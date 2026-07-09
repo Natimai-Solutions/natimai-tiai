@@ -1,0 +1,7 @@
+node_modules
+dist
+coverage
+.quasar
+npm-debug.log*
+Dockerfile
+.dockerignore

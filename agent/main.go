@@ -10,12 +10,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"tiai/agent/internal/agent"
 	"tiai/agent/internal/config"
+	"tiai/agent/internal/logging"
 	"tiai/agent/internal/service"
 )
 
@@ -75,6 +78,11 @@ func doRun(args []string) {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Tee logs to <data dir>\agent.log — under the SCM, stderr goes nowhere.
+	closeLog := logging.Setup(filepath.Dir(*cfgPath), cfg.LogLevel)
+	defer closeLog()
+	log.Printf("agent: v%s starting (config %s, log level %s)", agent.Version, *cfgPath, cfg.LogLevel)
 
 	// Started by the Service Control Manager → run under the service harness.
 	if isSvc, _ := service.IsWindowsService(); isSvc {

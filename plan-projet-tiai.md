@@ -359,10 +359,11 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 > Fusion de postes (§8) **implémentée** : merge backend (rattachement menaces/commandes + dédup + suppression du doublon) + découverte des doublons par SMBIOS + dialog UI. **46 tests backend** (dont 8 de contrat + 4 de fusion) + **20 vitest** (couverture 100 % services) verts ; ruff/mypy/typecheck/build SPA OK. Phase 1 backend + console fonctionnellement complètes ; reste M6 (packaging/GPO) et la validation end-to-end sur stack déployée.
 
 **Instantané — 2026-07-08** · Durcissement (M5, tranche 1) : garde de démarrage refusant les secrets placeholder hors `local` (validator `Settings`, testé), comparaison timing-safe du secret d'enrôlement, en-têtes de sécurité HTTP au reverse-proxy (HSTS, CSP, nosniff, frame-ancestors). CI étendue : job agent Go (gofmt + vet + tests + build croisé Windows), typecheck `vue-tsc` frontend, action de couverture épinglée par SHA. **Bugfix heartbeat** : la livraison de commandes levait `MissingGreenlet` (accès aux ORM expirés après `commit`) → réponse construite avant le commit ; suite complète verte sur Postgres (**83 tests**).
+> **`docker compose up` validé de bout en bout** (override dev `docker-compose.dev.yml` : backend HTTP direct :8800 + Caddy `tls internal`) : migrations + seed admin au boot, en-têtes/CSP vérifiés sur la SPA (aucun script inline, `script-src 'self'` compatible), cycle complet login → enroll (401 sans/mauvais secret) → heartbeat → commande → résultat → vues console (11 vérifications). Corrigé au passage : **Dockerfile frontend** (le `postinstall: quasar prepare` cassait `npm install` avant la copie des sources → `npm ci --ignore-scripts` + `quasar prepare` post-copie + `.dockerignore`).
 
 | Jalon | État |
 |---|---|
-| M0 Fondations | 🟢 quasi fini — reste `docker compose up` validé + certificat de signature |
+| M0 Fondations | 🟢 fini (compose validé de bout en bout) — reste le certificat de signature |
 | M1 Tranche verticale | 🟢 agent fonctionnel (service Windows, WMI `MSFT_MpComputerStatus`, token DPAPI) ; reste validation end-to-end sur serveur déployé |
 | M2 Agent Defender complet | 🟢 implémenté (état + menaces WMI, scans/MAJ PowerShell, config YAML/registre, file locale/back-off) ; reste DoD end-to-end sur poste réel |
 | M3 Backend complet | 🟢 commandes (broadcast par filtre + suivi + expiration), stats `/overview`, recherche/filtrage `/machines`, listing `/threats`, révocation de token, `is_up_to_date` calculé, pool DB configurable ; tests verts sur Postgres |
@@ -377,7 +378,7 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 - [x] Migrations Alembic (machines, threats, commands + users + empreinte)
 - [x] Caddy + TLS (Caddyfile ; `tls internal` possible pour dev)
 - [x] `/health` + versionnement `/api/v1`
-- [ ] `docker compose up` validé de bout en bout (à exécuter sur machine Docker)
+- [x] `docker compose up` validé de bout en bout (2026-07-08, override dev : HTTP direct + `tls internal` ; cycle enroll → heartbeat → commande → résultat vérifié)
 - [ ] Certificat de signature de code préparé (chaîne de build)
 
 **M1 — Tranche verticale**
@@ -420,6 +421,7 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 - [x] Garde de démarrage : secrets vides/placeholder `changeme*` refusés hors `local` (`SECRET_KEY`, `ENROLLMENT_SECRET`, `POSTGRES_PASSWORD`, `FIRST_ADMIN_PASSWORD`), testé
 - [x] Comparaison timing-safe du secret d'enrôlement (`hmac.compare_digest`)
 - [x] En-têtes de sécurité HTTP posés par Caddy (HSTS, CSP, `nosniff`, `frame-ancestors 'none'`, `Referrer-Policy`) — CSP à valider sur la stack déployée
+- [x] Logs agent : fichier `agent.log` (rotation simple, `.old` > 5 Mio) + niveau `log_level` INFO/DEBUG enfin branché ; chemin nominal loggé (démarrage, identité, enrôlement, heartbeat, commandes + durée) — indispensable en mode service où stderr est perdu ; validé sur poste réel contre la stack dev (enrôlement + heartbeats visibles dans le fichier et machine visible console)
 - [ ] Journal d'audit ; jobs ARQ branchés (nettoyage + envoi d'alertes) ; rotation tokens ; rate-limiting
 
 **M6 — Packaging & GPO** · ⬜ à faire

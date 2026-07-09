@@ -137,6 +137,10 @@ cd deploy
 cp .env.example .env        # renseigner les secrets, placer le certificat dans deploy/certs/
 docker compose up -d        # db + redis + backend + worker + frontend + caddy
 
+# Variante dev/tests — sans certificat : Caddy en TLS auto-signé (`tls internal`)
+# + backend exposé en HTTP direct sur http://localhost:8800 (agents/curl).
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
 # 2. Vérifier la santé du backend
 curl -k https://tiai.natimai.local/health
 

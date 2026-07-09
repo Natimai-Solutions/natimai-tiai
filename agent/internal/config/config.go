@@ -36,7 +36,7 @@ type Config struct {
 	RequestTimeoutSeconds    int    `yaml:"request_timeout_seconds"`
 	BackoffMaxSeconds        int    `yaml:"backoff_max_seconds"`
 	QueueMaxItems            int    `yaml:"queue_max_items"`
-	LogLevel                 string `yaml:"log_level"`
+	LogLevel                 string `yaml:"log_level"` // INFO (default) or DEBUG (also logs quiet heartbeats)
 
 	// AuthToken is never serialized to YAML — it is stored encrypted (DPAPI) in
 	// token.dat and loaded into this field at runtime.

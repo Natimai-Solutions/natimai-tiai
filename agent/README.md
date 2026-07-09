@@ -15,6 +15,7 @@ internal/
   api/       client HTTP (enroll / heartbeat / result)
   collector/ Defender : état + menaces via WMI (ROOT\Microsoft\Windows\Defender) ; scans + MAJ via PowerShell
   queue/     file locale durable (résultats de commandes non remis) + back-off
+  logging/   log fichier (agent.log, rotation simple) + niveau INFO/DEBUG
   service/   service Windows (golang.org/x/sys/windows/svc)
   agent/     boucle de polling + exécution des commandes
   models/    types de la couche transport
@@ -61,6 +62,16 @@ Déploiement en service :
 
 L'agent s'auto-enrôle au 1er démarrage (en-tête `X-Enrollment-Secret`), stocke
 le token reçu (DPAPI), puis n'utilise plus que `Authorization: Bearer <token>`.
+
+## Logs
+
+Les logs partent sur **stderr et** dans `<dossier config>\agent.log`
+(`C:\ProgramData\Tiai\agent.log` par défaut ; rotation en `.old` au-delà de
+5 Mio) — indispensable en mode service, où stderr n'aboutit nulle part.
+Niveau via `log_level` (YAML) ou la valeur registre `LogLevel` : `INFO` par
+défaut (démarrage, identité, enrôlement, commandes exécutées + durée, erreurs) ;
+`DEBUG` logge aussi chaque heartbeat silencieux — utile pour vérifier que
+l'agent poll bien pendant les tests.
 
 Le code reste compilable hors Windows (stubs `*_other.go`) pour `go vet` / les
 tests de logique pure ; les fonctionnalités Defender/service/registre/DPAPI sont

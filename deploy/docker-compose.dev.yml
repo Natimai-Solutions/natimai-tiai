@@ -1,0 +1,28 @@
+# Override de DÉVELOPPEMENT — tests HTTP directs + TLS auto-signé.
+#
+# Démarrage :
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Ce que l'override change par rapport à la prod :
+#   - backend exposé en HTTP pur sur http://localhost:8800 (curl / agent, sans TLS ;
+#     port hôte configurable via TIAI_DEV_BACKEND_PORT) ;
+#   - Caddy passe sur Caddyfile.dev (`tls internal`, AC locale auto-générée) ;
+#   - ENVIRONMENT=local : la garde de démarrage tolère les secrets placeholder,
+#     qu'elle refuse en staging/production.
+# Ne JAMAIS utiliser ce fichier sur un serveur exposé.
+
+services:
+  backend:
+    ports:
+      - "${TIAI_DEV_BACKEND_PORT:-8800}:8000"
+    environment:
+      ENVIRONMENT: local
+
+  worker:
+    environment:
+      ENVIRONMENT: local
+
+  caddy:
+    volumes:
+      # Même cible que le Caddyfile de prod → compose remplace le montage.
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro

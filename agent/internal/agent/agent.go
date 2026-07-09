@@ -15,6 +15,7 @@ import (
 	"tiai/agent/internal/collector"
 	"tiai/agent/internal/config"
 	"tiai/agent/internal/identity"
+	"tiai/agent/internal/logging"
 	"tiai/agent/internal/models"
 	"tiai/agent/internal/queue"
 	"tiai/agent/internal/sysinfo"
@@ -53,6 +54,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	a.identity = id
 	a.host = sysinfo.Collect()
+	log.Printf("agent: identity %s (hostname %s)", id.MachineUUID, a.host.Hostname)
 
 	q, err := queue.New(filepath.Join(dir, "queue"), a.cfg.QueueMaxItems)
 	if err != nil {
@@ -142,6 +144,11 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if n := len(resp.Commands); n > 0 {
+		log.Printf("agent: heartbeat ok, %d command(s) to run", n)
+	} else {
+		logging.Debugf("agent: heartbeat ok, no pending command")
+	}
 	for _, cmd := range resp.Commands {
 		a.execute(ctx, cmd)
 	}
@@ -151,26 +158,32 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 // execute runs a command and reports its result, queuing the result locally if
 // it can't be delivered right now.
 func (a *Agent) execute(ctx context.Context, cmd models.Command) {
-	var (
-		output string
-		err    error
-	)
+	var run func(context.Context) (string, error)
 	switch cmd.Type {
 	case "quick_scan":
-		output, err = collector.RunQuickScan(ctx)
+		run = collector.RunQuickScan
 	case "full_scan":
-		output, err = collector.RunFullScan(ctx)
+		run = collector.RunFullScan
 	case "update_signatures":
-		output, err = collector.UpdateSignatures(ctx)
+		run = collector.UpdateSignatures
 	default:
 		log.Printf("agent: unknown command type %q (id %s), ignoring", cmd.Type, cmd.ID)
 		return
 	}
 
+	log.Printf("agent: executing %s (id %s)", cmd.Type, cmd.ID)
+	start := time.Now()
+	output, err := run(ctx)
+
 	res := models.CommandResult{Status: "succeeded", Output: output}
 	if err != nil {
 		res.Status = "failed"
 		res.Error = err.Error()
+		log.Printf("agent: %s (id %s) failed after %s: %v",
+			cmd.Type, cmd.ID, time.Since(start).Round(time.Second), err)
+	} else {
+		log.Printf("agent: %s (id %s) succeeded in %s",
+			cmd.Type, cmd.ID, time.Since(start).Round(time.Second))
 	}
 	if perr := a.client.PostResult(ctx, cmd.ID, res); perr != nil {
 		log.Printf("agent: post result failed, queuing %s: %v", cmd.ID, perr)
@@ -195,6 +208,7 @@ func (a *Agent) flushQueue(ctx context.Context) {
 		if err := a.client.PostResult(ctx, item.CommandID, item.Result); err != nil {
 			return
 		}
+		log.Printf("agent: delivered queued result for command %s", item.CommandID)
 		if err := a.queue.Remove(path); err != nil {
 			log.Printf("agent: queue remove: %v", err)
 			return
