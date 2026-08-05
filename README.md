@@ -145,14 +145,18 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 curl -k https://tiai.natimai.local/health
 
 # 3. Agent — déployé par GPO sur les postes (MSI signé en M6)
-#    Configuration : C:\ProgramData\Tiai\config.json (+ surcharge registre)
+#    Configuration : C:\ProgramData\Tiai\config.yaml (+ surcharge registre)
 ```
+
+Les trois modes TLS (sans certificat / auto-signé / AC interne), les variables
+d'environnement et les paramètres de l'agent sont détaillés dans
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
 Pour le développement backend/frontend hors Docker, voir leurs README respectifs.
 
-**Prérequis serveur** : Docker + docker-compose, un certificat serveur émis par l'AC interne (ex. AD CS) pour le nom du serveur.
+**Prérequis serveur** : Docker + docker-compose, un certificat serveur émis par l'AC interne (ex. AD CS) pour le nom du serveur — sauf en mode dev/tests, où aucun certificat n'est requis.
 
-**Prérequis agent** : Windows avec Defender actif, droits `LocalSystem`, accès HTTPS au serveur.
+**Prérequis agent** : Windows avec Defender actif, droits `LocalSystem`, accès réseau au serveur (HTTPS en production, HTTP direct possible en test).
 
 ## Sécurité
 
