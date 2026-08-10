@@ -70,6 +70,10 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    # Seule variable dont le Caddyfile a besoin — pas d'`env_file: .env` ici,
+    # qui exposerait inutilement les secrets du backend au conteneur Caddy.
+    environment:
+      TIAI_SERVER_NAME: ${TIAI_SERVER_NAME:-tiai.natimai.local}
     ports:
       - "443:443"
       - "80:80"
