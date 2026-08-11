@@ -63,6 +63,44 @@ Déploiement en service :
 L'agent s'auto-enrôle au 1er démarrage (en-tête `X-Enrollment-Secret`), stocke
 le token reçu (DPAPI), puis n'utilise plus que `Authorization: Bearer <token>`.
 
+## Publier un .exe sur GitHub
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) construit les
+binaires Windows et les attache à la page *Releases* du dépôt. Rien à compiler à
+la main, rien à committer : la version vient du tag.
+
+```bash
+git tag -a v0.2.0 -m "Agent v0.2.0"
+git push origin v0.2.0
+```
+
+Le workflow joue les tests, cross-compile `windows/amd64` et `windows/arm64`,
+génère `SHA256SUMS.txt` et crée la release avec les notes issues des commits.
+Les postes téléchargent alors directement
+`tiai-agent-0.2.0-windows-amd64.exe` — c'est le fichier à déposer sur le partage
+GPO.
+
+Pour un binaire de test sans publier, lancer le workflow à la main (onglet
+*Actions* → *Release* → *Run workflow*) : les `.exe` sortent en artefact de
+build, versionnés `0.0.0-dev.<sha>`.
+
+**Version injectée au build.** `agent.Version` est un `var` écrasé par
+`-ldflags -X` ; le code source garde `0.1.0` comme valeur des builds locaux. Pour
+reproduire un build de release en local :
+
+```bash
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
+  -ldflags "-s -w -X tiai/agent/internal/agent.Version=0.2.0" \
+  -o tiai-agent.exe .
+```
+
+**Binaire non signé.** Aucun certificat de signature de code n'est utilisé :
+au premier lancement manuel, SmartScreen affichera un avertissement
+« Éditeur inconnu ». Sans impact en déploiement GPO (le service est installé par
+le système, pas par un double-clic de l'utilisateur), mais c'est à prévoir pour
+les tests manuels — et à corriger par un certificat de signature si l'agent doit
+un jour être distribué hors du parc.
+
 ## Logs
 
 Les logs partent sur **stderr et** dans `<dossier config>\agent.log`

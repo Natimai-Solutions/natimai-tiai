@@ -54,6 +54,7 @@ func osVersion() string {
 	product, _, _ := k.GetStringValue("ProductName")
 	display, _, _ := k.GetStringValue("DisplayVersion")
 	build, _, _ := k.GetStringValue("CurrentBuild")
+	product = fixProductName(product, build)
 
 	var parts []string
 	if product != "" {

@@ -53,6 +53,10 @@ curl http://localhost:8800/health
 
 ### Agent Windows
 
+Récupérer `tiai-agent-<version>-windows-amd64.exe` depuis la page *Releases* du
+dépôt (publication : cf. [agent/README.md](agent/README.md#publier-un-exe-sur-github)),
+ou le compiler avec `go build -o tiai-agent.exe .` dans `agent/`.
+
 Pointer l'agent directement sur le port HTTP — **pas** sur Caddy :
 
 ```powershell

@@ -2,6 +2,10 @@
 // interval, executing any commands the server hands back. On transient server
 // failures it backs off; command results that can't be delivered are queued
 // locally and replayed (plan §2.9).
+//
+// Commands run on a separate worker goroutine, one at a time. A Defender full
+// scan takes tens of minutes and executing it inline would freeze heartbeats
+// for its whole duration, so the poll loop only ever hands work off.
 package agent
 
 import (
@@ -9,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"tiai/agent/internal/api"
@@ -21,8 +26,16 @@ import (
 	"tiai/agent/internal/sysinfo"
 )
 
-// Version is the agent version reported on enroll/heartbeat.
-const Version = "0.1.0"
+// Version is the agent version reported on enroll/heartbeat. A `var`, not a
+// `const`: release builds overwrite it from the git tag via
+// `-ldflags "-X tiai/agent/internal/agent.Version=..."` (cf. .github/workflows/release.yml).
+// The literal below is only what a plain `go build` produces.
+var Version = "0.1.0"
+
+// maxPendingCommands bounds the in-memory backlog handed to the worker. Beyond
+// it we simply stop accepting: the command stays pending server-side and comes
+// back on a later heartbeat.
+const maxPendingCommands = 16
 
 // Agent owns the runtime state and the polling loop.
 type Agent struct {
@@ -32,6 +45,14 @@ type Agent struct {
 	identity identity.Identity
 	host     sysinfo.Info
 	queue    *queue.Queue
+
+	// Commands execute off the polling loop: a Defender full scan blocks for
+	// tens of minutes, and running it inline would stall heartbeats long enough
+	// for the server to mark the machine offline.
+	commands chan models.Command
+	mu       sync.Mutex
+	running  map[string]struct{} // command ids queued or executing
+	wg       sync.WaitGroup
 }
 
 // New creates an agent from config.
@@ -61,6 +82,14 @@ func (a *Agent) Run(ctx context.Context) error {
 		return fmt.Errorf("open local queue: %w", err)
 	}
 	a.queue = q
+
+	// One worker, not a pool: Defender serialises scans itself, so running two
+	// at once only yields "a scan is already in progress" failures.
+	a.commands = make(chan models.Command, maxPendingCommands)
+	a.running = make(map[string]struct{})
+	a.wg.Add(1)
+	go a.worker(ctx)
+	defer a.wg.Wait()
 
 	base := time.Duration(a.cfg.HeartbeatIntervalSeconds) * time.Second
 	maxBackoff := time.Duration(a.cfg.BackoffMaxSeconds) * time.Second
@@ -150,9 +179,57 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		logging.Debugf("agent: heartbeat ok, no pending command")
 	}
 	for _, cmd := range resp.Commands {
-		a.execute(ctx, cmd)
+		a.accept(cmd)
 	}
 	return nil
+}
+
+// accept hands a command to the worker without blocking the polling loop.
+// Duplicates are dropped: the server keeps re-offering a command until it gets
+// a result, which for a full scan spans many heartbeats.
+func (a *Agent) accept(cmd models.Command) {
+	a.mu.Lock()
+	if _, dup := a.running[cmd.ID]; dup {
+		a.mu.Unlock()
+		logging.Debugf("agent: %s (id %s) already in flight, ignoring", cmd.Type, cmd.ID)
+		return
+	}
+	a.running[cmd.ID] = struct{}{}
+	a.mu.Unlock()
+
+	select {
+	case a.commands <- cmd:
+	default:
+		// Backlog full — forget it so a later heartbeat can re-offer it.
+		a.release(cmd.ID)
+		log.Printf("agent: backlog full (%d), deferring %s (id %s)",
+			maxPendingCommands, cmd.Type, cmd.ID)
+	}
+}
+
+func (a *Agent) release(id string) {
+	a.mu.Lock()
+	delete(a.running, id)
+	a.mu.Unlock()
+}
+
+// worker executes accepted commands one at a time until the context is
+// cancelled. On shutdown, commands still waiting are abandoned rather than run
+// with a dead context — the server re-offers them at the next start.
+func (a *Agent) worker(ctx context.Context) {
+	defer a.wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case cmd := <-a.commands:
+			if ctx.Err() != nil {
+				return
+			}
+			a.execute(ctx, cmd)
+			a.release(cmd.ID)
+		}
+	}
 }
 
 // execute runs a command and reports its result, queuing the result locally if

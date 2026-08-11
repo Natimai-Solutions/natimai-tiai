@@ -1,0 +1,97 @@
+# Publie les binaires Windows de l'agent sur la page Releases du dépôt.
+#
+# Déclenchement :
+#   - tag `v*` poussé sur le dépôt  → crée la release et y attache les .exe ;
+#   - lancement manuel (Actions → Release → Run workflow) → produit les mêmes
+#     binaires en artefact de build, sans créer de release.
+#
+# Publier une version :
+#   git tag -a v0.2.0 -m "Agent v0.2.0" && git push origin v0.2.0
+#
+# La version du tag est injectée dans le binaire (`-X ...agent.Version`), donc
+# `tiai-agent.exe version` et le champ `agent_version` des heartbeats la
+# reflètent — pas besoin de modifier le code source pour publier.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # créer la release et téléverser les binaires
+
+jobs:
+  agent:
+    name: Agent Windows (.exe)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # --generate-notes a besoin de l'historique des tags
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      # Filet de sécurité : on ne publie pas un binaire dont les tests échouent.
+      - name: Tests
+        working-directory: agent
+        run: go test ./...
+
+      - name: Résoudre la version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-dev.$(git rev-parse --short HEAD)"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Version : ${version}"
+
+      # Go cross-compile sans toolchain externe : les deux cibles en quelques
+      # secondes, dans le même job (pas d'aller-retour par artefacts).
+      - name: Build
+        working-directory: agent
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p ../dist
+          for arch in amd64 arm64; do
+            echo "→ windows/${arch}"
+            GOOS=windows GOARCH="${arch}" CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags "-s -w -X tiai/agent/internal/agent.Version=${VERSION}" \
+              -o "../dist/tiai-agent-${VERSION}-windows-${arch}.exe" .
+          done
+
+      # Permet de vérifier l'intégrité du binaire avant déploiement GPO.
+      - name: Empreintes SHA-256
+        working-directory: dist
+        run: |
+          sha256sum *.exe | tee SHA256SUMS.txt
+
+      - name: Artefact de build
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiai-agent-windows-${{ steps.version.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Publier la release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Tiai ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            dist/*.exe dist/SHA256SUMS.txt
