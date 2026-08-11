@@ -94,14 +94,24 @@ func DefaultConfigPath() string {
 
 // Load reads the YAML config, applies registry overrides, loads the DPAPI
 // token, and validates.
+//
+// The YAML file is optional: when it is absent, the defaults plus
+// HKLM\SOFTWARE\Tiai are the whole configuration. A GPO can therefore deploy
+// the agent with registry values alone, with no file to write or template
+// (plan §2.10). Only api_base_url must come from one source or the other.
 func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
-	}
 	cfg := DefaultConfig()
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return nil, fmt.Errorf("parse config: %w", err)
+		}
+	case !os.IsNotExist(err):
+		// Present but unreadable (permissions, I/O) — that is a real failure,
+		// unlike "not there at all".
+		return nil, fmt.Errorf("read config: %w", err)
 	}
 
 	applyRegistryOverrides(cfg) // no-op off Windows
@@ -114,7 +124,8 @@ func Load(path string) (*Config, error) {
 	cfg.AuthToken = token
 
 	if cfg.APIBaseURL == "" {
-		return nil, fmt.Errorf("api_base_url is required")
+		return nil, fmt.Errorf(
+			`api_base_url is required: set it in %s or in HKLM\SOFTWARE\Tiai\ApiBaseURL`, path)
 	}
 	return cfg, nil
 }

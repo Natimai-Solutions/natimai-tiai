@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,35 @@ func TestLoadYAMLAppliesDefaults(t *testing.T) {
 	}
 	if cfg.QueueMaxItems != DefaultQueueMaxItems {
 		t.Errorf("expected default queue cap, got %d", cfg.QueueMaxItems)
+	}
+}
+
+// A GPO can deploy the agent with registry values only, so an absent
+// config.yaml must fall through to the defaults + registry rather than fail.
+func TestLoadWithoutConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+
+	cfg, err := Load(path)
+	if err != nil {
+		// Nothing can supply api_base_url here (no registry off Windows, and no
+		// HKLM\SOFTWARE\Tiai on a clean Windows box), so validation fails — but
+		// it must be *that* error, not a read error on the missing file.
+		if strings.Contains(err.Error(), "read config") {
+			t.Fatalf("an absent config file must not be a read error: %v", err)
+		}
+		if !strings.Contains(err.Error(), "api_base_url") {
+			t.Fatalf("expected the api_base_url validation error, got: %v", err)
+		}
+		return
+	}
+
+	// Windows machine that already has HKLM\SOFTWARE\Tiai\ApiBaseURL: the
+	// registry alone is a complete configuration.
+	if cfg.HeartbeatIntervalSeconds != DefaultHeartbeatInterval {
+		t.Errorf("expected default heartbeat interval, got %d", cfg.HeartbeatIntervalSeconds)
+	}
+	if cfg.LogLevel == "" {
+		t.Error("expected a default log level")
 	}
 }
 

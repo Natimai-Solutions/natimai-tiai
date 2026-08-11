@@ -86,12 +86,22 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+      # Une release peut déjà exister pour ce tag : créée depuis l'interface web
+      # (ce qui pousse le tag et déclenche donc ce workflow), ou laissée par une
+      # exécution précédente que l'on rejoue. `gh release create` échoue dans ce
+      # cas — on téléverse alors dans la release existante.
       - name: Publier la release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "Tiai ${GITHUB_REF_NAME}" \
-            --generate-notes \
-            dist/*.exe dist/SHA256SUMS.txt
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} déjà présente → mise à jour des binaires."
+            gh release upload "${GITHUB_REF_NAME}" \
+              dist/*.exe dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "Tiai ${GITHUB_REF_NAME}" \
+              --generate-notes \
+              dist/*.exe dist/SHA256SUMS.txt
+          fi

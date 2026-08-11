@@ -59,7 +59,7 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  run            Run the polling loop (foreground, or under the SCM)")
-	fmt.Println("  init-config    Generate a default config file")
+	fmt.Println("  init-config    Generate a default config file (optional: registry alone is enough)")
 	fmt.Println("  install        Install and register the Windows service")
 	fmt.Println("  uninstall      Remove the Windows service")
 	fmt.Println("  start          Start the installed service")
@@ -82,7 +82,14 @@ func doRun(args []string) {
 	// Tee logs to <data dir>\agent.log — under the SCM, stderr goes nowhere.
 	closeLog := logging.Setup(filepath.Dir(*cfgPath), cfg.LogLevel)
 	defer closeLog()
-	log.Printf("agent: v%s starting (config %s, log level %s)", agent.Version, *cfgPath, cfg.LogLevel)
+
+	// The config file is optional (registry-only GPO deployments). Say which
+	// case we are in: it is the first thing to check when a poste misbehaves.
+	source := *cfgPath
+	if _, err := os.Stat(*cfgPath); os.IsNotExist(err) {
+		source = "registry + defaults, no " + *cfgPath
+	}
+	log.Printf("agent: v%s starting (config %s, log level %s)", agent.Version, source, cfg.LogLevel)
 
 	// Started by the Service Control Manager → run under the service harness.
 	if isSvc, _ := service.IsWindowsService(); isSvc {
