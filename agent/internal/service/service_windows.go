@@ -19,6 +19,12 @@ const (
 	ServiceName        = "TiaiAgent"
 	ServiceDisplayName = "Tiai Agent"
 	ServiceDescription = "Reports Microsoft Defender state to the Tiai server and executes its commands."
+
+	// stopTimeout bounds the wait for the service to report Stopped. Shutdown
+	// does wait for the command worker, but a Defender scan in flight dies with
+	// its PowerShell process when the context is cancelled (exec.CommandContext),
+	// so this is a safety net rather than the normal path.
+	stopTimeout = 30 * time.Second
 )
 
 type tiaiService struct {
@@ -116,9 +122,17 @@ func Install(cfgPath string) error {
 	return nil
 }
 
-// Uninstall removes the service.
+// Uninstall stops the service, then removes it.
+//
+// Stopping first is not a courtesy: deleting a running service only marks it
+// for deletion, and it stays registered until it stops or the machine reboots —
+// so a later install fails on a service that looks gone. Uninstall followed by
+// install must work in one pass.
 func Uninstall() error {
 	return withService(func(s *mgr.Service) error {
+		if err := stopAndWait(s); err != nil {
+			return fmt.Errorf("stop before uninstall: %w", err)
+		}
 		if err := s.Delete(); err != nil {
 			return fmt.Errorf("delete service: %w", err)
 		}
@@ -141,23 +155,43 @@ func Start() error {
 // Stop stops the service and waits for it to terminate.
 func Stop() error {
 	return withService(func(s *mgr.Service) error {
-		status, err := s.Control(svc.Stop)
-		if err != nil {
-			return fmt.Errorf("stop service: %w", err)
-		}
-		deadline := time.Now().Add(30 * time.Second)
-		for status.State != svc.Stopped {
-			if time.Now().After(deadline) {
-				return fmt.Errorf("timeout waiting for service to stop")
-			}
-			time.Sleep(500 * time.Millisecond)
-			if status, err = s.Query(); err != nil {
-				return fmt.Errorf("query service: %w", err)
-			}
+		if err := stopAndWait(s); err != nil {
+			return err
 		}
 		fmt.Printf("Service %s stopped.\n", ServiceName)
 		return nil
 	})
+}
+
+// stopAndWait stops the service and blocks until it reports Stopped. A service
+// that is already stopped (or stopping) is not an error — Control(Stop) on a
+// stopped service fails with ERROR_SERVICE_NOT_ACTIVE, which would make an
+// otherwise fine `stop` or `uninstall` look broken.
+func stopAndWait(s *mgr.Service) error {
+	status, err := s.Query()
+	if err != nil {
+		return fmt.Errorf("query service: %w", err)
+	}
+	if status.State == svc.Stopped {
+		return nil
+	}
+	if status.State != svc.StopPending {
+		if status, err = s.Control(svc.Stop); err != nil {
+			return fmt.Errorf("stop service: %w", err)
+		}
+	}
+
+	deadline := time.Now().Add(stopTimeout)
+	for status.State != svc.Stopped {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for service to stop")
+		}
+		time.Sleep(500 * time.Millisecond)
+		if status, err = s.Query(); err != nil {
+			return fmt.Errorf("query service: %w", err)
+		}
+	}
+	return nil
 }
 
 // Status prints the current service state.

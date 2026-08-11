@@ -88,12 +88,21 @@ Sortir un poste du périmètre de la GPO ne désinstalle rien. Prévoir un scrip
 fermeture (*Shutdown*) ou une tâche immédiate :
 
 ```powershell
-& 'C:\Program Files\Tiai\tiai-agent.exe' stop
-& 'C:\Program Files\Tiai\tiai-agent.exe' uninstall
+& 'C:\Program Files\Tiai\tiai-agent.exe' uninstall   # arrête le service puis le supprime
 Remove-Item 'C:\Program Files\Tiai' -Recurse -Force
-Remove-Item 'C:\ProgramData\Tiai' -Recurse -Force   # supprime aussi le token
+Remove-Item 'C:\ProgramData\Tiai' -Recurse -Force    # token, identité de repli, file, logs
 Remove-Item 'HKLM:\SOFTWARE\Tiai' -Recurse -Force
 ```
+
+`uninstall` ne supprime **que** l'enregistrement du service : le binaire,
+`C:\ProgramData\Tiai` et les valeurs de registre restent en place, d'où les
+lignes suivantes. C'est voulu — pour une simple mise à jour, on veut justement
+conserver le token et la file locale.
+
+Attention, purger `C:\ProgramData\Tiai` ne donne pas forcément une nouvelle
+identité au poste : l'ancre est le SMBIOS UUID, `agent_id` n'étant qu'un repli.
+Sur du matériel réel le poste revient donc avec le même `machine_uuid` — sans
+conséquence, l'enrôlement étant idempotent côté serveur.
 
 ## Notes
 

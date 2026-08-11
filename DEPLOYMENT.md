@@ -367,6 +367,25 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'LogLevel' -Value 'DEBUG'
 L'agent s'auto-enrôle au premier démarrage, stocke le token reçu (DPAPI), puis
 n'utilise plus que `Authorization: Bearer <token>`.
 
+`uninstall` arrête le service avant de le supprimer, et ne retire que son
+enregistrement : le binaire, `C:\ProgramData\Tiai` et `HKLM\SOFTWARE\Tiai`
+restent en place.
+
+**Mettre à jour un poste** ne passe pas par `uninstall` / `install` — le service
+pointe sur un chemin, pas sur une version. Il suffit d'arrêter le service, de
+remplacer le binaire (Windows verrouille l'image d'un exécutable en cours) et de
+redémarrer : le token, l'identité et la file locale sont conservés, donc pas de
+ré-enrôlement.
+
+```powershell
+.\tiai-agent.exe stop
+Copy-Item .\tiai-agent-<version>-windows-amd64.exe 'C:\Program Files\Tiai\tiai-agent.exe' -Force
+.\tiai-agent.exe start
+```
+
+Seul un changement de chemin d'installation ou d'arguments du service impose une
+réinstallation.
+
 ### Logs
 
 `C:\ProgramData\Tiai\agent.log` (rotation en `.old` au-delà de 5 Mio), en plus de
