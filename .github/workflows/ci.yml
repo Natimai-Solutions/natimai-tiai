@@ -115,8 +115,11 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
+      # -race : la boucle de polling et le worker de commandes tournent sur des
+      # goroutines distinctes et partagent client HTTP, file locale et table des
+      # commandes en vol.
       - name: Tests
-        run: go test ./...
+        run: go test -race ./...
 
       # Build tags split dev stubs (linux, exercised above) from the real
       # Windows code — cross-compiling checks the latter still compiles.
