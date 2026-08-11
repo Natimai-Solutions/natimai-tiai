@@ -324,6 +324,12 @@ Toute valeur absente ou non positive retombe sur son défaut, donc un YAML
 partiel reste utilisable. Le token par poste n'est **jamais** dans ce fichier :
 il est chiffré via DPAPI (scope machine) dans `token.dat`, à côté du YAML.
 
+**Le fichier lui-même est facultatif.** S'il est absent, l'agent démarre sur ses
+valeurs par défaut surchargées par le registre — c'est le mode nominal d'un
+déploiement par GPO, qui n'a alors aucun fichier à déposer ni à mettre à jour.
+Seul `api_base_url` doit venir de l'une des deux sources. En revanche, un
+fichier présent mais illisible (droits, E/S) reste une erreur fatale.
+
 ### Surcharge par le registre (GPO)
 
 Les valeurs présentes sous `HKLM\SOFTWARE\Tiai` **priment sur le YAML**, ce qui
