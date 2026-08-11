@@ -127,7 +127,21 @@ try {
             Stop-Service -Name $ServiceName -Force
         }
         if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
-        Copy-Item -LiteralPath $SourceExe -Destination $TargetExe -Force
+
+        # Le SCM annonce "Stopped" des que le service le declare, pas quand le
+        # processus a rendu la main : le verrou sur l'image peut survivre
+        # quelques dizaines de ms, et Windows refuse alors l'ecrasement.
+        for ($try = 1; $try -le 5; $try++) {
+            try {
+                Copy-Item -LiteralPath $SourceExe -Destination $TargetExe -Force
+                break
+            }
+            catch {
+                if ($try -ge 5) { throw }
+                Write-Log "Copie refusee (tentative $try/5) : $($_.Exception.Message)" 'WARN'
+                Start-Sleep -Milliseconds 500
+            }
+        }
         Write-Log "Binaire deploye ($($sourceHash.Substring(0,12))...) dans $TargetExe."
     }
 
