@@ -11,14 +11,13 @@ least the acting admin always remains.
 
 import uuid
 from datetime import datetime
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, SessionDep, require_permission
+from app.api.fields import Email, Password
 from app.core import security
-from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.base import utcnow
 from app.features.user import crud
@@ -30,9 +29,6 @@ router = APIRouter(
     tags=["users"],
     dependencies=[Depends(require_permission(Resource.USER, Action.READ))],
 )
-
-# Any password accepted through the API must be at least this long.
-Password = Annotated[str, Field(min_length=settings.PASSWORD_MIN_LENGTH)]
 
 _WRITE = Depends(require_permission(Resource.USER, Action.WRITE))
 
@@ -63,7 +59,7 @@ class UserList(BaseModel):
 class UserCreate(BaseModel):
     """New account. The password is set by the admin and sent out of band."""
 
-    email: EmailStr
+    email: Email
     password: Password
     full_name: str | None = None
     role: Role = Role.READONLY
@@ -72,7 +68,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     """Partial update — only the supplied fields are changed."""
 
-    email: EmailStr | None = None
+    email: Email | None = None
     full_name: str | None = None
     role: Role | None = None
     is_active: bool | None = None
