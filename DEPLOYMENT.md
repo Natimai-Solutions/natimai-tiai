@@ -270,6 +270,9 @@ et chargé par `docker compose` (`env_file`). Il n'est jamais committé.
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `480` | Durée de vie du JWT console |
 | `FIRST_ADMIN_EMAIL` | — | Compte admin créé au démarrage s'il n'existe pas |
 | `FIRST_ADMIN_PASSWORD` | — | Idem |
+| `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée par l'API à tout mot de passe (création, réinitialisation, changement) |
+| `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Durée de validité d'un lien « mot de passe oublié » |
+| `CONSOLE_BASE_URL` | — | URL publique de la console, pour construire le lien de réinitialisation envoyé par e-mail. **Sans elle, aucun e-mail de réinitialisation n'est envoyé** (l'échec est journalisé en `ERROR`) |
 | `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé de l'en-tête `X-Enrollment-Secret` ; n'autorise que `/agent/enroll` |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile si la console passe par Caddy |
 | `POSTGRES_SERVER` | `db` | Forcé à `db` par le compose |
@@ -283,7 +286,14 @@ et chargé par `docker compose` (`env_file`). Il n'est jamais committé.
 | `SIGNATURE_MAX_AGE_DAYS` | `3` | Seuil « signatures à jour » |
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif » |
 
-### Alertes e-mail (facultatif — les alertes sont désactivées si `MAILGUN_DOMAIN` ou `MAILGUN_API_KEY` est vide)
+### Alertes e-mail et e-mails de compte (facultatif — désactivés si `MAILGUN_DOMAIN` ou `MAILGUN_API_KEY` est vide)
+
+Mailgun sert à deux usages : les alertes de supervision, envoyées à
+`ALERT_RECIPIENTS`, et le lien de réinitialisation de mot de passe, envoyé à
+l'adresse du compte concerné. Sans Mailgun, le parcours « mot de passe oublié »
+reste sans effet visible côté utilisateur (la réponse est volontairement
+identique dans tous les cas) — c'est alors à un administrateur de réinitialiser
+le mot de passe depuis la console.
 
 | Variable | Défaut |
 |---|---|

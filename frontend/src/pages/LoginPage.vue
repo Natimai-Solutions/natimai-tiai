@@ -31,13 +31,20 @@
               />
             </q-card-section>
 
-            <q-card-actions class="q-px-md q-pb-md">
+            <q-card-actions class="q-px-md q-pb-md column q-gutter-sm">
               <q-btn
                 type="submit"
                 color="primary"
                 class="full-width"
                 label="Se connecter"
                 :loading="loading"
+              />
+              <q-btn
+                flat
+                dense
+                class="full-width"
+                label="Mot de passe oublié ?"
+                :to="{ name: 'forgot-password' }"
               />
             </q-card-actions>
           </q-form>

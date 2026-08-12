@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
-from app.features.base import utcnow
+from app.features.base import utc_field, utcnow
 
 
 class Machine(SQLModel, table=True):
@@ -45,17 +45,17 @@ class Machine(SQLModel, table=True):
     rtp_enabled: bool | None = None
     av_enabled: bool | None = None
     signature_version: str | None = None
-    signature_last_updated: datetime | None = None
+    signature_last_updated: datetime | None = utc_field(default=None, nullable=True)
     signature_age_days: int | None = None
-    last_quick_scan: datetime | None = None
-    last_full_scan: datetime | None = None
+    last_quick_scan: datetime | None = utc_field(default=None, nullable=True)
+    last_full_scan: datetime | None = utc_field(default=None, nullable=True)
     is_up_to_date: bool | None = None
 
     # Per-machine auth: only the token hash is stored.
     token_hash: str | None = None
     token_revoked: bool = Field(default=False)
 
-    first_seen: datetime = Field(default_factory=utcnow)
-    last_seen: datetime = Field(default_factory=utcnow)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    first_seen: datetime = utc_field(default_factory=utcnow)
+    last_seen: datetime = utc_field(default_factory=utcnow)
+    created_at: datetime = utc_field(default_factory=utcnow)
+    updated_at: datetime = utc_field(default_factory=utcnow)

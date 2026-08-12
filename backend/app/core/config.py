@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     # First admin, seeded at startup if it does not exist yet.
     FIRST_ADMIN_EMAIL: str | None = None
     FIRST_ADMIN_PASSWORD: str | None = None
+    # Minimum length for any password set through the API (console forms and
+    # admin resets alike). Not applied to crud.create_user, used by seeding.
+    PASSWORD_MIN_LENGTH: int = 12
+    # Lifetime of a "forgot password" link.
+    PASSWORD_RESET_EXPIRE_MINUTES: int = 60
+    # Public console URL, used to build the reset link mailed to the user
+    # (e.g. https://tiai.natimai.local). Without it, no reset mail can be sent.
+    CONSOLE_BASE_URL: str | None = None
 
     # --- Agent enrollment ---
     # Shared secret deployed by GPO; only authorizes POST /agent/enroll.

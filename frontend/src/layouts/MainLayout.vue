@@ -8,6 +8,14 @@
           Tiai — Console
         </q-toolbar-title>
         <div v-if="auth.user" class="text-caption q-mr-sm">{{ auth.user.email }}</div>
+        <q-btn
+          flat
+          dense
+          round
+          icon="account_circle"
+          aria-label="Mon compte"
+          :to="{ name: 'account' }"
+        />
         <q-btn flat dense round icon="logout" aria-label="Déconnexion" @click="onLogout" />
       </q-toolbar>
     </q-header>
@@ -21,6 +29,10 @@
         <q-item v-ripple clickable :to="{ name: 'machines' }">
           <q-item-section avatar><q-icon name="devices" /></q-item-section>
           <q-item-section>Postes</q-item-section>
+        </q-item>
+        <q-item v-if="auth.isAdmin" v-ripple clickable :to="{ name: 'users' }">
+          <q-item-section avatar><q-icon name="group" /></q-item-section>
+          <q-item-section>Utilisateurs</q-item-section>
         </q-item>
       </q-list>
     </q-drawer>

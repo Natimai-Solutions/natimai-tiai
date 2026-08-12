@@ -6,6 +6,8 @@ from sqlalchemy import BigInteger, Column, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
+from app.features.base import utc_field
+
 
 class Threat(SQLModel, table=True):
     """A Defender detection reported by an agent.
@@ -36,5 +38,5 @@ class Threat(SQLModel, table=True):
     category: str | None = None
     status: str | None = None  # active / quarantined / removed / allowed
     action_taken: str | None = None
-    detected_at: datetime | None = None
+    detected_at: datetime | None = utc_field(default=None, nullable=True)
     raw: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
