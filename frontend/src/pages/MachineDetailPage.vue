@@ -107,6 +107,24 @@
         :rows-per-page-options="[10, 25, 50]"
         no-data-label="Aucune commande."
       >
+        <template #body-cell-status="props">
+          <q-td :props="props">
+            <q-badge :color="statusColor(props.value)">{{ statusLabel(props.value) }}</q-badge>
+            <q-btn
+              v-if="props.row.error"
+              flat
+              dense
+              round
+              size="sm"
+              icon="error_outline"
+              color="negative"
+              class="q-ml-xs"
+              @click="showError(props.row)"
+            >
+              <q-tooltip>Voir l'erreur</q-tooltip>
+            </q-btn>
+          </q-td>
+        </template>
         <template #body-cell-created_at="props">
           <q-td :props="props">{{ formatDateTime(props.value) }}</q-td>
         </template>
@@ -145,6 +163,22 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+
+    <q-dialog v-model="errorOpen">
+      <q-card style="min-width: 420px; max-width: 90vw">
+        <q-card-section class="text-h6">Détail de l'erreur</q-card-section>
+        <q-card-section v-if="errorCommand" class="q-pt-none text-caption text-grey">
+          {{ errorCommand.type }} — terminée le {{ formatDateTime(errorCommand.finished_at) }}
+        </q-card-section>
+        <q-separator />
+        <q-card-section>
+          <pre class="command-error">{{ errorCommand?.error }}</pre>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn v-close-popup flat label="Fermer" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
@@ -178,6 +212,8 @@ const commands = ref<Command[]>([]);
 const loading = ref(false);
 const mergeOpen = ref(false);
 const duplicates = ref<Machine[]>([]);
+const errorOpen = ref(false);
+const errorCommand = ref<Command | null>(null);
 
 const actions: { type: CommandType; label: string; icon: string }[] = [
   { type: 'quick_scan', label: 'Scan rapide', icon: 'bolt' },
@@ -226,6 +262,37 @@ const threatColumns: QTableColumn<Threat>[] = [
   { name: 'status', label: 'Statut', field: 'status', align: 'left' },
   { name: 'detected_at', label: 'Détectée le', field: 'detected_at', align: 'left' },
 ];
+
+const commandStatusColors: Record<string, string> = {
+  pending: 'grey-7',
+  delivered: 'blue-7',
+  running: 'blue-7',
+  succeeded: 'positive',
+  failed: 'negative',
+  expired: 'orange',
+};
+
+const commandStatusLabels: Record<string, string> = {
+  pending: 'En attente',
+  delivered: 'Transmise',
+  running: 'En cours',
+  succeeded: 'Réussie',
+  failed: 'Échec',
+  expired: 'Expirée',
+};
+
+function statusColor(status: string): string {
+  return commandStatusColors[status] ?? 'grey-7';
+}
+
+function statusLabel(status: string): string {
+  return commandStatusLabels[status] ?? status;
+}
+
+function showError(cmd: Command) {
+  errorCommand.value = cmd;
+  errorOpen.value = true;
+}
 
 const commandColumns: QTableColumn<Command>[] = [
   { name: 'type', label: 'Type', field: 'type', align: 'left' },
@@ -318,3 +385,14 @@ async function runMerge(sourceId: string) {
 
 onMounted(load);
 </script>
+
+<style scoped>
+.command-error {
+  margin: 0;
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+</style>
