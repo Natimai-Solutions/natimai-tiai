@@ -165,7 +165,9 @@ async def test_unknown_user_is_404(client, db_session):
 
 
 @pytest.mark.parametrize(
-    "payload", [{"is_active": False}, {"role": "readonly"}], ids=["deactivate", "demote"]
+    "payload",
+    [{"is_active": False}, {"role": "readonly"}],
+    ids=["deactivate", "demote"],
 )
 async def test_admin_cannot_lock_themselves_out(client, db_session, payload):
     headers = await _admin(client, db_session)
@@ -284,7 +286,9 @@ async def test_reset_password_ends_the_target_existing_sessions(client, db_sessi
     admin = await _admin(client, db_session)
     users = (await client.get("/api/v1/users", headers=admin)).json()["items"]
     target = next(u for u in users if u["email"] == "victim@test.local")
-    await client.post(f"/api/v1/users/{target['id']}/reset-password", headers=admin, json={})
+    await client.post(
+        f"/api/v1/users/{target['id']}/reset-password", headers=admin, json={}
+    )
 
     assert (await client.get("/api/v1/auth/me", headers=victim)).status_code == 401
 
@@ -315,7 +319,10 @@ async def test_password_change_requires_the_current_password(client, db_session)
     resp = await client.post(
         "/api/v1/auth/password",
         headers=headers,
-        json={"current_password": "not-my-password", "new_password": "another-one-here"},
+        json={
+            "current_password": "not-my-password",
+            "new_password": "another-one-here",
+        },
     )
     assert resp.status_code == 400
     assert _code(resp) == "password.current.invalid"
