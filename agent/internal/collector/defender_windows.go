@@ -148,8 +148,21 @@ func UpdateSignatures(ctx context.Context) (string, error) {
 	return runPowerShell(ctx, "Update-MpSignature")
 }
 
+// runPowerShell executes a script and returns its combined output. Windows
+// PowerShell encodes redirected output with the legacy console code page
+// (CP850/CP1252 on French systems, never UTF-8), so accented characters would
+// become U+FFFD once the bytes are treated as UTF-8 downstream. The wrapper
+// captures every stream as text and writes it back as raw UTF-8 bytes,
+// bypassing the console encoder — [Console]::OutputEncoding can't be used
+// instead, as setting it throws when no console is attached (service context).
+// $Error drives the exit code so failures still surface as a non-nil err.
 func runPowerShell(ctx context.Context, script string) (string, error) {
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	wrapped := "$Error.Clear(); " +
+		"try { $out = & { " + script + " } 2>&1 | Out-String } catch { $out = $_ | Out-String }; " +
+		"$b = [Text.Encoding]::UTF8.GetBytes($out); " +
+		"$s = [Console]::OpenStandardOutput(); $s.Write($b, 0, $b.Length); $s.Flush(); " +
+		"if ($Error.Count) { exit 1 }"
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", wrapped)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("powershell: %w (output: %s)", err, strings.TrimSpace(string(out)))
