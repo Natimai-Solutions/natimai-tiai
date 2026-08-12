@@ -7,6 +7,6 @@ Importing this module guarantees every table is registered on
 from app.features.command.models import Command  # noqa: F401
 from app.features.machine.models import Machine  # noqa: F401
 from app.features.threat.models import Threat  # noqa: F401
-from app.features.user.models import User  # noqa: F401
+from app.features.user.models import PasswordResetToken, User  # noqa: F401
 
-__all__ = ["Machine", "Threat", "Command", "User"]
+__all__ = ["Machine", "Threat", "Command", "User", "PasswordResetToken"]

@@ -33,9 +33,15 @@ class ErrorCode(enum.StrEnum):
     AUTH_TOKEN_INVALID = "auth.token.invalid"
     AUTH_TOKEN_REVOKED = "auth.token.revoked"
     AUTH_ENROLLMENT_SECRET_INVALID = "auth.enrollment_secret.invalid"
+    # Passwords
+    PASSWORD_CURRENT_INVALID = "password.current.invalid"
+    PASSWORD_RESET_TOKEN_INVALID = "password.reset_token.invalid"
     # Resources
     MACHINE_NOT_FOUND = "machine.not_found"
     MACHINE_MERGE_SELF = "machine.merge.self"
+    USER_NOT_FOUND = "user.not_found"
+    USER_EMAIL_TAKEN = "user.email.taken"
+    USER_SELF_FORBIDDEN = "user.self.forbidden"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     HTTP_NOT_FOUND = "http.not_found"

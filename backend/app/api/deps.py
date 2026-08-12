@@ -92,6 +92,17 @@ async def get_current_user(
     user = await session.get(User, uuid.UUID(str(sub)))
     if user is None or not user.is_active:
         raise credentials_error
+
+    # A password change (self-service or admin reset) ends earlier sessions:
+    # without this, resetting a compromised account's password would leave the
+    # attacker's token valid until it expires — up to 8h by default.
+    if user.password_changed_at is not None:
+        issued_at = payload.get("iat")
+        # Compare whole seconds: `iat` is second-granular, so a token minted
+        # microseconds after the change must not be read as predating it.
+        changed_at = int(user.password_changed_at.timestamp())
+        if issued_at is None or int(issued_at) < changed_at:
+            raise credentials_error
     return user
 
 

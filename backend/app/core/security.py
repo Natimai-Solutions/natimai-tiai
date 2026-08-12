@@ -16,6 +16,8 @@ from passlib.context import CryptContext
 from app.core.config import settings
 
 _TOKEN_BYTES = 32
+# Entropy of a generated console password: ~128 bits, still copy-pasteable.
+_PASSWORD_BYTES = 16
 
 # --- Agent tokens (per-machine, stored hashed) -----------------------------
 
@@ -51,10 +53,20 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
+def generate_password() -> str:
+    """Generate a random password for an admin-driven reset (shown once)."""
+    return secrets.token_urlsafe(_PASSWORD_BYTES)
+
+
 def create_access_token(subject: str | Any) -> str:
-    """Create a signed JWT access token for a user id."""
-    expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"exp": expire, "sub": str(subject), "type": "access"}
+    """Create a signed JWT access token for a user id.
+
+    ``iat`` is included so a password change can invalidate tokens issued
+    before it (see ``app.api.deps.get_current_user``).
+    """
+    now = datetime.now(UTC)
+    expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {"exp": expire, "iat": now, "sub": str(subject), "type": "access"}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 

@@ -6,6 +6,18 @@ const routes: RouteRecordRaw[] = [
     name: 'login',
     component: () => import('pages/LoginPage.vue'),
   },
+  // Parcours « mot de passe oublié » : pages publiques, atteintes sans session
+  // (depuis la page de connexion, ou depuis le lien reçu par e-mail).
+  {
+    path: '/forgot-password',
+    name: 'forgot-password',
+    component: () => import('pages/ForgotPasswordPage.vue'),
+  },
+  {
+    path: '/reset-password',
+    name: 'reset-password',
+    component: () => import('pages/ResetPasswordPage.vue'),
+  },
   {
     path: '/',
     component: () => import('layouts/MainLayout.vue'),
@@ -19,6 +31,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('pages/MachineDetailPage.vue'),
         props: true,
       },
+      {
+        path: 'users',
+        name: 'users',
+        component: () => import('pages/UsersPage.vue'),
+        meta: { requiresAdmin: true },
+      },
+      { path: 'account', name: 'account', component: () => import('pages/AccountPage.vue') },
     ],
   },
   {

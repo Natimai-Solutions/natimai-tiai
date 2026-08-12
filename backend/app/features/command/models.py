@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import Column, ForeignKey, Index
 from sqlmodel import Field, SQLModel
 
-from app.features.base import utcnow
+from app.features.base import utc_field, utcnow
 
 
 class CommandType(enum.StrEnum):
@@ -45,10 +45,10 @@ class Command(SQLModel, table=True):
     type: str
     status: str = Field(default=CommandStatus.PENDING)
     created_by: str | None = None
-    created_at: datetime = Field(default_factory=utcnow)
-    expires_at: datetime
-    delivered_at: datetime | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
+    created_at: datetime = utc_field(default_factory=utcnow)
+    expires_at: datetime = utc_field()
+    delivered_at: datetime | None = utc_field(default=None, nullable=True)
+    started_at: datetime | None = utc_field(default=None, nullable=True)
+    finished_at: datetime | None = utc_field(default=None, nullable=True)
     result_output: str | None = None
     error: str | None = None

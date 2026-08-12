@@ -9,6 +9,7 @@ import routes from './routes';
 
 // Source of truth for "logged in" in the guard (kept in sync by the auth store).
 const TOKEN_KEY = 'tiai_token';
+const ROLE_KEY = 'tiai_role';
 
 export default defineRouter(() => {
   const createHistory = process.env.SERVER
@@ -29,6 +30,11 @@ export default defineRouter(() => {
       return { name: 'login', query: { redirect: to.fullPath } };
     }
     if (to.name === 'login' && isAuthed) {
+      return { name: 'dashboard' };
+    }
+    // Admin-only pages. The guard only decides what to render — the backend
+    // authorizes every call independently, so this cannot be bypassed for real.
+    if (to.meta.requiresAdmin && localStorage.getItem(ROLE_KEY) !== 'admin') {
       return { name: 'dashboard' };
     }
     return true;

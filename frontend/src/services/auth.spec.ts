@@ -5,7 +5,7 @@ vi.mock('boot/axios', () => ({
 }));
 
 import { api } from 'boot/axios';
-import { getMe, login } from './auth';
+import { changePassword, confirmPasswordReset, getMe, login, requestPasswordReset } from './auth';
 
 describe('login', () => {
   beforeEach(() => {
@@ -41,5 +41,55 @@ describe('getMe', () => {
 
     expect(api.get).toHaveBeenCalledWith('/auth/me');
     expect(result).toEqual(user);
+  });
+});
+
+describe('changePassword', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset();
+  });
+
+  it('posts the current and new passwords in snake_case', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: undefined });
+
+    await changePassword('old-passphrase', 'new-passphrase');
+
+    expect(api.post).toHaveBeenCalledWith('/auth/password', {
+      current_password: 'old-passphrase',
+      new_password: 'new-passphrase',
+    });
+  });
+});
+
+describe('requestPasswordReset', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset();
+  });
+
+  it('asks for a reset link', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: undefined });
+
+    await requestPasswordReset('marie@test.local');
+
+    expect(api.post).toHaveBeenCalledWith('/auth/password-reset/request', {
+      email: 'marie@test.local',
+    });
+  });
+});
+
+describe('confirmPasswordReset', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset();
+  });
+
+  it('redeems the token with the new password', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: undefined });
+
+    await confirmPasswordReset('tok-123', 'new-passphrase');
+
+    expect(api.post).toHaveBeenCalledWith('/auth/password-reset/confirm', {
+      token: 'tok-123',
+      new_password: 'new-passphrase',
+    });
   });
 });

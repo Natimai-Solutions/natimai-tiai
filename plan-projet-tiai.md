@@ -261,18 +261,30 @@ commands               -- file de commandes (une ligne par poste, même en broad
 | `POST` | `/api/v1/agent/heartbeat` | Remonte l'état Defender + menaces. **Renvoie les commandes en attente.** |
 | `POST` | `/api/v1/agent/commands/{id}/result` | Résultat d'exécution d'une commande. |
 
-**Côté console** (auth : **JWT utilisateur**, email + mot de passe)
+**Côté console** (auth : **JWT utilisateur**, email + mot de passe — sauf les deux routes `password-reset/*`, publiques par nature ; les routes `admin` exigent le rôle admin)
 
 | Méthode | Endpoint | Rôle |
 |---|---|---|
 | `POST` | `/api/v1/auth/login` | Email + mot de passe (OAuth2 password) → JWT. |
 | `GET` | `/api/v1/auth/me` | Utilisateur courant. |
+| `POST` | `/api/v1/auth/password` | Changement de son propre mot de passe (preuve : mot de passe actuel). Ferme les autres sessions. |
+| `POST` | `/api/v1/auth/password-reset/request` | **Public.** Envoie un lien de réinitialisation par e-mail (Mailgun). Répond 204 quoi qu'il arrive (anti-énumération). |
+| `POST` | `/api/v1/auth/password-reset/confirm` | **Public.** Consomme le jeton (usage unique, expirant) et définit le nouveau mot de passe. |
 | `GET` | `/api/v1/machines?search=&domain=&status=&page=` | Liste filtrable/paginée. |
 | `GET` | `/api/v1/machines/{id}` | Détail d'un poste + menaces. |
+| `GET` | `/api/v1/machines/{id}/duplicates` | Doublons candidats (même ancre SMBIOS, cf. §8). |
+| `POST` | `/api/v1/machines/{id}/revoke-token` | *Admin.* Kill-switch : révoque le token du poste (ré-enrôlement requis). |
+| `POST` | `/api/v1/machines/{id}/merge` | *Admin.* Fusionne un doublon dans ce poste (menaces et commandes rattachées). |
 | `GET` | `/api/v1/stats/overview` | KPIs dashboard. |
 | `GET` | `/api/v1/threats?...` | Menaces actives du parc. |
 | `POST`| `/api/v1/commands` | Crée une/des commande(s) : cible (ids ou filtre) + type. |
 | `GET` | `/api/v1/commands?status=` | Suivi des commandes. |
+| `GET` | `/api/v1/users?search=&page=` | *Admin.* Liste des comptes console. |
+| `POST` | `/api/v1/users` | *Admin.* Création d'un compte (mot de passe transmis hors bande). |
+| `GET` | `/api/v1/users/{id}` | *Admin.* Détail d'un compte. |
+| `PATCH` | `/api/v1/users/{id}` | *Admin.* E-mail, nom, rôle, activation. Refusé sur son propre compte pour rôle/désactivation → il reste toujours ≥ 1 admin. |
+| `DELETE` | `/api/v1/users/{id}` | *Admin.* Suppression définitive (préférer la désactivation). Refusé sur son propre compte. |
+| `POST` | `/api/v1/users/{id}/reset-password` | *Admin.* Nouveau mot de passe (fourni ou généré), renvoyé une seule fois. Ferme les sessions du compte. |
 
 > Fusionner *heartbeat* et *récupération de commandes* en **un seul appel** divise par deux le trafic agent.
 
