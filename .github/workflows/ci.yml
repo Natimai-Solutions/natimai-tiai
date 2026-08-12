@@ -178,6 +178,7 @@ jobs:
 
       - name: Coverage badge (gist)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.GIST_SECRET != ''
+        continue-on-error: true
         uses: schneegans/dynamic-badges-action@v1.7.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
