@@ -7,18 +7,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, SessionDep
+from app.api.fields import Email, Password
 from app.core import security
-from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.user import crud, emails
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-# Any password accepted through the API must be at least this long.
-Password = Annotated[str, Field(min_length=settings.PASSWORD_MIN_LENGTH)]
 
 
 class Token(BaseModel):
@@ -96,7 +93,7 @@ async def change_password(
 class PasswordResetRequest(BaseModel):
     """Ask for a reset link to be mailed."""
 
-    email: EmailStr
+    email: Email
 
 
 @router.post("/password-reset/request", status_code=204)
@@ -116,8 +113,12 @@ async def request_password_reset(
     if user is None or not user.is_active:
         return
     token = await crud.create_reset_token(session, user)
+    # Read before committing: the session expires instances on commit
+    # (expire_on_commit default), and touching an expired attribute afterwards
+    # would lazy-load synchronously inside async — MissingGreenlet.
+    email = user.email
     await session.commit()
-    await emails.send_password_reset(user.email, token)
+    await emails.send_password_reset(email, token)
 
 
 class PasswordResetConfirm(BaseModel):

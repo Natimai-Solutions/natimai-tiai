@@ -437,6 +437,9 @@ async def test_issuing_a_new_reset_token_drops_the_previous_one(client, db_sessi
     user = await crud.create_user(db_session, email="twice@test.local", password=STRONG)
     first = await crud.create_reset_token(db_session, user)
     await db_session.commit()
+    # The commit expired the instance; reload it before handing it back to the
+    # crud layer, whose attribute access would otherwise lazy-load in async.
+    await db_session.refresh(user)
     second = await crud.create_reset_token(db_session, user)
     await db_session.commit()
 
@@ -470,6 +473,26 @@ def test_reset_link_uses_the_console_url(monkeypatch):
 
     monkeypatch.setattr(settings, "CONSOLE_BASE_URL", "https://tiai.local/")
     assert emails.reset_link("tok") == "https://tiai.local/reset-password?token=tok"
+
+
+def test_email_field_accepts_special_use_domains():
+    """The console must accept on-prem AD addresses (user@natimai.local) that
+    RFC validators reject as special-use — and the test park itself runs on
+    ``.local`` addresses, so this is also what keeps the API tests honest.
+    """
+    from pydantic import TypeAdapter
+
+    from app.api.fields import Email
+
+    adapter = TypeAdapter(Email)
+    for ok in ("admin@natimai.local", "a@test.local", "user@natimai.solutions"):
+        assert adapter.validate_python(ok) == ok
+    for bad in ("not-an-email", "user@nodot", "two words@x.y", "@x.y", "a@"):
+        try:
+            adapter.validate_python(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} should have been rejected")
 
 
 def test_generated_password_is_long_enough():
