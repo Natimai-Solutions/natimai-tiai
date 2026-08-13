@@ -2,6 +2,8 @@
 #
 # Déclenchement :
 #   - tag `v*` poussé sur le dépôt  → crée la release et y attache les .exe ;
+#   - release publiée depuis l'interface web (quel que soit le nom du tag)
+#     → compile et attache les .exe à cette release ;
 #   - lancement manuel (Actions → Release → Run workflow) → produit les mêmes
 #     binaires en artefact de build, sans créer de release.
 #
@@ -16,6 +18,13 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Filet de sécurité : une release créée depuis l'interface web avec un tag
+  # sans préfixe `v` (ex. `0.0.3`) ne matche pas `push: tags` — cet événement
+  # garantit la compilation dans tous les cas. Si le tag est en `v*`, les deux
+  # événements se déclenchent : la concurrence par ref les sérialise et le
+  # second téléverse simplement à nouveau (`--clobber`), sans doublon.
+  release:
+    types: [published]
   workflow_dispatch:
 
 concurrency:
