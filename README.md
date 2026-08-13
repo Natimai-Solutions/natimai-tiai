@@ -1,8 +1,8 @@
 # Tia'i
 
-[![CI](https://github.com/Natimai-Solutions/natimai-Tia'i/actions/workflows/ci.yml/badge.svg)](https://github.com/Natimai-Solutions/natimai-Tia'i/actions/workflows/ci.yml)
-[![Couverture backend](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/jburckel/80b72bc52448a36bc1a08370a68c88a1/raw/Tia'i-coverage-backend.json)](https://github.com/Natimai-Solutions/natimai-Tia'i/actions/workflows/ci.yml)
-[![Couverture frontend](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/jburckel/80b72bc52448a36bc1a08370a68c88a1/raw/Tia'i-coverage-frontend.json)](https://github.com/Natimai-Solutions/natimai-Tia'i/actions/workflows/ci.yml)
+[![CI](https://github.com/Natimai-Solutions/natimai-Tiai/actions/workflows/ci.yml/badge.svg)](https://github.com/Natimai-Solutions/natimai-tiai/actions/workflows/ci.yml)
+[![Couverture backend](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/jburckel/80b72bc52448a36bc1a08370a68c88a1/raw/tiai-coverage-backend.json)](https://github.com/Natimai-Solutions/natimai-Tiai/actions/workflows/ci.yml)
+[![Couverture frontend](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/jburckel/80b72bc52448a36bc1a08370a68c88a1/raw/tiai-coverage-frontend.json)](https://github.com/Natimai-Solutions/natimai-Tiai/actions/workflows/ci.yml)
 
 > **Console de gestion de parc informatique** — pilotage centralisé d'un parc de postes Windows.
 >
@@ -14,7 +14,7 @@ Tia'i est une plateforme qui collecte l'état des postes Windows d'un parc, orch
 
 ## Sommaire
 
-- [Pourquoi Tia'i](#pourquoi-Tia'i)
+- [Pourquoi Tia'i](#pourquoi-tiai)
 - [Architecture](#architecture)
 - [Principes de conception](#principes-de-conception)
 - [Stack technique](#stack-technique)
@@ -43,7 +43,7 @@ Tia'i repose sur un **modèle de polling** : l'agent installé sur chaque poste 
 ```
    POSTES WINDOWS (hors Docker)                 SERVEUR (docker compose)
  ┌───────────────────────────┐         ┌─────────────────────────────────────┐
- │  Agent Tia'i (Go)          │  HTTPS  │  Caddy : reverse-proxy + TLS         │
+ │  Agent Tiai (Go)          │  HTTPS  │  Caddy : reverse-proxy + TLS         │
  │  • Service Windows        │ ──────► │            │                        │
  │  • lit WMI Defender       │ ◄────── │     ┌──────┴──────┐                  │
  │  • poll heartbeat         │ cmds    │     │  Backend    │  FastAPI         │
@@ -114,7 +114,7 @@ Deux intervalles de polling sont prévus : un **long** pour la remontée d'état
 - **M5 — Durcissement** : auth console (JWT), journal d'audit, jobs ARQ (nettoyage + alertes), rotation des tokens, rate-limiting.
 - **M6 — Packaging & GPO** : build MSI signé, distribution du certificat en *Éditeurs approuvés*, déploiement sur un OU pilote.
 
-Le détail complet figure dans [plan-projet-Tia'i.md](plan-projet-Tia'i.md).
+Le détail complet figure dans [plan-projet-Tiai.md](plan-projet-Tiai.md).
 
 ## Structure du dépôt
 
@@ -124,7 +124,7 @@ Le détail complet figure dans [plan-projet-Tia'i.md](plan-projet-Tia'i.md).
 ├── backend/      # API FastAPI + worker ARQ + migrations Alembic
 ├── frontend/     # Console web (Quasar / Vue 3)
 ├── deploy/       # docker-compose, Caddyfile, .env.example
-└── plan-projet-Tia'i.md
+└── plan-projet-Tiai.md
 ```
 
 Chaque composant a son propre README : [agent/](agent/README.md), [backend/](backend/README.md), [frontend/](frontend/README.md).
@@ -142,10 +142,10 @@ docker compose up -d        # db + redis + backend + worker + frontend + caddy
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 # 2. Vérifier la santé du backend
-curl -k https://Tia'i.natimai.local/health
+curl -k https://tiai.natimai.local/health
 
 # 3. Agent — déployé par GPO sur les postes (MSI signé en M6)
-#    Configuration : C:\ProgramData\Tia'i\config.yaml (+ surcharge registre)
+#    Configuration : C:\ProgramData\Tiai\config.yaml (+ surcharge registre)
 ```
 
 Les trois modes TLS (sans certificat / auto-signé / AC interne), les variables
@@ -188,11 +188,11 @@ cd frontend && npm run test:coverage
 
 ### Badges de couverture (gist)
 
-Les badges en tête de README s'appuient sur un **gist** lu par shields.io, mis à jour par la CI à chaque push sur `main` (action `schneegans/dynamic-badges-action`). Configuration : gist `80b72bc52448a36bc1a08370a68c88a1` (compte `jburckel`), fichiers `Tia'i-coverage-backend.json` / `Tia'i-coverage-frontend.json`, secret **`GIST_SECRET`** (PAT scope `gist`). Sans `GIST_SECRET`, les étapes de badge sont simplement ignorées (CI verte).
+Les badges en tête de README s'appuient sur un **gist** lu par shields.io, mis à jour par la CI à chaque push sur `main` (action `schneegans/dynamic-badges-action`). Configuration : gist `80b72bc52448a36bc1a08370a68c88a1` (compte `jburckel`), fichiers `Tiai-coverage-backend.json` / `Tiai-coverage-frontend.json`, secret **`GIST_SECRET`** (PAT scope `gist`). Sans `GIST_SECRET`, les étapes de badge sont simplement ignorées (CI verte).
 
 ## Documentation
 
-- [plan-projet-Tia'i.md](plan-projet-Tia'i.md) — plan projet détaillé : vision, architecture, modèle de données, contrat d'API, jalons, risques.
+- [plan-projet-Tiai.md](plan-projet-Tiai.md) — plan projet détaillé : vision, architecture, modèle de données, contrat d'API, jalons, risques.
 
 ## Licence
 
