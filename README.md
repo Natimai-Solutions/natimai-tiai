@@ -192,7 +192,7 @@ Les badges en tête de README s'appuient sur un **gist** lu par shields.io, mis 
 
 ## Documentation
 
-- [plan-projet-Tiai.md](plan-projet-Tiai.md) — plan projet détaillé : vision, architecture, modèle de données, contrat d'API, jalons, risques.
+- [plan-projet-tiai.md](plan-projet-tiai.md) — plan projet détaillé : vision, architecture, modèle de données, contrat d'API, jalons, risques.
 
 ## Licence
 
