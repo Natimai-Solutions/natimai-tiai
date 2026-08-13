@@ -5,7 +5,7 @@
         <q-btn flat dense round icon="menu" aria-label="Menu" @click="drawer = !drawer" />
         <q-toolbar-title>
           <q-icon name="shield" class="q-mr-sm" />
-          Tiai — Console
+          Tia'i — Console
         </q-toolbar-title>
         <div v-if="auth.user" class="text-caption q-mr-sm">{{ auth.user.email }}</div>
         <q-btn
