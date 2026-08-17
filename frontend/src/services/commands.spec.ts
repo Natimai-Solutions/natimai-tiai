@@ -5,7 +5,14 @@ vi.mock('boot/axios', () => ({
 }));
 
 import { api } from 'boot/axios';
-import { createCommands, listCommands } from './commands';
+import {
+  commandActionGroups,
+  commandActions,
+  commandTypeLabel,
+  createCommands,
+  listCommands,
+  type CommandType,
+} from './commands';
 
 describe('createCommands', () => {
   beforeEach(() => {
@@ -23,6 +30,89 @@ describe('createCommands', () => {
       machine_ids: ['m-1', 'm-2'],
     });
     expect(result).toEqual(payload);
+  });
+});
+
+describe('command catalogue', () => {
+  // Spelled out rather than derived from the catalogue: the closed set is the
+  // security model (the agent holds the command lines, the wire carries only a
+  // name), so a type appearing or disappearing should cost a deliberate edit
+  // here — as it does in the backend enum and the agent's own table.
+  const expected: CommandType[] = [
+    'quick_scan',
+    'full_scan',
+    'update_signatures',
+    'gpo_update',
+    'flush_dns',
+    'time_resync',
+    'cert_pulse',
+    'spooler_reset',
+    'sfc_scan',
+    'dism_restore_health',
+    'dism_component_cleanup',
+    'chkdsk_scan',
+    'gpo_report',
+    'net_config',
+  ];
+
+  it('covers every command type exactly once', () => {
+    expect(commandActions.map((a) => a.type)).toEqual(expected);
+  });
+
+  it('gives every action a label and an icon', () => {
+    for (const action of commandActions) {
+      expect(action.label.length).toBeGreaterThan(0);
+      expect(action.icon.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('confirms every action that changes the machine or ties it up', () => {
+    const needConfirm = commandActions.filter((a) => a.confirm).map((a) => a.type);
+    expect(needConfirm).toEqual([
+      'full_scan',
+      'spooler_reset',
+      'sfc_scan',
+      'dism_restore_health',
+      'dism_component_cleanup',
+      'chkdsk_scan',
+    ]);
+  });
+
+  it('carries a hint on every action it asks confirmation for', () => {
+    for (const action of commandActions.filter((a) => a.confirm)) {
+      expect(action.hint, action.type).toBeTruthy();
+    }
+  });
+
+  it('keeps the read-only diagnostics out of bulk actions', () => {
+    const diagnostics = commandActions.filter((a) => a.group === 'diagnostic');
+    expect(diagnostics.map((a) => a.type)).toEqual(['gpo_report', 'net_config']);
+    expect(diagnostics.every((a) => !a.bulk)).toBe(true);
+  });
+
+  it('groups the menu in a stable order', () => {
+    expect(commandActionGroups().map((s) => s.group)).toEqual([
+      'defender',
+      'maintenance',
+      'diagnostic',
+    ]);
+  });
+
+  it('drops the diagnostic section from the bulk menu', () => {
+    const groups = commandActionGroups({ bulkOnly: true });
+    expect(groups.map((s) => s.group)).toEqual(['defender', 'maintenance']);
+    expect(groups.flatMap((s) => s.actions).every((a) => a.bulk)).toBe(true);
+  });
+});
+
+describe('commandTypeLabel', () => {
+  it('translates a known type', () => {
+    expect(commandTypeLabel('dism_restore_health')).toBe('Réparer l’image système (DISM)');
+  });
+
+  it('falls back to the raw value for an unknown type', () => {
+    // An older console against a newer server must show something, not a blank.
+    expect(commandTypeLabel('wu_install')).toBe('wu_install');
   });
 });
 

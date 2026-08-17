@@ -33,8 +33,10 @@ Administrer Microsoft Defender sur des centaines de postes Windows sans console 
 
 - une **vue temps quasi-réel** de l'état Defender de chaque poste (signatures, protection temps réel, dates de scans) ;
 - le **déclenchement d'actions à distance** (scan rapide / complet, mise à jour des signatures) sur un poste ou sur tout le parc ;
+- un **catalogue de commandes de maintenance et de diagnostic** Windows déclenchables de la même façon — appliquer les stratégies, vider le cache DNS, resynchroniser l'horloge, réinitialiser le spouleur d'impression, `sfc` / `DISM` / `chkdsk`, et deux diagnostics en lecture seule (`gpresult`, `ipconfig /all`) dont la sortie s'affiche dans la console ;
 - l'**occupation des postes** — quels postes ont une session ouverte, donc lesquels sont libres pour une intervention (remontée du nom d'utilisateur désactivable par GPO) ;
 - l'**adresse IP** de chaque poste, cherchable dans la console — pour remonter d'une ligne de log de pare-feu au poste concerné, ou simplement lancer une prise en main ;
+- l'**antivirus réellement actif** sur chaque poste, y compris un produit tiers (ESET, Bitdefender, Kaspersky…) : nom et statut, cherchables et filtrables — un parc mixte reste lisible dans une seule console ;
 - un **historique des menaces** dédupliqué et consultable ;
 - un **déploiement sans friction** via GPO, avec auto-enrôlement des postes.
 
@@ -67,7 +69,7 @@ Tia'i repose sur un **modèle de polling** : l'agent installé sur chaque poste 
 
 **Cycle de vie d'une commande**
 
-1. L'agent appelle `POST /heartbeat` → remonte l'état Defender, les menaces détectées, la session utilisateur ouverte et l'adresse IP du poste.
+1. L'agent appelle `POST /heartbeat` → remonte l'état Defender, l'antivirus enregistré (tiers compris), les menaces détectées, la session utilisateur ouverte et l'adresse IP du poste.
 2. La **même réponse** renvoie les commandes en attente pour ce poste.
 3. L'agent exécute la commande, puis poste le résultat via `POST /commands/{id}/result`.
 
@@ -82,9 +84,11 @@ Deux intervalles de polling sont prévus : un **long** pour la remontée d'état
 | **Enrôlement** | *Trust on first use* : un secret d'enrôlement partagé (déployé par GPO) ne sert **qu'à** s'enregistrer ; chaque poste reçoit ensuite un **token unique** (seul le hash est stocké côté serveur). |
 | **TLS** | Activé dès le MVP via **Caddy** + certificat de l'AC interne (déjà approuvée par les postes du domaine). |
 | **Accès Defender** | Lecture directe via **WMI** (`ROOT\Microsoft\Windows\Defender`) plutôt que des appels `powershell.exe` coûteux. |
+| **Antivirus tiers** | Lu dans le **Security Center** de Windows (`root\SecurityCenter2`), la seule source qui voie un produit non-Microsoft. **Lecture seule** : ce registre expose un nom et deux bits d'état, ni version de signatures ni moyen de déclencher une mise à jour. Absent des SKU Serveur, où le champ reste « inconnu » plutôt que faux. |
 | **Session utilisateur** | API **WTS** — le seul accès qui fonctionne depuis la session 0 où tourne l'agent. La remontée du **nom** est désactivable par GPO ; coupée, le nom ne quitte jamais le poste. |
 | **Adresse IP** | **Une seule** adresse remontée, élue par l'agent via `GetAdaptersAddresses` : IPv4 routée d'abord, loopback et 169.254.0.0/16 exclus. Relue à chaque heartbeat, jamais mise en cache. |
 | **Déduplication** | Contrainte d'unicité `(machine_id, detection_id)` + upsert `ON CONFLICT DO NOTHING`. |
+| **Commandes à distance** | **Catalogue fermé** : le serveur n'envoie qu'un identifiant de type, **aucun argument ne traverse le réseau**. L'exécutable et ses arguments fixes vivent dans le binaire de l'agent, résolus en chemin absolu sous `System32` — un serveur compromis ne peut déclencher que le catalogue, jamais du code arbitraire. Ni exécuteur de scripts libre, ni modification du registre, des fichiers, du pare-feu ou des comptes. |
 | **Expiration des commandes** | Chaque commande porte un `expires_at` — un poste éteint 3 semaines ne déclenche pas un scan obsolète à son retour. |
 | **Robustesse de l'agent** | File locale + back-off si le serveur est injoignable, commandes idempotentes, compte de service `LocalSystem`. |
 

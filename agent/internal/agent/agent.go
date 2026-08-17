@@ -14,6 +14,7 @@ import (
 	"log"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tiai/agent/internal/api"
@@ -53,6 +54,12 @@ type Agent struct {
 	mu       sync.Mutex
 	running  map[string]struct{} // command ids queued or executing
 	wg       sync.WaitGroup
+
+	// Security Center read failures are permanent on a host without one (a
+	// Windows Server SKU has no root\SecurityCenter2), so the first is logged and
+	// the rest demoted to debug rather than printed on every poll for the life of
+	// the service.
+	avErrLogged atomic.Bool
 }
 
 // New creates an agent from config.
@@ -178,6 +185,14 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	if err != nil {
 		log.Printf("agent: ip address: %v", err)
 	}
+	// Which antivirus actually guards this machine — Defender's own WMI classes
+	// cannot answer that once a third-party product has taken over. On failure av
+	// stays nil, the block is omitted, and the server keeps the last known
+	// product rather than being told "none" on no evidence.
+	av, err := collector.ReadAVProduct(ctx)
+	if err != nil {
+		a.logAVError(err)
+	}
 
 	fp := a.identity.Fingerprint
 	resp, err := a.client.Heartbeat(ctx, models.HeartbeatRequest{
@@ -187,6 +202,7 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		OSVersion:    a.host.OSVersion,
 		AgentVersion: Version,
 		Defender:     state,
+		AVProduct:    av,
 		Session:      sess,
 		Fingerprint:  &fp,
 		Threats:      threats,
@@ -203,6 +219,22 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		a.accept(cmd)
 	}
 	return nil
+}
+
+// logAVError reports a Security Center read failure once, then at debug level.
+//
+// Unlike every other collector, this one fails *permanently* on a legitimate
+// host: Windows Server ships no Security Center, so root\SecurityCenter2 does
+// not exist and the query can only ever fail there. Logging it on each poll
+// would fill the log of every server in the parc with the same line forever,
+// while suppressing it outright would hide a genuine WMI breakage on a
+// workstation. One line, then silence.
+func (a *Agent) logAVError(err error) {
+	if a.avErrLogged.Swap(true) {
+		logging.Debugf("agent: security center: %v", err)
+		return
+	}
+	log.Printf("agent: security center: %v (further failures logged at debug level)", err)
 }
 
 // accept hands a command to the worker without blocking the polling loop.
@@ -257,6 +289,7 @@ func (a *Agent) worker(ctx context.Context) {
 // it can't be delivered right now.
 func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	var run func(context.Context) (string, error)
+	long := false
 	switch cmd.Type {
 	case "quick_scan":
 		run = collector.RunQuickScan
@@ -265,11 +298,25 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	case "update_signatures":
 		run = collector.UpdateSignatures
 	default:
-		log.Printf("agent: unknown command type %q (id %s), ignoring", cmd.Type, cmd.ID)
-		return
+		// The maintenance catalogue is looked up rather than switched on: its
+		// entries differ only by data, so a new command is one table row in the
+		// collector and nothing here (plan-commandes-distantes.md §4).
+		info, ok := collector.LookupMaintenance(cmd.Type)
+		if !ok {
+			log.Printf("agent: unknown command type %q (id %s), ignoring", cmd.Type, cmd.ID)
+			return
+		}
+		long = info.Long
+		cmdType := cmd.Type
+		run = func(ctx context.Context) (string, error) {
+			return collector.RunMaintenance(ctx, cmdType)
+		}
 	}
 
 	log.Printf("agent: executing %s (id %s)", cmd.Type, cmd.ID)
+	if long {
+		a.reportRunning(ctx, cmd)
+	}
 	start := time.Now()
 	output, err := run(ctx)
 
@@ -288,6 +335,22 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 		if qerr := a.queue.Enqueue(queue.Item{CommandID: cmd.ID, Result: res}); qerr != nil {
 			log.Printf("agent: queue result %s: %v", cmd.ID, qerr)
 		}
+	}
+}
+
+// reportRunning tells the server a long command has started, so the console
+// reads "en cours" instead of "transmise" for the tens of minutes an sfc or a
+// dism takes — the difference between a fleet that looks stuck and one that is
+// working.
+//
+// Best-effort by design: this is a progress hint, not a result. A failure is
+// logged at debug level and never queued for replay — a `running` replayed
+// after the verdict would be stale, and the server refuses it anyway rather
+// than reopening a closed command.
+func (a *Agent) reportRunning(ctx context.Context, cmd models.Command) {
+	res := models.CommandResult{Status: "running"}
+	if err := a.client.PostResult(ctx, cmd.ID, res); err != nil {
+		logging.Debugf("agent: could not mark %s (id %s) as running: %v", cmd.Type, cmd.ID, err)
 	}
 }
 

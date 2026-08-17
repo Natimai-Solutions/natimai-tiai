@@ -6,7 +6,14 @@ vi.mock('boot/axios', () => ({
 }));
 
 import { api } from 'boot/axios';
-import { getDuplicates, getMachine, listMachines, mergeMachines, revokeToken } from './machines';
+import {
+  getDuplicates,
+  getMachine,
+  listAntivirusProducts,
+  listMachines,
+  mergeMachines,
+  revokeToken,
+} from './machines';
 
 describe('listMachines', () => {
   beforeEach(() => {
@@ -25,6 +32,18 @@ describe('listMachines', () => {
     expect(result).toEqual(payload);
   });
 
+  it('passes the antivirus filter through', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: { items: [], total: 0, page: 1, page_size: 50 },
+    });
+
+    await listMachines({ antivirus: 'ESET Endpoint Security' });
+
+    expect(api.get).toHaveBeenCalledWith('/machines', {
+      params: { antivirus: 'ESET Endpoint Security' },
+    });
+  });
+
   it('passes no params when called with no arguments', async () => {
     vi.mocked(api.get).mockResolvedValue({
       data: { items: [], total: 0, page: 1, page_size: 50 },
@@ -33,6 +52,25 @@ describe('listMachines', () => {
     await listMachines();
 
     expect(api.get).toHaveBeenCalledWith('/machines', { params: {} });
+  });
+});
+
+describe('listAntivirusProducts', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset();
+  });
+
+  it('fetches the antivirus products present in the fleet', async () => {
+    const products = [
+      { name: 'ESET Endpoint Security', count: 12 },
+      { name: 'Windows Defender', count: 3 },
+    ];
+    vi.mocked(api.get).mockResolvedValue({ data: products });
+
+    const result = await listAntivirusProducts();
+
+    expect(api.get).toHaveBeenCalledWith('/machines/antivirus-products');
+    expect(result).toEqual(products);
   });
 });
 

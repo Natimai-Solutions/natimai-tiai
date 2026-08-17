@@ -1,8 +1,10 @@
 # Tiai — Agent (Windows)
 
 Service Windows léger, déployé par GPO, qui interroge le serveur (polling),
-remonte l'état Defender, la session utilisateur ouverte et l'adresse IP du
-poste, et exécute les commandes (scan / mise à jour signatures).
+remonte l'état Defender, l'antivirus enregistré (tiers compris), la session
+utilisateur ouverte et l'adresse IP du poste, et exécute les commandes
+demandées depuis la console : scan / mise à jour des signatures Defender, et un
+catalogue fermé de commandes de maintenance et de diagnostic Windows.
 
 ## Layout
 
@@ -15,8 +17,10 @@ internal/
   sysinfo/   hostname / domaine AD / version OS
   api/       client HTTP (enroll / heartbeat / result)
   collector/ Defender : état + menaces via WMI (ROOT\Microsoft\Windows\Defender) ; scans + MAJ via PowerShell
+             antivirus enregistré (tiers compris) via WMI (root\SecurityCenter2), lecture seule
              session utilisateur ouverte via l'API WTS (wtsapi32)
              adresse IP principale via GetAdaptersAddresses (iphlpapi)
+             maintenance/diagnostic : catalogue fermé d'outils System32 (maintenance*.go)
   queue/     file locale durable (résultats de commandes non remis) + back-off
   logging/   log fichier (agent.log, rotation simple) + niveau INFO/DEBUG
   service/   service Windows (golang.org/x/sys/windows/svc)
@@ -29,6 +33,148 @@ internal/
 - **Lecture** (état, menaces) via **WMI** — pas de spawn de process par cycle :
   `MSFT_MpComputerStatus`, `MSFT_MpThreatDetection` + `MSFT_MpThreat` (jointure par `ThreatID`).
 - **Actions** (scans, MAJ signatures) via **PowerShell** : `Start-MpScan`, `Update-MpSignature`.
+- `AMRunningMode` est remonté avec l'état : c'est lui qui distingue « Defender
+  éteint » de « Defender **passif** parce qu'un antivirus tiers a pris le relais »
+  (`Normal` / `Passive` / `SxS Passive Mode` / `EDR Block Mode` ; vide avant
+  Windows 10 1903, où la propriété n'existe pas).
+
+## Commandes de maintenance à distance
+
+Au-delà de Defender, l'agent exécute un **catalogue fermé** de commandes de
+maintenance et de diagnostic Windows (cf. `plan-commandes-distantes.md`).
+
+**Le catalogue *est* le modèle de sécurité.** Le serveur n'envoie qu'un
+**identifiant de type** — `{id, type}`, protocole inchangé : **aucun argument ne
+traverse le réseau**. L'exécutable et ses arguments fixes sont dans la table
+[`maintenanceCatalogue`](internal/collector/maintenance.go), à l'intérieur du
+binaire de l'agent. Un serveur compromis ne peut donc déclencher que l'une de ces
+onze actions, jamais du code arbitraire. Sont **exclus par principe**, et ne
+doivent pas être réintroduits au fil de l'eau : tout exécuteur de scripts libre,
+et toute modification du registre, des fichiers, du pare-feu ou des comptes.
+
+| Type | Commande | Famille | Délai max | `running` |
+|---|---|---|---|---|
+| `gpo_update` | `gpupdate /target:computer /force` | Maintenance | 5 min | — |
+| `flush_dns` | `ipconfig /flushdns` | Maintenance | 5 min | — |
+| `time_resync` | `w32tm /resync` | Maintenance | 5 min | — |
+| `cert_pulse` | `certutil -pulse` | Maintenance | 5 min | — |
+| `spooler_reset` | arrêt spouleur → purge de la file → redémarrage (natif Go) | Maintenance | 5 min | — |
+| `sfc_scan` | `sfc /scannow` | Intégrité | 30 min | oui |
+| `dism_restore_health` | `dism /online /cleanup-image /restorehealth` | Intégrité | 2 h | oui |
+| `dism_component_cleanup` | `dism /online /cleanup-image /startcomponentcleanup` | Disque | 1 h | oui |
+| `chkdsk_scan` | `chkdsk /scan` | Disque | 1 h | oui |
+| `gpo_report` | `gpresult /r /scope:computer` | **Diagnostic** | 5 min | — |
+| `net_config` | `ipconfig /all` | **Diagnostic** | 5 min | — |
+
+Notes de périmètre :
+
+- `gpupdate` tourne en `/target:computer` : l'agent est `LocalSystem`, il n'y a
+  pas de ruche utilisateur à rafraîchir — le libellé de la console l'assume.
+- `chkdsk /scan` est l'analyse **en ligne** : elle signale sans réparer, donc
+  sans immobiliser le poste. La réparation (`/spotfix`) est hors catalogue.
+- `spooler_reset` passe par le **gestionnaire de services** plutôt que par
+  `net stop spooler` : l'API dit l'état réel du service au lieu d'une phrase
+  localisée, et permet d'**attendre** l'arrêt effectif avant de supprimer les
+  fichiers — sinon la purge court après un service qui n'a pas encore lâché ses
+  handles. Seuls les `.spl` et `.shd` sont supprimés ; le service est redémarré
+  même si la purge a échoué.
+- `netsh winsock reset` est écarté pour l'instant : il exige un redémarrage
+  derrière, il ira avec la commande `reboot` de la Phase 2.
+
+**Chemins absolus, jamais le `PATH`.** Chaque exécutable est résolu en
+`%SystemRoot%\System32\<exe>`. L'agent tourne en `LocalSystem` : un répertoire
+inscriptible placé avant System32 dans le `PATH` transformerait sinon chacune de
+ces commandes en exécution de code SYSTEM.
+
+**Encodage : il n'y en a pas un, il y en a quatre.** C'est le piège de ce
+chantier, et il est mesuré et non supposé (Windows 11 français, sortie capturée
+dans un tube) :
+
+| Outil | Écrit en | Comment c'est traité |
+|---|---|---|
+| `ipconfig`, `w32tm`, `gpupdate`, `chkdsk` | page de codes **OEM** (CP850) | conversion `MultiByteToWideChar(CP_OEMCP)` — le défaut |
+| `certutil` | page de codes **ANSI** (CP1252) | déclaré `encANSI` dans le catalogue |
+| `gpresult`, `dism` | **UTF-8** | détecté automatiquement : l'UTF-8 s'auto-identifie |
+| `sfc` | **UTF-16LE** entrelacé de nuls | déclaré `encUTF16LE`, *et vérifié* sur les octets |
+
+Ce n'est **pas** la page de codes de la console : sur la même machine,
+`GetConsoleOutputCP()` répondait 65001 pendant qu'`ipconfig` émettait du CP850.
+Ce qui compte est que la sortie soit redirigée, pas ce à quoi le terminal est
+réglé — et en service, il n'y a pas de terminal du tout. Sans ce traitement, un
+`ipconfig /all` remonte « Carte r�seau » et un `sfc` remonte du charabia.
+
+**Sortie.** Les retours chariot sont rejoués comme le ferait une console (tout
+ce qui précède le dernier `\r` d'une ligne a été écrasé) : les centaines de
+lignes de progression de `dism` et `sfc` se réduisent ainsi à leur dernière
+image, sans dépendre d'aucune langue ni d'aucun format. Le résultat est tronqué
+à **64 Kio** avant l'envoi (le serveur re-plafonne à la réception).
+
+**Statut intermédiaire.** Les quatre commandes longues postent
+`{status: "running"}` avant de démarrer : sans lui, la console afficherait
+« transmise » pendant vingt minutes de `sfc`. C'est un indice de progression et
+non un résultat — l'envoi est *best-effort*, jamais mis en file, et le serveur
+refuse un `running` qui arriverait après un verdict.
+
+**Codes de retour.** Traduits seulement quand la signification est documentée
+(`dism` 3010 = succès avec redémarrage requis, `0x800f081f` = source de
+réparation inaccessible → message qui oriente vers WU/WSUS ; `w32tm` +
+`0x80070426` = service W32Time arrêté ; codes `chkdsk` connus). Le reste est
+remonté brut plutôt que deviné, mais en hexadécimal quand c'est un HRESULT :
+`0x80070005` se reconnaît, `2147942405` ne dit rien.
+
+Le worker de commandes reste **séquentiel** : une commande longue retarde les
+suivantes du même poste. Comportement assumé, rendu visible par `running`.
+
+## Antivirus tiers
+
+Les classes Defender ne décrivent que Defender : un poste protégé par ESET ou
+Bitdefender y apparaît comme « antivirus éteint », et nulle part comme protégé.
+L'agent lit donc aussi le **Security Center** de Windows (WMI
+`root\SecurityCenter2`, classe `AntiVirusProduct`), où **tout** antivirus
+s'enregistre — c'est la condition pour que Windows cesse d'alerter l'utilisateur,
+donc la source de vérité sur « qui garde ce poste ».
+
+En sont tirés le **nom affiché** du produit et deux bits d'état extraits de
+`productState` : protection temps réel active, et signatures données pour à jour.
+Rien de plus n'est disponible : **ni version de signatures, ni date, ni moyen de
+déclencher une mise à jour** — d'où le périmètre en lecture seule (les commandes
+`quick_scan` / `full_scan` / `update_signatures` restent spécifiques à Defender).
+
+`productState` n'est documenté nulle part (l'accès supporté est l'API COM
+`wscapi`, hors de portée d'une requête WMI). Le décodage est donc **conservateur** :
+seules les valeurs réellement observées sont traduites, tout le reste est remonté
+comme *inconnu* plutôt que deviné — un « protection désactivée » affirmé à tort
+sur un écran de console est pire qu'un tiret. Les éditeurs étant par ailleurs
+inégaux sur le bit de fraîcheur, le serveur traite « fraîcheur inconnue » comme
+acceptable et ne retient que le « périmé » explicite.
+
+Trois réponses distinctes, et la distinction est signifiante :
+
+| Situation | Remontée | Console |
+|---|---|---|
+| un produit enregistré | nom + état | le nom, badge coloré selon l'état |
+| registre lisible et **vide** | bloc envoyé, nom vide | « Aucun » — un constat, pas une absence de mesure |
+| registre illisible | **bloc omis** | « Inconnu » ; le serveur conserve la valeur précédente |
+
+Le troisième cas est l'état **permanent** sur un SKU **Serveur**, qui n'embarque
+aucun Security Center : le namespace n'existe pas et la requête ne peut qu'échouer.
+L'échec est donc journalisé **une fois**, puis rétrogradé en `DEBUG` — sinon le log
+de chaque serveur du parc répéterait la même ligne toutes les minutes à vie.
+
+Quand plusieurs produits sont enregistrés — le cas normal, pas l'exception :
+Defender reste inscrit à côté du tiers qui l'a mis en passif — un seul est élu :
+
+| Critère | Pourquoi |
+|---|---|
+| produit actif avant produit arrêté | la question posée est « qu'est-ce qui protège le poste *maintenant* » ; un état illisible se classe entre les deux, il peut fort bien tourner |
+| tiers avant Defender | si les deux tournent, Windows a confié la protection au tiers et Defender est passif — alors que sa propre classe WMI continue de se déclarer active, exactement le piège que ce collecteur contourne |
+| nom le plus petit | départage arbitraire mais **stable** : deux antivirus tiers installés (pathologique, mais réel) ne doivent pas alterner d'un poll au suivant |
+
+L'identification de Defender se fait sur son `instanceGuid` bien connu, sinon sur
+l'URI `windowsdefender://` qu'il enregistre en guise de chemin d'exécutable, et
+seulement en dernier recours sur le nom — jamais sur un simple « defender » :
+« Bit**defender** » le contient, et prendre un antivirus tiers pour Defender est
+précisément l'erreur à ne pas commettre.
 
 ## Session utilisateur
 

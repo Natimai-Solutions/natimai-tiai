@@ -37,6 +37,29 @@ type DefenderState struct {
 	SignatureAgeDays     *int       `json:"signature_age_days,omitempty"`
 	LastQuickScan        *time.Time `json:"last_quick_scan,omitempty"`
 	LastFullScan         *time.Time `json:"last_full_scan,omitempty"`
+	// AMRunningMode: Normal / Passive / SxS Passive Mode / EDR Block Mode. This
+	// is what explains an "antivirus off" reading on a machine that is in fact
+	// protected — a third-party antivirus pushed Defender aside. Empty on
+	// Windows 10 before 1903, where the property does not exist.
+	RunningMode string `json:"running_mode,omitempty"`
+}
+
+// AVProductState reports the antivirus registered with the Windows Security
+// Center, which is the only place a third-party product is visible (see
+// collector/avproduct.go). Read-only by design: the Security Center exposes no
+// signature version and no way to trigger an update.
+//
+// No omitempty on Name: an empty name means "no antivirus registered at all",
+// which the server must be able to tell from an absent block — the latter means
+// the agent could not look, and leaves the last known value alone.
+type AVProductState struct {
+	Name               string `json:"name"`
+	Enabled            *bool  `json:"enabled,omitempty"`
+	SignaturesUpToDate *bool  `json:"signatures_up_to_date,omitempty"`
+	// Whether the product above is Defender itself. Decided here rather than
+	// server-side: the evidence (instanceGuid, registered URI) is local, and
+	// matching product names in the backend would be brittle.
+	IsDefender bool `json:"is_defender"`
 }
 
 // SessionState reports whether a user is logged on to the workstation. The
@@ -72,15 +95,16 @@ type Threat struct {
 // could not determine an address omits the field, and the server keeps the last
 // known one rather than blanking it on no evidence.
 type HeartbeatRequest struct {
-	Hostname     string         `json:"hostname,omitempty"`
-	Domain       string         `json:"domain,omitempty"`
-	IPAddress    string         `json:"ip_address,omitempty"`
-	OSVersion    string         `json:"os_version,omitempty"`
-	AgentVersion string         `json:"agent_version,omitempty"`
-	Defender     *DefenderState `json:"defender,omitempty"`
-	Session      *SessionState  `json:"session,omitempty"`
-	Fingerprint  *Fingerprint   `json:"fingerprint,omitempty"`
-	Threats      []Threat       `json:"threats,omitempty"`
+	Hostname     string          `json:"hostname,omitempty"`
+	Domain       string          `json:"domain,omitempty"`
+	IPAddress    string          `json:"ip_address,omitempty"`
+	OSVersion    string          `json:"os_version,omitempty"`
+	AgentVersion string          `json:"agent_version,omitempty"`
+	Defender     *DefenderState  `json:"defender,omitempty"`
+	AVProduct    *AVProductState `json:"av_product,omitempty"`
+	Session      *SessionState   `json:"session,omitempty"`
+	Fingerprint  *Fingerprint    `json:"fingerprint,omitempty"`
+	Threats      []Threat        `json:"threats,omitempty"`
 }
 
 // Command is a unit of work handed back by the server on heartbeat.

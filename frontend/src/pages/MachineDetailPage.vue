@@ -6,16 +6,19 @@
       <q-space />
       <q-btn-dropdown color="primary" dense label="Action" icon="bolt" :disable="!machine">
         <q-list>
-          <q-item
-            v-for="action in actions"
-            :key="action.type"
-            v-close-popup
-            clickable
-            @click="runOne(action.type)"
-          >
-            <q-item-section avatar><q-icon :name="action.icon" /></q-item-section>
-            <q-item-section>{{ action.label }}</q-item-section>
-          </q-item>
+          <template v-for="section in actionGroups" :key="section.group">
+            <q-item-label header class="q-py-xs">{{ section.label }}</q-item-label>
+            <q-item
+              v-for="action in section.actions"
+              :key="action.type"
+              v-close-popup
+              clickable
+              @click="runOne(action)"
+            >
+              <q-item-section avatar><q-icon :name="action.icon" /></q-item-section>
+              <q-item-section>{{ action.label }}</q-item-section>
+            </q-item>
+          </template>
         </q-list>
       </q-btn-dropdown>
       <q-btn
@@ -75,6 +78,24 @@
           </q-list>
         </q-card>
       </div>
+
+      <div class="col-12 col-md-6">
+        <q-card flat bordered>
+          <q-card-section class="text-subtitle1">
+            Antivirus enregistré
+            <div class="text-caption text-grey">
+              Vu par le Security Center de Windows — la seule source qui voit un antivirus tiers.
+            </div>
+          </q-card-section>
+          <q-separator />
+          <q-list dense>
+            <q-item v-for="r in antivirusRows" :key="r.label">
+              <q-item-section>{{ r.label }}</q-item-section>
+              <q-item-section side class="text-black">{{ r.value }}</q-item-section>
+            </q-item>
+          </q-list>
+        </q-card>
+      </div>
     </div>
 
     <q-card flat bordered class="q-mt-md">
@@ -107,9 +128,25 @@
         :rows-per-page-options="[10, 25, 50]"
         no-data-label="Aucune commande."
       >
+        <template #body-cell-type="props">
+          <q-td :props="props">{{ commandTypeLabel(props.value) }}</q-td>
+        </template>
         <template #body-cell-status="props">
           <q-td :props="props">
             <q-badge :color="statusColor(props.value)">{{ statusLabel(props.value) }}</q-badge>
+            <q-btn
+              v-if="props.row.result_output"
+              flat
+              dense
+              round
+              size="sm"
+              icon="search"
+              color="primary"
+              class="q-ml-xs"
+              @click="showDetail(props.row, 'output')"
+            >
+              <q-tooltip>Voir le résultat</q-tooltip>
+            </q-btn>
             <q-btn
               v-if="props.row.error"
               flat
@@ -119,7 +156,7 @@
               icon="error_outline"
               color="negative"
               class="q-ml-xs"
-              @click="showError(props.row)"
+              @click="showDetail(props.row, 'error')"
             >
               <q-tooltip>Voir l'erreur</q-tooltip>
             </q-btn>
@@ -164,17 +201,21 @@
       </q-card>
     </q-dialog>
 
-    <q-dialog v-model="errorOpen">
-      <q-card style="min-width: 420px; max-width: 90vw">
-        <q-card-section class="text-h6">Détail de l'erreur</q-card-section>
-        <q-card-section v-if="errorCommand" class="q-pt-none text-caption text-grey">
-          {{ errorCommand.type }} — terminée le {{ formatDateTime(errorCommand.finished_at) }}
+    <q-dialog v-model="detailOpen">
+      <q-card style="min-width: 480px; max-width: 90vw">
+        <q-card-section class="text-h6">
+          {{ detailKind === 'error' ? "Détail de l'erreur" : 'Résultat de la commande' }}
+        </q-card-section>
+        <q-card-section v-if="detailCommand" class="q-pt-none text-caption text-grey">
+          {{ commandTypeLabel(detailCommand.type) }} — terminée le
+          {{ formatDateTime(detailCommand.finished_at) }}
         </q-card-section>
         <q-separator />
         <q-card-section>
-          <pre class="command-error">{{ errorCommand?.error }}</pre>
+          <pre class="command-output">{{ detailText }}</pre>
         </q-card-section>
         <q-card-actions align="right">
+          <q-btn flat icon="content_copy" label="Copier" @click="copyDetail" />
           <q-btn v-close-popup flat label="Fermer" />
         </q-card-actions>
       </q-card>
@@ -195,13 +236,22 @@ import {
 } from 'src/services/machines';
 import { listThreats, type Threat } from 'src/services/threats';
 import {
+  commandActionGroups,
+  commandTypeLabel,
   createCommands,
   listCommands,
   type Command,
-  type CommandType,
+  type CommandAction,
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
-import { boolLabel, formatDateTime, sessionLabel, sessionTypeLabel } from 'src/utils/format';
+import {
+  antivirusLabel,
+  boolLabel,
+  formatDateTime,
+  runningModeLabel,
+  sessionLabel,
+  sessionTypeLabel,
+} from 'src/utils/format';
 
 const props = defineProps<{ id: string }>();
 const $q = useQuasar();
@@ -212,14 +262,19 @@ const commands = ref<Command[]>([]);
 const loading = ref(false);
 const mergeOpen = ref(false);
 const duplicates = ref<Machine[]>([]);
-const errorOpen = ref(false);
-const errorCommand = ref<Command | null>(null);
+const detailOpen = ref(false);
+const detailCommand = ref<Command | null>(null);
+const detailKind = ref<'output' | 'error'>('output');
 
-const actions: { type: CommandType; label: string; icon: string }[] = [
-  { type: 'quick_scan', label: 'Scan rapide', icon: 'bolt' },
-  { type: 'full_scan', label: 'Scan complet', icon: 'travel_explore' },
-  { type: 'update_signatures', label: 'Mise à jour signatures', icon: 'sync' },
-];
+// The whole catalogue here, diagnostics included: reading one machine's
+// gpresult or ipconfig is exactly what this page is for.
+const actionGroups = commandActionGroups();
+
+const detailText = computed(() =>
+  detailKind.value === 'error'
+    ? (detailCommand.value?.error ?? '')
+    : (detailCommand.value?.result_output ?? ''),
+);
 
 const title = computed(() => machine.value?.hostname || machine.value?.machine_uuid || 'Poste');
 
@@ -252,8 +307,12 @@ const identityRows = computed(() =>
 const defenderRows = computed(() =>
   machine.value
     ? [
-        { label: 'Antivirus actif', value: boolLabel(machine.value.av_enabled) },
+        { label: 'Defender actif', value: boolLabel(machine.value.av_enabled) },
         { label: 'Protection temps réel', value: boolLabel(machine.value.rtp_enabled) },
+        // Placed right under the two flags above: this is the row that explains
+        // them reading "Non" on a machine that is in fact protected, a
+        // third-party antivirus having pushed Defender into passive mode.
+        { label: "Mode d'exécution", value: runningModeLabel(machine.value.running_mode) },
         { label: 'À jour', value: boolLabel(machine.value.is_up_to_date) },
         { label: 'Version signatures', value: machine.value.signature_version ?? '—' },
         {
@@ -263,6 +322,23 @@ const defenderRows = computed(() =>
         { label: 'Âge signatures (j)', value: machine.value.signature_age_days ?? '—' },
         { label: 'Dernier scan rapide', value: formatDateTime(machine.value.last_quick_scan) },
         { label: 'Dernier scan complet', value: formatDateTime(machine.value.last_full_scan) },
+      ]
+    : [],
+);
+
+const antivirusRows = computed(() =>
+  machine.value
+    ? [
+        { label: 'Produit', value: antivirusLabel(machine.value.av_product_name) },
+        { label: 'Protection active', value: boolLabel(machine.value.av_product_enabled) },
+        // The Security Center exposes a freshness bit and nothing else — no
+        // version, no date, which is why this card carries no scan or update
+        // action for a third-party product.
+        {
+          label: 'Signatures à jour',
+          value: boolLabel(machine.value.av_product_signatures_up_to_date),
+        },
+        { label: 'Est Defender', value: boolLabel(machine.value.av_product_is_defender) },
       ]
     : [],
 );
@@ -300,9 +376,21 @@ function statusLabel(status: string): string {
   return commandStatusLabels[status] ?? status;
 }
 
-function showError(cmd: Command) {
-  errorCommand.value = cmd;
-  errorOpen.value = true;
+function showDetail(cmd: Command, kind: 'output' | 'error') {
+  detailCommand.value = cmd;
+  detailKind.value = kind;
+  detailOpen.value = true;
+}
+
+// An ipconfig /all or a gpresult dump is meant to be pasted into a ticket, and
+// selecting it out of a scrolling <pre> is a chore.
+async function copyDetail() {
+  try {
+    await navigator.clipboard.writeText(detailText.value);
+    $q.notify({ type: 'positive', message: 'Copié dans le presse-papiers' });
+  } catch {
+    $q.notify({ type: 'negative', message: 'Copie impossible' });
+  }
 }
 
 const commandColumns: QTableColumn<Command>[] = [
@@ -329,9 +417,24 @@ async function load() {
   }
 }
 
-async function runOne(type: CommandType) {
+function runOne(action: CommandAction) {
+  if (!action.confirm) {
+    void send(action);
+    return;
+  }
+  $q.dialog({
+    title: action.label,
+    message: [`Lancer « ${action.label} » sur ce poste ?`, action.hint].filter(Boolean).join(' '),
+    cancel: true,
+    persistent: true,
+  }).onOk(() => {
+    void send(action);
+  });
+}
+
+async function send(action: CommandAction) {
   try {
-    await createCommands({ type, machine_ids: [props.id] });
+    await createCommands({ type: action.type, machine_ids: [props.id] });
     $q.notify({ type: 'positive', message: 'Commande envoyée' });
     await load();
   } catch (e) {
@@ -398,7 +501,7 @@ onMounted(load);
 </script>
 
 <style scoped>
-.command-error {
+.command-output {
   margin: 0;
   max-height: 50vh;
   overflow: auto;

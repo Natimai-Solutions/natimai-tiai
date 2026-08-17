@@ -40,6 +40,14 @@ class MachineOut(BaseModel):
     is_up_to_date: bool | None
     needs_verification: bool
     signature_version: str | None
+    # Which antivirus guards the poste. In the list and not only in the detail:
+    # on a mixed parc it is the column that explains an "outdated" Defender
+    # reading, and the one people filter on. "" = no antivirus registered at all,
+    # None = never reported (see the model).
+    av_product_name: str | None
+    av_product_enabled: bool | None
+    av_product_signatures_up_to_date: bool | None
+    av_product_is_defender: bool | None
     session_user_present: bool | None
     session_username: str | None
     last_seen: datetime
@@ -56,6 +64,7 @@ class MachineDetailOut(MachineOut):
     signature_age_days: int | None
     last_quick_scan: datetime | None
     last_full_scan: datetime | None
+    running_mode: str | None
     session_state: str | None
     session_is_remote: bool | None
     machine_guid: str | None
@@ -80,11 +89,12 @@ async def list_machines(
     session: SessionDep,
     search: str | None = None,
     domain: str | None = None,
+    antivirus: str | None = None,
     status: MachineStatus | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> MachineList:
-    """List machines with optional search/domain/status filters and pagination."""
+    """List machines with optional search/domain/antivirus/status filters."""
     stmt = select(Machine)
     if search:
         pattern = f"%{search}%"
@@ -95,10 +105,19 @@ async def list_machines(
                 # Searchable too: going from an address in a firewall or DHCP
                 # log back to the machine is the everyday use of this field.
                 col(Machine.ip_address).ilike(pattern),
+                # And from a vendor name: "which postes still run the antivirus
+                # we are migrating off?" is the question a mixed parc asks.
+                col(Machine.av_product_name).ilike(pattern),
             )
         )
     if domain:
         stmt = stmt.where(col(Machine.domain) == domain)
+    if antivirus:
+        # Substring rather than equality, unlike the domain filter: the dropdown
+        # feeds it exact names from the fleet, but a hand-typed "eset" must find
+        # "ESET Endpoint Security" too — vendors rename their products between
+        # versions and a parc runs several at once.
+        stmt = stmt.where(col(Machine.av_product_name).ilike(f"%{antivirus}%"))
     if status is not None:
         stmt = stmt.where(status_clause(status, utcnow(), settings.INACTIVE_AFTER_DAYS))
 
@@ -110,6 +129,43 @@ async def list_machines(
     )
     items = [MachineOut.model_validate(m) for m in rows.all()]
     return MachineList(items=items, total=total or 0, page=page, page_size=page_size)
+
+
+class AntivirusProduct(BaseModel):
+    """One antivirus present in the fleet, with how many machines report it."""
+
+    name: str
+    count: int
+
+
+# Declared before ``/{machine_id}``: FastAPI matches in declaration order, and
+# the other way round "antivirus-products" would be parsed as a machine id.
+@router.get("/antivirus-products", response_model=list[AntivirusProduct])
+async def list_antivirus_products(session: SessionDep) -> list[AntivirusProduct]:
+    """Antivirus names reported across the fleet, most widespread first.
+
+    Feeds the console's filter dropdown: which products are installed is fleet
+    data, not something a client can hardcode — and the counts double as a
+    one-glance inventory of a mixed parc.
+
+    Machines that reported no product (empty name) or nothing at all (NULL) are
+    left out: they are not products to filter on, and the "Non à jour" status
+    filter already gathers them.
+    """
+    name = col(Machine.av_product_name)
+    rows = await session.exec(
+        select(name, func.count().label("count"))
+        .where(name.is_not(None))
+        .where(name != "")
+        .group_by(name)
+        .order_by(func.count().desc(), name)
+    )
+    return [
+        AntivirusProduct(name=product, count=count)
+        # `if product` narrows away the NULL the SQL already excluded.
+        for product, count in rows.all()
+        if product
+    ]
 
 
 async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machine:

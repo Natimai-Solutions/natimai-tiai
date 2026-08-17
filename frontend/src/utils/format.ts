@@ -35,6 +35,78 @@ export function sessionColor(present: boolean | null | undefined): string {
   return present ? 'primary' : 'grey-5';
 }
 
+/**
+ * Label for the antivirus registered with the Windows Security Center.
+ *
+ * Three states, deliberately distinct: an absent name means the agent never
+ * reported one (too old, or a host with no Security Center — Windows Server has
+ * none), while an *empty* name means the registry was read and holds nothing,
+ * i.e. the machine runs no antivirus at all. Collapsing the two would hide a
+ * finding behind a missing measurement.
+ */
+export function antivirusLabel(name: string | null | undefined): string {
+  if (name === null || name === undefined) return 'Inconnu';
+  return name === '' ? 'Aucun' : name;
+}
+
+/** Badge colour for the antivirus cell: red for none or stopped, grey for unknown. */
+export function antivirusColor(
+  name: string | null | undefined,
+  enabled: boolean | null | undefined,
+): string {
+  if (name === null || name === undefined) return 'grey-6';
+  // No antivirus at all is the one case that is unambiguously bad.
+  if (name === '') return 'negative';
+  if (enabled === null || enabled === undefined) return 'grey-7';
+  return enabled ? 'positive' : 'negative';
+}
+
+/**
+ * Sentence describing the registered antivirus, for the tooltip and the detail
+ * card. The signature clause is dropped when the product reports no freshness
+ * bit — vendors fill it in unevenly, and inventing "à jour" would be a claim the
+ * Security Center never made.
+ */
+export function antivirusStatusLabel(
+  name: string | null | undefined,
+  enabled: boolean | null | undefined,
+  signaturesUpToDate: boolean | null | undefined,
+): string {
+  if (name === null || name === undefined) return "Jamais remonté par l'agent";
+  if (name === '') return 'Aucun antivirus enregistré';
+
+  const parts: string[] = [];
+  if (enabled === null || enabled === undefined) parts.push('protection à l’état inconnu');
+  else parts.push(enabled ? 'protection active' : 'protection désactivée');
+  if (signaturesUpToDate === true) parts.push('signatures à jour');
+  else if (signaturesUpToDate === false) parts.push('signatures périmées');
+
+  return `${name} — ${parts.join(', ')}`;
+}
+
+/**
+ * Defender's execution mode (AMRunningMode), spelled out.
+ *
+ * The raw values are English identifiers, and "Passive" on its own tells an admin
+ * nothing about *why* the antivirus flags above it read "Non" — so the passive
+ * modes say so. An unrecognised value is shown as-is rather than swallowed: a
+ * future Windows mode should surface, not vanish.
+ */
+export function runningModeLabel(mode: string | null | undefined): string {
+  if (!mode) return '—';
+  switch (mode) {
+    case 'Normal':
+      return 'Normal';
+    case 'Passive':
+    case 'SxS Passive Mode':
+      return 'Passif (un antivirus tiers protège le poste)';
+    case 'EDR Block Mode':
+      return 'EDR en mode blocage';
+    default:
+      return mode;
+  }
+}
+
 /** Session kind for the detail row, e.g. "Déconnectée (Bureau à distance)". */
 export function sessionTypeLabel(
   state: string | null | undefined,

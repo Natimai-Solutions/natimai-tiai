@@ -213,7 +213,15 @@ machines
   signature_age_days       int
   last_quick_scan          timestamptz
   last_full_scan           timestamptz
-  is_up_to_date            bool       -- calculé (âge signatures + RTP)
+  running_mode             text       -- AMRunningMode : Normal / Passive / SxS Passive Mode / EDR Block Mode
+  is_up_to_date            bool       -- calculé (Defender à jour OU antivirus tiers actif)
+  -- antivirus enregistré au Security Center (root\SecurityCenter2) : seule source
+  -- qui voie un produit tiers. NULL = jamais remonté (agent ancien, SKU Serveur) ;
+  -- '' = registre lu et vide, donc aucun antivirus installé — un constat, pas un trou
+  av_product_name                  text
+  av_product_enabled               bool
+  av_product_signatures_up_to_date bool
+  av_product_is_defender           bool   -- tranché par l'agent (instanceGuid), pas par nom côté serveur
   -- session ouverte (API WTS, rafraîchie à chaque heartbeat)
   session_user_present     bool       -- NULL = jamais remonté ≠ false = personne
   session_username         text       -- NULL si la remontée du nom est coupée (GPO)
@@ -264,7 +272,7 @@ commands               -- file de commandes (une ligne par poste, même en broad
 | Méthode | Endpoint | Rôle |
 |---|---|---|
 | `POST` | `/api/v1/agent/enroll` | 1er contact, en-tête `X-Enrollment-Secret` : `machine_uuid`, `hostname`, `domain`, `os`, `agent_version` → **renvoie le token unique du poste** (une seule fois). Idempotent. |
-| `POST` | `/api/v1/agent/heartbeat` | Remonte l'état Defender + menaces + la session ouverte (bloc `session` optionnel : `user_present`, `username` selon la politique de confidentialité, `state`, `is_remote`) + `ip_address` (attribut optionnel, adresse déjà élue par l'agent ; une valeur non analysable est ignorée, pas rejetée). **Renvoie les commandes en attente.** |
+| `POST` | `/api/v1/agent/heartbeat` | Remonte l'état Defender + menaces + la session ouverte (bloc `session` optionnel : `user_present`, `username` selon la politique de confidentialité, `state`, `is_remote`) + `ip_address` (attribut optionnel, adresse déjà élue par l'agent ; une valeur non analysable est ignorée, pas rejetée) + l'antivirus enregistré (bloc `av_product` optionnel : `name`, `enabled`, `signatures_up_to_date`, `is_defender` ; bloc absent = l'agent n'a pas pu lire, `name` vide = aucun antivirus). **Renvoie les commandes en attente.** |
 | `POST` | `/api/v1/agent/commands/{id}/result` | Résultat d'exécution d'une commande. |
 
 **Côté console** (auth : **JWT utilisateur**, email + mot de passe — sauf les deux routes `password-reset/*`, publiques par nature ; les routes `admin` exigent le rôle admin)
@@ -276,7 +284,8 @@ commands               -- file de commandes (une ligne par poste, même en broad
 | `POST` | `/api/v1/auth/password` | Changement de son propre mot de passe (preuve : mot de passe actuel). Ferme les autres sessions. |
 | `POST` | `/api/v1/auth/password-reset/request` | **Public.** Envoie un lien de réinitialisation par e-mail (Mailgun). Répond 204 quoi qu'il arrive (anti-énumération). |
 | `POST` | `/api/v1/auth/password-reset/confirm` | **Public.** Consomme le jeton (usage unique, expirant) et définit le nouveau mot de passe. |
-| `GET` | `/api/v1/machines?search=&domain=&status=&page=` | Liste filtrable/paginée. |
+| `GET` | `/api/v1/machines?search=&domain=&antivirus=&status=&page=` | Liste filtrable/paginée (`search` couvre hostname / UUID / IP / nom d'antivirus ; `antivirus` filtre par sous-chaîne). |
+| `GET` | `/api/v1/machines/antivirus-products` | Antivirus présents dans le parc + nombre de postes (alimente le filtre de la console ; déclarée **avant** `/{id}`, sinon interprétée comme un id). |
 | `GET` | `/api/v1/machines/{id}` | Détail d'un poste + menaces. |
 | `GET` | `/api/v1/machines/{id}/duplicates` | Doublons candidats (même ancre SMBIOS, cf. §8). |
 | `POST` | `/api/v1/machines/{id}/revoke-token` | *Admin.* Kill-switch : révoque le token du poste (ré-enrôlement requis). |
@@ -387,13 +396,27 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 > **Le cas « plusieurs adresses » est la règle, pas l'exception** — un portable sur station d'accueil, un poste avec Hyper-V/WSL, un VPN monté. L'élection est donc explicite et ordonnée : IPv4 avant IPv6, adaptateur avec passerelle par défaut avant adaptateur sans (c'est ce qui écarte `vEthernet`/VirtualBox **sans** filtrer sur le nom des cartes), puis métrique d'interface la plus basse (l'ordre de routage de Windows lui-même), puis index d'interface — un départage arbitraire mais *stable*, pour que l'adresse affichée ne clignote pas d'un poll à l'autre. Exclus d'office : loopback, 169.254.0.0/16 (APIPA = bail DHCP échoué, ne joint rien), fe80::/10, adaptateurs non `IfOperStatusUp` et pseudo-interfaces tunnel.
 > Vérifications : **126 tests backend** verts sur Postgres 16 + migration `upgrade`/`downgrade`/`upgrade` rejouée sur base vierge ; 41 vitest, `vue-tsc` et `prettier` verts ; Go `gofmt`/`vet`/`test` verts, builds croisés `windows/amd64` et `windows/arm64`, binaire de test compilé pour la cible Linux de la CI. **Plomberie Win32 validée sur poste réel** : 5 adresses APIPA sur cartes déconnectées, 2 commutateurs Hyper-V adressés mais sans passerelle, 1 Wi-Fi — c'est bien le Wi-Fi qui est élu.
 
+**Instantané — 2026-08-17 (3)** · **Antivirus tiers** visible de bout en bout, en lecture seule. Les classes Defender ne décrivent que Defender : un poste sous ESET ou Bitdefender y lit « antivirus éteint » et nulle part « protégé ». L'agent lit donc aussi le **Security Center** (`root\SecurityCenter2`, `AntiVirusProduct`), où tout antivirus doit s'enregistrer pour que Windows cesse d'alerter — nom affiché + deux bits de `productState`. Ni version de signatures, ni date, ni déclenchement de mise à jour n'y sont exposés : le périmètre s'arrête donc là, et les commandes restent spécifiques à Defender. Backend : quatre colonnes + `running_mode` (migration `0007_av_product`), filtre `antivirus`, `av_product_name` ajouté à la recherche libre, et `GET /machines/antivirus-products` (valeurs distinctes + compte) qui alimente le sélecteur de la console et sert d'inventaire d'un parc mixte.
+> **`is_up_to_date` gagne une seconde voie**, et ce n'est pas une complaisance : installer un antivirus tiers met Defender en mode passif, ce qui met `av_enabled`/`rtp_enabled` à faux — sans cette voie, *tout* poste sous antivirus tiers comptait comme non protégé à vie et les KPI du dashboard étaient faux par construction. Elle est volontairement plus faible que la voie Defender (aucune date derrière elle) : un antivirus tiers **actif** dont la fraîcheur est *inconnue* qualifie, un « périmé » explicite non. L'entrée de Defender dans ce registre est ignorée — ses propres colonnes disent la même chose avec de vraies dates. Recalcul déclenché dès que **l'un** des deux blocs bouge : une désinstallation d'antivirus change l'état sans que le bloc Defender change.
+> **Trois états, pas deux** : bloc omis = l'agent n'a pas pu lire (état **permanent** sur un SKU Serveur, qui n'a pas de Security Center — d'où l'échec journalisé une seule fois puis rétrogradé en DEBUG) ; nom vide = registre lu et vide, donc aucun antivirus, ce qui est un constat à afficher ; un nom = le produit élu. Élection explicite quand plusieurs coexistent (le cas normal : Defender reste inscrit à côté du tiers) : actif > état illisible > arrêté, puis tiers avant Defender, puis nom — départage stable. `productState` n'étant documenté nulle part, le décodage ne traduit que les valeurs observées et remonte le reste comme inconnu.
+> **Bug attrapé par ses propres tests** : le repli d'identification de Defender par le nom matchait « defender » — que « Bit**defender** » contient. Resserré sur les noms qualifiés Microsoft, avec le cas en test.
+> Vérifications : **143 tests backend** verts sur Postgres 16 + migration `upgrade`/`downgrade`/`upgrade` rejouée sur base vierge ; **54 vitest** (100 % sur `src/services` + `src/utils`), `vue-tsc`, `prettier` et build SPA verts ; Go `gofmt`/`vet`/`test` verts, builds croisés `windows/amd64` et `windows/arm64`. **Reste à valider sur poste réel** avec un antivirus tiers installé (décodage de `productState` et `AMRunningMode` en conditions).
+
+**Instantané — 2026-08-17 (4)** · **Commandes de maintenance à distance** livrées (cf. `plan-commandes-distantes.md`) : onze nouveaux types de commandes — `gpo_update`, `flush_dns`, `time_resync`, `cert_pulse`, `spooler_reset`, `sfc_scan`, `dism_restore_health`, `dism_component_cleanup`, `chkdsk_scan` + deux diagnostics `gpo_report` / `net_config`. Le backend n'a coûté qu'une extension d'énumération (`type` stocké en `str` nu ⇒ **aucune migration**) : c'est la récompense de la file de commandes de M3.
+> **Le catalogue est le modèle de sécurité.** Le serveur n'envoie qu'un identifiant de type ; **aucun argument ne traverse le réseau**. L'exécutable et ses arguments fixes vivent dans une table du binaire de l'agent, donc un serveur compromis ne peut déclencher que ces onze actions, jamais du code arbitraire. Deux corollaires appliqués : chaque exécutable est résolu en **chemin absolu sous `System32`** et jamais via le `PATH` (l'agent est `LocalSystem` : un répertoire inscriptible en tête de `PATH` serait une exécution SYSTEM offerte), et l'endpoint de résultat n'accepte plus que `running` / `succeeded` / `failed` — un agent qui pouvait poster `pending` ou `expired` réécrivait la file qu'il est seulement censé vider.
+> **Statut intermédiaire `running` câblé** (brique partagée avec la Phase 2, spécifiée à son J1 et implémentée ici) : les quatre commandes longues l'annoncent avant de démarrer, le serveur écrit `started_at` **sans clore** la commande, et refuse un `running` arrivé après un verdict. Sans lui la console afficherait « transmise » pendant vingt minutes de `sfc`.
+> **Le piège du chantier était l'encodage, et il n'y a pas *une* réponse mais quatre** — mesurées sur poste réel, pas supposées : `ipconfig`/`w32tm` écrivent en **OEM** (CP850), `certutil` en **ANSI** (CP1252), `gpresult`/`dism` en **UTF-8**, `sfc` en **UTF-16LE** entrelacé de nuls. Ce n'est pas la page de codes de la console : `GetConsoleOutputCP()` répondait 65001 pendant qu'`ipconfig` émettait du CP850 — ce qui compte est que la sortie soit *redirigée*, et en service il n'y a de toute façon aucune console. L'UTF-8 s'auto-identifie (une lettre accentuée CP850 ou CP1252 isolée n'est jamais une séquence multi-octets valide), ce qui limite la table par outil aux deux cas restants. La progression de `dism`/`sfc` est réduite en rejouant les retours chariot comme le ferait une console — indépendant de la langue, là où filtrer sur « % » ne l'est pas.
+> **Console** : les deux tableaux d'actions dupliqués (page détail / actions de masse) sont **factorisés** en un catalogue unique `commandActions` (libellé, icône, groupe, confirmation, éligibilité au masse) — la factorisation prévue au J4 de la Phase 2 est donc faite. Menu en sections (Defender / Maintenance / Diagnostic), confirmation `$q.dialog` avec le **nombre de postes** pour les actions coûteuses, et **dialog « Résultat »** (bouton loupe + copie) sans lequel `gpo_report` et `net_config` n'auraient aucune valeur. Les deux diagnostics restent hors actions de masse : leur intérêt est la lecture d'un poste, en masse ils ne produisent que du bruit.
+> Vérifications : **160 tests backend** verts sur Postgres 16 ; Go `gofmt`/`vet`/`test` verts (30 tests collector), builds croisés `windows/amd64` et `windows/arm64` ; **63 vitest** (100 % sur `src/services` + `src/utils`), `vue-tsc`, `prettier` et build SPA verts. **Boucle end-to-end validée sur poste réel** (backend local + agent réel) : enrôlement, livraison au heartbeat, exécution, résultat en base — `net_config` et `flush_dns` en succès avec accents corrects vérifiés directement en base, `gpo_report`/`time_resync`/`dism` en échec « accès refusé » lisible et actionnable (agent lancé sans élévation), `started_at` renseigné par le `running` d'une commande longue. **Reste à valider en `LocalSystem`** : les chemins nominaux des huit commandes qui exigent l'élévation, `sfc_scan` en tête — c'est la dernière branche d'encodage du catalogue à n'avoir jamais vu d'octets réels, et la mesure est précisément ce qui a démenti le plan pour les trois autres.
+
 | Jalon | État |
 |---|---|
 | M0 Fondations | 🟢 fini (compose validé de bout en bout) — reste le certificat de signature |
 | M1 Tranche verticale | 🟢 agent fonctionnel (service Windows, WMI `MSFT_MpComputerStatus`, token DPAPI) ; reste validation end-to-end sur serveur déployé |
 | M2 Agent Defender complet | 🟢 implémenté (état + menaces WMI, scans/MAJ PowerShell, config YAML/registre, file locale/back-off) ; reste DoD end-to-end sur poste réel |
 | M3 Backend complet | 🟢 commandes (broadcast par filtre + suivi + expiration), stats `/overview`, recherche/filtrage `/machines`, listing `/threats`, révocation de token, `is_up_to_date` calculé, pool DB configurable ; tests verts sur Postgres |
-| M4 Console | 🟢 login JWT + dashboard KPI/alertes + filtres + détail poste + actions de masse + révocation + fusion de postes |
+| M4 Console | 🟢 login JWT + dashboard KPI/alertes + filtres + détail poste + actions de masse + révocation + fusion de postes + catalogue d'actions factorisé (sections + confirmations + dialog Résultat) |
+| Commandes de maintenance | 🟢 catalogue fermé de 11 commandes (maintenance + diagnostic) de bout en bout : types backend, exécution agent, console ; statut `running` câblé. Reste la validation en `LocalSystem` des huit commandes exigeant l'élévation (cf. `plan-commandes-distantes.md` §5) |
 | M5 Durcissement | 🟡 JWT + rôles, provider Mailgun, garde secrets prod, timing-safe enroll, en-têtes sécurité ; reste audit, jobs ARQ branchés, rotation, rate-limit |
 | M6 Packaging & GPO | ⬜ à faire |
 | Transverse | 🟢 tests backend/frontend + ruff + mypy + CI (tous verts) |
@@ -423,6 +446,7 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 - [x] Identité réelle (SMBIOS UUID via WMI, MachineGuid via registre, EK TPM best-effort) + host info (hostname/domaine/OS)
 - [x] **Adresse IP du poste** via `GetAdaptersAddresses` (métrique d'interface + passerelle par défaut, là où `net.Interfaces()` ne donne ni l'un ni l'autre) — relue à chaque heartbeat car elle change sous l'agent (bail DHCP, station d'accueil, VPN) ; une seule adresse élue (IPv4 routée d'abord), loopback / 169.254.0.0/16 / fe80::/10 exclus, commutateurs virtuels sans passerelle écartés sans heuristique de nom. Validé sur poste réel (5 adresses APIPA, 2 commutateurs Hyper-V, Wi-Fi élu)
 - [x] **Session utilisateur ouverte** via l'API WTS (`WTSEnumerateSessions` + `WTSQuerySessionInformationW`) — fonctionne depuis la session 0 où tourne l'agent ; élection d'une session (active > déconnectée, console > distante), filtrage session 0 / écran de connexion / écouteur RDP ; interrupteur de confidentialité `report_session_username` (`*bool`, défaut activé) + surcharge registre `ReportSessionUsername` où `0` est signifiant. Validé sur poste réel (deux sessions, dont une déconnectée).
+- [x] **Antivirus tiers** via WMI `root\SecurityCenter2` (`AntiVirusProduct`) — nom + décodage conservateur de `productState`, élection d'un produit parmi plusieurs, identification de Defender par `instanceGuid`/URI et non par le nom seul ; `AMRunningMode` ajouté à l'état Defender pour expliquer le mode passif. Lecture seule (le Security Center n'expose ni version de signatures ni action). Échec journalisé une fois puis en DEBUG, l'absence de namespace étant permanente sur SKU Serveur. **À valider sur poste réel avec un antivirus tiers.**
 
 **M3 — Backend complet** · 🟢 implémenté
 - [x] File de commandes : création (route `POST /commands`, permission `command:execute`)
@@ -430,7 +454,7 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 - [x] Déduplication + stockage des menaces (contrainte + upsert `ON CONFLICT DO NOTHING`, testé)
 - [x] Création **groupée** par filtre (tous / domaine / statut) + suivi `GET /commands` + expiration (`mark_expired`, plan §2.8)
 - [x] Stats `GET /stats/overview` (total, à jour/non, à vérifier, inactifs, postes avec menaces actives)
-- [x] Recherche/filtrage `/machines` (hostname/UUID, domaine, statut) + listing `GET /threats`
+- [x] Recherche/filtrage `/machines` (hostname/UUID/IP/antivirus, domaine, antivirus, statut) + valeurs distinctes `GET /machines/antivirus-products` + listing `GET /threats`
 - [x] Révocation de token (`POST /machines/{id}/revoke-token`, kill-switch) + ré-enrôlement
 - [x] Calcul de `is_up_to_date` au heartbeat (AV+RTP+âge signatures) ; pool DB (psycopg) configurable
 
@@ -444,6 +468,16 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 - [x] Détail backend enrichi (`MachineDetailOut`) + services frontend testés (vitest, couverture 100 % sur `src/services`)
 - [x] **Adresse IP** : colonne « Adresse IP » dans la liste (non triable — un tri texte placerait `.10` avant `.9`) et ligne sur la fiche détail ; la **recherche** couvre désormais nom / UUID / IP, pour remonter d'une adresse de log de pare-feu au poste
 - [x] **Session ouverte** : colonne « Session » dans la liste (badge + infobulle « au dernier contact ») et lignes « Session » / « Type de session » sur la fiche détail ; quatre états distincts (nom, présence sans nom, aucun utilisateur, inconnu) via `sessionLabel`/`sessionColor`/`sessionTypeLabel` — couverture vitest élargie à `src/utils`
+
+**Commandes de maintenance à distance** · 🟢 implémenté (cf. `plan-commandes-distantes.md`)
+- [x] Backend : 11 types ajoutés à `CommandType` (stockage `str` nu ⇒ aucune migration) ; endpoint de résultat restreint à `running`/`succeeded`/`failed` et plafonnement du texte remonté à 64 Kio
+- [x] Backend : statut intermédiaire **`running`** → `started_at` sans clôture, ignoré s'il arrive après un verdict (brique partagée avec la Phase 2 J1)
+- [x] Agent : catalogue `maintenance*.go` (table type → exécutable/arguments/délai/encodage/verdict), exécutables résolus en **chemin absolu sous System32** (jamais le `PATH`)
+- [x] Agent : décodage par outil (OEM / ANSI / UTF-8 auto-détecté / UTF-16LE vérifié), rejeu des retours chariot pour effacer la progression `dism`/`sfc`, troncature à 64 Kio, codes HRESULT en hexadécimal
+- [x] Agent : `spooler_reset` natif (gestionnaire de services + purge `.spl`/`.shd`, service redémarré même si la purge échoue) ; `running` posté par les 4 commandes longues
+- [x] Console : catalogue d'actions **factorisé** (fin de la duplication détail/masse), menu en sections, confirmation avec nombre de postes, **dialog « Résultat »** + copie, libellés des types dans l'historique
+- [x] Tests : 17 backend (round-trip des 11 types, cycle `running`, garde de statut, plafonnement), 30 Go collector (encodages, progression, verdicts, exhaustivité du catalogue) + 3 d'intégration réelle sous Windows, 9 vitest de catalogue
+- [ ] Validation en `LocalSystem` des huit commandes exigeant l'élévation (`gpo_update`, `time_resync`, `cert_pulse`, `spooler_reset`, `sfc_scan`, `dism_restore_health`, `dism_component_cleanup`, `chkdsk_scan`) — `sfc_scan` en priorité : c'est la dernière branche d'encodage du catalogue jamais vérifiée sur des octets réels
 
 **M5 — Durcissement** · 🟡 partiel (anticipé)
 - [x] Auth console JWT + rôles `admin` / `readonly` (permissions `(ressource, action)`)

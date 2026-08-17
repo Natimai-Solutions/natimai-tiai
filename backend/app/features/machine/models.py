@@ -55,7 +55,29 @@ class Machine(SQLModel, table=True):
     signature_age_days: int | None = None
     last_quick_scan: datetime | None = utc_field(default=None, nullable=True)
     last_full_scan: datetime | None = utc_field(default=None, nullable=True)
+    # AMRunningMode: Normal / Passive / SxS Passive Mode / EDR Block Mode. What
+    # explains the two flags above reading "off" on a machine that is in fact
+    # protected — a third-party antivirus pushed Defender aside.
+    running_mode: str | None = None
     is_up_to_date: bool | None = None
+
+    # Antivirus registered with the Windows Security Center, the only place a
+    # *third-party* product is visible (the Defender columns above describe
+    # Defender alone). Refreshed on each heartbeat.
+    #
+    # Three states on the name, all distinct: NULL = never reported (an agent
+    # older than the feature, or a host with no Security Center — Windows Server
+    # has none); "" = the registry was read and is empty, i.e. no antivirus at
+    # all, which is a finding rather than an absence of data; a name = the
+    # elected product. No index: the console searches this with a substring
+    # ILIKE, which no btree would serve, and groups it over a table this size.
+    av_product_name: str | None = None
+    av_product_enabled: bool | None = None
+    av_product_signatures_up_to_date: bool | None = None
+    # Whether the product above is Defender itself. Decided by the agent, which
+    # holds the evidence (instanceGuid); matching product names here would be
+    # brittle and locale-dependent.
+    av_product_is_defender: bool | None = None
 
     # Interactive session (WTS), refreshed on each heartbeat. NULL means "never
     # reported" — an agent older than the feature, or a failed read — which is
