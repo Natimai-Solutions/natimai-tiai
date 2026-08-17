@@ -2,9 +2,10 @@
 
 import uuid
 from datetime import datetime
+from ipaddress import ip_address
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlmodel import select
 
 from app.api.deps import CurrentMachine, SessionDep, verify_enrollment_secret
@@ -83,12 +84,33 @@ class HeartbeatRequest(BaseModel):
 
     hostname: str | None = None
     domain: str | None = None
+    ip_address: str | None = None
     os_version: str | None = None
     agent_version: str | None = None
     defender: DefenderState | None = None
     session: SessionState | None = None
     fingerprint: Fingerprint | None = None
     threats: list[ThreatReport] = []
+
+    @field_validator("ip_address")
+    @classmethod
+    def _normalize_ip(cls, value: str | None) -> str | None:
+        """Keep a parseable address, drop anything else — never 422.
+
+        Same trade-off as SessionState's defaults: one malformed field must not
+        cost us the Defender state, the threats and the command pickup riding
+        along in the same request. Dropping it to None means the heartbeat
+        simply doesn't touch the stored address.
+
+        Parsing also bounds what reaches the column and the console: only an
+        IPv4/IPv6 literal gets through, in its canonical form.
+        """
+        if value is None:
+            return None
+        try:
+            return str(ip_address(value))
+        except ValueError:
+            return None
 
 
 class CommandOut(BaseModel):
@@ -185,6 +207,11 @@ async def heartbeat(
         machine.hostname = payload.hostname
     if payload.domain is not None:
         machine.domain = payload.domain
+    if payload.ip_address is not None:
+        # Conditional like the other attributes: an agent that could not read an
+        # address omits the field, and the last known one is better than none —
+        # it is dated by last_seen anyway.
+        machine.ip_address = payload.ip_address
     if payload.os_version is not None:
         machine.os_version = payload.os_version
     if payload.agent_version is not None:

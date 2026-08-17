@@ -7,6 +7,8 @@ export interface Machine {
   machine_uuid: string;
   hostname: string | null;
   domain: string | null;
+  /** Primary address elected by the agent; null = never reported. */
+  ip_address: string | null;
   os_version: string | null;
   agent_version: string | null;
   is_up_to_date: boolean | null;

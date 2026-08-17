@@ -202,6 +202,7 @@ machines
   needs_verification bool            -- empreinte divergente → à vérifier (admin)
   hostname          text             -- attribut, peut changer
   domain            text
+  ip_address        text             -- adresse principale élue par l'agent (NULL = jamais remontée)
   os_version        text
   agent_version     text
   -- état Defender (dérivé de MSFT_MpComputerStatus)
@@ -263,7 +264,7 @@ commands               -- file de commandes (une ligne par poste, même en broad
 | Méthode | Endpoint | Rôle |
 |---|---|---|
 | `POST` | `/api/v1/agent/enroll` | 1er contact, en-tête `X-Enrollment-Secret` : `machine_uuid`, `hostname`, `domain`, `os`, `agent_version` → **renvoie le token unique du poste** (une seule fois). Idempotent. |
-| `POST` | `/api/v1/agent/heartbeat` | Remonte l'état Defender + menaces + la session ouverte (bloc `session` optionnel : `user_present`, `username` selon la politique de confidentialité, `state`, `is_remote`). **Renvoie les commandes en attente.** |
+| `POST` | `/api/v1/agent/heartbeat` | Remonte l'état Defender + menaces + la session ouverte (bloc `session` optionnel : `user_present`, `username` selon la politique de confidentialité, `state`, `is_remote`) + `ip_address` (attribut optionnel, adresse déjà élue par l'agent ; une valeur non analysable est ignorée, pas rejetée). **Renvoie les commandes en attente.** |
 | `POST` | `/api/v1/agent/commands/{id}/result` | Résultat d'exécution d'une commande. |
 
 **Côté console** (auth : **JWT utilisateur**, email + mot de passe — sauf les deux routes `password-reset/*`, publiques par nature ; les routes `admin` exigent le rôle admin)
@@ -382,6 +383,10 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 > **Confidentialité par construction** : la remontée du nom est désactivable par GPO et agit **à la source** — le nom est lu localement pour distinguer une session utilisateur de l'écran de connexion, puis abandonné avant sérialisation. Jamais journalisé. Test dédié côté agent (`reportUsername=false` → présence conservée, nom vide) et côté backend (déconnexion → nom effacé).
 > Vérifications : **119 tests backend** verts sur Postgres (98 % de couverture) + migration `upgrade`/`downgrade`/`upgrade` rejouée sur base vierge (les migrations n'étant pas exercées par pytest) ; **41 vitest** (100 % sur `src/services` + `src/utils`) ; Go `gofmt`/`vet`/`test` verts, builds croisés `windows/amd64` et `windows/arm64`, binaires de test compilés pour la cible Linux de la CI. **Plomberie Win32 validée sur poste réel** : deux sessions détectées (une active en console, une déconnectée), élection correcte, nom bien supprimé quand l'option est coupée.
 
+**Instantané — 2026-08-17 (2)** · **Adresse IP du poste** livrée de bout en bout, sans ouvrir le chantier inventaire : un attribut, une colonne, pas de table d'interfaces réseau. Agent : collecteur `collector/network*.go` sur `GetAdaptersAddresses`, relu à chaque heartbeat (une adresse mise en cache au démarrage serait fausse au premier renouvellement de bail). Backend : colonne `ip_address` (migration `0006_ip_address`), patch conditionnel comme `hostname` — champ absent = adresse conservée, ce qui couvre l'agent trop ancien comme la lecture ratée. Une valeur non analysable est **ignorée**, jamais renvoyée en 422 : un champ malformé ne doit pas coûter l'état Defender et les menaces du même heartbeat.
+> **Le cas « plusieurs adresses » est la règle, pas l'exception** — un portable sur station d'accueil, un poste avec Hyper-V/WSL, un VPN monté. L'élection est donc explicite et ordonnée : IPv4 avant IPv6, adaptateur avec passerelle par défaut avant adaptateur sans (c'est ce qui écarte `vEthernet`/VirtualBox **sans** filtrer sur le nom des cartes), puis métrique d'interface la plus basse (l'ordre de routage de Windows lui-même), puis index d'interface — un départage arbitraire mais *stable*, pour que l'adresse affichée ne clignote pas d'un poll à l'autre. Exclus d'office : loopback, 169.254.0.0/16 (APIPA = bail DHCP échoué, ne joint rien), fe80::/10, adaptateurs non `IfOperStatusUp` et pseudo-interfaces tunnel.
+> Vérifications : **126 tests backend** verts sur Postgres 16 + migration `upgrade`/`downgrade`/`upgrade` rejouée sur base vierge ; 41 vitest, `vue-tsc` et `prettier` verts ; Go `gofmt`/`vet`/`test` verts, builds croisés `windows/amd64` et `windows/arm64`, binaire de test compilé pour la cible Linux de la CI. **Plomberie Win32 validée sur poste réel** : 5 adresses APIPA sur cartes déconnectées, 2 commutateurs Hyper-V adressés mais sans passerelle, 1 Wi-Fi — c'est bien le Wi-Fi qui est élu.
+
 | Jalon | État |
 |---|---|
 | M0 Fondations | 🟢 fini (compose validé de bout en bout) — reste le certificat de signature |
@@ -416,6 +421,7 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 - [x] Exécution `quick_scan` / `full_scan` / `update_signatures` (PowerShell) + remontée résultat
 - [x] Config YAML + surcharge registre (`HKLM\SOFTWARE\Tiai`) ; file locale + back-off
 - [x] Identité réelle (SMBIOS UUID via WMI, MachineGuid via registre, EK TPM best-effort) + host info (hostname/domaine/OS)
+- [x] **Adresse IP du poste** via `GetAdaptersAddresses` (métrique d'interface + passerelle par défaut, là où `net.Interfaces()` ne donne ni l'un ni l'autre) — relue à chaque heartbeat car elle change sous l'agent (bail DHCP, station d'accueil, VPN) ; une seule adresse élue (IPv4 routée d'abord), loopback / 169.254.0.0/16 / fe80::/10 exclus, commutateurs virtuels sans passerelle écartés sans heuristique de nom. Validé sur poste réel (5 adresses APIPA, 2 commutateurs Hyper-V, Wi-Fi élu)
 - [x] **Session utilisateur ouverte** via l'API WTS (`WTSEnumerateSessions` + `WTSQuerySessionInformationW`) — fonctionne depuis la session 0 où tourne l'agent ; élection d'une session (active > déconnectée, console > distante), filtrage session 0 / écran de connexion / écouteur RDP ; interrupteur de confidentialité `report_session_username` (`*bool`, défaut activé) + surcharge registre `ReportSessionUsername` où `0` est signifiant. Validé sur poste réel (deux sessions, dont une déconnectée).
 
 **M3 — Backend complet** · 🟢 implémenté
@@ -436,6 +442,7 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 - [x] Sélection multiple → actions de masse (scan rapide/complet, MAJ signatures) + révocation de token, avec retour `Notify`
 - [x] **Fusion de postes** (`needs_verification`, plan §8) : backend `POST /machines/{id}/merge` (rattache menaces + commandes, dédup `detection_id`, lève le flag, supprime le doublon) + `GET /machines/{id}/duplicates` (même SMBIOS) ; UI = dialog de fusion sur la vue détail
 - [x] Détail backend enrichi (`MachineDetailOut`) + services frontend testés (vitest, couverture 100 % sur `src/services`)
+- [x] **Adresse IP** : colonne « Adresse IP » dans la liste (non triable — un tri texte placerait `.10` avant `.9`) et ligne sur la fiche détail ; la **recherche** couvre désormais nom / UUID / IP, pour remonter d'une adresse de log de pare-feu au poste
 - [x] **Session ouverte** : colonne « Session » dans la liste (badge + infobulle « au dernier contact ») et lignes « Session » / « Type de session » sur la fiche détail ; quatre états distincts (nom, présence sans nom, aucun utilisateur, inconnu) via `sessionLabel`/`sessionColor`/`sessionTypeLabel` — couverture vitest élargie à `src/utils`
 
 **M5 — Durcissement** · 🟡 partiel (anticipé)

@@ -229,6 +229,7 @@ const identityRows = computed(() =>
         { label: 'Nom', value: machine.value.hostname ?? '—' },
         { label: 'UUID machine', value: machine.value.machine_uuid },
         { label: 'Domaine', value: machine.value.domain ?? '—' },
+        { label: 'Adresse IP', value: machine.value.ip_address ?? '—' },
         { label: 'OS', value: machine.value.os_version ?? '—' },
         { label: 'Version agent', value: machine.value.agent_version ?? '—' },
         { label: 'SMBIOS UUID', value: machine.value.smbios_uuid ?? '—' },

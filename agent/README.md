@@ -1,8 +1,8 @@
 # Tiai — Agent (Windows)
 
 Service Windows léger, déployé par GPO, qui interroge le serveur (polling),
-remonte l'état Defender et la session utilisateur ouverte, et exécute les
-commandes (scan / mise à jour signatures).
+remonte l'état Defender, la session utilisateur ouverte et l'adresse IP du
+poste, et exécute les commandes (scan / mise à jour signatures).
 
 ## Layout
 
@@ -16,6 +16,7 @@ internal/
   api/       client HTTP (enroll / heartbeat / result)
   collector/ Defender : état + menaces via WMI (ROOT\Microsoft\Windows\Defender) ; scans + MAJ via PowerShell
              session utilisateur ouverte via l'API WTS (wtsapi32)
+             adresse IP principale via GetAdaptersAddresses (iphlpapi)
   queue/     file locale durable (résultats de commandes non remis) + back-off
   logging/   log fichier (agent.log, rotation simple) + niveau INFO/DEBUG
   service/   service Windows (golang.org/x/sys/windows/svc)
@@ -62,6 +63,42 @@ connecté » sans identité. Défaut : activé.
 
 L'information vaut ce que vaut le dernier heartbeat (60 s par défaut) : la
 console l'accompagne du « vu le » du poste.
+
+## Adresse IP
+
+L'agent remonte **une** adresse IP par poste, relue à chaque heartbeat — pas
+mise en cache au démarrage comme le hostname : un bail DHCP, une station
+d'accueil ou un VPN la change sous un agent qui tourne depuis des semaines.
+Lecture via **`GetAdaptersAddresses`** (`iphlpapi`) plutôt que `net.Interfaces()`
+de la bibliothèque standard, qui n'expose ni la métrique d'interface ni la
+présence d'une passerelle par défaut — les deux critères qui rendent le choix
+déterministe au lieu d'heuristique.
+
+Sont **exclues** d'office : les adresses de loopback (`127.0.0.0/8`, `::1`), les
+adresses lien-local — `169.254.0.0/16`, l'auto-attribution APIPA d'un poste dont
+le bail DHCP a échoué, et `fe80::/10` — et l'adresse non spécifiée. Sont écartés
+de même les adaptateurs qui ne sont pas `IfOperStatusUp` (une carte débranchée
+garde son adresse statique, une carte désactivée son dernier bail) et les
+pseudo-interfaces tunnel (Teredo, ISATAP, 6to4).
+
+Quand plusieurs adresses subsistent — cas moins rare qu'il n'y paraît : portable
+sur station d'accueil, poste avec Hyper-V/WSL, VPN monté — une seule est élue,
+dans cet ordre :
+
+| Critère | Pourquoi |
+|---|---|
+| IPv4 avant IPv6 | c'est l'adresse qu'un admin va pinguer ou saisir dans un client RDP ; une IPv6 n'est remontée que pour un poste qui n'a aucune IPv4 |
+| passerelle par défaut avant absence de passerelle | écarte les commutateurs virtuels *host-only* (vEthernet Hyper-V, WSL, VirtualBox, VMware) qui portent une adresse mais ne joignent aucun réseau — **sans** filtrer sur le nom des cartes, qu'aucune heuristique ne couvrirait de façon fiable |
+| métrique d'interface la plus basse | c'est l'ordre de routage de Windows lui-même : l'Ethernet d'une station d'accueil passe devant le Wi-Fi resté associé |
+| index d'interface, puis adresse | départage arbitraire mais **stable** : sur deux cartes réellement équivalentes, l'adresse affichée ne doit pas clignoter d'un poll au suivant |
+
+Si rien ne subsiste, l'agent n'envoie pas le champ (plutôt qu'une chaîne vide) :
+le serveur conserve alors la dernière adresse connue, datée par le « vu le » du
+poste, au lieu d'effacer une information sur une lecture ratée.
+
+> Une seule adresse est conservée côté serveur : l'objectif est de **joindre** le
+> poste, pas d'inventorier ses cartes réseau. Le détail des interfaces relève du
+> module Inventaire (phase ultérieure).
 
 ## Identité & sécurité
 

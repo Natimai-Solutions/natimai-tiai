@@ -8,7 +8,7 @@
         dense
         outlined
         debounce="300"
-        placeholder="Nom ou UUID…"
+        placeholder="Nom, IP ou UUID…"
         class="col-auto"
         style="min-width: 220px"
         @update:model-value="reload"
@@ -130,6 +130,15 @@ const actions: { type: CommandType; label: string; icon: string }[] = [
 const columns: QTableColumn<Machine>[] = [
   { name: 'hostname', label: 'Nom', field: 'hostname', align: 'left', sortable: true },
   { name: 'domain', label: 'Domaine', field: 'domain', align: 'left', sortable: true },
+  // Not sortable: a string sort would put 192.168.1.10 before 192.168.1.9, and
+  // an octet-aware comparator is not worth it on a column people search, not sort.
+  {
+    name: 'ip_address',
+    label: 'Adresse IP',
+    field: 'ip_address',
+    align: 'left',
+    format: (val: string | null) => val ?? '—',
+  },
   { name: 'os_version', label: 'OS', field: 'os_version', align: 'left' },
   { name: 'signature_version', label: 'Signatures', field: 'signature_version', align: 'left' },
   { name: 'is_up_to_date', label: 'État', field: 'is_up_to_date', align: 'center' },

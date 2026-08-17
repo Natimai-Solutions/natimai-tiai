@@ -40,6 +40,12 @@ class Machine(SQLModel, table=True):
     domain: str | None = None
     os_version: str | None = None
     agent_version: str | None = None
+    # Primary IP address elected by the agent among the machine's addresses
+    # (loopback and 169.254.0.0/16 excluded), refreshed on each heartbeat. Only
+    # as fresh as last_seen: a DHCP lease outlives neither. NULL = never
+    # reported — an agent older than the feature, or a host with no usable
+    # address.
+    ip_address: str | None = None
 
     # Defender state (derived from MSFT_MpComputerStatus)
     rtp_enabled: bool | None = None

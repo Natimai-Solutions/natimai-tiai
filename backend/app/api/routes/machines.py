@@ -34,6 +34,7 @@ class MachineOut(BaseModel):
     machine_uuid: str
     hostname: str | None
     domain: str | None
+    ip_address: str | None
     os_version: str | None
     agent_version: str | None
     is_up_to_date: bool | None
@@ -91,6 +92,9 @@ async def list_machines(
             or_(
                 col(Machine.hostname).ilike(pattern),
                 col(Machine.machine_uuid).ilike(pattern),
+                # Searchable too: going from an address in a firewall or DHCP
+                # log back to the machine is the everyday use of this field.
+                col(Machine.ip_address).ilike(pattern),
             )
         )
     if domain:

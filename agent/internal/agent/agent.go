@@ -170,11 +170,20 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	if err != nil {
 		log.Printf("agent: session state: %v", err)
 	}
+	// Read here and not from a.host: the host attributes are collected once at
+	// start-up, whereas the address changes under a running agent (DHCP
+	// renewal, dock, VPN). Same contract as above on failure — "" is omitted
+	// from the payload, so the server keeps the last known address.
+	ip, err := collector.ReadIPAddress(ctx)
+	if err != nil {
+		log.Printf("agent: ip address: %v", err)
+	}
 
 	fp := a.identity.Fingerprint
 	resp, err := a.client.Heartbeat(ctx, models.HeartbeatRequest{
 		Hostname:     a.host.Hostname,
 		Domain:       a.host.Domain,
+		IPAddress:    ip,
 		OSVersion:    a.host.OSVersion,
 		AgentVersion: Version,
 		Defender:     state,

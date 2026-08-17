@@ -420,6 +420,92 @@ async def test_machine_list_omits_session_type(client, db_session):
     assert body["session_is_remote"] is True
 
 
+# --- Primary IP address -----------------------------------------------------
+
+
+async def test_heartbeat_stores_ip_address(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip")
+    await _heartbeat(client, enrolled["token"], ip_address="192.168.1.10")
+
+    row = await _list_row(client, headers, "m-ip")
+    assert row["ip_address"] == "192.168.1.10"
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["ip_address"] == "192.168.1.10"
+
+
+async def test_ip_address_never_reported_stays_null(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-unknown")
+    await _heartbeat(client, enrolled["token"])
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["ip_address"] is None
+
+
+async def test_heartbeat_updates_ip_address(client, db_session):
+    """A new lease replaces the old address — nothing accumulates."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-dhcp")
+    await _heartbeat(client, enrolled["token"], ip_address="192.168.1.10")
+    await _heartbeat(client, enrolled["token"], ip_address="10.0.0.20")
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["ip_address"] == "10.0.0.20"
+
+
+async def test_heartbeat_without_ip_preserves_last_value(client, db_session):
+    """An agent whose read failed omits the field; the last address survives."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-keep")
+    await _heartbeat(client, enrolled["token"], ip_address="192.168.1.10")
+    await _heartbeat(client, enrolled["token"], hostname="PC-IP-KEEP")
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["hostname"] == "PC-IP-KEEP"
+    assert body["ip_address"] == "192.168.1.10"
+
+
+async def test_heartbeat_malformed_ip_is_dropped_not_rejected(client, db_session):
+    """A bad address must not cost the heartbeat its Defender state."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-bad")
+    await _heartbeat(client, enrolled["token"], ip_address="192.168.1.10")
+
+    resp = await _heartbeat(
+        client,
+        enrolled["token"],
+        ip_address="not-an-address",
+        defender={"av_enabled": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["av_enabled"] is True
+    assert body["ip_address"] == "192.168.1.10"
+
+
+async def test_heartbeat_normalizes_ipv6(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-v6")
+    await _heartbeat(client, enrolled["token"], ip_address="2001:0DB8:0000::0001")
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["ip_address"] == "2001:db8::1"
+
+
+async def test_machines_search_matches_ip(client, db_session):
+    """From an address in a firewall log back to the machine."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-search", hostname="ZZZ-IP")
+    await _heartbeat(client, enrolled["token"], ip_address="10.42.7.99")
+
+    resp = await client.get("/api/v1/machines?search=10.42.7.99", headers=headers)
+    assert resp.status_code == 200
+    assert [m["machine_uuid"] for m in resp.json()["items"]] == ["m-ip-search"]
+
+
 # --- Machine merge (plan §8) -----------------------------------------------
 
 

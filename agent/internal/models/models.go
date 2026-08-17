@@ -66,9 +66,15 @@ type Threat struct {
 }
 
 // HeartbeatRequest is sent on each poll (auth: Bearer token).
+//
+// IPAddress is a plain attribute like the hostname, not a block: one elected
+// address, re-read on every poll. omitempty is load-bearing — an agent that
+// could not determine an address omits the field, and the server keeps the last
+// known one rather than blanking it on no evidence.
 type HeartbeatRequest struct {
 	Hostname     string         `json:"hostname,omitempty"`
 	Domain       string         `json:"domain,omitempty"`
+	IPAddress    string         `json:"ip_address,omitempty"`
 	OSVersion    string         `json:"os_version,omitempty"`
 	AgentVersion string         `json:"agent_version,omitempty"`
 	Defender     *DefenderState `json:"defender,omitempty"`
