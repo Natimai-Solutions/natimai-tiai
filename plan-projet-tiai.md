@@ -213,6 +213,11 @@ machines
   last_quick_scan          timestamptz
   last_full_scan           timestamptz
   is_up_to_date            bool       -- calculé (âge signatures + RTP)
+  -- session ouverte (API WTS, rafraîchie à chaque heartbeat)
+  session_user_present     bool       -- NULL = jamais remonté ≠ false = personne
+  session_username         text       -- NULL si la remontée du nom est coupée (GPO)
+  session_state            text       -- active / disconnected
+  session_is_remote        bool       -- session Bureau à distance
   first_seen        timestamptz
   last_seen         timestamptz       -- = date de dernière connexion (UI)
   created_at, updated_at timestamptz
@@ -258,7 +263,7 @@ commands               -- file de commandes (une ligne par poste, même en broad
 | Méthode | Endpoint | Rôle |
 |---|---|---|
 | `POST` | `/api/v1/agent/enroll` | 1er contact, en-tête `X-Enrollment-Secret` : `machine_uuid`, `hostname`, `domain`, `os`, `agent_version` → **renvoie le token unique du poste** (une seule fois). Idempotent. |
-| `POST` | `/api/v1/agent/heartbeat` | Remonte l'état Defender + menaces. **Renvoie les commandes en attente.** |
+| `POST` | `/api/v1/agent/heartbeat` | Remonte l'état Defender + menaces + la session ouverte (bloc `session` optionnel : `user_present`, `username` selon la politique de confidentialité, `state`, `is_remote`). **Renvoie les commandes en attente.** |
 | `POST` | `/api/v1/agent/commands/{id}/result` | Résultat d'exécution d'une commande. |
 
 **Côté console** (auth : **JWT utilisateur**, email + mot de passe — sauf les deux routes `password-reset/*`, publiques par nature ; les routes `admin` exigent le rôle admin)
@@ -373,6 +378,10 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 **Instantané — 2026-07-08** · Durcissement (M5, tranche 1) : garde de démarrage refusant les secrets placeholder hors `local` (validator `Settings`, testé), comparaison timing-safe du secret d'enrôlement, en-têtes de sécurité HTTP au reverse-proxy (HSTS, CSP, nosniff, frame-ancestors). CI étendue : job agent Go (gofmt + vet + tests + build croisé Windows), typecheck `vue-tsc` frontend, action de couverture épinglée par SHA. **Bugfix heartbeat** : la livraison de commandes levait `MissingGreenlet` (accès aux ORM expirés après `commit`) → réponse construite avant le commit ; suite complète verte sur Postgres (**83 tests**).
 > **`docker compose up` validé de bout en bout** (override dev `docker-compose.dev.yml` : backend HTTP direct :8800 + Caddy `tls internal`) : migrations + seed admin au boot, en-têtes/CSP vérifiés sur la SPA (aucun script inline, `script-src 'self'` compatible), cycle complet login → enroll (401 sans/mauvais secret) → heartbeat → commande → résultat → vues console (11 vérifications). Corrigé au passage : **Dockerfile frontend** (le `postinstall: quasar prepare` cassait `npm install` avant la copie des sources → `npm ci --ignore-scripts` + `quasar prepare` post-copie + `.dockerignore`).
 
+**Instantané — 2026-08-17** · **Session utilisateur** livrée de bout en bout (cf. `plan-session-utilisateur.md`) : la console indique si un poste est occupé, dans la liste et sur la fiche détail. Agent : nouveau collecteur WTS (`collector/session*.go`), élection d'une session parmi plusieurs, bloc `session` optionnel sur le heartbeat. Backend : quatre colonnes nullables sur `machines` (migration `0005_session`), patch conditionnel comme le bloc Defender — un heartbeat sans le bloc n'écrase rien, un `user_present:false` efface le nom. `session_user_present` est **tri-état** (`NULL` = jamais remonté), ce qui permet de distinguer « nom masqué par politique » de « agent trop ancien ».
+> **Confidentialité par construction** : la remontée du nom est désactivable par GPO et agit **à la source** — le nom est lu localement pour distinguer une session utilisateur de l'écran de connexion, puis abandonné avant sérialisation. Jamais journalisé. Test dédié côté agent (`reportUsername=false` → présence conservée, nom vide) et côté backend (déconnexion → nom effacé).
+> Vérifications : **119 tests backend** verts sur Postgres (98 % de couverture) + migration `upgrade`/`downgrade`/`upgrade` rejouée sur base vierge (les migrations n'étant pas exercées par pytest) ; **41 vitest** (100 % sur `src/services` + `src/utils`) ; Go `gofmt`/`vet`/`test` verts, builds croisés `windows/amd64` et `windows/arm64`, binaires de test compilés pour la cible Linux de la CI. **Plomberie Win32 validée sur poste réel** : deux sessions détectées (une active en console, une déconnectée), élection correcte, nom bien supprimé quand l'option est coupée.
+
 | Jalon | État |
 |---|---|
 | M0 Fondations | 🟢 fini (compose validé de bout en bout) — reste le certificat de signature |
@@ -407,6 +416,7 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 - [x] Exécution `quick_scan` / `full_scan` / `update_signatures` (PowerShell) + remontée résultat
 - [x] Config YAML + surcharge registre (`HKLM\SOFTWARE\Tiai`) ; file locale + back-off
 - [x] Identité réelle (SMBIOS UUID via WMI, MachineGuid via registre, EK TPM best-effort) + host info (hostname/domaine/OS)
+- [x] **Session utilisateur ouverte** via l'API WTS (`WTSEnumerateSessions` + `WTSQuerySessionInformationW`) — fonctionne depuis la session 0 où tourne l'agent ; élection d'une session (active > déconnectée, console > distante), filtrage session 0 / écran de connexion / écouteur RDP ; interrupteur de confidentialité `report_session_username` (`*bool`, défaut activé) + surcharge registre `ReportSessionUsername` où `0` est signifiant. Validé sur poste réel (deux sessions, dont une déconnectée).
 
 **M3 — Backend complet** · 🟢 implémenté
 - [x] File de commandes : création (route `POST /commands`, permission `command:execute`)
@@ -426,6 +436,7 @@ Réutilise l'agent et la file de commandes. Nouveaux types de commandes (recherc
 - [x] Sélection multiple → actions de masse (scan rapide/complet, MAJ signatures) + révocation de token, avec retour `Notify`
 - [x] **Fusion de postes** (`needs_verification`, plan §8) : backend `POST /machines/{id}/merge` (rattache menaces + commandes, dédup `detection_id`, lève le flag, supprime le doublon) + `GET /machines/{id}/duplicates` (même SMBIOS) ; UI = dialog de fusion sur la vue détail
 - [x] Détail backend enrichi (`MachineDetailOut`) + services frontend testés (vitest, couverture 100 % sur `src/services`)
+- [x] **Session ouverte** : colonne « Session » dans la liste (badge + infobulle « au dernier contact ») et lignes « Session » / « Type de session » sur la fiche détail ; quatre états distincts (nom, présence sans nom, aucun utilisateur, inconnu) via `sessionLabel`/`sessionColor`/`sessionTypeLabel` — couverture vitest élargie à `src/utils`
 
 **M5 — Durcissement** · 🟡 partiel (anticipé)
 - [x] Auth console JWT + rôles `admin` / `readonly` (permissions `(ressource, action)`)
@@ -468,6 +479,7 @@ Points permanents : binaire agent **signé**, validation stricte des entrées AP
 - **Cohérence des dates Defender** : certaines propriétés WMI valent `0`/`null` si aucun scan n'a eu lieu — gérer ces cas dans le calcul de `is_up_to_date`.
 - **Clones / faux doublons** : l'ancre **SMBIOS UUID** survit à une ré-image (même identité conservée) et distingue les clones non-sysprepés (cf. §2.3). Cas résiduels signalés par `needs_verification` → réconciliation manuelle / **fusion de postes** dans l'UI : swap de carte mère (nouvelle ancre), SMBIOS invalide tombant sur le repli UUID agent, ou clonage préservant le SMBIOS.
 - **Effet de masse** : « scan complet sur tout le parc » peut saturer postes et réseau → permettre l'étalement (les commandes sont récupérées au *poll*, ce qui étale naturellement, mais documenter le comportement).
+- **Données personnelles (session utilisateur)** : savoir quel salarié nommé est sur quelle machine, et à quelle heure, est une donnée personnelle et un point de vigilance RGPD/CSE. La mitigation est un interrupteur **à la source** (`report_session_username`, valeur registre `ReportSessionUsername`, cf. `plan-session-utilisateur.md`) : coupé, le nom ne transite ni ne se stocke, seule la présence remonte — la garantie est donc vérifiable côté poste et non sur parole. Le nom n'est journalisé à aucun niveau. Le défaut est **activé** ; à arbitrer avec le DPO / le CSE avant la mise en production, sachant que la bascule se fait par GPO sans changement de code. À porter au registre des traitements et à l'information des utilisateurs.
 
 ---
 

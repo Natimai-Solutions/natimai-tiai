@@ -76,6 +76,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.identity = id
 	a.host = sysinfo.Collect()
 	log.Printf("agent: identity %s (hostname %s)", id.MachineUUID, a.host.Hostname)
+	if !a.cfg.ReportsUsername() {
+		// Traced once so the setting is auditable from the log. The name itself
+		// is never logged, at any level.
+		log.Printf("agent: logged-on username reporting disabled (presence only)")
+	}
 
 	q, err := queue.New(filepath.Join(dir, "queue"), a.cfg.QueueMaxItems)
 	if err != nil {
@@ -159,6 +164,12 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	if err != nil {
 		log.Printf("agent: defender threats: %v", err)
 	}
+	// On failure sess stays nil, the block is omitted, and the server keeps the
+	// last known session rather than being told "nobody" on no evidence.
+	sess, err := collector.ReadSessionState(ctx, a.cfg.ReportsUsername())
+	if err != nil {
+		log.Printf("agent: session state: %v", err)
+	}
 
 	fp := a.identity.Fingerprint
 	resp, err := a.client.Heartbeat(ctx, models.HeartbeatRequest{
@@ -167,6 +178,7 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		OSVersion:    a.host.OSVersion,
 		AgentVersion: Version,
 		Defender:     state,
+		Session:      sess,
 		Fingerprint:  &fp,
 		Threats:      threats,
 	})

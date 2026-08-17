@@ -63,6 +63,21 @@ class DefenderState(BaseModel):
     last_full_scan: datetime | None = None
 
 
+class SessionState(BaseModel):
+    """Interactive session reported on each heartbeat.
+
+    ``username`` is absent when the agent is configured not to report it
+    (report_session_username=false): presence is still known, the name never
+    leaves the machine. Every field has a default so a malformed block degrades
+    to "nobody" instead of 422-ing the whole heartbeat, Defender state included.
+    """
+
+    user_present: bool = False
+    username: str | None = None
+    state: str | None = None  # active / disconnected
+    is_remote: bool = False
+
+
 class HeartbeatRequest(BaseModel):
     """State report; threats reported separately as a list of raw dicts."""
 
@@ -71,6 +86,7 @@ class HeartbeatRequest(BaseModel):
     os_version: str | None = None
     agent_version: str | None = None
     defender: DefenderState | None = None
+    session: SessionState | None = None
     fingerprint: Fingerprint | None = None
     threats: list[ThreatReport] = []
 
@@ -189,6 +205,17 @@ async def heartbeat(
             signature_age_days=machine.signature_age_days,
             max_age_days=settings.SIGNATURE_MAX_AGE_DAYS,
         )
+
+    if payload.session is not None:
+        # `s`, not `session`: `session` is the database session in this scope.
+        s = payload.session
+        machine.session_user_present = s.user_present
+        # Straight assignment, like the defender block above: a logoff, or the
+        # privacy toggle being turned off, must *clear* a name stored earlier or
+        # the console would keep displaying it forever.
+        machine.session_username = s.username
+        machine.session_state = s.state
+        machine.session_is_remote = s.is_remote
 
     if payload.fingerprint is not None:
         fp = payload.fingerprint

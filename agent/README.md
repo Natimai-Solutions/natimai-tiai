@@ -1,7 +1,8 @@
 # Tiai — Agent (Windows)
 
 Service Windows léger, déployé par GPO, qui interroge le serveur (polling),
-remonte l'état Defender et exécute les commandes (scan / mise à jour signatures).
+remonte l'état Defender et la session utilisateur ouverte, et exécute les
+commandes (scan / mise à jour signatures).
 
 ## Layout
 
@@ -14,6 +15,7 @@ internal/
   sysinfo/   hostname / domaine AD / version OS
   api/       client HTTP (enroll / heartbeat / result)
   collector/ Defender : état + menaces via WMI (ROOT\Microsoft\Windows\Defender) ; scans + MAJ via PowerShell
+             session utilisateur ouverte via l'API WTS (wtsapi32)
   queue/     file locale durable (résultats de commandes non remis) + back-off
   logging/   log fichier (agent.log, rotation simple) + niveau INFO/DEBUG
   service/   service Windows (golang.org/x/sys/windows/svc)
@@ -26,6 +28,40 @@ internal/
 - **Lecture** (état, menaces) via **WMI** — pas de spawn de process par cycle :
   `MSFT_MpComputerStatus`, `MSFT_MpThreatDetection` + `MSFT_MpThreat` (jointure par `ThreatID`).
 - **Actions** (scans, MAJ signatures) via **PowerShell** : `Start-MpScan`, `Update-MpSignature`.
+
+## Session utilisateur
+
+L'agent remonte à chaque heartbeat s'il y a **une session ouverte sur le poste**,
+via l'**API WTS** (`WTSEnumerateSessions` + `WTSQuerySessionInformationW`). Il
+tourne en `LocalSystem` dans la session 0 : `os/user` et `%USERNAME%` y sont
+inutilisables, alors que WTS énumère toutes les sessions locales quel que soit
+l'appelant — c'est précisément le cas d'usage de cette API, et elle coûte un
+appel système, sans process lancé ni requête WMI.
+
+Sont ignorées : la session 0 (services), et toute session sans nom
+d'utilisateur — écran de connexion, écouteur `RDP-Tcp`, stations `UMFD`/`DWM`.
+Quand plusieurs sessions coexistent (RDS, changement rapide d'utilisateur), une
+seule est élue : active avant déconnectée, console avant distante, et à égalité
+le plus petit identifiant de session pour que la réponse soit stable d'un poll
+au suivant.
+
+**Confidentialité.** Le nom de l'utilisateur est une donnée personnelle. La clé
+`report_session_username` (YAML) ou la valeur registre `ReportSessionUsername`
+(`REG_DWORD`, `0` = coupé) contrôle sa **remontée** ; la présence, elle, est
+toujours remontée. Le nom est lu localement — c'est ce qui permet de distinguer
+une session utilisateur de l'écran de connexion — puis abandonné avant d'être
+sérialisé : il ne quitte jamais le poste quand l'option est coupée. Il n'est
+**jamais** journalisé, à aucun niveau. La console affiche alors « Utilisateur
+connecté » sans identité. Défaut : activé.
+
+> **Session verrouillée = session ouverte.** Un poste verrouillé reste `WTSActive`
+> et sera donc affiché comme occupé. C'est le sens voulu (« un utilisateur est
+> connecté »), pas « un utilisateur est devant l'écran » : l'API WTS ne permet pas
+> de distinguer les deux depuis la session 0. Une session RDP abandonnée sans
+> déconnexion est en revanche bien signalée comme « déconnectée ».
+
+L'information vaut ce que vaut le dernier heartbeat (60 s par défaut) : la
+console l'accompagne du « vu le » du poste.
 
 ## Identité & sécurité
 
@@ -109,7 +145,9 @@ Les logs partent sur **stderr et** dans `<dossier config>\agent.log`
 Niveau via `log_level` (YAML) ou la valeur registre `LogLevel` : `INFO` par
 défaut (démarrage, identité, enrôlement, commandes exécutées + durée, erreurs) ;
 `DEBUG` logge aussi chaque heartbeat silencieux — utile pour vérifier que
-l'agent poll bien pendant les tests.
+l'agent poll bien pendant les tests. Le nom de l'utilisateur connecté n'est
+journalisé à aucun niveau ; seule la désactivation de sa remontée est tracée une
+fois au démarrage, pour rendre le réglage auditable.
 
 Le code reste compilable hors Windows (stubs `*_other.go`) pour `go vet` / les
 tests de logique pure ; les fonctionnalités Defender/service/registre/DPAPI sont

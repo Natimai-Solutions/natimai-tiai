@@ -33,6 +33,7 @@ Administrer Microsoft Defender sur des centaines de postes Windows sans console 
 
 - une **vue temps quasi-réel** de l'état Defender de chaque poste (signatures, protection temps réel, dates de scans) ;
 - le **déclenchement d'actions à distance** (scan rapide / complet, mise à jour des signatures) sur un poste ou sur tout le parc ;
+- l'**occupation des postes** — quels postes ont une session ouverte, donc lesquels sont libres pour une intervention (remontée du nom d'utilisateur désactivable par GPO) ;
 - un **historique des menaces** dédupliqué et consultable ;
 - un **déploiement sans friction** via GPO, avec auto-enrôlement des postes.
 
@@ -65,7 +66,7 @@ Tia'i repose sur un **modèle de polling** : l'agent installé sur chaque poste 
 
 **Cycle de vie d'une commande**
 
-1. L'agent appelle `POST /heartbeat` → remonte l'état Defender et les menaces détectées.
+1. L'agent appelle `POST /heartbeat` → remonte l'état Defender, les menaces détectées et la session utilisateur ouverte.
 2. La **même réponse** renvoie les commandes en attente pour ce poste.
 3. L'agent exécute la commande, puis poste le résultat via `POST /commands/{id}/result`.
 
@@ -80,6 +81,7 @@ Deux intervalles de polling sont prévus : un **long** pour la remontée d'état
 | **Enrôlement** | *Trust on first use* : un secret d'enrôlement partagé (déployé par GPO) ne sert **qu'à** s'enregistrer ; chaque poste reçoit ensuite un **token unique** (seul le hash est stocké côté serveur). |
 | **TLS** | Activé dès le MVP via **Caddy** + certificat de l'AC interne (déjà approuvée par les postes du domaine). |
 | **Accès Defender** | Lecture directe via **WMI** (`ROOT\Microsoft\Windows\Defender`) plutôt que des appels `powershell.exe` coûteux. |
+| **Session utilisateur** | API **WTS** — le seul accès qui fonctionne depuis la session 0 où tourne l'agent. La remontée du **nom** est désactivable par GPO ; coupée, le nom ne quitte jamais le poste. |
 | **Déduplication** | Contrainte d'unicité `(machine_id, detection_id)` + upsert `ON CONFLICT DO NOTHING`. |
 | **Expiration des commandes** | Chaque commande porte un `expires_at` — un poste éteint 3 semaines ne déclenche pas un scan obsolète à son retour. |
 | **Robustesse de l'agent** | File locale + back-off si le serveur est injoignable, commandes idempotentes, compte de service `LocalSystem`. |

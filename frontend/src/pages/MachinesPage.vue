@@ -79,6 +79,14 @@
           <span v-else>—</span>
         </q-td>
       </template>
+      <template #body-cell-session="props">
+        <q-td :props="props">
+          <q-badge :color="sessionColor(props.row.session_user_present)">
+            {{ sessionLabel(props.row.session_user_present, props.row.session_username) }}
+          </q-badge>
+          <q-tooltip>Au dernier contact : {{ formatDateTime(props.row.last_seen) }}</q-tooltip>
+        </q-td>
+      </template>
       <template #body-cell-last_seen="props">
         <q-td :props="props">{{ formatDateTime(props.value) }}</q-td>
       </template>
@@ -93,7 +101,7 @@ import { useQuasar, type QTableColumn } from 'quasar';
 import { listMachines, type Machine, type MachineStatus } from 'src/services/machines';
 import { createCommands, type CommandType } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
-import { formatDateTime } from 'src/utils/format';
+import { formatDateTime, sessionColor, sessionLabel } from 'src/utils/format';
 
 const $q = useQuasar();
 const router = useRouter();
@@ -130,6 +138,15 @@ const columns: QTableColumn<Machine>[] = [
     label: 'Vérif.',
     field: 'needs_verification',
     align: 'center',
+  },
+  // name ≠ field on purpose: the cell renders presence *and* username, while
+  // `field` still gives the sort a sensible key (present / absent / unknown).
+  {
+    name: 'session',
+    label: 'Session',
+    field: 'session_user_present',
+    align: 'center',
+    sortable: true,
   },
   { name: 'last_seen', label: 'Vu le', field: 'last_seen', align: 'left', sortable: true },
 ];

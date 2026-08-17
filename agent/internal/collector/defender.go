@@ -1,9 +1,15 @@
-// Package collector reads Microsoft Defender state and drives scans / signature
-// updates. Per plan §2.6, status and threats are read via WMI (namespace
+// Package collector reads the per-poll state of a workstation — Microsoft
+// Defender status and threats, and the logged-on session — and drives Defender
+// scans / signature updates.
+//
+// Per plan §2.6, Defender status and threats are read via WMI (namespace
 // ROOT\Microsoft\Windows\Defender) — cheap, no process spawn — while the
 // actions not cleanly exposed as WMI methods (scans, signature update) fall
-// back to PowerShell cmdlets. Mapping helpers below are pure and platform-
-// independent so they can be unit-tested anywhere.
+// back to PowerShell cmdlets. The session is read through the WTS API, which
+// works from session 0 where the agent runs (see session.go).
+//
+// Mapping and election helpers in the build-tag-free files are pure and
+// platform-independent so they can be unit-tested anywhere.
 package collector
 
 import "time"

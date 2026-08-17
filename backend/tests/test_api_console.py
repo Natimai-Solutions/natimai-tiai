@@ -295,6 +295,131 @@ async def test_machine_detail_exposes_defender_state(client, db_session):
     assert "last_quick_scan" in body and "created_at" in body
 
 
+# --- Logged-on session ------------------------------------------------------
+
+
+async def _detail(client, headers, machine_id) -> dict:
+    resp = await client.get(f"/api/v1/machines/{machine_id}", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def _list_row(client, headers, machine_uuid) -> dict:
+    resp = await client.get(
+        "/api/v1/machines", headers=headers, params={"search": machine_uuid}
+    )
+    assert resp.status_code == 200, resp.text
+    rows = [m for m in resp.json()["items"] if m["machine_uuid"] == machine_uuid]
+    assert len(rows) == 1
+    return rows[0]
+
+
+async def test_heartbeat_stores_session_user(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-user")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        session={
+            "user_present": True,
+            "username": "CORP\\jdupont",
+            "state": "active",
+            "is_remote": False,
+        },
+    )
+
+    row = await _list_row(client, headers, "m-sess-user")
+    assert row["session_user_present"] is True
+    assert row["session_username"] == "CORP\\jdupont"
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["session_state"] == "active"
+    assert body["session_is_remote"] is False
+
+
+async def test_heartbeat_session_without_username_keeps_presence(client, db_session):
+    """Privacy toggle off: presence is reported, the name never arrives."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-anon")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        session={"user_present": True, "state": "active"},
+    )
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["session_user_present"] is True
+    assert body["session_username"] is None
+    assert body["session_state"] == "active"
+
+
+async def test_heartbeat_session_logoff_clears_username(client, db_session):
+    """A logoff must erase a name stored earlier, not leave it on display."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-logoff")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        session={"user_present": True, "username": "CORP\\jdupont"},
+    )
+    await _heartbeat(client, enrolled["token"], session={"user_present": False})
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["session_user_present"] is False
+    assert body["session_username"] is None
+
+
+async def test_heartbeat_without_session_block_preserves_last_value(client, db_session):
+    """Same contract as the defender block: an absent block overwrites nothing.
+
+    An agent older than the feature — or one whose WTS read failed — must not
+    silently blank the last known session.
+    """
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-keep")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        session={"user_present": True, "username": "CORP\\jdupont"},
+    )
+    await _heartbeat(client, enrolled["token"], hostname="PC-KEEP")
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["hostname"] == "PC-KEEP"
+    assert body["session_user_present"] is True
+    assert body["session_username"] == "CORP\\jdupont"
+
+
+async def test_session_never_reported_stays_null(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-unknown")
+    await _heartbeat(client, enrolled["token"])
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["session_user_present"] is None
+    assert body["session_username"] is None
+
+
+async def test_machine_list_omits_session_type(client, db_session):
+    """Session type stays on the detail view; the list row stays lean."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-lean")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        session={"user_present": True, "state": "disconnected", "is_remote": True},
+    )
+
+    row = await _list_row(client, headers, "m-sess-lean")
+    assert "session_user_present" in row
+    assert "session_state" not in row
+    assert "session_is_remote" not in row
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["session_state"] == "disconnected"
+    assert body["session_is_remote"] is True
+
+
 # --- Machine merge (plan §8) -----------------------------------------------
 
 

@@ -38,6 +38,16 @@ type Config struct {
 	QueueMaxItems            int    `yaml:"queue_max_items"`
 	LogLevel                 string `yaml:"log_level"` // INFO (default) or DEBUG (also logs quiet heartbeats)
 
+	// ReportSessionUsername controls whether the *name* of the logged-on user is
+	// sent to the server; the presence always is. Personal data, so it is
+	// switchable fleet-wide from a GPO (registry value ReportSessionUsername).
+	//
+	// A pointer, not a bool: only a pointer distinguishes "absent from the YAML"
+	// (→ default true) from an explicit `false`. A plain bool defaulted in
+	// DefaultConfig would be silently flipped off by any Config literal that
+	// skips it and then calls Save.
+	ReportSessionUsername *bool `yaml:"report_session_username"`
+
 	// AuthToken is never serialized to YAML — it is stored encrypted (DPAPI) in
 	// token.dat and loaded into this field at runtime.
 	AuthToken string `yaml:"-"`
@@ -76,6 +86,16 @@ func (c *Config) applyDefaults() {
 	if c.LogLevel == "" {
 		c.LogLevel = "INFO"
 	}
+	if c.ReportSessionUsername == nil {
+		on := true
+		c.ReportSessionUsername = &on
+	}
+}
+
+// ReportsUsername reports whether the logged-on user's name may be sent, so
+// callers never have to dereference the pointer themselves.
+func (c *Config) ReportsUsername() bool {
+	return c.ReportSessionUsername == nil || *c.ReportSessionUsername
 }
 
 // DefaultConfigDir is C:\ProgramData\Tiai.

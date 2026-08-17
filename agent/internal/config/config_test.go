@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -65,6 +66,52 @@ func TestLoadRequiresAPIBaseURL(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected error when api_base_url is missing")
+	}
+}
+
+// The logged-on username is personal data, so the default must be deliberate
+// and an explicit `false` must survive a round trip. Together with the test
+// below, this proves "absent from the YAML" is not read as "disabled".
+func TestReportSessionUsernameDefaultsOn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("api_base_url: https://tiai.example.local\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.ReportsUsername() {
+		t.Error("username reporting must default to on when the key is absent")
+	}
+}
+
+func TestReportSessionUsernameExplicitFalse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// Raw YAML, not Save(): Save writes the value already resolved by
+	// applyDefaults, which would not exercise the absent-vs-false distinction.
+	body := "api_base_url: https://tiai.example.local\nreport_session_username: false\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ReportsUsername() {
+		t.Error("an explicit report_session_username: false must be honoured")
+	}
+}
+
+// A Config literal that never went through DefaultConfig must not read as
+// "username reporting disabled" — the trap a plain bool would fall into.
+func TestReportsUsernameOnZeroValueConfig(t *testing.T) {
+	if !(&Config{}).ReportsUsername() {
+		t.Error("a zero-value Config must still report usernames")
 	}
 }
 

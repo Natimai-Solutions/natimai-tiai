@@ -201,7 +201,7 @@ import {
   type CommandType,
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
-import { boolLabel, formatDateTime } from 'src/utils/format';
+import { boolLabel, formatDateTime, sessionLabel, sessionTypeLabel } from 'src/utils/format';
 
 const props = defineProps<{ id: string }>();
 const $q = useQuasar();
@@ -233,6 +233,16 @@ const identityRows = computed(() =>
         { label: 'Version agent', value: machine.value.agent_version ?? '—' },
         { label: 'SMBIOS UUID', value: machine.value.smbios_uuid ?? '—' },
         { label: 'MachineGuid', value: machine.value.machine_guid ?? '—' },
+        {
+          label: 'Session',
+          value: sessionLabel(machine.value.session_user_present, machine.value.session_username),
+        },
+        {
+          label: 'Type de session',
+          value: sessionTypeLabel(machine.value.session_state, machine.value.session_is_remote),
+        },
+        // Kept adjacent to the two rows above: the session is only as fresh as
+        // the last heartbeat, and this is the timestamp that says how fresh.
         { label: 'Vu le', value: formatDateTime(machine.value.last_seen) },
       ]
     : [],

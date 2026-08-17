@@ -12,6 +12,10 @@ export interface Machine {
   is_up_to_date: boolean | null;
   needs_verification: boolean;
   signature_version: string | null;
+  /** null = never reported (agent older than the feature, or a failed read). */
+  session_user_present: boolean | null;
+  /** null while present = the agent reports presence only (privacy setting). */
+  session_username: string | null;
   last_seen: string;
 }
 
@@ -22,6 +26,8 @@ export interface MachineDetail extends Machine {
   signature_age_days: number | null;
   last_quick_scan: string | null;
   last_full_scan: string | null;
+  session_state: string | null;
+  session_is_remote: boolean | null;
   machine_guid: string | null;
   smbios_uuid: string | null;
   tpm_ek_hash: string | null;

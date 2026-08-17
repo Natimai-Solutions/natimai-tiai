@@ -328,6 +328,7 @@ request_timeout_seconds: 10
 backoff_max_seconds: 300
 queue_max_items: 1000
 log_level: INFO                           # DEBUG logge aussi les heartbeats silencieux
+report_session_username: true             # false = remonter la présence sans le nom
 ```
 
 Toute valeur absente ou non positive retombe sur son défaut, donc un YAML
@@ -355,6 +356,14 @@ YAML.
 | `LogLevel` | `REG_SZ` | `log_level` |
 | `HeartbeatIntervalSeconds` | `REG_DWORD` | `heartbeat_interval_seconds` |
 | `TelemetryIntervalSeconds` | `REG_DWORD` | `telemetry_interval_seconds` |
+| `ReportSessionUsername` | `REG_DWORD` | `report_session_username` |
+
+Contrairement aux intervalles, où `0` est ignoré et signifie « laisser le
+défaut », `ReportSessionUsername` traite `0` comme une valeur à part entière :
+c'est la **présence de la clé** qui l'emporte. `0` coupe la remontée du nom de
+l'utilisateur connecté (la console affiche alors « Utilisateur connecté » sans
+identité) ; `1` la rétablit. Voir §Session utilisateur du
+[README agent](agent/README.md).
 
 Exemple de bascule d'un poste de test vers le serveur HTTP, sans toucher au YAML :
 

@@ -51,6 +51,16 @@ class Machine(SQLModel, table=True):
     last_full_scan: datetime | None = utc_field(default=None, nullable=True)
     is_up_to_date: bool | None = None
 
+    # Interactive session (WTS), refreshed on each heartbeat. NULL means "never
+    # reported" — an agent older than the feature, or a failed read — which is
+    # distinct from False, "nobody is logged on". session_username stays NULL
+    # when the agent reports presence only (report_session_username=false), so
+    # the console can tell "name withheld by policy" from "agent too old".
+    session_user_present: bool | None = None
+    session_username: str | None = None
+    session_state: str | None = None  # active / disconnected
+    session_is_remote: bool | None = None
+
     # Per-machine auth: only the token hash is stored.
     token_hash: str | None = None
     token_revoked: bool = Field(default=False)

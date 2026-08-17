@@ -39,13 +39,15 @@ class MachineOut(BaseModel):
     is_up_to_date: bool | None
     needs_verification: bool
     signature_version: str | None
+    session_user_present: bool | None
+    session_username: str | None
     last_seen: datetime
 
     model_config = {"from_attributes": True}
 
 
 class MachineDetailOut(MachineOut):
-    """Full machine detail (Defender state, fingerprint, timestamps)."""
+    """Full machine detail (Defender state, session type, fingerprint, times)."""
 
     rtp_enabled: bool | None
     av_enabled: bool | None
@@ -53,6 +55,8 @@ class MachineDetailOut(MachineOut):
     signature_age_days: int | None
     last_quick_scan: datetime | None
     last_full_scan: datetime | None
+    session_state: str | None
+    session_is_remote: bool | None
     machine_guid: str | None
     smbios_uuid: str | None
     tpm_ek_hash: str | None

@@ -39,6 +39,20 @@ type DefenderState struct {
 	LastFullScan         *time.Time `json:"last_full_scan,omitempty"`
 }
 
+// SessionState reports whether a user is logged on to the workstation. The
+// username is present only when the agent is configured to report it
+// (report_session_username, default true) — the presence always is.
+//
+// No omitempty on the bools: an omitted "user_present": false would be
+// indistinguishable server-side from "the agent never reported a session",
+// which is a third, meaningful state.
+type SessionState struct {
+	UserPresent bool   `json:"user_present"`
+	Username    string `json:"username,omitempty"`
+	State       string `json:"state,omitempty"` // active / disconnected
+	IsRemote    bool   `json:"is_remote"`
+}
+
 // Threat mirrors the backend ThreatReport: one Defender detection. detection_id
 // is the dedup key (UNIQUE (machine_id, detection_id) server-side, plan §2.7).
 type Threat struct {
@@ -58,6 +72,7 @@ type HeartbeatRequest struct {
 	OSVersion    string         `json:"os_version,omitempty"`
 	AgentVersion string         `json:"agent_version,omitempty"`
 	Defender     *DefenderState `json:"defender,omitempty"`
+	Session      *SessionState  `json:"session,omitempty"`
 	Fingerprint  *Fingerprint   `json:"fingerprint,omitempty"`
 	Threats      []Threat       `json:"threats,omitempty"`
 }
