@@ -8,199 +8,113 @@
 >
 > *« Tīa'i »* — en reo tahiti : *gardien, vigile, garder, protéger.*
 
-Tia'i est une plateforme qui collecte l'état des postes Windows d'un parc, orchestre des actions à distance et offre une console web de supervision. La **Phase 1** se concentre sur **Microsoft Defender** (état antivirus, scans à distance, mise à jour des signatures). Les phases suivantes étendront la plateforme à Windows Update, au déploiement logiciel et à l'inventaire — en réutilisant le **même agent, le même canal de communication et le même modèle de commandes**.
+Tia'i collecte l'état des postes Windows d'un parc, déclenche des actions à
+distance et présente le tout dans une console web. Un agent léger, déployé par
+GPO, interroge le serveur à intervalle régulier : le serveur ne se connecte
+jamais aux postes, ce qui traverse NAT et pare-feu sans ouvrir de flux entrant et
+gère naturellement les postes éteints.
 
----
+## Fonctionnalités
 
-## Sommaire
-
-- [Pourquoi Tia'i](#pourquoi-tiai)
-- [Architecture](#architecture)
-- [Principes de conception](#principes-de-conception)
-- [Stack technique](#stack-technique)
-- [Modules & feuille de route](#modules--feuille-de-route)
-- [Structure du dépôt](#structure-du-dépôt)
-- [Démarrage rapide](#démarrage-rapide)
-- [Sécurité](#sécurité)
-- [Documentation](#documentation)
-- [Licence](#licence)
-
----
-
-## Pourquoi Tia'i
-
-Administrer Microsoft Defender sur des centaines de postes Windows sans console centralisée est laborieux : pas de vue d'ensemble de l'état des signatures, pas de moyen simple de déclencher un scan sur tout le parc, pas d'historique consolidé des menaces. Tia'i répond à ce besoin avec :
-
-- une **vue temps quasi-réel** de l'état Defender de chaque poste (signatures, protection temps réel, dates de scans) ;
-- le **déclenchement d'actions à distance** (scan rapide / complet, mise à jour des signatures) sur un poste ou sur tout le parc ;
-- un **catalogue de commandes de maintenance et de diagnostic** Windows déclenchables de la même façon — appliquer les stratégies, vider le cache DNS, resynchroniser l'horloge, réinitialiser le spouleur d'impression, `sfc` / `DISM` / `chkdsk`, et deux diagnostics en lecture seule (`gpresult`, `ipconfig /all`) dont la sortie s'affiche dans la console ;
-- l'**occupation des postes** — quels postes ont une session ouverte, donc lesquels sont libres pour une intervention (remontée du nom d'utilisateur désactivable par GPO) ;
-- l'**adresse IP** de chaque poste, cherchable dans la console — pour remonter d'une ligne de log de pare-feu au poste concerné, ou simplement lancer une prise en main ;
-- l'**antivirus réellement actif** sur chaque poste, y compris un produit tiers (ESET, Bitdefender, Kaspersky…) : nom et statut, cherchables et filtrables — un parc mixte reste lisible dans une seule console ;
-- un **historique des menaces** dédupliqué et consultable ;
-- un **déploiement sans friction** via GPO, avec auto-enrôlement des postes.
+- **Microsoft Defender** — état des signatures et de la protection temps réel,
+  historique des menaces, scan rapide ou complet et mise à jour des signatures
+  déclenchables à distance, sur un poste ou sur tout le parc.
+- **Windows Update** — mises à jour en attente poste par poste, installation à
+  distance (pilotes inclus ou non), redémarrage requis signalé puis déclenché sur
+  décision explicite — jamais automatiquement.
+- **Maintenance & diagnostic** — un catalogue fermé de commandes Windows
+  courantes (stratégies de groupe, cache DNS, horloge, spouleur d'impression,
+  vérification d'intégrité et de disque) et deux diagnostics en lecture seule
+  dont la sortie s'affiche dans la console.
+- **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
+  produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
+  est protégé, où joindre un poste et lequel est libre pour une intervention.
+- **Supervision** — tableau de bord, recherche et filtres, alertes par e-mail,
+  nettoyage automatique des postes disparus.
+- **Déploiement sans friction** — un binaire unique poussé par GPO,
+  auto-enrôlement des postes, HTTPS de bout en bout.
 
 ## Architecture
 
-Tia'i repose sur un **modèle de polling** : l'agent installé sur chaque poste interroge le serveur à intervalle régulier. Le serveur ne se connecte jamais aux postes — il met des commandes en file que les agents récupèrent à leur prochain appel. Ce choix traverse naturellement NAT et pare-feu, gère les postes hors-ligne et reste trivial à dimensionner pour un millier de postes.
-
 ```
-   POSTES WINDOWS (hors Docker)                 SERVEUR (docker compose)
- ┌───────────────────────────┐         ┌─────────────────────────────────────┐
- │  Agent Tiai (Go)          │  HTTPS  │  Caddy : reverse-proxy + TLS         │
- │  • Service Windows        │ ──────► │            │                        │
- │  • lit WMI Defender       │ ◄────── │     ┌──────┴──────┐                  │
- │  • poll heartbeat         │ cmds    │     │  Backend    │  FastAPI         │
- │  • exécute scans/update   │         │     │  (uvicorn)  │                  │
- └───────────────────────────┘         │     └──┬───────┬──┘                  │
-            ▲                           │        │       │                    │
-            │ déploiement GPO           │   ┌────┴───┐ ┌─┴──────┐             │
-            │ (MSI/EXE + config)        │   │Postgres│ │ Redis  │             │
-            └───────────────────────────┘   └────────┘ └───┬────┘             │
-                                            │      ┌────────┴────────┐         │
-                                            │      │ Worker (ARQ)    │         │
-                                            │      │ nettoyage+alerts│         │
-                                            │      └─────────────────┘         │
-                                            │  ┌──────────────┐                │
-                                            │  │ Frontend     │ Quasar/Vue     │
-                                            │  └──────────────┘                │
-                                            └─────────────────────────────────┘
+   POSTES WINDOWS                     SERVEUR (docker compose)
+ ┌──────────────────┐                 ┌──────────────────────────────┐
+ │  Agent Tia'i     │      HTTPS      │  Caddy (TLS + proxy)         │
+ │  (service Go)    │ ──────────────► │  Backend FastAPI + worker    │
+ │                  │ ◄────────────── │  PostgreSQL · Redis          │
+ └──────────────────┘    commandes    │  Console web (Quasar / Vue)  │
+           ▲                          └──────────────────────────────┘
+           │ déploiement GPO
 ```
 
-**Cycle de vie d'une commande**
-
-1. L'agent appelle `POST /heartbeat` → remonte l'état Defender, l'antivirus enregistré (tiers compris), les menaces détectées, la session utilisateur ouverte et l'adresse IP du poste.
-2. La **même réponse** renvoie les commandes en attente pour ce poste.
-3. L'agent exécute la commande, puis poste le résultat via `POST /commands/{id}/result`.
-
-Deux intervalles de polling sont prévus : un **long** pour la remontée d'état (~15 min) et un **court** pour la récupération de commandes (~1 min).
-
-## Principes de conception
-
-| Principe | Choix |
-|---|---|
-| **Communication** | Polling (l'agent interroge le serveur), jamais de push. Traverse NAT/pare-feu, gère les postes hors-ligne. |
-| **Identité des postes** | Identifiant stable (`MachineGuid` Windows ou UUID persisté), pas le `hostname` — qui devient un simple attribut. |
-| **Enrôlement** | *Trust on first use* : un secret d'enrôlement partagé (déployé par GPO) ne sert **qu'à** s'enregistrer ; chaque poste reçoit ensuite un **token unique** (seul le hash est stocké côté serveur). |
-| **TLS** | Activé dès le MVP via **Caddy** + certificat de l'AC interne (déjà approuvée par les postes du domaine). |
-| **Accès Defender** | Lecture directe via **WMI** (`ROOT\Microsoft\Windows\Defender`) plutôt que des appels `powershell.exe` coûteux. |
-| **Antivirus tiers** | Lu dans le **Security Center** de Windows (`root\SecurityCenter2`), la seule source qui voie un produit non-Microsoft. **Lecture seule** : ce registre expose un nom et deux bits d'état, ni version de signatures ni moyen de déclencher une mise à jour. Absent des SKU Serveur, où le champ reste « inconnu » plutôt que faux. |
-| **Session utilisateur** | API **WTS** — le seul accès qui fonctionne depuis la session 0 où tourne l'agent. La remontée du **nom** est désactivable par GPO ; coupée, le nom ne quitte jamais le poste. |
-| **Adresse IP** | **Une seule** adresse remontée, élue par l'agent via `GetAdaptersAddresses` : IPv4 routée d'abord, loopback et 169.254.0.0/16 exclus. Relue à chaque heartbeat, jamais mise en cache. |
-| **Déduplication** | Contrainte d'unicité `(machine_id, detection_id)` + upsert `ON CONFLICT DO NOTHING`. |
-| **Commandes à distance** | **Catalogue fermé** : le serveur n'envoie qu'un identifiant de type, **aucun argument ne traverse le réseau**. L'exécutable et ses arguments fixes vivent dans le binaire de l'agent, résolus en chemin absolu sous `System32` — un serveur compromis ne peut déclencher que le catalogue, jamais du code arbitraire. Ni exécuteur de scripts libre, ni modification du registre, des fichiers, du pare-feu ou des comptes. |
-| **Expiration des commandes** | Chaque commande porte un `expires_at` — un poste éteint 3 semaines ne déclenche pas un scan obsolète à son retour. |
-| **Robustesse de l'agent** | File locale + back-off si le serveur est injoignable, commandes idempotentes, compte de service `LocalSystem`. |
+L'agent remonte l'état du poste à chaque appel ; la **même réponse** lui rend les
+commandes en attente, qu'il exécute avant d'en poster le résultat. Aucun argument
+ne traverse le réseau : le serveur n'envoie qu'un identifiant de commande, dont
+l'exécution est figée dans le binaire de l'agent.
 
 ## Stack technique
 
-| Couche | Choix | Note |
-|---|---|---|
-| **Agent** | Go | Binaire statique unique, idéal GPO, faible empreinte. WMI via `yusufpapurcu/wmi`, service Windows via `kardianos/service`. |
-| **Backend** | FastAPI (async) + asyncpg / SQLAlchemy | API REST versionnée (`/api/v1`). |
-| **Base de données** | PostgreSQL | Stockage en UTC (`timestamptz`). |
-| **File de tâches** | ARQ + Redis | Nettoyage des postes inactifs, envoi d'alertes par e-mail (API Mailgun). |
-| **Frontend** | Quasar / Vue 3 | Build statique servi par nginx. |
-| **Infra** | docker-compose + Caddy | Reverse-proxy + terminaison TLS dès le départ. |
+| Couche | Choix |
+|---|---|
+| **Agent** | Go — binaire statique unique, service Windows, faible empreinte |
+| **Backend** | FastAPI (async) + SQLAlchemy, API REST versionnée |
+| **Base de données** | PostgreSQL |
+| **File de tâches** | ARQ + Redis |
+| **Console** | Quasar / Vue 3 |
+| **Infra** | docker-compose + Caddy (reverse-proxy et terminaison TLS) |
 
-## Modules & feuille de route
+## Feuille de route
 
-| Module | Priorité | Horizon |
-|---|---|---|
-| **Defender** — état, scans à distance, mise à jour des signatures | 🔴 Urgent | Phase 1 |
-| Windows Update | 🟠 Moyen | Fin d'année |
-| Déploiement logiciel | 🟡 Bas | Fin d'année |
-| Inventaire matériel / logiciel | 🟡 Bas | Fin d'année |
-
-**Jalons de la Phase 1 (Defender)**
-
-- **M0 — Fondations** : mono-repo, squelette docker-compose en HTTPS, migrations Alembic, chaîne de signature de code.
-- **M1 — Tranche verticale 🎯** : agent minimal (heartbeat WMI), enrôlement + émission de token, page de liste des postes.
-- **M2 — Agent Defender complet** : lecture complète de l'état, remontée des menaces, exécution des commandes (`quick_scan`, `full_scan`, `update_signatures`).
-- **M3 — Backend complet** : déduplication, file de commandes (unitaire et groupée), stats, recherche/filtrage, révocation de token.
-- **M4 — Console** : dashboard KPI, recherche/filtres, vue détail poste, actions de masse.
-- **M5 — Durcissement** : auth console (JWT), journal d'audit, jobs ARQ (nettoyage + alertes), rotation des tokens, rate-limiting.
-- **M6 — Packaging & GPO** : build MSI signé, distribution du certificat en *Éditeurs approuvés*, déploiement sur un OU pilote.
-
-Le détail complet figure dans [plan-projet-Tiai.md](plan-projet-Tiai.md).
-
-## Structure du dépôt
-
-```
-.
-├── agent/        # Agent Windows (Go) — service, WMI Defender, polling
-├── backend/      # API FastAPI + worker ARQ + migrations Alembic
-├── frontend/     # Console web (Quasar / Vue 3)
-├── deploy/       # docker-compose, Caddyfile, .env.example
-└── plan-projet-Tiai.md
-```
-
-Chaque composant a son propre README : [agent/](agent/README.md), [backend/](backend/README.md), [frontend/](frontend/README.md).
+| Module | État |
+|---|---|
+| Microsoft Defender | 🟢 Livré |
+| Maintenance & diagnostic | 🟢 Livré |
+| Windows Update | 🟢 Livré |
+| Déploiement logiciel | ⚪ À venir |
+| Inventaire matériel / logiciel | ⚪ À venir |
 
 ## Démarrage rapide
 
 ```bash
-# 1. Serveur — lève la stack en HTTPS
 cd deploy
 cp .env.example .env        # renseigner les secrets, placer le certificat dans deploy/certs/
-docker compose up -d        # db + redis + backend + worker + frontend + caddy
-
-# Variante dev/tests — sans certificat : Caddy en TLS auto-signé (`tls internal`)
-# + backend exposé en HTTP direct sur http://localhost:8800 (agents/curl).
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-
-# 2. Vérifier la santé du backend
-curl -k https://tiai.natimai.local/health
-
-# 3. Agent — déployé par GPO sur les postes (MSI signé en M6)
-#    Configuration : C:\ProgramData\Tiai\config.yaml (+ surcharge registre)
+docker compose up -d        # db + redis + backend + worker + console + caddy
 ```
 
-Les trois modes TLS (sans certificat / auto-signé / AC interne), les variables
-d'environnement et les paramètres de l'agent sont détaillés dans
-[DEPLOYMENT.md](DEPLOYMENT.md).
+Une variante dev/tests lève la même stack sans certificat. L'agent, lui, se
+déploie par GPO sur les postes et s'enrôle tout seul au premier démarrage.
 
-Pour le développement backend/frontend hors Docker, voir leurs README respectifs.
+Les modes TLS, les variables d'environnement du serveur et les paramètres de
+l'agent sont détaillés dans [DEPLOYMENT.md](DEPLOYMENT.md).
 
-**Prérequis serveur** : Docker + docker-compose, un certificat serveur émis par l'AC interne (ex. AD CS) pour le nom du serveur — sauf en mode dev/tests, où aucun certificat n'est requis.
-
-**Prérequis agent** : Windows avec Defender actif, droits `LocalSystem`, accès réseau au serveur (HTTPS en production, HTTP direct possible en test).
+**Prérequis** : côté serveur, Docker et un certificat émis par une AC approuvée
+des postes ; côté poste, Windows avec Defender actif et un accès réseau au
+serveur.
 
 ## Sécurité
 
-| Étape | Mesure |
-|---|---|
-| MVP (M0–M1) | TLS dès le départ ; auto-enrôlement par secret partagé → token unique par poste (chiffré via DPAPI) ; identité = `machine_uuid`. |
-| Durcissement (M5) | Auth console (JWT) ; garde-fou de ré-enrôlement + révocation de token ; journal d'audit ; rate-limiting. |
-| Plus tard | Rotation automatique des tokens ; mTLS ; attestation d'identité AD ; RBAC console. |
+- **TLS de bout en bout** entre les postes et le serveur.
+- **Auto-enrôlement contrôlé** : un secret partagé ne sert qu'à s'enregistrer,
+  chaque poste reçoit ensuite un token qui lui est propre, révocable, chiffré sur
+  le poste.
+- **Console authentifiée** (JWT), journal d'audit et limitation de débit.
+- **Catalogue de commandes fermé** : aucun exécuteur de scripts, aucune
+  modification du registre, des fichiers, du pare-feu ou des comptes — un serveur
+  compromis ne peut déclencher que les actions prévues.
+- **Binaire agent signé** par le certificat de l'AC interne.
 
-Points permanents : binaire agent **signé** (certificat de l'AC interne), validation stricte des entrées API, limitation de débit côté agent pour éviter l'effet « troupeau ».
-
-Pour signaler une vulnérabilité, contactez l'équipe sécurité de Natimai plutôt que d'ouvrir une issue publique.
-
-## Tests & couverture
-
-La CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) tourne à chaque push sur `main` et sur chaque PR :
-
-- **Backend** : `ruff format` + `ruff check` + `mypy --strict` + `pytest` **sous couverture** (service PostgreSQL pour les tests d'API). Seuil `fail_under` dans [backend/pyproject.toml](backend/pyproject.toml) — le build échoue en dessous.
-- **Agent** : `gofmt` + `go vet` + `go test` (stubs linux) + build croisé `windows/amd64` (code réel).
-- **Frontend** : `prettier --check` + `vue-tsc` (typecheck) + `vitest run --coverage` (cadré sur `src/services`, à élargir au fil des tests).
-- **PR** : un commentaire de couverture est posté automatiquement (backend + frontend).
-
-```bash
-# Backend (Postgres de test optionnel pour les tests d'API)
-cd backend && uv run pytest --cov=app --cov-report=term-missing
-# Frontend
-cd frontend && npm run test:coverage
-```
-
-### Badges de couverture (gist)
-
-Les badges en tête de README s'appuient sur un **gist** lu par shields.io, mis à jour par la CI à chaque push sur `main` (action `schneegans/dynamic-badges-action`). Configuration : gist `80b72bc52448a36bc1a08370a68c88a1` (compte `jburckel`), fichiers `Tiai-coverage-backend.json` / `Tiai-coverage-frontend.json`, secret **`GIST_SECRET`** (PAT scope `gist`). Sans `GIST_SECRET`, les étapes de badge sont simplement ignorées (CI verte).
+Pour signaler une vulnérabilité, contactez
+[Natimai Solutions](https://www.natimai.solutions/contact) plutôt que d'ouvrir
+une issue publique.
 
 ## Documentation
 
-- [plan-projet-tiai.md](plan-projet-tiai.md) — plan projet détaillé : vision, architecture, modèle de données, contrat d'API, jalons, risques.
+- [DEPLOYMENT.md](DEPLOYMENT.md) — déploiement, TLS, configuration du serveur et
+  de l'agent.
+- Chaque composant a son propre README : [agent/](agent/README.md),
+  [backend/](backend/README.md), [frontend/](frontend/README.md).
+- Le dossier [dev/](dev/) rassemble les documents de conception et de suivi du
+  projet, pour qui veut le détail des choix techniques.
 
 ## Licence
 

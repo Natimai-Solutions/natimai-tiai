@@ -2,6 +2,12 @@ import { api } from 'boot/axios';
 
 export type MachineStatus = 'up_to_date' | 'outdated' | 'needs_verification' | 'inactive';
 
+/**
+ * Windows Update facet of the machine list. A separate axis from
+ * `MachineStatus` (an antivirus axis): the two filters combine.
+ */
+export type WindowsUpdateFilter = 'pending' | 'reboot_required';
+
 export interface Machine {
   id: string;
   machine_uuid: string;
@@ -37,6 +43,13 @@ export interface Machine {
   /** Never null: a machine that has not reported is not awaiting a restart. */
   wu_reboot_required: boolean;
   last_seen: string;
+  /**
+   * Powered on with its agent reaching the server, i.e. `last_seen` is younger
+   * than the server's online window (a few agent poll intervals). Computed
+   * server-side on each read — a snapshot, like every other field here, that
+   * goes stale until the next refresh.
+   */
+  is_online: boolean;
 }
 
 /** An update Windows Update reports as applicable and not yet installed. */
@@ -93,6 +106,9 @@ export interface ListMachinesParams {
   /** Antivirus name, matched as a substring server-side. */
   antivirus?: string;
   status?: MachineStatus;
+  wu_status?: WindowsUpdateFilter;
+  /** true = only machines with at least one active threat. */
+  with_active_threats?: boolean;
   page?: number;
   page_size?: number;
 }

@@ -44,6 +44,20 @@ describe('listMachines', () => {
     });
   });
 
+  it('passes the Windows Update and threat facets through', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: { items: [], total: 0, page: 1, page_size: 50 },
+    });
+
+    // The two axes combine: the dashboard's cards each set one, and a user can
+    // then narrow with the other without either clearing the first.
+    await listMachines({ wu_status: 'pending', with_active_threats: true });
+
+    expect(api.get).toHaveBeenCalledWith('/machines', {
+      params: { wu_status: 'pending', with_active_threats: true },
+    });
+  });
+
   it('passes no params when called with no arguments', async () => {
     vi.mocked(api.get).mockResolvedValue({
       data: { items: [], total: 0, page: 1, page_size: 50 },

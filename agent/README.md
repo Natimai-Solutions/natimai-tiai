@@ -1,4 +1,4 @@
-# Tiai — Agent (Windows)
+# Tia'i — Agent (Windows)
 
 Service Windows léger, déployé par GPO, qui interroge le serveur (polling),
 remonte l'état Defender, l'antivirus enregistré (tiers compris), la session

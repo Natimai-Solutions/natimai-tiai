@@ -1,6 +1,9 @@
 """Unit tests for the up-to-date computation (no database)."""
 
-from app.features.machine.status import compute_is_up_to_date
+from datetime import timedelta
+
+from app.features.base import utcnow
+from app.features.machine.status import compute_is_up_to_date, is_online
 
 MAX_AGE = 3
 
@@ -97,6 +100,34 @@ def test_defender_entry_in_the_security_center_grants_nothing():
     # Unknown is treated the same: a product the agent could not identify must
     # not be credited with protecting the machine.
     assert not _third_party(av_product_is_defender=None)
+
+
+# --- Online window ----------------------------------------------------------
+
+OFFLINE_AFTER = 180
+
+
+def _online(seconds_ago: float) -> bool:
+    now = utcnow()
+    return is_online(now - timedelta(seconds=seconds_ago), now, OFFLINE_AFTER)
+
+
+def test_a_machine_that_just_polled_is_online():
+    assert _online(0)
+    assert _online(45)
+
+
+def test_one_missed_heartbeat_does_not_flip_a_machine_off():
+    """The window is several poll intervals wide on purpose: a blip or the
+    agent's retry back-off must not show the parc as powered off."""
+    assert _online(61)
+    assert _online(150)
+
+
+def test_a_machine_silent_past_the_window_is_offline():
+    assert not _online(OFFLINE_AFTER)  # boundary: the comparison is strict
+    assert not _online(600)
+    assert not _online(86_400)
 
 
 def test_machine_with_no_antivirus_at_all_is_not_up_to_date():

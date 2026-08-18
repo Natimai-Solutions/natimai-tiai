@@ -58,7 +58,11 @@ func mapThreatStatus(id uint32) string {
 	case 107:
 		return "block_failed"
 	default:
-		return "active"
+		// "unknown", never "active": a status id Defender adds later is a status
+		// we cannot read, not a live infection. Guessing "active" would show the
+		// console an untreated threat that Defender has in fact dealt with, and
+		// there is no way back from a false alarm of that kind.
+		return "unknown"
 	}
 }
 

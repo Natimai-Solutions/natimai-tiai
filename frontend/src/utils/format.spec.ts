@@ -5,10 +5,20 @@ import {
   antivirusStatusLabel,
   boolLabel,
   formatDateTime,
+  onlineColor,
+  onlineIcon,
+  onlineLabel,
+  protectionColor,
+  protectionLabel,
   runningModeLabel,
   sessionColor,
   sessionLabel,
   sessionTypeLabel,
+  timeAgoLabel,
+  threatSeverityColor,
+  threatSeverityLabel,
+  threatStatusColor,
+  threatStatusLabel,
   wuPendingColor,
   wuPendingLabel,
   wuSeverityColor,
@@ -29,6 +39,48 @@ describe('formatDateTime', () => {
     // depend on the runner's timezone.
     const iso = '2026-08-17T09:12:03Z';
     expect(formatDateTime(iso)).toBe(new Date(iso).toLocaleString('fr-FR'));
+  });
+});
+
+describe('timeAgoLabel', () => {
+  /** An ISO timestamp `seconds` in the past, relative to the test's own clock. */
+  const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
+
+  it('renders a dash for a missing or unparseable timestamp', () => {
+    expect(timeAgoLabel(null)).toBe('—');
+    expect(timeAgoLabel(undefined)).toBe('—');
+    expect(timeAgoLabel('')).toBe('—');
+    expect(timeAgoLabel('pas une date')).toBe('—');
+  });
+
+  it('scales the unit to the age', () => {
+    expect(timeAgoLabel(ago(5))).toBe("à l'instant");
+    expect(timeAgoLabel(ago(59))).toBe("à l'instant");
+    expect(timeAgoLabel(ago(60))).toBe('il y a 1 min');
+    expect(timeAgoLabel(ago(45 * 60))).toBe('il y a 45 min');
+    expect(timeAgoLabel(ago(3 * 3600))).toBe('il y a 3 h');
+    expect(timeAgoLabel(ago(5 * 86400))).toBe('il y a 5 j');
+  });
+
+  it('reads a clock skewed into the future as just now, not as a negative age', () => {
+    expect(timeAgoLabel(ago(-30))).toBe("à l'instant");
+  });
+});
+
+describe('onlineIcon / onlineColor / onlineLabel', () => {
+  it('encodes presence in shape as well as colour', () => {
+    expect(onlineIcon(true)).toBe('circle');
+    expect(onlineIcon(false)).toBe('radio_button_unchecked');
+    expect(onlineColor(true)).toBe('positive');
+    expect(onlineColor(false)).toBe('grey-5');
+  });
+
+  it('speaks of the machine, not of a logged-on user', () => {
+    // The session column owns "utilisateur connecté"; a poste sitting at its
+    // login screen is on with nobody on it, and both must stay readable.
+    expect(onlineLabel(true)).toBe('Poste allumé');
+    // Names both causes the server cannot tell apart.
+    expect(onlineLabel(false)).toBe('Poste éteint ou injoignable');
   });
 });
 
@@ -150,6 +202,24 @@ describe('antivirusStatusLabel', () => {
   });
 });
 
+describe('protectionLabel', () => {
+  it('keeps unknown apart from measured-and-behind', () => {
+    expect(protectionLabel(null)).toBe('État inconnu');
+    expect(protectionLabel(undefined)).toBe('État inconnu');
+    expect(protectionLabel(true)).toBe('À jour');
+    expect(protectionLabel(false)).toBe('Non à jour');
+  });
+});
+
+describe('protectionColor', () => {
+  it('greys unknown, colours the two measured states', () => {
+    expect(protectionColor(null)).toBe('grey-6');
+    expect(protectionColor(undefined)).toBe('grey-6');
+    expect(protectionColor(true)).toBe('positive');
+    expect(protectionColor(false)).toBe('negative');
+  });
+});
+
 describe('runningModeLabel', () => {
   it('renders a dash when Defender reported no mode', () => {
     expect(runningModeLabel(null)).toBe('—');
@@ -237,5 +307,58 @@ describe('wuSizeLabel', () => {
     // Zero is a real reading here, unlike null: the server already turned
     // "WUA reported nothing" into null upstream.
     expect(wuSizeLabel(0)).toBe('0 Mio');
+  });
+});
+
+describe('threatSeverityLabel', () => {
+  it('translates the ratings the agent emits', () => {
+    expect(threatSeverityLabel('low')).toBe('Faible');
+    expect(threatSeverityLabel('medium')).toBe('Moyenne');
+    // Microsoft's own spelling of the same rating.
+    expect(threatSeverityLabel('moderate')).toBe('Moyenne');
+    expect(threatSeverityLabel('high')).toBe('Élevée');
+    expect(threatSeverityLabel('severe')).toBe('Grave');
+    expect(threatSeverityLabel('unknown')).toBe('Inconnue');
+  });
+
+  it('surfaces an unmapped rating rather than swallowing it', () => {
+    expect(threatSeverityLabel('catastrophic')).toBe('catastrophic');
+    expect(threatSeverityLabel(null)).toBe('—');
+  });
+});
+
+describe('threatSeverityColor', () => {
+  it('ranks only the ratings Defender publishes', () => {
+    expect(threatSeverityColor('severe')).toBe('negative');
+    expect(threatSeverityColor('high')).toBe('warning');
+    expect(threatSeverityColor('low')).toBe('grey-7');
+    expect(threatSeverityColor('catastrophic')).toBe('grey-5');
+    expect(threatSeverityColor(null)).toBe('grey-5');
+  });
+});
+
+describe('threatStatusLabel', () => {
+  it('translates the statuses the agent emits, failures included', () => {
+    expect(threatStatusLabel('active')).toBe('Active');
+    expect(threatStatusLabel('quarantined')).toBe('En quarantaine');
+    expect(threatStatusLabel('removed')).toBe('Supprimée');
+    expect(threatStatusLabel('remove_failed')).toBe('Échec de suppression');
+    expect(threatStatusLabel('unknown')).toBe('Inconnu');
+  });
+
+  it('surfaces an unmapped status rather than swallowing it', () => {
+    expect(threatStatusLabel('detected_offline')).toBe('detected_offline');
+    expect(threatStatusLabel(null)).toBe('—');
+  });
+});
+
+describe('threatStatusColor', () => {
+  it('flags the statuses needing a human', () => {
+    expect(threatStatusColor('active')).toBe('negative');
+    // A remediation Defender failed to carry out is as bad as an untreated one.
+    expect(threatStatusColor('quarantine_failed')).toBe('negative');
+    expect(threatStatusColor('quarantined')).toBe('positive');
+    expect(threatStatusColor('allowed')).toBe('warning');
+    expect(threatStatusColor(null)).toBe('grey-5');
   });
 });

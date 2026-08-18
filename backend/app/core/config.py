@@ -108,6 +108,13 @@ class Settings(BaseSettings):
     SIGNATURE_MAX_AGE_DAYS: int = 3
     # A machine is considered inactive after this many days without heartbeat.
     INACTIVE_AFTER_DAYS: int = 30
+    # A machine counts as *online* (powered on, agent reachable) when its last
+    # heartbeat is younger than this. Three times the agent's 60 s default poll,
+    # not one: a single missed beat — a network blip, a server restart, the
+    # agent's own retry back-off — must not flash the whole parc as off. Three
+    # minutes still flips a poste within a few minutes of a real shutdown.
+    # Raise it in step with `heartbeat_interval_seconds` on a slower parc.
+    OFFLINE_AFTER_SECONDS: int = 180
 
     @model_validator(mode="after")
     def _refuse_placeholder_secrets(self) -> Self:

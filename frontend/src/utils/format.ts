@@ -4,6 +4,49 @@ export function formatDateTime(value: string | null | undefined): string {
   return new Date(value).toLocaleString('fr-FR');
 }
 
+/**
+ * How long ago an instant was, coarsely — the useful reading next to a presence
+ * indicator, where "il y a 2 min" says what an absolute timestamp makes the
+ * reader compute. The absolute time stays in the « Vu le » column beside it.
+ */
+export function timeAgoLabel(value: string | null | undefined): string {
+  if (!value) return '—';
+  const then = new Date(value).getTime();
+  if (Number.isNaN(then)) return '—';
+  const seconds = Math.round((Date.now() - then) / 1000);
+  // Negative means this browser's clock trails the server's. A few seconds of
+  // skew is ordinary, and "à l'instant" is truer than a negative age.
+  if (seconds < 60) return "à l'instant";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  return `il y a ${Math.floor(hours / 24)} j`;
+}
+
+/**
+ * Presence icon for a machine. Filled versus hollow, so the shape carries the
+ * state as well as the colour does.
+ */
+export function onlineIcon(isOnline: boolean): string {
+  return isOnline ? 'circle' : 'radio_button_unchecked';
+}
+
+/** Presence colour: green while the agent polls, grey once it goes quiet. */
+export function onlineColor(isOnline: boolean): string {
+  return isOnline ? 'positive' : 'grey-5';
+}
+
+/**
+ * Presence in words. « Poste allumé » rather than « connecté » to keep it clear
+ * of the session column, which is about a *user* being logged on — a machine at
+ * its login screen is on with nobody on it. The negative case names both causes
+ * the server cannot tell apart: a poste off, and one whose agent cannot reach it.
+ */
+export function onlineLabel(isOnline: boolean): string {
+  return isOnline ? 'Poste allumé' : 'Poste éteint ou injoignable';
+}
+
 /** Human label for a nullable boolean (e.g. Defender flags). */
 export function boolLabel(value: boolean | null | undefined): string {
   if (value === null || value === undefined) return 'Inconnu';
@@ -82,6 +125,22 @@ export function antivirusStatusLabel(
   else if (signaturesUpToDate === false) parts.push('signatures périmées');
 
   return `${name} — ${parts.join(', ')}`;
+}
+
+/**
+ * Overall protection state (`is_up_to_date`), spelled out. Unknown is kept
+ * apart from "non à jour": a machine the agent could not measure is not the
+ * same finding as one measured and found behind.
+ */
+export function protectionLabel(isUpToDate: boolean | null | undefined): string {
+  if (isUpToDate === null || isUpToDate === undefined) return 'État inconnu';
+  return isUpToDate ? 'À jour' : 'Non à jour';
+}
+
+/** Badge colour for the overall protection state: grey when never computed. */
+export function protectionColor(isUpToDate: boolean | null | undefined): string {
+  if (isUpToDate === null || isUpToDate === undefined) return 'grey-6';
+  return isUpToDate ? 'positive' : 'negative';
 }
 
 /**
@@ -183,4 +242,107 @@ export function wuTypeLabel(type: string | null | undefined): string {
 export function wuSizeLabel(sizeMb: number | null | undefined): string {
   if (sizeMb === null || sizeMb === undefined) return '—';
   return `${sizeMb.toLocaleString('fr-FR')} Mio`;
+}
+
+/**
+ * Threat severity in French. The raw values come from the agent's mapping of
+ * MSFT_MpThreat.SeverityID (low / medium / high / severe), with "moderate"
+ * accepted too since that is Microsoft's own spelling of the same rating.
+ */
+export function threatSeverityLabel(severity: string | null | undefined): string {
+  switch (severity) {
+    case 'low':
+      return 'Faible';
+    case 'medium':
+    case 'moderate':
+      return 'Moyenne';
+    case 'high':
+      return 'Élevée';
+    case 'severe':
+      return 'Grave';
+    case 'unknown':
+      return 'Inconnue';
+    // Shown as-is rather than swallowed: a rating Defender adds later should
+    // surface, not vanish.
+    default:
+      return severity || '—';
+  }
+}
+
+/** Badge colour for a threat's severity; unrated stays neutral. */
+export function threatSeverityColor(severity: string | null | undefined): string {
+  switch (severity) {
+    case 'low':
+      return 'grey-7';
+    case 'medium':
+    case 'moderate':
+      return 'amber-7';
+    case 'high':
+      return 'warning';
+    case 'severe':
+      return 'negative';
+    default:
+      return 'grey-5';
+  }
+}
+
+/**
+ * Threat status in French — the agent's mapping of
+ * MSFT_MpThreatDetection.ThreatStatusID, failures included. "Active" is the one
+ * that matters: it is the only status meaning Defender has not dealt with the
+ * detection, and it is what the dashboard counts.
+ */
+export function threatStatusLabel(status: string | null | undefined): string {
+  switch (status) {
+    case 'active':
+      return 'Active';
+    case 'cleaned':
+      return 'Nettoyée';
+    case 'quarantined':
+      return 'En quarantaine';
+    case 'removed':
+      return 'Supprimée';
+    case 'allowed':
+      return 'Autorisée';
+    case 'blocked':
+      return 'Bloquée';
+    case 'quarantine_failed':
+      return 'Échec de mise en quarantaine';
+    case 'remove_failed':
+      return 'Échec de suppression';
+    case 'allow_failed':
+      return "Échec d'autorisation";
+    case 'block_failed':
+      return 'Échec de blocage';
+    case 'abandoned':
+      return 'Abandonnée';
+    case 'unknown':
+      return 'Inconnu';
+    default:
+      return status || '—';
+  }
+}
+
+/**
+ * Badge colour for a threat status. Red for the ones needing a human — untreated
+ * or a remediation Defender failed to carry out — green once handled.
+ */
+export function threatStatusColor(status: string | null | undefined): string {
+  switch (status) {
+    case 'active':
+    case 'quarantine_failed':
+    case 'remove_failed':
+    case 'block_failed':
+      return 'negative';
+    case 'cleaned':
+    case 'quarantined':
+    case 'removed':
+    case 'blocked':
+      return 'positive';
+    case 'allowed':
+    case 'abandoned':
+      return 'warning';
+    default:
+      return 'grey-5';
+  }
 }
