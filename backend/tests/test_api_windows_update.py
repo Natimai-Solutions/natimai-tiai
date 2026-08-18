@@ -301,6 +301,35 @@ async def test_machine_list_carries_the_wu_columns(client, db_session):
     assert row["wu_reboot_required"] is True
 
 
+async def test_machine_list_filters_on_wu_state(client, db_session):
+    """The dashboard's card links: pending updates, and reboot pending.
+
+    A machine that never reported (NULL count) matches neither filter — unknown
+    is not behind.
+    """
+    headers = await _admin_headers(client, db_session)
+
+    behind = await _enroll(client, "m-wu-filter-behind")
+    await _heartbeat(
+        client, behind["token"], windows_update={"pending": [_update("u-behind")]}
+    )
+    rebooting = await _enroll(client, "m-wu-filter-reboot")
+    await _heartbeat(
+        client,
+        rebooting["token"],
+        windows_update={"reboot_required": True, "pending": []},
+    )
+    await _enroll(client, "m-wu-filter-silent")
+
+    resp = await client.get("/api/v1/machines?wu_status=pending", headers=headers)
+    assert [m["machine_uuid"] for m in resp.json()["items"]] == ["m-wu-filter-behind"]
+
+    resp = await client.get(
+        "/api/v1/machines?wu_status=reboot_required", headers=headers
+    )
+    assert [m["machine_uuid"] for m in resp.json()["items"]] == ["m-wu-filter-reboot"]
+
+
 async def test_never_reported_machine_reads_as_unknown(client, db_session):
     """NULL count = never reported, which is not "nothing to install"."""
     headers = await _admin_headers(client, db_session)

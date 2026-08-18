@@ -11,7 +11,7 @@
         placeholder="Nom, IP, antivirus ou UUID…"
         class="col-auto"
         style="min-width: 260px"
-        @update:model-value="reload"
+        @update:model-value="pushQuery"
       >
         <template #append><q-icon name="search" /></template>
       </q-input>
@@ -23,7 +23,7 @@
         placeholder="Domaine"
         class="col-auto"
         style="width: 160px"
-        @update:model-value="reload"
+        @update:model-value="pushQuery"
       />
       <q-select
         v-model="antivirus"
@@ -34,7 +34,7 @@
         outlined
         class="col-auto"
         style="width: 200px"
-        @update:model-value="reload"
+        @update:model-value="pushQuery"
       />
       <q-select
         v-model="status"
@@ -44,14 +44,32 @@
         dense
         outlined
         class="col-auto"
-        style="width: 160px"
-        @update:model-value="reload"
+        style="width: 190px"
+        @update:model-value="pushQuery"
+      />
+      <q-select
+        v-model="wu"
+        :options="wuOptions"
+        emit-value
+        map-options
+        dense
+        outlined
+        class="col-auto"
+        style="width: 210px"
+        @update:model-value="pushQuery"
+      />
+      <q-toggle
+        v-model="threatsOnly"
+        dense
+        label="Menaces actives"
+        class="col-auto"
+        @update:model-value="pushQuery"
       />
     </div>
 
     <div v-if="selected.length" class="row items-center q-mb-sm">
       <div class="text-caption text-grey q-mr-md">{{ selected.length }} sélectionné(s)</div>
-      <q-btn-dropdown color="primary" dense label="Actions de masse" icon="bolt">
+      <q-btn-dropdown color="primary" dense label="Action groupée" icon="bolt">
         <q-list>
           <template v-for="section in actionGroups" :key="section.group">
             <q-item-label header class="q-py-xs">{{ section.label }}</q-item-label>
@@ -80,33 +98,38 @@
       :rows-per-page-options="[25, 50, 100]"
       @row-click="(_evt, row) => goDetail(row)"
     >
-      <template #body-cell-is_up_to_date="props">
+      <template #body-cell-hostname="props">
         <q-td :props="props">
-          <q-badge :color="props.value ? 'positive' : 'negative'">
-            {{ props.value ? 'À jour' : 'Non à jour' }}
-          </q-badge>
-        </q-td>
-      </template>
-      <template #body-cell-needs_verification="props">
-        <q-td :props="props">
-          <q-badge v-if="props.value" color="orange">À vérifier</q-badge>
-          <span v-else>—</span>
+          <!-- Leading, so a column of dots reads as one glance down the list. -->
+          <q-icon
+            :name="onlineIcon(props.row.is_online)"
+            :color="onlineColor(props.row.is_online)"
+            size="12px"
+            class="q-mr-sm"
+          >
+            <q-tooltip>
+              {{ onlineLabel(props.row.is_online) }} — dernier contact
+              {{ timeAgoLabel(props.row.last_seen) }}
+            </q-tooltip>
+          </q-icon>
+          {{ props.value || props.row.machine_uuid }}
+          <q-icon
+            v-if="props.row.needs_verification"
+            name="warning"
+            color="orange"
+            size="16px"
+            class="q-ml-xs"
+          >
+            <q-tooltip>À vérifier — identité du poste à confirmer (doublon possible)</q-tooltip>
+          </q-icon>
         </q-td>
       </template>
       <template #body-cell-antivirus="props">
         <q-td :props="props">
-          <q-badge :color="antivirusColor(props.row.av_product_name, props.row.av_product_enabled)">
+          <q-badge :color="protectionColor(props.row.is_up_to_date)">
             {{ antivirusLabel(props.row.av_product_name) }}
           </q-badge>
-          <q-tooltip>
-            {{
-              antivirusStatusLabel(
-                props.row.av_product_name,
-                props.row.av_product_enabled,
-                props.row.av_product_signatures_up_to_date,
-              )
-            }}
-          </q-tooltip>
+          <q-tooltip>{{ antivirusTooltip(props.row) }}</q-tooltip>
         </q-td>
       </template>
       <template #body-cell-windows_update="props">
@@ -148,30 +171,37 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import {
   listAntivirusProducts,
   listMachines,
   type Machine,
   type MachineStatus,
+  type WindowsUpdateFilter,
 } from 'src/services/machines';
 import { commandActionGroups, createCommands, type CommandAction } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import {
-  antivirusColor,
   antivirusLabel,
   antivirusStatusLabel,
   formatDateTime,
+  onlineColor,
+  onlineIcon,
+  onlineLabel,
+  protectionColor,
+  protectionLabel,
   sessionColor,
   sessionLabel,
+  timeAgoLabel,
   wuPendingColor,
   wuPendingLabel,
 } from 'src/utils/format';
 
 const $q = useQuasar();
 const router = useRouter();
+const route = useRoute();
 
 const rows = ref<Machine[]>([]);
 const selected = ref<Machine[]>([]);
@@ -180,6 +210,8 @@ const search = ref('');
 const domain = ref('');
 const antivirus = ref<string | null>(null);
 const status = ref<MachineStatus | null>(null);
+const wu = ref<WindowsUpdateFilter | null>(null);
+const threatsOnly = ref(false);
 
 // Filled from the fleet on mount: the products installed are data, not a list
 // the console can know in advance. The count sits in the label so the dropdown
@@ -188,12 +220,20 @@ const antivirusOptions = ref<{ label: string; value: string | null }[]>([
   { label: 'Tous antivirus', value: null },
 ]);
 
+// « Antivirus » in the labels, not just « à jour » : since the Windows Update
+// filter joined it, this axis has to say which of the two updates it means.
 const statusOptions = [
-  { label: 'Tous statuts', value: null },
-  { label: 'À jour', value: 'up_to_date' },
-  { label: 'Non à jour', value: 'outdated' },
+  { label: 'Tous statuts antivirus', value: null },
+  { label: 'Antivirus à jour', value: 'up_to_date' },
+  { label: 'Antivirus périmé', value: 'outdated' },
   { label: 'À vérifier', value: 'needs_verification' },
   { label: 'Inactif', value: 'inactive' },
+];
+
+const wuOptions = [
+  { label: 'Toutes MAJ Windows', value: null },
+  { label: 'MAJ Windows requises', value: 'pending' },
+  { label: 'Redémarrage requis', value: 'reboot_required' },
 ];
 
 // bulkOnly: the two diagnostics stay on the detail page. Their value is reading
@@ -217,20 +257,14 @@ const columns: QTableColumn<Machine>[] = [
   // name ≠ field like the session column below: the cell renders the product and
   // its state together, while `field` keeps a sensible sort key. Sortable because
   // grouping a mixed parc by product is exactly what this column is for.
+  // The badge colour carries the overall state (`is_up_to_date`) and the tooltip
+  // the signature detail — one column where there used to be three.
   {
     name: 'antivirus',
     label: 'Antivirus',
     field: 'av_product_name',
     align: 'left',
     sortable: true,
-  },
-  { name: 'signature_version', label: 'Signatures', field: 'signature_version', align: 'left' },
-  { name: 'is_up_to_date', label: 'État', field: 'is_up_to_date', align: 'center' },
-  {
-    name: 'needs_verification',
-    label: 'Vérif.',
-    field: 'needs_verification',
-    align: 'center',
   },
   // Sortable, and it is the sort that matters: "show me the postes furthest
   // behind" is the whole point of the column. A null count (never reported)
@@ -258,6 +292,70 @@ function goDetail(row: Machine) {
   void router.push({ name: 'machine-detail', params: { id: row.id } });
 }
 
+/** One line: overall state, what the Security Center says of the product, and
+ * the signature version — the detail the badge colour compresses. */
+function antivirusTooltip(m: Machine): string {
+  const parts = [
+    protectionLabel(m.is_up_to_date),
+    antivirusStatusLabel(
+      m.av_product_name,
+      m.av_product_enabled,
+      m.av_product_signatures_up_to_date,
+    ),
+  ];
+  if (m.signature_version) parts.push(`signatures ${m.signature_version}`);
+  return parts.join(' · ');
+}
+
+const MACHINE_STATUSES: readonly string[] = [
+  'up_to_date',
+  'outdated',
+  'needs_verification',
+  'inactive',
+];
+const WU_FILTERS: readonly string[] = ['pending', 'reboot_required'];
+
+/** First scalar of a route-query value, or null (drops arrays' extra values). */
+function queryValue(v: unknown): string | null {
+  const scalar = Array.isArray(v) ? v[0] : v;
+  return typeof scalar === 'string' && scalar ? scalar : null;
+}
+
+/** Read the filters from the URL — the dashboard cards land here with one set. */
+function applyQuery() {
+  const q = route.query;
+  search.value = queryValue(q.search) ?? '';
+  domain.value = queryValue(q.domain) ?? '';
+  antivirus.value = queryValue(q.antivirus);
+  const s = queryValue(q.status);
+  status.value = s && MACHINE_STATUSES.includes(s) ? (s as MachineStatus) : null;
+  const w = queryValue(q.wu_status);
+  wu.value = w && WU_FILTERS.includes(w) ? (w as WindowsUpdateFilter) : null;
+  threatsOnly.value = queryValue(q.with_active_threats) === 'true';
+}
+
+// The URL is the single source of truth for the filters: widgets push into it,
+// and the reload happens in the route watcher — so a link from the dashboard, a
+// pasted URL and a widget change all take the same path.
+function pushQuery() {
+  const query: Record<string, string> = {};
+  if (search.value) query.search = search.value;
+  if (domain.value) query.domain = domain.value;
+  if (antivirus.value) query.antivirus = antivirus.value;
+  if (status.value) query.status = status.value;
+  if (wu.value) query.wu_status = wu.value;
+  if (threatsOnly.value) query.with_active_threats = 'true';
+  void router.replace({ query });
+}
+
+watch(
+  () => route.query,
+  () => {
+    applyQuery();
+    void reload();
+  },
+);
+
 async function reload() {
   loading.value = true;
   try {
@@ -266,6 +364,8 @@ async function reload() {
     if (domain.value) params.domain = domain.value;
     if (antivirus.value) params.antivirus = antivirus.value;
     if (status.value) params.status = status.value;
+    if (wu.value) params.wu_status = wu.value;
+    if (threatsOnly.value) params.with_active_threats = true;
     const data = await listMachines(params);
     rows.value = data.items;
   } finally {
@@ -318,6 +418,7 @@ async function sendBulk(action: CommandAction, ids: string[]) {
 }
 
 onMounted(() => {
+  applyQuery();
   void reload();
   void loadAntivirusOptions();
 });

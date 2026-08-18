@@ -7,8 +7,8 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
-from sqlalchemy import case, func, or_
+from pydantic import BaseModel, computed_field
+from sqlalchemy import case, exists, func, or_
 from sqlmodel import col, select
 
 from app.api.deps import SessionDep, require_permission
@@ -17,7 +17,14 @@ from app.core.errors import AppError, ErrorCode
 from app.features.base import utcnow
 from app.features.machine import crud as machine_crud
 from app.features.machine.models import Machine
-from app.features.machine.status import MachineStatus, status_clause
+from app.features.machine.status import (
+    MachineStatus,
+    WindowsUpdateFilter,
+    is_online,
+    status_clause,
+    windows_update_clause,
+)
+from app.features.threat.models import Threat
 from app.features.user.permissions import Action, Resource
 from app.features.windows_update.models import WindowsUpdate
 
@@ -60,6 +67,15 @@ class MachineOut(BaseModel):
     last_seen: datetime
 
     model_config = {"from_attributes": True}
+
+    # Derived here rather than stored, and served rather than left to the client:
+    # the cadence it is read against is a server setting, and computing it at
+    # serialization time keeps the answer free of any client clock skew.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_online(self) -> bool:
+        """Whether the agent has phoned home within the online window."""
+        return is_online(self.last_seen, utcnow(), settings.OFFLINE_AFTER_SECONDS)
 
 
 class PendingUpdateOut(BaseModel):
@@ -122,10 +138,15 @@ async def list_machines(
     domain: str | None = None,
     antivirus: str | None = None,
     status: MachineStatus | None = None,
+    wu_status: WindowsUpdateFilter | None = None,
+    with_active_threats: bool | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> MachineList:
-    """List machines with optional search/domain/antivirus/status filters."""
+    """List machines with optional search/domain/antivirus/status filters, plus
+    the two facets the dashboard cards link to: Windows Update state and the
+    presence of an active threat.
+    """
     stmt = select(Machine)
     if search:
         pattern = f"%{search}%"
@@ -151,6 +172,16 @@ async def list_machines(
         stmt = stmt.where(col(Machine.av_product_name).ilike(f"%{antivirus}%"))
     if status is not None:
         stmt = stmt.where(status_clause(status, utcnow(), settings.INACTIVE_AFTER_DAYS))
+    if wu_status is not None:
+        stmt = stmt.where(windows_update_clause(wu_status))
+    if with_active_threats is not None:
+        # Same definition as the dashboard's "avec menaces" KPI: at least one
+        # threat Defender has not dealt with. False selects the complement.
+        active = exists().where(
+            (col(Threat.machine_id) == col(Machine.id))
+            & (col(Threat.status) == "active")
+        )
+        stmt = stmt.where(active if with_active_threats else ~active)
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = await session.exec(

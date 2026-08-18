@@ -247,6 +247,76 @@ async def test_threats_listing_and_severity_filter(client, db_session):
     assert len(items) == 1 and items[0]["detection_id"] == "T-1"
 
 
+async def test_machine_list_reports_online_state(client, db_session):
+    """The list's presence dot: a poste that just polled is on, one silent past
+    the window is off — and the field decays on read, with no write involved."""
+    from datetime import timedelta
+
+    from sqlmodel import select
+
+    from app.core.config import settings
+    from app.features.base import utcnow
+    from app.features.machine.models import Machine
+
+    headers = await _admin_headers(client, db_session)
+    live = await _enroll(client, "m-online-live")
+    await _heartbeat(client, live["token"], agent_version="test")
+    gone = await _enroll(client, "m-online-gone")
+    await _heartbeat(client, gone["token"], agent_version="test")
+
+    # Age the second machine's heartbeat past the window, as a shutdown would.
+    row = (
+        await db_session.exec(
+            select(Machine).where(Machine.machine_uuid == "m-online-gone")
+        )
+    ).one()
+    row.last_seen = utcnow() - timedelta(seconds=settings.OFFLINE_AFTER_SECONDS + 60)
+    db_session.add(row)
+    await db_session.commit()
+
+    listed = await client.get("/api/v1/machines", headers=headers)
+    by_uuid = {m["machine_uuid"]: m for m in listed.json()["items"]}
+    assert by_uuid["m-online-live"]["is_online"] is True
+    assert by_uuid["m-online-gone"]["is_online"] is False
+
+    # And on the detail payload, which inherits the same computation.
+    detail = await client.get(f"/api/v1/machines/{gone['machine_id']}", headers=headers)
+    assert detail.json()["is_online"] is False
+
+
+async def test_machine_filter_with_active_threats(client, db_session):
+    """The dashboard's "avec menaces" card link: a handled threat (or none at
+    all) keeps the machine out of the filter; only an active one puts it in."""
+    headers = await _admin_headers(client, db_session)
+
+    hit = await _enroll(client, "m-tf-hit")
+    await _heartbeat(
+        client,
+        hit["token"],
+        threats=[{"detection_id": "TF-1", "threat_name": "EICAR", "status": "active"}],
+    )
+    handled = await _enroll(client, "m-tf-handled")
+    await _heartbeat(
+        client,
+        handled["token"],
+        threats=[{"detection_id": "TF-2", "threat_name": "Old", "status": "removed"}],
+    )
+    await _enroll(client, "m-tf-clean")
+
+    resp = await client.get(
+        "/api/v1/machines?with_active_threats=true", headers=headers
+    )
+    assert [m["machine_uuid"] for m in resp.json()["items"]] == ["m-tf-hit"]
+
+    resp = await client.get(
+        "/api/v1/machines?with_active_threats=false", headers=headers
+    )
+    assert {m["machine_uuid"] for m in resp.json()["items"]} == {
+        "m-tf-handled",
+        "m-tf-clean",
+    }
+
+
 # --- Token revocation ------------------------------------------------------
 
 

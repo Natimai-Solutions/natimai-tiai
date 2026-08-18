@@ -177,6 +177,20 @@
         :rows-per-page-options="[10, 25, 50]"
         no-data-label="Aucune menace détectée."
       >
+        <template #body-cell-severity="props">
+          <q-td :props="props">
+            <q-badge :color="threatSeverityColor(props.value)">
+              {{ threatSeverityLabel(props.value) }}
+            </q-badge>
+          </q-td>
+        </template>
+        <template #body-cell-status="props">
+          <q-td :props="props">
+            <q-badge :color="threatStatusColor(props.value)">
+              {{ threatStatusLabel(props.value) }}
+            </q-badge>
+          </q-td>
+        </template>
         <template #body-cell-detected_at="props">
           <q-td :props="props">{{ formatDateTime(props.value) }}</q-td>
         </template>
@@ -316,9 +330,15 @@ import {
   antivirusLabel,
   boolLabel,
   formatDateTime,
+  onlineLabel,
   runningModeLabel,
   sessionLabel,
   sessionTypeLabel,
+  threatSeverityColor,
+  threatSeverityLabel,
+  threatStatusColor,
+  threatStatusLabel,
+  timeAgoLabel,
   wuPendingLabel,
   wuSeverityColor,
   wuSeverityLabel,
@@ -372,7 +392,15 @@ const identityRows = computed(() =>
         },
         // Kept adjacent to the two rows above: the session is only as fresh as
         // the last heartbeat, and this is the timestamp that says how fresh.
-        { label: 'Vu le', value: formatDateTime(machine.value.last_seen) },
+        // The presence rides along rather than taking a row of its own — it is
+        // read from this very timestamp, and it is what says whether a command
+        // queued here will be picked up now or at the poste's next boot.
+        {
+          label: 'Vu le',
+          value: `${formatDateTime(machine.value.last_seen)} (${timeAgoLabel(
+            machine.value.last_seen,
+          )}) — ${onlineLabel(machine.value.is_online)}`,
+        },
       ]
     : [],
 );

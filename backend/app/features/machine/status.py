@@ -90,6 +90,21 @@ def _third_party_protects(
     return signatures_up_to_date is not False
 
 
+def is_online(last_seen: datetime, now: datetime, offline_after_seconds: int) -> bool:
+    """Whether the machine is powered on with its agent reaching the server.
+
+    Read from ``last_seen`` alone: the agent polls on a fixed interval, so a
+    heartbeat younger than a few of those intervals is the only evidence the
+    server has that a poste is up. Deliberately *not* the same question as the
+    ``INACTIVE`` status, which spans thirty days and means "this record looks
+    abandoned" — this one spans minutes and means "it is on right now".
+
+    Computed on read and never stored: unlike ``is_up_to_date``, it decays with
+    the clock, so no write would ever mark a poste as gone.
+    """
+    return (now - last_seen).total_seconds() < offline_after_seconds
+
+
 class MachineStatus(enum.StrEnum):
     """Console status filters (also usable as command broadcast targets)."""
 
@@ -116,3 +131,26 @@ def status_clause(
         case MachineStatus.INACTIVE:
             cutoff = now - timedelta(days=inactive_after_days)
             return col(Machine.last_seen) < cutoff
+
+
+class WindowsUpdateFilter(enum.StrEnum):
+    """Console Windows Update filters for the machine list.
+
+    Not folded into ``MachineStatus``: that enum is an antivirus axis (and a
+    command broadcast target), and a poste sits on both axes at once — filtering
+    "antivirus périmé" must stay combinable with "MAJ Windows requises".
+    """
+
+    PENDING = "pending"
+    REBOOT_REQUIRED = "reboot_required"
+
+
+def windows_update_clause(wu: WindowsUpdateFilter) -> ColumnElement[bool]:
+    """Build the SQL predicate selecting machines in the given WU state."""
+    match wu:
+        case WindowsUpdateFilter.PENDING:
+            # Strictly positive: a NULL count means the agent never reported a
+            # Windows Update search — unknown, not behind.
+            return col(Machine.wu_pending_count) > 0
+        case WindowsUpdateFilter.REBOOT_REQUIRED:
+            return col(Machine.wu_reboot_required).is_(True)

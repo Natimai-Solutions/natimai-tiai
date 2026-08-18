@@ -15,7 +15,12 @@ func TestMapSeverity(t *testing.T) {
 }
 
 func TestMapThreatStatus(t *testing.T) {
-	cases := map[uint32]string{1: "active", 3: "quarantined", 4: "removed", 5: "allowed", 999: "active"}
+	// 999: an id we cannot read is reported "unknown", not "active" — the console
+	// must not show a live infection on a status Defender never claimed.
+	cases := map[uint32]string{
+		1: "active", 2: "cleaned", 3: "quarantined", 4: "removed", 5: "allowed",
+		6: "blocked", 0: "unknown", 999: "unknown",
+	}
 	for id, want := range cases {
 		if got := mapThreatStatus(id); got != want {
 			t.Errorf("mapThreatStatus(%d) = %q, want %q", id, got, want)

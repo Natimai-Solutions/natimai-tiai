@@ -1,4 +1,4 @@
-# Tiai — Backend
+# Tia'i — Backend
 
 API FastAPI (async) + worker ARQ. Architecture « features » (inspirée de
 `fastapi-ecommerce`), SQLModel sur PostgreSQL (psycopg 3), migrations Alembic.

@@ -1,4 +1,4 @@
-# Tiai — Frontend (console)
+# Tia'i — Frontend (console)
 
 SPA Quasar / Vue 3 autonome (TypeScript). Sert la console de supervision.
 
