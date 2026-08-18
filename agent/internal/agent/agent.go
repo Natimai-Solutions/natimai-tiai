@@ -14,6 +14,7 @@ import (
 	"log"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tiai/agent/internal/api"
@@ -53,6 +54,22 @@ type Agent struct {
 	mu       sync.Mutex
 	running  map[string]struct{} // command ids queued or executing
 	wg       sync.WaitGroup
+
+	// Security Center read failures are permanent on a host without one (a
+	// Windows Server SKU has no root\SecurityCenter2), so the first is logged and
+	// the rest demoted to debug rather than printed on every poll for the life of
+	// the service.
+	avErrLogged atomic.Bool
+
+	// Windows Update runs on its own clock: a background cycle every few hours
+	// fills wu, and the heartbeat ships what it holds. A WU search takes minutes,
+	// so it can neither run inline in the poll loop nor be re-read per heartbeat.
+	wu wuCache
+	// Serialises everything that opens a WUA session — the background cycle, a
+	// wu_scan, an install. Two concurrent sessions is the documented way to get
+	// "another installation is in progress" back from Windows, and the collection
+	// running six-hourly *will* eventually land on top of an install otherwise.
+	wuOp sync.Mutex
 }
 
 // New creates an agent from config.
@@ -76,6 +93,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.identity = id
 	a.host = sysinfo.Collect()
 	log.Printf("agent: identity %s (hostname %s)", id.MachineUUID, a.host.Hostname)
+	if !a.cfg.ReportsUsername() {
+		// Traced once so the setting is auditable from the log. The name itself
+		// is never logged, at any level.
+		log.Printf("agent: logged-on username reporting disabled (presence only)")
+	}
 
 	q, err := queue.New(filepath.Join(dir, "queue"), a.cfg.QueueMaxItems)
 	if err != nil {
@@ -89,6 +111,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.running = make(map[string]struct{})
 	a.wg.Add(1)
 	go a.worker(ctx)
+	a.wg.Add(1)
+	go a.wuLoop(ctx)
 	defer a.wg.Wait()
 
 	base := time.Duration(a.cfg.HeartbeatIntervalSeconds) * time.Second
@@ -159,19 +183,55 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	if err != nil {
 		log.Printf("agent: defender threats: %v", err)
 	}
+	// On failure sess stays nil, the block is omitted, and the server keeps the
+	// last known session rather than being told "nobody" on no evidence.
+	sess, err := collector.ReadSessionState(ctx, a.cfg.ReportsUsername())
+	if err != nil {
+		log.Printf("agent: session state: %v", err)
+	}
+	// Read here and not from a.host: the host attributes are collected once at
+	// start-up, whereas the address changes under a running agent (DHCP
+	// renewal, dock, VPN). Same contract as above on failure — "" is omitted
+	// from the payload, so the server keeps the last known address.
+	ip, err := collector.ReadIPAddress(ctx)
+	if err != nil {
+		log.Printf("agent: ip address: %v", err)
+	}
+	// Which antivirus actually guards this machine — Defender's own WMI classes
+	// cannot answer that once a third-party product has taken over. On failure av
+	// stays nil, the block is omitted, and the server keeps the last known
+	// product rather than being told "none" on no evidence.
+	av, err := collector.ReadAVProduct(ctx)
+	if err != nil {
+		a.logAVError(err)
+	}
+
+	// Attached only when the background cycle has produced something the server
+	// has not acknowledged — nil on the vast majority of heartbeats, which then
+	// leave the stored Windows Update state exactly as it was.
+	wu, wuGen := a.wu.pending()
 
 	fp := a.identity.Fingerprint
 	resp, err := a.client.Heartbeat(ctx, models.HeartbeatRequest{
-		Hostname:     a.host.Hostname,
-		Domain:       a.host.Domain,
-		OSVersion:    a.host.OSVersion,
-		AgentVersion: Version,
-		Defender:     state,
-		Fingerprint:  &fp,
-		Threats:      threats,
+		Hostname:      a.host.Hostname,
+		Domain:        a.host.Domain,
+		IPAddress:     ip,
+		OSVersion:     a.host.OSVersion,
+		AgentVersion:  Version,
+		Defender:      state,
+		AVProduct:     av,
+		Session:       sess,
+		WindowsUpdate: wu,
+		Fingerprint:   &fp,
+		Threats:       threats,
 	})
 	if err != nil {
 		return err
+	}
+	if wu != nil {
+		// Only now: a heartbeat that never reached the server has not reported
+		// anything, and the block has to ride the next one.
+		a.wu.markSent(wuGen)
 	}
 	if n := len(resp.Commands); n > 0 {
 		log.Printf("agent: heartbeat ok, %d command(s) to run", n)
@@ -182,6 +242,22 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		a.accept(cmd)
 	}
 	return nil
+}
+
+// logAVError reports a Security Center read failure once, then at debug level.
+//
+// Unlike every other collector, this one fails *permanently* on a legitimate
+// host: Windows Server ships no Security Center, so root\SecurityCenter2 does
+// not exist and the query can only ever fail there. Logging it on each poll
+// would fill the log of every server in the parc with the same line forever,
+// while suppressing it outright would hide a genuine WMI breakage on a
+// workstation. One line, then silence.
+func (a *Agent) logAVError(err error) {
+	if a.avErrLogged.Swap(true) {
+		logging.Debugf("agent: security center: %v", err)
+		return
+	}
+	log.Printf("agent: security center: %v (further failures logged at debug level)", err)
 }
 
 // accept hands a command to the worker without blocking the polling loop.
@@ -236,6 +312,7 @@ func (a *Agent) worker(ctx context.Context) {
 // it can't be delivered right now.
 func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	var run func(context.Context) (string, error)
+	long := false
 	switch cmd.Type {
 	case "quick_scan":
 		run = collector.RunQuickScan
@@ -243,12 +320,36 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 		run = collector.RunFullScan
 	case "update_signatures":
 		run = collector.UpdateSignatures
+	case "wu_scan":
+		run = a.runWUScan
+	case "wu_install":
+		long = true
+		run = func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, false) }
+	case "wu_install_full":
+		long = true
+		run = func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, true) }
+	case "reboot":
+		run = collector.Reboot
 	default:
-		log.Printf("agent: unknown command type %q (id %s), ignoring", cmd.Type, cmd.ID)
-		return
+		// The maintenance catalogue is looked up rather than switched on: its
+		// entries differ only by data, so a new command is one table row in the
+		// collector and nothing here (plan-commandes-distantes.md §4).
+		info, ok := collector.LookupMaintenance(cmd.Type)
+		if !ok {
+			log.Printf("agent: unknown command type %q (id %s), ignoring", cmd.Type, cmd.ID)
+			return
+		}
+		long = info.Long
+		cmdType := cmd.Type
+		run = func(ctx context.Context) (string, error) {
+			return collector.RunMaintenance(ctx, cmdType)
+		}
 	}
 
 	log.Printf("agent: executing %s (id %s)", cmd.Type, cmd.ID)
+	if long {
+		a.reportRunning(ctx, cmd)
+	}
 	start := time.Now()
 	output, err := run(ctx)
 
@@ -267,6 +368,22 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 		if qerr := a.queue.Enqueue(queue.Item{CommandID: cmd.ID, Result: res}); qerr != nil {
 			log.Printf("agent: queue result %s: %v", cmd.ID, qerr)
 		}
+	}
+}
+
+// reportRunning tells the server a long command has started, so the console
+// reads "en cours" instead of "transmise" for the tens of minutes an sfc or a
+// dism takes — the difference between a fleet that looks stuck and one that is
+// working.
+//
+// Best-effort by design: this is a progress hint, not a result. A failure is
+// logged at debug level and never queued for replay — a `running` replayed
+// after the verdict would be stale, and the server refuses it anyway rather
+// than reopening a closed command.
+func (a *Agent) reportRunning(ctx context.Context, cmd models.Command) {
+	res := models.CommandResult{Status: "running"}
+	if err := a.client.PostResult(ctx, cmd.ID, res); err != nil {
+		logging.Debugf("agent: could not mark %s (id %s) as running: %v", cmd.Type, cmd.ID, err)
 	}
 }
 

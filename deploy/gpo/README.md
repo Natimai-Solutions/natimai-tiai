@@ -42,6 +42,11 @@ l'*ExecutionPolicy* locale) :
 | Script Name | `powershell.exe` |
 | Script Parameters | `-NoProfile -ExecutionPolicy Bypass -File \\natimai.local\NETLOGON\Tiai\Install-TiaiAgent.ps1 -SourceExe \\natimai.local\NETLOGON\Tiai\tiai-agent.exe -ApiBaseUrl https://tiai.natimai.local` |
 
+Pour un parc où le **nom** de l'utilisateur connecté ne doit pas remonter au
+serveur, ajouter `-ReportSessionUsername false` aux paramètres ci-dessus : la
+console verra alors qu'une session est ouverte, sans savoir de qui. Le réglage
+est repris au démarrage suivant, sans réinstaller l'agent.
+
 Activer aussi **Computer Configuration → Policies → Administrative Templates →
 System → Logon → Always wait for the network at computer startup and logon**.
 Sans ça, le premier démarrage peut partir avant que le partage soit joignable
@@ -65,7 +70,8 @@ dans `token.dat`).
    si le binaire change → c'est le mécanisme de mise à jour : on remplace le
    fichier sur le partage, les postes se mettent à jour au démarrage suivant) ;
 2. écrit `HKLM\SOFTWARE\Tiai` (`ApiBaseURL`, `EnrollmentSecret`, `LogLevel`,
-   intervalles) — **à chaque exécution**, donc un changement de GPO est repris ;
+   intervalles, `ReportSessionUsername`) — **à chaque exécution**, donc un
+   changement de GPO est repris ;
 3. `install` + `Automatic` + `start`.
 
 Aucun `config.yaml` n'est déposé : l'agent tolère son absence et se configure

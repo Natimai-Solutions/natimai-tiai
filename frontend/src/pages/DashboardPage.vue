@@ -7,7 +7,7 @@
     </div>
 
     <div class="row q-col-gutter-md q-mb-lg">
-      <div v-for="kpi in kpis" :key="kpi.label" class="col-6 col-sm-4 col-md-2">
+      <div v-for="kpi in kpis" :key="kpi.label" class="col-6 col-sm-4 col-md-3">
         <q-card flat bordered>
           <q-card-section class="text-center">
             <q-icon :name="kpi.icon" :color="kpi.color" size="28px" />
@@ -111,6 +111,18 @@ const kpis = computed(() =>
           value: stats.value.with_active_threats,
           icon: 'coronavirus',
           color: 'negative',
+        },
+        {
+          label: 'MAJ en attente',
+          value: stats.value.machines_wu_pending,
+          icon: 'system_update',
+          color: 'warning',
+        },
+        {
+          label: 'Redémarrage requis',
+          value: stats.value.machines_reboot_required,
+          icon: 'restart_alt',
+          color: 'orange',
         },
       ]
     : [],

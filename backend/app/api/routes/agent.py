@@ -2,9 +2,10 @@
 
 import uuid
 from datetime import datetime
+from ipaddress import ip_address
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlmodel import select
 
 from app.api.deps import CurrentMachine, SessionDep, verify_enrollment_secret
@@ -12,12 +13,19 @@ from app.core import security
 from app.core.config import settings
 from app.features.base import utcnow
 from app.features.command import crud as command_crud
-from app.features.command.models import Command, CommandStatus
+from app.features.command.models import (
+    AGENT_REPORTABLE_STATUSES,
+    TERMINAL_STATUSES,
+    Command,
+    CommandStatus,
+)
 from app.features.machine import fingerprint
 from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
 from app.features.threat.crud import upsert_threats
 from app.features.threat.schemas import ThreatReport
+from app.features.windows_update.crud import replace_pending
+from app.features.windows_update.schemas import WUStateReport
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -51,6 +59,13 @@ class EnrollResponse(BaseModel):
     token: str
 
 
+# Bounds the third-party product name that reaches the column and the console.
+# Real names run to ~40 characters ("Bitdefender Endpoint Security Tools"); this
+# leaves ample room while keeping a vendor string we do not control from growing
+# without limit.
+AV_PRODUCT_NAME_MAX = 120
+
+
 class DefenderState(BaseModel):
     """Defender status reported on each heartbeat."""
 
@@ -61,6 +76,51 @@ class DefenderState(BaseModel):
     signature_age_days: int | None = None
     last_quick_scan: datetime | None = None
     last_full_scan: datetime | None = None
+    # Normal / Passive / SxS Passive Mode / EDR Block Mode (AMRunningMode).
+    running_mode: str | None = None
+
+
+class AVProduct(BaseModel):
+    """Antivirus registered with the Windows Security Center (client SKUs only).
+
+    Sent whenever the agent could read the registry, empty name included: "no
+    antivirus at all" is a finding worth storing. An absent block means the agent
+    could not look — no Security Center on Windows Server — and the server then
+    keeps what it had. Every field has a default so a malformed block degrades
+    instead of 422-ing the whole heartbeat.
+    """
+
+    name: str = ""
+    enabled: bool | None = None
+    signatures_up_to_date: bool | None = None
+    is_defender: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        """Trim and bound the product name — never 422.
+
+        Same trade-off as ``ip_address``: this is a third-party vendor's display
+        string, so it is bounded here rather than trusted, and a value we dislike
+        costs the name and not the Defender state, the threats and the command
+        pickup riding along in the same request.
+        """
+        return value.strip()[:AV_PRODUCT_NAME_MAX]
+
+
+class SessionState(BaseModel):
+    """Interactive session reported on each heartbeat.
+
+    ``username`` is absent when the agent is configured not to report it
+    (report_session_username=false): presence is still known, the name never
+    leaves the machine. Every field has a default so a malformed block degrades
+    to "nobody" instead of 422-ing the whole heartbeat, Defender state included.
+    """
+
+    user_present: bool = False
+    username: str | None = None
+    state: str | None = None  # active / disconnected
+    is_remote: bool = False
 
 
 class HeartbeatRequest(BaseModel):
@@ -68,11 +128,39 @@ class HeartbeatRequest(BaseModel):
 
     hostname: str | None = None
     domain: str | None = None
+    ip_address: str | None = None
     os_version: str | None = None
     agent_version: str | None = None
     defender: DefenderState | None = None
+    av_product: AVProduct | None = None
+    session: SessionState | None = None
+    # Sent only on the heartbeats that follow a Windows Update collection — the
+    # agent runs that on its own slow cycle (hours), because a WU search takes
+    # minutes. Absent on every other heartbeat, which leaves the stored state
+    # alone exactly like an absent Defender block.
+    windows_update: WUStateReport | None = None
     fingerprint: Fingerprint | None = None
     threats: list[ThreatReport] = []
+
+    @field_validator("ip_address")
+    @classmethod
+    def _normalize_ip(cls, value: str | None) -> str | None:
+        """Keep a parseable address, drop anything else — never 422.
+
+        Same trade-off as SessionState's defaults: one malformed field must not
+        cost us the Defender state, the threats and the command pickup riding
+        along in the same request. Dropping it to None means the heartbeat
+        simply doesn't touch the stored address.
+
+        Parsing also bounds what reaches the column and the console: only an
+        IPv4/IPv6 literal gets through, in its canonical form.
+        """
+        if value is None:
+            return None
+        try:
+            return str(ip_address(value))
+        except ValueError:
+            return None
 
 
 class CommandOut(BaseModel):
@@ -88,12 +176,45 @@ class HeartbeatResponse(BaseModel):
     commands: list[CommandOut]
 
 
+# Bounds what one command result can write to the database and pour into the
+# console's result dialog. The agent truncates to the same budget before
+# posting; this is the server not taking its word for it.
+RESULT_TEXT_MAX = 64 * 1024
+
+
 class CommandResult(BaseModel):
-    """Execution result posted back by the agent."""
+    """Execution result posted back by the agent.
+
+    ``status`` is also the progress ping: a long command (sfc, dism, chkdsk)
+    posts ``running`` when it starts, then its final verdict.
+    """
 
     status: CommandStatus
     output: str | None = None
     error: str | None = None
+
+    @field_validator("status")
+    @classmethod
+    def _reportable(cls, value: CommandStatus) -> CommandStatus:
+        """Reject the statuses that are the server's to write, not the agent's.
+
+        Unlike the degrade-don't-422 fields above, this one *is* worth
+        rejecting: there is no partial value to salvage, and silently accepting
+        "pending" or "expired" would let an agent rewrite the queue it is only
+        meant to drain.
+        """
+        if value not in AGENT_REPORTABLE_STATUSES:
+            allowed = ", ".join(sorted(AGENT_REPORTABLE_STATUSES))
+            raise ValueError(f"status must be one of: {allowed}")
+        return value
+
+    @field_validator("output", "error")
+    @classmethod
+    def _bound_text(cls, value: str | None) -> str | None:
+        """Cap the reported text rather than 422 it — a truncated verdict beats none."""
+        if value is None or len(value) <= RESULT_TEXT_MAX:
+            return value
+        return value[:RESULT_TEXT_MAX] + "\n[…] sortie tronquée par le serveur"
 
 
 # --- Routes ----------------------------------------------------------------
@@ -169,6 +290,11 @@ async def heartbeat(
         machine.hostname = payload.hostname
     if payload.domain is not None:
         machine.domain = payload.domain
+    if payload.ip_address is not None:
+        # Conditional like the other attributes: an agent that could not read an
+        # address omits the field, and the last known one is better than none —
+        # it is dated by last_seen anyway.
+        machine.ip_address = payload.ip_address
     if payload.os_version is not None:
         machine.os_version = payload.os_version
     if payload.agent_version is not None:
@@ -183,11 +309,54 @@ async def heartbeat(
         machine.signature_age_days = d.signature_age_days
         machine.last_quick_scan = d.last_quick_scan
         machine.last_full_scan = d.last_full_scan
+        machine.running_mode = d.running_mode
+
+    if payload.av_product is not None:
+        # Straight assignment, like the session block below: an antivirus being
+        # uninstalled must *clear* the name stored earlier, or the console would
+        # keep crediting a product that is no longer there. The empty name the
+        # agent then sends is what carries that.
+        av = payload.av_product
+        machine.av_product_name = av.name
+        machine.av_product_enabled = av.enabled
+        machine.av_product_signatures_up_to_date = av.signatures_up_to_date
+        machine.av_product_is_defender = av.is_defender
+
+    if payload.defender is not None or payload.av_product is not None:
+        # Recomputed whenever *either* source moved: a machine whose third-party
+        # antivirus was just uninstalled changes state without its Defender block
+        # changing at all, and the reverse holds too.
         machine.is_up_to_date = compute_is_up_to_date(
             av_enabled=machine.av_enabled,
             rtp_enabled=machine.rtp_enabled,
             signature_age_days=machine.signature_age_days,
             max_age_days=settings.SIGNATURE_MAX_AGE_DAYS,
+            av_product_enabled=machine.av_product_enabled,
+            av_product_signatures_up_to_date=machine.av_product_signatures_up_to_date,
+            av_product_is_defender=machine.av_product_is_defender,
+        )
+
+    if payload.session is not None:
+        # `s`, not `session`: `session` is the database session in this scope.
+        s = payload.session
+        machine.session_user_present = s.user_present
+        # Straight assignment, like the defender block above: a logoff, or the
+        # privacy toggle being turned off, must *clear* a name stored earlier or
+        # the console would keep displaying it forever.
+        machine.session_username = s.username
+        machine.session_state = s.state
+        machine.session_is_remote = s.is_remote
+
+    if payload.windows_update is not None:
+        wu = payload.windows_update
+        machine.wu_reboot_required = wu.reboot_required
+        machine.wu_last_search = wu.last_search_time
+        machine.wu_last_install = wu.last_install_time
+        # Counted from the reported list rather than trusted from a field of its
+        # own: the badge in the machine list and the table on the detail page
+        # then cannot disagree about the same machine.
+        machine.wu_pending_count = await replace_pending(
+            session, machine.id, wu.pending
         )
 
     if payload.fingerprint is not None:
@@ -238,10 +407,23 @@ async def command_result(
     machine: CurrentMachine,
     session: SessionDep,
 ) -> dict[str, str]:
-    """Record the result of a command executed by the agent."""
+    """Record the result — or the start — of a command executed by the agent."""
     cmd = await session.get(Command, command_id)
     if cmd is None or cmd.machine_id != machine.id:
         return {"status": "ignored"}
+
+    if payload.status == CommandStatus.RUNNING:
+        # Progress ping from a long command (sfc, dism, chkdsk): it says "I have
+        # started", not "I am done", so the command is *not* closed — no
+        # finished_at, and the output/error columns are left alone for the final
+        # verdict to fill. Guarded against arriving late: a duplicate delivery
+        # must never reopen a command that already has one.
+        if cmd.status in TERMINAL_STATUSES:
+            return {"status": "ignored"}
+        cmd.status = CommandStatus.RUNNING
+        cmd.started_at = utcnow()
+        await session.commit()
+        return {"status": "ok"}
 
     cmd.status = payload.status
     cmd.result_output = payload.output

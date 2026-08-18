@@ -1,5 +1,7 @@
 # Phase 2 — Windows Update : plan de travail
 
+> **Statut : implémenté (2026-08-17)** — cf. §7 en fin de document.
+>
 > Objectif : remonter l'état Windows Update de chaque poste dans la console, et pouvoir **forcer la mise à jour d'un poste à distance**.
 > Réutilise l'agent, le canal polling et la file de commandes existants (cf. `plan-projet-tiai.md` §Phase 2) — seuls de nouveaux types de commandes et un nouveau bloc de données s'ajoutent.
 
@@ -176,3 +178,50 @@ Voir §5 Vérification. Puis : mise à jour de `plan-projet-tiai.md` (suivi d'av
 - **TTL des commandes** : défaut 60 min conservé. Pour `reboot`, ne **pas** allonger (un reboot différé de 24 h serait une surprise) ; pour `wu_install*`, un TTL plus long (ex. 4 h) est raisonnable — exposé plus tard si besoin.
 - **Encodage/JSON PowerShell** : réutiliser `runPowerShell()` (UTF-8 déjà géré) ; `ConvertTo-Json` avec `-Depth` suffisant ; parser tolérant aux champs absents (`AllowMissingFields` esprit Defender).
 - **Postes sans WU fonctionnel** (service désactivé, WMI cassé) : la collecte échoue en log sans bloquer le heartbeat (pattern best-effort existant) ; la commande échoue avec un message actionnable.
+---
+
+## 7. État de réalisation *(2026-08-17)*
+
+**J1 à J4 livrés.** Le suivi détaillé vit dans `plan-projet-tiai.md` §Suivi
+d'avancement ; ne sont notées ici que les décisions prises **en cours de route**,
+là où ce plan laissait le choix ouvert ou s'est révélé inexact.
+
+| Point du plan | Ce qui a été fait |
+|---|---|
+| Migration `0005_windows_update` | Devenue **`0008_windows_update`** : les migrations `0005` à `0007` (session, adresse IP, antivirus tiers) ont été livrées entre l'écriture de ce plan et sa mise en œuvre. `down_revision = "0007_av_product"`. |
+| Statut intermédiaire `running` (J1) | **Déjà câblé** par le chantier « commandes de maintenance », qui l'a implémenté en s'appuyant sur cette spécification. Les deux installations s'y branchent sans une ligne de backend. |
+| Factorisation du catalogue d'actions console (J4) | **Déjà faite**, même chantier. Il ne restait qu'à ajouter une section « Windows Update » et quatre entrées. |
+| `TelemetryIntervalSeconds` — « à trancher en revue » | **Supprimé.** La clé n'était lue par aucun code depuis l'origine ; le cycle lent qu'elle annonçait existe désormais pour de bon sous le nom `wu_collect_interval_seconds`, avec un défaut de 6 h et non de 15 min. Une valeur résiduelle dans un YAML déployé est ignorée sans erreur. |
+| `wu_pending_count` | **Dérivé côté serveur** de la liste reçue, plutôt que remonté comme champ propre : le badge de la liste et le tableau de la fiche détail ne peuvent alors pas se contredire sur le même poste. |
+| Sévérité | **Normalisée en minuscules** côté serveur (`Critical` → `critical`), pour qu'un agent ancien et un agent récent atterrissent sur la valeur unique dont la console tire ses couleurs. Les MAJ en attente sont renvoyées **triées critique d'abord** : le vocabulaire MSRC trié alphabétiquement donne critical < important < low < moderate, ce qui est pire qu'inutile. |
+| Fusion de postes | Les MAJ en attente du doublon ne sont **pas** rattachées au poste conservé : c'est de l'état courant et non de l'historique, elles entreraient en collision avec son propre set et son compteur ne correspondrait plus à ses lignes. La suppression du doublon les efface par cascade, le cycle suivant rétablit la vérité. |
+
+**Deux bugs attrapés par leurs propres tests, tous deux sur le chemin nominal :**
+
+1. Les apostrophes de `Type='Software'` refermaient le littéral PowerShell — le
+   script d'installation **ne se parsait pas du tout**, sur la variante sans
+   pilotes, c'est-à-dire celle de `wu_install`. Trouvé par un test qui fait
+   parser les deux scripts par le parseur de PowerShell lui-même, ajouté
+   précisément parce que la branche d'installation ne peut pas être exercée sans
+   patcher une machine.
+2. Une extension de pilote de quelques kilo-octets s'affichait « 0 Mio » à côté
+   d'une icône de téléchargement. La conversion plancher désormais à 0,1 Mio.
+
+### Vérification effectuée (§5)
+
+1. **Qualité locale** — 178 tests backend verts sur Postgres 16, 98 % de
+   couverture (`ruff`, `mypy --strict`) ; migration rejouée `upgrade`/`downgrade`/`upgrade` sur base
+   vierge ; Go `gofmt`/`vet`/`test` verts, builds croisés `windows/amd64`,
+   `windows/arm64` et `linux` ; 76 vitest, `vue-tsc` et `prettier` verts.
+2. **Boucle complète sur poste réel contre la stack `docker compose` dev** —
+   agent réel enrôlé, `wu_scan` déclenché depuis l'API console, **19 mises à
+   jour** remontées en 13 s (accents intacts jusqu'en base), colonnes machine et
+   table `windows_updates` renseignées, dates `LastSearchSuccessDate` /
+   `LastInstallationSuccessDate` lues, pilotes correctement typés. Cycle de fond
+   à 2 min confirmant l'upsert **en place** (`first_seen` conservé, `last_seen`
+   avancé) et la retenue du bloc : **18 heartbeats, 2 écritures**.
+3. **Reste à valider sur poste réel** — une installation effective
+   (`wu_install` / `wu_install_full`) et un `reboot`. Ce sont les deux seules
+   branches qu'on ne peut pas exercer sans patcher ou redémarrer une machine ;
+   la syntaxe des scripts, le filtrage par variante et la lecture des
+   `ResultCode` sont couverts par des tests, l'exécution réelle non.

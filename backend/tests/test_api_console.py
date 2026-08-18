@@ -6,6 +6,8 @@ overview, machine status filtering, threat listing, and token revocation.
 
 from datetime import timedelta
 
+import pytest
+
 
 async def _admin_headers(client, db_session) -> dict[str, str]:
     from app.features.user import crud
@@ -295,6 +297,403 @@ async def test_machine_detail_exposes_defender_state(client, db_session):
     assert "last_quick_scan" in body and "created_at" in body
 
 
+# --- Logged-on session ------------------------------------------------------
+
+
+async def _detail(client, headers, machine_id) -> dict:
+    resp = await client.get(f"/api/v1/machines/{machine_id}", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def _list_row(client, headers, machine_uuid) -> dict:
+    resp = await client.get(
+        "/api/v1/machines", headers=headers, params={"search": machine_uuid}
+    )
+    assert resp.status_code == 200, resp.text
+    rows = [m for m in resp.json()["items"] if m["machine_uuid"] == machine_uuid]
+    assert len(rows) == 1
+    return rows[0]
+
+
+async def test_heartbeat_stores_session_user(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-user")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        session={
+            "user_present": True,
+            "username": "CORP\\jdupont",
+            "state": "active",
+            "is_remote": False,
+        },
+    )
+
+    row = await _list_row(client, headers, "m-sess-user")
+    assert row["session_user_present"] is True
+    assert row["session_username"] == "CORP\\jdupont"
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["session_state"] == "active"
+    assert body["session_is_remote"] is False
+
+
+async def test_heartbeat_session_without_username_keeps_presence(client, db_session):
+    """Privacy toggle off: presence is reported, the name never arrives."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-anon")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        session={"user_present": True, "state": "active"},
+    )
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["session_user_present"] is True
+    assert body["session_username"] is None
+    assert body["session_state"] == "active"
+
+
+async def test_heartbeat_session_logoff_clears_username(client, db_session):
+    """A logoff must erase a name stored earlier, not leave it on display."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-logoff")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        session={"user_present": True, "username": "CORP\\jdupont"},
+    )
+    await _heartbeat(client, enrolled["token"], session={"user_present": False})
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["session_user_present"] is False
+    assert body["session_username"] is None
+
+
+async def test_heartbeat_without_session_block_preserves_last_value(client, db_session):
+    """Same contract as the defender block: an absent block overwrites nothing.
+
+    An agent older than the feature — or one whose WTS read failed — must not
+    silently blank the last known session.
+    """
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-keep")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        session={"user_present": True, "username": "CORP\\jdupont"},
+    )
+    await _heartbeat(client, enrolled["token"], hostname="PC-KEEP")
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["hostname"] == "PC-KEEP"
+    assert body["session_user_present"] is True
+    assert body["session_username"] == "CORP\\jdupont"
+
+
+async def test_session_never_reported_stays_null(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-unknown")
+    await _heartbeat(client, enrolled["token"])
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["session_user_present"] is None
+    assert body["session_username"] is None
+
+
+async def test_machine_list_omits_session_type(client, db_session):
+    """Session type stays on the detail view; the list row stays lean."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-sess-lean")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        session={"user_present": True, "state": "disconnected", "is_remote": True},
+    )
+
+    row = await _list_row(client, headers, "m-sess-lean")
+    assert "session_user_present" in row
+    assert "session_state" not in row
+    assert "session_is_remote" not in row
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["session_state"] == "disconnected"
+    assert body["session_is_remote"] is True
+
+
+# --- Primary IP address -----------------------------------------------------
+
+
+async def test_heartbeat_stores_ip_address(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip")
+    await _heartbeat(client, enrolled["token"], ip_address="192.168.1.10")
+
+    row = await _list_row(client, headers, "m-ip")
+    assert row["ip_address"] == "192.168.1.10"
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["ip_address"] == "192.168.1.10"
+
+
+async def test_ip_address_never_reported_stays_null(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-unknown")
+    await _heartbeat(client, enrolled["token"])
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["ip_address"] is None
+
+
+async def test_heartbeat_updates_ip_address(client, db_session):
+    """A new lease replaces the old address — nothing accumulates."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-dhcp")
+    await _heartbeat(client, enrolled["token"], ip_address="192.168.1.10")
+    await _heartbeat(client, enrolled["token"], ip_address="10.0.0.20")
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["ip_address"] == "10.0.0.20"
+
+
+async def test_heartbeat_without_ip_preserves_last_value(client, db_session):
+    """An agent whose read failed omits the field; the last address survives."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-keep")
+    await _heartbeat(client, enrolled["token"], ip_address="192.168.1.10")
+    await _heartbeat(client, enrolled["token"], hostname="PC-IP-KEEP")
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["hostname"] == "PC-IP-KEEP"
+    assert body["ip_address"] == "192.168.1.10"
+
+
+async def test_heartbeat_malformed_ip_is_dropped_not_rejected(client, db_session):
+    """A bad address must not cost the heartbeat its Defender state."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-bad")
+    await _heartbeat(client, enrolled["token"], ip_address="192.168.1.10")
+
+    resp = await _heartbeat(
+        client,
+        enrolled["token"],
+        ip_address="not-an-address",
+        defender={"av_enabled": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["av_enabled"] is True
+    assert body["ip_address"] == "192.168.1.10"
+
+
+async def test_heartbeat_normalizes_ipv6(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-v6")
+    await _heartbeat(client, enrolled["token"], ip_address="2001:0DB8:0000::0001")
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["ip_address"] == "2001:db8::1"
+
+
+async def test_machines_search_matches_ip(client, db_session):
+    """From an address in a firewall log back to the machine."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-ip-search", hostname="ZZZ-IP")
+    await _heartbeat(client, enrolled["token"], ip_address="10.42.7.99")
+
+    resp = await client.get("/api/v1/machines?search=10.42.7.99", headers=headers)
+    assert resp.status_code == 200
+    assert [m["machine_uuid"] for m in resp.json()["items"]] == ["m-ip-search"]
+
+
+# --- Third-party antivirus (Security Center) --------------------------------
+
+# The product name Windows reports for a third party, and the block an agent
+# sends for it: running, definitions current, and not Defender.
+ESET = "ESET Endpoint Security"
+_ESET_BLOCK = {
+    "name": ESET,
+    "enabled": True,
+    "signatures_up_to_date": True,
+    "is_defender": False,
+}
+# Defender pushed into passive mode by the above — what its own WMI class then
+# reports, which on its own reads as "unprotected".
+_PASSIVE_DEFENDER = {
+    "av_enabled": False,
+    "rtp_enabled": False,
+    "running_mode": "Passive",
+}
+
+
+async def test_heartbeat_stores_antivirus_product(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-av")
+    await _heartbeat(client, enrolled["token"], av_product=_ESET_BLOCK)
+
+    # In the list row, not only the detail: this is a column people scan.
+    row = await _list_row(client, headers, "m-av")
+    assert row["av_product_name"] == ESET
+    assert row["av_product_enabled"] is True
+    assert row["av_product_signatures_up_to_date"] is True
+    assert row["av_product_is_defender"] is False
+
+
+async def test_third_party_antivirus_counts_as_up_to_date(client, db_session):
+    """The point of the whole feature: a protected poste stops reading as unprotected."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-av-fresh")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        defender=_PASSIVE_DEFENDER,
+        av_product=_ESET_BLOCK,
+    )
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["is_up_to_date"] is True
+    # And the reason Defender reads as off is now visible rather than inferred.
+    assert body["running_mode"] == "Passive"
+
+
+async def test_third_party_with_stale_signatures_is_outdated(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-av-stale")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        defender=_PASSIVE_DEFENDER,
+        av_product={**_ESET_BLOCK, "signatures_up_to_date": False},
+    )
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["is_up_to_date"] is False
+
+
+async def test_uninstalling_the_antivirus_recomputes_without_defender_block(
+    client, db_session
+):
+    """An empty name clears the product *and* the up-to-date flag it earned.
+
+    The second heartbeat carries no Defender block at all, so recomputing only
+    inside that block would leave the machine credited to an antivirus that is no
+    longer installed.
+    """
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-av-gone")
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        defender=_PASSIVE_DEFENDER,
+        av_product=_ESET_BLOCK,
+    )
+    assert (await _detail(client, headers, enrolled["machine_id"]))["is_up_to_date"]
+
+    await _heartbeat(client, enrolled["token"], av_product={"name": ""})
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["av_product_name"] == ""
+    assert body["is_up_to_date"] is False
+
+
+async def test_antivirus_never_reported_stays_null(client, db_session):
+    """No Security Center to read (Windows Server) ≠ no antivirus installed."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-av-unknown")
+    await _heartbeat(client, enrolled["token"])
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["av_product_name"] is None
+    assert body["av_product_enabled"] is None
+    assert body["av_product_is_defender"] is None
+
+
+async def test_heartbeat_without_av_block_preserves_last_value(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-av-keep")
+    await _heartbeat(client, enrolled["token"], av_product=_ESET_BLOCK)
+    await _heartbeat(client, enrolled["token"], hostname="PC-AV-KEEP")
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["hostname"] == "PC-AV-KEEP"
+    assert body["av_product_name"] == ESET
+
+
+async def test_antivirus_name_is_trimmed_and_bounded(client, db_session):
+    """A vendor display string is bounded here, never trusted — and never 422s."""
+    from app.api.routes.agent import AV_PRODUCT_NAME_MAX
+
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-av-long")
+    resp = await _heartbeat(
+        client,
+        enrolled["token"],
+        av_product={"name": "  " + "A" * (AV_PRODUCT_NAME_MAX + 50) + "  "},
+        defender={"av_enabled": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+    body = await _detail(client, headers, enrolled["machine_id"])
+    assert body["av_product_name"] == "A" * AV_PRODUCT_NAME_MAX
+    assert body["av_enabled"] is True
+
+
+async def test_machines_search_matches_antivirus_name(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-av-search", hostname="ZZZ-AV")
+    await _heartbeat(client, enrolled["token"], av_product=_ESET_BLOCK)
+
+    resp = await client.get("/api/v1/machines?search=eset", headers=headers)
+    assert resp.status_code == 200
+    assert [m["machine_uuid"] for m in resp.json()["items"]] == ["m-av-search"]
+
+
+async def test_antivirus_filter_selects_one_product(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    eset = await _enroll(client, "m-av-eset")
+    await _heartbeat(client, eset["token"], av_product=_ESET_BLOCK)
+    defender = await _enroll(client, "m-av-defender")
+    await _heartbeat(
+        client,
+        defender["token"],
+        av_product={"name": "Windows Defender", "is_defender": True, "enabled": True},
+    )
+
+    resp = await client.get("/api/v1/machines?antivirus=ESET", headers=headers)
+    assert [m["machine_uuid"] for m in resp.json()["items"]] == ["m-av-eset"]
+
+    # Substring, so a partial vendor name works from the search box too.
+    resp = await client.get("/api/v1/machines?antivirus=defend", headers=headers)
+    assert [m["machine_uuid"] for m in resp.json()["items"]] == ["m-av-defender"]
+
+
+async def test_antivirus_products_lists_the_fleet_most_common_first(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    for uuid_ in ("m-inv-1", "m-inv-2"):
+        enrolled = await _enroll(client, uuid_)
+        await _heartbeat(client, enrolled["token"], av_product=_ESET_BLOCK)
+    lonely = await _enroll(client, "m-inv-3")
+    await _heartbeat(
+        client,
+        lonely["token"],
+        av_product={"name": "Windows Defender", "is_defender": True},
+    )
+    # Reported no product at all, and never reported: neither is a product to
+    # offer in a filter.
+    none_at_all = await _enroll(client, "m-inv-4")
+    await _heartbeat(client, none_at_all["token"], av_product={"name": ""})
+    await _enroll(client, "m-inv-5")
+
+    resp = await client.get("/api/v1/machines/antivirus-products", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == [
+        {"name": ESET, "count": 2},
+        {"name": "Windows Defender", "count": 1},
+    ]
+
+
 # --- Machine merge (plan §8) -----------------------------------------------
 
 
@@ -446,6 +845,199 @@ async def test_command_result_unknown_is_ignored(client, db_session):
     )
     assert res.status_code == 200
     assert res.json()["status"] == "ignored"
+
+
+# --- Maintenance catalogue + intermediate `running` ------------------------
+
+# The closed catalogue of remote maintenance/diagnostic commands
+# (plan-commandes-distantes.md §2), minus the three Defender ones covered above.
+MAINTENANCE_TYPES = [
+    "gpo_update",
+    "flush_dns",
+    "time_resync",
+    "cert_pulse",
+    "spooler_reset",
+    "sfc_scan",
+    "dism_restore_health",
+    "dism_component_cleanup",
+    "chkdsk_scan",
+    "gpo_report",
+    "net_config",
+]
+
+
+async def _queue_and_deliver(client, headers, enrolled, command_type: str) -> str:
+    """Queue one command for the machine and let a heartbeat pick it up."""
+    created = await client.post(
+        "/api/v1/commands",
+        headers=headers,
+        json={"type": command_type, "machine_ids": [enrolled["machine_id"]]},
+    )
+    assert created.status_code == 200, created.text
+    hb = await _heartbeat(client, enrolled["token"])
+    commands = hb.json()["commands"]
+    assert len(commands) == 1
+    assert commands[0]["type"] == command_type
+    return str(commands[0]["id"])
+
+
+async def _command_row(client, headers, enrolled, command_id: str) -> dict:
+    listed = await client.get(
+        f"/api/v1/commands?machine_id={enrolled['machine_id']}", headers=headers
+    )
+    rows = [c for c in listed.json()["items"] if c["id"] == command_id]
+    assert rows, listed.text
+    return rows[0]
+
+
+def test_catalogue_is_fully_covered_below():
+    """Guard the list above: a new command type must gain a round-trip test.
+
+    Spelled out rather than derived from the enum on purpose — this is a closed
+    catalogue for security reasons (no arguments cross the wire, the agent holds
+    the command lines), so a value appearing in it should cost a deliberate edit
+    here too.
+    """
+    from app.features.command.models import CommandType
+
+    defender = {"quick_scan", "full_scan", "update_signatures"}
+    # Phase 2's four types are covered by tests/test_api_windows_update.py, and
+    # named here so this guard still fails on a type nobody tested anywhere.
+    windows_update = {"wu_scan", "wu_install", "wu_install_full", "reboot"}
+    assert {t.value for t in CommandType} == (
+        defender | windows_update | set(MAINTENANCE_TYPES)
+    )
+
+
+@pytest.mark.parametrize("command_type", MAINTENANCE_TYPES)
+async def test_maintenance_command_round_trip(client, db_session, command_type):
+    """Every catalogue type is creatable, deliverable and closeable.
+
+    The point is the catalogue's *exhaustiveness*: a value added to CommandType
+    without the console or the agent knowing it would still pass this, but a
+    type the API refuses to queue is caught here rather than on a real machine.
+    """
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, f"m-cat-{command_type}")
+    cmd_id = await _queue_and_deliver(client, headers, enrolled, command_type)
+
+    res = await client.post(
+        f"/api/v1/agent/commands/{cmd_id}/result",
+        headers={"Authorization": f"Bearer {enrolled['token']}"},
+        json={"status": "succeeded", "output": "ok"},
+    )
+    assert res.status_code == 200
+    row = await _command_row(client, headers, enrolled, cmd_id)
+    assert row["status"] == "succeeded"
+
+
+async def test_maintenance_command_forbidden_for_readonly(client, db_session):
+    headers = await _readonly_headers(client, db_session)
+    resp = await client.post(
+        "/api/v1/commands",
+        headers=headers,
+        json={"type": "sfc_scan", "target_all": True},
+    )
+    assert resp.status_code == 403
+
+
+async def test_running_marks_started_without_closing(client, db_session):
+    """A long command reports `running`, then its verdict — two distinct writes."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-running")
+    auth = {"Authorization": f"Bearer {enrolled['token']}"}
+    cmd_id = await _queue_and_deliver(client, headers, enrolled, "sfc_scan")
+
+    started = await client.post(
+        f"/api/v1/agent/commands/{cmd_id}/result",
+        headers=auth,
+        json={"status": "running"},
+    )
+    assert started.status_code == 200
+    row = await _command_row(client, headers, enrolled, cmd_id)
+    assert row["status"] == "running"
+    assert row["started_at"] is not None
+    # Not closed: the verdict is still to come.
+    assert row["finished_at"] is None
+    assert row["result_output"] is None
+    started_at = row["started_at"]
+
+    final = await client.post(
+        f"/api/v1/agent/commands/{cmd_id}/result",
+        headers=auth,
+        json={"status": "succeeded", "output": "aucune violation d'intégrité"},
+    )
+    assert final.status_code == 200
+    row = await _command_row(client, headers, enrolled, cmd_id)
+    assert row["status"] == "succeeded"
+    assert row["finished_at"] is not None
+    # The start time survives the close — it is what makes the duration readable.
+    assert row["started_at"] == started_at
+    assert row["result_output"] == "aucune violation d'intégrité"
+
+
+async def test_running_after_final_is_ignored(client, db_session):
+    """A late progress ping must not reopen a command that already has a verdict."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-running-late")
+    auth = {"Authorization": f"Bearer {enrolled['token']}"}
+    cmd_id = await _queue_and_deliver(client, headers, enrolled, "dism_restore_health")
+
+    await client.post(
+        f"/api/v1/agent/commands/{cmd_id}/result",
+        headers=auth,
+        json={"status": "failed", "error": "source de réparation inaccessible"},
+    )
+    late = await client.post(
+        f"/api/v1/agent/commands/{cmd_id}/result",
+        headers=auth,
+        json={"status": "running"},
+    )
+    assert late.status_code == 200
+    assert late.json()["status"] == "ignored"
+
+    row = await _command_row(client, headers, enrolled, cmd_id)
+    assert row["status"] == "failed"
+    assert row["error"] == "source de réparation inaccessible"
+
+
+async def test_agent_cannot_report_queue_statuses(client, db_session):
+    """pending/delivered/expired are the server's to write, not the agent's."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-status-guard")
+    auth = {"Authorization": f"Bearer {enrolled['token']}"}
+    cmd_id = await _queue_and_deliver(client, headers, enrolled, "flush_dns")
+
+    for status in ("pending", "delivered", "expired"):
+        resp = await client.post(
+            f"/api/v1/agent/commands/{cmd_id}/result",
+            headers=auth,
+            json={"status": status},
+        )
+        assert resp.status_code == 422, f"{status}: {resp.text}"
+
+    row = await _command_row(client, headers, enrolled, cmd_id)
+    assert row["status"] == "delivered"  # untouched
+
+
+async def test_result_output_is_bounded_server_side(client, db_session):
+    """The agent truncates; the server does not take its word for it."""
+    from app.api.routes.agent import RESULT_TEXT_MAX
+
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-bigout")
+    auth = {"Authorization": f"Bearer {enrolled['token']}"}
+    cmd_id = await _queue_and_deliver(client, headers, enrolled, "net_config")
+
+    await client.post(
+        f"/api/v1/agent/commands/{cmd_id}/result",
+        headers=auth,
+        json={"status": "succeeded", "output": "x" * (RESULT_TEXT_MAX + 5000)},
+    )
+    row = await _command_row(client, headers, enrolled, cmd_id)
+    assert row["result_output"].startswith("x" * 100)
+    assert len(row["result_output"]) < RESULT_TEXT_MAX + 200
+    assert "tronqu" in row["result_output"]
 
 
 async def test_heartbeat_stores_host_fields(client, db_session):

@@ -7,11 +7,53 @@ export interface Machine {
   machine_uuid: string;
   hostname: string | null;
   domain: string | null;
+  /** Primary address elected by the agent; null = never reported. */
+  ip_address: string | null;
   os_version: string | null;
   agent_version: string | null;
   is_up_to_date: boolean | null;
   needs_verification: boolean;
   signature_version: string | null;
+  /**
+   * Antivirus registered with the Windows Security Center — the only source that
+   * sees a third-party product. null = never reported (agent too old, or a host
+   * with no Security Center); '' = read and empty, i.e. no antivirus at all.
+   */
+  av_product_name: string | null;
+  av_product_enabled: boolean | null;
+  av_product_signatures_up_to_date: boolean | null;
+  /** Whether the product above is Defender itself (decided by the agent). */
+  av_product_is_defender: boolean | null;
+  /** null = never reported (agent older than the feature, or a failed read). */
+  session_user_present: boolean | null;
+  /** null while present = the agent reports presence only (privacy setting). */
+  session_username: string | null;
+  /**
+   * Pending Windows updates. null = never reported — an agent older than the
+   * feature, or one whose Windows Update search failed — which the console
+   * shows as unknown rather than as "nothing to install".
+   */
+  wu_pending_count: number | null;
+  /** Never null: a machine that has not reported is not awaiting a restart. */
+  wu_reboot_required: boolean;
+  last_seen: string;
+}
+
+/** An update Windows Update reports as applicable and not yet installed. */
+export interface PendingUpdate {
+  id: number;
+  /** WUA's UpdateID and revision — the server's dedup key, not for display. */
+  update_id: string;
+  kb: string | null;
+  title: string;
+  /** MSRC rating, lowercased server-side: critical / important / moderate / low. */
+  severity: string | null;
+  type: 'software' | 'driver' | string;
+  categories: string | null;
+  is_downloaded: boolean;
+  size_mb: number | null;
+  /** When this machine first reported the update — how long it has been behind. */
+  first_seen: string;
   last_seen: string;
 }
 
@@ -22,6 +64,14 @@ export interface MachineDetail extends Machine {
   signature_age_days: number | null;
   last_quick_scan: string | null;
   last_full_scan: string | null;
+  /** Defender's AMRunningMode: Normal / Passive / SxS Passive Mode / EDR Block Mode. */
+  running_mode: string | null;
+  session_state: string | null;
+  session_is_remote: boolean | null;
+  wu_last_search: string | null;
+  wu_last_install: string | null;
+  /** Sorted critical-first by the server; empty when nothing is pending. */
+  pending_updates: PendingUpdate[];
   machine_guid: string | null;
   smbios_uuid: string | null;
   tpm_ek_hash: string | null;
@@ -40,6 +90,8 @@ export interface MachineList {
 export interface ListMachinesParams {
   search?: string;
   domain?: string;
+  /** Antivirus name, matched as a substring server-side. */
+  antivirus?: string;
   status?: MachineStatus;
   page?: number;
   page_size?: number;
@@ -47,6 +99,22 @@ export interface ListMachinesParams {
 
 export async function listMachines(params: ListMachinesParams = {}): Promise<MachineList> {
   const { data } = await api.get<MachineList>('/machines', { params });
+  return data;
+}
+
+/** One antivirus present in the fleet, with how many machines report it. */
+export interface AntivirusProduct {
+  name: string;
+  count: number;
+}
+
+/**
+ * Antivirus products found across the fleet, most widespread first. Feeds the
+ * machine list's filter dropdown: which products are installed is fleet data, not
+ * something the console can hardcode.
+ */
+export async function listAntivirusProducts(): Promise<AntivirusProduct[]> {
+  const { data } = await api.get<AntivirusProduct[]>('/machines/antivirus-products');
   return data;
 }
 

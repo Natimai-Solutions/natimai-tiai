@@ -28,10 +28,19 @@ func applyRegistryOverrides(cfg *Config) {
 	if v, _, err := k.GetStringValue("LogLevel"); err == nil && v != "" {
 		cfg.LogLevel = v
 	}
+	// No `v > 0` guard here, unlike the intervals below: 0 is the meaningful
+	// value (report presence only), so it is the key's *presence* that wins.
+	if v, _, err := k.GetIntegerValue("ReportSessionUsername"); err == nil {
+		on := v != 0
+		cfg.ReportSessionUsername = &on
+	}
 	if v, _, err := k.GetIntegerValue("HeartbeatIntervalSeconds"); err == nil && v > 0 {
 		cfg.HeartbeatIntervalSeconds = int(v)
 	}
-	if v, _, err := k.GetIntegerValue("TelemetryIntervalSeconds"); err == nil && v > 0 {
-		cfg.TelemetryIntervalSeconds = int(v)
+	if v, _, err := k.GetIntegerValue("WUCollectIntervalSeconds"); err == nil && v > 0 {
+		cfg.WUCollectIntervalSeconds = int(v)
+	}
+	if v, _, err := k.GetIntegerValue("WUInstallTimeoutSeconds"); err == nil && v > 0 {
+		cfg.WUInstallTimeoutSeconds = int(v)
 	}
 }

@@ -8,7 +8,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlmodel import col, select
 
 from app.api.deps import SessionDep, require_permission
@@ -19,6 +19,7 @@ from app.features.machine import crud as machine_crud
 from app.features.machine.models import Machine
 from app.features.machine.status import MachineStatus, status_clause
 from app.features.user.permissions import Action, Resource
+from app.features.windows_update.models import WindowsUpdate
 
 router = APIRouter(
     prefix="/machines",
@@ -34,18 +35,53 @@ class MachineOut(BaseModel):
     machine_uuid: str
     hostname: str | None
     domain: str | None
+    ip_address: str | None
     os_version: str | None
     agent_version: str | None
     is_up_to_date: bool | None
     needs_verification: bool
     signature_version: str | None
+    # Which antivirus guards the poste. In the list and not only in the detail:
+    # on a mixed parc it is the column that explains an "outdated" Defender
+    # reading, and the one people filter on. "" = no antivirus registered at all,
+    # None = never reported (see the model).
+    av_product_name: str | None
+    av_product_enabled: bool | None
+    av_product_signatures_up_to_date: bool | None
+    av_product_is_defender: bool | None
+    session_user_present: bool | None
+    session_username: str | None
+    # In the list and not only in the detail: "which postes are missing patches"
+    # and "which are waiting on a restart" are the two questions this phase
+    # exists to answer, and both are answered by scanning a column. NULL on the
+    # count = never reported (see the model).
+    wu_pending_count: int | None
+    wu_reboot_required: bool
+    last_seen: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PendingUpdateOut(BaseModel):
+    """An update WUA reports as applicable and not yet installed on this machine."""
+
+    id: int
+    update_id: str
+    kb: str | None
+    title: str
+    severity: str | None
+    type: str
+    categories: str | None
+    is_downloaded: bool
+    size_mb: float | None
+    first_seen: datetime
     last_seen: datetime
 
     model_config = {"from_attributes": True}
 
 
 class MachineDetailOut(MachineOut):
-    """Full machine detail (Defender state, fingerprint, timestamps)."""
+    """Full machine detail (Defender state, session type, fingerprint, times)."""
 
     rtp_enabled: bool | None
     av_enabled: bool | None
@@ -53,12 +89,21 @@ class MachineDetailOut(MachineOut):
     signature_age_days: int | None
     last_quick_scan: datetime | None
     last_full_scan: datetime | None
+    running_mode: str | None
+    session_state: str | None
+    session_is_remote: bool | None
+    wu_last_search: datetime | None
+    wu_last_install: datetime | None
     machine_guid: str | None
     smbios_uuid: str | None
     tpm_ek_hash: str | None
     first_seen: datetime
     created_at: datetime
     updated_at: datetime
+    # Embedded rather than served from a /machines/{id}/updates of its own: the
+    # list is a few dozen rows, it is only ever read next to the state above, and
+    # a second round trip would only make the page load in two steps.
+    pending_updates: list[PendingUpdateOut] = []
 
 
 class MachineList(BaseModel):
@@ -75,11 +120,12 @@ async def list_machines(
     session: SessionDep,
     search: str | None = None,
     domain: str | None = None,
+    antivirus: str | None = None,
     status: MachineStatus | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> MachineList:
-    """List machines with optional search/domain/status filters and pagination."""
+    """List machines with optional search/domain/antivirus/status filters."""
     stmt = select(Machine)
     if search:
         pattern = f"%{search}%"
@@ -87,10 +133,22 @@ async def list_machines(
             or_(
                 col(Machine.hostname).ilike(pattern),
                 col(Machine.machine_uuid).ilike(pattern),
+                # Searchable too: going from an address in a firewall or DHCP
+                # log back to the machine is the everyday use of this field.
+                col(Machine.ip_address).ilike(pattern),
+                # And from a vendor name: "which postes still run the antivirus
+                # we are migrating off?" is the question a mixed parc asks.
+                col(Machine.av_product_name).ilike(pattern),
             )
         )
     if domain:
         stmt = stmt.where(col(Machine.domain) == domain)
+    if antivirus:
+        # Substring rather than equality, unlike the domain filter: the dropdown
+        # feeds it exact names from the fleet, but a hand-typed "eset" must find
+        # "ESET Endpoint Security" too — vendors rename their products between
+        # versions and a parc runs several at once.
+        stmt = stmt.where(col(Machine.av_product_name).ilike(f"%{antivirus}%"))
     if status is not None:
         stmt = stmt.where(status_clause(status, utcnow(), settings.INACTIVE_AFTER_DAYS))
 
@@ -102,6 +160,43 @@ async def list_machines(
     )
     items = [MachineOut.model_validate(m) for m in rows.all()]
     return MachineList(items=items, total=total or 0, page=page, page_size=page_size)
+
+
+class AntivirusProduct(BaseModel):
+    """One antivirus present in the fleet, with how many machines report it."""
+
+    name: str
+    count: int
+
+
+# Declared before ``/{machine_id}``: FastAPI matches in declaration order, and
+# the other way round "antivirus-products" would be parsed as a machine id.
+@router.get("/antivirus-products", response_model=list[AntivirusProduct])
+async def list_antivirus_products(session: SessionDep) -> list[AntivirusProduct]:
+    """Antivirus names reported across the fleet, most widespread first.
+
+    Feeds the console's filter dropdown: which products are installed is fleet
+    data, not something a client can hardcode — and the counts double as a
+    one-glance inventory of a mixed parc.
+
+    Machines that reported no product (empty name) or nothing at all (NULL) are
+    left out: they are not products to filter on, and the "Non à jour" status
+    filter already gathers them.
+    """
+    name = col(Machine.av_product_name)
+    rows = await session.exec(
+        select(name, func.count().label("count"))
+        .where(name.is_not(None))
+        .where(name != "")
+        .group_by(name)
+        .order_by(func.count().desc(), name)
+    )
+    return [
+        AntivirusProduct(name=product, count=count)
+        # `if product` narrows away the NULL the SQL already excluded.
+        for product, count in rows.all()
+        if product
+    ]
 
 
 async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machine:
@@ -116,11 +211,39 @@ async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machin
     return machine
 
 
+async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetailOut:
+    """Build a detail payload, pending Windows updates included.
+
+    Ordered by severity then title rather than by insertion: the reason to open
+    this table is to find the critical patch, and the ``severity`` values are
+    MSRC's own vocabulary, which sorts alphabetically as critical < important <
+    low < moderate — no use at all. Hence the explicit CASE.
+    """
+    severity_rank = case(
+        {
+            "critical": 0,
+            "important": 1,
+            "moderate": 2,
+            "low": 3,
+        },
+        value=col(WindowsUpdate.severity),
+        else_=4,
+    )
+    rows = await session.exec(
+        select(WindowsUpdate)
+        .where(col(WindowsUpdate.machine_id) == machine.id)
+        .order_by(severity_rank, col(WindowsUpdate.title))
+    )
+    detail = MachineDetailOut.model_validate(machine)
+    detail.pending_updates = [PendingUpdateOut.model_validate(u) for u in rows.all()]
+    return detail
+
+
 @router.get("/{machine_id}", response_model=MachineDetailOut)
 async def get_machine(machine_id: uuid.UUID, session: SessionDep) -> MachineDetailOut:
     """Fetch a single machine by id (full Defender state + fingerprint)."""
     machine = await _require_machine(session, machine_id)
-    return MachineDetailOut.model_validate(machine)
+    return await _machine_detail(session, machine)
 
 
 @router.get("/{machine_id}/duplicates", response_model=list[MachineOut])
@@ -186,4 +309,4 @@ async def merge_machine(
     await machine_crud.merge_into(session, target=target, source=source)
     await session.commit()
     await session.refresh(target)
-    return MachineDetailOut.model_validate(target)
+    return await _machine_detail(session, target)

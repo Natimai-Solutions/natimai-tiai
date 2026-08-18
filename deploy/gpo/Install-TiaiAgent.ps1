@@ -34,8 +34,19 @@
     les parametres de script GPO sont stockes dans scripts.ini (SYSVOL), lisible
     par tout utilisateur authentifie.
 
+.PARAMETER ReportSessionUsername
+    Remontee du NOM de l'utilisateur connecte ('true' / 'false'). La presence
+    d'une session est remontee dans tous les cas ; seul le nom est concerne.
+    Laisse vide, la valeur registre n'est pas touchee et l'agent applique son
+    defaut (activee). Donnee personnelle : voir la section "Session utilisateur"
+    du README agent.
+
 .EXAMPLE
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\natimai.local\NETLOGON\Tiai\Install-TiaiAgent.ps1 -SourceExe \\natimai.local\NETLOGON\Tiai\tiai-agent.exe -ApiBaseUrl https://tiai.natimai.local
+
+.EXAMPLE
+    # Parc ou le nom de l'utilisateur ne doit pas remonter au serveur.
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\natimai.local\NETLOGON\Tiai\Install-TiaiAgent.ps1 -SourceExe \\natimai.local\NETLOGON\Tiai\tiai-agent.exe -ApiBaseUrl https://tiai.natimai.local -ReportSessionUsername false
 #>
 [CmdletBinding()]
 param(
@@ -45,6 +56,10 @@ param(
     [ValidateSet('INFO', 'DEBUG')][string] $LogLevel = 'INFO',
     [int]    $HeartbeatIntervalSeconds = 0,
     [int]    $TelemetryIntervalSeconds = 0,
+    # Sentinelle chaine vide, et non un booleen : 0 est une valeur signifiante
+    # ("ne pas remonter le nom"), donc l'idiome -gt 0 des intervalles ne
+    # s'applique pas -- il faut pouvoir distinguer "false" de "non precise".
+    [ValidateSet('', 'true', 'false')][string] $ReportSessionUsername = '',
     [string] $InstallDir = "$env:ProgramFiles\Tiai",
     [int]    $ShareTimeoutSeconds = 120
 )
@@ -164,6 +179,10 @@ try {
     }
     if ($TelemetryIntervalSeconds -gt 0) {
         Set-ItemProperty -Path $RegPath -Name 'TelemetryIntervalSeconds' -Value $TelemetryIntervalSeconds -Type DWord
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ReportSessionUsername)) {
+        $reportName = if ($ReportSessionUsername -eq 'true') { 1 } else { 0 }
+        Set-ItemProperty -Path $RegPath -Name 'ReportSessionUsername' -Value $reportName -Type DWord
     }
 
     # Pas de config.yaml a generer : l'agent tolere son absence et se configure

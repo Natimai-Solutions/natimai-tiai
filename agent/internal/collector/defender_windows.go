@@ -38,6 +38,9 @@ type mpComputerStatus struct {
 	AntivirusSignatureLastUpdated *time.Time
 	QuickScanEndTime              *time.Time
 	FullScanEndTime               *time.Time
+	// Added in Windows 10 1903; absent on older builds, which AllowMissingFields
+	// turns into an empty string rather than an error.
+	AMRunningMode string
 }
 
 // ReadDefenderState returns the current Defender status from
@@ -62,6 +65,7 @@ func ReadDefenderState(ctx context.Context) (*models.DefenderState, error) {
 		SignatureAgeDays:     signatureAgeDays(r.AntivirusSignatureLastUpdated, time.Now().UTC()),
 		LastQuickScan:        r.QuickScanEndTime,
 		LastFullScan:         r.FullScanEndTime,
+		RunningMode:          strings.TrimSpace(r.AMRunningMode),
 	}, nil
 }
 
