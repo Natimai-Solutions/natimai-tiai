@@ -280,9 +280,7 @@ async def test_machine_list_reports_online_state(client, db_session):
     assert by_uuid["m-online-gone"]["is_online"] is False
 
     # And on the detail payload, which inherits the same computation.
-    detail = await client.get(
-        f"/api/v1/machines/{gone['machine_id']}", headers=headers
-    )
+    detail = await client.get(f"/api/v1/machines/{gone['machine_id']}", headers=headers)
     assert detail.json()["is_online"] is False
 
 
