@@ -15,6 +15,11 @@ export type CommandType =
   | 'dism_restore_health'
   | 'dism_component_cleanup'
   | 'chkdsk_scan'
+  // Windows Update (phase 2) + the restart it eventually needs.
+  | 'wu_scan'
+  | 'wu_install'
+  | 'wu_install_full'
+  | 'reboot'
   // Diagnostics: read-only, the value is in reading the result.
   | 'gpo_report'
   | 'net_config';
@@ -27,7 +32,7 @@ export type CommandStatus =
   | 'failed'
   | 'expired';
 
-export type CommandGroup = 'defender' | 'maintenance' | 'diagnostic';
+export type CommandGroup = 'defender' | 'windows_update' | 'maintenance' | 'diagnostic';
 
 /** A command as the console offers it: label, icon, and how it may be triggered. */
 export interface CommandAction {
@@ -45,6 +50,10 @@ export interface CommandAction {
 
 export const commandGroupLabels: Record<CommandGroup, string> = {
   defender: 'Defender',
+  // The restart lives in this section rather than in Maintenance: what makes an
+  // admin reach for it is the « redémarrage requis » an update just raised, and
+  // the two belong next to each other in the menu.
+  windows_update: 'Windows Update',
   maintenance: 'Maintenance',
   diagnostic: 'Diagnostic',
 };
@@ -54,7 +63,7 @@ export const commandGroupLabels: Record<CommandGroup, string> = {
  *
  * Both the machine detail page and the bulk-action menu read this list: they
  * used to carry a hand-kept array each, which was already drifting at three
- * Defender entries and would not have survived fourteen.
+ * Defender entries and would not have survived eighteen.
  *
  * Order matters — it is the order of the menu — and mirrors the agent's own
  * catalogue (`agent/internal/collector/maintenance.go`) and the backend enum.
@@ -84,6 +93,43 @@ export const commandActions: CommandAction[] = [
     group: 'defender',
     confirm: false,
     bulk: true,
+  },
+  {
+    type: 'wu_scan',
+    label: 'Rechercher les mises à jour',
+    icon: 'search',
+    group: 'windows_update',
+    confirm: false,
+    bulk: true,
+  },
+  {
+    type: 'wu_install',
+    label: 'Installer les mises à jour (hors pilotes)',
+    icon: 'system_update',
+    group: 'windows_update',
+    confirm: true,
+    bulk: true,
+    hint: 'Le poste télécharge et installe ses mises à jour logicielles ; compter plusieurs dizaines de minutes. Aucun redémarrage automatique : le poste signalera s’il en attend un.',
+  },
+  {
+    type: 'wu_install_full',
+    label: 'Installer les mises à jour (pilotes compris)',
+    icon: 'browser_updated',
+    group: 'windows_update',
+    confirm: true,
+    bulk: true,
+    hint: 'Comme ci-dessus, mais les pilotes proposés par Windows Update sont installés eux aussi — à réserver aux postes où c’est souhaité. Aucun redémarrage automatique.',
+  },
+  {
+    // Never automatic, whatever a poste reports as needing one: restarting a
+    // machine somebody is working on is an explicit decision.
+    type: 'reboot',
+    label: 'Redémarrer le poste',
+    icon: 'restart_alt',
+    group: 'windows_update',
+    confirm: true,
+    bulk: true,
+    hint: 'Le redémarrage a lieu dans 60 secondes ; l’utilisateur connecté voit un avertissement et peut enregistrer son travail. Les documents non enregistrés seront perdus.',
   },
   {
     // /target:computer: l'agent tourne en LocalSystem, il n'y a pas de ruche
@@ -192,10 +238,10 @@ export interface CommandActionGroup {
   actions: CommandAction[];
 }
 
-const groupOrder: CommandGroup[] = ['defender', 'maintenance', 'diagnostic'];
+const groupOrder: CommandGroup[] = ['defender', 'windows_update', 'maintenance', 'diagnostic'];
 
 /**
- * The catalogue split into menu sections. Fourteen entries in one flat dropdown
+ * The catalogue split into menu sections. Eighteen entries in one flat dropdown
  * is unusable; grouped, an admin finds "Maintenance" without reading the list.
  *
  * `bulkOnly` keeps the diagnostics out of the mass-action menu.

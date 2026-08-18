@@ -42,6 +42,10 @@ describe('command catalogue', () => {
     'quick_scan',
     'full_scan',
     'update_signatures',
+    'wu_scan',
+    'wu_install',
+    'wu_install_full',
+    'reboot',
     'gpo_update',
     'flush_dns',
     'time_resync',
@@ -70,6 +74,12 @@ describe('command catalogue', () => {
     const needConfirm = commandActions.filter((a) => a.confirm).map((a) => a.type);
     expect(needConfirm).toEqual([
       'full_scan',
+      // Installing patches ties the poste up for a while, and restarting it can
+      // cost a user their unsaved work. wu_scan only reads, so it goes straight
+      // through like the Defender scans.
+      'wu_install',
+      'wu_install_full',
+      'reboot',
       'spooler_reset',
       'sfc_scan',
       'dism_restore_health',
@@ -93,6 +103,7 @@ describe('command catalogue', () => {
   it('groups the menu in a stable order', () => {
     expect(commandActionGroups().map((s) => s.group)).toEqual([
       'defender',
+      'windows_update',
       'maintenance',
       'diagnostic',
     ]);
@@ -100,8 +111,20 @@ describe('command catalogue', () => {
 
   it('drops the diagnostic section from the bulk menu', () => {
     const groups = commandActionGroups({ bulkOnly: true });
-    expect(groups.map((s) => s.group)).toEqual(['defender', 'maintenance']);
+    expect(groups.map((s) => s.group)).toEqual(['defender', 'windows_update', 'maintenance']);
     expect(groups.flatMap((s) => s.actions).every((a) => a.bulk)).toBe(true);
+  });
+});
+
+describe('the restart command', () => {
+  // The one command in the catalogue that can cost a user unsaved work, so its
+  // two guards are asserted by name rather than left to the generic checks: a
+  // confirmation, and a hint that says what happens and when.
+  it('always asks, and says what it will do', () => {
+    const reboot = commandActions.find((a) => a.type === 'reboot');
+    expect(reboot?.group).toBe('windows_update');
+    expect(reboot?.confirm).toBe(true);
+    expect(reboot?.hint).toMatch(/60 secondes/);
   });
 });
 
@@ -112,7 +135,7 @@ describe('commandTypeLabel', () => {
 
   it('falls back to the raw value for an unknown type', () => {
     // An older console against a newer server must show something, not a blank.
-    expect(commandTypeLabel('wu_install')).toBe('wu_install');
+    expect(commandTypeLabel('install_package')).toBe('install_package');
   });
 });
 

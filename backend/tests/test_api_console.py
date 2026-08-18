@@ -901,7 +901,12 @@ def test_catalogue_is_fully_covered_below():
     from app.features.command.models import CommandType
 
     defender = {"quick_scan", "full_scan", "update_signatures"}
-    assert {t.value for t in CommandType} == defender | set(MAINTENANCE_TYPES)
+    # Phase 2's four types are covered by tests/test_api_windows_update.py, and
+    # named here so this guard still fails on a type nobody tested anywhere.
+    windows_update = {"wu_scan", "wu_install", "wu_install_full", "reboot"}
+    assert {t.value for t in CommandType} == (
+        defender | windows_update | set(MAINTENANCE_TYPES)
+    )
 
 
 @pytest.mark.parametrize("command_type", MAINTENANCE_TYPES)

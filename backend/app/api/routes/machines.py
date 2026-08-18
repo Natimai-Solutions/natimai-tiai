@@ -8,7 +8,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlmodel import col, select
 
 from app.api.deps import SessionDep, require_permission
@@ -19,6 +19,7 @@ from app.features.machine import crud as machine_crud
 from app.features.machine.models import Machine
 from app.features.machine.status import MachineStatus, status_clause
 from app.features.user.permissions import Action, Resource
+from app.features.windows_update.models import WindowsUpdate
 
 router = APIRouter(
     prefix="/machines",
@@ -50,6 +51,30 @@ class MachineOut(BaseModel):
     av_product_is_defender: bool | None
     session_user_present: bool | None
     session_username: str | None
+    # In the list and not only in the detail: "which postes are missing patches"
+    # and "which are waiting on a restart" are the two questions this phase
+    # exists to answer, and both are answered by scanning a column. NULL on the
+    # count = never reported (see the model).
+    wu_pending_count: int | None
+    wu_reboot_required: bool
+    last_seen: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PendingUpdateOut(BaseModel):
+    """An update WUA reports as applicable and not yet installed on this machine."""
+
+    id: int
+    update_id: str
+    kb: str | None
+    title: str
+    severity: str | None
+    type: str
+    categories: str | None
+    is_downloaded: bool
+    size_mb: float | None
+    first_seen: datetime
     last_seen: datetime
 
     model_config = {"from_attributes": True}
@@ -67,12 +92,18 @@ class MachineDetailOut(MachineOut):
     running_mode: str | None
     session_state: str | None
     session_is_remote: bool | None
+    wu_last_search: datetime | None
+    wu_last_install: datetime | None
     machine_guid: str | None
     smbios_uuid: str | None
     tpm_ek_hash: str | None
     first_seen: datetime
     created_at: datetime
     updated_at: datetime
+    # Embedded rather than served from a /machines/{id}/updates of its own: the
+    # list is a few dozen rows, it is only ever read next to the state above, and
+    # a second round trip would only make the page load in two steps.
+    pending_updates: list[PendingUpdateOut] = []
 
 
 class MachineList(BaseModel):
@@ -180,11 +211,39 @@ async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machin
     return machine
 
 
+async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetailOut:
+    """Build a detail payload, pending Windows updates included.
+
+    Ordered by severity then title rather than by insertion: the reason to open
+    this table is to find the critical patch, and the ``severity`` values are
+    MSRC's own vocabulary, which sorts alphabetically as critical < important <
+    low < moderate — no use at all. Hence the explicit CASE.
+    """
+    severity_rank = case(
+        {
+            "critical": 0,
+            "important": 1,
+            "moderate": 2,
+            "low": 3,
+        },
+        value=col(WindowsUpdate.severity),
+        else_=4,
+    )
+    rows = await session.exec(
+        select(WindowsUpdate)
+        .where(col(WindowsUpdate.machine_id) == machine.id)
+        .order_by(severity_rank, col(WindowsUpdate.title))
+    )
+    detail = MachineDetailOut.model_validate(machine)
+    detail.pending_updates = [PendingUpdateOut.model_validate(u) for u in rows.all()]
+    return detail
+
+
 @router.get("/{machine_id}", response_model=MachineDetailOut)
 async def get_machine(machine_id: uuid.UUID, session: SessionDep) -> MachineDetailOut:
     """Fetch a single machine by id (full Defender state + fingerprint)."""
     machine = await _require_machine(session, machine_id)
-    return MachineDetailOut.model_validate(machine)
+    return await _machine_detail(session, machine)
 
 
 @router.get("/{machine_id}/duplicates", response_model=list[MachineOut])
@@ -250,4 +309,4 @@ async def merge_machine(
     await machine_crud.merge_into(session, target=target, source=source)
     await session.commit()
     await session.refresh(target)
-    return MachineDetailOut.model_validate(target)
+    return await _machine_detail(session, target)

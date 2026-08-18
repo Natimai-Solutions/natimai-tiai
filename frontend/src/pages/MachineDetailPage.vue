@@ -81,6 +81,25 @@
 
       <div class="col-12 col-md-6">
         <q-card flat bordered>
+          <q-card-section class="text-subtitle1 row items-center">
+            Windows Update
+            <q-space />
+            <q-badge v-if="machine?.wu_reboot_required" color="orange" class="q-ml-sm">
+              Redémarrage requis
+            </q-badge>
+          </q-card-section>
+          <q-separator />
+          <q-list dense>
+            <q-item v-for="r in windowsUpdateRows" :key="r.label">
+              <q-item-section>{{ r.label }}</q-item-section>
+              <q-item-section side class="text-black">{{ r.value }}</q-item-section>
+            </q-item>
+          </q-list>
+        </q-card>
+      </div>
+
+      <div class="col-12 col-md-6">
+        <q-card flat bordered>
           <q-card-section class="text-subtitle1">
             Antivirus enregistré
             <div class="text-caption text-grey">
@@ -97,6 +116,54 @@
         </q-card>
       </div>
     </div>
+
+    <q-card v-if="machine?.pending_updates?.length" flat bordered class="q-mt-md">
+      <q-card-section class="text-subtitle1">
+        Mises à jour en attente
+        <div class="text-caption text-grey">
+          Relevé au dernier passage de l'agent ({{ formatDateTime(machine.wu_last_search) }}) — «
+          Rechercher les mises à jour » force un nouveau relevé.
+        </div>
+      </q-card-section>
+      <q-separator />
+      <q-table
+        :rows="machine.pending_updates"
+        :columns="updateColumns"
+        row-key="id"
+        :loading="loading"
+        flat
+        :rows-per-page-options="[10, 25, 50]"
+        no-data-label="Aucune mise à jour en attente."
+      >
+        <template #body-cell-severity="props">
+          <q-td :props="props">
+            <q-badge :color="wuSeverityColor(props.value)">
+              {{ wuSeverityLabel(props.value) }}
+            </q-badge>
+          </q-td>
+        </template>
+        <template #body-cell-type="props">
+          <q-td :props="props">{{ wuTypeLabel(props.value) }}</q-td>
+        </template>
+        <template #body-cell-size_mb="props">
+          <q-td :props="props">{{ wuSizeLabel(props.value) }}</q-td>
+        </template>
+        <template #body-cell-is_downloaded="props">
+          <q-td :props="props">
+            <q-icon
+              :name="props.value ? 'download_done' : 'cloud_download'"
+              :color="props.value ? 'positive' : 'grey-6'"
+            />
+            <q-tooltip>
+              {{ props.value ? 'Déjà téléchargée sur le poste' : 'Reste à télécharger' }}
+            </q-tooltip>
+          </q-td>
+        </template>
+        <template #body-cell-first_seen="props">
+          <q-td :props="props">{{ formatDateTime(props.value) }}</q-td>
+        </template>
+      </q-table>
+    </q-card>
 
     <q-card flat bordered class="q-mt-md">
       <q-card-section class="text-subtitle1">Historique des menaces</q-card-section>
@@ -233,6 +300,7 @@ import {
   revokeToken,
   type Machine,
   type MachineDetail,
+  type PendingUpdate,
 } from 'src/services/machines';
 import { listThreats, type Threat } from 'src/services/threats';
 import {
@@ -251,6 +319,11 @@ import {
   runningModeLabel,
   sessionLabel,
   sessionTypeLabel,
+  wuPendingLabel,
+  wuSeverityColor,
+  wuSeverityLabel,
+  wuSizeLabel,
+  wuTypeLabel,
 } from 'src/utils/format';
 
 const props = defineProps<{ id: string }>();
@@ -342,6 +415,41 @@ const antivirusRows = computed(() =>
       ]
     : [],
 );
+
+const windowsUpdateRows = computed(() =>
+  machine.value
+    ? [
+        { label: 'Mises à jour en attente', value: wuPendingLabel(machine.value.wu_pending_count) },
+        { label: 'Redémarrage requis', value: boolLabel(machine.value.wu_reboot_required) },
+        // Windows' own timestamps, not the agent's: they say when the machine
+        // last managed to talk to its update source, which is what distinguishes
+        // "nothing to install" from "has not checked since March".
+        { label: 'Dernière recherche', value: formatDateTime(machine.value.wu_last_search) },
+        { label: 'Dernière installation', value: formatDateTime(machine.value.wu_last_install) },
+      ]
+    : [],
+);
+
+const updateColumns: QTableColumn<PendingUpdate>[] = [
+  { name: 'kb', label: 'KB', field: 'kb', align: 'left', format: (v: string | null) => v ?? '—' },
+  { name: 'title', label: 'Titre', field: 'title', align: 'left' },
+  // Sortable, but the server already returns them critical-first: MSRC's own
+  // vocabulary sorts alphabetically as critical < important < low < moderate,
+  // which is worse than useless, so the default order is the one to trust.
+  { name: 'severity', label: 'Sévérité', field: 'severity', align: 'left' },
+  { name: 'type', label: 'Type', field: 'type', align: 'left', sortable: true },
+  { name: 'size_mb', label: 'Taille', field: 'size_mb', align: 'right', sortable: true },
+  { name: 'is_downloaded', label: 'Téléchargée', field: 'is_downloaded', align: 'center' },
+  // How long this machine has been sitting on the update — the column that
+  // turns a list of KBs into "this poste has been behind since June".
+  {
+    name: 'first_seen',
+    label: 'En attente depuis',
+    field: 'first_seen',
+    align: 'left',
+    sortable: true,
+  },
+];
 
 const threatColumns: QTableColumn<Threat>[] = [
   { name: 'threat_name', label: 'Menace', field: 'threat_name', align: 'left' },

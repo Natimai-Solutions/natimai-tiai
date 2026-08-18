@@ -323,13 +323,20 @@ api_base_url: http://192.168.1.50:8800   # http:// accepté ; https:// exige un 
 enrollment_secret: <secret partagé>       # préférer le registre (voir plus bas)
 machine_uuid: ""                          # vide = résolution auto (SMBIOS UUID, repli UUID agent)
 heartbeat_interval_seconds: 60
-telemetry_interval_seconds: 900
 request_timeout_seconds: 10
 backoff_max_seconds: 300
 queue_max_items: 1000
+wu_collect_interval_seconds: 21600        # cycle Windows Update (6 h) — jamais dans le heartbeat
+wu_install_timeout_seconds: 7200          # budget d'une installation de MAJ (2 h)
 log_level: INFO                           # DEBUG logge aussi les heartbeats silencieux
 report_session_username: true             # false = remonter la présence sans le nom
 ```
+
+> `telemetry_interval_seconds` a été **retiré** : la clé n'était lue par aucun
+> code. Le « cycle lent » qu'elle annonçait existe désormais pour de bon sous le
+> nom `wu_collect_interval_seconds`, avec un défaut de 6 h et non de 15 min —
+> une recherche Windows Update prend des minutes et interroge le serveur WSUS.
+> Une valeur résiduelle dans un YAML déployé est simplement ignorée.
 
 Toute valeur absente ou non positive retombe sur son défaut, donc un YAML
 partiel reste utilisable. Le token par poste n'est **jamais** dans ce fichier :
@@ -355,7 +362,8 @@ YAML.
 | `MachineUUID` | `REG_SZ` | `machine_uuid` |
 | `LogLevel` | `REG_SZ` | `log_level` |
 | `HeartbeatIntervalSeconds` | `REG_DWORD` | `heartbeat_interval_seconds` |
-| `TelemetryIntervalSeconds` | `REG_DWORD` | `telemetry_interval_seconds` |
+| `WUCollectIntervalSeconds` | `REG_DWORD` | `wu_collect_interval_seconds` |
+| `WUInstallTimeoutSeconds` | `REG_DWORD` | `wu_install_timeout_seconds` |
 | `ReportSessionUsername` | `REG_DWORD` | `report_session_username` |
 
 Contrairement aux intervalles, où `0` est ignoré et signifie « laisser le

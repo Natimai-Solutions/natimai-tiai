@@ -9,6 +9,12 @@ import {
   sessionColor,
   sessionLabel,
   sessionTypeLabel,
+  wuPendingColor,
+  wuPendingLabel,
+  wuSeverityColor,
+  wuSeverityLabel,
+  wuSizeLabel,
+  wuTypeLabel,
 } from './format';
 
 describe('formatDateTime', () => {
@@ -162,5 +168,74 @@ describe('runningModeLabel', () => {
 
   it('surfaces a mode it does not know rather than hiding it', () => {
     expect(runningModeLabel('Some Future Mode')).toBe('Some Future Mode');
+  });
+});
+
+describe('wuPendingLabel', () => {
+  // The distinction the whole column rests on: a machine that has never
+  // reported a Windows Update search is not a machine with nothing to install.
+  it('distinguishes never-reported from up-to-date', () => {
+    expect(wuPendingLabel(null)).toBe('Inconnu');
+    expect(wuPendingLabel(undefined)).toBe('Inconnu');
+    expect(wuPendingLabel(0)).toBe('À jour');
+    expect(wuPendingLabel(12)).toBe('12');
+  });
+
+  it('colours unknown apart from both other states', () => {
+    expect(wuPendingColor(null)).toBe('grey-6');
+    expect(wuPendingColor(0)).toBe('positive');
+    expect(wuPendingColor(3)).toBe('warning');
+  });
+});
+
+describe('wuSeverityLabel', () => {
+  it('translates the MSRC ratings', () => {
+    expect(wuSeverityLabel('critical')).toBe('Critique');
+    expect(wuSeverityLabel('important')).toBe('Importante');
+    expect(wuSeverityLabel('moderate')).toBe('Modérée');
+    expect(wuSeverityLabel('low')).toBe('Faible');
+  });
+
+  it('shows a dash for the many updates carrying no rating', () => {
+    expect(wuSeverityLabel(null)).toBe('—');
+    expect(wuSeverityLabel('')).toBe('—');
+  });
+
+  it('surfaces a rating it does not know rather than swallowing it', () => {
+    expect(wuSeverityLabel('unspecified')).toBe('unspecified');
+  });
+
+  it('only colours what Microsoft actually rates', () => {
+    expect(wuSeverityColor('critical')).toBe('negative');
+    expect(wuSeverityColor('important')).toBe('warning');
+    // No invented ranking for an unrated update.
+    expect(wuSeverityColor(null)).toBe('grey-5');
+    expect(wuSeverityColor('unspecified')).toBe('grey-5');
+  });
+});
+
+describe('wuTypeLabel', () => {
+  it('names the distinction the two install commands hinge on', () => {
+    expect(wuTypeLabel('software')).toBe('Logicielle');
+    expect(wuTypeLabel('driver')).toBe('Pilote');
+  });
+
+  it('falls back to the raw value', () => {
+    expect(wuTypeLabel('firmware')).toBe('firmware');
+    expect(wuTypeLabel(null)).toBe('—');
+  });
+});
+
+describe('wuSizeLabel', () => {
+  it('renders a dash when Windows Update reported no size', () => {
+    expect(wuSizeLabel(null)).toBe('—');
+    expect(wuSizeLabel(undefined)).toBe('—');
+  });
+
+  it('formats the size in the French locale', () => {
+    expect(wuSizeLabel(620.5)).toBe(`${(620.5).toLocaleString('fr-FR')} Mio`);
+    // Zero is a real reading here, unlike null: the server already turned
+    // "WUA reported nothing" into null upstream.
+    expect(wuSizeLabel(0)).toBe('0 Mio');
   });
 });

@@ -18,10 +18,24 @@ import (
 
 const (
 	DefaultHeartbeatInterval = 60   // short poll: command pickup (seconds)
-	DefaultTelemetryInterval = 900  // long poll: full state report (seconds)
 	DefaultRequestTimeout    = 10   // seconds
 	DefaultBackoffMax        = 300  // cap for heartbeat retry back-off (seconds)
 	DefaultQueueMaxItems     = 1000 // local result queue cap
+
+	// DefaultWUCollectInterval is the Windows Update cycle: six hours.
+	//
+	// Its own cycle, deliberately far from the 60 s heartbeat: a WU search takes
+	// minutes and hits the WSUS server, so running it on the poll interval would
+	// keep every poste of the parc permanently searching. Six hours is well
+	// inside the rhythm of Patch Tuesday, and the console can always force a
+	// fresh reading with a wu_scan.
+	DefaultWUCollectInterval = 21600 // seconds
+
+	// DefaultWUInstallTimeout is two hours. A cumulative update on a slow link
+	// is the case that sets it: download and install both happen inside this
+	// budget, and blowing it leaves the command reported as timed out while
+	// Windows carries on installing.
+	DefaultWUInstallTimeout = 7200 // seconds
 
 	tokenFileName = "token.dat"
 )
@@ -32,11 +46,17 @@ type Config struct {
 	MachineUUID              string `yaml:"machine_uuid,omitempty"`      // optional override; else auto-resolved (SMBIOS UUID / agent UUID)
 	EnrollmentSecret         string `yaml:"enrollment_secret,omitempty"` // GPO-deployed; prefer registry/DPAPI over clear YAML
 	HeartbeatIntervalSeconds int    `yaml:"heartbeat_interval_seconds"`
-	TelemetryIntervalSeconds int    `yaml:"telemetry_interval_seconds"`
 	RequestTimeoutSeconds    int    `yaml:"request_timeout_seconds"`
 	BackoffMaxSeconds        int    `yaml:"backoff_max_seconds"`
 	QueueMaxItems            int    `yaml:"queue_max_items"`
 	LogLevel                 string `yaml:"log_level"` // INFO (default) or DEBUG (also logs quiet heartbeats)
+
+	// Windows Update runs on its own clock, away from the heartbeat: one search
+	// every WUCollectIntervalSeconds, and an install allowed to run for
+	// WUInstallTimeoutSeconds. Both are here rather than hard-coded because they
+	// are the two values a slow parc or a slow link actually needs to change.
+	WUCollectIntervalSeconds int `yaml:"wu_collect_interval_seconds"`
+	WUInstallTimeoutSeconds  int `yaml:"wu_install_timeout_seconds"`
 
 	// ReportSessionUsername controls whether the *name* of the logged-on user is
 	// sent to the server; the presence always is. Personal data, so it is
@@ -57,10 +77,11 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		HeartbeatIntervalSeconds: DefaultHeartbeatInterval,
-		TelemetryIntervalSeconds: DefaultTelemetryInterval,
 		RequestTimeoutSeconds:    DefaultRequestTimeout,
 		BackoffMaxSeconds:        DefaultBackoffMax,
 		QueueMaxItems:            DefaultQueueMaxItems,
+		WUCollectIntervalSeconds: DefaultWUCollectInterval,
+		WUInstallTimeoutSeconds:  DefaultWUInstallTimeout,
 		LogLevel:                 "INFO",
 	}
 }
@@ -71,9 +92,6 @@ func (c *Config) applyDefaults() {
 	if c.HeartbeatIntervalSeconds <= 0 {
 		c.HeartbeatIntervalSeconds = DefaultHeartbeatInterval
 	}
-	if c.TelemetryIntervalSeconds <= 0 {
-		c.TelemetryIntervalSeconds = DefaultTelemetryInterval
-	}
 	if c.RequestTimeoutSeconds <= 0 {
 		c.RequestTimeoutSeconds = DefaultRequestTimeout
 	}
@@ -82,6 +100,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.QueueMaxItems <= 0 {
 		c.QueueMaxItems = DefaultQueueMaxItems
+	}
+	if c.WUCollectIntervalSeconds <= 0 {
+		c.WUCollectIntervalSeconds = DefaultWUCollectInterval
+	}
+	if c.WUInstallTimeoutSeconds <= 0 {
+		c.WUInstallTimeoutSeconds = DefaultWUInstallTimeout
 	}
 	if c.LogLevel == "" {
 		c.LogLevel = "INFO"

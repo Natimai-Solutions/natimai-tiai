@@ -2,9 +2,11 @@
 
 Service Windows léger, déployé par GPO, qui interroge le serveur (polling),
 remonte l'état Defender, l'antivirus enregistré (tiers compris), la session
-utilisateur ouverte et l'adresse IP du poste, et exécute les commandes
-demandées depuis la console : scan / mise à jour des signatures Defender, et un
-catalogue fermé de commandes de maintenance et de diagnostic Windows.
+utilisateur ouverte, l'adresse IP et l'état **Windows Update** du poste, et
+exécute les commandes demandées depuis la console : scan / mise à jour des
+signatures Defender, recherche et installation des mises à jour Windows,
+redémarrage, et un catalogue fermé de commandes de maintenance et de diagnostic
+Windows.
 
 ## Layout
 
@@ -21,6 +23,8 @@ internal/
              session utilisateur ouverte via l'API WTS (wtsapi32)
              adresse IP principale via GetAdaptersAddresses (iphlpapi)
              maintenance/diagnostic : catalogue fermé d'outils System32 (maintenance*.go)
+             Windows Update : API COM WUA pilotée en PowerShell, sortie JSON (wu*.go)
+             redémarrage : shutdown.exe /r /t 60 (system*.go)
   queue/     file locale durable (résultats de commandes non remis) + back-off
   logging/   log fichier (agent.log, rotation simple) + niveau INFO/DEBUG
   service/   service Windows (golang.org/x/sys/windows/svc)
@@ -66,6 +70,15 @@ et toute modification du registre, des fichiers, du pare-feu ou des comptes.
 | `gpo_report` | `gpresult /r /scope:computer` | **Diagnostic** | 5 min | — |
 | `net_config` | `ipconfig /all` | **Diagnostic** | 5 min | — |
 
+S'y ajoutent les quatre commandes de la Phase 2, décrites en détail plus bas :
+
+| Type | Effet | Famille | Délai max | `running` |
+|---|---|---|---|---|
+| `wu_scan` | recherche WU immédiate + rafraîchit l'état remonté | Windows Update | 30 min | — |
+| `wu_install` | installe les MAJ **logicielles** (pilotes exclus) | Windows Update | 2 h (réglable) | oui |
+| `wu_install_full` | installe les MAJ **et les pilotes** | Windows Update | 2 h (réglable) | oui |
+| `reboot` | `shutdown /r /t 60` avec message à l'utilisateur | Redémarrage | 1 min | — |
+
 Notes de périmètre :
 
 - `gpupdate` tourne en `/target:computer` : l'agent est `LocalSystem`, il n'y a
@@ -78,8 +91,10 @@ Notes de périmètre :
   fichiers — sinon la purge court après un service qui n'a pas encore lâché ses
   handles. Seuls les `.spl` et `.shd` sont supprimés ; le service est redémarré
   même si la purge a échoué.
-- `netsh winsock reset` est écarté pour l'instant : il exige un redémarrage
-  derrière, il ira avec la commande `reboot` de la Phase 2.
+- `netsh winsock reset` reste écarté : il exige un redémarrage derrière. La
+  commande `reboot` existe désormais, mais elle est déclenchée **à part et
+  explicitement** — enchaîner l'un sur l'autre reviendrait à redémarrer un poste
+  sans que personne l'ait demandé.
 
 **Chemins absolus, jamais le `PATH`.** Chaque exécutable est résolu en
 `%SystemRoot%\System32\<exe>`. L'agent tourne en `LocalSystem` : un répertoire
@@ -124,6 +139,178 @@ remonté brut plutôt que deviné, mais en hexadécimal quand c'est un HRESULT :
 
 Le worker de commandes reste **séquentiel** : une commande longue retarde les
 suivantes du même poste. Comportement assumé, rendu visible par `running`.
+
+## Windows Update
+
+L'agent remonte ce que chaque poste a **en attente** — mises à jour applicables
+et non installées, redémarrage requis, dates des dernières recherche et
+installation réussies — et sait les **installer à distance** depuis la console
+(cf. `plan-phase2-windows-update.md`).
+
+**API COM WUA, pas PSWindowsUpdate.** Tout passe par `Microsoft.Update.Session`,
+pilotée en PowerShell et lue en JSON côté Go. Le module PSWindowsUpdate aurait
+été plus court à écrire mais n'est **pas** livré avec Windows : un agent déployé
+par GPO ne peut ni supposer sa présence sur un poste, ni se mettre à l'installer.
+WUA est *in-box* sur toutes les versions supportées.
+
+**La source de mises à jour du poste est respectée.** La recherche interroge ce
+que le poste est configuré pour interroger : le serveur **WSUS** imposé par GPO
+s'il y en a un, Windows Update sinon. Rien ne force Microsoft Update — ce serait
+distribuer des correctifs que l'administrateur n'a pas approuvés.
+
+### Cycle lent, jamais dans le heartbeat
+
+Une recherche WU prend des **minutes** (13 s sur un poste à jour, bien davantage
+sur un poste qui a un an de retard). Elle a donc son propre rythme :
+
+| | Valeur | Pourquoi |
+|---|---|---|
+| Première collecte | ~2 min après le démarrage | ne pas peser sur le boot, pendant qu'un utilisateur attend sa session |
+| Cycle | `wu_collect_interval_seconds`, **6 h** par défaut | largement dans le rythme du *Patch Tuesday* ; à 15 min tout le parc interrogerait WSUS en permanence |
+| Délai max d'une recherche | 30 min | détecteur de blocage, pas un budget |
+| Délai max d'une installation | `wu_install_timeout_seconds`, **2 h** par défaut | une mise à jour cumulative sur une liaison lente |
+
+Le résultat est mis en cache, et le bloc `windows_update` n'est attaché à un
+heartbeat **que s'il contient une lecture que le serveur n'a pas encore
+accusée**. Sans ce filtre, une trentaine de mises à jour avec leurs titres
+repartiraient toutes les 60 s pour ne rien apprendre à personne — et le serveur
+réécrirait les mêmes lignes à chaque poll.
+
+Le suivi se fait par **compteur de génération** et non par un booléen : une
+collecte qui se termine *pendant* qu'un heartbeat est en vol ne doit pas être
+marquée comme envoyée par l'acquittement de ce heartbeat, sinon la lecture
+fraîche resterait en cache jusqu'au cycle suivant — six heures plus tard.
+
+**Toutes les opérations WUA sont sérialisées** par un mutex partagé : la collecte
+de fond, un `wu_scan` et une installation ne peuvent jamais ouvrir deux sessions
+WUA en même temps. C'est le moyen documenté d'obtenir « une autre installation
+est déjà en cours » de Windows, et avec un cycle de six heures la collision
+finirait immanquablement par arriver.
+
+### Ce qui est remonté
+
+Par mise à jour : identifiant WUA **avec son numéro de révision**, KB, titre,
+sévérité MSRC, type (logicielle / pilote), catégories, si elle est déjà
+téléchargée, et sa taille.
+
+La révision fait partie de la clé parce que Microsoft **révise une mise à jour
+sans changer son `UpdateID`** : la version révisée est autre chose à installer,
+et les fusionner masquerait la révision côté serveur.
+
+Le **type** vient de `IUpdate.Type` (1 = logicielle, 2 = pilote), avec repli sur
+la catégorie « Drivers » si la propriété revient à 0. Ce repli n'est pas
+décoratif : c'est précisément sur cette distinction que les deux commandes
+d'installation se séparent.
+
+Côté serveur, la liste a une **sémantique de remplacement** — contrairement aux
+menaces, qui s'accumulent. Une mise à jour installée disparaît du rapport de
+l'agent et disparaît de la base : la console ne doit jamais proposer d'installer
+un KB déjà en place. Seul `first_seen` survit, et c'est lui qui répond à « depuis
+combien de temps ce poste traîne-t-il ce correctif ».
+
+Les dates de dernière recherche / installation viennent de
+`Microsoft.Update.AutoUpdate.Results`, en *best-effort* dans leur propre
+`try/catch` : elles sont absentes sur un poste dont les mises à jour automatiques
+sont pilotées par stratégie, et perdre toute la liste des correctifs pour une
+date manquante serait un mauvais échange.
+
+### Installer
+
+Deux types de commandes plutôt qu'un seul avec un drapeau : le protocole ne
+transporte **qu'un nom de type**, jamais d'argument, et cette contrainte est le
+modèle de sécurité de tout le catalogue.
+
+| | Critère de recherche WUA |
+|---|---|
+| `wu_install` | `IsInstalled=0 and IsHidden=0 and Type='Software'` |
+| `wu_install_full` | `IsInstalled=0 and IsHidden=0` |
+
+Le filtre pilotes est **dans le critère** et non dans une boucle après coup :
+WUA ne les évalue ni ne les télécharge, et les deux variantes ne diffèrent alors
+que par un mot-clé documenté.
+
+Déroulé : recherche → `AcceptEula()` sur ce qui va être installé → téléchargement
+de ce qui manque → installation de **ce qui est effectivement téléchargé**.
+Cette dernière précision compte : `Install()` échoue en bloc si on lui passe une
+mise à jour non téléchargée, ce qui transformerait un téléchargement raté en
+« aucune mise à jour installée ».
+
+Sont **écartées** les mises à jour dont `InstallationBehavior.CanRequestUserInput`
+est vrai : l'agent tourne en `LocalSystem` dans la session 0, personne ne verrait
+jamais l'invite et l'installation resterait bloquée jusqu'au délai maximal. Elles
+sont comptées et signalées dans le résultat.
+
+Le résultat est lisible dans les deux cas, succès comme échec — c'est le détail
+par KB qui a de la valeur, et un échec sans lui renverrait l'administrateur au
+journal Windows Update du poste, ce que cette fonctionnalité existe justement
+pour éviter :
+
+```
+2 mise(s) à jour retenue(s), 2 installée(s).
+KB5063878 — 2026-08 Mise à jour cumulative : installée
+KB5062660 — Mise à jour Defender : installée avec des erreurs (0x80240017)
+
+Redémarrage requis pour finaliser l'installation (commande « Redémarrer »).
+```
+
+`ResultCode` WUA → verdict : 2 (*Succeeded*) et 3 (*SucceededWithErrors*)
+comptent comme appliquées — la mise à jour **est** installée, un effet de bord
+raté mérite d'être affiché sans faire virer toute la commande au rouge. 4
+(*Failed*), 5 (*Aborted*) et les retenues jamais installées font échouer la
+commande. Zéro mise à jour applicable est un **succès** : c'est exactement ce
+qu'on demandait au poste d'atteindre.
+
+**Codes d'erreur.** Comme pour la maintenance, seuls les codes documentés sont
+traduits — service `wuauserv` désactivé (`0x80070422`), serveur WSUS injoignable
+(`0x8024402C`), accès à Windows Update interdit par stratégie (`0x8024002E`),
+TrustedInstaller occupé (`0x80240016`)… — en une phrase qui dit **quoi faire**,
+et toujours **à côté** du code brut, jamais à sa place. Le reste est remonté tel
+quel plutôt que deviné.
+
+Après un `wu_scan` comme après une installation, l'état est **relu
+immédiatement** : la console voit le nouveau nombre de mises à jour et le
+« redémarrage requis » — qui ne devient vrai qu'à ce moment-là — au heartbeat
+suivant, une minute plus tard, sans attendre le cycle de six heures.
+
+### Redémarrage
+
+**Jamais automatique.** Une mise à jour qui réclame un redémarrage le *signale*,
+et rien de plus. La commande `reboot` est déclenchée séparément, explicitement,
+derrière une confirmation dans la console : redémarrer un poste sur lequel
+quelqu'un travaille est une décision d'administrateur, pas un effet de bord.
+
+`shutdown.exe /r /t 60 /c "Redémarrage demandé par l'administrateur (Tiai)."`
+plutôt que l'API `InitiateSystemShutdownEx` : l'outil porte déjà le privilège
+`SeShutdownPrivilege`, la notification à l'utilisateur et l'affichage du message.
+
+Le délai de 60 s porte deux choses à la fois : l'utilisateur connecté voit
+l'avertissement et peut enregistrer son travail, et l'agent a le temps de poster
+le résultat **avant** que la machine ne tombe. Si le POST échoue quand même, la
+file locale durable le rejoue au retour — le même mécanisme qui couvre un scan
+terminé pendant que le serveur était indisponible.
+
+### Sortie JSON de PowerShell
+
+Les scripts WU utilisent un wrapper distinct de celui de Defender
+(`runPowerShellJSON`), pour deux raisons dont aucune n'est cosmétique.
+
+D'abord la **charge utile doit rester intacte** : `runPowerShell` passe par
+`Out-String`, dont le formateur retourne à la ligne à la largeur de l'hôte — un
+titre de mise à jour la dépasse sans effort, et un document JSON coupé à la
+colonne 120 n'est plus un document JSON. Ici la chaîne sérialisée est écrite
+directement sur le handle de sortie standard en octets UTF-8, en contournant
+l'encodeur console (`[Console]::OutputEncoding` lève une exception quand aucune
+console n'est attachée — le cas d'un service).
+
+Ensuite les **flux sont séparés** : un avertissement que WUA écrirait sur stderr
+ne doit pas venir se coller au milieu de l'objet que stdout transporte.
+
+Les critères de recherche sont injectés **en Go**, avant que PowerShell ne voie
+le script, et leurs apostrophes sont doublées : `Type='Software'` en contient, et
+collé tel quel il referme le littéral en plein milieu. Le script ne se compilait
+alors pas du tout — sur la variante *sans pilotes*, celle de `wu_install`. Un
+test parse les deux scripts avec le parseur de PowerShell lui-même, précisément
+pour que cette classe de faute ne se découvre pas sur un poste de production.
 
 ## Antivirus tiers
 
@@ -259,8 +446,11 @@ poste, au lieu d'effacer une information sur une lecture ratée.
 
 - Back-off exponentiel (plafonné) si le serveur est injoignable.
 - File locale durable pour les **résultats de commandes** : un scan terminé alors
-  que le serveur était down est rejoué au prochain contact. L'état/les menaces
-  sont reconstruits à chaque heartbeat (pas mis en file).
+  que le serveur était down est rejoué au prochain contact — y compris le
+  résultat d'un `reboot`, si le poste tombe avant que le POST n'aboutisse.
+  L'état/les menaces sont reconstruits à chaque heartbeat (pas mis en file), et
+  l'état Windows Update reste en cache jusqu'à ce qu'un heartbeat l'ait
+  effectivement remis.
 
 ## Build & essai
 

@@ -27,6 +27,40 @@ func TestLoadYAMLAppliesDefaults(t *testing.T) {
 	if cfg.QueueMaxItems != DefaultQueueMaxItems {
 		t.Errorf("expected default queue cap, got %d", cfg.QueueMaxItems)
 	}
+	// Windows Update has its own clock, and getting these two wrong is
+	// expensive in opposite directions: a short collect interval makes every
+	// poste of the parc search WSUS in a loop, a short install timeout reports
+	// a cumulative update as failed while Windows is still installing it.
+	if cfg.WUCollectIntervalSeconds != DefaultWUCollectInterval {
+		t.Errorf("expected default WU collect interval, got %d", cfg.WUCollectIntervalSeconds)
+	}
+	if cfg.WUInstallTimeoutSeconds != DefaultWUInstallTimeout {
+		t.Errorf("expected default WU install timeout, got %d", cfg.WUInstallTimeoutSeconds)
+	}
+}
+
+// A hand-edited YAML that zeroes an interval must fall back to the default
+// rather than spin: a zero collect interval would search Windows Update in a
+// tight loop, which on a parc means hammering the WSUS server.
+func TestWUIntervalsFallBackWhenZeroed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "api_base_url: https://tiai.example.local\n" +
+		"wu_collect_interval_seconds: 0\n" +
+		"wu_install_timeout_seconds: -1\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.WUCollectIntervalSeconds != DefaultWUCollectInterval {
+		t.Errorf("collect interval = %d, want the default", cfg.WUCollectIntervalSeconds)
+	}
+	if cfg.WUInstallTimeoutSeconds != DefaultWUInstallTimeout {
+		t.Errorf("install timeout = %d, want the default", cfg.WUInstallTimeoutSeconds)
+	}
 }
 
 // A GPO can deploy the agent with registry values only, so an absent

@@ -20,6 +20,8 @@ describe('getOverview', () => {
       needs_verification: 1,
       inactive: 2,
       with_active_threats: 1,
+      machines_wu_pending: 4,
+      machines_reboot_required: 2,
     };
     vi.mocked(api.get).mockResolvedValue({ data: payload });
 
@@ -27,5 +29,7 @@ describe('getOverview', () => {
 
     expect(api.get).toHaveBeenCalledWith('/stats/overview');
     expect(result).toEqual(payload);
+    expect(result.machines_wu_pending).toBe(4);
+    expect(result.machines_reboot_required).toBe(2);
   });
 });

@@ -79,6 +79,23 @@ class Machine(SQLModel, table=True):
     # brittle and locale-dependent.
     av_product_is_defender: bool | None = None
 
+    # Windows Update state, refreshed on the agent's own slow cycle (hours) and
+    # not on every heartbeat: a WU search takes minutes. NULL on the count means
+    # "never reported" — an agent older than the feature, or a host whose WU
+    # service could not be queried — which the console renders as unknown rather
+    # than as "nothing to install".
+    #
+    # wu_pending_count is derived server-side from the reported list, not taken
+    # from the agent: the badge in the list and the table on the detail page then
+    # cannot disagree.
+    wu_pending_count: int | None = None
+    # NOT NULL, unlike the columns around it: a machine that never reported is
+    # not "pending a reboot", and false is the honest default. The console shows
+    # nothing for it, so there is no unknown state to represent.
+    wu_reboot_required: bool = Field(default=False)
+    wu_last_search: datetime | None = utc_field(default=None, nullable=True)
+    wu_last_install: datetime | None = utc_field(default=None, nullable=True)
+
     # Interactive session (WTS), refreshed on each heartbeat. NULL means "never
     # reported" — an agent older than the feature, or a failed read — which is
     # distinct from False, "nobody is logged on". session_username stays NULL

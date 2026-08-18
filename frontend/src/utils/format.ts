@@ -116,3 +116,71 @@ export function sessionTypeLabel(
   const base = state === 'active' ? 'Active' : 'Déconnectée';
   return `${base} (${isRemote ? 'Bureau à distance' : 'console'})`;
 }
+
+/**
+ * Label for the pending-update count. A null count is not zero: it means the
+ * agent has never reported a Windows Update search — too old for the feature,
+ * or a machine whose WU service could not be queried — and showing "0" there
+ * would credit a machine we know nothing about.
+ */
+export function wuPendingLabel(count: number | null | undefined): string {
+  if (count === null || count === undefined) return 'Inconnu';
+  return count === 0 ? 'À jour' : String(count);
+}
+
+/** Badge colour for the pending count: grey unknown, green none, amber some. */
+export function wuPendingColor(count: number | null | undefined): string {
+  if (count === null || count === undefined) return 'grey-6';
+  return count === 0 ? 'positive' : 'warning';
+}
+
+/**
+ * Badge colour for an update's MSRC severity. Only the ratings Microsoft
+ * actually publishes are coloured; anything else — most updates are unrated —
+ * stays neutral rather than being ranked by guesswork.
+ */
+export function wuSeverityColor(severity: string | null | undefined): string {
+  switch (severity) {
+    case 'critical':
+      return 'negative';
+    case 'important':
+      return 'warning';
+    case 'moderate':
+      return 'amber-7';
+    case 'low':
+      return 'grey-7';
+    default:
+      return 'grey-5';
+  }
+}
+
+/** MSRC severity in French, or a dash for the many updates carrying no rating. */
+export function wuSeverityLabel(severity: string | null | undefined): string {
+  switch (severity) {
+    case 'critical':
+      return 'Critique';
+    case 'important':
+      return 'Importante';
+    case 'moderate':
+      return 'Modérée';
+    case 'low':
+      return 'Faible';
+    // Shown as-is rather than swallowed: a rating Microsoft adds later should
+    // surface, not vanish.
+    default:
+      return severity || '—';
+  }
+}
+
+/** Update kind, spelled out: the distinction the two install commands hinge on. */
+export function wuTypeLabel(type: string | null | undefined): string {
+  if (type === 'driver') return 'Pilote';
+  if (type === 'software') return 'Logicielle';
+  return type || '—';
+}
+
+/** Download size in MiB, or a dash when Windows Update reported none. */
+export function wuSizeLabel(sizeMb: number | null | undefined): string {
+  if (sizeMb === null || sizeMb === undefined) return '—';
+  return `${sizeMb.toLocaleString('fr-FR')} Mio`;
+}

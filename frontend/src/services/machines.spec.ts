@@ -137,3 +137,55 @@ describe('mergeMachines', () => {
     expect(result).toEqual(target);
   });
 });
+
+describe('windows update fields', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset();
+  });
+
+  it('carries the pending updates through the machine detail', async () => {
+    const payload = {
+      id: 'm-1',
+      wu_pending_count: 2,
+      wu_reboot_required: true,
+      wu_last_search: '2026-08-13T04:00:00Z',
+      wu_last_install: '2026-08-01T03:12:00Z',
+      pending_updates: [
+        {
+          id: 1,
+          update_id: 'e6cf1350.201',
+          kb: 'KB5063878',
+          title: 'Mise à jour cumulative 2026-08',
+          severity: 'critical',
+          type: 'software',
+          categories: 'Security Updates',
+          is_downloaded: true,
+          size_mb: 620.5,
+          first_seen: '2026-08-13T04:00:00Z',
+          last_seen: '2026-08-17T04:00:00Z',
+        },
+      ],
+    };
+    vi.mocked(api.get).mockResolvedValue({ data: payload });
+
+    const result = await getMachine('m-1');
+
+    expect(api.get).toHaveBeenCalledWith('/machines/m-1');
+    expect(result.wu_pending_count).toBe(2);
+    expect(result.wu_reboot_required).toBe(true);
+    expect(result.pending_updates[0]?.kb).toBe('KB5063878');
+    expect(result.pending_updates[0]?.severity).toBe('critical');
+  });
+
+  it('keeps a never-reported machine distinguishable from a patched one', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: { id: 'm-2', wu_pending_count: null, wu_reboot_required: false, pending_updates: [] },
+    });
+
+    const result = await getMachine('m-2');
+
+    // null, not 0: the console renders the two differently on purpose.
+    expect(result.wu_pending_count).toBeNull();
+    expect(result.pending_updates).toEqual([]);
+  });
+});

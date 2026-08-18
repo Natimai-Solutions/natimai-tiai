@@ -109,6 +109,29 @@
           </q-tooltip>
         </q-td>
       </template>
+      <template #body-cell-windows_update="props">
+        <q-td :props="props">
+          <q-badge :color="wuPendingColor(props.row.wu_pending_count)">
+            {{ wuPendingLabel(props.row.wu_pending_count) }}
+          </q-badge>
+          <q-icon
+            v-if="props.row.wu_reboot_required"
+            name="restart_alt"
+            color="orange"
+            size="18px"
+            class="q-ml-xs"
+          >
+            <q-tooltip>Redémarrage requis</q-tooltip>
+          </q-icon>
+          <q-tooltip>
+            {{
+              props.row.wu_pending_count === null
+                ? 'Windows Update jamais remonté par l’agent'
+                : `${props.row.wu_pending_count} mise(s) à jour en attente`
+            }}
+          </q-tooltip>
+        </q-td>
+      </template>
       <template #body-cell-session="props">
         <q-td :props="props">
           <q-badge :color="sessionColor(props.row.session_user_present)">
@@ -143,6 +166,8 @@ import {
   formatDateTime,
   sessionColor,
   sessionLabel,
+  wuPendingColor,
+  wuPendingLabel,
 } from 'src/utils/format';
 
 const $q = useQuasar();
@@ -206,6 +231,16 @@ const columns: QTableColumn<Machine>[] = [
     label: 'Vérif.',
     field: 'needs_verification',
     align: 'center',
+  },
+  // Sortable, and it is the sort that matters: "show me the postes furthest
+  // behind" is the whole point of the column. A null count (never reported)
+  // sorts apart from a zero, which is the distinction the badge makes too.
+  {
+    name: 'windows_update',
+    label: 'MAJ Windows',
+    field: 'wu_pending_count',
+    align: 'center',
+    sortable: true,
   },
   // name ≠ field on purpose: the cell renders presence *and* username, while
   // `field` still gives the sort a sensible key (present / absent / unknown).

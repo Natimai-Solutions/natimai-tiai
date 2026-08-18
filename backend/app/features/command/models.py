@@ -37,6 +37,17 @@ class CommandType(enum.StrEnum):
     DISM_COMPONENT_CLEANUP = "dism_component_cleanup"
     CHKDSK_SCAN = "chkdsk_scan"
 
+    # Windows Update (Phase 2). Two install types rather than one carrying a
+    # "drivers included" flag: the protocol deliberately carries a type name and
+    # nothing else, so a variant is a value here and not a payload.
+    WU_SCAN = "wu_scan"
+    WU_INSTALL = "wu_install"
+    WU_INSTALL_FULL = "wu_install_full"
+    # Never triggered on the agent's own initiative, whatever it reports as
+    # needing one: a reboot is an admin decision, taken in the console behind a
+    # confirmation.
+    REBOOT = "reboot"
+
     # Diagnostics: read-only, the value is in reading ``result_output``.
     GPO_REPORT = "gpo_report"
     NET_CONFIG = "net_config"

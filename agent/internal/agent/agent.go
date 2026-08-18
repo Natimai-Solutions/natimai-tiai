@@ -60,6 +60,16 @@ type Agent struct {
 	// the rest demoted to debug rather than printed on every poll for the life of
 	// the service.
 	avErrLogged atomic.Bool
+
+	// Windows Update runs on its own clock: a background cycle every few hours
+	// fills wu, and the heartbeat ships what it holds. A WU search takes minutes,
+	// so it can neither run inline in the poll loop nor be re-read per heartbeat.
+	wu wuCache
+	// Serialises everything that opens a WUA session — the background cycle, a
+	// wu_scan, an install. Two concurrent sessions is the documented way to get
+	// "another installation is in progress" back from Windows, and the collection
+	// running six-hourly *will* eventually land on top of an install otherwise.
+	wuOp sync.Mutex
 }
 
 // New creates an agent from config.
@@ -101,6 +111,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.running = make(map[string]struct{})
 	a.wg.Add(1)
 	go a.worker(ctx)
+	a.wg.Add(1)
+	go a.wuLoop(ctx)
 	defer a.wg.Wait()
 
 	base := time.Duration(a.cfg.HeartbeatIntervalSeconds) * time.Second
@@ -194,21 +206,32 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		a.logAVError(err)
 	}
 
+	// Attached only when the background cycle has produced something the server
+	// has not acknowledged — nil on the vast majority of heartbeats, which then
+	// leave the stored Windows Update state exactly as it was.
+	wu, wuGen := a.wu.pending()
+
 	fp := a.identity.Fingerprint
 	resp, err := a.client.Heartbeat(ctx, models.HeartbeatRequest{
-		Hostname:     a.host.Hostname,
-		Domain:       a.host.Domain,
-		IPAddress:    ip,
-		OSVersion:    a.host.OSVersion,
-		AgentVersion: Version,
-		Defender:     state,
-		AVProduct:    av,
-		Session:      sess,
-		Fingerprint:  &fp,
-		Threats:      threats,
+		Hostname:      a.host.Hostname,
+		Domain:        a.host.Domain,
+		IPAddress:     ip,
+		OSVersion:     a.host.OSVersion,
+		AgentVersion:  Version,
+		Defender:      state,
+		AVProduct:     av,
+		Session:       sess,
+		WindowsUpdate: wu,
+		Fingerprint:   &fp,
+		Threats:       threats,
 	})
 	if err != nil {
 		return err
+	}
+	if wu != nil {
+		// Only now: a heartbeat that never reached the server has not reported
+		// anything, and the block has to ride the next one.
+		a.wu.markSent(wuGen)
 	}
 	if n := len(resp.Commands); n > 0 {
 		log.Printf("agent: heartbeat ok, %d command(s) to run", n)
@@ -297,6 +320,16 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 		run = collector.RunFullScan
 	case "update_signatures":
 		run = collector.UpdateSignatures
+	case "wu_scan":
+		run = a.runWUScan
+	case "wu_install":
+		long = true
+		run = func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, false) }
+	case "wu_install_full":
+		long = true
+		run = func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, true) }
+	case "reboot":
+		run = collector.Reboot
 	default:
 		// The maintenance catalogue is looked up rather than switched on: its
 		// entries differ only by data, so a new command is one table row in the

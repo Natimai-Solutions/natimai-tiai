@@ -19,6 +19,12 @@ async def merge_into(
     source. Threats whose ``detection_id`` already exists on the target are
     dropped (the target's row wins) to honor the (machine_id, detection_id)
     uniqueness. The caller commits.
+
+    The source's *pending Windows updates* are deliberately not reattached: they
+    are current state and not history, they would collide with the target's own
+    set, and the target's ``wu_pending_count`` would then disagree with the rows.
+    Deleting the source drops them by FK cascade, and the target's next Windows
+    Update cycle re-establishes the truth.
     """
     # Commands carry no uniqueness constraint — reassign them wholesale.
     await session.execute(

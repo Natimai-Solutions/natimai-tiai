@@ -28,6 +28,32 @@ export interface Machine {
   session_user_present: boolean | null;
   /** null while present = the agent reports presence only (privacy setting). */
   session_username: string | null;
+  /**
+   * Pending Windows updates. null = never reported — an agent older than the
+   * feature, or one whose Windows Update search failed — which the console
+   * shows as unknown rather than as "nothing to install".
+   */
+  wu_pending_count: number | null;
+  /** Never null: a machine that has not reported is not awaiting a restart. */
+  wu_reboot_required: boolean;
+  last_seen: string;
+}
+
+/** An update Windows Update reports as applicable and not yet installed. */
+export interface PendingUpdate {
+  id: number;
+  /** WUA's UpdateID and revision — the server's dedup key, not for display. */
+  update_id: string;
+  kb: string | null;
+  title: string;
+  /** MSRC rating, lowercased server-side: critical / important / moderate / low. */
+  severity: string | null;
+  type: 'software' | 'driver' | string;
+  categories: string | null;
+  is_downloaded: boolean;
+  size_mb: number | null;
+  /** When this machine first reported the update — how long it has been behind. */
+  first_seen: string;
   last_seen: string;
 }
 
@@ -42,6 +68,10 @@ export interface MachineDetail extends Machine {
   running_mode: string | null;
   session_state: string | null;
   session_is_remote: boolean | null;
+  wu_last_search: string | null;
+  wu_last_install: string | null;
+  /** Sorted critical-first by the server; empty when nothing is pending. */
+  pending_updates: PendingUpdate[];
   machine_guid: string | null;
   smbios_uuid: string | null;
   tpm_ek_hash: string | null;

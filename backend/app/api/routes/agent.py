@@ -24,6 +24,8 @@ from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
 from app.features.threat.crud import upsert_threats
 from app.features.threat.schemas import ThreatReport
+from app.features.windows_update.crud import replace_pending
+from app.features.windows_update.schemas import WUStateReport
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -132,6 +134,11 @@ class HeartbeatRequest(BaseModel):
     defender: DefenderState | None = None
     av_product: AVProduct | None = None
     session: SessionState | None = None
+    # Sent only on the heartbeats that follow a Windows Update collection — the
+    # agent runs that on its own slow cycle (hours), because a WU search takes
+    # minutes. Absent on every other heartbeat, which leaves the stored state
+    # alone exactly like an absent Defender block.
+    windows_update: WUStateReport | None = None
     fingerprint: Fingerprint | None = None
     threats: list[ThreatReport] = []
 
@@ -339,6 +346,18 @@ async def heartbeat(
         machine.session_username = s.username
         machine.session_state = s.state
         machine.session_is_remote = s.is_remote
+
+    if payload.windows_update is not None:
+        wu = payload.windows_update
+        machine.wu_reboot_required = wu.reboot_required
+        machine.wu_last_search = wu.last_search_time
+        machine.wu_last_install = wu.last_install_time
+        # Counted from the reported list rather than trusted from a field of its
+        # own: the badge in the machine list and the table on the detail page
+        # then cannot disagree about the same machine.
+        machine.wu_pending_count = await replace_pending(
+            session, machine.id, wu.pending
+        )
 
     if payload.fingerprint is not None:
         fp = payload.fingerprint

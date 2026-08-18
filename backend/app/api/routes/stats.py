@@ -32,6 +32,12 @@ class StatsOverview(BaseModel):
     needs_verification: int
     inactive: int
     with_active_threats: int
+    # Windows Update (Phase 2). Counted over the machines' own columns rather
+    # than over ``windows_updates``: a machine that reports zero pending updates
+    # has no rows there, so counting rows would say nothing about how many
+    # machines are behind.
+    machines_wu_pending: int
+    machines_reboot_required: int
 
 
 async def _count(session: SessionDep, clause: ColumnElement[bool] | None = None) -> int:
@@ -56,6 +62,11 @@ async def overview(session: SessionDep) -> StatsOverview:
     )
     inactive = await _count(session, status_clause(MachineStatus.INACTIVE, now, days))
 
+    machines_wu_pending = await _count(session, col(Machine.wu_pending_count) > 0)
+    machines_reboot_required = await _count(
+        session, col(Machine.wu_reboot_required).is_(True)
+    )
+
     with_active_threats = (
         await session.scalar(
             select(func.count(func.distinct(Threat.machine_id))).where(
@@ -72,4 +83,6 @@ async def overview(session: SessionDep) -> StatsOverview:
         needs_verification=needs_verification,
         inactive=inactive,
         with_active_threats=with_active_threats,
+        machines_wu_pending=machines_wu_pending,
+        machines_reboot_required=machines_reboot_required,
     )
