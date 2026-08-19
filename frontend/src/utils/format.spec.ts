@@ -306,11 +306,11 @@ describe('wuSizeLabel', () => {
     expect(wuSizeLabel(undefined)).toBe('—');
   });
 
-  it('formats the size in the French locale', () => {
-    expect(wuSizeLabel(620.5)).toBe(`${(620.5).toLocaleString('fr-FR')} Mio`);
+  it('formats the size in the French locale, as the ceiling it is', () => {
+    expect(wuSizeLabel(620.5)).toBe(`≤ ${(620.5).toLocaleString('fr-FR')} Mio`);
     // Zero is a real reading here, unlike null: the server already turned
     // "WUA reported nothing" into null upstream.
-    expect(wuSizeLabel(0)).toBe('0 Mio');
+    expect(wuSizeLabel(0)).toBe('≤ 0 Mio');
   });
 });
 

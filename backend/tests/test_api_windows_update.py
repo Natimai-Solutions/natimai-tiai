@@ -203,6 +203,29 @@ async def test_pending_updates_are_scoped_to_their_machine(client, db_session):
     assert [u["update_id"] for u in right["pending_updates"]] == ["u-shared"]
 
 
+def test_absurd_size_is_dropped_rather_than_stored():
+    """WUA's MaxDownloadSize is a ceiling, and sometimes not a size at all.
+
+    No database: this is the schema's own guard. The agent already filters these,
+    so what this covers is the parc's older agents, whose figures reach the route
+    unchallenged — KB5121003 really does report ninety gibibytes for a download
+    of about one.
+    """
+    from app.features.windows_update.schemas import SIZE_MB_MAX, PendingUpdateReport
+
+    def size_of(size_mb):
+        return PendingUpdateReport(update_id="u-1", size_mb=size_mb).size_mb
+
+    assert size_of(92_795.0) is None  # KB5121003, as WUA reports it
+    assert size_of(-1.0) is None
+    # The merely large still reports: a feature update is legitimately several
+    # gibibytes, and the bound is there for the absurd only.
+    assert size_of(float(SIZE_MB_MAX)) == SIZE_MB_MAX
+    assert size_of(620.5) == 620.5
+    # Unknown stays unknown rather than becoming a zero the console would show.
+    assert size_of(None) is None
+
+
 async def test_malformed_update_degrades_instead_of_422(client, db_session):
     """One unusable entry must not cost the rest of the heartbeat."""
     from app.features.windows_update.schemas import TITLE_MAX

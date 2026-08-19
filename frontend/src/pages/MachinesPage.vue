@@ -223,7 +223,7 @@ const antivirusOptions = ref<{ label: string; value: string | null }[]>([
 // « Antivirus » in the labels, not just « à jour » : since the Windows Update
 // filter joined it, this axis has to say which of the two updates it means.
 const statusOptions = [
-  { label: 'Tous statuts antivirus', value: null },
+  { label: 'Antivirus : Tous statuts', value: null },
   { label: 'Antivirus à jour', value: 'up_to_date' },
   { label: 'Antivirus périmé', value: 'outdated' },
   { label: 'À vérifier', value: 'needs_verification' },
@@ -231,7 +231,7 @@ const statusOptions = [
 ];
 
 const wuOptions = [
-  { label: 'Toutes MAJ Windows', value: null },
+  { label: 'Windows update : Tous statuts', value: null },
   { label: 'MAJ Windows requises', value: 'pending' },
   { label: 'Redémarrage requis', value: 'reboot_required' },
 ];

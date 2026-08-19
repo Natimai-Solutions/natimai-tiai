@@ -359,15 +359,35 @@ func mapUpdateType(typeID int, categories []string) string {
 	return updateTypeSoftware
 }
 
+// maxPlausibleDownloadBytes is where a reported size stops meaning anything.
+//
+// MaxDownloadSize is a *ceiling*, not a measurement: WUA sums every payload the
+// update could conceivably need — full package and express/delta variants, each
+// architecture, each language — where exactly one of them is ever fetched. On a
+// driver, which ships a single payload, that ceiling is the size, which is why
+// those read true. On a cumulative update it is not: KB5121003 reports
+// 97 304 266 124 bytes — ninety gigabytes — for a download of about one.
+//
+// So a bound, above which the figure carries no information at all and a dash is
+// the more honest answer. Ten gibibytes leaves an order of magnitude over the
+// largest download Windows legitimately ships (a feature update, four to six),
+// and still catches the values that were destroying trust in the column.
+//
+// It does not, and cannot, rescue a ceiling that is merely inflated rather than
+// absurd — a Defender definition update reporting 1.4 GiB for some 150 MB. That
+// is why the console labels the column a maximum instead of a size.
+const maxPlausibleDownloadBytes = 10 * 1024 * 1024 * 1024
+
 // bytesToMB converts WUA's MaxDownloadSize, rounded to a tenth of a mebibyte.
 //
-// Two ends, both deliberate. Zero means "WUA reported no size", which is nil —
-// not a claim that the update is empty. And a real but tiny download (many
-// driver extensions are tens of kilobytes) floors at 0.1 rather than rounding to
-// 0.0, which the console would render as "0 Mio" next to an update that plainly
-// has something to fetch.
+// Three ends, all deliberate. Zero means "WUA reported no size", which is nil —
+// not a claim that the update is empty. A real but tiny download (many driver
+// extensions are tens of kilobytes) floors at 0.1 rather than rounding to 0.0,
+// which the console would render as "0 Mio" next to an update that plainly has
+// something to fetch. And anything past maxPlausibleDownloadBytes is nil too:
+// see there.
 func bytesToMB(size float64) *float64 {
-	if size <= 0 {
+	if size <= 0 || size > maxPlausibleDownloadBytes {
 		return nil
 	}
 	mb := float64(int64(size/(1024*1024)*10+0.5)) / 10

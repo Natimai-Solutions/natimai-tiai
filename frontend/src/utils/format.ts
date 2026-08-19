@@ -245,10 +245,19 @@ export function wuTypeLabel(type: string | null | undefined): string {
   return type || '—';
 }
 
-/** Download size in MiB, or a dash when Windows Update reported none. */
+/**
+ * Download ceiling in MiB, or a dash when Windows Update reported none usable.
+ *
+ * Prefixed with ≤ on purpose. What WUA reports is MaxDownloadSize, the sum of
+ * every payload the update could need — full package and express/delta variants,
+ * each architecture, each language — where exactly one of them is fetched. A
+ * driver ships a single payload and so reads true; a cumulative update or a
+ * Defender definition does not, and printing its ceiling as a plain size is what
+ * made the column look broken. The sign says what the number is.
+ */
 export function wuSizeLabel(sizeMb: number | null | undefined): string {
   if (sizeMb === null || sizeMb === undefined) return '—';
-  return `${sizeMb.toLocaleString('fr-FR')} Mio`;
+  return `≤ ${sizeMb.toLocaleString('fr-FR')} Mio`;
 }
 
 /**

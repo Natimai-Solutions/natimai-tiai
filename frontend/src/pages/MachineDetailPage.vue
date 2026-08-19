@@ -157,7 +157,14 @@
           <q-td :props="props">{{ wuTypeLabel(props.value) }}</q-td>
         </template>
         <template #body-cell-size_mb="props">
-          <q-td :props="props">{{ wuSizeLabel(props.value) }}</q-td>
+          <q-td :props="props">
+            {{ wuSizeLabel(props.value) }}
+            <q-tooltip v-if="props.value != null">
+              Majorant relevé par Windows Update : la somme de toutes les charges utiles que la mise
+              à jour pourrait avoir à récupérer, alors qu'une seule sera téléchargée. Exact sur un
+              pilote, surestimé sur un correctif cumulatif.
+            </q-tooltip>
+          </q-td>
         </template>
         <template #body-cell-is_downloaded="props">
           <q-td :props="props">
@@ -507,7 +514,9 @@ const updateColumns: QTableColumn<PendingUpdate>[] = [
   // which is worse than useless, so the default order is the one to trust.
   { name: 'severity', label: 'Sévérité', field: 'severity', align: 'left' },
   { name: 'type', label: 'Type', field: 'type', align: 'left', sortable: true },
-  { name: 'size_mb', label: 'Taille', field: 'size_mb', align: 'right', sortable: true },
+  // "max." and not "Taille": WUA reports a ceiling, not a measurement — see
+  // wuSizeLabel. The header carries the caveat so the cells do not have to.
+  { name: 'size_mb', label: 'Taille max.', field: 'size_mb', align: 'right', sortable: true },
   { name: 'is_downloaded', label: 'Téléchargée', field: 'is_downloaded', align: 'center' },
   // How long this machine has been sitting on the update — the column that
   // turns a list of KBs into "this poste has been behind since June".
