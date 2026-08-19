@@ -102,6 +102,66 @@ func TestWUScriptsAreValidPowerShell(t *testing.T) {
 	}
 }
 
+// ConvertTo-WUDate is where the two timestamps the console shows are decided,
+// and the failure it guards against is invisible in a UTC timezone: WUA reports
+// UTC, COM drops the kind, and a naive ToUniversalTime() shifts it a second time
+// by the machine's offset. Run from Pacific/Tahiti that put the last search ten
+// hours into the future. So the UTC case is asserted verbatim, on a host whose
+// own offset the test does not control.
+func TestConvertToWUDateKeepsWUATimestampsInUTC(t *testing.T) {
+	local := time.Date(2026, 8, 18, 8, 14, 0, 0, time.Local)
+
+	script := wuDateHelper + `
+@{
+  unspecified = ConvertTo-WUDate ([datetime]::SpecifyKind([datetime]'2026-08-18T18:14:00', [System.DateTimeKind]::Unspecified))
+  utc         = ConvertTo-WUDate ([datetime]::SpecifyKind([datetime]'2026-08-18T18:14:00', [System.DateTimeKind]::Utc))
+  local       = ConvertTo-WUDate ([datetime]::SpecifyKind([datetime]'2026-08-18T08:14:00', [System.DateTimeKind]::Local))
+  never       = ConvertTo-WUDate ([datetime]'1601-01-01T00:00:00')
+}
+`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	out, err := runPowerShellJSON(ctx, script)
+	if err != nil {
+		t.Fatalf("runPowerShellJSON: %v", err)
+	}
+	var got struct {
+		Unspecified *string `json:"unspecified"`
+		UTC         *string `json:"utc"`
+		Local       *string `json:"local"`
+		Never       *string `json:"never"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("output is not valid JSON (%v):\n%s", err, out)
+	}
+
+	const wuaWallClock = "2026-08-18T18:14:00Z"
+	for _, c := range []struct {
+		name string
+		got  *string
+		want string
+	}{
+		// The shape COM actually hands back, and the one the bug shifted.
+		{"unspecified", got.Unspecified, wuaWallClock},
+		{"utc", got.UTC, wuaWallClock},
+		{"local", got.Local, local.UTC().Format("2006-01-02T15:04:05Z")},
+	} {
+		if c.got == nil {
+			t.Errorf("%s: got null, want %s", c.name, c.want)
+			continue
+		}
+		if *c.got != c.want {
+			t.Errorf("%s: got %s, want %s", c.name, *c.got, c.want)
+		}
+	}
+	// WUA's "never", which must reach the console as a dash and not as 1601.
+	if got.Never != nil {
+		t.Errorf("never: got %s, want null", *got.Never)
+	}
+}
+
 // The collection script against the machine's own WUA. Slow — a search runs to
 // minutes on a poste that is behind — so it is opt-in via TIAI_WU_LIVE=1 rather
 // than run on every `go test`.

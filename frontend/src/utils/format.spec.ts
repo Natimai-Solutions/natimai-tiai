@@ -145,8 +145,10 @@ describe('sessionTypeLabel', () => {
 
 describe('antivirusLabel', () => {
   it('distinguishes "never reported" from "none installed"', () => {
-    expect(antivirusLabel(null)).toBe('Inconnu');
-    expect(antivirusLabel(undefined)).toBe('Inconnu');
+    // "Non relevé", not "Inconnu": the difference an administrator reads next to
+    // a live Defender column.
+    expect(antivirusLabel(null)).toBe('Non relevé');
+    expect(antivirusLabel(undefined)).toBe('Non relevé');
     // The registry was read and holds nothing: a finding, not a missing measure.
     expect(antivirusLabel('')).toBe('Aucun');
   });
@@ -176,7 +178,9 @@ describe('antivirusColor', () => {
 
 describe('antivirusStatusLabel', () => {
   it('names the two absent cases apart', () => {
-    expect(antivirusStatusLabel(null, null, null)).toBe("Jamais remonté par l'agent");
+    expect(antivirusStatusLabel(null, null, null)).toBe(
+      'Security Center jamais relevé (agent antérieur, ou hôte sans Security Center)',
+    );
     expect(antivirusStatusLabel('', null, null)).toBe('Aucun antivirus enregistré');
   });
 

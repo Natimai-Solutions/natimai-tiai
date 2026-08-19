@@ -68,7 +68,12 @@
 
       <div class="col-12 col-md-6">
         <q-card flat bordered>
-          <q-card-section class="text-subtitle1">État Defender</q-card-section>
+          <q-card-section class="text-subtitle1">
+            État Defender
+            <div v-if="machine?.av_product_is_defender" class="text-caption text-grey">
+              Defender est l'antivirus enregistré au Security Center de Windows.
+            </div>
+          </q-card-section>
           <q-separator />
           <q-list dense>
             <q-item v-for="r in defenderRows" :key="r.label">
@@ -98,16 +103,22 @@
         </q-card>
       </div>
 
-      <div class="col-12 col-md-6">
+      <div v-if="showAVProductCard" class="col-12 col-md-6">
         <q-card flat bordered>
           <q-card-section class="text-subtitle1">
             Antivirus enregistré
             <div class="text-caption text-grey">
-              Vu par le Security Center de Windows — la seule source qui voit un antivirus tiers.
+              Vu par le Security Center de Windows — un produit tiers, ou aucun.
             </div>
           </q-card-section>
           <q-separator />
-          <q-list dense>
+          <q-card-section v-if="avProductUnread" class="text-caption text-grey">
+            Jamais relevé sur ce poste : son agent est antérieur à la lecture du Security Center, ou
+            l'hôte n'en a pas — un SKU Windows Server n'en embarque aucun. C'est ce que dit « Non
+            relevé » dans la liste des postes : non pas que le poste soit sans antivirus, mais que
+            ce relevé-là manque. L'état Defender ci-dessus, lui, est bien à jour.
+          </q-card-section>
+          <q-list v-else dense>
             <q-item v-for="r in antivirusRows" :key="r.label">
               <q-item-section>{{ r.label }}</q-item-section>
               <q-item-section side class="text-black">{{ r.value }}</q-item-section>
@@ -427,22 +438,52 @@ const defenderRows = computed(() =>
     : [],
 );
 
-const antivirusRows = computed(() =>
-  machine.value
-    ? [
-        { label: 'Produit', value: antivirusLabel(machine.value.av_product_name) },
-        { label: 'Protection active', value: boolLabel(machine.value.av_product_enabled) },
-        // The Security Center exposes a freshness bit and nothing else — no
-        // version, no date, which is why this card carries no scan or update
-        // action for a third-party product.
-        {
-          label: 'Signatures à jour',
-          value: boolLabel(machine.value.av_product_signatures_up_to_date),
-        },
-        { label: 'Est Defender', value: boolLabel(machine.value.av_product_is_defender) },
-      ]
-    : [],
+/**
+ * Whether the Security Center deserves a card of its own.
+ *
+ * Not when the product it names is Defender: every row it would carry is already
+ * in the Defender card, and two panels stating the same protection twice read as
+ * a display bug rather than as corroboration. It stays for a third-party product
+ * — the case Defender's own WMI class cannot describe — for "no antivirus
+ * registered at all", and for the case where nothing was ever read, which is the
+ * one an administrator most needs spelled out.
+ */
+const showAVProductCard = computed(
+  () => machine.value != null && machine.value.av_product_is_defender !== true,
 );
+
+/**
+ * No Security Center reading at all, as opposed to one that found nothing. The
+ * card then explains itself instead of printing four rows of "Inconnu" beside a
+ * Defender card that is plainly alive — the contradiction that reading invites.
+ */
+const avProductUnread = computed(
+  () => machine.value != null && machine.value.av_product_name == null,
+);
+
+const antivirusRows = computed(() => {
+  const m = machine.value;
+  // Never read: the card shows its explanation instead, not a table of dashes.
+  if (!m || m.av_product_name == null) return [];
+  const rows = [{ label: 'Produit', value: antivirusLabel(m.av_product_name) }];
+  // Both bits below describe a *product*. With none registered they would only
+  // add two "Inconnu" under a "Aucun" that has already said everything.
+  if (m.av_product_name !== '') {
+    rows.push(
+      { label: 'Protection active', value: boolLabel(m.av_product_enabled) },
+      // The Security Center exposes a freshness bit and nothing else — no
+      // version, no date, which is why this card carries no scan or update
+      // action for a third-party product.
+      {
+        label: 'Signatures à jour',
+        value: boolLabel(m.av_product_signatures_up_to_date),
+      },
+    );
+  }
+  // No "Est Defender" row: the card being here at all is that answer, and the
+  // Defender card says so in words on the machines where it is Defender.
+  return rows;
+});
 
 const windowsUpdateRows = computed(() =>
   machine.value

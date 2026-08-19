@@ -86,9 +86,14 @@ export function sessionColor(present: boolean | null | undefined): string {
  * none), while an *empty* name means the registry was read and holds nothing,
  * i.e. the machine runs no antivirus at all. Collapsing the two would hide a
  * finding behind a missing measurement.
+ *
+ * "Non relevé" and not "Inconnu" for the absent case: on a machine whose
+ * Defender columns are visibly alive, "Inconnu" reads as the console failing to
+ * name an antivirus it can see, and so as a contradiction. The measurement is
+ * what is missing, and the label now says which.
  */
 export function antivirusLabel(name: string | null | undefined): string {
-  if (name === null || name === undefined) return 'Inconnu';
+  if (name === null || name === undefined) return 'Non relevé';
   return name === '' ? 'Aucun' : name;
 }
 
@@ -115,7 +120,9 @@ export function antivirusStatusLabel(
   enabled: boolean | null | undefined,
   signaturesUpToDate: boolean | null | undefined,
 ): string {
-  if (name === null || name === undefined) return "Jamais remonté par l'agent";
+  if (name === null || name === undefined) {
+    return 'Security Center jamais relevé (agent antérieur, ou hôte sans Security Center)';
+  }
   if (name === '') return 'Aucun antivirus enregistré';
 
   const parts: string[] = [];

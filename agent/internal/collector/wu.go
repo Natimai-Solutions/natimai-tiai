@@ -75,20 +75,35 @@ func wuSearchCriteria(includeDrivers bool) string {
 
 // --- The scripts ------------------------------------------------------------
 
+// wuDateHelper renders a WUA timestamp as the UTC ISO 8601 string parseWUTime
+// expects. Its own const so a test can run it without searching Windows Update.
+//
+// WUA already reports these dates in UTC, but the COM marshaller hands the DATE
+// back as a DateTime with Kind = Unspecified. ToUniversalTime() then reads that
+// as *local* time and shifts it a second time: a poste in Pacific/Tahiti (UTC-10)
+// reported timestamps ten hours in the future, which the console — converting
+// back to local for display — showed as a search that had not happened yet. So
+// the kind we know is stamped on rather than converted, and only a value that
+// arrives explicitly Local is shifted.
+const wuDateHelper = `
+function ConvertTo-WUDate($value) {
+  if ($null -eq $value) { return $null }
+  try { $d = [datetime]$value } catch { return $null }
+  # WUA reports "never" as 1601-01-01 (and sometimes 1900), not as null.
+  if ($d.Year -lt 1980) { return $null }
+  if ($d.Kind -eq [System.DateTimeKind]::Local) { $d = $d.ToUniversalTime() }
+  else { $d = [datetime]::SpecifyKind($d, [System.DateTimeKind]::Utc) }
+  return $d.ToString('yyyy-MM-ddTHH:mm:ssZ')
+}
+`
+
 // wuCollectScript searches for applicable updates and reports the machine's WU
 // state. It emits one JSON object, which runPowerShellJSON serialises for it.
 //
 // The two dates are best-effort in their own try/catch: Microsoft.Update.AutoUpdate
 // is absent or throws on a machine whose Automatic Updates are managed away, and
 // losing the whole pending list over a missing timestamp would be a poor trade.
-const wuCollectScript = `
-function ConvertTo-WUDate($value) {
-  if ($null -eq $value) { return $null }
-  try { $d = [datetime]$value } catch { return $null }
-  # WUA reports "never" as 1601-01-01 (and sometimes 1900), not as null.
-  if ($d.Year -lt 1980) { return $null }
-  return $d.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-}
+const wuCollectScript = wuDateHelper + `
 
 $rebootRequired = $false
 try { $rebootRequired = [bool](New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired } catch { }
