@@ -77,6 +77,7 @@ S'y ajoutent les quatre commandes de la Phase 2, décrites en détail plus bas :
 | `wu_scan` | recherche WU immédiate + rafraîchit l'état remonté | Windows Update | 30 min | — |
 | `wu_install` | installe les MAJ **logicielles** (pilotes exclus) | Windows Update | 2 h (réglable) | oui |
 | `wu_install_full` | installe les MAJ **et les pilotes** | Windows Update | 2 h (réglable) | oui |
+| `wu_reset` | arrêt des 4 services WU → renommage de `SoftwareDistribution` et `catroot2` → redémarrage (natif Go) | Windows Update | 10 min | oui |
 | `reboot` | `shutdown /r /t 60` avec message à l'utilisateur | Redémarrage | 1 min | — |
 
 Notes de périmètre :
@@ -91,10 +92,60 @@ Notes de périmètre :
   fichiers — sinon la purge court après un service qui n'a pas encore lâché ses
   handles. Seuls les `.spl` et `.shd` sont supprimés ; le service est redémarré
   même si la purge a échoué.
+- `wu_reset` est la procédure Microsoft « Réinitialiser les composants Windows
+  Update », écrite en natif pour les mêmes raisons que `spooler_reset` : le
+  gestionnaire de services dit l'état réel et permet d'**attendre** l'arrêt
+  effectif avant de renommer — un dossier encore ouvert ne se renomme pas. Trois
+  règles d'ordonnancement portent la sûreté de l'ensemble : les renommages
+  n'ont lieu qu'une fois **tous** les services arrêtés ; un service qui n'a pas
+  pu être arrêté **annule** les renommages plutôt que de les laisser échouer un
+  par un ; les services sont redémarrés quoi qu'il arrive au milieu. Seuls les
+  services que la commande a effectivement arrêtés sont relancés — `wuauserv` et
+  `msiserver` démarrent à la demande, et un service désactivé par GPO doit le
+  rester. Un `.old` laissé par une exécution précédente est supprimé avant le
+  renommage : le `ren` de l'article échoue à la deuxième exécution, alors que
+  rejouer la procédure sur un poste récalcitrant est le cas normal.
+- Écartés du `wu_reset`, bien qu'ils figurent dans des variantes plus anciennes
+  ou tierces de la même recette : le ré-enregistrement des DLL WU par `regsvr32`
+  (sans effet depuis Windows 8), `netsh winsock reset` et la réécriture des
+  descripteurs de sécurité par `sc sdset`. Aucun n'est nécessaire sur une
+  version supportée, et chacun est plus difficile à défaire que l'ensemble de ce
+  que fait la commande.
 - `netsh winsock reset` reste écarté : il exige un redémarrage derrière. La
   commande `reboot` existe désormais, mais elle est déclenchée **à part et
   explicitement** — enchaîner l'un sur l'autre reviendrait à redémarrer un poste
   sans que personne l'ait demandé.
+
+### Rationnement du redémarrage
+
+`reboot` est la seule commande dont l'effet survit au processus qui l'exécute, et
+la seule qui puisse coûter son travail à un utilisateur. La console demande une
+confirmation et le serveur refuse d'en mettre une seconde en file tant que la
+première n'est pas terminée — mais ni l'une ni l'autre ne tourne sur le poste
+concerné. L'agent tranche donc lui-même ([`internal/agent/reboot.go`](internal/agent/reboot.go)),
+là où ni une erreur de console, ni une file dupliquée, ni un serveur compromis
+ne peuvent l'atteindre. Même raisonnement que le catalogue fermé : c'est l'agent
+qui décide de ce qu'il fait réellement.
+
+Deux règles, et un refus est remonté en **échec** avec son motif — jamais un
+succès silencieux :
+
+- **10 minutes minimum entre deux redémarrages.** Mesuré sur la *durée de
+  fonctionnement* du poste (`GetTickCount64`) autant que sur la mémoire du
+  processus : un agent qui ne se souviendrait que de ses propres redémarrages
+  oublierait chacun d'eux au moment où ça compte, puisque le redémarrage emporte
+  le processus. Une file qui re-proposerait un `reboot` boucherait sinon le poste
+  indéfiniment, chaque démarrage effaçant la trace du précédent. Une lecture
+  d'uptime en échec ne bloque pas : c'est une règle de rationnement, pas une
+  frontière de sécurité.
+- **Un redémarrage programmé bloque tout le reste du catalogue** pendant 5 min.
+  Le worker exécute les commandes une à une, donc une commande longue mise en
+  file *après* un `reboot` ne peut pas démarrer avant lui — mais un `reboot` mis
+  en file *avant* elle rend la main en quelques millisecondes, et la machine
+  tombe alors soixante secondes après le début d'un `dism` en train de réécrire
+  le magasin de composants. L'ordre protège dans un sens seulement ; cette règle
+  protège l'autre. Bornée à 5 min parce qu'un redémarrage peut être annulé
+  (`shutdown /a`) : passé ce délai l'agent reprend son fonctionnement normal.
 
 **Chemins absolus, jamais le `PATH`.** Chaque exécutable est résolu en
 `%SystemRoot%\System32\<exe>`. L'agent tourne en `LocalSystem` : un répertoire

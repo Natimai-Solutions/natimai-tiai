@@ -3,7 +3,12 @@
     <div class="row items-center q-mb-md">
       <div class="text-h5">Tableau de bord</div>
       <q-space />
-      <q-btn flat round icon="refresh" :loading="loading" @click="load" />
+      <div v-if="lastRefreshedAt" class="text-caption text-grey q-mr-sm">
+        Actualisé à {{ lastRefreshLabel }}
+      </div>
+      <q-btn flat round icon="refresh" :loading="loading" @click="reload">
+        <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
+      </q-btn>
     </div>
 
     <div class="row q-col-gutter-md q-mb-lg">
@@ -30,7 +35,7 @@
         <q-card flat bordered>
           <q-card-section class="text-subtitle1 row items-center">
             <q-icon name="gpp_maybe" color="warning" class="q-mr-sm" />
-            Postes non à jour
+            Postes à mettre à jour
           </q-card-section>
           <q-separator />
           <q-list separator>
@@ -101,6 +106,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter, type RouteLocationRaw } from 'vue-router';
+import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { getOverview, type StatsOverview } from 'src/services/stats';
 import { listMachines, type Machine } from 'src/services/machines';
 import { listThreats, type Threat } from 'src/services/threats';
@@ -191,22 +197,43 @@ function mergeOutdated(av: Machine[], wuBehind: Machine[]): Machine[] {
   return [...byId.values()].sort((a, b) => b.last_seen.localeCompare(a.last_seen)).slice(0, 5);
 }
 
-async function load() {
+async function fetchAll() {
+  const [s, av, wuBehind, t] = await Promise.all([
+    getOverview(),
+    listMachines({ status: 'outdated', page_size: 5 }),
+    listMachines({ wu_status: 'pending', page_size: 5 }),
+    listThreats({ status: 'active', page_size: 5 }),
+  ]);
+  stats.value = s;
+  outdated.value = mergeOutdated(av.items, wuBehind.items);
+  threats.value = t.items;
+}
+
+// The dashboard is a wall screen as much as a page: left open, it has to keep
+// telling the truth without anyone pressing anything.
+const { lastRefreshedAt, refreshNow } = useAutoRefresh(fetchAll);
+
+/**
+ * The button's own load, spinner and all. The automatic ones deliberately do
+ * *not* raise `loading`: a spinner blinking on its own every ninety seconds
+ * reads as a page that is struggling rather than as one that is current.
+ */
+async function reload() {
   loading.value = true;
   try {
-    const [s, av, wuBehind, t] = await Promise.all([
-      getOverview(),
-      listMachines({ status: 'outdated', page_size: 5 }),
-      listMachines({ wu_status: 'pending', page_size: 5 }),
-      listThreats({ status: 'active', page_size: 5 }),
-    ]);
-    stats.value = s;
-    outdated.value = mergeOutdated(av.items, wuBehind.items);
-    threats.value = t.items;
+    await refreshNow();
   } finally {
     loading.value = false;
   }
 }
 
-onMounted(load);
+const lastRefreshLabel = computed(() =>
+  lastRefreshedAt.value ? lastRefreshedAt.value.toLocaleTimeString('fr-FR') : '',
+);
+
+const autoRefreshHint = `Actualiser — automatique toutes les ${Math.round(
+  AUTO_REFRESH_INTERVAL_MS / 1000,
+)} s`;
+
+onMounted(reload);
 </script>

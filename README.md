@@ -21,7 +21,9 @@ gère naturellement les postes éteints.
   déclenchables à distance, sur un poste ou sur tout le parc.
 - **Windows Update** — mises à jour en attente poste par poste, installation à
   distance (pilotes inclus ou non), redémarrage requis signalé puis déclenché sur
-  décision explicite — jamais automatiquement.
+  décision explicite — jamais automatiquement. Réinitialisation des composants
+  Windows Update (procédure Microsoft) pour un poste qui ne se met plus à jour
+  du tout.
 - **Maintenance & diagnostic** — un catalogue fermé de commandes Windows
   courantes (stratégies de groupe, cache DNS, horloge, spouleur d'impression,
   vérification d'intégrité et de disque) et deux diagnostics en lecture seule
@@ -30,7 +32,8 @@ gère naturellement les postes éteints.
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
 - **Supervision** — tableau de bord, recherche et filtres, alertes par e-mail,
-  nettoyage automatique des postes disparus.
+  nettoyage automatique des postes disparus. Le tableau de bord et la fiche
+  d'un poste se rafraîchissent seuls, au rythme des remontées des agents.
 - **Déploiement sans friction** — un binaire unique poussé par GPO,
   auto-enrôlement des postes, HTTPS de bout en bout.
 
@@ -101,6 +104,10 @@ serveur.
 - **Catalogue de commandes fermé** : aucun exécuteur de scripts, aucune
   modification du registre, des fichiers, du pare-feu ou des comptes — un serveur
   compromis ne peut déclencher que les actions prévues.
+- **Une commande à la fois par poste** : une même commande n'est pas remise en
+  file tant que la précédente n'a pas rendu son verdict, et le redémarrage —
+  la seule action qui puisse coûter son travail à un utilisateur — est en outre
+  rationné par l'agent lui-même, sur le poste, hors de portée du serveur.
 - **Binaire agent signé** par le certificat de l'AC interne.
 
 Pour signaler une vulnérabilité, contactez

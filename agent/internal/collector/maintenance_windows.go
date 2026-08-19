@@ -93,11 +93,16 @@ func runSystem32(ctx context.Context, exe string, args ...string) ([]byte, int, 
 // directory that appears before System32 in PATH and is writable by a normal
 // user would turn every one of these commands into SYSTEM code execution.
 func system32Path(exe string) string {
-	root := os.Getenv("SystemRoot")
-	if root == "" {
-		root = `C:\Windows`
+	return filepath.Join(systemRoot(), "System32", exe)
+}
+
+// systemRoot is the Windows directory — "C:\Windows" on all but the unusual
+// machine, which is exactly why it is read rather than assumed.
+func systemRoot() string {
+	if root := os.Getenv("SystemRoot"); root != "" {
+		return root
 	}
-	return filepath.Join(root, "System32", exe)
+	return `C:\Windows`
 }
 
 // systemDrive is the volume Windows is installed on — "C:\" on all but the
@@ -170,10 +175,6 @@ const (
 	// descriptor) per job. Only those two extensions are ever deleted — the
 	// directory is not wiped.
 	spoolQueueSubdir = `System32\spool\PRINTERS`
-	// serviceStateTimeout bounds each of the two state transitions. The spooler
-	// normally stops in under a second; a stuck driver is what this catches.
-	serviceStateTimeout = 60 * time.Second
-	servicePollInterval = 300 * time.Millisecond
 )
 
 // runSpoolerReset stops the print spooler, empties its queue and starts it
@@ -269,11 +270,7 @@ func setServiceState(ctx context.Context, s *mgr.Service, control svc.Cmd, want 
 // Failures are counted but not fatal — one locked job must not stop the rest
 // from being cleared, nor the spooler from restarting.
 func purgeSpoolQueue() (int, error) {
-	root := os.Getenv("SystemRoot")
-	if root == "" {
-		root = `C:\Windows`
-	}
-	dir := filepath.Join(root, spoolQueueSubdir)
+	dir := filepath.Join(systemRoot(), spoolQueueSubdir)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {

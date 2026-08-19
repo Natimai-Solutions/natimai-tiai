@@ -43,6 +43,11 @@ class CommandType(enum.StrEnum):
     WU_SCAN = "wu_scan"
     WU_INSTALL = "wu_install"
     WU_INSTALL_FULL = "wu_install_full"
+    # Moves the update store aside so Windows rebuilds it — the repair for a
+    # poste whose updates no longer search, download or install. In this family
+    # rather than in Maintenance because it is Windows Update it repairs, and
+    # because the search that verifies it sits right beside it in the menu.
+    WU_RESET = "wu_reset"
     # Never triggered on the agent's own initiative, whatever it reports as
     # needing one: a reboot is an admin decision, taken in the console behind a
     # confirmation.

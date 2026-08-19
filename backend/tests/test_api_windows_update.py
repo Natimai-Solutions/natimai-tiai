@@ -398,7 +398,7 @@ async def test_merged_duplicate_drops_its_pending_updates(client, db_session):
 
 # --- Commands ---------------------------------------------------------------
 
-WU_TYPES = ["wu_scan", "wu_install", "wu_install_full", "reboot"]
+WU_TYPES = ["wu_scan", "wu_install", "wu_install_full", "wu_reset", "reboot"]
 
 
 @pytest.mark.parametrize("command_type", WU_TYPES)

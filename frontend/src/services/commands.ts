@@ -19,6 +19,7 @@ export type CommandType =
   | 'wu_scan'
   | 'wu_install'
   | 'wu_install_full'
+  | 'wu_reset'
   | 'reboot'
   // Diagnostics: read-only, the value is in reading the result.
   | 'gpo_report'
@@ -119,6 +120,17 @@ export const commandActions: CommandAction[] = [
     confirm: true,
     bulk: true,
     hint: 'Comme ci-dessus, mais les pilotes proposés par Windows Update sont installés eux aussi — à réserver aux postes où c’est souhaité. Aucun redémarrage automatique.',
+  },
+  {
+    // Last in the section, after the two installs: it is what an admin reaches
+    // for once those have failed on a poste, not something to try first.
+    type: 'wu_reset',
+    label: 'Réinitialiser Windows Update',
+    icon: 'settings_backup_restore',
+    group: 'windows_update',
+    confirm: true,
+    bulk: true,
+    hint: 'Procédure Microsoft : les services Windows Update sont arrêtés, le magasin de mises à jour et le cache de signatures sont renommés, puis les services repartent. Windows les reconstruit à la recherche suivante — l’historique des mises à jour du poste est perdu et les correctifs déjà téléchargés le seront à nouveau. Rien n’est installé ni redémarré.',
   },
   {
     // Never automatic, whatever a poste reports as needing one: restarting a
@@ -278,6 +290,16 @@ export interface CreateCommandsPayload {
 export interface CreateCommandsResponse {
   created: string[];
   count: number;
+  /**
+   * Targets left alone because they already carried an unfinished command of
+   * the same type. Not an error — re-pressing a button on a poste that has not
+   * answered yet is the normal way this happens — but the console has to say
+   * so instead of claiming it sent something.
+   *
+   * Optional so an older server, which does not send the field, reads as zero
+   * rather than as NaN in the notification.
+   */
+  skipped?: number;
 }
 
 export interface Command {
@@ -307,6 +329,34 @@ export interface ListCommandsParams {
   machine_id?: string;
   page?: number;
   page_size?: number;
+}
+
+/**
+ * What a bulk send actually did, as a notification.
+ *
+ * The skipped count is the point. Fire a scan on 340 postes, press it again
+ * before any of them has answered, and the server legitimately creates nothing
+ * — « 0 commande(s) envoyée(s) » alone would read as a failure rather than as
+ * "they all already have it".
+ */
+export function bulkSendNotification(res: CreateCommandsResponse): {
+  type: 'positive' | 'warning';
+  message: string;
+} {
+  // ?? 0 and not a required field: an older server does not send it, and NaN
+  // in a notification is worse than an undercount.
+  const skipped = res.skipped ?? 0;
+  if (res.count === 0 && skipped > 0) {
+    return {
+      type: 'warning',
+      message: `Rien à envoyer : cette commande est déjà en attente sur ${skipped} poste(s).`,
+    };
+  }
+  const sent = `${res.count} commande(s) envoyée(s)`;
+  return {
+    type: 'positive',
+    message: skipped > 0 ? `${sent} — ${skipped} déjà en attente, ignoré(s)` : sent,
+  };
 }
 
 export async function createCommands(

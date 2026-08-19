@@ -57,10 +57,17 @@ class CreateCommands(BaseModel):
 
 
 class CreateCommandsResponse(BaseModel):
-    """Ids of the created command rows."""
+    """Ids of the created command rows, and what was left alone.
+
+    ``skipped`` counts the targets that already carried an unfinished command of
+    the same type. It is not an error — re-pressing a button on a poste that has
+    not answered yet is the normal way this happens — but the console has to be
+    able to say so rather than claim it sent something.
+    """
 
     created: list[uuid.UUID]
     count: int
+    skipped: int = 0
 
 
 class CommandOut(BaseModel):
@@ -118,10 +125,18 @@ async def _resolve_targets(
 async def create_commands(
     payload: CreateCommands, session: SessionDep, user: CurrentUser
 ) -> CreateCommandsResponse:
-    """Queue one command per resolved target machine (admin only)."""
+    """Queue one command per resolved target machine (admin only).
+
+    A machine that already has an unfinished command of the same type is
+    skipped, not queued twice: see ``command_crud.create_for_machines``.
+    """
     machine_ids = await _resolve_targets(session, payload)
+    # Same sweep the tracking endpoint runs: a command left pending past its TTL
+    # must not block the one an administrator is queueing now, on a poste that
+    # was simply off the whole time.
+    await command_crud.mark_expired(session)
     expires_at = utcnow() + timedelta(minutes=payload.ttl_minutes)
-    created = await command_crud.create_for_machines(
+    created, skipped = await command_crud.create_for_machines(
         session,
         machine_ids=machine_ids,
         command_type=payload.type,
@@ -129,7 +144,9 @@ async def create_commands(
         expires_at=expires_at,
     )
     await session.commit()
-    return CreateCommandsResponse(created=created, count=len(created))
+    return CreateCommandsResponse(
+        created=created, count=len(created), skipped=len(skipped)
+    )
 
 
 @router.get(

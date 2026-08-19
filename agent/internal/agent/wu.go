@@ -138,6 +138,29 @@ func (a *Agent) runWUScan(ctx context.Context) (string, error) {
 	return fmt.Sprintf("%d mise(s) à jour en attente.", len(state.Pending)), nil
 }
 
+// runWUReset moves the Windows Update store aside — the repair for a poste
+// whose updates no longer search, download or install.
+//
+// Under the same lock as everything else that touches Windows Update, and this
+// is the operation the lock matters most for: renaming SoftwareDistribution
+// while a search or an install is running is precisely how a machine ends up
+// with a half-written update store, and the six-hourly collection *will*
+// eventually land on top of a reset otherwise.
+//
+// The cache is deliberately left alone afterwards. What the reset discards is
+// the store, not the truth: the updates this machine is missing are still
+// missing, so the pending list the console shows stays correct. The two
+// timestamps beside it come from the Automatic Updates results in the
+// registry, which the reset does not touch either. The next cycle — or a
+// wu_scan, which is what the command's own output tells the administrator to
+// run — re-reads all of it.
+func (a *Agent) runWUReset(ctx context.Context) (string, error) {
+	a.wuOp.Lock()
+	defer a.wuOp.Unlock()
+
+	return collector.RunWUReset(ctx)
+}
+
 // runWUInstall installs the pending updates, drivers included or not.
 //
 // The state is re-read afterwards whatever the outcome, and that is deliberate:

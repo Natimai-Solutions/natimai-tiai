@@ -6,6 +6,7 @@ vi.mock('boot/axios', () => ({
 
 import { api } from 'boot/axios';
 import {
+  bulkSendNotification,
   commandActionGroups,
   commandActions,
   commandTypeLabel,
@@ -45,6 +46,7 @@ describe('command catalogue', () => {
     'wu_scan',
     'wu_install',
     'wu_install_full',
+    'wu_reset',
     'reboot',
     'gpo_update',
     'flush_dns',
@@ -79,6 +81,8 @@ describe('command catalogue', () => {
       // through like the Defender scans.
       'wu_install',
       'wu_install_full',
+      // Discards the update store, and with it the poste's update history.
+      'wu_reset',
       'reboot',
       'spooler_reset',
       'sfc_scan',
@@ -128,6 +132,31 @@ describe('the restart command', () => {
   });
 });
 
+describe('the Windows Update reset', () => {
+  // Microsoft's own repair procedure, and the one command that throws data
+  // away without installing anything — so what it costs has to be spelled out
+  // before it is sent, not discovered afterwards in the update history.
+  it('asks, and names what it discards', () => {
+    const reset = commandActions.find((a) => a.type === 'wu_reset');
+    expect(reset?.group).toBe('windows_update');
+    expect(reset?.confirm).toBe(true);
+    expect(reset?.hint).toMatch(/historique/);
+    // No reboot hidden inside it: the restart stays a separate, explicit call.
+    expect(reset?.hint).toMatch(/Rien n’est installé ni redémarré/);
+  });
+
+  it('sits after the installs, before the restart', () => {
+    const wu = commandActions.filter((a) => a.group === 'windows_update');
+    expect(wu.map((a) => a.type)).toEqual([
+      'wu_scan',
+      'wu_install',
+      'wu_install_full',
+      'wu_reset',
+      'reboot',
+    ]);
+  });
+});
+
 describe('commandTypeLabel', () => {
   it('translates a known type', () => {
     expect(commandTypeLabel('dism_restore_health')).toBe('Réparer l’image système (DISM)');
@@ -136,6 +165,39 @@ describe('commandTypeLabel', () => {
   it('falls back to the raw value for an unknown type', () => {
     // An older console against a newer server must show something, not a blank.
     expect(commandTypeLabel('install_package')).toBe('install_package');
+  });
+});
+
+describe('bulkSendNotification', () => {
+  it('reports a plain send', () => {
+    expect(bulkSendNotification({ created: ['a', 'b'], count: 2, skipped: 0 })).toEqual({
+      type: 'positive',
+      message: '2 commande(s) envoyée(s)',
+    });
+  });
+
+  it('names what was left alone', () => {
+    const note = bulkSendNotification({ created: ['a'], count: 1, skipped: 3 });
+    expect(note.type).toBe('positive');
+    expect(note.message).toContain('1 commande(s) envoyée(s)');
+    expect(note.message).toContain('3 déjà en attente');
+  });
+
+  it('warns rather than claiming a send when everything was skipped', () => {
+    // The case that would otherwise read as a failure: the button pressed twice
+    // before any poste has answered.
+    const note = bulkSendNotification({ created: [], count: 0, skipped: 340 });
+    expect(note.type).toBe('warning');
+    expect(note.message).toContain('340 poste(s)');
+  });
+
+  it('treats a missing count as zero', () => {
+    // An older server does not send the field; NaN in a notification is worse
+    // than an undercount.
+    expect(bulkSendNotification({ created: [], count: 0 })).toEqual({
+      type: 'positive',
+      message: '0 commande(s) envoyée(s)',
+    });
   });
 });
 

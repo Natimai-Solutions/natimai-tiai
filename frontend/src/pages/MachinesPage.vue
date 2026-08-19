@@ -181,7 +181,12 @@ import {
   type MachineStatus,
   type WindowsUpdateFilter,
 } from 'src/services/machines';
-import { commandActionGroups, createCommands, type CommandAction } from 'src/services/commands';
+import {
+  bulkSendNotification,
+  commandActionGroups,
+  createCommands,
+  type CommandAction,
+} from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import {
   antivirusLabel,
@@ -410,7 +415,7 @@ function runBulk(action: CommandAction) {
 async function sendBulk(action: CommandAction, ids: string[]) {
   try {
     const res = await createCommands({ type: action.type, machine_ids: ids });
-    $q.notify({ type: 'positive', message: `${res.count} commande(s) envoyée(s)` });
+    $q.notify(bulkSendNotification(res));
     selected.value = [];
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'envoi des commandes") });

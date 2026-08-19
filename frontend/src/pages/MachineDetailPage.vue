@@ -4,6 +4,12 @@
       <q-btn flat dense round icon="arrow_back" :to="{ name: 'machines' }" class="q-mr-sm" />
       <div class="text-h5">{{ title }}</div>
       <q-space />
+      <div v-if="lastRefreshedAt" class="text-caption text-grey q-mr-sm">
+        Actualisé à {{ lastRefreshLabel }}
+      </div>
+      <q-btn flat dense round icon="refresh" :loading="loading" class="q-mr-sm" @click="load">
+        <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
+      </q-btn>
       <q-btn-dropdown color="primary" dense label="Action" icon="bolt" :disable="!machine">
         <q-list>
           <template v-for="section in actionGroups" :key="section.group">
@@ -325,6 +331,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useQuasar, type QTableColumn } from 'quasar';
+import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAutoRefresh';
 import {
   getDuplicates,
   getMachine,
@@ -587,21 +594,49 @@ const commandColumns: QTableColumn<Command>[] = [
   { name: 'finished_at', label: 'Terminée le', field: 'finished_at', align: 'left' },
 ];
 
+async function fetchAll() {
+  const [m, t, c] = await Promise.all([
+    getMachine(props.id),
+    listThreats({ machine_id: props.id }),
+    listCommands({ machine_id: props.id }),
+  ]);
+  machine.value = m;
+  threats.value = t.items;
+  commands.value = c.items;
+}
+
+/**
+ * This is the page an administrator leaves open after firing a command, so it
+ * follows the poste on its own: `pending` → `transmise` → `en cours` →
+ * `réussie` arrives without a click.
+ *
+ * Paused while a dialog is over the page. The result dialog reads a snapshot
+ * and would survive a refresh, but the merge dialog would have its duplicate
+ * list swapped under the cursor — and either way, pulling the tables around
+ * behind a modal is the one moment a background refresh is worse than stale
+ * data.
+ */
+const { lastRefreshedAt, refreshNow } = useAutoRefresh(fetchAll, {
+  paused: () => detailOpen.value || mergeOpen.value,
+});
+
+/** The manual load: this one shows the spinner, the automatic ones do not. */
 async function load() {
   loading.value = true;
   try {
-    const [m, t, c] = await Promise.all([
-      getMachine(props.id),
-      listThreats({ machine_id: props.id }),
-      listCommands({ machine_id: props.id }),
-    ]);
-    machine.value = m;
-    threats.value = t.items;
-    commands.value = c.items;
+    await refreshNow();
   } finally {
     loading.value = false;
   }
 }
+
+const lastRefreshLabel = computed(() =>
+  lastRefreshedAt.value ? lastRefreshedAt.value.toLocaleTimeString('fr-FR') : '',
+);
+
+const autoRefreshHint = `Actualiser — automatique toutes les ${Math.round(
+  AUTO_REFRESH_INTERVAL_MS / 1000,
+)} s`;
 
 function runOne(action: CommandAction) {
   if (!action.confirm) {
@@ -620,8 +655,17 @@ function runOne(action: CommandAction) {
 
 async function send(action: CommandAction) {
   try {
-    await createCommands({ type: action.type, machine_ids: [props.id] });
-    $q.notify({ type: 'positive', message: 'Commande envoyée' });
+    const res = await createCommands({ type: action.type, machine_ids: [props.id] });
+    if (res.count === 0) {
+      // The server de-duplicates per (poste, type). Saying "envoyée" here would
+      // have the administrator watch a history that never grows a row.
+      $q.notify({
+        type: 'warning',
+        message: `« ${action.label} » est déjà en attente sur ce poste.`,
+      });
+    } else {
+      $q.notify({ type: 'positive', message: 'Commande envoyée' });
+    }
     await load();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'envoi de la commande") });

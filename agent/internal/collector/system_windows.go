@@ -4,7 +4,25 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
+
+	"golang.org/x/sys/windows"
 )
+
+var procGetTickCount64 = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount64")
+
+// Uptime reports how long this machine has been running.
+//
+// GetTickCount64 rather than reading a boot timestamp out of WMI or the event
+// log: it is a single call into kernel32, needs no privilege and no COM, and
+// cannot fail on a machine whose WMI repository is exactly the kind of thing
+// somebody is rebooting to fix. It counts sleep and hibernation as elapsed
+// time, which is the reading we want — a laptop booted this morning and shut
+// twice since is not a machine that just restarted.
+func Uptime() (time.Duration, error) {
+	ms, _, _ := procGetTickCount64.Call()
+	return time.Duration(ms) * time.Millisecond, nil
+}
 
 // Reboot schedules a restart of the machine after rebootDelay, with a message
 // for whoever is logged on.

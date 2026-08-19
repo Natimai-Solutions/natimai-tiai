@@ -47,7 +47,7 @@
 
 Même modèle que le bloc `defender` : optionnel, patch conditionnel côté serveur (un heartbeat sans le bloc n'écrase rien).
 
-### Nouveaux types de commandes (4)
+### Nouveaux types de commandes (4, puis 5 — cf. §8)
 
 | Type | Effet sur le poste | Sortie attendue |
 |---|---|---|
@@ -225,3 +225,67 @@ là où ce plan laissait le choix ouvert ou s'est révélé inexact.
    branches qu'on ne peut pas exercer sans patcher ou redémarrer une machine ;
    la syntaxe des scripts, le filtrage par variante et la lecture des
    `ResultCode` sont couverts par des tests, l'exécution réelle non.
+
+---
+
+## 8. Extension — `wu_reset` *(2026-08-19)*
+
+Cinquième type de la famille, ajouté après coup : **réinitialiser les composants
+Windows Update** d'un poste qui ne cherche, ne télécharge ou n'installe plus
+rien. C'est le cas que les quatre commandes précédentes ne savaient pas traiter
+— elles supposent toutes une pile WU fonctionnelle, et `wu_install` sur un poste
+dont le magasin est corrompu ne fait que remonter le même HRESULT en boucle.
+
+### Ce que fait la commande
+
+La procédure documentée par Microsoft, sans rien de plus :
+
+1. arrêt de `wuauserv`, `cryptsvc`, `bits`, `msiserver` ;
+2. renommage de `%SystemRoot%\SoftwareDistribution` et de
+   `%SystemRoot%\System32\catroot2` en `*.old` ;
+3. redémarrage des services.
+
+Windows reconstruit les deux dossiers à la recherche suivante. Le coût est réel
+et il est annoncé dans la confirmation console : l'**historique des mises à jour**
+du poste est perdu (il vit dans `SoftwareDistribution\DataStore`), et les
+correctifs déjà téléchargés le seront à nouveau. Rien n'est installé, rien n'est
+redémarré : le poste est remis en état de se mettre à jour, pas mis à jour.
+
+### Écarts assumés par rapport à l'article
+
+| Point | Décision |
+|---|---|
+| `net stop` / `ren` en shell | **Natif Go**, comme `spooler_reset` : le gestionnaire de services dit l'état réel au lieu d'une phrase localisée, permet d'**attendre** `Stopped` avant de renommer (un dossier encore ouvert ne se renomme pas), et n'introduit pas de shell dans un agent qui n'en a pas. |
+| `ren` échoue à la 2ᵉ exécution | Un `*.old` laissé par une exécution précédente est **supprimé** avant le renommage. Rejouer la procédure sur un poste récalcitrant est le cas normal, pas l'exception. |
+| `net start` des 4 services | Seuls les services que la commande a **effectivement arrêtés** sont relancés. `wuauserv` et `msiserver` démarrent à la demande sur un Windows moderne et sont couramment trouvés à l'arrêt ; surtout, un service désactivé par GPO doit le rester — le relancer serait la commande qui passe outre la stratégie d'un administrateur. |
+| `regsvr32` des DLL WU, `netsh winsock reset`, `sc sdset` | **Hors périmètre.** Sans effet depuis Windows 8 pour le premier, exige un redémarrage pour le deuxième, verrouille l'accès au service quand il se trompe pour le troisième. Chacun est plus difficile à défaire que l'ensemble de ce que fait la commande. |
+
+### Trois règles d'ordonnancement
+
+Elles portent toute la sûreté de la commande :
+
+- les renommages n'ont lieu qu'une fois **tous** les services arrêtés ;
+- un service qui n'a **pas** pu être arrêté annule les renommages plutôt que de
+  les laisser échouer un par un — un poste intact vaut mieux qu'un poste dont le
+  magasin a bougé sous un `wuauserv` qui le tient encore ;
+- les services sont **redémarrés quoi qu'il arrive** au milieu, exactement comme
+  `spooler_reset` redémarre le spouleur par-dessus une purge ratée.
+
+### Ce que ça a coûté
+
+- **Backend** : une valeur d'énumération. `type` est stocké en `str` nu ⇒ aucune
+  migration, aucun changement de protocole — la promesse du §4 tenue une fois de
+  plus.
+- **Agent** : `collector/wureset*.go` (tables, rapport, verdict et le renommage
+  lui-même en neutre ; seul le gestionnaire de services est sous `_windows.go`),
+  plus un `case` dans le dispatch. La commande prend le **même mutex** que le
+  reste de la famille : renommer `SoftwareDistribution` sous une recherche ou une
+  installation en cours est précisément la façon d'obtenir un magasin à moitié
+  écrit, et le cycle de fond de 6 h finirait par tomber dessus.
+- **Console** : une entrée de catalogue, en fin de section Windows Update — c'est
+  ce vers quoi on se tourne quand les installations ont échoué, pas ce qu'on
+  essaie en premier.
+- Le cache WU de l'agent est **délibérément laissé intact** : ce que la
+  réinitialisation jette est le magasin, pas la vérité. Les mises à jour qui
+  manquaient manquent toujours, et les deux horodatages viennent des résultats
+  Automatic Updates dans le registre, que la commande ne touche pas.
