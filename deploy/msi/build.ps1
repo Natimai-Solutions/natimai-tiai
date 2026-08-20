@@ -67,14 +67,32 @@ if ([string]::IsNullOrWhiteSpace($AgentExe)) {
 if (-not (Test-Path -LiteralPath $AgentExe)) { throw "Binaire introuvable : $AgentExe" }
 
 # --- 2. Outil WiX ---------------------------------------------------------------
+# Même version épinglée que le job `msi` de release.yml : l'extension doit
+# correspondre exactement au CLI (sinon WIX0144), et l'eulaId `wix7` accepté
+# ci-dessous est propre à cette version majeure.
+$wixToolVersion = '7.0.0'
+
 if ($null -eq (Get-Command wix -ErrorAction SilentlyContinue)) {
-    Write-Host 'Installation de WiX (dotnet tool global)...'
-    dotnet tool install --global wix
+    Write-Host "Installation de WiX $wixToolVersion (dotnet tool global)..."
+    dotnet tool install --global wix --version $wixToolVersion
     if ($LASTEXITCODE -ne 0) { throw 'Installation de wix impossible.' }
     $env:Path = "$env:Path;$env:USERPROFILE\.dotnet\tools"
 }
-if (-not ((wix extension list --global) -match 'WixToolset\.Util\.wixext')) {
-    wix extension add --global WixToolset.Util.wixext
+$wixInstalled = ((wix --version) -split '\+')[0]
+if ($wixInstalled -ne $wixToolVersion) {
+    Write-Host "WiX $wixInstalled present -> alignement sur $wixToolVersion..."
+    dotnet tool update --global wix --version $wixToolVersion
+    if ($LASTEXITCODE -ne 0) { throw "Mise a jour de wix vers $wixToolVersion impossible." }
+}
+
+# WiX v7 : l'EULA « Open Source Maintenance Fee » (https://wixtoolset.org/osmf/)
+# doit être acceptée une fois par utilisateur — sans quoi toute commande
+# (extension add, build) échoue avec WIX7015.
+wix eula accept wix7
+if ($LASTEXITCODE -ne 0) { throw "Acceptation de l'EULA WiX (wix7) impossible." }
+
+if (-not ((wix extension list --global) -match ([regex]::Escape("WixToolset.Util.wixext $wixToolVersion")))) {
+    wix extension add --global "WixToolset.Util.wixext/$wixToolVersion"
     if ($LASTEXITCODE -ne 0) { throw "Ajout de l'extension WixToolset.Util.wixext impossible." }
 }
 
@@ -83,7 +101,7 @@ $wixArch = if ($Arch -eq 'amd64') { 'x64' } else { 'arm64' }
 $msiPath = Join-Path $OutDir "tiai-agent-$Version-windows-$Arch.msi"
 
 wix build (Join-Path $PSScriptRoot 'Package.wxs') `
-    -ext WixToolset.Util.wixext `
+    -ext "WixToolset.Util.wixext/$wixToolVersion" `
     -arch $wixArch `
     -d "ProductVersion=$msiVersion" `
     -d "AgentExe=$AgentExe" `
