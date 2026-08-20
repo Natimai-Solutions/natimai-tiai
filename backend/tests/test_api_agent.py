@@ -170,3 +170,145 @@ async def test_heartbeat_tolerates_a_repeated_detection_id_in_one_batch(
     stored = rows.scalars().all()
     assert len(stored) == 1
     assert stored[0].threat_name == "B"  # last reading wins
+
+
+async def test_upsert_reports_only_genuinely_new_detections(client, db_session):
+    """The alert path must fire on a first sighting, not on a status moving.
+
+    The agent re-reads Defender's whole history every poll, so almost every
+    write is a re-report. Telling the two apart is what keeps an operator on
+    immediate alerts from being mailed the same threat every minute — it rides
+    on PostgreSQL's ``xmax = 0``, which is worth a test of its own.
+    """
+    from app.features.machine.models import Machine
+    from app.features.threat.crud import upsert_threats
+    from app.features.threat.schemas import ThreatReport
+
+    machine = Machine(machine_uuid="machine-new-detections")
+    db_session.add(machine)
+    await db_session.commit()
+    await db_session.refresh(machine)
+
+    def report(status: str) -> ThreatReport:
+        return ThreatReport(
+            detection_id="DET-NEW", threat_name="EICAR-Test-File", status=status
+        )
+
+    first = await upsert_threats(db_session, machine.id, [report("active")])
+    assert first.written == 1
+    assert [d.detection_id for d in first.new_detections] == ["DET-NEW"]
+
+    # Same detection, moved on: written again, but not new.
+    moved = await upsert_threats(db_session, machine.id, [report("quarantined")])
+    assert moved.written == 1
+    assert moved.new_detections == []
+
+    # Same detection, unchanged: not even written.
+    unchanged = await upsert_threats(db_session, machine.id, [report("quarantined")])
+    assert unchanged.written == 0
+    assert unchanged.new_detections == []
+
+
+async def test_heartbeat_mails_the_immediate_cadence_on_a_new_threat(
+    client, db_session, engine, monkeypatch
+):
+    """End to end: a detection arriving on a heartbeat reaches an inbox.
+
+    The mail goes out as a background task, which the ASGI transport runs before
+    the response is handed back — so by the time the heartbeat returns here, the
+    send has been attempted. The task opens a session of its own on the
+    module-level engine (the request's is closed by then), which is pointed at
+    the test database here, exactly as the ARQ job tests do.
+    """
+    from app.core.config import settings
+    from app.features.notification import threat_alert
+    from app.features.user import crud
+    from app.features.user.models import EmailPreference, Role
+
+    monkeypatch.setattr(threat_alert, "engine", engine)
+
+    user = await crud.create_user(
+        db_session, email="oncall@test.local", password="pw", role=Role.ADMIN
+    )
+    user.email_preference = EmailPreference.IMMEDIATE
+    db_session.add(user)
+    await db_session.commit()
+
+    sent: list[dict] = []
+
+    async def fake_send_email(subject: str, text: str, to=None):
+        sent.append({"subject": subject, "text": text, "to": to})
+        return True
+
+    monkeypatch.setattr(threat_alert, "send_email", fake_send_email)
+
+    enroll = await client.post(
+        "/api/v1/agent/enroll",
+        headers={"X-Enrollment-Secret": settings.ENROLLMENT_SECRET},
+        json={"machine_uuid": "machine-alert", "hostname": "PC-ALERT"},
+    )
+    headers = {"Authorization": f"Bearer {enroll.json()['token']}"}
+    threat = {
+        "detection_id": "DET-ALERT",
+        "threat_name": "Trojan:Win32/Wacatac",
+        "severity": "high",
+        "status": "active",
+    }
+
+    hb = await client.post(
+        "/api/v1/agent/heartbeat",
+        headers=headers,
+        json={"agent_version": "test", "threats": [threat]},
+    )
+    assert hb.status_code == 200
+    assert len(sent) == 1
+    assert sent[0]["to"] == ["oncall@test.local"]
+    assert "PC-ALERT" in sent[0]["subject"]
+
+    # The same detection re-reported must not mail anyone a second time.
+    hb = await client.post(
+        "/api/v1/agent/heartbeat",
+        headers=headers,
+        json={"agent_version": "test", "threats": [threat]},
+    )
+    assert hb.status_code == 200
+    assert len(sent) == 1
+
+
+async def test_a_mixed_batch_reports_only_the_new_row(client, db_session):
+    """The everyday shape of a heartbeat: a long history plus one new line.
+
+    The agent re-sends every detection Defender holds, so a real batch is
+    dozens of unchanged rows, a few whose status moved, and — on the poll that
+    matters — one genuinely new. Only that last one may reach an inbox.
+    """
+    from app.features.machine.models import Machine
+    from app.features.threat.crud import upsert_threats
+    from app.features.threat.schemas import ThreatReport
+
+    machine = Machine(machine_uuid="machine-mixed-batch")
+    db_session.add(machine)
+    await db_session.commit()
+    await db_session.refresh(machine)
+
+    history = [
+        ThreatReport(detection_id=f"OLD-{i}", threat_name="Known", status="quarantined")
+        for i in range(5)
+    ]
+    first = await upsert_threats(db_session, machine.id, history)
+    assert len(first.new_detections) == 5
+
+    # Same five, one of them moved on, plus one never seen before.
+    moved = ThreatReport(detection_id="OLD-2", threat_name="Known", status="removed")
+    fresh = ThreatReport(
+        detection_id="BRAND-NEW", threat_name="Trojan:Win32/Wacatac", status="active"
+    )
+    batch = [h for h in history if h.detection_id != "OLD-2"] + [moved, fresh]
+
+    result = await upsert_threats(db_session, machine.id, batch)
+
+    # Written: the one that moved and the one that is new. The four unchanged
+    # rows are filtered out by the statement's own WHERE.
+    assert result.written == 2
+    assert [d.detection_id for d in result.new_detections] == ["BRAND-NEW"]
+    assert result.new_detections[0].threat_name == "Trojan:Win32/Wacatac"

@@ -21,7 +21,7 @@ from app.core import security
 from app.core.errors import AppError, ErrorCode
 from app.features.base import utcnow
 from app.features.user import crud
-from app.features.user.models import Role, User
+from app.features.user.models import EmailPreference, Role, User
 from app.features.user.permissions import Action, Resource
 
 router = APIRouter(
@@ -41,6 +41,10 @@ class UserOut(BaseModel):
     full_name: str | None
     role: str
     is_active: bool
+    # Visible to an administrator because "who gets told when a poste catches
+    # something" is a property of the parc's supervision, not a private setting:
+    # an account left on « aucun e-mail » is how a fleet ends up unwatched.
+    email_preference: str
     created_at: datetime
     updated_at: datetime
 
@@ -72,6 +76,7 @@ class UserUpdate(BaseModel):
     full_name: str | None = None
     role: Role | None = None
     is_active: bool | None = None
+    email_preference: EmailPreference | None = None
 
 
 class PasswordReset(BaseModel):
@@ -166,7 +171,7 @@ async def update_user(
     session: SessionDep,
     current: CurrentUser,
 ) -> UserOut:
-    """Update an account's email, name, role or activation."""
+    """Update an account's email, name, role, activation or e-mail cadence."""
     user = await _require_user(session, user_id)
     fields = payload.model_dump(exclude_unset=True)
 
@@ -178,7 +183,10 @@ async def update_user(
         await _reject_email_taken(session, fields["email"], exclude=user.id)
 
     for name, value in fields.items():
-        setattr(user, name, value.value if isinstance(value, Role) else value)
+        # The str enums are the vocabulary of plain string columns: stored as
+        # their value so a read never has to know the enum existed.
+        stored = value.value if isinstance(value, Role | EmailPreference) else value
+        setattr(user, name, stored)
     user.updated_at = utcnow()
     session.add(user)
     await session.commit()

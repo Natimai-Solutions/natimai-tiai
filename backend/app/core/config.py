@@ -1,6 +1,6 @@
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import AnyUrl, BeforeValidator, computed_field, model_validator
+from pydantic import AnyUrl, BeforeValidator, Field, computed_field, model_validator
 from pydantic_core import MultiHostUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -102,6 +102,27 @@ class Settings(BaseSettings):
     def alerts_enabled(self) -> bool:
         """Whether Mailgun is configured."""
         return bool(self.MAILGUN_DOMAIN and self.MAILGUN_API_KEY)
+
+    # --- Notifications sent to console accounts ---
+    # Hour (UTC) the daily digest goes out. The parc this console was built for
+    # sits at UTC-10, where 18:00 UTC is 08:00 local — a digest that lands with
+    # the morning coffee rather than in the middle of the night. Move it to suit
+    # the deployment: the job reads the fleet's current state, so the hour only
+    # decides when someone is told, never what they are told.
+    # Bounded, because the failure is silent: an ARQ cron pinned to hour 25
+    # matches no minute of any day, so the digest would simply never run and
+    # nothing would say why.
+    DIGEST_HOUR_UTC: int = Field(default=18, ge=0, le=23)
+    # A detection older than this never triggers an immediate alert. A poste
+    # enrolling for the first time hands over Defender's *entire* detection
+    # history in one heartbeat; without this, joining a machine to the parc
+    # would mail out years-old threats as if they had just happened.
+    THREAT_ALERT_MAX_AGE_HOURS: int = 24
+    # How many machines or detections a single mail spells out before falling
+    # back on "… et N autres". A digest is a nudge to open the console, not a
+    # report to work from — and a fleet-wide outage must not send a mail with
+    # three hundred lines in it.
+    NOTIFICATION_MAX_ITEMS: int = 10
 
     # --- Defender freshness policy ---
     # A machine is "up to date" if signatures are younger than this many days.

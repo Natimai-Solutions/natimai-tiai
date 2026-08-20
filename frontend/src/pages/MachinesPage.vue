@@ -90,13 +90,16 @@
 
     <q-table
       v-model:selected="selected"
+      v-model:pagination="pagination"
       :rows="rows"
       :columns="columns"
       row-key="id"
       selection="multiple"
       :loading="loading"
       :rows-per-page-options="[25, 50, 100]"
-      @row-click="(_evt, row) => goDetail(row)"
+      binary-state-sort
+      @request="onRequest"
+      @row-click="(_evt, row, index) => goDetail(row, index)"
     >
       <template #body-cell-hostname="props">
         <q-td :props="props">
@@ -174,12 +177,15 @@
 import { onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
+import { useAutoRefresh } from 'src/composables/useAutoRefresh';
 import {
   listAntivirusProducts,
   listMachines,
   wakeMachines,
   wakeNotification,
+  type ListMachinesParams,
   type Machine,
+  type MachineSortField,
   type MachineStatus,
   type WindowsUpdateFilter,
 } from 'src/services/machines';
@@ -190,6 +196,13 @@ import {
   type CommandAction,
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
+import {
+  DEFAULT_PAGE_SIZE,
+  MACHINE_STATUSES,
+  PAGE_SIZE_OPTIONS,
+  WU_FILTERS,
+  queryValue,
+} from 'src/utils/machineQuery';
 import {
   antivirusLabel,
   antivirusStatusLabel,
@@ -219,6 +232,31 @@ const antivirus = ref<string | null>(null);
 const status = ref<MachineStatus | null>(null);
 const wu = ref<WindowsUpdateFilter | null>(null);
 const threatsOnly = ref(false);
+
+/** Sortable columns ↔ their API field: the table speaks in column names, the
+ * URL and the server in field names. */
+const SORT_FIELD_BY_COLUMN: Record<string, MachineSortField> = {
+  hostname: 'hostname',
+  domain: 'domain',
+  antivirus: 'av_product_name',
+  windows_update: 'wu_pending_count',
+  session: 'session_user_present',
+  last_seen: 'last_seen',
+};
+const COLUMN_BY_SORT_FIELD = Object.fromEntries(
+  Object.entries(SORT_FIELD_BY_COLUMN).map(([column, field]) => [field, column]),
+) as Record<string, string>;
+
+/** Server-side pagination state. `rowsNumber` present makes the q-table hand
+ * every page/sort interaction to `onRequest` instead of slicing `rows` — the
+ * server holds the fleet, the table only ever holds one page of it. */
+const pagination = ref({
+  sortBy: 'last_seen' as string | null,
+  descending: true,
+  page: 1,
+  rowsPerPage: DEFAULT_PAGE_SIZE,
+  rowsNumber: 0,
+});
 
 // Filled from the fleet on mount: the products installed are data, not a list
 // the console can know in advance. The count sits in the label so the dropdown
@@ -295,8 +333,17 @@ const columns: QTableColumn<Machine>[] = [
   { name: 'last_seen', label: 'Vu le', field: 'last_seen', align: 'left', sortable: true },
 ];
 
-function goDetail(row: Machine) {
-  void router.push({ name: 'machine-detail', params: { id: row.id } });
+/** Open a poste, carrying the whole list query plus the row's absolute rank in
+ * it (`i`). The detail page uses the query to come back to this exact search,
+ * and the rank to walk to the previous/next result of it. */
+function goDetail(row: Machine, rowIndex: number) {
+  const p = pagination.value;
+  const i = (p.page - 1) * p.rowsPerPage + rowIndex;
+  void router.push({
+    name: 'machine-detail',
+    params: { id: row.id },
+    query: { ...buildQuery(), i: String(i) },
+  });
 }
 
 /** One line: overall state, what the Security Center says of the product, and
@@ -314,21 +361,8 @@ function antivirusTooltip(m: Machine): string {
   return parts.join(' · ');
 }
 
-const MACHINE_STATUSES: readonly string[] = [
-  'up_to_date',
-  'outdated',
-  'needs_verification',
-  'inactive',
-];
-const WU_FILTERS: readonly string[] = ['pending', 'reboot_required'];
-
-/** First scalar of a route-query value, or null (drops arrays' extra values). */
-function queryValue(v: unknown): string | null {
-  const scalar = Array.isArray(v) ? v[0] : v;
-  return typeof scalar === 'string' && scalar ? scalar : null;
-}
-
-/** Read the filters from the URL — the dashboard cards land here with one set. */
+/** Read the filters, sort and page from the URL — the dashboard cards land
+ * here with one set, and the detail page's back arrow with another. */
 function applyQuery() {
   const q = route.query;
   search.value = queryValue(q.search) ?? '';
@@ -339,12 +373,25 @@ function applyQuery() {
   const w = queryValue(q.wu_status);
   wu.value = w && WU_FILTERS.includes(w) ? (w as WindowsUpdateFilter) : null;
   threatsOnly.value = queryValue(q.with_active_threats) === 'true';
+
+  const sortField = queryValue(q.sort_by);
+  const sortColumn = sortField ? COLUMN_BY_SORT_FIELD[sortField] : undefined;
+  const page = Number(queryValue(q.page) ?? '1');
+  const pageSize = Number(queryValue(q.page_size) ?? String(DEFAULT_PAGE_SIZE));
+  pagination.value = {
+    ...pagination.value,
+    // No sort in the URL = the server's default order, freshest first — shown
+    // as such rather than as "unsorted".
+    sortBy: sortColumn ?? 'last_seen',
+    descending: sortColumn ? queryValue(q.sort_desc) !== 'false' : true,
+    page: Number.isInteger(page) && page >= 1 ? page : 1,
+    rowsPerPage: PAGE_SIZE_OPTIONS.includes(pageSize) ? pageSize : DEFAULT_PAGE_SIZE,
+  };
 }
 
-// The URL is the single source of truth for the filters: widgets push into it,
-// and the reload happens in the route watcher — so a link from the dashboard, a
-// pasted URL and a widget change all take the same path.
-function pushQuery() {
+/** The whole list state as URL query params, defaults omitted so the common
+ * URL stays short. Shared by the address bar and the links into a fiche. */
+function buildQuery(): Record<string, string> {
   const query: Record<string, string> = {};
   if (search.value) query.search = search.value;
   if (domain.value) query.domain = domain.value;
@@ -352,7 +399,40 @@ function pushQuery() {
   if (status.value) query.status = status.value;
   if (wu.value) query.wu_status = wu.value;
   if (threatsOnly.value) query.with_active_threats = 'true';
-  void router.replace({ query });
+  const p = pagination.value;
+  const field = p.sortBy ? SORT_FIELD_BY_COLUMN[p.sortBy] : undefined;
+  if (field && !(field === 'last_seen' && p.descending)) {
+    query.sort_by = field;
+    query.sort_desc = String(p.descending);
+  }
+  if (p.page > 1) query.page = String(p.page);
+  if (p.rowsPerPage !== DEFAULT_PAGE_SIZE) query.page_size = String(p.rowsPerPage);
+  return query;
+}
+
+// The URL is the single source of truth for the list state: widgets and the
+// table push into it, and the reload happens in the route watcher — so a link
+// from the dashboard, a pasted URL, a widget change and a page turn all take
+// the same path.
+function pushQuery() {
+  // A filter change starts a new search: page 1 of it, sort kept.
+  pagination.value = { ...pagination.value, page: 1 };
+  void router.replace({ query: buildQuery() });
+}
+
+/** Every page/sort/page-size interaction of the server-side table lands here. */
+function onRequest(evt: {
+  pagination: { sortBy?: string | null; descending?: boolean; page?: number; rowsPerPage?: number };
+}) {
+  const p = evt.pagination;
+  pagination.value = {
+    sortBy: p.sortBy ?? null,
+    descending: p.descending ?? true,
+    page: p.page ?? 1,
+    rowsPerPage: p.rowsPerPage ?? DEFAULT_PAGE_SIZE,
+    rowsNumber: pagination.value.rowsNumber,
+  };
+  void router.replace({ query: buildQuery() });
 }
 
 watch(
@@ -363,18 +443,64 @@ watch(
   },
 );
 
+// Which fetch is the current one. A background refresh started 90 s ago and a
+// page turn issued just now are both in flight at once, and whichever answers
+// last would otherwise win — putting page 1's rows under a table that says page
+// 2, and writing its own stale page number back over the user's.
+let requestId = 0;
+
+/** Fetch the current page of the current query. */
+async function fetchMachines() {
+  const id = ++requestId;
+  const p = pagination.value;
+  const params: ListMachinesParams = { page: p.page, page_size: p.rowsPerPage };
+  if (search.value) params.search = search.value;
+  if (domain.value) params.domain = domain.value;
+  if (antivirus.value) params.antivirus = antivirus.value;
+  if (status.value) params.status = status.value;
+  if (wu.value) params.wu_status = wu.value;
+  if (threatsOnly.value) params.with_active_threats = true;
+  const field = p.sortBy ? SORT_FIELD_BY_COLUMN[p.sortBy] : undefined;
+  if (field) {
+    params.sort_by = field;
+    params.sort_desc = p.descending;
+  }
+  const data = await listMachines(params);
+  // Superseded while we waited: these rows answer a question nobody is asking
+  // any more, and the fetch that replaced us will write its own.
+  if (id !== requestId) return;
+  if (!data.items.length && data.total > 0 && p.page > 1) {
+    // The page evaporated under us — the fleet shrank, or a filter came from a
+    // URL pointing past the end. Fall back on the last page that still exists.
+    pagination.value = {
+      ...pagination.value,
+      page: Math.ceil(data.total / p.rowsPerPage),
+      rowsNumber: data.total,
+    };
+    void router.replace({ query: buildQuery() });
+    return;
+  }
+  rows.value = data.items;
+  // Merged into the *current* pagination, never the snapshot taken above: the
+  // user may have turned the page while this request was in the air, and
+  // writing the snapshot back would silently undo it.
+  pagination.value = { ...pagination.value, rowsNumber: data.total };
+}
+
+// The machine list follows the fleet like the dashboard does: agents report
+// every minute, so a page left open shows postes coming online without a
+// keypress. Paused while rows are selected — a bulk action being composed must
+// not have its rows shuffled underneath it.
+const { refreshNow } = useAutoRefresh(fetchMachines, {
+  paused: () => selected.value.length > 0,
+});
+
+/** The user-visible load: spinner on, and the auto-refresh countdown restarts
+ * so the next background tick lands a full period away. */
 async function reload() {
   loading.value = true;
   try {
-    const params: Parameters<typeof listMachines>[0] = {};
-    if (search.value) params.search = search.value;
-    if (domain.value) params.domain = domain.value;
-    if (antivirus.value) params.antivirus = antivirus.value;
-    if (status.value) params.status = status.value;
-    if (wu.value) params.wu_status = wu.value;
-    if (threatsOnly.value) params.with_active_threats = true;
-    const data = await listMachines(params);
-    rows.value = data.items;
+    await refreshNow();
   } finally {
     loading.value = false;
   }

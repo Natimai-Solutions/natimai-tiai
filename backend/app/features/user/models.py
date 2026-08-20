@@ -19,6 +19,30 @@ class Role(enum.StrEnum):
     READONLY = "readonly"  # read only
 
 
+class EmailPreference(enum.StrEnum):
+    """What this account wants to receive by e-mail.
+
+    One axis with four positions rather than a set of independent switches: the
+    real question an operator answers is "how much do I want to hear from
+    Tia'i", and the four answers below are ordered from silence to a message
+    every morning. Switches would let you ask for a digest of nothing, or for
+    nothing plus a digest.
+    """
+
+    # Nothing at all. Account mail (password reset) is not covered by this: it
+    # answers a request the user just made, and is not a notification.
+    NONE = "none"
+    # One mail per newly detected threat, as it is reported. No daily summary —
+    # this is the setting for someone who wants to hear only when it burns.
+    IMMEDIATE = "immediate"
+    # One mail a day, and only on a day that has something to report.
+    DIGEST_EVENTS = "digest_events"
+    # One mail a day, whatever happened. The default: a fleet whose console
+    # nobody opens is the case this product exists for, and "no mail today"
+    # then reads as "nothing broke" rather than as "the digest is broken".
+    DIGEST_DAILY = "digest_daily"
+
+
 class User(SQLModel, table=True):
     """A console operator authenticating with email + password (JWT)."""
 
@@ -30,6 +54,10 @@ class User(SQLModel, table=True):
     full_name: str | None = Field(default=None, max_length=255)
     # Stored as a plain string; Role is a str enum used as a constant.
     role: str = Field(default=Role.READONLY)
+    # Same treatment as ``role``: a plain string column, the enum being the
+    # vocabulary rather than a database type. A PostgreSQL ENUM would need a
+    # migration to add a fifth cadence.
+    email_preference: str = Field(default=EmailPreference.DIGEST_DAILY)
     is_active: bool = Field(default=True)
     # Set on every password change. Access tokens issued before this instant are
     # rejected (app.api.deps), so resetting a password ends existing sessions —

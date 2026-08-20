@@ -5,10 +5,12 @@ Auth (admin session/JWT) is added in M5; left open for the MVP.
 
 import uuid
 from datetime import datetime
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, computed_field
 from sqlalchemy import case, exists, func, or_
+from sqlalchemy.sql.elements import UnaryExpression
 from sqlmodel import col, select
 
 from app.api.deps import CurrentUser, SessionDep, require_permission
@@ -17,6 +19,7 @@ from app.core.errors import AppError, ErrorCode
 from app.features.base import utcnow
 from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.machine import crud as machine_crud
+from app.features.machine.fingerprint import trustworthy_smbios_uuid
 from app.features.machine.models import Machine
 from app.features.machine.status import (
     MachineStatus,
@@ -143,6 +146,42 @@ class MachineList(BaseModel):
     page_size: int
 
 
+# The list's sortable columns, keyed by their API field names. A dict lookup
+# rather than getattr on user input: anything outside it is a 422, not an
+# ORDER BY built from a request.
+MachineSortField = Literal[
+    "hostname",
+    "domain",
+    "av_product_name",
+    "wu_pending_count",
+    "session_user_present",
+    "last_seen",
+]
+_SORT_COLUMNS = {
+    "hostname": Machine.hostname,
+    "domain": Machine.domain,
+    "av_product_name": Machine.av_product_name,
+    "wu_pending_count": Machine.wu_pending_count,
+    "session_user_present": Machine.session_user_present,
+    "last_seen": Machine.last_seen,
+}
+# Sorted case-folded: under a C collation "ZEUS" would otherwise come before
+# "alpha", which no reader of a hostname column expects.
+_CASEFOLD_SORT_FIELDS = {"hostname", "domain", "av_product_name"}
+
+
+def _sort_clause(field: MachineSortField, descending: bool) -> UnaryExpression[Any]:
+    """ORDER BY expression for one sortable column.
+
+    NULLs last in both directions: "never reported" is an absence, not a value,
+    and it must not lead the list whichever way the reader flips the arrow.
+    """
+    column = col(_SORT_COLUMNS[field])
+    key = func.lower(column) if field in _CASEFOLD_SORT_FIELDS else column
+    ordered = key.desc() if descending else key.asc()
+    return ordered.nulls_last()
+
+
 @router.get("", response_model=MachineList)
 async def list_machines(
     session: SessionDep,
@@ -152,12 +191,15 @@ async def list_machines(
     status: MachineStatus | None = None,
     wu_status: WindowsUpdateFilter | None = None,
     with_active_threats: bool | None = None,
+    sort_by: MachineSortField | None = None,
+    sort_desc: bool = True,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> MachineList:
     """List machines with optional search/domain/antivirus/status filters, plus
     the two facets the dashboard cards link to: Windows Update state and the
-    presence of an active threat.
+    presence of an active threat. Sortable on the console list's own columns;
+    the default order is freshest contact first.
     """
     stmt = select(Machine)
     if search:
@@ -196,11 +238,18 @@ async def list_machines(
         stmt = stmt.where(active if with_active_threats else ~active)
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
-    rows = await session.exec(
-        stmt.order_by(col(Machine.last_seen).desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
+    # last_seen then id behind the requested column: ties must land on the same
+    # page from one request to the next, or rows duplicate and vanish across
+    # page boundaries.
+    if sort_by is None:
+        stmt = stmt.order_by(col(Machine.last_seen).desc(), col(Machine.id))
+    else:
+        stmt = stmt.order_by(
+            _sort_clause(sort_by, sort_desc),
+            col(Machine.last_seen).desc(),
+            col(Machine.id),
+        )
+    rows = await session.exec(stmt.offset((page - 1) * page_size).limit(page_size))
     items = [MachineOut.model_validate(m) for m in rows.all()]
     return MachineList(items=items, total=total or 0, page=page, page_size=page_size)
 
@@ -410,23 +459,135 @@ async def get_machine(machine_id: uuid.UUID, session: SessionDep) -> MachineDeta
     return await _machine_detail(session, machine)
 
 
-@router.get("/{machine_id}/duplicates", response_model=list[MachineOut])
+MatchReason = Literal["smbios_uuid", "tpm_ek_hash", "hostname"]
+
+
+class DuplicateCandidateOut(MachineOut):
+    """A machine that may be another record of the same physical poste.
+
+    Carries *why* it is a candidate: the two anchors are hardware evidence, a
+    matching hostname is a hint and nothing more. The console shows the reason
+    rather than a flat list, because merging is irreversible and the decision
+    is not the same one in the two cases.
+
+    ``first_seen`` rides along, which the list payload does not carry: two
+    records of one poste share its hostname, so what tells them apart is when
+    each was first enrolled — the older one is usually the record being retired.
+    """
+
+    first_seen: datetime
+    match_reason: MatchReason
+
+
+def _hardware_contradicts(
+    anchor: str | None, tpm: str, other_anchor: str | None, other_tpm: str
+) -> bool:
+    """Whether two records provably describe *different* physical machines.
+
+    Only a pair of values that both exist and differ proves anything: a missing
+    anchor is a missing reading, not evidence of difference, and the firmware
+    constants are already filtered out by ``trustworthy_smbios_uuid``.
+    """
+    if anchor and other_anchor and anchor != other_anchor:
+        return True
+    return bool(tpm and other_tpm and tpm != other_tpm)
+
+
+def _duplicate_candidate(
+    machine: Machine, reason: MatchReason
+) -> DuplicateCandidateOut:
+    """A machine as a merge candidate, tagged with what makes it one."""
+    # ``is_online`` is derived from ``last_seen`` at serialization time, so it is
+    # dropped here rather than fed back in as an input.
+    base = MachineOut.model_validate(machine).model_dump(exclude={"is_online"})
+    return DuplicateCandidateOut(
+        **base, first_seen=machine.first_seen, match_reason=reason
+    )
+
+
+@router.get("/{machine_id}/duplicates", response_model=list[DuplicateCandidateOut])
 async def list_duplicates(
     machine_id: uuid.UUID, session: SessionDep
-) -> list[MachineOut]:
-    """Candidate duplicates: other machines sharing this one's SMBIOS anchor
-    (plan §2.3) — the records an admin may want to merge.
+) -> list[DuplicateCandidateOut]:
+    """Candidate duplicates of this machine — the records an admin may merge.
+
+    Three signals, strongest first:
+
+    - **SMBIOS UUID** (plan §2.3), the motherboard's own identifier. Only when
+      it identifies a single machine: the firmware constants a whitebox ships on
+      every unit are excluded, or a batch of forty would each list the other
+      thirty-nine as duplicates.
+    - **TPM EK hash**, which survives a re-image just as well and is there when
+      the SMBIOS anchor is not.
+    - **Hostname**, deliberately included although it proves nothing on its own:
+      the case that most needs merging — a poste whose anchor drifted, which is
+      exactly what the "empreinte divergente" banner reports — leaves no *shared*
+      anchor between the two records, so an anchors-only search would answer
+      "aucun doublon" on the one page that offers the button. Reported as the
+      weak signal it is, never for a poste that reported no hostname at all, and
+      **only when the hardware does not contradict it**: two records that each
+      carry a real, different SMBIOS UUID or TPM key are two machines, and no
+      shared name makes them one.
+
+      That last rule costs one real case to buy a much worse one. It keeps a
+      batch of freshly imaged, not-yet-renamed postes — all still answering to
+      the image's computer name — from listing each other as candidates for a
+      merge that *deletes* a row; and the drift it turns away is the variant
+      where both records hold a real anchor, which is indistinguishable from two
+      distinct machines by any query. That variant is resolved from the merge
+      dialog's manual search instead, deliberately and with both UUIDs on
+      screen. The everyday drift — an old record that predates fingerprinting
+      and carries no anchor at all — is not contradicted, and is still offered.
+
+    ``machine_guid`` is not a signal here: this fleet's postes are re-imaged
+    without Sysprep, which is precisely the case where clones share it — it
+    would group a whole image, not the copies of one machine.
     """
     machine = await _require_machine(session, machine_id)
-    if not machine.smbios_uuid:
+
+    anchor = trustworthy_smbios_uuid(machine.smbios_uuid)
+    tpm = (machine.tpm_ek_hash or "").strip()
+    hostname = (machine.hostname or "").strip()
+
+    clauses = []
+    if anchor:
+        clauses.append(func.lower(func.trim(col(Machine.smbios_uuid))) == anchor)
+    if tpm:
+        clauses.append(func.trim(col(Machine.tpm_ek_hash)) == tpm)
+    if hostname:
+        clauses.append(func.lower(func.trim(col(Machine.hostname))) == hostname.lower())
+    if not clauses:
         return []
+
     rows = await session.exec(
         select(Machine)
-        .where(col(Machine.smbios_uuid) == machine.smbios_uuid)
+        .where(or_(*clauses))
         .where(col(Machine.id) != machine_id)
         .order_by(col(Machine.last_seen).desc())
     )
-    return [MachineOut.model_validate(m) for m in rows.all()]
+
+    candidates: list[DuplicateCandidateOut] = []
+    for other in rows.all():
+        reason: MatchReason
+        other_anchor = trustworthy_smbios_uuid(other.smbios_uuid)
+        other_tpm = (other.tpm_ek_hash or "").strip()
+        if anchor and other_anchor == anchor:
+            reason = "smbios_uuid"
+        elif tpm and other_tpm == tpm:
+            reason = "tpm_ek_hash"
+        elif _hardware_contradicts(anchor, tpm, other_anchor, other_tpm):
+            # Same name, demonstrably different hardware: not a duplicate, and
+            # offering it would be offering to delete a live poste.
+            continue
+        else:
+            reason = "hostname"
+        candidates.append(_duplicate_candidate(other, reason))
+
+    # Hardware evidence first, whatever their last contact: a hostname match is
+    # a lead an administrator checks, an anchor match is a duplicate.
+    order = {"smbios_uuid": 0, "tpm_ek_hash": 1, "hostname": 2}
+    candidates.sort(key=lambda c: order[c.match_reason])
+    return candidates
 
 
 @router.post(

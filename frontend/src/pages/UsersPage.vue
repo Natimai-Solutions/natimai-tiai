@@ -11,7 +11,7 @@
         placeholder="E-mail ou nom…"
         class="col-auto"
         style="min-width: 220px"
-        @update:model-value="reload"
+        @update:model-value="searchAgain"
       >
         <template #append><q-icon name="search" /></template>
       </q-input>
@@ -19,11 +19,13 @@
     </div>
 
     <q-table
+      v-model:pagination="pagination"
       :rows="rows"
       :columns="columns"
       row-key="id"
       :loading="loading"
       :rows-per-page-options="[25, 50, 100]"
+      @request="onRequest"
     >
       <template #body-cell-role="props">
         <q-td :props="props">
@@ -38,6 +40,14 @@
           <q-badge :color="props.value ? 'positive' : 'negative'">
             {{ props.value ? 'Actif' : 'Désactivé' }}
           </q-badge>
+        </q-td>
+      </template>
+
+      <template #body-cell-email_preference="props">
+        <q-td :props="props">
+          <span :class="props.value === 'none' ? 'text-grey' : ''">
+            {{ emailPreferenceLabel(props.value) }}
+          </span>
         </q-td>
       </template>
 
@@ -119,6 +129,20 @@
               emit-value
               map-options
               label="Rôle"
+              outlined
+              dense
+            />
+            <!-- Only when editing: a new account starts on the default cadence
+                 (résumé quotidien), and its holder changes it from « Mon
+                 compte ». Here it is the lever for the opposite case — an
+                 account left on « aucun e-mail » on a parc nobody is watching. -->
+            <q-select
+              v-if="editing"
+              v-model="form.email_preference"
+              :options="preferenceOptions"
+              emit-value
+              map-options
+              label="Notifications par e-mail"
               outlined
               dense
             />
@@ -219,8 +243,9 @@ import {
   type Role,
 } from 'src/services/users';
 import { apiErrorMessage } from 'src/services/errors';
+import type { EmailPreference } from 'src/services/auth';
 import { useAuthStore } from 'src/stores/auth';
-import { formatDateTime } from 'src/utils/format';
+import { EMAIL_PREFERENCE_OPTIONS, emailPreferenceLabel, formatDateTime } from 'src/utils/format';
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -230,9 +255,27 @@ const loading = ref(false);
 const saving = ref(false);
 const search = ref('');
 
+// Server-side pagination: `rowsNumber` is what makes the q-table ask the server
+// for each page instead of slicing whatever it was handed first.
+const DEFAULT_PAGE_SIZE = 25;
+const pagination = ref({ page: 1, rowsPerPage: DEFAULT_PAGE_SIZE, rowsNumber: 0 });
+
 const formOpen = ref(false);
 const editing = ref<ConsoleUser | null>(null);
-const form = reactive({ email: '', full_name: '', role: 'readonly' as Role, password: '' });
+const form = reactive({
+  email: '',
+  full_name: '',
+  role: 'readonly' as Role,
+  password: '',
+  email_preference: 'digest_daily' as EmailPreference,
+});
+
+// Label + value only: the explanatory sentences belong on « Mon compte », where
+// someone is choosing for themselves. Here an admin is reading a list.
+const preferenceOptions = EMAIL_PREFERENCE_OPTIONS.map((o) => ({
+  label: o.label,
+  value: o.value,
+}));
 
 const resetOpen = ref(false);
 const resetTarget = ref<ConsoleUser | null>(null);
@@ -251,11 +294,14 @@ const resetModes = [
 ];
 
 const columns: QTableColumn<ConsoleUser>[] = [
-  { name: 'email', label: 'E-mail', field: 'email', align: 'left', sortable: true },
-  { name: 'full_name', label: 'Nom', field: 'full_name', align: 'left', sortable: true },
+  { name: 'email', label: 'E-mail', field: 'email', align: 'left' },
+  { name: 'full_name', label: 'Nom', field: 'full_name', align: 'left' },
   { name: 'role', label: 'Rôle', field: 'role', align: 'center' },
   { name: 'is_active', label: 'État', field: 'is_active', align: 'center' },
-  { name: 'created_at', label: 'Créé le', field: 'created_at', align: 'left', sortable: true },
+  // Not sortable, like the columns above: the rows are a server page now, and
+  // a client-side sort would only reorder the page in view.
+  { name: 'email_preference', label: 'E-mails', field: 'email_preference', align: 'left' },
+  { name: 'created_at', label: 'Créé le', field: 'created_at', align: 'left' },
   { name: 'actions', label: '', field: 'id', align: 'right' },
 ];
 
@@ -271,22 +317,59 @@ function isSelf(user: ConsoleUser) {
   return user.id === auth.user?.id;
 }
 
+// Which fetch is the current one: a debounced search and a page turn can be in
+// flight together, and the slower answer must not paint its rows over the newer
+// question — nor write its own page number back over the current one.
+let requestId = 0;
+
 async function reload() {
   loading.value = true;
+  const id = ++requestId;
   try {
-    const params: Parameters<typeof listUsers>[0] = {};
+    const p = pagination.value;
+    const params: Parameters<typeof listUsers>[0] = {
+      page: p.page,
+      page_size: p.rowsPerPage,
+    };
     if (search.value) params.search = search.value;
-    rows.value = (await listUsers(params)).items;
+    const data = await listUsers(params);
+    if (id !== requestId) return;
+    rows.value = data.items;
+    pagination.value = { ...pagination.value, rowsNumber: data.total };
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
   } finally {
-    loading.value = false;
+    // Only the current fetch may clear the spinner: a superseded one finishing
+    // first would take it down while the newer request is still running.
+    if (id === requestId) loading.value = false;
   }
+}
+
+/** A new search starts at its first page, not at the page of the previous one. */
+function searchAgain() {
+  pagination.value = { ...pagination.value, page: 1 };
+  void reload();
+}
+
+/** Page turns and page-size changes go back to the server. */
+function onRequest(evt: { pagination: { page?: number; rowsPerPage?: number } }) {
+  pagination.value = {
+    ...pagination.value,
+    page: evt.pagination.page ?? 1,
+    rowsPerPage: evt.pagination.rowsPerPage ?? DEFAULT_PAGE_SIZE,
+  };
+  void reload();
 }
 
 function openCreate() {
   editing.value = null;
-  Object.assign(form, { email: '', full_name: '', role: 'readonly', password: '' });
+  Object.assign(form, {
+    email: '',
+    full_name: '',
+    role: 'readonly',
+    password: '',
+    email_preference: 'digest_daily',
+  });
   formOpen.value = true;
 }
 
@@ -297,6 +380,7 @@ function openEdit(user: ConsoleUser) {
     full_name: user.full_name ?? '',
     role: user.role,
     password: '',
+    email_preference: user.email_preference,
   });
   formOpen.value = true;
 }
@@ -309,6 +393,7 @@ async function submitForm() {
         email: form.email,
         full_name: form.full_name || null,
         role: form.role,
+        email_preference: form.email_preference,
       });
       $q.notify({ type: 'positive', message: 'Compte mis à jour' });
     } else {

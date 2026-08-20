@@ -113,6 +113,15 @@ export interface MachineList {
   page_size: number;
 }
 
+/** Sortable columns of the machine list, named after the API's own fields. */
+export type MachineSortField =
+  | 'hostname'
+  | 'domain'
+  | 'av_product_name'
+  | 'wu_pending_count'
+  | 'session_user_present'
+  | 'last_seen';
+
 export interface ListMachinesParams {
   search?: string;
   domain?: string;
@@ -122,6 +131,9 @@ export interface ListMachinesParams {
   wu_status?: WindowsUpdateFilter;
   /** true = only machines with at least one active threat. */
   with_active_threats?: boolean;
+  /** Server-side sort; omitted = freshest contact first. */
+  sort_by?: MachineSortField;
+  sort_desc?: boolean;
   page?: number;
   page_size?: number;
 }
@@ -156,9 +168,23 @@ export async function revokeToken(id: string): Promise<void> {
   await api.post(`/machines/${id}/revoke-token`);
 }
 
-/** Candidate duplicates of a machine (others sharing its SMBIOS anchor). */
-export async function getDuplicates(id: string): Promise<Machine[]> {
-  const { data } = await api.get<Machine[]>(`/machines/${id}/duplicates`);
+/** What makes a record a candidate duplicate, strongest evidence first. */
+export type MatchReason = 'smbios_uuid' | 'tpm_ek_hash' | 'hostname';
+
+export interface DuplicateCandidate extends Machine {
+  /** When this record was first enrolled — what tells two records of the same
+   * poste apart, since they share its hostname. */
+  first_seen: string;
+  match_reason: MatchReason;
+}
+
+/**
+ * Candidate duplicates of a machine: other records that may be the same
+ * physical poste, matched on its SMBIOS anchor, its TPM key, or — as a lead and
+ * not as proof — its hostname. Sorted with the hardware evidence first.
+ */
+export async function getDuplicates(id: string): Promise<DuplicateCandidate[]> {
+  const { data } = await api.get<DuplicateCandidate[]>(`/machines/${id}/duplicates`);
   return data;
 }
 

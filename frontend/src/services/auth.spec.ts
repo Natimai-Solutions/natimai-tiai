@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('boot/axios', () => ({
-  api: { get: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }));
 
 import { api } from 'boot/axios';
-import { changePassword, confirmPasswordReset, getMe, login, requestPasswordReset } from './auth';
+import {
+  changePassword,
+  confirmPasswordReset,
+  getMe,
+  login,
+  requestPasswordReset,
+  updateMe,
+} from './auth';
 
 describe('login', () => {
   beforeEach(() => {
@@ -91,5 +98,27 @@ describe('confirmPasswordReset', () => {
       token: 'tok-123',
       new_password: 'new-passphrase',
     });
+  });
+});
+
+describe('updateMe', () => {
+  beforeEach(() => {
+    vi.mocked(api.patch).mockReset();
+  });
+
+  it('PATCHes the chosen cadence and returns the updated account', async () => {
+    const user = {
+      id: 'u-1',
+      email: 'ops@example.com',
+      full_name: null,
+      role: 'readonly',
+      email_preference: 'immediate',
+    };
+    vi.mocked(api.patch).mockResolvedValue({ data: user });
+
+    const result = await updateMe({ email_preference: 'immediate' });
+
+    expect(api.patch).toHaveBeenCalledWith('/auth/me', { email_preference: 'immediate' });
+    expect(result).toEqual(user);
   });
 });

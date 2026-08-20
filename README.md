@@ -37,9 +37,14 @@ gère naturellement les postes éteints.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
-- **Supervision** — tableau de bord, recherche et filtres, alertes par e-mail,
-  nettoyage automatique des postes disparus. Le tableau de bord et la fiche
-  d'un poste se rafraîchissent seuls, au rythme des remontées des agents.
+- **Supervision** — tableau de bord, recherche et filtres, nettoyage automatique
+  des postes disparus. Le tableau de bord, la liste et la fiche d'un poste se
+  rafraîchissent seuls, au rythme des remontées des agents.
+- **E-mails, au rythme de chacun** — chaque compte choisit ce qu'il reçoit :
+  rien, une alerte immédiate à chaque menace détectée, un résumé quotidien les
+  jours où il y a à traiter, ou un résumé chaque matin — état du parc, antivirus
+  périmés, correctifs critiques en attente. Un « rien à signaler » est aussi une
+  information : c'est le réglage par défaut.
 - **Déploiement sans friction** — un binaire unique poussé par GPO,
   auto-enrôlement des postes, HTTPS de bout en bout.
 

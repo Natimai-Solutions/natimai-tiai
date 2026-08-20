@@ -1,3 +1,5 @@
+import type { EmailPreference } from 'src/services/auth';
+
 /** Format an ISO timestamp for display, or a dash when absent. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—';
@@ -375,4 +377,46 @@ export function threatStatusColor(status: string | null | undefined): string {
 export function ipAddressLabel(ip: string | null, prefixLength: number | null): string {
   if (!ip) return '—';
   return prefixLength == null ? ip : `${ip} /${prefixLength}`;
+}
+
+/**
+ * The four e-mail cadences, in the order they are offered: from silence to a
+ * message every morning. Each carries the sentence that tells an operator what
+ * they will actually receive — « digest » says nothing to someone choosing.
+ */
+export const EMAIL_PREFERENCE_OPTIONS: {
+  value: EmailPreference;
+  label: string;
+  hint: string;
+  icon: string;
+}[] = [
+  {
+    value: 'none',
+    label: 'Aucun e-mail',
+    hint: "Rien ne vous sera envoyé. Les messages liés au compte, comme la réinitialisation du mot de passe, continuent d'arriver.",
+    icon: 'notifications_off',
+  },
+  {
+    value: 'immediate',
+    label: 'Alerte immédiate à chaque menace',
+    hint: 'Un e-mail dès qu’un poste signale une menace nouvellement détectée. Pas de résumé quotidien.',
+    icon: 'notification_important',
+  },
+  {
+    value: 'digest_events',
+    label: 'Résumé quotidien, seulement s’il y a du nouveau',
+    hint: 'Un e-mail par jour, uniquement les jours où il y a quelque chose à traiter : menace active, mise à jour critique ou importante en attente, poste à vérifier.',
+    icon: 'event_note',
+  },
+  {
+    value: 'digest_daily',
+    label: 'Résumé quotidien, tous les jours',
+    hint: 'Un e-mail chaque matin, même sans incident : état du parc, antivirus périmés, postes à mettre à jour. Un « rien à signaler » est aussi une information.',
+    icon: 'calendar_month',
+  },
+];
+
+/** The chosen cadence in one short phrase, for a list or a badge. */
+export function emailPreferenceLabel(preference: string | null | undefined): string {
+  return EMAIL_PREFERENCE_OPTIONS.find((o) => o.value === preference)?.label ?? '—';
 }

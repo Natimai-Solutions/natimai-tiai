@@ -1,6 +1,9 @@
 import uuid
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, literal_column, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -14,9 +17,34 @@ from app.features.threat.schemas import ThreatReport
 _MUTABLE = ("threat_name", "severity", "category", "status", "action_taken")
 
 
+@dataclass(frozen=True)
+class NewDetection:
+    """A detection this write recorded for the first time.
+
+    The distinction matters to the alert path and only there: the agent re-reads
+    Defender's whole history on every poll, so a *written* row is usually a
+    status moving from active to quarantined — news for the console, but not
+    something to mail anyone about a second time.
+    """
+
+    detection_id: str
+    threat_name: str | None
+    severity: str | None
+    status: str | None
+    detected_at: datetime | None
+
+
+@dataclass(frozen=True)
+class UpsertResult:
+    """What a batch of reported threats changed."""
+
+    written: int
+    new_detections: list[NewDetection]
+
+
 async def upsert_threats(
     session: AsyncSession, machine_id: uuid.UUID, reports: list[ThreatReport]
-) -> int:
+) -> UpsertResult:
     """Store reported threats, deduplicated on (machine_id, detection_id).
 
     ``INSERT ... ON CONFLICT DO UPDATE``, not DO NOTHING: the agent re-reads
@@ -31,7 +59,8 @@ async def upsert_threats(
     poll, and an unconditional update would churn the table for nothing.
 
     Reports without a detection_id are skipped (no stable key to deduplicate on).
-    Returns the number of rows written (inserted or updated).
+    Returns the rows written (inserted or updated) and, among them, the ones
+    that were genuinely new — see ``NewDetection``.
     """
     # Deduplicate within the batch first: ON CONFLICT DO UPDATE refuses to touch
     # the same row twice in one statement, and a batch *can* carry the same key
@@ -55,7 +84,7 @@ async def upsert_threats(
         }
     rows = list(deduped.values())
     if not rows:
-        return 0
+        return UpsertResult(written=0, new_detections=[])
 
     insert = pg_insert(Threat).values(rows)
     stored = Threat.__table__.c  # type: ignore[attr-defined]
@@ -76,5 +105,31 @@ async def upsert_threats(
             stored.detected_at.is_distinct_from(detected_at),
         ),
     )
-    result = await session.execute(stmt)
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    # ``xmax = 0`` is PostgreSQL's own answer to "did this row exist before?":
+    # on an INSERT ... ON CONFLICT, an inserted tuple carries no deleting
+    # transaction, an updated one carries the transaction that superseded the
+    # previous version. It is the only way to tell the two apart in a single
+    # statement — and issuing a SELECT first would race with the next heartbeat
+    # of the same poste.
+    returning: Any = stmt.returning(
+        literal_column("detection_id"),
+        literal_column("threat_name"),
+        literal_column("severity"),
+        literal_column("status"),
+        literal_column("detected_at"),
+        literal_column("xmax = 0").label("inserted"),
+    )
+    result = await session.execute(returning)
+    written = result.fetchall()
+    new_detections = [
+        NewDetection(
+            detection_id=row.detection_id,
+            threat_name=row.threat_name,
+            severity=row.severity,
+            status=row.status,
+            detected_at=row.detected_at,
+        )
+        for row in written
+        if row.inserted
+    ]
+    return UpsertResult(written=len(written), new_detections=new_detections)

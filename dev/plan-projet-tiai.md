@@ -453,7 +453,7 @@ Cadrée et livrée : cf. `plan-phase2-windows-update.md`. Réutilise l'agent et 
 | M4 Console | 🟢 login JWT + dashboard KPI/alertes + filtres + détail poste + actions de masse + révocation + fusion de postes + catalogue d'actions factorisé (sections + confirmations + dialog Résultat) |
 | Commandes de maintenance | 🟢 catalogue fermé de 11 commandes (maintenance + diagnostic) de bout en bout : types backend, exécution agent, console ; statut `running` câblé. Reste la validation en `LocalSystem` des huit commandes exigeant l'élévation (cf. `plan-commandes-distantes.md` §5) |
 | Phase 2 Windows Update | 🟢 état WU remonté (MAJ en attente, redémarrage requis, dates) + 4 commandes de bout en bout : cycle lent dédié côté agent, table `windows_updates` à sémantique de remplacement, carte + tableau + KPI côté console. Reste la validation sur poste réel d'une installation effective et d'un redémarrage |
-| M5 Durcissement | 🟡 JWT + rôles, provider Mailgun, garde secrets prod, timing-safe enroll, en-têtes sécurité ; reste audit, jobs ARQ branchés, rotation, rate-limit |
+| M5 Durcissement | 🟡 JWT + rôles, provider Mailgun, notifications par compte (digest quotidien + alerte immédiate) branchées sur ARQ et le heartbeat, garde secrets prod, timing-safe enroll, en-têtes sécurité ; reste audit, rotation, rate-limit |
 | M6 Packaging & GPO | ⬜ à faire |
 | Transverse | 🟢 tests backend/frontend + ruff + mypy + CI (tous verts) |
 
@@ -544,7 +544,8 @@ Cadrée et livrée : cf. `plan-phase2-windows-update.md`. Réutilise l'agent et 
 - [x] Comparaison timing-safe du secret d'enrôlement (`hmac.compare_digest`)
 - [x] En-têtes de sécurité HTTP posés par Caddy (HSTS, CSP, `nosniff`, `frame-ancestors 'none'`, `Referrer-Policy`) — CSP à valider sur la stack déployée
 - [x] Logs agent : fichier `agent.log` (rotation simple, `.old` > 5 Mio) + niveau `log_level` INFO/DEBUG enfin branché ; chemin nominal loggé (démarrage, identité, enrôlement, heartbeat, commandes + durée) — indispensable en mode service où stderr est perdu ; validé sur poste réel contre la stack dev (enrôlement + heartbeats visibles dans le fichier et machine visible console)
-- [ ] Journal d'audit ; jobs ARQ branchés (nettoyage + envoi d'alertes) ; rotation tokens ; rate-limiting
+- [x] Notifications e-mail branchées : cadence par compte (aucun / alerte immédiate / résumé si évènement / résumé quotidien, défaut résumé quotidien), digest posé sur un cron ARQ quotidien, alerte immédiate émise en tâche de fond depuis le heartbeat sur les seules détections *nouvelles* (`xmax = 0`) et récentes ; destinataires lus dans `users`, `ALERT_RECIPIENTS` devenu repli
+- [ ] Journal d'audit ; rotation tokens ; rate-limiting
 
 **M6 — Packaging & GPO** · ⬜ à faire
 

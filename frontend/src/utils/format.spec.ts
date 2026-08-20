@@ -26,6 +26,8 @@ import {
   wuSeverityLabel,
   wuSizeLabel,
   wuTypeLabel,
+  EMAIL_PREFERENCE_OPTIONS,
+  emailPreferenceLabel,
 } from './format';
 
 describe('formatDateTime', () => {
@@ -385,5 +387,33 @@ describe('ipAddressLabel', () => {
   it('falls back to a dash without an address', () => {
     expect(ipAddressLabel(null, null)).toBe('—');
     expect(ipAddressLabel(null, 24)).toBe('—');
+  });
+});
+
+describe('email preference labels', () => {
+  it('offers the four cadences from silence to daily', () => {
+    expect(EMAIL_PREFERENCE_OPTIONS.map((o) => o.value)).toEqual([
+      'none',
+      'immediate',
+      'digest_events',
+      'digest_daily',
+    ]);
+  });
+
+  it('explains each cadence, since "digest" tells a chooser nothing', () => {
+    for (const option of EMAIL_PREFERENCE_OPTIONS) {
+      expect(option.hint.length).toBeGreaterThan(30);
+    }
+  });
+
+  it('names a stored preference', () => {
+    expect(emailPreferenceLabel('digest_daily')).toBe('Résumé quotidien, tous les jours');
+    expect(emailPreferenceLabel('none')).toBe('Aucun e-mail');
+  });
+
+  it('falls back on a dash for an unknown or missing value', () => {
+    expect(emailPreferenceLabel('hourly')).toBe('—');
+    expect(emailPreferenceLabel(null)).toBe('—');
+    expect(emailPreferenceLabel(undefined)).toBe('—');
   });
 });
