@@ -23,7 +23,7 @@ export default defineConfig({
       reporter: ['text', 'json', 'json-summary'],
       reportsDirectory: './coverage',
       // Scope to the tested layers for now; widen as components get tests.
-      include: ['src/services/**', 'src/utils/**'],
+      include: ['src/composables/**', 'src/services/**', 'src/utils/**'],
       thresholds: { lines: 80, functions: 80, statements: 80, branches: 70 },
     },
   },

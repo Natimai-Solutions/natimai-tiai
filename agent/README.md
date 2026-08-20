@@ -77,7 +77,9 @@ S'y ajoutent les quatre commandes de la Phase 2, décrites en détail plus bas :
 | `wu_scan` | recherche WU immédiate + rafraîchit l'état remonté | Windows Update | 30 min | — |
 | `wu_install` | installe les MAJ **logicielles** (pilotes exclus) | Windows Update | 2 h (réglable) | oui |
 | `wu_install_full` | installe les MAJ **et les pilotes** | Windows Update | 2 h (réglable) | oui |
-| `reboot` | `shutdown /r /t 60` avec message à l'utilisateur | Redémarrage | 1 min | — |
+| `wu_reset` | arrêt des 4 services WU → renommage de `SoftwareDistribution` et `catroot2` → redémarrage (natif Go) | Windows Update | 10 min | oui |
+| `reboot` | `shutdown /r /t 60` avec message à l'utilisateur | Alimentation | 1 min | — |
+| `shutdown` | `shutdown /s /t 60` avec message à l'utilisateur | Alimentation | 1 min | — |
 
 Notes de périmètre :
 
@@ -91,10 +93,83 @@ Notes de périmètre :
   fichiers — sinon la purge court après un service qui n'a pas encore lâché ses
   handles. Seuls les `.spl` et `.shd` sont supprimés ; le service est redémarré
   même si la purge a échoué.
+- `wu_reset` est la procédure Microsoft « Réinitialiser les composants Windows
+  Update », écrite en natif pour les mêmes raisons que `spooler_reset` : le
+  gestionnaire de services dit l'état réel et permet d'**attendre** l'arrêt
+  effectif avant de renommer — un dossier encore ouvert ne se renomme pas. Trois
+  règles d'ordonnancement portent la sûreté de l'ensemble : les renommages
+  n'ont lieu qu'une fois **tous** les services arrêtés ; un service qui n'a pas
+  pu être arrêté **annule** les renommages plutôt que de les laisser échouer un
+  par un ; les services sont redémarrés quoi qu'il arrive au milieu. Seuls les
+  services que la commande a effectivement arrêtés sont relancés — `wuauserv` et
+  `msiserver` démarrent à la demande, et un service désactivé par GPO doit le
+  rester. Un `.old` laissé par une exécution précédente est supprimé avant le
+  renommage : le `ren` de l'article échoue à la deuxième exécution, alors que
+  rejouer la procédure sur un poste récalcitrant est le cas normal.
+- Écartés du `wu_reset`, bien qu'ils figurent dans des variantes plus anciennes
+  ou tierces de la même recette : le ré-enregistrement des DLL WU par `regsvr32`
+  (sans effet depuis Windows 8), `netsh winsock reset` et la réécriture des
+  descripteurs de sécurité par `sc sdset`. Aucun n'est nécessaire sur une
+  version supportée, et chacun est plus difficile à défaire que l'ensemble de ce
+  que fait la commande.
 - `netsh winsock reset` reste écarté : il exige un redémarrage derrière. La
   commande `reboot` existe désormais, mais elle est déclenchée **à part et
   explicitement** — enchaîner l'un sur l'autre reviendrait à redémarrer un poste
   sans que personne l'ait demandé.
+
+### Rationnement de l'alimentation (`reboot`, `shutdown`)
+
+`reboot` et `shutdown` sont les deux seules commandes dont l'effet survit au
+processus qui les exécute, et les seules qui puissent coûter son travail à un
+utilisateur. La console demande une confirmation et le serveur refuse d'en mettre
+une seconde en file tant que la première n'est pas terminée — mais ni l'une ni
+l'autre ne tourne sur le poste concerné. L'agent tranche donc lui-même
+([`internal/agent/power.go`](internal/agent/power.go)), là où ni une erreur de
+console, ni une file dupliquée, ni un serveur compromis ne peuvent l'atteindre.
+Même raisonnement que le catalogue fermé : c'est l'agent qui décide de ce qu'il
+fait réellement.
+
+**Une seule garde pour les deux**, et non une par commande : ce qui est rationné,
+c'est le poste qui tombe. Un poste qui vient de redémarrer ne doit pas plus être
+arrêté que redémarré à nouveau. Le `shutdown` rend l'argument plus net que le
+`reboot` ne l'a jamais été : le serveur sait désormais réveiller un poste par
+Wake-on-LAN, donc un `shutdown` resté en file rencontrerait la machine qu'il
+vient de réveiller et l'éteindrait aussitôt, en boucle et sans témoin.
+
+Deux règles, et un refus est remonté en **échec** avec son motif — jamais un
+succès silencieux :
+
+- **10 minutes minimum entre deux opérations d'alimentation.** Mesuré sur la
+  *durée de fonctionnement* du poste (`GetTickCount64`) autant que sur la mémoire
+  du processus : un agent qui ne se souviendrait que de ses propres redémarrages
+  oublierait chacun d'eux au moment où ça compte, puisque le redémarrage emporte
+  le processus. Une file qui re-proposerait un `reboot` boucherait sinon le poste
+  indéfiniment, chaque démarrage effaçant la trace du précédent. Une lecture
+  d'uptime en échec ne bloque pas : c'est une règle de rationnement, pas une
+  frontière de sécurité.
+- **Un arrêt ou un redémarrage programmé bloque tout le reste du catalogue**
+  pendant 5 min. Le worker exécute les commandes une à une, donc une commande
+  longue mise en file *après* un `reboot` ne peut pas démarrer avant lui — mais un
+  `reboot` mis en file *avant* elle rend la main en quelques millisecondes, et la
+  machine tombe alors soixante secondes après le début d'un `dism` en train de
+  réécrire le magasin de composants. L'ordre protège dans un sens seulement ;
+  cette règle protège l'autre. Bornée à 5 min parce qu'une opération peut être
+  annulée (`shutdown /a`) : passé ce délai l'agent reprend son fonctionnement
+  normal. Le motif du refus nomme l'opération en attente — « un arrêt de ce poste
+  est déjà programmé » — plutôt qu'un type de commande.
+
+`/s` et non `/p` ni `/f` : un arrêt qui saute la notification, ou qui ferme les
+applications de force sans leur demander, est exactement ce que le délai de 60 s
+existe pour éviter. Le poste s'éteint dans les deux cas ; seule change la chance
+laissée à l'utilisateur d'enregistrer son travail. Pas de `/hybrid` non plus : un
+poste arrêté avec le démarrage rapide de Windows laisse sa carte réseau dans un
+état où le Wake-on-LAN est peu fiable, et la console proposerait alors un réveil
+qui marche sur certains postes et pas sur d'autres.
+
+> **Le réveil (`wake_on_lan`) ne passe pas par l'agent** et ne figure pas dans ce
+> catalogue : le poste visé est éteint. C'est le serveur qui émet le paquet
+> magique — cf. `backend/app/features/wol/`. Ce que l'agent y apporte, c'est
+> l'adresse MAC (§ « Adresse IP & MAC »).
 
 **Chemins absolus, jamais le `PATH`.** Chaque exécutable est résolu en
 `%SystemRoot%\System32\<exe>`. L'agent tourne en `LocalSystem` : un répertoire
@@ -397,7 +472,7 @@ connecté » sans identité. Défaut : activé.
 L'information vaut ce que vaut le dernier heartbeat (60 s par défaut) : la
 console l'accompagne du « vu le » du poste.
 
-## Adresse IP
+## Adresse IP & MAC
 
 L'agent remonte **une** adresse IP par poste, relue à chaque heartbeat — pas
 mise en cache au démarrage comme le hostname : un bail DHCP, une station
@@ -433,6 +508,42 @@ poste, au lieu d'effacer une information sur une lecture ratée.
 > poste, pas d'inventorier ses cartes réseau. Le détail des interfaces relève du
 > module Inventaire (phase ultérieure).
 
+### L'adresse MAC et le masque voyagent avec elle
+
+Le même relevé remonte l'**adresse matérielle de la carte qui porte l'adresse
+élue** (`mac_address`) et le **masque de cette adresse** (`ip_prefix_length`), et
+c'est cette solidarité qui compte : le paquet de réveil nomme une MAC et est
+diffusé sur le sous-réseau d'une IP. Une MAC lue sur une autre carte que celle
+remontée, ou un masque pris ailleurs, ferait crier le serveur sur le mauvais
+réseau. Les trois sont donc élus ensemble, en un seul passage — l'incohérence est
+irreprésentable plutôt que rattrapée après coup.
+
+Le masque vient de `OnLinkPrefixLength`, que `GetAdaptersAddresses` renseigne
+**par adresse** et non par carte — deux adresses d'une même carte peuvent tenir
+sur deux préfixes différents. Le remonter plutôt que de le supposer côté serveur
+est ce qui rend le réveil juste sur un parc en /16 comme sur un parc en /24, et
+sur un parc qui mêle les deux : un défaut serveur y serait juste par accident.
+Sont refusés le zéro — ce que Windows laisse quand il n'a pas renseigné le champ,
+et aussi bien un `/0` dont l'adresse de diffusion est `255.255.255.255`, soit le
+monde entier ou rien, jamais le poste — et toute valeur qui dépasse la famille de
+l'adresse. Un masque refusé coûte le masque et non l'adresse : le serveur retombe
+alors sur son réglage `WOL_SUBNET_PREFIXLEN`, c'est-à-dire sur ce qu'il faisait
+avant que ce champ existe.
+
+Ne sont remontées que les adresses **EUI-48** (six octets) : un paquet magique
+est six octets `0xFF` suivis de la MAC répétée seize fois, donc ni l'adresse vide
+d'un pseudo-adaptateur PPP ou tunnel, ni les vingt octets d'une carte InfiniBand,
+ni l'adresse tout à zéro que certains adaptateurs virtuels remontent à la place
+de rien ne peuvent en produire un. Une carte sans adresse exploitable n'empêche
+pas la remontée de l'IP : perdre l'adresse joignable parce que la MAC est
+illisible échangerait une fonction qui marche contre une fonction manquante.
+
+Format `AA:BB:CC:DD:EE:FF` en majuscules — le serveur re-normalise de toute façon
+ce qui arrive, c'est une politesse et non un contrat. Comme pour l'IP, un champ
+absent laisse le serveur sur sa dernière valeur connue : un poste dont l'agent
+n'a pas su lire la carte ne doit pas perdre la seule information qui permette de
+le rallumer.
+
 ## Identité & sécurité
 
 - Ancre = **SMBIOS/System UUID** (`Win32_ComputerSystemProduct.UUID`), repli sur un
@@ -448,6 +559,8 @@ poste, au lieu d'effacer une information sur une lecture ratée.
 - File locale durable pour les **résultats de commandes** : un scan terminé alors
   que le serveur était down est rejoué au prochain contact — y compris le
   résultat d'un `reboot`, si le poste tombe avant que le POST n'aboutisse.
+  Après un `shutdown`, le rejeu attend le rallumage du poste — c'est le
+  comportement honnête : personne ne regarde une machine éteinte.
   L'état/les menaces sont reconstruits à chaque heartbeat (pas mis en file), et
   l'état Windows Update reste en cache jusqu'à ce qu'un heartbeat l'ait
   effectivement remis.

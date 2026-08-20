@@ -34,6 +34,14 @@ MAX_PENDING_UPDATES = 500
 UPDATE_TYPE_DRIVER = "driver"
 UPDATE_TYPE_SOFTWARE = "software"
 
+# Above this, a reported size is not a size. WUA's MaxDownloadSize is a ceiling
+# summing every payload variant an update could need — KB5121003 reports ninety
+# gibibytes for a download of about one — and the agent already drops those. This
+# repeats the bound for the agents in the parc that predate that filter, whose
+# figures would otherwise reach the console unchallenged. Ten gibibytes leaves an
+# order of magnitude over a Windows feature update, the largest genuine one.
+SIZE_MB_MAX = 10 * 1024
+
 
 class PendingUpdateReport(BaseModel):
     """One update WUA reports as applicable and not yet installed."""
@@ -99,8 +107,12 @@ class PendingUpdateReport(BaseModel):
     @field_validator("size_mb")
     @classmethod
     def _sane_size(cls, value: float | None) -> float | None:
-        """Drop a negative size rather than store it — WUA reports 0 for unknown."""
-        if value is None or value < 0:
+        """Drop a size that cannot be one — see ``SIZE_MB_MAX``.
+
+        WUA reports 0 for unknown, never a negative; and past the bound the
+        figure has stopped describing a download at all.
+        """
+        if value is None or value < 0 or value > SIZE_MB_MAX:
             return None
         return value
 

@@ -70,6 +70,11 @@ type Agent struct {
 	// "another installation is in progress" back from Windows, and the collection
 	// running six-hourly *will* eventually land on top of an install otherwise.
 	wuOp sync.Mutex
+
+	// Rations restarts and shutdowns, and holds the rest of the catalogue back
+	// once one is scheduled (power.go). The last line of defence, and the only
+	// one that runs on the machine actually being taken down.
+	power powerGuard
 }
 
 // New creates an agent from config.
@@ -191,11 +196,17 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	}
 	// Read here and not from a.host: the host attributes are collected once at
 	// start-up, whereas the address changes under a running agent (DHCP
-	// renewal, dock, VPN). Same contract as above on failure — "" is omitted
-	// from the payload, so the server keeps the last known address.
-	ip, err := collector.ReadIPAddress(ctx)
+	// renewal, dock, VPN). Same contract as above on failure — the zero value
+	// is omitted from the payload, so the server keeps the last known address
+	// and the last known MAC.
+	//
+	// One read for all three: the MAC and the mask reported are those of the
+	// adapter holding the address reported, so the server can broadcast a magic
+	// packet on the subnet of that address without the three ever describing
+	// different NICs.
+	netInfo, err := collector.ReadNetwork(ctx)
 	if err != nil {
-		log.Printf("agent: ip address: %v", err)
+		log.Printf("agent: network: %v", err)
 	}
 	// Which antivirus actually guards this machine — Defender's own WMI classes
 	// cannot answer that once a third-party product has taken over. On failure av
@@ -213,17 +224,19 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 
 	fp := a.identity.Fingerprint
 	resp, err := a.client.Heartbeat(ctx, models.HeartbeatRequest{
-		Hostname:      a.host.Hostname,
-		Domain:        a.host.Domain,
-		IPAddress:     ip,
-		OSVersion:     a.host.OSVersion,
-		AgentVersion:  Version,
-		Defender:      state,
-		AVProduct:     av,
-		Session:       sess,
-		WindowsUpdate: wu,
-		Fingerprint:   &fp,
-		Threats:       threats,
+		Hostname:       a.host.Hostname,
+		Domain:         a.host.Domain,
+		IPAddress:      netInfo.IP,
+		MACAddress:     netInfo.MAC,
+		IPPrefixLength: netInfo.PrefixLength,
+		OSVersion:      a.host.OSVersion,
+		AgentVersion:   Version,
+		Defender:       state,
+		AVProduct:      av,
+		Session:        sess,
+		WindowsUpdate:  wu,
+		Fingerprint:    &fp,
+		Threats:        threats,
 	})
 	if err != nil {
 		return err
@@ -328,8 +341,21 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	case "wu_install_full":
 		long = true
 		run = func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, true) }
+	case "wu_reset":
+		// Long not because it usually is — the nominal run takes seconds — but
+		// because the case worth watching is the one where a service refuses to
+		// stop, and "transmise" for four minutes is exactly what the
+		// intermediate `running` exists to replace.
+		long = true
+		run = a.runWUReset
 	case "reboot":
-		run = collector.Reboot
+		run = func(ctx context.Context) (string, error) {
+			return a.runPowerAction(ctx, actionReboot, collector.Reboot)
+		}
+	case "shutdown":
+		run = func(ctx context.Context) (string, error) {
+			return a.runPowerAction(ctx, actionShutdown, collector.Shutdown)
+		}
 	default:
 		// The maintenance catalogue is looked up rather than switched on: its
 		// entries differ only by data, so a new command is one table row in the
@@ -344,6 +370,16 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 		run = func(ctx context.Context) (string, error) {
 			return collector.RunMaintenance(ctx, cmdType)
 		}
+	}
+
+	// Checked here rather than per command: a machine going down in sixty
+	// seconds must not start anything at all, and a command refused now is
+	// re-offered by the server once the poste is back.
+	if kind := a.power.pending(time.Now()); kind != "" {
+		a.refuse(ctx, cmd, fmt.Errorf(
+			"un %s de ce poste est déjà programmé : commande non exécutée, "+
+				"à relancer une fois le poste revenu en ligne", kind))
+		return
 	}
 
 	log.Printf("agent: executing %s (id %s)", cmd.Type, cmd.ID)
@@ -367,6 +403,46 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 		log.Printf("agent: post result failed, queuing %s: %v", cmd.ID, perr)
 		if qerr := a.queue.Enqueue(queue.Item{CommandID: cmd.ID, Result: res}); qerr != nil {
 			log.Printf("agent: queue result %s: %v", cmd.ID, qerr)
+		}
+	}
+}
+
+// runPowerAction schedules a restart or a shutdown, unless this machine has had
+// one too recently — see power.go for what "too recently" means and why the
+// agent is the right place to decide it.
+//
+// The two share this path rather than each guarding itself: they are rationed
+// together (one machine, one power state), and a poste that just restarted is
+// no more available to be stopped than to be restarted again.
+func (a *Agent) runPowerAction(
+	ctx context.Context, kind string, schedule func(context.Context) (string, error),
+) (string, error) {
+	now := time.Now()
+	if err := a.power.allow(now); err != nil {
+		return "", err
+	}
+	output, err := schedule(ctx)
+	if err != nil {
+		// Nothing was scheduled, so nothing is remembered: a shutdown.exe that
+		// refused must not ration the retry that fixes whatever refused it.
+		return output, err
+	}
+	a.power.markScheduled(now, kind)
+	return output, nil
+}
+
+// refuse closes a command the agent declined to run, without running it.
+//
+// A `failed` and not a silent drop: the command would otherwise sit in the
+// server's queue being re-offered on every heartbeat until it expired, and the
+// administrator who triggered it would watch "transmise" for an hour with no
+// idea the poste had decided otherwise.
+func (a *Agent) refuse(ctx context.Context, cmd models.Command, reason error) {
+	log.Printf("agent: refusing %s (id %s): %v", cmd.Type, cmd.ID, reason)
+	res := models.CommandResult{Status: "failed", Error: reason.Error()}
+	if err := a.client.PostResult(ctx, cmd.ID, res); err != nil {
+		if qerr := a.queue.Enqueue(queue.Item{CommandID: cmd.ID, Result: res}); qerr != nil {
+			log.Printf("agent: queue refusal %s: %v", cmd.ID, qerr)
 		}
 	}
 }

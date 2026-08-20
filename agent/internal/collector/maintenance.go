@@ -40,6 +40,17 @@ const (
 	dismRestoreTimeout = 2 * time.Hour
 )
 
+// Driving a Windows service to a state and waiting for it to get there — used
+// by the two native commands (spooler_reset, wu_reset). Neutral rather than
+// Windows-only so the commands that chain several transitions can assert their
+// own timeout covers them all.
+const (
+	// serviceStateTimeout bounds one state transition. A service normally stops
+	// in under a second; a stuck driver is what this catches.
+	serviceStateTimeout = 60 * time.Second
+	servicePollInterval = 300 * time.Millisecond
+)
+
 // maxOutputBytes bounds what one command sends back. Console tools are chatty
 // (a gpresult /r on a machine with many GPOs runs to tens of kilobytes) and the
 // text lands in a database column and then in a browser dialog. The server caps

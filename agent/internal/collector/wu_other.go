@@ -28,3 +28,9 @@ func ReadWUState(ctx context.Context) (*models.WUState, error) {
 func RunWUInstall(ctx context.Context, includeDrivers bool, timeout time.Duration) (string, error) {
 	return "", errWUUnsupported
 }
+
+// RunWUReset refuses off Windows: it drives the Windows service manager and
+// renames directories under %SystemRoot%, neither of which has a counterpart.
+func RunWUReset(ctx context.Context) (string, error) {
+	return "", errWUUnsupported
+}

@@ -123,19 +123,30 @@ type Threat struct {
 
 // HeartbeatRequest is sent on each poll (auth: Bearer token).
 //
-// IPAddress is a plain attribute like the hostname, not a block: one elected
-// address, re-read on every poll. omitempty is load-bearing — an agent that
-// could not determine an address omits the field, and the server keeps the last
-// known one rather than blanking it on no evidence.
+// IPAddress and MACAddress are plain attributes like the hostname, not a block:
+// one elected adapter, re-read on every poll. omitempty is load-bearing — an
+// agent that could not determine an address omits the field, and the server
+// keeps the last known one rather than blanking it on no evidence.
+//
+// The MAC is what the server needs to wake this machine once it is off, and it
+// is deliberately the MAC of the adapter holding IPAddress: the magic packet is
+// broadcast on the subnet of that address, so a MAC belonging to another
+// adapter would have the server shouting on the wrong network. IPPrefixLength
+// is that subnet — reported rather than assumed server-side, because only the
+// poste knows whether it lives in a /16 or a /24.
 type HeartbeatRequest struct {
-	Hostname     string          `json:"hostname,omitempty"`
-	Domain       string          `json:"domain,omitempty"`
-	IPAddress    string          `json:"ip_address,omitempty"`
-	OSVersion    string          `json:"os_version,omitempty"`
-	AgentVersion string          `json:"agent_version,omitempty"`
-	Defender     *DefenderState  `json:"defender,omitempty"`
-	AVProduct    *AVProductState `json:"av_product,omitempty"`
-	Session      *SessionState   `json:"session,omitempty"`
+	Hostname   string `json:"hostname,omitempty"`
+	Domain     string `json:"domain,omitempty"`
+	IPAddress  string `json:"ip_address,omitempty"`
+	MACAddress string `json:"mac_address,omitempty"`
+	// omitempty on an int omits zero, which is precisely "not reported": the
+	// server then keeps whatever mask it had, exactly as for the two above.
+	IPPrefixLength int             `json:"ip_prefix_length,omitempty"`
+	OSVersion      string          `json:"os_version,omitempty"`
+	AgentVersion   string          `json:"agent_version,omitempty"`
+	Defender       *DefenderState  `json:"defender,omitempty"`
+	AVProduct      *AVProductState `json:"av_product,omitempty"`
+	Session        *SessionState   `json:"session,omitempty"`
 	// Attached only on the heartbeats that follow a Windows Update collection —
 	// every few hours, not every minute. Absent (nil) leaves the server's stored
 	// state alone, exactly like an absent Defender block.

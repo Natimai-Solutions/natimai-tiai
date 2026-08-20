@@ -971,11 +971,23 @@ def test_catalogue_is_fully_covered_below():
     from app.features.command.models import CommandType
 
     defender = {"quick_scan", "full_scan", "update_signatures"}
-    # Phase 2's four types are covered by tests/test_api_windows_update.py, and
+    # Phase 2's types are covered by tests/test_api_windows_update.py, and
     # named here so this guard still fails on a type nobody tested anywhere.
-    windows_update = {"wu_scan", "wu_install", "wu_install_full", "reboot"}
+    windows_update = {
+        "wu_scan",
+        "wu_install",
+        "wu_install_full",
+        "wu_reset",
+    }
+    # Taking a poste down, and bringing it back. Covered by
+    # tests/test_api_power_wol.py — except `reboot`, whose de-duplication is
+    # tested just below and whose round trip rides with Phase 2's types.
+    #
+    # `wake_on_lan` is the one value here no agent ever executes: the machine it
+    # targets is off, so the server emits the packet and closes the row itself.
+    power = {"reboot", "shutdown", "wake_on_lan"}
     assert {t.value for t in CommandType} == (
-        defender | windows_update | set(MAINTENANCE_TYPES)
+        defender | windows_update | power | set(MAINTENANCE_TYPES)
     )
 
 
@@ -1185,3 +1197,221 @@ async def test_health_reports_database_ok(client):
     body = resp.json()
     assert body["status"] == "ok"
     assert body["database"] is True
+
+
+# --- De-duplication: one open command per (machine, type) -------------------
+
+
+async def test_same_command_is_not_queued_twice(client, db_session):
+    """The second press creates nothing while the first is still open."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-dedup-1")
+    body = {"type": "quick_scan", "machine_ids": [enrolled["machine_id"]]}
+
+    first = await client.post("/api/v1/commands", headers=headers, json=body)
+    assert first.status_code == 200, first.text
+    assert first.json()["count"] == 1
+    assert first.json()["skipped"] == 0
+
+    second = await client.post("/api/v1/commands", headers=headers, json=body)
+    assert second.status_code == 200, second.text
+    # Not an error: re-pressing a button on a poste that has not answered yet is
+    # the normal way this happens. The console needs to be able to say so.
+    assert second.json()["count"] == 0
+    assert second.json()["created"] == []
+    assert second.json()["skipped"] == 1
+
+    listed = await client.get(
+        f"/api/v1/commands?machine_id={enrolled['machine_id']}", headers=headers
+    )
+    assert listed.json()["total"] == 1
+
+
+async def test_dedup_is_per_type(client, db_session):
+    """A different command is unaffected — the rule is per (machine, type)."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-dedup-type")
+
+    for command_type in ("quick_scan", "flush_dns"):
+        resp = await client.post(
+            "/api/v1/commands",
+            headers=headers,
+            json={"type": command_type, "machine_ids": [enrolled["machine_id"]]},
+        )
+        assert resp.json()["count"] == 1, command_type
+
+
+async def test_dedup_is_per_machine(client, db_session):
+    """One poste already holding the command must not shield the others."""
+    headers = await _admin_headers(client, db_session)
+    first = await _enroll(client, "m-dedup-a")
+    await _enroll(client, "m-dedup-b")
+
+    await client.post(
+        "/api/v1/commands",
+        headers=headers,
+        json={"type": "quick_scan", "machine_ids": [first["machine_id"]]},
+    )
+    resp = await client.post(
+        "/api/v1/commands",
+        headers=headers,
+        json={"type": "quick_scan", "target_all": True},
+    )
+    body = resp.json()
+    assert body["count"] == 1
+    assert body["skipped"] == 1
+    assert body["created"] != []
+
+
+async def test_delivered_command_still_blocks_a_second(client, db_session):
+    """Handed to the agent is not finished: it is running on the poste."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-dedup-delivered")
+    body = {"type": "full_scan", "machine_ids": [enrolled["machine_id"]]}
+
+    await client.post("/api/v1/commands", headers=headers, json=body)
+    hb = await _heartbeat(client, enrolled["token"])
+    assert len(hb.json()["commands"]) == 1
+
+    resp = await client.post("/api/v1/commands", headers=headers, json=body)
+    assert resp.json()["count"] == 0
+    assert resp.json()["skipped"] == 1
+
+
+async def test_finished_command_frees_the_slot(client, db_session):
+    """Once the poste has answered, the same command can be sent again."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-dedup-done")
+    body = {"type": "quick_scan", "machine_ids": [enrolled["machine_id"]]}
+
+    await client.post("/api/v1/commands", headers=headers, json=body)
+    hb = await _heartbeat(client, enrolled["token"])
+    command_id = hb.json()["commands"][0]["id"]
+    res = await client.post(
+        f"/api/v1/agent/commands/{command_id}/result",
+        headers={"Authorization": f"Bearer {enrolled['token']}"},
+        json={"status": "succeeded", "output": "clean"},
+    )
+    assert res.status_code == 200
+
+    resp = await client.post("/api/v1/commands", headers=headers, json=body)
+    assert resp.json()["count"] == 1
+    assert resp.json()["skipped"] == 0
+
+
+async def test_a_failed_command_frees_the_slot(client, db_session):
+    """A failure is a verdict: retrying is exactly what an admin does next."""
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-dedup-failed")
+    body = {"type": "sfc_scan", "machine_ids": [enrolled["machine_id"]]}
+
+    await client.post("/api/v1/commands", headers=headers, json=body)
+    hb = await _heartbeat(client, enrolled["token"])
+    command_id = hb.json()["commands"][0]["id"]
+    await client.post(
+        f"/api/v1/agent/commands/{command_id}/result",
+        headers={"Authorization": f"Bearer {enrolled['token']}"},
+        json={"status": "failed", "error": "accès refusé"},
+    )
+
+    resp = await client.post("/api/v1/commands", headers=headers, json=body)
+    assert resp.json()["count"] == 1
+
+
+async def _expire_now(db_session, command_id=None):
+    """Push a command's TTL into the past, as a long-offline poste would."""
+    from sqlmodel import col, select
+
+    from app.features.base import utcnow
+    from app.features.command.models import Command
+
+    stmt = select(Command)
+    if command_id is not None:
+        stmt = stmt.where(col(Command.id) == command_id)
+    rows = await db_session.exec(stmt)
+    command = rows.all()[0]
+    command.expires_at = utcnow() - timedelta(hours=1)
+    db_session.add(command)
+    await db_session.commit()
+    # Reloaded eagerly: the commit expires the instance, and touching an
+    # attribute afterwards would fire a lazy refresh outside the greenlet.
+    await db_session.refresh(command)
+    return command
+
+
+async def test_expired_command_does_not_block(client, db_session):
+    """The poste was off the whole TTL — re-queueing is the point.
+
+    The creation endpoint runs the same lazy expiry sweep as the tracking one,
+    so a stale PENDING row is flipped to EXPIRED *before* it is consulted;
+    otherwise a poste that stayed off would be locked out of that command type
+    until somebody happened to open the console.
+    """
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-dedup-expired")
+    body = {"type": "quick_scan", "machine_ids": [enrolled["machine_id"]]}
+
+    await client.post("/api/v1/commands", headers=headers, json=body)
+    command = await _expire_now(db_session)
+
+    resp = await client.post("/api/v1/commands", headers=headers, json=body)
+    assert resp.json()["count"] == 1
+    assert resp.json()["skipped"] == 0
+
+    await db_session.refresh(command)
+    assert command.status == "expired"
+
+
+async def test_a_delivered_command_past_its_ttl_stops_blocking(client, db_session):
+    """The trap this rule would otherwise be.
+
+    Only PENDING commands are ever swept to EXPIRED — once delivered, the agent
+    owns the command. So one handed to an agent that never came back stays
+    DELIVERED for good, and a de-duplication keyed on status alone would lock
+    that command type out of that machine permanently.
+    """
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-dedup-stuck")
+    body = {"type": "full_scan", "machine_ids": [enrolled["machine_id"]]}
+
+    await client.post("/api/v1/commands", headers=headers, json=body)
+    hb = await _heartbeat(client, enrolled["token"])
+    command_id = hb.json()["commands"][0]["id"]
+
+    # Still delivered — nothing expires it — but its TTL has run out.
+    stuck = await _expire_now(db_session, command_id)
+    assert stuck.status == "delivered"
+
+    resp = await client.post("/api/v1/commands", headers=headers, json=body)
+    assert resp.json()["count"] == 1
+    assert resp.json()["skipped"] == 0
+
+    # And the old row is still open to the verdict of an agent that does come
+    # back: a late result is written whatever the command's status.
+    late = await client.post(
+        f"/api/v1/agent/commands/{command_id}/result",
+        headers={"Authorization": f"Bearer {enrolled['token']}"},
+        json={"status": "succeeded", "output": "tardif"},
+    )
+    assert late.status_code == 200
+    await db_session.refresh(stuck)
+    assert stuck.result_output == "tardif"
+
+
+async def test_reboot_cannot_be_stacked(client, db_session):
+    """The command that matters most here: a restart is never queued twice.
+
+    The agent rations restarts on its own as well (agent/internal/agent/power.go)
+    — this is the server half, and it is what stops the queue growing a second
+    one at all.
+    """
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, "m-dedup-reboot")
+    body = {"type": "reboot", "machine_ids": [enrolled["machine_id"]]}
+
+    assert (await client.post("/api/v1/commands", headers=headers, json=body)).json()[
+        "count"
+    ] == 1
+    assert (await client.post("/api/v1/commands", headers=headers, json=body)).json()[
+        "count"
+    ] == 0

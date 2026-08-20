@@ -86,9 +86,14 @@ export function sessionColor(present: boolean | null | undefined): string {
  * none), while an *empty* name means the registry was read and holds nothing,
  * i.e. the machine runs no antivirus at all. Collapsing the two would hide a
  * finding behind a missing measurement.
+ *
+ * "Non relevé" and not "Inconnu" for the absent case: on a machine whose
+ * Defender columns are visibly alive, "Inconnu" reads as the console failing to
+ * name an antivirus it can see, and so as a contradiction. The measurement is
+ * what is missing, and the label now says which.
  */
 export function antivirusLabel(name: string | null | undefined): string {
-  if (name === null || name === undefined) return 'Inconnu';
+  if (name === null || name === undefined) return 'Non relevé';
   return name === '' ? 'Aucun' : name;
 }
 
@@ -115,7 +120,9 @@ export function antivirusStatusLabel(
   enabled: boolean | null | undefined,
   signaturesUpToDate: boolean | null | undefined,
 ): string {
-  if (name === null || name === undefined) return "Jamais remonté par l'agent";
+  if (name === null || name === undefined) {
+    return 'Security Center jamais relevé (agent antérieur, ou hôte sans Security Center)';
+  }
   if (name === '') return 'Aucun antivirus enregistré';
 
   const parts: string[] = [];
@@ -238,10 +245,19 @@ export function wuTypeLabel(type: string | null | undefined): string {
   return type || '—';
 }
 
-/** Download size in MiB, or a dash when Windows Update reported none. */
+/**
+ * Download ceiling in MiB, or a dash when Windows Update reported none usable.
+ *
+ * Prefixed with ≤ on purpose. What WUA reports is MaxDownloadSize, the sum of
+ * every payload the update could need — full package and express/delta variants,
+ * each architecture, each language — where exactly one of them is fetched. A
+ * driver ships a single payload and so reads true; a cumulative update or a
+ * Defender definition does not, and printing its ceiling as a plain size is what
+ * made the column look broken. The sign says what the number is.
+ */
 export function wuSizeLabel(sizeMb: number | null | undefined): string {
   if (sizeMb === null || sizeMb === undefined) return '—';
-  return `${sizeMb.toLocaleString('fr-FR')} Mio`;
+  return `≤ ${sizeMb.toLocaleString('fr-FR')} Mio`;
 }
 
 /**
@@ -345,4 +361,18 @@ export function threatStatusColor(status: string | null | undefined): string {
     default:
       return 'grey-5';
   }
+}
+
+/**
+ * An address with the mask the poste reported for it: « 10.4.7.9 /16 ».
+ *
+ * The two belong on one line because neither answers the question alone: the
+ * address says where the poste is, the mask says which network that is — and it
+ * is the network a wake packet is broadcast on. A missing mask is simply left
+ * out rather than filled with a default: the console would otherwise show a
+ * value the poste never confirmed.
+ */
+export function ipAddressLabel(ip: string | null, prefixLength: number | null): string {
+  if (!ip) return '—';
+  return prefixLength == null ? ip : `${ip} /${prefixLength}`;
 }

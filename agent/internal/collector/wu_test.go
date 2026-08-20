@@ -257,6 +257,17 @@ func TestBytesToMB(t *testing.T) {
 	if mb == nil || *mb != 0.1 {
 		t.Errorf("20 KiB = %v, want the 0.1 floor", mb)
 	}
+	// The value KB5121003 actually reports on a Windows 11 poste: ninety
+	// gibibytes of ceiling for about a gibibyte of download. A number that size
+	// is not a size, and the column is worth more with a dash in it.
+	if mb := bytesToMB(97_304_266_124); mb != nil {
+		t.Errorf("an absurd ceiling must read as unknown, got %v", *mb)
+	}
+	// Just under the bound still reports: the guard is for the absurd, not for
+	// the merely large — a feature update is a legitimate several gibibytes.
+	if mb := bytesToMB(maxPlausibleDownloadBytes); mb == nil {
+		t.Error("the bound itself must still report a size")
+	}
 }
 
 func TestParseWUTimeRejectsTheNeverDate(t *testing.T) {

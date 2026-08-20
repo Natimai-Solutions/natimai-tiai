@@ -46,6 +46,24 @@ class Machine(SQLModel, table=True):
     # reported — an agent older than the feature, or a host with no usable
     # address.
     ip_address: str | None = None
+    # Hardware address of the adapter holding ``ip_address``, canonicalised
+    # server-side as "AA:BB:CC:DD:EE:FF". The wake target: a magic packet names
+    # this MAC and is broadcast on the subnet of the address above, which is why
+    # the agent elects both from the same adapter rather than reporting them
+    # independently. NULL = never reported — an agent older than the feature, or
+    # an adapter with no usable hardware address (a PPP or tunnel pseudo-NIC) —
+    # and a machine with no MAC simply cannot be woken from the console.
+    mac_address: str | None = None
+    # The mask that goes with ``ip_address``, as the poste's own adapter holds
+    # it: 16 for a machine in 10.4.0.0/16. Reported rather than assumed, because
+    # only the poste knows — a server-side default is right by accident on a flat
+    # /24 parc and wrong on every other. It is what turns the address above into
+    # the broadcast address a magic packet has to be sent to.
+    #
+    # NULL = never reported (an agent older than the feature, or an adapter whose
+    # prefix Windows did not fill in), and the wake then falls back on
+    # ``WOL_SUBNET_PREFIXLEN``.
+    ip_prefix_length: int | None = None
 
     # Defender state (derived from MSFT_MpComputerStatus)
     rtp_enabled: bool | None = None

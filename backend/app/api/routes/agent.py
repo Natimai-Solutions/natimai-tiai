@@ -26,6 +26,7 @@ from app.features.threat.crud import upsert_threats
 from app.features.threat.schemas import ThreatReport
 from app.features.windows_update.crud import replace_pending
 from app.features.windows_update.schemas import WUStateReport
+from app.features.wol.packet import normalize_mac
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -129,6 +130,8 @@ class HeartbeatRequest(BaseModel):
     hostname: str | None = None
     domain: str | None = None
     ip_address: str | None = None
+    mac_address: str | None = None
+    ip_prefix_length: int | None = None
     os_version: str | None = None
     agent_version: str | None = None
     defender: DefenderState | None = None
@@ -161,6 +164,38 @@ class HeartbeatRequest(BaseModel):
             return str(ip_address(value))
         except ValueError:
             return None
+
+    @field_validator("mac_address")
+    @classmethod
+    def _normalize_mac(cls, value: str | None) -> str | None:
+        """Canonicalise the wake target, drop anything else — never 422.
+
+        Same trade-off as the address above, and the same reason to parse rather
+        than store: the column feeds a magic packet, so what reaches it has to be
+        six bytes of hardware address and not a string an agent happened to send.
+        Canonical form (upper case, colons) means the console shows one shape and
+        the value can be compared as text.
+        """
+        return normalize_mac(value)
+
+    @field_validator("ip_prefix_length")
+    @classmethod
+    def _bound_prefix(cls, value: int | None) -> int | None:
+        """Keep a mask that can describe a network, drop anything else.
+
+        1 to 128 — the widest an IPv6 prefix goes; the derivation refuses a value
+        that does not fit the address it is applied to anyway. Zero is excluded
+        on both readings: it is what Windows leaves when it did not fill the
+        field in, and a /0 whose broadcast address is 255.255.255.255, which
+        reaches the whole world or nothing at all and never the poste.
+
+        Degrades to None like its neighbours rather than 422-ing the heartbeat:
+        the wake then falls back on the configured default, which is what it did
+        before agents reported this at all.
+        """
+        if value is None or not 1 <= value <= 128:
+            return None
+        return value
 
 
 class CommandOut(BaseModel):
@@ -295,6 +330,17 @@ async def heartbeat(
         # address omits the field, and the last known one is better than none —
         # it is dated by last_seen anyway.
         machine.ip_address = payload.ip_address
+    if payload.mac_address is not None:
+        # Conditional for the same reason, and it matters more here: this is the
+        # only way to wake the poste once it is off, so a heartbeat that could
+        # not read the adapter must never erase the address that still can.
+        machine.mac_address = payload.mac_address
+    if payload.ip_prefix_length is not None:
+        # The mask that goes with the address above. Conditional again: an agent
+        # too old to report it, or one whose adapter did not expose it, leaves
+        # the last known mask in place rather than sending the wake back to the
+        # server's configured default.
+        machine.ip_prefix_length = payload.ip_prefix_length
     if payload.os_version is not None:
         machine.os_version = payload.os_version
     if payload.agent_version is not None:

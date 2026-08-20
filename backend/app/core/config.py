@@ -116,6 +116,35 @@ class Settings(BaseSettings):
     # Raise it in step with `heartbeat_interval_seconds` on a slower parc.
     OFFLINE_AFTER_SECONDS: int = 180
 
+    # --- Wake-on-LAN ---
+    # The magic packet is emitted by the server, not by an agent: the machine it
+    # targets is off, and the whole point is to reach it anyway. What it needs is
+    # a destination on the poste's own network segment — a NIC in standby only
+    # ever sees frames broadcast on the wire it is plugged into.
+    #
+    # WOL_SUBNET_PREFIXLEN is a *fallback*. The mask normally comes from the
+    # poste itself — its agent reads it off the adapter and reports it with the
+    # address — which is the only source that can be right on a parc where /16
+    # and /24 segments coexist. This applies to a poste whose agent predates that
+    # reporting, or whose adapter did not expose a mask: 192.168.1.42 at /24 →
+    # 192.168.1.255. /32 degrades to a unicast to the address itself, which only
+    # wakes a poste whose ARP entry is still alive upstream.
+    WOL_SUBNET_PREFIXLEN: int = 24
+    # Explicit broadcast addresses, comma-separated. When set they *replace* the
+    # derived one and every poste is woken through all of them — the answer for a
+    # server that must reach segments it has no address on, and the only way to
+    # wake a poste that has never reported an address.
+    WOL_BROADCAST_ADDRESSES: Annotated[
+        list[str] | str, BeforeValidator(parse_list)
+    ] = []
+    # UDP/9 (discard) by convention. The port is immaterial to the hardware — a
+    # NIC in standby matches the magic pattern anywhere in the frame — so this
+    # only ever matters to a firewall on the way.
+    WOL_PORT: int = 9
+    # UDP over a broadcast is unacknowledged and dropped without notice; three
+    # copies cost three datagrams and remove the single-loss case.
+    WOL_PACKET_COUNT: int = 3
+
     @model_validator(mode="after")
     def _refuse_placeholder_secrets(self) -> Self:
         """Fail fast outside `local` when a secret is empty or a placeholder.

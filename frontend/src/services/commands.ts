@@ -15,11 +15,15 @@ export type CommandType =
   | 'dism_restore_health'
   | 'dism_component_cleanup'
   | 'chkdsk_scan'
-  // Windows Update (phase 2) + the restart it eventually needs.
+  // Windows Update (phase 2).
   | 'wu_scan'
   | 'wu_install'
   | 'wu_install_full'
+  | 'wu_reset'
+  // Power: taking the poste down, and bringing it back.
   | 'reboot'
+  | 'shutdown'
+  | 'wake_on_lan'
   // Diagnostics: read-only, the value is in reading the result.
   | 'gpo_report'
   | 'net_config';
@@ -32,7 +36,7 @@ export type CommandStatus =
   | 'failed'
   | 'expired';
 
-export type CommandGroup = 'defender' | 'windows_update' | 'maintenance' | 'diagnostic';
+export type CommandGroup = 'defender' | 'windows_update' | 'power' | 'maintenance' | 'diagnostic';
 
 /** A command as the console offers it: label, icon, and how it may be triggered. */
 export interface CommandAction {
@@ -46,14 +50,28 @@ export interface CommandAction {
   bulk: boolean;
   /** Extra sentence for the confirmation dialog, when the cost is not obvious. */
   hint?: string;
+  /**
+   * Executed by the *server*, not queued for the poste's agent.
+   *
+   * True of exactly one action, and it could not be otherwise: a Wake-on-LAN
+   * targets a machine that is off, so there is no agent to hand it to. The
+   * pages read this to pick the call to make — `wakeMachines` instead of
+   * `createCommands` — while the menu, the confirmation and the history label
+   * stay the same for both kinds.
+   */
+  serverSide?: boolean;
 }
 
 export const commandGroupLabels: Record<CommandGroup, string> = {
   defender: 'Defender',
-  // The restart lives in this section rather than in Maintenance: what makes an
-  // admin reach for it is the « redémarrage requis » an update just raised, and
-  // the two belong next to each other in the menu.
   windows_update: 'Windows Update',
+  // The restart used to sit in the Windows Update section, on the grounds that
+  // what makes an admin reach for it is the « redémarrage requis » an update
+  // just raised. With a shutdown and a wake beside it that no longer holds:
+  // the three actions that change a poste's power state are one decision family
+  // and belong in one section. The « Redémarrage requis » badge on the Windows
+  // Update card still says when to reach for it.
+  power: 'Alimentation',
   maintenance: 'Maintenance',
   diagnostic: 'Diagnostic',
 };
@@ -121,15 +139,50 @@ export const commandActions: CommandAction[] = [
     hint: 'Comme ci-dessus, mais les pilotes proposés par Windows Update sont installés eux aussi — à réserver aux postes où c’est souhaité. Aucun redémarrage automatique.',
   },
   {
+    // Last in the section, after the two installs: it is what an admin reaches
+    // for once those have failed on a poste, not something to try first.
+    type: 'wu_reset',
+    label: 'Réinitialiser Windows Update',
+    icon: 'settings_backup_restore',
+    group: 'windows_update',
+    confirm: true,
+    bulk: true,
+    hint: 'Procédure Microsoft : les services Windows Update sont arrêtés, le magasin de mises à jour et le cache de signatures sont renommés, puis les services repartent. Windows les reconstruit à la recherche suivante — l’historique des mises à jour du poste est perdu et les correctifs déjà téléchargés le seront à nouveau. Rien n’est installé ni redémarré.',
+  },
+  {
     // Never automatic, whatever a poste reports as needing one: restarting a
     // machine somebody is working on is an explicit decision.
     type: 'reboot',
     label: 'Redémarrer le poste',
     icon: 'restart_alt',
-    group: 'windows_update',
+    group: 'power',
     confirm: true,
     bulk: true,
     hint: 'Le redémarrage a lieu dans 60 secondes ; l’utilisateur connecté voit un avertissement et peut enregistrer son travail. Les documents non enregistrés seront perdus.',
+  },
+  {
+    // The counterpart of the wake below, and the reason that one exists: a parc
+    // somebody switches off in the evening is a parc somebody has to switch
+    // back on in the morning.
+    type: 'shutdown',
+    label: 'Arrêter le poste',
+    icon: 'power_settings_new',
+    group: 'power',
+    confirm: true,
+    bulk: true,
+    hint: 'Le poste s’éteint dans 60 secondes ; l’utilisateur connecté voit un avertissement et peut enregistrer son travail. Les documents non enregistrés seront perdus. Le poste ne remontera plus rien tant qu’il n’aura pas été rallumé — sur place, ou par « Réveiller le poste » si son matériel le permet.',
+  },
+  {
+    // The one action the server performs itself: the poste is off, there is no
+    // agent to ask. No confirmation — a wake costs three datagrams and wakes a
+    // machine at worst, where the two above can cost somebody their work.
+    type: 'wake_on_lan',
+    label: 'Réveiller le poste (Wake-on-LAN)',
+    icon: 'wifi_tethering',
+    group: 'power',
+    confirm: false,
+    bulk: true,
+    serverSide: true,
   },
   {
     // /target:computer: l'agent tourne en LocalSystem, il n'y a pas de ruche
@@ -238,10 +291,16 @@ export interface CommandActionGroup {
   actions: CommandAction[];
 }
 
-const groupOrder: CommandGroup[] = ['defender', 'windows_update', 'maintenance', 'diagnostic'];
+const groupOrder: CommandGroup[] = [
+  'defender',
+  'windows_update',
+  'power',
+  'maintenance',
+  'diagnostic',
+];
 
 /**
- * The catalogue split into menu sections. Eighteen entries in one flat dropdown
+ * The catalogue split into menu sections. Twenty entries in one flat dropdown
  * is unusable; grouped, an admin finds "Maintenance" without reading the list.
  *
  * `bulkOnly` keeps the diagnostics out of the mass-action menu.
@@ -278,6 +337,16 @@ export interface CreateCommandsPayload {
 export interface CreateCommandsResponse {
   created: string[];
   count: number;
+  /**
+   * Targets left alone because they already carried an unfinished command of
+   * the same type. Not an error — re-pressing a button on a poste that has not
+   * answered yet is the normal way this happens — but the console has to say
+   * so instead of claiming it sent something.
+   *
+   * Optional so an older server, which does not send the field, reads as zero
+   * rather than as NaN in the notification.
+   */
+  skipped?: number;
 }
 
 export interface Command {
@@ -307,6 +376,34 @@ export interface ListCommandsParams {
   machine_id?: string;
   page?: number;
   page_size?: number;
+}
+
+/**
+ * What a bulk send actually did, as a notification.
+ *
+ * The skipped count is the point. Fire a scan on 340 postes, press it again
+ * before any of them has answered, and the server legitimately creates nothing
+ * — « 0 commande(s) envoyée(s) » alone would read as a failure rather than as
+ * "they all already have it".
+ */
+export function bulkSendNotification(res: CreateCommandsResponse): {
+  type: 'positive' | 'warning';
+  message: string;
+} {
+  // ?? 0 and not a required field: an older server does not send it, and NaN
+  // in a notification is worse than an undercount.
+  const skipped = res.skipped ?? 0;
+  if (res.count === 0 && skipped > 0) {
+    return {
+      type: 'warning',
+      message: `Rien à envoyer : cette commande est déjà en attente sur ${skipped} poste(s).`,
+    };
+  }
+  const sent = `${res.count} commande(s) envoyée(s)`;
+  return {
+    type: 'positive',
+    message: skipped > 0 ? `${sent} — ${skipped} déjà en attente, ignoré(s)` : sent,
+  };
 }
 
 export async function createCommands(

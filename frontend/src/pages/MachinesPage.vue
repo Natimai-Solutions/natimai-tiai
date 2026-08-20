@@ -177,11 +177,18 @@ import { useQuasar, type QTableColumn } from 'quasar';
 import {
   listAntivirusProducts,
   listMachines,
+  wakeMachines,
+  wakeNotification,
   type Machine,
   type MachineStatus,
   type WindowsUpdateFilter,
 } from 'src/services/machines';
-import { commandActionGroups, createCommands, type CommandAction } from 'src/services/commands';
+import {
+  bulkSendNotification,
+  commandActionGroups,
+  createCommands,
+  type CommandAction,
+} from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import {
   antivirusLabel,
@@ -223,7 +230,7 @@ const antivirusOptions = ref<{ label: string; value: string | null }[]>([
 // « Antivirus » in the labels, not just « à jour » : since the Windows Update
 // filter joined it, this axis has to say which of the two updates it means.
 const statusOptions = [
-  { label: 'Tous statuts antivirus', value: null },
+  { label: 'Antivirus : Tous statuts', value: null },
   { label: 'Antivirus à jour', value: 'up_to_date' },
   { label: 'Antivirus périmé', value: 'outdated' },
   { label: 'À vérifier', value: 'needs_verification' },
@@ -231,7 +238,7 @@ const statusOptions = [
 ];
 
 const wuOptions = [
-  { label: 'Toutes MAJ Windows', value: null },
+  { label: 'Windows update : Tous statuts', value: null },
   { label: 'MAJ Windows requises', value: 'pending' },
   { label: 'Redémarrage requis', value: 'reboot_required' },
 ];
@@ -408,12 +415,28 @@ function runBulk(action: CommandAction) {
 }
 
 async function sendBulk(action: CommandAction, ids: string[]) {
+  // The wake is emitted by the server, not queued for agents that — by
+  // definition of the action — are not running. Everything around it is the
+  // same: same menu, same selection, same notification slot.
+  if (action.serverSide) {
+    await wakeBulk(ids);
+    return;
+  }
   try {
     const res = await createCommands({ type: action.type, machine_ids: ids });
-    $q.notify({ type: 'positive', message: `${res.count} commande(s) envoyée(s)` });
+    $q.notify(bulkSendNotification(res));
     selected.value = [];
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'envoi des commandes") });
+  }
+}
+
+async function wakeBulk(ids: string[]) {
+  try {
+    $q.notify(wakeNotification(await wakeMachines(ids)));
+    selected.value = [];
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec du réveil') });
   }
 }
 

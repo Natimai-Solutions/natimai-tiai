@@ -18,6 +18,9 @@ class CommandType(enum.StrEnum):
     (``plan-commandes-distantes.md`` §1). Adding a command is one value here,
     one row in the agent's table and one entry in the console catalogue; the
     protocol and the schema stay untouched (``type`` is stored as a plain str).
+
+    One value — ``WAKE_ON_LAN`` — is executed by the *server* and never
+    delivered to an agent; see its comment below.
     """
 
     # Defender (Phase 1).
@@ -43,10 +46,27 @@ class CommandType(enum.StrEnum):
     WU_SCAN = "wu_scan"
     WU_INSTALL = "wu_install"
     WU_INSTALL_FULL = "wu_install_full"
-    # Never triggered on the agent's own initiative, whatever it reports as
-    # needing one: a reboot is an admin decision, taken in the console behind a
-    # confirmation.
+    # Moves the update store aside so Windows rebuilds it — the repair for a
+    # poste whose updates no longer search, download or install. In this family
+    # rather than in Maintenance because it is Windows Update it repairs, and
+    # because the search that verifies it sits right beside it in the menu.
+    WU_RESET = "wu_reset"
+    # --- Power. Never triggered on the agent's own initiative, whatever it
+    # reports as needing one: taking a poste down is an admin decision, taken in
+    # the console behind a confirmation. The agent rations both on its own as
+    # well (``agent/internal/agent/power.go``).
     REBOOT = "reboot"
+    SHUTDOWN = "shutdown"
+    # The one type in this enum the agent never runs, and cannot: the machine it
+    # targets is off. The server emits the magic packet itself and writes the row
+    # already closed — it is never handed out on a heartbeat, so nothing can pick
+    # it up (``app/features/wol/``).
+    #
+    # It lives here rather than in a history of its own so that "who woke this
+    # poste, and when" is answered in the same place as "who restarted it": the
+    # ``commands`` table is this product's audit trail, and a wake is an
+    # administrator acting on a machine like any other.
+    WAKE_ON_LAN = "wake_on_lan"
 
     # Diagnostics: read-only, the value is in reading ``result_output``.
     GPO_REPORT = "gpo_report"

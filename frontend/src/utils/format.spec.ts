@@ -5,6 +5,7 @@ import {
   antivirusStatusLabel,
   boolLabel,
   formatDateTime,
+  ipAddressLabel,
   onlineColor,
   onlineIcon,
   onlineLabel,
@@ -145,8 +146,10 @@ describe('sessionTypeLabel', () => {
 
 describe('antivirusLabel', () => {
   it('distinguishes "never reported" from "none installed"', () => {
-    expect(antivirusLabel(null)).toBe('Inconnu');
-    expect(antivirusLabel(undefined)).toBe('Inconnu');
+    // "Non relevé", not "Inconnu": the difference an administrator reads next to
+    // a live Defender column.
+    expect(antivirusLabel(null)).toBe('Non relevé');
+    expect(antivirusLabel(undefined)).toBe('Non relevé');
     // The registry was read and holds nothing: a finding, not a missing measure.
     expect(antivirusLabel('')).toBe('Aucun');
   });
@@ -176,7 +179,9 @@ describe('antivirusColor', () => {
 
 describe('antivirusStatusLabel', () => {
   it('names the two absent cases apart', () => {
-    expect(antivirusStatusLabel(null, null, null)).toBe("Jamais remonté par l'agent");
+    expect(antivirusStatusLabel(null, null, null)).toBe(
+      'Security Center jamais relevé (agent antérieur, ou hôte sans Security Center)',
+    );
     expect(antivirusStatusLabel('', null, null)).toBe('Aucun antivirus enregistré');
   });
 
@@ -302,11 +307,11 @@ describe('wuSizeLabel', () => {
     expect(wuSizeLabel(undefined)).toBe('—');
   });
 
-  it('formats the size in the French locale', () => {
-    expect(wuSizeLabel(620.5)).toBe(`${(620.5).toLocaleString('fr-FR')} Mio`);
+  it('formats the size in the French locale, as the ceiling it is', () => {
+    expect(wuSizeLabel(620.5)).toBe(`≤ ${(620.5).toLocaleString('fr-FR')} Mio`);
     // Zero is a real reading here, unlike null: the server already turned
     // "WUA reported nothing" into null upstream.
-    expect(wuSizeLabel(0)).toBe('0 Mio');
+    expect(wuSizeLabel(0)).toBe('≤ 0 Mio');
   });
 });
 
@@ -360,5 +365,25 @@ describe('threatStatusColor', () => {
     expect(threatStatusColor('quarantined')).toBe('positive');
     expect(threatStatusColor('allowed')).toBe('warning');
     expect(threatStatusColor(null)).toBe('grey-5');
+  });
+});
+
+describe('ipAddressLabel', () => {
+  it('shows the mask the poste reported next to its address', () => {
+    // The pair that says which network the poste is on — and which broadcast
+    // address a wake packet goes to.
+    expect(ipAddressLabel('10.4.7.9', 16)).toBe('10.4.7.9 /16');
+    expect(ipAddressLabel('192.168.1.42', 24)).toBe('192.168.1.42 /24');
+  });
+
+  it('shows the address alone when no mask was reported', () => {
+    // An agent older than the mask reporting. Filling in a default here would
+    // show a value the poste never confirmed.
+    expect(ipAddressLabel('192.168.1.42', null)).toBe('192.168.1.42');
+  });
+
+  it('falls back to a dash without an address', () => {
+    expect(ipAddressLabel(null, null)).toBe('—');
+    expect(ipAddressLabel(null, 24)).toBe('—');
   });
 });

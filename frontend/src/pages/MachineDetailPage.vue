@@ -4,6 +4,12 @@
       <q-btn flat dense round icon="arrow_back" :to="{ name: 'machines' }" class="q-mr-sm" />
       <div class="text-h5">{{ title }}</div>
       <q-space />
+      <div v-if="lastRefreshedAt" class="text-caption text-grey q-mr-sm">
+        Actualisé à {{ lastRefreshLabel }}
+      </div>
+      <q-btn flat dense round icon="refresh" :loading="loading" class="q-mr-sm" @click="load">
+        <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
+      </q-btn>
       <q-btn-dropdown color="primary" dense label="Action" icon="bolt" :disable="!machine">
         <q-list>
           <template v-for="section in actionGroups" :key="section.group">
@@ -68,7 +74,12 @@
 
       <div class="col-12 col-md-6">
         <q-card flat bordered>
-          <q-card-section class="text-subtitle1">État Defender</q-card-section>
+          <q-card-section class="text-subtitle1">
+            État Defender
+            <div v-if="machine?.av_product_is_defender" class="text-caption text-grey">
+              Defender est l'antivirus enregistré au Security Center de Windows.
+            </div>
+          </q-card-section>
           <q-separator />
           <q-list dense>
             <q-item v-for="r in defenderRows" :key="r.label">
@@ -98,16 +109,22 @@
         </q-card>
       </div>
 
-      <div class="col-12 col-md-6">
+      <div v-if="showAVProductCard" class="col-12 col-md-6">
         <q-card flat bordered>
           <q-card-section class="text-subtitle1">
             Antivirus enregistré
             <div class="text-caption text-grey">
-              Vu par le Security Center de Windows — la seule source qui voit un antivirus tiers.
+              Vu par le Security Center de Windows — un produit tiers, ou aucun.
             </div>
           </q-card-section>
           <q-separator />
-          <q-list dense>
+          <q-card-section v-if="avProductUnread" class="text-caption text-grey">
+            Jamais relevé sur ce poste : son agent est antérieur à la lecture du Security Center, ou
+            l'hôte n'en a pas — un SKU Windows Server n'en embarque aucun. C'est ce que dit « Non
+            relevé » dans la liste des postes : non pas que le poste soit sans antivirus, mais que
+            ce relevé-là manque. L'état Defender ci-dessus, lui, est bien à jour.
+          </q-card-section>
+          <q-list v-else dense>
             <q-item v-for="r in antivirusRows" :key="r.label">
               <q-item-section>{{ r.label }}</q-item-section>
               <q-item-section side class="text-black">{{ r.value }}</q-item-section>
@@ -146,7 +163,14 @@
           <q-td :props="props">{{ wuTypeLabel(props.value) }}</q-td>
         </template>
         <template #body-cell-size_mb="props">
-          <q-td :props="props">{{ wuSizeLabel(props.value) }}</q-td>
+          <q-td :props="props">
+            {{ wuSizeLabel(props.value) }}
+            <q-tooltip v-if="props.value != null">
+              Majorant relevé par Windows Update : la somme de toutes les charges utiles que la mise
+              à jour pourrait avoir à récupérer, alors qu'une seule sera téléchargée. Exact sur un
+              pilote, surestimé sur un correctif cumulatif.
+            </q-tooltip>
+          </q-td>
         </template>
         <template #body-cell-is_downloaded="props">
           <q-td :props="props">
@@ -307,11 +331,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useQuasar, type QTableColumn } from 'quasar';
+import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAutoRefresh';
 import {
   getDuplicates,
   getMachine,
   mergeMachines,
   revokeToken,
+  wakeMachines,
+  wakeNotification,
   type Machine,
   type MachineDetail,
   type PendingUpdate,
@@ -330,6 +357,7 @@ import {
   antivirusLabel,
   boolLabel,
   formatDateTime,
+  ipAddressLabel,
   onlineLabel,
   runningModeLabel,
   sessionLabel,
@@ -377,7 +405,15 @@ const identityRows = computed(() =>
         { label: 'Nom', value: machine.value.hostname ?? '—' },
         { label: 'UUID machine', value: machine.value.machine_uuid },
         { label: 'Domaine', value: machine.value.domain ?? '—' },
-        { label: 'Adresse IP', value: machine.value.ip_address ?? '—' },
+        {
+          label: 'Adresse IP',
+          value: ipAddressLabel(machine.value.ip_address, machine.value.ip_prefix_length),
+        },
+        // Right under the address it was elected with, and for two reasons: it
+        // is the wake target — a dash here means « Réveiller le poste » has
+        // nothing to aim at — and it is what an admin compares against the
+        // switch when a wake did not work.
+        { label: 'Adresse MAC', value: machine.value.mac_address ?? '—' },
         { label: 'OS', value: machine.value.os_version ?? '—' },
         { label: 'Version agent', value: machine.value.agent_version ?? '—' },
         { label: 'SMBIOS UUID', value: machine.value.smbios_uuid ?? '—' },
@@ -427,22 +463,52 @@ const defenderRows = computed(() =>
     : [],
 );
 
-const antivirusRows = computed(() =>
-  machine.value
-    ? [
-        { label: 'Produit', value: antivirusLabel(machine.value.av_product_name) },
-        { label: 'Protection active', value: boolLabel(machine.value.av_product_enabled) },
-        // The Security Center exposes a freshness bit and nothing else — no
-        // version, no date, which is why this card carries no scan or update
-        // action for a third-party product.
-        {
-          label: 'Signatures à jour',
-          value: boolLabel(machine.value.av_product_signatures_up_to_date),
-        },
-        { label: 'Est Defender', value: boolLabel(machine.value.av_product_is_defender) },
-      ]
-    : [],
+/**
+ * Whether the Security Center deserves a card of its own.
+ *
+ * Not when the product it names is Defender: every row it would carry is already
+ * in the Defender card, and two panels stating the same protection twice read as
+ * a display bug rather than as corroboration. It stays for a third-party product
+ * — the case Defender's own WMI class cannot describe — for "no antivirus
+ * registered at all", and for the case where nothing was ever read, which is the
+ * one an administrator most needs spelled out.
+ */
+const showAVProductCard = computed(
+  () => machine.value != null && machine.value.av_product_is_defender !== true,
 );
+
+/**
+ * No Security Center reading at all, as opposed to one that found nothing. The
+ * card then explains itself instead of printing four rows of "Inconnu" beside a
+ * Defender card that is plainly alive — the contradiction that reading invites.
+ */
+const avProductUnread = computed(
+  () => machine.value != null && machine.value.av_product_name == null,
+);
+
+const antivirusRows = computed(() => {
+  const m = machine.value;
+  // Never read: the card shows its explanation instead, not a table of dashes.
+  if (!m || m.av_product_name == null) return [];
+  const rows = [{ label: 'Produit', value: antivirusLabel(m.av_product_name) }];
+  // Both bits below describe a *product*. With none registered they would only
+  // add two "Inconnu" under a "Aucun" that has already said everything.
+  if (m.av_product_name !== '') {
+    rows.push(
+      { label: 'Protection active', value: boolLabel(m.av_product_enabled) },
+      // The Security Center exposes a freshness bit and nothing else — no
+      // version, no date, which is why this card carries no scan or update
+      // action for a third-party product.
+      {
+        label: 'Signatures à jour',
+        value: boolLabel(m.av_product_signatures_up_to_date),
+      },
+    );
+  }
+  // No "Est Defender" row: the card being here at all is that answer, and the
+  // Defender card says so in words on the machines where it is Defender.
+  return rows;
+});
 
 const windowsUpdateRows = computed(() =>
   machine.value
@@ -466,7 +532,9 @@ const updateColumns: QTableColumn<PendingUpdate>[] = [
   // which is worse than useless, so the default order is the one to trust.
   { name: 'severity', label: 'Sévérité', field: 'severity', align: 'left' },
   { name: 'type', label: 'Type', field: 'type', align: 'left', sortable: true },
-  { name: 'size_mb', label: 'Taille', field: 'size_mb', align: 'right', sortable: true },
+  // "max." and not "Taille": WUA reports a ceiling, not a measurement — see
+  // wuSizeLabel. The header carries the caveat so the cells do not have to.
+  { name: 'size_mb', label: 'Taille max.', field: 'size_mb', align: 'right', sortable: true },
   { name: 'is_downloaded', label: 'Téléchargée', field: 'is_downloaded', align: 'center' },
   // How long this machine has been sitting on the update — the column that
   // turns a list of KBs into "this poste has been behind since June".
@@ -537,21 +605,49 @@ const commandColumns: QTableColumn<Command>[] = [
   { name: 'finished_at', label: 'Terminée le', field: 'finished_at', align: 'left' },
 ];
 
+async function fetchAll() {
+  const [m, t, c] = await Promise.all([
+    getMachine(props.id),
+    listThreats({ machine_id: props.id }),
+    listCommands({ machine_id: props.id }),
+  ]);
+  machine.value = m;
+  threats.value = t.items;
+  commands.value = c.items;
+}
+
+/**
+ * This is the page an administrator leaves open after firing a command, so it
+ * follows the poste on its own: `pending` → `transmise` → `en cours` →
+ * `réussie` arrives without a click.
+ *
+ * Paused while a dialog is over the page. The result dialog reads a snapshot
+ * and would survive a refresh, but the merge dialog would have its duplicate
+ * list swapped under the cursor — and either way, pulling the tables around
+ * behind a modal is the one moment a background refresh is worse than stale
+ * data.
+ */
+const { lastRefreshedAt, refreshNow } = useAutoRefresh(fetchAll, {
+  paused: () => detailOpen.value || mergeOpen.value,
+});
+
+/** The manual load: this one shows the spinner, the automatic ones do not. */
 async function load() {
   loading.value = true;
   try {
-    const [m, t, c] = await Promise.all([
-      getMachine(props.id),
-      listThreats({ machine_id: props.id }),
-      listCommands({ machine_id: props.id }),
-    ]);
-    machine.value = m;
-    threats.value = t.items;
-    commands.value = c.items;
+    await refreshNow();
   } finally {
     loading.value = false;
   }
 }
+
+const lastRefreshLabel = computed(() =>
+  lastRefreshedAt.value ? lastRefreshedAt.value.toLocaleTimeString('fr-FR') : '',
+);
+
+const autoRefreshHint = `Actualiser — automatique toutes les ${Math.round(
+  AUTO_REFRESH_INTERVAL_MS / 1000,
+)} s`;
 
 function runOne(action: CommandAction) {
   if (!action.confirm) {
@@ -569,12 +665,41 @@ function runOne(action: CommandAction) {
 }
 
 async function send(action: CommandAction) {
+  // The wake is not a command: the poste is off, so there is nothing to queue
+  // for an agent that is not running. Same menu entry, same confirmation path,
+  // a different call.
+  if (action.serverSide) {
+    await sendWake();
+    return;
+  }
   try {
-    await createCommands({ type: action.type, machine_ids: [props.id] });
-    $q.notify({ type: 'positive', message: 'Commande envoyée' });
+    const res = await createCommands({ type: action.type, machine_ids: [props.id] });
+    if (res.count === 0) {
+      // The server de-duplicates per (poste, type). Saying "envoyée" here would
+      // have the administrator watch a history that never grows a row.
+      $q.notify({
+        type: 'warning',
+        message: `« ${action.label} » est déjà en attente sur ce poste.`,
+      });
+    } else {
+      $q.notify({ type: 'positive', message: 'Commande envoyée' });
+    }
     await load();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'envoi de la commande") });
+  }
+}
+
+async function sendWake() {
+  try {
+    const res = await wakeMachines([props.id]);
+    $q.notify(wakeNotification(res));
+    // Reloaded for the history, not for the machine's state: the wake is
+    // recorded as a command row, while the poste itself will not reappear until
+    // its agent reports — a minute or so after it has actually booted.
+    await load();
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec du réveil') });
   }
 }
 
