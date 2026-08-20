@@ -82,6 +82,23 @@ l'exécution est figée dans le binaire de l'agent.
 | Déploiement logiciel | ⚪ À venir |
 | Inventaire matériel / logiciel | ⚪ À venir |
 
+## Téléchargement
+
+Chaque release publie l'agent Windows en `.exe` nu (déploiement par
+[script de démarrage GPO](deploy/gpo/README.md)) et en installateur `.msi`
+(GPO *Software Installation* ou pose manuelle — voir
+[deploy/msi/](deploy/msi/README.md)). Liens directs vers la dernière version :
+
+| | x64 | ARM64 |
+|---|---|---|
+| Agent `.exe` | [tiai-agent-windows-amd64.exe](https://github.com/Natimai-Solutions/natimai-tiai/releases/latest/download/tiai-agent-windows-amd64.exe) | [tiai-agent-windows-arm64.exe](https://github.com/Natimai-Solutions/natimai-tiai/releases/latest/download/tiai-agent-windows-arm64.exe) |
+| Installateur `.msi` | [tiai-agent-windows-amd64.msi](https://github.com/Natimai-Solutions/natimai-tiai/releases/latest/download/tiai-agent-windows-amd64.msi) | [tiai-agent-windows-arm64.msi](https://github.com/Natimai-Solutions/natimai-tiai/releases/latest/download/tiai-agent-windows-arm64.msi) |
+
+Vérifier l'empreinte téléchargée contre
+[SHA256SUMS.txt](https://github.com/Natimai-Solutions/natimai-tiai/releases/latest/download/SHA256SUMS.txt) ;
+les binaires versionnés de chaque release restent sur la page
+[Releases](https://github.com/Natimai-Solutions/natimai-tiai/releases).
+
 ## Démarrage rapide
 
 ```bash

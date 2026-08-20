@@ -26,6 +26,9 @@ agent/*.exe
 agent/bin/
 agent/dist/
 
+# Binaires et MSI produits par release.yml / deploy/msi/build.ps1
+/dist/
+
 # Deploy secrets / TLS material
 deploy/.env
 deploy/certs/
