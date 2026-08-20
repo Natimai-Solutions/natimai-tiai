@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "tiai"
 
     # Async connection pool (psycopg 3). Load is light (~1–3 req/s for 1000
-    # endpoints, plan §2.2) but the backend and ARQ worker share Postgres, so
+    # endpoints, plan §2.2) but the backend and the worker share Postgres, so
     # the pool is tunable per deployment.
     POSTGRES_POOL_SIZE: int = 20
     POSTGRES_MAX_OVERFLOW: int = 10
@@ -83,10 +83,6 @@ class Settings(BaseSettings):
                 path=self.POSTGRES_DB,
             )
         )
-
-    # --- Redis (ARQ queue) ---
-    REDIS_SERVER: str = "redis"
-    REDIS_PORT: int = 6379
 
     # --- Mailgun (outgoing e-mail) ---
     # Who receives what is not configured here: it is a per-account setting read
@@ -112,14 +108,26 @@ class Settings(BaseSettings):
         """Whether Mailgun is configured."""
         return bool(self.MAILGUN_DOMAIN and self.MAILGUN_API_KEY)
 
+    # --- E-mail outbox ---
+    # Every mail is a row in ``email_outbox`` before it is a Mailgun request;
+    # the worker drains the table and retries failures with an exponential
+    # backoff (1 min doubling to a 1 h ceiling). After this many attempts —
+    # roughly 14 hours, enough to ride out a night-long proxy or Mailgun
+    # outage — the row is marked abandoned and kept with its last error.
+    EMAIL_MAX_ATTEMPTS: int = 20
+    # How long sent and abandoned rows stay in the table before the daily purge
+    # drops them. Pending rows are never purged: a mail still owed is not
+    # clutter, whatever its age.
+    EMAIL_OUTBOX_RETENTION_DAYS: int = 30
+
     # --- Notifications sent to console accounts ---
     # Hour (UTC) the daily digest goes out. The parc this console was built for
     # sits at UTC-10, where 18:00 UTC is 08:00 local — a digest that lands with
     # the morning coffee rather than in the middle of the night. Move it to suit
     # the deployment: the job reads the fleet's current state, so the hour only
     # decides when someone is told, never what they are told.
-    # Bounded, because the failure is silent: an ARQ cron pinned to hour 25
-    # matches no minute of any day, so the digest would simply never run and
+    # Bounded, because the failure is silent: a daily job aimed at hour 25
+    # never comes due on any day, so the digest would simply never run and
     # nothing would say why.
     DIGEST_HOUR_UTC: int = Field(default=18, ge=0, le=23)
     # A detection older than this never triggers an immediate alert. A poste

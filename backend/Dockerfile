@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 COPY --from=ghcr.io/astral-sh/uv:0.9.7 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
-# Put the project venv on PATH so alembic/uvicorn/arq resolve in the entrypoint.
+# Put the project venv on PATH so alembic/uvicorn resolve in the entrypoint.
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Install dependencies in a cached layer (no app code yet, runtime deps only).

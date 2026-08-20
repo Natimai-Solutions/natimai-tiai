@@ -44,7 +44,9 @@ gère naturellement les postes éteints.
   rien, une alerte immédiate à chaque menace détectée, un résumé quotidien les
   jours où il y a à traiter, ou un résumé chaque matin — état du parc, antivirus
   périmés, correctifs critiques en attente. Un « rien à signaler » est aussi une
-  information : c'est le réglage par défaut.
+  information : c'est le réglage par défaut. Chaque e-mail passe par une file en
+  base et est réessayé en cas d'incident d'envoi : un courrier décidé n'est
+  jamais perdu.
 - **Déploiement sans friction** — un binaire unique poussé par GPO,
   auto-enrôlement des postes, HTTPS de bout en bout.
 
@@ -55,7 +57,7 @@ gère naturellement les postes éteints.
  ┌──────────────────┐                 ┌──────────────────────────────┐
  │  Agent Tia'i     │      HTTPS      │  Caddy (TLS + proxy)         │
  │  (service Go)    │ ──────────────► │  Backend FastAPI + worker    │
- │                  │ ◄────────────── │  PostgreSQL · Redis          │
+ │                  │ ◄────────────── │  PostgreSQL                  │
  └──────────────────┘    commandes    │  Console web (Quasar / Vue)  │
            ▲                          └──────────────────────────────┘
            │ déploiement GPO
@@ -72,8 +74,7 @@ l'exécution est figée dans le binaire de l'agent.
 |---|---|
 | **Agent** | Go — binaire statique unique, service Windows, faible empreinte |
 | **Backend** | FastAPI (async) + SQLAlchemy, API REST versionnée |
-| **Base de données** | PostgreSQL |
-| **File de tâches** | ARQ + Redis |
+| **Base de données** | PostgreSQL — y compris la file d'e-mails (outbox) et les tâches de fond |
 | **Console** | Quasar / Vue 3 |
 | **Infra** | docker-compose + Caddy (reverse-proxy et terminaison TLS) |
 
@@ -116,7 +117,7 @@ commande, sans rien d'autre à installer sur la machine.
 ```bash
 cd deploy
 cp .env.example .env        # renseigner les secrets, placer le certificat dans deploy/certs/
-docker compose up -d        # db + redis + backend + worker + console + caddy
+docker compose up -d        # db + backend + worker + console + caddy
 ```
 
 Une variante dev/tests lève la même stack sans certificat. L'agent, lui, se

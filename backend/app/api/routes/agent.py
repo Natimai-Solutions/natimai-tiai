@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from ipaddress import ip_address
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func
 from sqlmodel import select
@@ -327,7 +327,6 @@ async def heartbeat(
     payload: HeartbeatRequest,
     machine: CurrentMachine,
     session: SessionDep,
-    background: BackgroundTasks,
 ) -> HeartbeatResponse:
     """Upsert Defender state, then return this machine's pending commands."""
     if payload.hostname is not None:
@@ -454,20 +453,17 @@ async def heartbeat(
         cmd.delivered_at = utcnow()
 
     # Build the payload before commit: expire_on_commit would otherwise trigger
-    # a sync refresh on attribute access — MissingGreenlet under asyncio. The
-    # alert's snapshot of the machine is taken here for the same reason.
+    # a sync refresh on attribute access — MissingGreenlet under asyncio.
     commands = [CommandOut(id=c.id, type=c.type) for c in pending]
-    machine_context = (
-        threat_alert.MachineContext.of(machine) if new_detections else None
-    )
-    await session.commit()
-    if machine_context is not None:
-        # Queued rather than awaited, and only once the detections are committed:
-        # a mail that names a threat the console cannot yet show would be a mail
-        # about nothing, and the agent has no use for the delay.
-        background.add_task(
-            threat_alert.alert_new_threats, machine_context, new_detections
+    if new_detections:
+        # Queued in the outbox inside this same transaction: the alert commits
+        # with the detections it names, or not at all. The worker sends it with
+        # retries — Mailgun down never fails a heartbeat, and never loses the
+        # mail either.
+        await threat_alert.queue_threat_alert(
+            session, threat_alert.MachineContext.of(machine), new_detections
         )
+    await session.commit()
     return HeartbeatResponse(commands=commands)
 
 

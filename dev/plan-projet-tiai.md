@@ -119,7 +119,9 @@ Source principale : fichier `C:\ProgramData\Tiai\config.yaml`, **surchargé** pa
 
 ### 2.11 — Impact sur la stack
 
-L'usage d'**ARQ implique Redis**. La stack docker-compose côté serveur devient donc : PostgreSQL + Redis + backend + worker + frontend + **Caddy** (reverse-proxy + TLS). **Les agents Windows ne sont pas dans Docker** (ils tournent sur les postes).
+La stack docker-compose côté serveur : PostgreSQL + backend + worker + frontend + **Caddy** (reverse-proxy + TLS). **Les agents Windows ne sont pas dans Docker** (ils tournent sur les postes).
+
+*Révision (août 2026)* : ARQ et Redis, initialement prévus comme file de tâches, ont été retirés. Tout l'état passe par Postgres — les commandes agents y étaient déjà (table `commands`, tirée au heartbeat), les e-mails y passent désormais aussi (table `email_outbox`, écrite dans la transaction de l'appelant et dépilée par le worker avec reprises). Le worker est une simple boucle asyncio ; un service de moins à opérer, et un envoi d'e-mail devient transactionnel et rejouable au lieu d'être perdu sur une panne du proxy ou de Mailgun.
 
 ### 2.12 — Produit réutilisable (multi-parc) & TLS optionnel
 
@@ -163,16 +165,17 @@ Les erreurs API suivent un **contrat partagé** entre backend et frontend (comme
  │  • exécute scans/update   │         │     │  (uvicorn)  │                  │
  └───────────────────────────┘         │     └──┬───────┬──┘                  │
             ▲                           │        │       │                    │
-            │ déploiement GPO           │   ┌────┴───┐ ┌─┴──────┐             │
-            │ (MSI/EXE + config)        │   │Postgres│ │ Redis  │             │
-            └───────────────────────────┘   └────────┘ └───┬────┘             │
-                                            │      ┌────────┴────────┐         │
-                                            │      │ Worker (ARQ)    │         │
-                                            │      │ nettoyage+alerts│         │
-                                            │      └─────────────────┘         │
-                                            │  ┌──────────────┐                │
-                                            │  │ Frontend     │ Quasar/Vue     │
-                                            │  └──────────────┘                │
+            │ déploiement GPO           │   ┌────┴───┐    │                   │
+            │ (MSI/EXE + config)        │   │Postgres│◄───┤                   │
+            └───────────────────────────┘   └───▲────┘    │                   │
+                                            │   │  ┌──────┴──────────┐        │
+                                            │   └──┤ Worker (asyncio)│        │
+                                            │      │ outbox e-mail + │        │
+                                            │      │ tâches périod.  │        │
+                                            │      └─────────────────┘        │
+                                            │  ┌──────────────┐               │
+                                            │  │ Frontend     │ Quasar/Vue    │
+                                            │  └──────────────┘               │
                                             └─────────────────────────────────┘
 ```
 
@@ -182,9 +185,8 @@ Les erreurs API suivent un **contrat partagé** entre backend et frontend (comme
 |---|---|
 | `caddy` | Reverse-proxy + **terminaison TLS** (certificat AC interne) ; route le backend et sert le build Quasar |
 | `backend` | API FastAPI (uvicorn/gunicorn) |
-| `worker` | Tâches ARQ (nettoyage postes inactifs, envoi d'alertes) |
-| `db` | PostgreSQL (volume persistant) |
-| `redis` | File ARQ + cache léger |
+| `worker` | Boucle asyncio : outbox e-mail (envois + reprises) et tâches périodiques (expiration des commandes, digest quotidien, purge) |
+| `db` | PostgreSQL (volume persistant) — y compris la file d'e-mails (`email_outbox`) |
 | `frontend` | Build Quasar statique servi par nginx |
 
 ---
@@ -453,7 +455,7 @@ Cadrée et livrée : cf. `plan-phase2-windows-update.md`. Réutilise l'agent et 
 | M4 Console | 🟢 login JWT + dashboard KPI/alertes + filtres + détail poste + actions de masse + révocation + fusion de postes + catalogue d'actions factorisé (sections + confirmations + dialog Résultat) |
 | Commandes de maintenance | 🟢 catalogue fermé de 11 commandes (maintenance + diagnostic) de bout en bout : types backend, exécution agent, console ; statut `running` câblé. Reste la validation en `LocalSystem` des huit commandes exigeant l'élévation (cf. `plan-commandes-distantes.md` §5) |
 | Phase 2 Windows Update | 🟢 état WU remonté (MAJ en attente, redémarrage requis, dates) + 4 commandes de bout en bout : cycle lent dédié côté agent, table `windows_updates` à sémantique de remplacement, carte + tableau + KPI côté console. Reste la validation sur poste réel d'une installation effective et d'un redémarrage |
-| M5 Durcissement | 🟡 JWT + rôles, provider Mailgun, notifications par compte (digest quotidien + alerte immédiate) branchées sur ARQ et le heartbeat, garde secrets prod, timing-safe enroll, en-têtes sécurité ; reste audit, rotation, rate-limit |
+| M5 Durcissement | 🟡 JWT + rôles, provider Mailgun, notifications par compte (digest quotidien + alerte immédiate) via l'outbox e-mail et le worker, garde secrets prod, timing-safe enroll, en-têtes sécurité ; reste audit, rotation, rate-limit |
 | M6 Packaging & GPO | ⬜ à faire |
 | Transverse | 🟢 tests backend/frontend + ruff + mypy + CI (tous verts) |
 
@@ -545,6 +547,7 @@ Cadrée et livrée : cf. `plan-phase2-windows-update.md`. Réutilise l'agent et 
 - [x] En-têtes de sécurité HTTP posés par Caddy (HSTS, CSP, `nosniff`, `frame-ancestors 'none'`, `Referrer-Policy`) — CSP à valider sur la stack déployée
 - [x] Logs agent : fichier `agent.log` (rotation simple, `.old` > 5 Mio) + niveau `log_level` INFO/DEBUG enfin branché ; chemin nominal loggé (démarrage, identité, enrôlement, heartbeat, commandes + durée) — indispensable en mode service où stderr est perdu ; validé sur poste réel contre la stack dev (enrôlement + heartbeats visibles dans le fichier et machine visible console)
 - [x] Notifications e-mail branchées : cadence par compte (aucun / alerte immédiate / résumé si évènement / résumé quotidien, défaut résumé quotidien), digest posé sur un cron ARQ quotidien, alerte immédiate émise en tâche de fond depuis le heartbeat sur les seules détections *nouvelles* (`xmax = 0`) et récentes ; destinataires lus dans `users` — `ALERT_RECIPIENTS` supprimé, la console n'a plus de liste de diffusion hors base
+- [x] **Outbox e-mail + retrait d'ARQ/Redis** (2026-08-20, cf. §2.11) : tout e-mail (alerte, digest, réinitialisation) est écrit dans `email_outbox` **dans la transaction de l'appelant** — l'alerte de menace part désormais de la transaction du heartbeat même, plus d'une tâche de fond — puis envoyé par le worker avec reprises (backoff 1 min → 1 h, `EMAIL_MAX_ATTEMPTS`, statut `abandoned` conservé avec la dernière erreur, purge après `EMAIL_OUTBOX_RETENTION_DAYS`). Motivé par un envoi perdu sur erreur de proxy sortant. Le worker ARQ est remplacé par une boucle asyncio (`app/core/worker.py`) portant les trois tâches périodiques existantes ; services `redis` et dépendances `arq`/`redis` supprimés. Migration `0012_email_outbox` ; 319 tests verts sur Postgres, chaîne Alembic vérifiée up/down/up
 - [ ] Journal d'audit ; rotation tokens ; rate-limiting
 
 **M6 — Packaging & GPO** · ⬜ à faire
@@ -590,8 +593,8 @@ Points permanents : binaire agent **signé**, validation stricte des entrées AP
 | Agent | **Go** | Binaire statique unique, idéal GPO, faible empreinte, bon support service Windows (`golang.org/x/sys/windows/svc` ou `kardianos/service`), WMI via `yusufpapurcu/wmi`. Alternative écartée : C#/.NET — intégration Windows plus riche et packaging/signature plus simples, mais runtime à gérer. |
 | Backend | **FastAPI** (async) + asyncpg/SQLAlchemy | API REST versionnée (`/api/v1`). |
 | Base | **PostgreSQL** | Stockage en UTC (`timestamptz`). |
-| File de tâches | **ARQ** + **Redis** | Nettoyage + alertes. |
-| Alertes | **e-mail via API Mailgun** | Notifications envoyées par le worker ARQ. |
+| Tâches de fond | **Worker asyncio** sur Postgres | Outbox e-mail + tâches périodiques. ARQ/Redis retirés (cf. §2.11) : la file, c'est la base. |
+| Alertes | **e-mail via API Mailgun** | Mises en file dans `email_outbox` (transactionnel), envoyées par le worker avec reprises. |
 | Frontend | **Quasar / Vue 3** | Build statique servi par nginx. |
 | Infra | docker-compose + **Caddy** (reverse-proxy + TLS) | TLS **dès le départ**, certificat de l'AC interne (déjà approuvée par les postes du domaine). Traefik inutile ici. |
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Container entrypoint. Modes:
 #   api      run migrations then serve the FastAPI app (default)
-#   worker   run the ARQ worker
+#   worker   run the worker loop (e-mail outbox + periodic tasks)
 #   migrate  run Alembic migrations and exit
 set -euo pipefail
 
@@ -14,7 +14,7 @@ case "$mode" in
     exec uvicorn app.main:app --host 0.0.0.0 --port 8000
     ;;
   worker)
-    exec arq app.core.arq_worker.WorkerSettings
+    exec python -m app.core.worker
     ;;
   migrate)
     exec alembic upgrade head

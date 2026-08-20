@@ -1,4 +1,4 @@
-# Stack serveur Tiai — db + redis + backend + worker + frontend + caddy.
+# Stack serveur Tiai — db + backend + worker + frontend + caddy.
 # Les agents Windows ne sont PAS dans Docker (ils tournent sur les postes).
 #
 # Démarrage : cp .env.example .env && docker compose up -d
@@ -20,18 +20,6 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   backend:
     build:
       context: ../backend
@@ -39,12 +27,9 @@ services:
     env_file: .env
     environment:
       POSTGRES_SERVER: db
-      REDIS_SERVER: redis
     command: ["api"]
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
 
   worker:
@@ -54,12 +39,9 @@ services:
     env_file: .env
     environment:
       POSTGRES_SERVER: db
-      REDIS_SERVER: redis
     command: ["worker"]
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
 
   frontend:
@@ -88,6 +70,5 @@ services:
 
 volumes:
   db_data:
-  redis_data:
   caddy_data:
   caddy_config:
