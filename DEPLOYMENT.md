@@ -203,18 +203,38 @@ variables ci-dessous ne décrivent que la destination du paquet.
 ### Alertes e-mail et e-mails de compte
 
 Facultatif — désactivé si `MAILGUN_DOMAIN` ou `MAILGUN_API_KEY` est vide. Mailgun
-sert aux alertes de supervision (envoyées à `ALERT_RECIPIENTS`) et au lien de
-réinitialisation de mot de passe. Sans lui, le parcours « mot de passe oublié »
-reste sans effet : c'est alors à un administrateur de réinitialiser le mot de
-passe depuis la console.
+sert aux notifications de supervision et au lien de réinitialisation de mot de
+passe. Sans lui, le parcours « mot de passe oublié » reste sans effet : c'est
+alors à un administrateur de réinitialiser le mot de passe depuis la console.
 
-| Variable | Défaut |
+**Qui reçoit quoi se règle par compte**, page « Mon compte » de la console, et un
+administrateur voit et modifie le réglage des autres comptes depuis la page
+Utilisateurs. Quatre cadences :
+
+| Cadence | Ce qui part |
 |---|---|
-| `MAILGUN_API_BASE_URL` | `https://api.mailgun.net/v3` |
-| `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` | — |
-| `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` | — / `Tiai` |
-| `MAILGUN_TIMEOUT_SECONDS` | `10` |
-| `ALERT_RECIPIENTS` | *(vide)* — liste séparée par des virgules |
+| Aucun e-mail | rien (les e-mails de compte, comme la réinitialisation, continuent d'arriver) |
+| Alerte immédiate à chaque menace | un e-mail dès qu'un poste signale une menace **nouvellement** détectée |
+| Résumé quotidien, seulement s'il y a du nouveau | un e-mail les jours où il y a à traiter : menace active, mise à jour critique ou importante en attente, poste à vérifier |
+| Résumé quotidien, tous les jours *(défaut)* | un e-mail chaque matin, même sans incident : état du parc, antivirus périmés, postes à mettre à jour |
+
+Le résumé est envoyé par le worker ARQ ; les alertes immédiates partent du
+serveur d'API, en tâche de fond, une fois le heartbeat répondu — une panne
+Mailgun ne fait jamais échouer la remontée d'un poste.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `MAILGUN_API_BASE_URL` | `https://api.mailgun.net/v3` | |
+| `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` | — | Vides = aucun e-mail n'est envoyé |
+| `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` | — / `Tiai` | |
+| `MAILGUN_TIMEOUT_SECONDS` | `10` | |
+| `ALERT_RECIPIENTS` | *(vide)* | **Repli seulement**, liste séparée par des virgules : sert quand aucun compte n'a demandé de résumé, pour qu'une installation neuve ne soit pas silencieusement sans surveillance |
+| `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place |
+| `THREAT_ALERT_MAX_AGE_HOURS` | `24` | Une détection plus ancienne ne déclenche pas d'alerte immédiate : un poste qui s'enrôle remonte tout l'historique Defender d'un coup |
+| `NOTIFICATION_MAX_ITEMS` | `10` | Postes détaillés dans un e-mail avant « … et N autres » |
+
+`CONSOLE_BASE_URL` mérite d'être renseignée ici aussi : c'est ce qui met dans
+chaque e-mail le lien vers la fiche du poste concerné.
 
 ### Hors Docker
 

@@ -1,4 +1,5 @@
 import { api } from 'boot/axios';
+import type { EmailPreference } from 'src/services/auth';
 
 export type Role = 'admin' | 'readonly';
 
@@ -11,6 +12,10 @@ export interface ConsoleUser {
   full_name: string | null;
   role: Role;
   is_active: boolean;
+  /** Which mails this account receives. Visible to an administrator because
+   * "who gets told when a poste catches something" is a property of the parc's
+   * supervision, not a private setting. */
+  email_preference: EmailPreference;
   created_at: string;
   updated_at: string;
 }
@@ -41,6 +46,7 @@ export interface UpdateUserPayload {
   full_name?: string | null;
   role?: Role;
   is_active?: boolean;
+  email_preference?: EmailPreference;
 }
 
 export async function listUsers(params: ListUsersParams = {}): Promise<UserList> {

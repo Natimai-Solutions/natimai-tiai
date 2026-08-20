@@ -173,8 +173,11 @@ async def list_commands(
         stmt = stmt.where(col(Command.machine_id) == machine_id)
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
+    # ``id`` behind the timestamp: a broadcast queues one row per poste in the
+    # same instant, and ties reordered between two OFFSETs would duplicate a
+    # command on one page and hide another.
     rows = await session.exec(
-        stmt.order_by(col(Command.created_at).desc())
+        stmt.order_by(col(Command.created_at).desc(), col(Command.id))
         .offset((page - 1) * page_size)
         .limit(page_size)
     )

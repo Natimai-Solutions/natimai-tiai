@@ -5,11 +5,21 @@ export interface Token {
   token_type: string;
 }
 
+/**
+ * How much this account hears from Tia'i by e-mail. One axis rather than a set
+ * of switches — see the backend enum of the same name.
+ *
+ * Account mail (the password-reset link) is outside this: it answers a request
+ * the user just made, and « aucun e-mail » does not suppress it.
+ */
+export type EmailPreference = 'none' | 'immediate' | 'digest_events' | 'digest_daily';
+
 export interface User {
   id: string;
   email: string;
   full_name: string | null;
   role: string;
+  email_preference: EmailPreference;
 }
 
 export async function login(email: string, password: string): Promise<Token> {
@@ -23,6 +33,16 @@ export async function login(email: string, password: string): Promise<Token> {
 
 export async function getMe(): Promise<User> {
   const { data } = await api.get<User>('/auth/me');
+  return data;
+}
+
+/**
+ * Update one's own profile. Self-service and deliberately narrow: an account
+ * changes how much mail it receives, never its role or its activation — those
+ * stay with an administrator.
+ */
+export async function updateMe(payload: { email_preference?: EmailPreference }): Promise<User> {
+  const { data } = await api.patch<User>('/auth/me', payload);
   return data;
 }
 

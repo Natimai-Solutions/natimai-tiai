@@ -63,8 +63,17 @@ async def list_threats(
         stmt = stmt.where(col(Threat.severity) == severity)
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
+    # NULLS LAST and a tiebreaker, both of which this list needs more than most:
+    # ``detected_at`` is Defender's own clock and it is nullable, and a single
+    # scan quarantining a folder writes a dozen rows carrying the very same
+    # instant. Without ``id`` behind it PostgreSQL may order those ties
+    # differently for each OFFSET, so a detection would show on two pages while
+    # another never appeared at all — and a NULLS FIRST default would open the
+    # history with the detections Defender never dated.
     rows = await session.exec(
-        stmt.order_by(col(Threat.detected_at).desc())
+        stmt.order_by(
+            col(Threat.detected_at).desc().nulls_last(), col(Threat.id).desc()
+        )
         .offset((page - 1) * page_size)
         .limit(page_size)
     )

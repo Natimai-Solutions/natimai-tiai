@@ -4,8 +4,9 @@ import uuid
 from datetime import datetime
 from ipaddress import ip_address
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, field_validator
+from sqlalchemy import func
 from sqlmodel import select
 
 from app.api.deps import CurrentMachine, SessionDep, verify_enrollment_secret
@@ -22,7 +23,8 @@ from app.features.command.models import (
 from app.features.machine import fingerprint
 from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
-from app.features.threat.crud import upsert_threats
+from app.features.notification import threat_alert
+from app.features.threat.crud import NewDetection, upsert_threats
 from app.features.threat.schemas import ThreatReport
 from app.features.windows_update.crud import replace_pending
 from app.features.windows_update.schemas import WUStateReport
@@ -286,10 +288,14 @@ async def enroll(payload: EnrollRequest, session: SessionDep) -> EnrollResponse:
 
     # Another active identity sharing the same SMBIOS anchor → re-image of the
     # same physical box or a clone → flag for manual reconciliation (merge).
-    if fp.smbios_uuid:
+    # Only for an anchor that identifies one machine: a firmware constant shared
+    # by every unit of a batch would otherwise flag the whole batch, and the flag
+    # is what puts the "à vérifier" banner on a poste that is perfectly fine.
+    anchor = fingerprint.trustworthy_smbios_uuid(fp.smbios_uuid)
+    if anchor:
         other = await session.exec(
             select(Machine.id)
-            .where(Machine.smbios_uuid == fp.smbios_uuid)
+            .where(func.lower(Machine.smbios_uuid) == anchor)
             .where(Machine.machine_uuid != payload.machine_uuid)
         )
         if other.first() is not None:
@@ -318,7 +324,10 @@ async def enroll(payload: EnrollRequest, session: SessionDep) -> EnrollResponse:
 
 @router.post("/heartbeat", response_model=HeartbeatResponse)
 async def heartbeat(
-    payload: HeartbeatRequest, machine: CurrentMachine, session: SessionDep
+    payload: HeartbeatRequest,
+    machine: CurrentMachine,
+    session: SessionDep,
+    background: BackgroundTasks,
 ) -> HeartbeatResponse:
     """Upsert Defender state, then return this machine's pending commands."""
     if payload.hostname is not None:
@@ -421,8 +430,13 @@ async def heartbeat(
     machine.last_seen = utcnow()
     machine.updated_at = utcnow()
 
+    # Detections nobody had seen before, for the immediate-alert cadence. Taken
+    # here and mailed after the response: the agent is waiting on this request,
+    # and Mailgun is not on its critical path.
+    new_detections: list[NewDetection] = []
     if payload.threats:
-        await upsert_threats(session, machine.id, payload.threats)
+        result = await upsert_threats(session, machine.id, payload.threats)
+        new_detections = result.new_detections
 
     # Persist the EXPIRED status for this machine's stale pending commands so a
     # long-offline host doesn't run a scan requested weeks ago (plan §2.8).
@@ -440,9 +454,20 @@ async def heartbeat(
         cmd.delivered_at = utcnow()
 
     # Build the payload before commit: expire_on_commit would otherwise trigger
-    # a sync refresh on attribute access — MissingGreenlet under asyncio.
+    # a sync refresh on attribute access — MissingGreenlet under asyncio. The
+    # alert's snapshot of the machine is taken here for the same reason.
     commands = [CommandOut(id=c.id, type=c.type) for c in pending]
+    machine_context = (
+        threat_alert.MachineContext.of(machine) if new_detections else None
+    )
     await session.commit()
+    if machine_context is not None:
+        # Queued rather than awaited, and only once the detections are committed:
+        # a mail that names a threat the console cannot yet show would be a mail
+        # about nothing, and the agent has no use for the delay.
+        background.add_task(
+            threat_alert.alert_new_threats, machine_context, new_detections
+        )
     return HeartbeatResponse(commands=commands)
 
 

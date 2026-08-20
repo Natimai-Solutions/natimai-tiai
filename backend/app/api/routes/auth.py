@@ -13,7 +13,9 @@ from app.api.deps import CurrentUser, SessionDep
 from app.api.fields import Email, Password
 from app.core import security
 from app.core.errors import AppError, ErrorCode
+from app.features.base import utcnow
 from app.features.user import crud, emails
+from app.features.user.models import EmailPreference
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -32,6 +34,7 @@ class UserOut(BaseModel):
     email: str
     full_name: str | None
     role: str
+    email_preference: str
 
     model_config = {"from_attributes": True}
 
@@ -56,6 +59,32 @@ async def login(
 @router.get("/me", response_model=UserOut)
 async def me(user: CurrentUser) -> UserOut:
     """Return the current authenticated user."""
+    return UserOut.model_validate(user)
+
+
+class ProfileUpdate(BaseModel):
+    """Self-service profile update — only the supplied fields are changed."""
+
+    email_preference: EmailPreference | None = None
+
+
+@router.patch("/me", response_model=UserOut)
+async def update_me(
+    payload: ProfileUpdate, user: CurrentUser, session: SessionDep
+) -> UserOut:
+    """Update one's own profile.
+
+    Self-service, and deliberately narrow: what an account may change about
+    itself here is how much mail it receives. Its role, its address and whether
+    it is active stay with an administrator (``/users``) — a read-only operator
+    who could edit their own row would not be read-only for long.
+    """
+    if payload.email_preference is not None:
+        user.email_preference = payload.email_preference
+    user.updated_at = utcnow()
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
     return UserOut.model_validate(user)
 
 

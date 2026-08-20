@@ -69,8 +69,11 @@ async def list_users(
             )
         )
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
+    # ``email`` behind the date: accounts seeded together share a creation
+    # instant, and the list is paginated server-side — ties reordered between
+    # two pages would show one account twice and another not at all.
     rows = await session.exec(
-        stmt.order_by(col(User.created_at).desc())
+        stmt.order_by(col(User.created_at).desc(), col(User.email))
         .offset((page - 1) * page_size)
         .limit(page_size)
     )

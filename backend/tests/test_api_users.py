@@ -523,3 +523,102 @@ def test_model_datetime_columns_are_timezone_aware():
         and not getattr(column.type, "timezone", False)
     ]
     assert naive == [], f"naive datetime columns: {naive}"
+
+
+# --- E-mail cadence --------------------------------------------------------
+
+
+async def test_new_account_defaults_to_the_daily_digest(client, db_session):
+    """The default matters: a fleet whose operators never opted in is watched."""
+    headers = await _admin(client, db_session)
+
+    resp = await client.get("/api/v1/auth/me", headers=headers)
+
+    assert resp.status_code == 200
+    assert resp.json()["email_preference"] == "digest_daily"
+
+
+async def test_a_user_sets_their_own_cadence(client, db_session):
+    headers = await _readonly(client, db_session)
+
+    resp = await client.patch(
+        "/api/v1/auth/me", headers=headers, json={"email_preference": "immediate"}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["email_preference"] == "immediate"
+    assert (await client.get("/api/v1/auth/me", headers=headers)).json()[
+        "email_preference"
+    ] == "immediate"
+
+
+async def test_an_unknown_cadence_is_refused(client, db_session):
+    headers = await _readonly(client, db_session)
+
+    resp = await client.patch(
+        "/api/v1/auth/me", headers=headers, json={"email_preference": "hourly"}
+    )
+
+    assert resp.status_code == 422
+
+
+async def test_self_service_cannot_reach_beyond_the_cadence(client, db_session):
+    """A read-only operator editing their own row must not gain a role.
+
+    Extra fields are ignored rather than applied: ``ProfileUpdate`` declares one
+    field, so ``role`` never reaches the model.
+    """
+    headers = await _readonly(client, db_session)
+
+    resp = await client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"email_preference": "none", "role": "admin", "is_active": False},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["email_preference"] == "none"
+    assert body["role"] == "readonly"
+
+
+async def test_an_admin_sees_and_sets_another_account_cadence(client, db_session):
+    from app.features.user.models import Role
+
+    headers = await _admin(client, db_session)
+    created = await client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={"email": "ops@test.local", "password": STRONG, "role": Role.READONLY},
+    )
+    user_id = created.json()["id"]
+    assert created.json()["email_preference"] == "digest_daily"
+
+    resp = await client.patch(
+        f"/api/v1/users/{user_id}",
+        headers=headers,
+        json={"email_preference": "none"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["email_preference"] == "none"
+
+
+async def test_cadence_is_stored_as_its_value_not_the_enum_repr(client, db_session):
+    """The column is a plain string; a stored "EmailPreference.NONE" would make
+    every recipient query miss."""
+    from sqlmodel import select
+
+    from app.features.user.models import User
+
+    headers = await _readonly(client, db_session, "stored@test.local")
+    await client.patch(
+        "/api/v1/auth/me", headers=headers, json={"email_preference": "digest_events"}
+    )
+
+    stored = (
+        await db_session.exec(
+            select(User.email_preference).where(User.email == "stored@test.local")
+        )
+    ).one()
+    assert stored == "digest_events"
