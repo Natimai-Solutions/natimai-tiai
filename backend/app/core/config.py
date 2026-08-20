@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     MAILGUN_FROM_EMAIL: str | None = None
     MAILGUN_FROM_NAME: str | None = "Tiai"
     MAILGUN_TIMEOUT_SECONDS: int = 10
+    # Outbound HTTP proxy for the Mailgun client alone (e.g. "http://10.0.0.1:3128").
+    # School networks often force outbound traffic through a proxy; a dedicated
+    # variable keeps that detour scoped to this one client — the standard
+    # HTTP_PROXY/HTTPS_PROXY names would be honoured by every process handed the
+    # environment, Caddy included, which must keep talking to its upstreams
+    # directly.
+    MAILGUN_PROXY_URL: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

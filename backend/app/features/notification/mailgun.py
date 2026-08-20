@@ -23,7 +23,10 @@ async def send_email(subject: str, text: str, to: list[str]) -> bool:
     sender = f"{from_name} <{settings.MAILGUN_FROM_EMAIL}>"
     url = f"{settings.MAILGUN_API_BASE_URL}/{settings.MAILGUN_DOMAIN}/messages"
 
-    async with httpx.AsyncClient(timeout=settings.MAILGUN_TIMEOUT_SECONDS) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.MAILGUN_TIMEOUT_SECONDS,
+        proxy=settings.MAILGUN_PROXY_URL,
+    ) as client:
         resp = await client.post(
             url,
             auth=("api", settings.MAILGUN_API_KEY or ""),

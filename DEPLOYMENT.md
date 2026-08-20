@@ -234,6 +234,7 @@ adresse réelle et modifiable depuis la console.
 | `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` | — | Vides = aucun e-mail n'est envoyé |
 | `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` | — / `Tiai` | |
 | `MAILGUN_TIMEOUT_SECONDS` | `10` | |
+| `MAILGUN_PROXY_URL` | — | Proxy HTTP sortant pour le seul client Mailgun (ex. `http://10.0.0.1:3128`), utile derrière le proxy d'un établissement. Volontairement distinct de `HTTP_PROXY`/`HTTPS_PROXY`, que tous les processus honoreraient — Caddy compris |
 | `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place |
 | `THREAT_ALERT_MAX_AGE_HOURS` | `24` | Une détection plus ancienne ne déclenche pas d'alerte immédiate : un poste qui s'enrôle remonte tout l'historique Defender d'un coup |
 | `NOTIFICATION_MAX_ITEMS` | `10` | Postes détaillés dans un e-mail avant « … et N autres » |

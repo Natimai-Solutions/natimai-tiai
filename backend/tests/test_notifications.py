@@ -16,11 +16,13 @@ class _FakeResponse:
 
 
 class _FakeAsyncClient:
-    """Records the last POST so tests can assert the request shape."""
+    """Records construction and the last POST so tests can assert the request shape."""
 
     last_call: dict | None = None
+    last_init: dict | None = None
 
     def __init__(self, *args, **kwargs) -> None:
+        type(self).last_init = kwargs
         self.raise_exc: Exception | None = None
 
     async def __aenter__(self) -> "_FakeAsyncClient":
@@ -71,6 +73,29 @@ async def test_send_email_posts_to_mailgun(monkeypatch):
     assert call["data"]["subject"] == "Subject"
     assert call["data"]["to"] == ["a@example.com"]
     assert call["auth"] == ("api", "key-123")
+    # No proxy configured → none handed to the client (httpx treats None as "direct").
+    assert _FakeAsyncClient.last_init is not None
+    assert _FakeAsyncClient.last_init["proxy"] is None
+
+
+async def test_send_email_routes_through_dedicated_proxy(monkeypatch):
+    """MAILGUN_PROXY_URL reaches the Mailgun client, and only the Mailgun client.
+
+    School networks force outbound traffic through a proxy. The setting is a
+    dedicated variable rather than HTTP_PROXY/HTTPS_PROXY because those names
+    are honoured by every process handed the environment — Caddy included,
+    which must keep talking to its upstreams directly.
+    """
+    _configure_mailgun(monkeypatch)
+    monkeypatch.setattr(settings, "MAILGUN_PROXY_URL", "http://proxy.school.local:3128")
+    _FakeAsyncClient.last_init = None
+    monkeypatch.setattr(mailgun.httpx, "AsyncClient", _FakeAsyncClient)
+
+    ok = await mailgun.send_email("Subject", "Body", to=["a@example.com"])
+
+    assert ok is True
+    assert _FakeAsyncClient.last_init is not None
+    assert _FakeAsyncClient.last_init["proxy"] == "http://proxy.school.local:3128"
 
 
 async def test_send_email_propagates_http_error(monkeypatch):

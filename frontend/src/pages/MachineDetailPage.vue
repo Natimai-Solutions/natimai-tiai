@@ -13,7 +13,22 @@
           {{ fromSearch ? 'Retour aux résultats de la recherche' : 'Retour aux postes' }}
         </q-tooltip>
       </q-btn>
-      <div class="text-h5">{{ title }}</div>
+      <div class="text-h5 row items-center no-wrap">
+        <!-- Leading, same dot as the list: the fiche answers « allumé ? » at a glance too. -->
+        <q-icon
+          v-if="machine"
+          :name="onlineIcon(machine.is_online)"
+          :color="onlineColor(machine.is_online)"
+          size="14px"
+          class="q-mr-sm"
+        >
+          <q-tooltip>
+            {{ onlineLabel(machine.is_online) }} — dernier contact
+            {{ timeAgoLabel(machine.last_seen) }}
+          </q-tooltip>
+        </q-icon>
+        {{ title }}
+      </div>
       <!-- Only when the fiche was opened from a list query: elsewhere there is
            no search to walk, and dead arrows would be worse than none. -->
       <template v-if="fromSearch">
@@ -487,6 +502,8 @@ import {
   boolLabel,
   formatDateTime,
   ipAddressLabel,
+  onlineColor,
+  onlineIcon,
   onlineLabel,
   runningModeLabel,
   sessionLabel,
