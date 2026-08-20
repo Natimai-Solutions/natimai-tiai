@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -11,7 +12,9 @@ import (
 
 // gaaFlags: gateways are the one extra we ask for — they are what tells a real
 // NIC from a host-only virtual switch (see betterAddress). Everything we don't
-// read is skipped, which is both cheaper and a smaller buffer to size.
+// read is skipped, which is both cheaper and a smaller buffer to size. The
+// physical address needs no flag: it is a field of the adapter structure
+// itself, always filled in.
 const gaaFlags = windows.GAA_FLAG_INCLUDE_GATEWAYS |
 	windows.GAA_FLAG_SKIP_ANYCAST |
 	windows.GAA_FLAG_SKIP_MULTICAST |
@@ -28,21 +31,25 @@ const (
 	adapterBufAttempts = 4
 )
 
-// ReadIPAddress returns the machine's primary IP address, or "" when it has
-// none worth reporting (see usableAddress).
+// ReadNetwork returns the machine's primary IP address, the MAC of the adapter
+// holding it and the mask that address sits behind. All are empty when nothing
+// qualifies (see usableAddress).
 //
 // Read on every heartbeat rather than cached at start-up like sysinfo: a DHCP
 // renewal, a docking station or a VPN changes the address while the agent keeps
-// running, and an address that is a week stale is worse than none.
-func ReadIPAddress(ctx context.Context) (string, error) {
+// running, and an address that is a week stale is worse than none. The MAC
+// changes far less often, but it is elected *with* the address rather than
+// separately — a MAC read off another adapter than the reported one is what
+// would make a Wake-on-LAN packet land on the wrong subnet.
+func ReadNetwork(ctx context.Context) (NetworkInfo, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return NetworkInfo{}, err
 	}
 	addrs, err := enumerateAddresses()
 	if err != nil {
-		return "", err
+		return NetworkInfo{}, err
 	}
-	return electAddress(addrs), nil
+	return elect(addrs), nil
 }
 
 // enumerateAddresses lists the unicast addresses of every operational adapter.
@@ -100,6 +107,13 @@ func collectAddresses(head *windows.IpAdapterAddresses) []rawAddress {
 			continue
 		}
 		hasGateway := ad.FirstGatewayAddress != nil
+		// Copied out of the fixed-size array rather than sliced in place: the
+		// buffer stays alive as long as the returned addresses reference it,
+		// and a MAC is six bytes — not worth pinning fifteen kilobytes for.
+		var mac net.HardwareAddr
+		if n := ad.PhysicalAddressLength; n > 0 && int(n) <= len(ad.PhysicalAddress) {
+			mac = append(net.HardwareAddr(nil), ad.PhysicalAddress[:n]...)
+		}
 
 		for ua := ad.FirstUnicastAddress; ua != nil; ua = ua.Next {
 			ip := ua.Address.IP()
@@ -112,7 +126,12 @@ func collectAddresses(head *windows.IpAdapterAddresses) []rawAddress {
 				metric, index = ad.Ipv6Metric, ad.Ipv6IfIndex
 			}
 			out = append(out, rawAddress{
-				IP:         ip,
+				IP:  ip,
+				MAC: mac,
+				// The mask, straight from Windows. Per address and not per
+				// adapter — two addresses on one NIC can sit on two different
+				// prefixes — which is why it is read here and not above.
+				PrefixLen:  ua.OnLinkPrefixLength,
 				IfIndex:    index,
 				Metric:     metric,
 				HasGateway: hasGateway,

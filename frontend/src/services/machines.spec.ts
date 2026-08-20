@@ -13,6 +13,8 @@ import {
   listMachines,
   mergeMachines,
   revokeToken,
+  wakeMachines,
+  wakeNotification,
 } from './machines';
 
 describe('listMachines', () => {
@@ -201,5 +203,71 @@ describe('windows update fields', () => {
     // null, not 0: the console renders the two differently on purpose.
     expect(result.wu_pending_count).toBeNull();
     expect(result.pending_updates).toEqual([]);
+  });
+});
+
+describe('wakeMachines', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset();
+  });
+
+  it('posts the selection to the server, which emits the packets', async () => {
+    const payload = {
+      results: [{ machine_id: 'm-1', hostname: 'POSTE-1', ok: true, detail: 'émis' }],
+      woken: 1,
+      failed: 0,
+    };
+    vi.mocked(api.post).mockResolvedValue({ data: payload });
+
+    const result = await wakeMachines(['m-1']);
+
+    expect(api.post).toHaveBeenCalledWith('/machines/wake', { machine_ids: ['m-1'] });
+    expect(result).toEqual(payload);
+  });
+});
+
+describe('wakeNotification', () => {
+  // Three outcomes, not two: an administrator waking a room needs to know that
+  // two postes were left behind, and one that woke nothing needs the reason.
+  it('reports a clean wake without promising the poste came back', () => {
+    const note = wakeNotification({ results: [], woken: 4, failed: 0 });
+
+    expect(note.type).toBe('positive');
+    expect(note.message).toMatch(/4 poste/);
+    // Wake-on-LAN acknowledges nothing: the console only learns of a wake when
+    // the agent reports, so the wording says exactly that.
+    expect(note.message).toMatch(/prochain démarrage/);
+  });
+
+  it('flags the postes it could not aim at', () => {
+    const note = wakeNotification({ results: [], woken: 3, failed: 2 });
+
+    expect(note.type).toBe('warning');
+    expect(note.message).toMatch(/2 sans cible connue/);
+  });
+
+  it('quotes the server’s reason when a single wake failed', () => {
+    const note = wakeNotification({
+      results: [
+        {
+          machine_id: 'm-1',
+          hostname: 'POSTE-1',
+          ok: false,
+          detail: 'Aucune adresse MAC connue pour ce poste.',
+        },
+      ],
+      woken: 0,
+      failed: 1,
+    });
+
+    expect(note.type).toBe('negative');
+    expect(note.message).toMatch(/Aucune adresse MAC/);
+  });
+
+  it('does not quote a reason it cannot pick when several failed', () => {
+    const note = wakeNotification({ results: [], woken: 0, failed: 5 });
+
+    expect(note.type).toBe('negative');
+    expect(note.message).toMatch(/5 poste/);
   });
 });

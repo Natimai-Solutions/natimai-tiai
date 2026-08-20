@@ -49,6 +49,13 @@ Ajouter une dépendance : `uv add <pkg>` (ou `uv add --dev <pkg>` pour le groupe
 - `GET  /api/v1/auth/me` — utilisateur courant.
 - `GET  /api/v1/machines` / `GET /api/v1/machines/{id}` — lecture (permission `machine:read`).
 - `POST /api/v1/commands` — file une commande par poste (permission `command:execute`, admin).
+- `POST /api/v1/machines/wake` — réveil Wake-on-LAN (permission `command:execute`, admin).
+  La seule action que le **serveur** exécute lui-même : le poste visé est éteint,
+  il n'a pas d'agent à qui la confier. Le paquet magique est diffusé sur le
+  sous-réseau du poste ([features/wol/](app/features/wol/)) et la tentative est
+  inscrite dans l'historique des commandes, close d'emblée — elle n'est jamais
+  proposée à un agent. Réponse poste par poste : un poste sans MAC connue est un
+  échec parmi les autres, pas une erreur HTTP.
 
 ## Utilisateurs & permissions
 

@@ -7,14 +7,15 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 from sqlalchemy import case, exists, func, or_
 from sqlmodel import col, select
 
-from app.api.deps import SessionDep, require_permission
+from app.api.deps import CurrentUser, SessionDep, require_permission
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.base import utcnow
+from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.machine import crud as machine_crud
 from app.features.machine.models import Machine
 from app.features.machine.status import (
@@ -27,6 +28,7 @@ from app.features.machine.status import (
 from app.features.threat.models import Threat
 from app.features.user.permissions import Action, Resource
 from app.features.windows_update.models import WindowsUpdate
+from app.features.wol.sender import wake as emit_wake
 
 router = APIRouter(
     prefix="/machines",
@@ -110,6 +112,16 @@ class MachineDetailOut(MachineOut):
     session_is_remote: bool | None
     wu_last_search: datetime | None
     wu_last_install: datetime | None
+    # In the detail and not in the list: nobody scans a fleet by hardware
+    # address, but on one poste it is what says whether the wake button can do
+    # anything at all — and it is the first thing to check against the switch
+    # when a wake did not work.
+    mac_address: str | None
+    # The mask the poste reported for ``ip_address``. Shown next to it — an
+    # address without its mask does not say which network it is on — and it is
+    # what the wake broadcasts to. NULL = never reported, and the wake then falls
+    # back on the server's configured default.
+    ip_prefix_length: int | None
     machine_guid: str | None
     smbios_uuid: str | None
     tpm_ek_hash: str | None
@@ -228,6 +240,127 @@ async def list_antivirus_products(session: SessionDep) -> list[AntivirusProduct]
         for product, count in rows.all()
         if product
     ]
+
+
+class WakeRequest(BaseModel):
+    """Machines to wake: one id from a machine's page, a selection from the list."""
+
+    # Bounded rather than open: a wake is a handful of datagrams per poste, but
+    # the request holds the event loop for the whole list, and nobody wakes a
+    # parc of five hundred by accident.
+    machine_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+class WakeOut(BaseModel):
+    """What the server did about one machine, in the words the console shows."""
+
+    machine_id: uuid.UUID
+    hostname: str | None
+    ok: bool
+    detail: str
+
+
+class WakeResponse(BaseModel):
+    """Per-machine outcomes, and the two counts a notification needs.
+
+    Per machine and not one status for the batch: waking thirty postes of which
+    two have never reported a MAC is a *partial* success, and a single "OK"
+    would hide exactly the two an administrator has to go and look at.
+    """
+
+    results: list[WakeOut]
+    woken: int
+    failed: int
+
+
+# Declared before ``/{machine_id}``, like the antivirus listing above: FastAPI
+# matches in declaration order, and this path would otherwise be read as an id.
+@router.post(
+    "/wake",
+    response_model=WakeResponse,
+    dependencies=[Depends(require_permission(Resource.COMMAND, Action.EXECUTE))],
+)
+async def wake_machines(
+    payload: WakeRequest, session: SessionDep, user: CurrentUser
+) -> WakeResponse:
+    """Broadcast a Wake-on-LAN magic packet for each machine (admin only).
+
+    The one action in this console the *server* performs on a poste rather than
+    its agent, for the only reason that could justify it: the machine is off, so
+    there is no agent to ask. What travels is a frame the network adapter
+    recognises while the rest of the hardware sleeps — see ``features/wol``.
+
+    Each attempt is recorded as a ``wake_on_lan`` row in the command history,
+    created already closed: it is never handed out on a heartbeat and no agent
+    can pick it up. That keeps "who woke this poste, and when" in the same table
+    as "who restarted it", which is where an administrator looks.
+
+    Never fails as a whole. A poste without a known MAC, or without an address
+    to derive a broadcast from, comes back as one failed entry among the
+    others — the batch is not the unit of success here, the poste is.
+    """
+    rows = await session.exec(
+        select(Machine).where(col(Machine.id).in_(payload.machine_ids))
+    )
+    machines = {m.id: m for m in rows.all()}
+
+    results: list[WakeOut] = []
+    for machine_id in payload.machine_ids:
+        machine = machines.get(machine_id)
+        if machine is None:
+            # Reported rather than 404'd: one stale id in a selection of thirty
+            # must not cost the other twenty-nine their wake. Nothing is
+            # recorded — there is no machine left to record it against.
+            results.append(
+                WakeOut(
+                    machine_id=machine_id,
+                    hostname=None,
+                    ok=False,
+                    detail="Poste introuvable : il a été supprimé ou fusionné.",
+                )
+            )
+            continue
+
+        outcome = await emit_wake(
+            mac=machine.mac_address,
+            ip=machine.ip_address,
+            prefix_length=machine.ip_prefix_length,
+        )
+        now = utcnow()
+        session.add(
+            Command(
+                machine_id=machine.id,
+                type=CommandType.WAKE_ON_LAN.value,
+                status=(
+                    CommandStatus.SUCCEEDED.value
+                    if outcome.ok
+                    else CommandStatus.FAILED.value
+                ),
+                created_by=user.email,
+                created_at=now,
+                # Already terminal, so it never had a life to expire — the sweep
+                # only ever touches PENDING rows. Set to the creation instant so
+                # the column reads as "was never offered to anyone" rather than
+                # dangling an hour into the future.
+                expires_at=now,
+                started_at=now,
+                finished_at=now,
+                result_output=outcome.detail if outcome.ok else None,
+                error=None if outcome.ok else outcome.detail,
+            )
+        )
+        results.append(
+            WakeOut(
+                machine_id=machine.id,
+                hostname=machine.hostname,
+                ok=outcome.ok,
+                detail=outcome.detail,
+            )
+        )
+
+    await session.commit()
+    woken = sum(1 for r in results if r.ok)
+    return WakeResponse(results=results, woken=woken, failed=len(results) - woken)
 
 
 async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machine:

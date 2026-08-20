@@ -48,6 +48,8 @@ describe('command catalogue', () => {
     'wu_install_full',
     'wu_reset',
     'reboot',
+    'shutdown',
+    'wake_on_lan',
     'gpo_update',
     'flush_dns',
     'time_resync',
@@ -83,7 +85,10 @@ describe('command catalogue', () => {
       'wu_install_full',
       // Discards the update store, and with it the poste's update history.
       'wu_reset',
+      // The two that can cost a user their unsaved work. The wake beside them
+      // does not: it costs three datagrams and wakes a machine at worst.
       'reboot',
+      'shutdown',
       'spooler_reset',
       'sfc_scan',
       'dism_restore_health',
@@ -108,6 +113,7 @@ describe('command catalogue', () => {
     expect(commandActionGroups().map((s) => s.group)).toEqual([
       'defender',
       'windows_update',
+      'power',
       'maintenance',
       'diagnostic',
     ]);
@@ -115,8 +121,46 @@ describe('command catalogue', () => {
 
   it('drops the diagnostic section from the bulk menu', () => {
     const groups = commandActionGroups({ bulkOnly: true });
-    expect(groups.map((s) => s.group)).toEqual(['defender', 'windows_update', 'maintenance']);
+    expect(groups.map((s) => s.group)).toEqual([
+      'defender',
+      'windows_update',
+      'power',
+      'maintenance',
+    ]);
     expect(groups.flatMap((s) => s.actions).every((a) => a.bulk)).toBe(true);
+  });
+
+  // Only one action is not queued for an agent, and mistaking a second one for
+  // it would send a command to a poste through an endpoint that wakes it.
+  it('marks exactly one action as executed by the server', () => {
+    expect(commandActions.filter((a) => a.serverSide).map((a) => a.type)).toEqual(['wake_on_lan']);
+  });
+});
+
+describe('the power section', () => {
+  // Restart, stop, wake: one decision family, one section. The restart used to
+  // live under Windows Update, which stopped making sense the day it gained two
+  // neighbours.
+  it('gathers the three actions that change a power state', () => {
+    const power = commandActions.filter((a) => a.group === 'power');
+    expect(power.map((a) => a.type)).toEqual(['reboot', 'shutdown', 'wake_on_lan']);
+  });
+
+  it('warns before a shutdown exactly as before a restart', () => {
+    const shutdown = commandActions.find((a) => a.type === 'shutdown');
+    expect(shutdown?.confirm).toBe(true);
+    expect(shutdown?.hint).toMatch(/60 secondes/);
+    // And says the part a restart does not have to: nothing comes back on its
+    // own afterwards.
+    expect(shutdown?.hint).toMatch(/rallumé/);
+  });
+
+  it('does not stop to confirm a wake, and does not queue it either', () => {
+    const wake = commandActions.find((a) => a.type === 'wake_on_lan');
+    expect(wake?.confirm).toBe(false);
+    expect(wake?.serverSide).toBe(true);
+    // Offered in bulk: waking a room in the morning is the use case.
+    expect(wake?.bulk).toBe(true);
   });
 });
 
@@ -126,7 +170,7 @@ describe('the restart command', () => {
   // confirmation, and a hint that says what happens and when.
   it('always asks, and says what it will do', () => {
     const reboot = commandActions.find((a) => a.type === 'reboot');
-    expect(reboot?.group).toBe('windows_update');
+    expect(reboot?.group).toBe('power');
     expect(reboot?.confirm).toBe(true);
     expect(reboot?.hint).toMatch(/60 secondes/);
   });
@@ -145,15 +189,9 @@ describe('the Windows Update reset', () => {
     expect(reset?.hint).toMatch(/Rien n’est installé ni redémarré/);
   });
 
-  it('sits after the installs, before the restart', () => {
+  it('sits last in its section, after the two installs', () => {
     const wu = commandActions.filter((a) => a.group === 'windows_update');
-    expect(wu.map((a) => a.type)).toEqual([
-      'wu_scan',
-      'wu_install',
-      'wu_install_full',
-      'wu_reset',
-      'reboot',
-    ]);
+    expect(wu.map((a) => a.type)).toEqual(['wu_scan', 'wu_install', 'wu_install_full', 'wu_reset']);
   });
 });
 

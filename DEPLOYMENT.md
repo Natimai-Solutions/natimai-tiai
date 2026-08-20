@@ -187,6 +187,19 @@ Il n'est jamais committé.
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif » |
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
 
+### Réveil des postes (Wake-on-LAN)
+
+Voir la section « [Réveil des postes](#réveil-des-postes-wake-on-lan-1) » plus
+bas pour ce qui doit être vrai du poste, du réseau et de l'hôte Docker — les
+variables ci-dessous ne décrivent que la destination du paquet.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `WOL_SUBNET_PREFIXLEN` | `24` | **Repli seulement.** Le masque vient normalement du poste lui-même : son agent le lit sur la carte et le remonte avec l'adresse, ce qui est la seule source juste sur un parc où cohabitent des /16 et des /24. Ce réglage ne sert qu'aux postes dont l'agent est antérieur à cette remontée, ou dont la carte n'a pas exposé de masque |
+| `WOL_BROADCAST_ADDRESSES` | *(vide)* | Adresses de diffusion explicites, séparées par des virgules. Renseignées, elles **remplacent** l'adresse déduite et servent pour *tous* les postes — la réponse pour un serveur qui doit joindre des segments où il n'a pas d'adresse, et le seul moyen de réveiller un poste qui n'a jamais remonté d'IP |
+| `WOL_PORT` | `9` | Port UDP du paquet magique. Indifférent au matériel (la carte reconnaît le motif n'importe où dans la trame) ; ne compte que pour un pare-feu sur le trajet |
+| `WOL_PACKET_COUNT` | `3` | Nombre de copies émises. Une diffusion UDP n'accuse rien et se perd sans bruit ; trois copies coûtent trois datagrammes |
+
 ### Alertes e-mail et e-mails de compte
 
 Facultatif — désactivé si `MAILGUN_DOMAIN` ou `MAILGUN_API_KEY` est vide. Mailgun
@@ -209,6 +222,92 @@ passe depuis la console.
 |---|---|---|
 | `API_BASE_URL` | Build frontend | baseURL axios, injectée au build ; défaut `/api/v1` |
 | `TIAI_TEST_DATABASE_URL` | Tests backend | DSN Postgres pour les tests d'API |
+
+---
+
+## Réveil des postes (Wake-on-LAN)
+
+Le réveil est la **seule action que le serveur exécute lui-même**, et c'est la
+seule qui puisse l'être : le poste est éteint, il n'a plus d'agent à qui parler.
+Ce qui le rallume est une trame que sa carte réseau reconnaît pendant que le
+reste du matériel dort — six octets `0xFF` suivis de son adresse MAC répétée
+seize fois — et seule une machine du même domaine de diffusion peut la déposer
+sur le fil.
+
+Trois conditions, toutes en dehors du logiciel. Aucune n'est vérifiable depuis la
+console : le protocole n'accuse rien, donc Tia'i annonce toujours « paquet émis »
+et jamais « poste réveillé ». Un poste réveillé se constate à sa remontée d'agent,
+une minute après son démarrage.
+
+### 1. Le poste
+
+- **BIOS/UEFI** : activer *Wake on LAN* (parfois *Power On By PCI-E*, *Resume by
+  LAN*). Sur un poste où l'option est absente ou grisée, rien d'autre ne servira.
+- **Carte réseau**, dans le gestionnaire de périphériques : onglet *Gestion de
+  l'alimentation* → « Autoriser ce périphérique à sortir l'ordinateur du mode
+  veille », et *Avancé* → « Wake on Magic Packet » à *Activé*. Ces deux réglages
+  se pilotent par GPO ou par script, comme le reste du déploiement.
+- **Démarrage rapide de Windows désactivé** (`powercfg /h off`, ou la stratégie
+  correspondante). Avec le démarrage rapide, « arrêter » est en réalité une mise
+  en veille prolongée, qui laisse la carte dans un état où le réveil est
+  aléatoire. C'est la cause n°1 d'un parc qui se réveille à moitié — et la raison
+  pour laquelle la commande `shutdown` de Tia'i n'utilise pas `/hybrid`.
+- **En filaire.** Le réveil par Wi-Fi (WoWLAN) dépend du couple carte/pilote et
+  fonctionne rarement sur un poste éteint.
+- Le poste doit avoir **remonté au moins une fois son adresse MAC**, ce que fait
+  tout agent à partir de cette version — avec le masque de son sous-réseau, qui
+  détermine l'adresse de diffusion visée. Les deux sont visibles sur sa fiche,
+  auprès de l'adresse IP ; un tiret sur la MAC signifie que le réveil n'a rien à
+  viser, et la console le dit plutôt que de prétendre avoir émis.
+
+### 2. Le réseau
+
+Le paquet est diffusé sur l'adresse de diffusion du sous-réseau **du poste** —
+déduite de sa dernière adresse connue **et du masque que le poste a lui-même
+remonté** : `10.4.7.9 /16` donne `10.4.255.255`, `192.168.1.42 /24` donne
+`192.168.1.255`. Rien à configurer, donc, y compris sur un parc mêlant plusieurs
+tailles de sous-réseaux ; `WOL_SUBNET_PREFIXLEN` ne sert que de repli pour un
+poste dont l'agent est trop ancien pour remonter son masque. Le masque retenu est
+visible sur la fiche du poste, à côté de son adresse.
+
+Sur un réseau plat, il n'y a rien d'autre à faire. Si le serveur est sur un autre VLAN que les postes,
+le routeur doit relayer la diffusion dirigée (`ip directed-broadcast` chez Cisco)
+— ce que la plupart refusent par défaut, et à raison. Là où ce relais n'est pas
+envisageable, le réveil ne peut pas venir de ce serveur : il faut un émetteur sur
+le segment concerné.
+
+### 3. L'hôte Docker
+
+C'est le point qui surprend, et il n'apparaît qu'au déploiement : le backend
+tourne dans un conteneur sur le *bridge* Docker. Le datagramme part vers
+l'adresse de diffusion du sous-réseau du poste, arrive à l'hôte qui sert de
+passerelle — et **Linux ne relaie pas une diffusion dirigée par défaut**
+(RFC 2644). Sans l'un des deux réglages ci-dessous, le paquet meurt sur l'hôte et
+la console annonce pourtant une émission réussie, puisqu'elle l'a bien émise.
+
+Le moins invasif — le `docker-compose.yml` reste inchangé :
+
+```bash
+# <iface> = l'interface LAN de l'hôte (ip -br addr)
+sudo sysctl -w net.ipv4.conf.<iface>.bc_forwarding=1
+echo "net.ipv4.conf.<iface>.bc_forwarding = 1" | sudo tee /etc/sysctl.d/99-tiai-wol.conf
+```
+
+L'alternative est de donner au service `backend` le réseau de l'hôte
+(`network_mode: host`) : la pile réseau du conteneur devient celle de l'hôte et
+la question disparaît, mais `db` et `redis` ne sont plus joignables par leur nom
+de service et le proxy Caddy est à revoir. À réserver aux déploiements qui ne
+peuvent pas toucher aux `sysctl`.
+
+**Vérifier**, depuis une machine du même segment que les postes, pendant qu'on
+appuie sur « Réveiller le poste » dans la console :
+
+```bash
+sudo tcpdump -ni <iface> udp port 9
+```
+
+Une trame par `WOL_PACKET_COUNT` doit apparaître. Si rien ne sort de l'hôte,
+c'est le §3 ; si les trames sortent mais que le poste ne démarre pas, c'est le §1.
 
 ---
 

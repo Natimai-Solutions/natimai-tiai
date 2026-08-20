@@ -71,10 +71,10 @@ type Agent struct {
 	// running six-hourly *will* eventually land on top of an install otherwise.
 	wuOp sync.Mutex
 
-	// Rations restarts and holds the rest of the catalogue back once one is
-	// scheduled (reboot.go). The last line of defence, and the only one that
-	// runs on the machine actually being restarted.
-	reboot rebootGuard
+	// Rations restarts and shutdowns, and holds the rest of the catalogue back
+	// once one is scheduled (power.go). The last line of defence, and the only
+	// one that runs on the machine actually being taken down.
+	power powerGuard
 }
 
 // New creates an agent from config.
@@ -196,11 +196,17 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	}
 	// Read here and not from a.host: the host attributes are collected once at
 	// start-up, whereas the address changes under a running agent (DHCP
-	// renewal, dock, VPN). Same contract as above on failure — "" is omitted
-	// from the payload, so the server keeps the last known address.
-	ip, err := collector.ReadIPAddress(ctx)
+	// renewal, dock, VPN). Same contract as above on failure — the zero value
+	// is omitted from the payload, so the server keeps the last known address
+	// and the last known MAC.
+	//
+	// One read for all three: the MAC and the mask reported are those of the
+	// adapter holding the address reported, so the server can broadcast a magic
+	// packet on the subnet of that address without the three ever describing
+	// different NICs.
+	netInfo, err := collector.ReadNetwork(ctx)
 	if err != nil {
-		log.Printf("agent: ip address: %v", err)
+		log.Printf("agent: network: %v", err)
 	}
 	// Which antivirus actually guards this machine — Defender's own WMI classes
 	// cannot answer that once a third-party product has taken over. On failure av
@@ -218,17 +224,19 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 
 	fp := a.identity.Fingerprint
 	resp, err := a.client.Heartbeat(ctx, models.HeartbeatRequest{
-		Hostname:      a.host.Hostname,
-		Domain:        a.host.Domain,
-		IPAddress:     ip,
-		OSVersion:     a.host.OSVersion,
-		AgentVersion:  Version,
-		Defender:      state,
-		AVProduct:     av,
-		Session:       sess,
-		WindowsUpdate: wu,
-		Fingerprint:   &fp,
-		Threats:       threats,
+		Hostname:       a.host.Hostname,
+		Domain:         a.host.Domain,
+		IPAddress:      netInfo.IP,
+		MACAddress:     netInfo.MAC,
+		IPPrefixLength: netInfo.PrefixLength,
+		OSVersion:      a.host.OSVersion,
+		AgentVersion:   Version,
+		Defender:       state,
+		AVProduct:      av,
+		Session:        sess,
+		WindowsUpdate:  wu,
+		Fingerprint:    &fp,
+		Threats:        threats,
 	})
 	if err != nil {
 		return err
@@ -341,7 +349,13 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 		long = true
 		run = a.runWUReset
 	case "reboot":
-		run = a.runReboot
+		run = func(ctx context.Context) (string, error) {
+			return a.runPowerAction(ctx, actionReboot, collector.Reboot)
+		}
+	case "shutdown":
+		run = func(ctx context.Context) (string, error) {
+			return a.runPowerAction(ctx, actionShutdown, collector.Shutdown)
+		}
 	default:
 		// The maintenance catalogue is looked up rather than switched on: its
 		// entries differ only by data, so a new command is one table row in the
@@ -361,10 +375,10 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	// Checked here rather than per command: a machine going down in sixty
 	// seconds must not start anything at all, and a command refused now is
 	// re-offered by the server once the poste is back.
-	if a.reboot.restartPending(time.Now()) {
+	if kind := a.power.pending(time.Now()); kind != "" {
 		a.refuse(ctx, cmd, fmt.Errorf(
-			"un redémarrage de ce poste est déjà programmé : commande non exécutée, "+
-				"à relancer une fois le poste redémarré"))
+			"un %s de ce poste est déjà programmé : commande non exécutée, "+
+				"à relancer une fois le poste revenu en ligne", kind))
 		return
 	}
 
@@ -393,21 +407,27 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	}
 }
 
-// runReboot schedules a restart, unless this machine has had one too
-// recently — see reboot.go for what "too recently" means and why the agent is
-// the right place to decide it.
-func (a *Agent) runReboot(ctx context.Context) (string, error) {
+// runPowerAction schedules a restart or a shutdown, unless this machine has had
+// one too recently — see power.go for what "too recently" means and why the
+// agent is the right place to decide it.
+//
+// The two share this path rather than each guarding itself: they are rationed
+// together (one machine, one power state), and a poste that just restarted is
+// no more available to be stopped than to be restarted again.
+func (a *Agent) runPowerAction(
+	ctx context.Context, kind string, schedule func(context.Context) (string, error),
+) (string, error) {
 	now := time.Now()
-	if err := a.reboot.allow(now); err != nil {
+	if err := a.power.allow(now); err != nil {
 		return "", err
 	}
-	output, err := collector.Reboot(ctx)
+	output, err := schedule(ctx)
 	if err != nil {
 		// Nothing was scheduled, so nothing is remembered: a shutdown.exe that
 		// refused must not ration the retry that fixes whatever refused it.
 		return output, err
 	}
-	a.reboot.markScheduled(now)
+	a.power.markScheduled(now, kind)
 	return output, nil
 }
 

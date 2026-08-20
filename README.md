@@ -28,6 +28,12 @@ gère naturellement les postes éteints.
   courantes (stratégies de groupe, cache DNS, horloge, spouleur d'impression,
   vérification d'intégrité et de disque) et deux diagnostics en lecture seule
   dont la sortie s'affiche dans la console.
+- **Alimentation** — redémarrage et arrêt à distance, chacun derrière une
+  confirmation, annoncés à l'utilisateur connecté soixante secondes à l'avance et
+  rationnés par l'agent lui-même. Et le retour : un réveil **Wake-on-LAN** émis
+  par le serveur — le poste est éteint, il n'a plus d'agent à qui parler — vers
+  l'adresse de diffusion de son propre sous-réseau, sur un poste ou sur toute une
+  salle.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
@@ -105,9 +111,10 @@ serveur.
   modification du registre, des fichiers, du pare-feu ou des comptes — un serveur
   compromis ne peut déclencher que les actions prévues.
 - **Une commande à la fois par poste** : une même commande n'est pas remise en
-  file tant que la précédente n'a pas rendu son verdict, et le redémarrage —
-  la seule action qui puisse coûter son travail à un utilisateur — est en outre
-  rationné par l'agent lui-même, sur le poste, hors de portée du serveur.
+  file tant que la précédente n'a pas rendu son verdict, et l'arrêt comme le
+  redémarrage — les seules actions qui puissent coûter son travail à un
+  utilisateur — sont en outre rationnés par l'agent lui-même, sur le poste, hors
+  de portée du serveur.
 - **Binaire agent signé** par le certificat de l'AC interne.
 
 Pour signaler une vulnérabilité, contactez

@@ -978,10 +978,16 @@ def test_catalogue_is_fully_covered_below():
         "wu_install",
         "wu_install_full",
         "wu_reset",
-        "reboot",
     }
+    # Taking a poste down, and bringing it back. Covered by
+    # tests/test_api_power_wol.py — except `reboot`, whose de-duplication is
+    # tested just below and whose round trip rides with Phase 2's types.
+    #
+    # `wake_on_lan` is the one value here no agent ever executes: the machine it
+    # targets is off, so the server emits the packet and closes the row itself.
+    power = {"reboot", "shutdown", "wake_on_lan"}
     assert {t.value for t in CommandType} == (
-        defender | windows_update | set(MAINTENANCE_TYPES)
+        defender | windows_update | power | set(MAINTENANCE_TYPES)
     )
 
 
@@ -1395,7 +1401,7 @@ async def test_a_delivered_command_past_its_ttl_stops_blocking(client, db_sessio
 async def test_reboot_cannot_be_stacked(client, db_session):
     """The command that matters most here: a restart is never queued twice.
 
-    The agent rations restarts on its own as well (agent/internal/agent/reboot.go)
+    The agent rations restarts on its own as well (agent/internal/agent/power.go)
     — this is the server half, and it is what stops the queue growing a second
     one at all.
     """

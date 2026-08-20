@@ -337,6 +337,8 @@ import {
   getMachine,
   mergeMachines,
   revokeToken,
+  wakeMachines,
+  wakeNotification,
   type Machine,
   type MachineDetail,
   type PendingUpdate,
@@ -355,6 +357,7 @@ import {
   antivirusLabel,
   boolLabel,
   formatDateTime,
+  ipAddressLabel,
   onlineLabel,
   runningModeLabel,
   sessionLabel,
@@ -402,7 +405,15 @@ const identityRows = computed(() =>
         { label: 'Nom', value: machine.value.hostname ?? '—' },
         { label: 'UUID machine', value: machine.value.machine_uuid },
         { label: 'Domaine', value: machine.value.domain ?? '—' },
-        { label: 'Adresse IP', value: machine.value.ip_address ?? '—' },
+        {
+          label: 'Adresse IP',
+          value: ipAddressLabel(machine.value.ip_address, machine.value.ip_prefix_length),
+        },
+        // Right under the address it was elected with, and for two reasons: it
+        // is the wake target — a dash here means « Réveiller le poste » has
+        // nothing to aim at — and it is what an admin compares against the
+        // switch when a wake did not work.
+        { label: 'Adresse MAC', value: machine.value.mac_address ?? '—' },
         { label: 'OS', value: machine.value.os_version ?? '—' },
         { label: 'Version agent', value: machine.value.agent_version ?? '—' },
         { label: 'SMBIOS UUID', value: machine.value.smbios_uuid ?? '—' },
@@ -654,6 +665,13 @@ function runOne(action: CommandAction) {
 }
 
 async function send(action: CommandAction) {
+  // The wake is not a command: the poste is off, so there is nothing to queue
+  // for an agent that is not running. Same menu entry, same confirmation path,
+  // a different call.
+  if (action.serverSide) {
+    await sendWake();
+    return;
+  }
   try {
     const res = await createCommands({ type: action.type, machine_ids: [props.id] });
     if (res.count === 0) {
@@ -669,6 +687,19 @@ async function send(action: CommandAction) {
     await load();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'envoi de la commande") });
+  }
+}
+
+async function sendWake() {
+  try {
+    const res = await wakeMachines([props.id]);
+    $q.notify(wakeNotification(res));
+    // Reloaded for the history, not for the machine's state: the wake is
+    // recorded as a command row, while the poste itself will not reappear until
+    // its agent reports — a minute or so after it has actually booted.
+    await load();
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec du réveil') });
   }
 }
 

@@ -14,11 +14,17 @@ func Reboot(ctx context.Context) (string, error) {
 	return "", errors.New("reboot is only supported on windows")
 }
 
+// Shutdown refuses off Windows, for the same reason and more so: the one thing
+// worse than restarting a developer's machine is stopping it.
+func Shutdown(ctx context.Context) (string, error) {
+	return "", errors.New("shutdown is only supported on windows")
+}
+
 // Uptime is unavailable off Windows.
 //
-// An error rather than a plausible-looking zero: the caller rations restarts on
-// this reading, and a zero would read as "this machine just booted" — the one
-// answer that must never be invented.
+// An error rather than a plausible-looking zero: the caller rations power
+// actions on this reading, and a zero would read as "this machine just booted"
+// — the one answer that must never be invented.
 func Uptime() (time.Duration, error) {
 	return 0, errors.New("uptime is only supported on windows")
 }

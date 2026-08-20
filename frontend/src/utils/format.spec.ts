@@ -5,6 +5,7 @@ import {
   antivirusStatusLabel,
   boolLabel,
   formatDateTime,
+  ipAddressLabel,
   onlineColor,
   onlineIcon,
   onlineLabel,
@@ -364,5 +365,25 @@ describe('threatStatusColor', () => {
     expect(threatStatusColor('quarantined')).toBe('positive');
     expect(threatStatusColor('allowed')).toBe('warning');
     expect(threatStatusColor(null)).toBe('grey-5');
+  });
+});
+
+describe('ipAddressLabel', () => {
+  it('shows the mask the poste reported next to its address', () => {
+    // The pair that says which network the poste is on — and which broadcast
+    // address a wake packet goes to.
+    expect(ipAddressLabel('10.4.7.9', 16)).toBe('10.4.7.9 /16');
+    expect(ipAddressLabel('192.168.1.42', 24)).toBe('192.168.1.42 /24');
+  });
+
+  it('shows the address alone when no mask was reported', () => {
+    // An agent older than the mask reporting. Filling in a default here would
+    // show a value the poste never confirmed.
+    expect(ipAddressLabel('192.168.1.42', null)).toBe('192.168.1.42');
+  });
+
+  it('falls back to a dash without an address', () => {
+    expect(ipAddressLabel(null, null)).toBe('—');
+    expect(ipAddressLabel(null, 24)).toBe('—');
   });
 });

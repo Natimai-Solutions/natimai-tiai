@@ -15,12 +15,15 @@ export type CommandType =
   | 'dism_restore_health'
   | 'dism_component_cleanup'
   | 'chkdsk_scan'
-  // Windows Update (phase 2) + the restart it eventually needs.
+  // Windows Update (phase 2).
   | 'wu_scan'
   | 'wu_install'
   | 'wu_install_full'
   | 'wu_reset'
+  // Power: taking the poste down, and bringing it back.
   | 'reboot'
+  | 'shutdown'
+  | 'wake_on_lan'
   // Diagnostics: read-only, the value is in reading the result.
   | 'gpo_report'
   | 'net_config';
@@ -33,7 +36,7 @@ export type CommandStatus =
   | 'failed'
   | 'expired';
 
-export type CommandGroup = 'defender' | 'windows_update' | 'maintenance' | 'diagnostic';
+export type CommandGroup = 'defender' | 'windows_update' | 'power' | 'maintenance' | 'diagnostic';
 
 /** A command as the console offers it: label, icon, and how it may be triggered. */
 export interface CommandAction {
@@ -47,14 +50,28 @@ export interface CommandAction {
   bulk: boolean;
   /** Extra sentence for the confirmation dialog, when the cost is not obvious. */
   hint?: string;
+  /**
+   * Executed by the *server*, not queued for the poste's agent.
+   *
+   * True of exactly one action, and it could not be otherwise: a Wake-on-LAN
+   * targets a machine that is off, so there is no agent to hand it to. The
+   * pages read this to pick the call to make — `wakeMachines` instead of
+   * `createCommands` — while the menu, the confirmation and the history label
+   * stay the same for both kinds.
+   */
+  serverSide?: boolean;
 }
 
 export const commandGroupLabels: Record<CommandGroup, string> = {
   defender: 'Defender',
-  // The restart lives in this section rather than in Maintenance: what makes an
-  // admin reach for it is the « redémarrage requis » an update just raised, and
-  // the two belong next to each other in the menu.
   windows_update: 'Windows Update',
+  // The restart used to sit in the Windows Update section, on the grounds that
+  // what makes an admin reach for it is the « redémarrage requis » an update
+  // just raised. With a shutdown and a wake beside it that no longer holds:
+  // the three actions that change a poste's power state are one decision family
+  // and belong in one section. The « Redémarrage requis » badge on the Windows
+  // Update card still says when to reach for it.
+  power: 'Alimentation',
   maintenance: 'Maintenance',
   diagnostic: 'Diagnostic',
 };
@@ -138,10 +155,34 @@ export const commandActions: CommandAction[] = [
     type: 'reboot',
     label: 'Redémarrer le poste',
     icon: 'restart_alt',
-    group: 'windows_update',
+    group: 'power',
     confirm: true,
     bulk: true,
     hint: 'Le redémarrage a lieu dans 60 secondes ; l’utilisateur connecté voit un avertissement et peut enregistrer son travail. Les documents non enregistrés seront perdus.',
+  },
+  {
+    // The counterpart of the wake below, and the reason that one exists: a parc
+    // somebody switches off in the evening is a parc somebody has to switch
+    // back on in the morning.
+    type: 'shutdown',
+    label: 'Arrêter le poste',
+    icon: 'power_settings_new',
+    group: 'power',
+    confirm: true,
+    bulk: true,
+    hint: 'Le poste s’éteint dans 60 secondes ; l’utilisateur connecté voit un avertissement et peut enregistrer son travail. Les documents non enregistrés seront perdus. Le poste ne remontera plus rien tant qu’il n’aura pas été rallumé — sur place, ou par « Réveiller le poste » si son matériel le permet.',
+  },
+  {
+    // The one action the server performs itself: the poste is off, there is no
+    // agent to ask. No confirmation — a wake costs three datagrams and wakes a
+    // machine at worst, where the two above can cost somebody their work.
+    type: 'wake_on_lan',
+    label: 'Réveiller le poste (Wake-on-LAN)',
+    icon: 'wifi_tethering',
+    group: 'power',
+    confirm: false,
+    bulk: true,
+    serverSide: true,
   },
   {
     // /target:computer: l'agent tourne en LocalSystem, il n'y a pas de ruche
@@ -250,10 +291,16 @@ export interface CommandActionGroup {
   actions: CommandAction[];
 }
 
-const groupOrder: CommandGroup[] = ['defender', 'windows_update', 'maintenance', 'diagnostic'];
+const groupOrder: CommandGroup[] = [
+  'defender',
+  'windows_update',
+  'power',
+  'maintenance',
+  'diagnostic',
+];
 
 /**
- * The catalogue split into menu sections. Eighteen entries in one flat dropdown
+ * The catalogue split into menu sections. Twenty entries in one flat dropdown
  * is unusable; grouped, an admin finds "Maintenance" without reading the list.
  *
  * `bulkOnly` keeps the diagnostics out of the mass-action menu.

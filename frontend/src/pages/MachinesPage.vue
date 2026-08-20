@@ -177,6 +177,8 @@ import { useQuasar, type QTableColumn } from 'quasar';
 import {
   listAntivirusProducts,
   listMachines,
+  wakeMachines,
+  wakeNotification,
   type Machine,
   type MachineStatus,
   type WindowsUpdateFilter,
@@ -413,12 +415,28 @@ function runBulk(action: CommandAction) {
 }
 
 async function sendBulk(action: CommandAction, ids: string[]) {
+  // The wake is emitted by the server, not queued for agents that — by
+  // definition of the action — are not running. Everything around it is the
+  // same: same menu, same selection, same notification slot.
+  if (action.serverSide) {
+    await wakeBulk(ids);
+    return;
+  }
   try {
     const res = await createCommands({ type: action.type, machine_ids: ids });
     $q.notify(bulkSendNotification(res));
     selected.value = [];
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'envoi des commandes") });
+  }
+}
+
+async function wakeBulk(ids: string[]) {
+  try {
+    $q.notify(wakeNotification(await wakeMachines(ids)));
+    selected.value = [];
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec du réveil') });
   }
 }
 

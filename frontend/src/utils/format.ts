@@ -362,3 +362,17 @@ export function threatStatusColor(status: string | null | undefined): string {
       return 'grey-5';
   }
 }
+
+/**
+ * An address with the mask the poste reported for it: « 10.4.7.9 /16 ».
+ *
+ * The two belong on one line because neither answers the question alone: the
+ * address says where the poste is, the mask says which network that is — and it
+ * is the network a wake packet is broadcast on. A missing mask is simply left
+ * out rather than filled with a default: the console would otherwise show a
+ * value the poste never confirmed.
+ */
+export function ipAddressLabel(ip: string | null, prefixLength: number | null): string {
+  if (!ip) return '—';
+  return prefixLength == null ? ip : `${ip} /${prefixLength}`;
+}

@@ -71,6 +71,19 @@ export interface PendingUpdate {
 }
 
 export interface MachineDetail extends Machine {
+  /**
+   * Hardware address of the adapter holding `ip_address`, canonicalised
+   * server-side. null = never reported, and a poste without one cannot be woken:
+   * the magic packet has nothing to name.
+   */
+  mac_address: string | null;
+  /**
+   * Mask reported for `ip_address` by the poste's own adapter — 16 for a machine
+   * in 10.4.0.0/16. It is what the wake broadcasts to. null = never reported (an
+   * agent older than the feature), and the server then falls back on its
+   * configured default.
+   */
+  ip_prefix_length: number | null;
   rtp_enabled: boolean | null;
   av_enabled: boolean | null;
   signature_last_updated: string | null;
@@ -147,6 +160,71 @@ export async function revokeToken(id: string): Promise<void> {
 export async function getDuplicates(id: string): Promise<Machine[]> {
   const { data } = await api.get<Machine[]>(`/machines/${id}/duplicates`);
   return data;
+}
+
+/** What the server did about one machine when asked to wake it. */
+export interface WakeResult {
+  machine_id: string;
+  hostname: string | null;
+  ok: boolean;
+  /**
+   * The server's own sentence, in French: the destination the packet went to,
+   * or why none could be found. Shown as-is — it is the only thing that
+   * explains a poste that did not come back.
+   */
+  detail: string;
+}
+
+export interface WakeResponse {
+  results: WakeResult[];
+  woken: number;
+  failed: number;
+}
+
+/**
+ * Wake machines with a Wake-on-LAN magic packet emitted by the *server*.
+ *
+ * The one action in this console that does not go through the poste's agent,
+ * and it could not: the machine is off. It therefore has no command to queue and
+ * no result to wait for — the server emits, records the attempt in the machine's
+ * command history, and answers here with what it did.
+ *
+ * Never partially fails as a request: a poste with no known MAC comes back as a
+ * failed entry among the others, not as an HTTP error.
+ */
+export async function wakeMachines(ids: string[]): Promise<WakeResponse> {
+  const { data } = await api.post<WakeResponse>('/machines/wake', { machine_ids: ids });
+  return data;
+}
+
+/**
+ * What a wake actually did, as a notification.
+ *
+ * Three outcomes rather than two, because "rien n'a été émis" and "tout est
+ * parti" are not the same news, and neither is the mixed case an admin has to
+ * act on. Nothing here promises a poste came back: Wake-on-LAN is
+ * unacknowledged, and the console learns of a wake only when the agent reports.
+ */
+export function wakeNotification(res: WakeResponse): {
+  type: 'positive' | 'warning' | 'negative';
+  message: string;
+} {
+  if (res.woken === 0) {
+    // One poste failing has a reason worth quoting; thirty have thirty, and the
+    // detail of each is in its own line of the machine's command history.
+    const only = res.failed === 1 ? res.results.find((r) => !r.ok) : undefined;
+    return {
+      type: 'negative',
+      message: only
+        ? `Réveil impossible : ${only.detail}`
+        : `Réveil impossible sur ${res.failed} poste(s) : aucun paquet émis.`,
+    };
+  }
+  const sent = `Paquet de réveil émis vers ${res.woken} poste(s)`;
+  if (res.failed > 0) {
+    return { type: 'warning', message: `${sent} — ${res.failed} sans cible connue` };
+  }
+  return { type: 'positive', message: `${sent} — le poste remontera à son prochain démarrage` };
 }
 
 /** Merge `sourceId` into `targetId` (kept); returns the updated target. */
