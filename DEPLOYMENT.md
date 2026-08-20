@@ -3,6 +3,14 @@
 Comment lever la stack selon le niveau de TLS souhaité, quelles variables
 d'environnement renseigner côté serveur et quels paramètres pousser côté agent.
 
+Seul prérequis côté serveur : [Docker](https://www.docker.com/), disponible sur
+Windows, macOS et Linux
+([instructions d'installation](https://docs.docker.com/get-started/get-docker/)).
+Aucune connaissance de Docker n'est nécessaire pour suivre ce guide : une fois
+installé, il télécharge et démarre tous les composants — base de données,
+backend, console, reverse-proxy — avec les commandes données telles quelles
+ci-dessous, sans rien d'autre à installer sur la machine.
+
 Le TLS n'est pas une dépendance dure : l'authentification passe par des en-têtes
 HTTP, jamais par un cookie `Secure` ou une redirection. On peut donc démarrer les
 tests en HTTP pur et ajouter le certificat plus tard, sans toucher au code.
@@ -206,6 +214,10 @@ Facultatif — désactivé si `MAILGUN_DOMAIN` ou `MAILGUN_API_KEY` est vide. Ma
 sert aux notifications de supervision et au lien de réinitialisation de mot de
 passe. Sans lui, le parcours « mot de passe oublié » reste sans effet : c'est
 alors à un administrateur de réinitialiser le mot de passe depuis la console.
+
+Un compte Mailgun se crée facilement sur [mailgun.com](https://www.mailgun.com/) ;
+le domaine d'envoi et la clé API à reporter ci-dessous se trouvent ensuite dans
+son tableau de bord.
 
 **Qui reçoit quoi se règle par compte**, page « Mon compte » de la console, et un
 administrateur voit et modifie le réglage des autres comptes depuis la page

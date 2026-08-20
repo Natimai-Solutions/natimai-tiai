@@ -106,6 +106,13 @@ les binaires versionnés de chaque release restent sur la page
 
 ## Démarrage rapide
 
+Le serveur s'installe via [Docker](https://www.docker.com/), disponible sur
+Windows, macOS et Linux
+([instructions d'installation](https://docs.docker.com/get-started/get-docker/)).
+Nul besoin de connaître Docker : une fois installé, il télécharge et démarre
+tous les composants — base de données, serveur, console web — en une seule
+commande, sans rien d'autre à installer sur la machine.
+
 ```bash
 cd deploy
 cp .env.example .env        # renseigner les secrets, placer le certificat dans deploy/certs/
@@ -118,9 +125,9 @@ déploie par GPO sur les postes et s'enrôle tout seul au premier démarrage.
 Les modes TLS, les variables d'environnement du serveur et les paramètres de
 l'agent sont détaillés dans [DEPLOYMENT.md](DEPLOYMENT.md).
 
-**Prérequis** : côté serveur, Docker et un certificat émis par une AC approuvée
-des postes ; côté poste, Windows avec Defender actif et un accès réseau au
-serveur.
+**Prérequis** : côté serveur, [Docker](https://www.docker.com/) et un certificat
+émis par une AC approuvée des postes ; côté poste, Windows avec Defender actif
+et un accès réseau au serveur.
 
 ## Sécurité
 
