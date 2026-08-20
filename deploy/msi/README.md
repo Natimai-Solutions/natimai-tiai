@@ -96,7 +96,10 @@ l'ancien) — ou préférer le script de démarrage, qui met à jour tout seul.
 ```
 
 Le script installe l'outil [`wix`](https://wixtoolset.org) (dotnet tool global)
-et l'extension `WixToolset.Util.wixext` s'ils manquent.
+et l'extension `WixToolset.Util.wixext` s'ils manquent — version épinglée,
+identique à celle du CI — et accepte l'[EULA OSMF de WiX
+v7](https://wixtoolset.org/osmf/) pour l'utilisateur courant (obligatoire
+depuis août 2026, sinon toute commande `wix` échoue avec WIX7015).
 
 Note versions : Windows Installer n'accepte qu'une version numérique `x.y.z` —
 le suffixe d'un build de dev (`0.0.0-dev.abc123`) est tronqué pour le MSI, mais

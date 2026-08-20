@@ -113,6 +113,13 @@ jobs:
     runs-on: windows-latest # WiX construit les MSI de façon fiable sous Windows
     needs: agent
 
+    env:
+      # Épinglée : l'extension doit correspondre exactement à la version du CLI
+      # (sinon WIX0144), et l'eulaId `wix7` accepté ci-dessous est propre à
+      # cette version majeure. Un `latest` implicite a déjà cassé le build à
+      # l'entrée en vigueur de l'EULA OSMF de WiX v7 (août 2026).
+      WIX_VERSION: "7.0.0"
+
     steps:
       - uses: actions/checkout@v4 # pour deploy/msi/Package.wxs
 
@@ -124,11 +131,23 @@ jobs:
 
       # `update` plutôt que `install` : idempotent si l'image du runner
       # embarque déjà l'outil.
+      #
+      # WiX v7 exige d'accepter l'EULA « Open Source Maintenance Fee »
+      # (https://wixtoolset.org/osmf/) avant toute commande : sans acceptation,
+      # `extension add` échoue (WIX7015) et le build ne trouve ensuite pas
+      # l'extension (WIX0144). `wix eula accept` vaut pour tout le job.
+      #
+      # `shell: bash` et non le PowerShell par défaut : bash est lancé avec
+      # `-e`, donc l'échec d'une commande intermédiaire fait échouer l'étape —
+      # en PowerShell, seul le code de sortie de la dernière commande compte,
+      # ce qui a déjà masqué un `extension add` en échec.
       - name: Installer WiX
+        shell: bash
         run: |
-          dotnet tool update --global wix
-          wix extension add --global WixToolset.Util.wixext
-          wix --version
+          dotnet tool update --global wix --version "${WIX_VERSION}"
+          wix eula accept wix7
+          wix extension add --global "WixToolset.Util.wixext/${WIX_VERSION}"
+          wix extension list --global
 
       # Même dualité de noms que pour les .exe : versionné + fixe pour le lien
       # `releases/latest/download/...` du README.
@@ -148,7 +167,7 @@ jobs:
             esac
             echo "→ msi windows/${arch}"
             wix build deploy/msi/Package.wxs \
-              -ext WixToolset.Util.wixext \
+              -ext "WixToolset.Util.wixext/${WIX_VERSION}" \
               -arch "${wix_arch}" \
               -d ProductVersion="${msi_version}" \
               -d AgentExe="dist/tiai-agent-${VERSION}-windows-${arch}.exe" \
