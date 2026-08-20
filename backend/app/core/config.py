@@ -88,14 +88,16 @@ class Settings(BaseSettings):
     REDIS_SERVER: str = "redis"
     REDIS_PORT: int = 6379
 
-    # --- Mailgun (alert e-mails) ---
+    # --- Mailgun (outgoing e-mail) ---
+    # Who receives what is not configured here: it is a per-account setting read
+    # from the ``users`` table (``EmailPreference``). These say how mail leaves,
+    # never to whom.
     MAILGUN_API_BASE_URL: str = "https://api.mailgun.net/v3"
     MAILGUN_DOMAIN: str | None = None
     MAILGUN_API_KEY: str | None = None
     MAILGUN_FROM_EMAIL: str | None = None
     MAILGUN_FROM_NAME: str | None = "Tiai"
     MAILGUN_TIMEOUT_SECONDS: int = 10
-    ALERT_RECIPIENTS: Annotated[list[str] | str, BeforeValidator(parse_list)] = []
 
     @computed_field  # type: ignore[prop-decorator]
     @property

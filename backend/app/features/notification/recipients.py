@@ -1,13 +1,14 @@
 """Who receives which notification, read from the accounts themselves.
 
-Recipients are console accounts and their chosen cadence, not the static
-``ALERT_RECIPIENTS`` list: a supervision console already knows who its operators
-are, and an address in an environment variable cannot be turned off by the
-person receiving the mail.
+The recipients of a supervision message are the console's own operators and the
+cadence each of them chose — there is no configured address list beside them.
+A console already knows who its operators are, and an address held in an
+environment variable cannot be turned off by the person receiving the mail.
 
-``ALERT_RECIPIENTS`` survives as a fallback for a deployment that has not
-created its accounts yet — a fresh install whose only user is the seeded admin
-still has someone to tell.
+Nobody on a given cadence therefore means nobody is mailed, which is an answer
+and not a gap: a fresh install seeds its first admin (``scripts/seed_admin``)
+with the daily digest as the default, so an unattended deployment is watched
+from its first morning — at a real address, changeable from the console.
 """
 
 from collections.abc import Iterable
@@ -15,7 +16,6 @@ from collections.abc import Iterable
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.config import settings
 from app.features.user.models import EmailPreference, User
 
 
@@ -37,21 +37,3 @@ async def recipients_for(
         .order_by(col(User.email))
     )
     return list(rows.all())
-
-
-async def has_active_accounts(session: AsyncSession) -> bool:
-    """Whether any active console account exists.
-
-    Separates "nobody has been asked yet" from "everybody answered no" — which
-    is the difference between a deployment that needs the configured fallback
-    and a team that has deliberately turned the mail off.
-    """
-    found = await session.exec(
-        select(User.id).where(col(User.is_active).is_(True)).limit(1)
-    )
-    return found.first() is not None
-
-
-def fallback_recipients() -> list[str]:
-    """The configured alert addresses, for a deployment with no accounts yet."""
-    return list(settings.ALERT_RECIPIENTS)

@@ -31,11 +31,7 @@ from app.features.machine.status import (
 )
 from app.features.machine.status import WindowsUpdateFilter as WUFilter
 from app.features.notification.mailgun import send_email
-from app.features.notification.recipients import (
-    fallback_recipients,
-    has_active_accounts,
-    recipients_for,
-)
+from app.features.notification.recipients import recipients_for
 from app.features.threat.models import Threat
 from app.features.user.models import EmailPreference
 from app.features.windows_update.models import WindowsUpdate
@@ -330,18 +326,10 @@ async def send_daily_digest(session: AsyncSession) -> int:
         else []
     )
     recipients = list(dict.fromkeys([*wants_daily, *wants_events]))
-    if not recipients and not await has_active_accounts(session):
-        # Nobody to ask *at all* — a deployment whose accounts are not created
-        # yet — so fall back on the configured addresses rather than leave it
-        # silently unmonitored.
-        #
-        # The condition is "no account exists", deliberately narrower than "no
-        # recipient today": a team that has all chosen « aucun e-mail » has
-        # answered the question, and a fallback firing there would send a digest
-        # nobody asked for, from a setting no page of the console can turn off.
-        recipients = fallback_recipients()
     if not recipients:
-        logger.info("Daily digest: no recipient configured, nothing sent")
+        # Not a misconfiguration to work around: either nobody asked for a
+        # digest, or nobody had anything to hear about today. Both are answers.
+        logger.info("Daily digest: no recipient today, nothing sent")
         return 0
 
     subject, text = render_digest(digest)

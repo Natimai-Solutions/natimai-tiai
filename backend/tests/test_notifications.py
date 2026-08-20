@@ -38,19 +38,23 @@ def _configure_mailgun(monkeypatch) -> None:
     monkeypatch.setattr(settings, "MAILGUN_DOMAIN", "mg.example.com")
     monkeypatch.setattr(settings, "MAILGUN_API_KEY", "key-123")
     monkeypatch.setattr(settings, "MAILGUN_FROM_EMAIL", "tiai@example.com")
-    monkeypatch.setattr(settings, "ALERT_RECIPIENTS", ["ops@example.com"])
 
 
 async def test_send_email_noop_when_disabled(monkeypatch):
     monkeypatch.setattr(settings, "MAILGUN_DOMAIN", None)
     monkeypatch.setattr(settings, "MAILGUN_API_KEY", None)
-    assert await mailgun.send_email("s", "t") is False
+    assert await mailgun.send_email("s", "t", to=["a@example.com"]) is False
 
 
 async def test_send_email_noop_without_recipients(monkeypatch):
+    """An empty recipient list is a no-op, never a mail to somebody else.
+
+    There is no configured address to fall back on: who hears from the console
+    is a per-account setting, and a client able to substitute an address of its
+    own would be a client able to mail someone nobody chose.
+    """
     _configure_mailgun(monkeypatch)
-    monkeypatch.setattr(settings, "ALERT_RECIPIENTS", [])
-    assert await mailgun.send_email("s", "t") is False
+    assert await mailgun.send_email("s", "t", to=[]) is False
 
 
 async def test_send_email_posts_to_mailgun(monkeypatch):
@@ -79,4 +83,4 @@ async def test_send_email_propagates_http_error(monkeypatch):
     monkeypatch.setattr(mailgun.httpx, "AsyncClient", _Failing)
 
     with pytest.raises(RuntimeError):
-        await mailgun.send_email("s", "t")
+        await mailgun.send_email("s", "t", to=["a@example.com"])
