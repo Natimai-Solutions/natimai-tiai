@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Installateur MSI de l'agent Tia'i (WiX v4+).
+
+  Construit par `wix build` (CI : .github/workflows/release.yml ; en local :
+  deploy/msi/build.ps1) avec deux variables préprocesseur :
+
+    -d ProductVersion=<x.y.z>   version MSI (numérique pure : un suffixe de
+                                pré-version type `-dev.abc123` est refusé par
+                                Windows Installer — le workflow le retire)
+    -d AgentExe=<chemin>        binaire tiai-agent.exe à empaqueter (déjà
+                                compilé avec la version injectée par ldflags)
+
+  et `-arch x64` ou `-arch arm64` — un MSI par architecture, même UpgradeCode :
+  deux paquets ne coexistent jamais sur un poste, l'un remplace l'autre.
+
+  Ce que fait le paquet :
+    - copie tiai-agent.exe dans %ProgramFiles%\Tiai ;
+    - enregistre le service TiaiAgent (démarrage automatique, relance sur
+      échec 15 s — mêmes réglages que `tiai-agent install`) et le démarre ;
+    - écrit dans HKLM\SOFTWARE\Tiai les valeurs passées en propriétés
+      (APIBASEURL, ENROLLMENTSECRET, …) — celles que l'agent lit déjà
+      (agent/internal/config/registry_windows.go).
+
+  Les valeurs registre sont marquées Permanent : une mise à jour ou une
+  désinstallation ne les retire pas, donc un upgrade SANS repasser les
+  propriétés conserve la configuration en place. %ProgramData%\Tiai (token
+  DPAPI, logs) n'est pas touché non plus : un poste réinstallé garde son
+  enrôlement.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <?ifndef ProductVersion ?>
+    <?define ProductVersion = "0.0.0" ?>
+  <?endif?>
+  <?ifndef AgentExe ?>
+    <?define AgentExe = "..\..\dist\tiai-agent.exe" ?>
+  <?endif?>
+
+  <Package Name="Tia'i Agent"
+           Manufacturer="Natimai Solutions"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="023DE8A0-4D2C-49B3-9C8F-6DB0A55DDB00"
+           Language="1033"
+           InstallerVersion="500"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <SummaryInformation Description="Agent Tia'i — supervision du parc Windows" />
+
+    <!-- AllowSameVersionUpgrades : les builds de dev partagent la version MSI
+         0.0.0, il faut pouvoir les réinstaller l'un sur l'autre. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Une version plus récente de l'agent Tia'i est déjà installée." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Natimai-Solutions/natimai-tiai" />
+
+    <!-- Secure : requis pour qu'une propriété passée en ligne de commande
+         traverse l'élévation (msiexec sous UAC, déploiement GPO).
+         Hidden sur le secret : ne pas le laisser en clair dans les journaux
+         MSI (msiexec /l*v). -->
+    <Property Id="APIBASEURL" Secure="yes" />
+    <Property Id="ENROLLMENTSECRET" Secure="yes" Hidden="yes" />
+    <Property Id="LOGLEVEL" Secure="yes" />
+    <Property Id="HEARTBEATINTERVALSECONDS" Secure="yes" />
+    <Property Id="WUCOLLECTINTERVALSECONDS" Secure="yes" />
+    <Property Id="WUINSTALLTIMEOUTSECONDS" Secure="yes" />
+    <!-- 1 ou 0 (DWORD), pas true/false : voir ReportSessionUsername dans le
+         README de l'agent — 0 = remonter la présence d'une session, pas le nom. -->
+    <Property Id="REPORTSESSIONUSERNAME" Secure="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Tiai" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="Agent" Directory="INSTALLFOLDER">
+
+      <Component Id="AgentExe" Guid="BC1E88C9-9E8F-4EF6-80BD-766167DE3A60">
+        <File Id="AgentExeFile" Name="tiai-agent.exe" Source="$(var.AgentExe)" KeyPath="yes" />
+
+        <!-- `run` sans chemin de config : l'agent retombe sur son défaut
+             (%ProgramData%\Tiai\config.yaml, facultatif) + le registre —
+             exactement ce que `tiai-agent install` enregistre. -->
+        <ServiceInstall Id="AgentService"
+                        Name="TiaiAgent"
+                        DisplayName="Tiai Agent"
+                        Description="Reports Microsoft Defender state to the Tiai server and executes its commands."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Arguments="run">
+          <!-- Relance sur échec, remise à zéro du compteur après 24 h — les
+               réglages de service.Install (service_windows.go). -->
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="none"
+                              RestartServiceDelayInSeconds="15"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+
+        <!-- Deux éléments, car Wait diffère : l'arrêt doit être attendu (le
+             fichier est verrouillé tant que le processus vit), mais pas le
+             démarrage — sans ApiBaseURL (posé plus tard par GPO, par exemple)
+             l'agent sort aussitôt, et l'installation ne doit pas échouer pour
+             autant : le service repartira au prochain démarrage du poste. -->
+        <ServiceControl Id="AgentServiceStop" Name="TiaiAgent" Stop="both" Remove="uninstall" Wait="yes" />
+        <ServiceControl Id="AgentServiceStart" Name="TiaiAgent" Start="install" Wait="no" />
+      </Component>
+
+      <!-- Un composant par valeur registre : chacun n'est installé que si sa
+           propriété est fournie, et Permanent les laisse en place à la
+           désinstallation comme au passage de version. -->
+      <Component Id="RegApiBaseUrl" Guid="3123C131-7FC9-46DF-8706-B86CDAFF3C60"
+                 Permanent="yes" Condition="APIBASEURL">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="ApiBaseURL"
+                       Type="string" Value="[APIBASEURL]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegEnrollmentSecret" Guid="9A9FEB38-7EC3-41B3-A82A-B8B2D2C02E8E"
+                 Permanent="yes" Condition="ENROLLMENTSECRET">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="EnrollmentSecret"
+                       Type="string" Value="[ENROLLMENTSECRET]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegLogLevel" Guid="05233ECA-926C-40A1-9E0F-8E026D890E2A"
+                 Permanent="yes" Condition="LOGLEVEL">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="LogLevel"
+                       Type="string" Value="[LOGLEVEL]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegHeartbeatInterval" Guid="BDB675B2-F873-4793-8824-BBE07C3318F5"
+                 Permanent="yes" Condition="HEARTBEATINTERVALSECONDS">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="HeartbeatIntervalSeconds"
+                       Type="integer" Value="[HEARTBEATINTERVALSECONDS]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegWUCollectInterval" Guid="D2990227-8702-4783-B893-59016B4C24D0"
+                 Permanent="yes" Condition="WUCOLLECTINTERVALSECONDS">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="WUCollectIntervalSeconds"
+                       Type="integer" Value="[WUCOLLECTINTERVALSECONDS]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegWUInstallTimeout" Guid="20A5C020-1863-43FE-B050-359FD318D787"
+                 Permanent="yes" Condition="WUINSTALLTIMEOUTSECONDS">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="WUInstallTimeoutSeconds"
+                       Type="integer" Value="[WUINSTALLTIMEOUTSECONDS]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegReportSessionUsername" Guid="E5824CAE-D846-44F9-8E9E-8CB45BB6E7C9"
+                 Permanent="yes" Condition="REPORTSESSIONUSERNAME">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="ReportSessionUsername"
+                       Type="integer" Value="[REPORTSESSIONUSERNAME]" KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Agent Tia'i">
+      <ComponentGroupRef Id="Agent" />
+    </Feature>
+
+  </Package>
+</Wix>

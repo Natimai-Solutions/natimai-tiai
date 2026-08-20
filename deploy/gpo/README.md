@@ -1,9 +1,11 @@
 # Déploiement de l'agent par GPO
 
-L'agent est publié en `.exe` nu (pas de MSI), donc *Software Installation* n'est
-pas utilisable : le vecteur est un **script de démarrage ordinateur**, exécuté
-par `LocalSystem` avant ouverture de session — ce qu'il faut pour enregistrer le
-service et pour DPAPI en scope machine.
+Le vecteur documenté ici est un **script de démarrage ordinateur**, exécuté par
+`LocalSystem` avant ouverture de session — ce qu'il faut pour enregistrer le
+service et pour DPAPI en scope machine — qui gère aussi la mise à jour du
+binaire et la réapplication des réglages à chaque boot. Les releases publient
+également un installateur `.msi` pour qui préfère *Software Installation* ou
+une pose manuelle : voir [deploy/msi/](../msi/README.md).
 
 [`Install-TiaiAgent.ps1`](Install-TiaiAgent.ps1) est idempotent : il tourne à
 chaque démarrage, compare le binaire du partage à celui installé (SHA-256) et ne

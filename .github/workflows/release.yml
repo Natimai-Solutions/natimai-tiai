@@ -1,11 +1,12 @@
-# Publie les binaires Windows de l'agent sur la page Releases du dépôt.
+# Publie les binaires Windows de l'agent (.exe et installateur .msi) sur la
+# page Releases du dépôt.
 #
 # Déclenchement :
-#   - tag `v*` poussé sur le dépôt  → crée la release et y attache les .exe ;
+#   - tag `v*` poussé sur le dépôt  → crée la release et y attache .exe + .msi ;
 #   - release publiée depuis l'interface web (quel que soit le nom du tag)
-#     → compile et attache les .exe à cette release ;
+#     → compile et attache les binaires à cette release ;
 #   - lancement manuel (Actions → Release → Run workflow) → produit les mêmes
-#     binaires en artefact de build, sans créer de release.
+#     binaires en artefacts de build, sans créer de release.
 #
 # Publier une version :
 #   git tag -a v0.2.0 -m "Agent v0.2.0" && git push origin v0.2.0
@@ -13,6 +14,11 @@
 # La version du tag est injectée dans le binaire (`-X ...agent.Version`), donc
 # `tiai-agent.exe version` et le champ `agent_version` des heartbeats la
 # reflètent — pas besoin de modifier le code source pour publier.
+#
+# Trois jobs : les .exe se cross-compilent sur Linux, mais le .msi est
+# construit sur un runner Windows (WiX y est pleinement supporté), et la
+# publication attend les deux pour attacher un jeu complet — binaires,
+# installateurs et empreintes — ou rien.
 name: Release
 
 on:
@@ -38,11 +44,11 @@ jobs:
   agent:
     name: Agent Windows (.exe)
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # --generate-notes a besoin de l'historique des tags
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -68,6 +74,10 @@ jobs:
 
       # Go cross-compile sans toolchain externe : les deux cibles en quelques
       # secondes, dans le même job (pas d'aller-retour par artefacts).
+      #
+      # Chaque binaire existe sous deux noms : versionné (archivage) et fixe,
+      # car le lien `releases/latest/download/<nom>` du README ne fonctionne
+      # qu'avec un nom d'asset stable d'une version à l'autre.
       - name: Build
         working-directory: agent
         env:
@@ -80,9 +90,12 @@ jobs:
               -trimpath \
               -ldflags "-s -w -X tiai/agent/internal/agent.Version=${VERSION}" \
               -o "../dist/tiai-agent-${VERSION}-windows-${arch}.exe" .
+            cp "../dist/tiai-agent-${VERSION}-windows-${arch}.exe" \
+               "../dist/tiai-agent-windows-${arch}.exe"
           done
 
-      # Permet de vérifier l'intégrité du binaire avant déploiement GPO.
+      # Permet de vérifier l'intégrité du binaire avant déploiement GPO. Les
+      # empreintes définitives (exe + msi) sont recalculées à la publication.
       - name: Empreintes SHA-256
         working-directory: dist
         run: |
@@ -91,26 +104,105 @@ jobs:
       - name: Artefact de build
         uses: actions/upload-artifact@v4
         with:
-          name: tiai-agent-windows-${{ steps.version.outputs.version }}
+          name: tiai-agent-exe-${{ steps.version.outputs.version }}
           path: dist/
           if-no-files-found: error
+
+  msi:
+    name: Installateur Windows (.msi)
+    runs-on: windows-latest # WiX construit les MSI de façon fiable sous Windows
+    needs: agent
+
+    steps:
+      - uses: actions/checkout@v4 # pour deploy/msi/Package.wxs
+
+      - name: Récupérer les .exe
+        uses: actions/download-artifact@v4
+        with:
+          name: tiai-agent-exe-${{ needs.agent.outputs.version }}
+          path: dist
+
+      # `update` plutôt que `install` : idempotent si l'image du runner
+      # embarque déjà l'outil.
+      - name: Installer WiX
+        run: |
+          dotnet tool update --global wix
+          wix extension add --global WixToolset.Util.wixext
+          wix --version
+
+      # Même dualité de noms que pour les .exe : versionné + fixe pour le lien
+      # `releases/latest/download/...` du README.
+      - name: Build MSI
+        shell: bash
+        env:
+          VERSION: ${{ needs.agent.outputs.version }}
+        run: |
+          # Windows Installer exige une version numérique x.y.z : on tronque le
+          # suffixe des builds de dev (0.0.0-dev.abc123 → 0.0.0). La version
+          # complète reste dans le binaire et dans le nom du fichier.
+          msi_version="${VERSION%%-*}"
+          for arch in amd64 arm64; do
+            case "${arch}" in
+              amd64) wix_arch=x64 ;;
+              *)     wix_arch="${arch}" ;;
+            esac
+            echo "→ msi windows/${arch}"
+            wix build deploy/msi/Package.wxs \
+              -ext WixToolset.Util.wixext \
+              -arch "${wix_arch}" \
+              -d ProductVersion="${msi_version}" \
+              -d AgentExe="dist/tiai-agent-${VERSION}-windows-${arch}.exe" \
+              -o "dist/tiai-agent-${VERSION}-windows-${arch}.msi"
+            cp "dist/tiai-agent-${VERSION}-windows-${arch}.msi" \
+               "dist/tiai-agent-windows-${arch}.msi"
+          done
+
+      - name: Artefact de build
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiai-agent-msi-${{ needs.agent.outputs.version }}
+          path: dist/*.msi
+          if-no-files-found: error
+
+  publish:
+    name: Publier la release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    needs: [agent, msi]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # --generate-notes a besoin de l'historique des tags
+
+      - name: Rassembler les binaires
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tiai-agent-*-${{ needs.agent.outputs.version }}
+          merge-multiple: true
+          path: dist
+
+      # Recalculées ici pour couvrir exe et msi dans un seul fichier.
+      - name: Empreintes SHA-256
+        working-directory: dist
+        run: |
+          sha256sum *.exe *.msi | tee SHA256SUMS.txt
 
       # Une release peut déjà exister pour ce tag : créée depuis l'interface web
       # (ce qui pousse le tag et déclenche donc ce workflow), ou laissée par une
       # exécution précédente que l'on rejoue. `gh release create` échoue dans ce
       # cas — on téléverse alors dans la release existante.
       - name: Publier la release
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             echo "Release ${GITHUB_REF_NAME} déjà présente → mise à jour des binaires."
             gh release upload "${GITHUB_REF_NAME}" \
-              dist/*.exe dist/SHA256SUMS.txt --clobber
+              dist/*.exe dist/*.msi dist/SHA256SUMS.txt --clobber
           else
             gh release create "${GITHUB_REF_NAME}" \
               --title "Tiai ${GITHUB_REF_NAME}" \
               --generate-notes \
-              dist/*.exe dist/SHA256SUMS.txt
+              dist/*.exe dist/*.msi dist/SHA256SUMS.txt
           fi
