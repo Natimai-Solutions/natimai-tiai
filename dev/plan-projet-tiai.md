@@ -544,7 +544,7 @@ Cadrée et livrée : cf. `plan-phase2-windows-update.md`. Réutilise l'agent et 
 - [x] Comparaison timing-safe du secret d'enrôlement (`hmac.compare_digest`)
 - [x] En-têtes de sécurité HTTP posés par Caddy (HSTS, CSP, `nosniff`, `frame-ancestors 'none'`, `Referrer-Policy`) — CSP à valider sur la stack déployée
 - [x] Logs agent : fichier `agent.log` (rotation simple, `.old` > 5 Mio) + niveau `log_level` INFO/DEBUG enfin branché ; chemin nominal loggé (démarrage, identité, enrôlement, heartbeat, commandes + durée) — indispensable en mode service où stderr est perdu ; validé sur poste réel contre la stack dev (enrôlement + heartbeats visibles dans le fichier et machine visible console)
-- [x] Notifications e-mail branchées : cadence par compte (aucun / alerte immédiate / résumé si évènement / résumé quotidien, défaut résumé quotidien), digest posé sur un cron ARQ quotidien, alerte immédiate émise en tâche de fond depuis le heartbeat sur les seules détections *nouvelles* (`xmax = 0`) et récentes ; destinataires lus dans `users`, `ALERT_RECIPIENTS` devenu repli
+- [x] Notifications e-mail branchées : cadence par compte (aucun / alerte immédiate / résumé si évènement / résumé quotidien, défaut résumé quotidien), digest posé sur un cron ARQ quotidien, alerte immédiate émise en tâche de fond depuis le heartbeat sur les seules détections *nouvelles* (`xmax = 0`) et récentes ; destinataires lus dans `users` — `ALERT_RECIPIENTS` supprimé, la console n'a plus de liste de diffusion hors base
 - [ ] Journal d'audit ; rotation tokens ; rate-limiting
 
 **M6 — Packaging & GPO** · ⬜ à faire

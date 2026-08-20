@@ -222,13 +222,19 @@ Le résumé est envoyé par le worker ARQ ; les alertes immédiates partent du
 serveur d'API, en tâche de fond, une fois le heartbeat répondu — une panne
 Mailgun ne fait jamais échouer la remontée d'un poste.
 
+Il n'y a **aucune liste de destinataires dans la configuration** : le courrier
+ne part qu'aux comptes de la console, selon la cadence de chacun. Une nouvelle
+installation n'est pas pour autant sans surveillance — le premier admin, créé au
+démarrage à partir de `FIRST_ADMIN_EMAIL`, arrive sur le résumé quotidien, à une
+adresse réelle et modifiable depuis la console.
+
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `MAILGUN_API_BASE_URL` | `https://api.mailgun.net/v3` | |
 | `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` | — | Vides = aucun e-mail n'est envoyé |
 | `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` | — / `Tiai` | |
 | `MAILGUN_TIMEOUT_SECONDS` | `10` | |
-| `ALERT_RECIPIENTS` | *(vide)* | **Repli seulement**, liste séparée par des virgules : sert quand aucun compte n'a demandé de résumé, pour qu'une installation neuve ne soit pas silencieusement sans surveillance |
+| `MAILGUN_PROXY_URL` | — | Proxy HTTP sortant pour le seul client Mailgun (ex. `http://10.0.0.1:3128`), utile derrière le proxy d'un établissement. Volontairement distinct de `HTTP_PROXY`/`HTTPS_PROXY`, que tous les processus honoreraient — Caddy compris |
 | `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place |
 | `THREAT_ALERT_MAX_AGE_HOURS` | `24` | Une détection plus ancienne ne déclenche pas d'alerte immédiate : un poste qui s'enrôle remonte tout l'historique Defender d'un coup |
 | `NOTIFICATION_MAX_ITEMS` | `10` | Postes détaillés dans un e-mail avant « … et N autres » |

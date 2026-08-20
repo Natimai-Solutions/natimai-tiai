@@ -1,7 +1,8 @@
 """Transactional e-mail for console accounts (password reset).
 
-Sent through the same Mailgun client as supervision alerts; only the recipient
-differs (the account holder rather than ``ALERT_RECIPIENTS``).
+Sent through the same Mailgun client as the supervision notifications, and the
+only mail here that ignores the recipient's cadence: it answers a request the
+account holder has just made, so « aucun e-mail » does not suppress it.
 """
 
 import logging

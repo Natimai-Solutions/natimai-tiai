@@ -15,7 +15,7 @@
       >
         <template #append><q-icon name="search" /></template>
       </q-input>
-      <q-input
+      <!--< q-input
         v-model="domain"
         dense
         outlined
@@ -24,7 +24,7 @@
         class="col-auto"
         style="width: 160px"
         @update:model-value="pushQuery"
-      />
+      /> -->
       <q-select
         v-model="antivirus"
         :options="antivirusOptions"
@@ -262,7 +262,7 @@ const pagination = ref({
 // the console can know in advance. The count sits in the label so the dropdown
 // doubles as an inventory of a mixed parc.
 const antivirusOptions = ref<{ label: string; value: string | null }[]>([
-  { label: 'Tous antivirus', value: null },
+  { label: 'Tous les antivirus', value: null },
 ]);
 
 // « Antivirus » in the labels, not just « à jour » : since the Windows Update
@@ -276,7 +276,7 @@ const statusOptions = [
 ];
 
 const wuOptions = [
-  { label: 'Windows update : Tous statuts', value: null },
+  { label: 'Windows Update : Tous statuts', value: null },
   { label: 'MAJ Windows requises', value: 'pending' },
   { label: 'Redémarrage requis', value: 'reboot_required' },
 ];

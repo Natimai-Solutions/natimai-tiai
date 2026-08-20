@@ -216,31 +216,14 @@ async def test_digest_is_addressed_one_recipient_at_a_time(db_session, monkeypat
     assert [call["to"] for call in outbox.sent] == [["a@test.local"], ["b@test.local"]]
 
 
-async def test_digest_falls_back_when_no_account_exists_yet(db_session, monkeypatch):
-    """A deployment whose accounts are not created yet is not left unwatched."""
-    from app.features.notification import digest
+async def test_a_console_with_no_account_mails_nobody(db_session, monkeypatch):
+    """No account, no recipient — and no configured address to substitute.
 
-    monkeypatch.setattr(settings, "ALERT_RECIPIENTS", ["ops@example.com"])
-
-    outbox = _Outbox()
-    monkeypatch.setattr(digest, "send_email", outbox)
-
-    assert await digest.send_daily_digest(db_session) == 1
-    assert outbox.recipients == ["ops@example.com"]
-
-
-async def test_opting_everyone_out_really_stops_the_mail(db_session, monkeypatch):
-    """« Aucun e-mail » must not be undone by the configured fallback.
-
-    The fallback exists for a console with no accounts at all. A team that has
-    every account on « aucun e-mail » has answered the question — and there is
-    no page anywhere that could turn off a fallback firing over their choice.
+    A console in this state is one nobody can log into; the seeded first admin
+    (``scripts/seed_admin``) is what keeps a real deployment watched, on the
+    daily digest its default gives it.
     """
     from app.features.notification import digest
-
-    await _user(db_session, "quiet@test.local", "none")
-    await _user(db_session, "also-quiet@test.local", "immediate")
-    monkeypatch.setattr(settings, "ALERT_RECIPIENTS", ["ops@example.com"])
 
     outbox = _Outbox()
     monkeypatch.setattr(digest, "send_email", outbox)
@@ -249,16 +232,30 @@ async def test_opting_everyone_out_really_stops_the_mail(db_session, monkeypatch
     assert outbox.sent == []
 
 
-async def test_a_quiet_day_does_not_wake_the_fallback(db_session, monkeypatch):
-    """An events-only account on a calm day is still an account.
+async def test_opting_everyone_out_really_stops_the_mail(db_session, monkeypatch):
+    """« Aucun e-mail » is final: nothing anywhere can undo the choice.
 
-    Nothing goes out, and nothing may substitute the configured addresses for
-    the recipient who simply had nothing to hear about today.
+    A team that has every account on « aucun e-mail » (or on the immediate
+    alerts alone) has answered the question, and no setting outside the console
+    may keep mailing them a digest they turned off.
     """
     from app.features.notification import digest
 
+    await _user(db_session, "quiet@test.local", "none")
+    await _user(db_session, "also-quiet@test.local", "immediate")
+
+    outbox = _Outbox()
+    monkeypatch.setattr(digest, "send_email", outbox)
+
+    assert await digest.send_daily_digest(db_session) == 0
+    assert outbox.sent == []
+
+
+async def test_a_quiet_day_simply_sends_nothing(db_session, monkeypatch):
+    """An events-only account on a calm day hears nothing — as it asked."""
+    from app.features.notification import digest
+
     await _user(db_session, "events@test.local", "digest_events")
-    monkeypatch.setattr(settings, "ALERT_RECIPIENTS", ["ops@example.com"])
 
     outbox = _Outbox()
     monkeypatch.setattr(digest, "send_email", outbox)
