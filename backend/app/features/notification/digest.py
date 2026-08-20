@@ -30,7 +30,7 @@ from app.features.machine.status import (
     windows_update_clause,
 )
 from app.features.machine.status import WindowsUpdateFilter as WUFilter
-from app.features.notification.mailgun import send_email
+from app.features.notification.outbox import queue_email
 from app.features.notification.recipients import recipients_for
 from app.features.threat.models import Threat
 from app.features.user.models import EmailPreference
@@ -311,11 +311,16 @@ def render_digest(digest: Digest) -> tuple[str, str]:
 
 
 async def send_daily_digest(session: AsyncSession) -> int:
-    """Mail the digest to the accounts that asked for one. Returns how many went out.
+    """Queue the digest for the accounts that asked for one. Returns how many.
 
     One message per recipient rather than one message to all of them: the two
     cadences do not receive the same days, and putting every operator's address
     in a shared ``To:`` would hand each of them the console's user list.
+
+    Queued, not sent: the rows land in the outbox and the worker's drain sends
+    them — with retries, so a Mailgun or proxy incident delays the digest
+    instead of losing it. The body is a dated snapshot ("État du parc au …"),
+    so a retried digest stays truthful about the morning it describes.
     """
     digest = await build_digest(session)
 
@@ -333,14 +338,10 @@ async def send_daily_digest(session: AsyncSession) -> int:
         return 0
 
     subject, text = render_digest(digest)
-    sent = 0
+    queued = 0
     for address in recipients:
-        try:
-            if await send_email(subject=subject, text=text, to=[address]):
-                sent += 1
-        except Exception:
-            # One address failing must not cost the others their digest: a
-            # bounced or malformed recipient is a per-address problem.
-            logger.exception("Daily digest could not be sent to %s", address)
-    logger.info("Daily digest sent to %d/%d recipient(s)", sent, len(recipients))
-    return sent
+        if queue_email(session, to=address, subject=subject, text=text):
+            queued += 1
+    await session.commit()
+    logger.info("Daily digest queued for %d/%d recipient(s)", queued, len(recipients))
+    return queued

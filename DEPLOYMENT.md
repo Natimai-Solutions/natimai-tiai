@@ -190,7 +190,6 @@ Il n'est jamais committé.
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | |
 | `POSTGRES_POOL_SIZE` / `POSTGRES_MAX_OVERFLOW` / `POSTGRES_POOL_TIMEOUT` | `20` / `10` / `30` | Pool async partagé backend + worker |
-| `REDIS_SERVER` / `REDIS_PORT` | `redis` / `6379` | File ARQ ; forcés par le compose |
 | `SIGNATURE_MAX_AGE_DAYS` | `3` | Seuil « signatures à jour » |
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif » |
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
@@ -230,9 +229,11 @@ Utilisateurs. Quatre cadences :
 | Résumé quotidien, seulement s'il y a du nouveau | un e-mail les jours où il y a à traiter : menace active, mise à jour critique ou importante en attente, poste à vérifier |
 | Résumé quotidien, tous les jours *(défaut)* | un e-mail chaque matin, même sans incident : état du parc, antivirus périmés, postes à mettre à jour |
 
-Le résumé est envoyé par le worker ARQ ; les alertes immédiates partent du
-serveur d'API, en tâche de fond, une fois le heartbeat répondu — une panne
-Mailgun ne fait jamais échouer la remontée d'un poste.
+Chaque e-mail est d'abord une ligne dans la table `email_outbox`, écrite dans la
+même transaction que ce qui le motive — détection, résumé, lien de
+réinitialisation — puis envoyée par le worker, avec de nouvelles tentatives
+espacées en cas d'échec. Une panne de Mailgun ou du proxy sortant retarde donc
+un e-mail au lieu de le perdre, et ne fait jamais échouer la remontée d'un poste.
 
 Il n'y a **aucune liste de destinataires dans la configuration** : le courrier
 ne part qu'aux comptes de la console, selon la cadence de chacun. Une nouvelle
@@ -250,6 +251,8 @@ adresse réelle et modifiable depuis la console.
 | `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place |
 | `THREAT_ALERT_MAX_AGE_HOURS` | `24` | Une détection plus ancienne ne déclenche pas d'alerte immédiate : un poste qui s'enrôle remonte tout l'historique Defender d'un coup |
 | `NOTIFICATION_MAX_ITEMS` | `10` | Postes détaillés dans un e-mail avant « … et N autres » |
+| `EMAIL_MAX_ATTEMPTS` | `20` | Tentatives d'envoi avant abandon d'un e-mail (délai doublé de 1 min à 1 h entre chacune, soit ≈ 14 h — de quoi traverser une nuit de panne du proxy) |
+| `EMAIL_OUTBOX_RETENTION_DAYS` | `30` | Durée de conservation des lignes réglées (envoyées ou abandonnées) de `email_outbox`, pour consultation |
 
 `CONSOLE_BASE_URL` mérite d'être renseignée ici aussi : c'est ce qui met dans
 chaque e-mail le lien vers la fiche du poste concerné.
@@ -333,9 +336,9 @@ echo "net.ipv4.conf.<iface>.bc_forwarding = 1" | sudo tee /etc/sysctl.d/99-tiai-
 
 L'alternative est de donner au service `backend` le réseau de l'hôte
 (`network_mode: host`) : la pile réseau du conteneur devient celle de l'hôte et
-la question disparaît, mais `db` et `redis` ne sont plus joignables par leur nom
-de service et le proxy Caddy est à revoir. À réserver aux déploiements qui ne
-peuvent pas toucher aux `sysctl`.
+la question disparaît, mais `db` n'est plus joignable par son nom de service et
+le proxy Caddy est à revoir. À réserver aux déploiements qui ne peuvent pas
+toucher aux `sysctl`.
 
 **Vérifier**, depuis une machine du même segment que les postes, pendant qu'on
 appuie sur « Réveiller le poste » dans la console :

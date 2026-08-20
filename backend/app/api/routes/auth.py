@@ -142,12 +142,11 @@ async def request_password_reset(
     if user is None or not user.is_active:
         return
     token = await crud.create_reset_token(session, user)
-    # Read before committing: the session expires instances on commit
-    # (expire_on_commit default), and touching an expired attribute afterwards
-    # would lazy-load synchronously inside async — MissingGreenlet.
-    email = user.email
+    # Queued before the commit, so the mail and the token it links to are one
+    # transaction: no link mailed for a token that was rolled back, no token
+    # whose mail was lost to a Mailgun outage — the worker sends with retries.
+    emails.send_password_reset(session, user.email, token)
     await session.commit()
-    await emails.send_password_reset(email, token)
 
 
 class PasswordResetConfirm(BaseModel):

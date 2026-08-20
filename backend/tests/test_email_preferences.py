@@ -3,8 +3,9 @@
 DB-backed (require TIAI_TEST_DATABASE_URL) except the rendering tests, which are
 pure functions over a dataclass.
 
-Mailgun is never reached: ``send_email`` is monkeypatched at the point each
-module imported it, and the recorded calls are what the assertions read.
+Mailgun is never reached: the notification code queues rows in the e-mail
+outbox (sent later by the worker, exercised in ``test_outbox``), and those rows
+are what the assertions here read.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -14,20 +15,27 @@ import pytest
 from app.core.config import settings
 
 
-class _Outbox:
-    """Stand-in for ``send_email`` that records what would have gone out."""
+@pytest.fixture
+def mailgun_configured(monkeypatch):
+    """Nothing is queued while Mailgun is off — delivery tests turn it on."""
+    monkeypatch.setattr(settings, "MAILGUN_DOMAIN", "mg.test.local")
+    monkeypatch.setattr(settings, "MAILGUN_API_KEY", "key-test")
 
-    def __init__(self, ok: bool = True) -> None:
-        self.ok = ok
-        self.sent: list[dict] = []
 
-    async def __call__(self, subject: str, text: str, to: list[str] | None = None):
-        self.sent.append({"subject": subject, "text": text, "to": to})
-        return self.ok
+async def _queued(db_session) -> list:
+    """The outbox rows, ordered by address — what would go out, and to whom."""
+    from sqlmodel import col, select
 
-    @property
-    def recipients(self) -> list[str]:
-        return [address for call in self.sent for address in (call["to"] or [])]
+    from app.features.notification.models import EmailOutbox
+
+    result = await db_session.exec(
+        select(EmailOutbox).order_by(col(EmailOutbox.to_address))
+    )
+    return result.all()
+
+
+async def _recipients(db_session) -> list[str]:
+    return [row.to_address for row in await _queued(db_session)]
 
 
 async def _user(db_session, email: str, preference: str, *, is_active: bool = True):
@@ -160,7 +168,7 @@ def test_digest_states_the_overflow_rather_than_cutting_it():
 
 
 async def test_daily_digest_goes_only_to_daily_when_nothing_happened(
-    db_session, monkeypatch
+    db_session, mailgun_configured
 ):
     from app.features.notification import digest
 
@@ -168,16 +176,15 @@ async def test_daily_digest_goes_only_to_daily_when_nothing_happened(
     await _user(db_session, "events@test.local", "digest_events")
     await _user(db_session, "quiet@test.local", "none")
 
-    outbox = _Outbox()
-    monkeypatch.setattr(digest, "send_email", outbox)
+    queued = await digest.send_daily_digest(db_session)
 
-    sent = await digest.send_daily_digest(db_session)
-
-    assert sent == 1
-    assert outbox.recipients == ["daily@test.local"]
+    assert queued == 1
+    assert await _recipients(db_session) == ["daily@test.local"]
 
 
-async def test_event_digest_joins_in_on_a_day_with_a_threat(db_session, monkeypatch):
+async def test_event_digest_joins_in_on_a_day_with_a_threat(
+    db_session, mailgun_configured
+):
     from app.features.machine.models import Machine
     from app.features.notification import digest
     from app.features.threat.models import Threat
@@ -192,31 +199,30 @@ async def test_event_digest_joins_in_on_a_day_with_a_threat(db_session, monkeypa
     db_session.add(Threat(machine_id=machine.id, detection_id="d-1", status="active"))
     await db_session.commit()
 
-    outbox = _Outbox()
-    monkeypatch.setattr(digest, "send_email", outbox)
+    queued = await digest.send_daily_digest(db_session)
 
-    sent = await digest.send_daily_digest(db_session)
-
-    assert sent == 2
-    assert sorted(outbox.recipients) == ["daily@test.local", "events@test.local"]
+    assert queued == 2
+    assert await _recipients(db_session) == ["daily@test.local", "events@test.local"]
 
 
-async def test_digest_is_addressed_one_recipient_at_a_time(db_session, monkeypatch):
+async def test_digest_is_addressed_one_recipient_at_a_time(
+    db_session, mailgun_configured
+):
     """Never a shared To:, which would hand every operator the user list."""
     from app.features.notification import digest
 
     await _user(db_session, "a@test.local", "digest_daily")
     await _user(db_session, "b@test.local", "digest_daily")
 
-    outbox = _Outbox()
-    monkeypatch.setattr(digest, "send_email", outbox)
-
     await digest.send_daily_digest(db_session)
 
-    assert [call["to"] for call in outbox.sent] == [["a@test.local"], ["b@test.local"]]
+    assert [row.to_address for row in await _queued(db_session)] == [
+        "a@test.local",
+        "b@test.local",
+    ]
 
 
-async def test_a_console_with_no_account_mails_nobody(db_session, monkeypatch):
+async def test_a_console_with_no_account_mails_nobody(db_session, mailgun_configured):
     """No account, no recipient — and no configured address to substitute.
 
     A console in this state is one nobody can log into; the seeded first admin
@@ -225,14 +231,13 @@ async def test_a_console_with_no_account_mails_nobody(db_session, monkeypatch):
     """
     from app.features.notification import digest
 
-    outbox = _Outbox()
-    monkeypatch.setattr(digest, "send_email", outbox)
-
     assert await digest.send_daily_digest(db_session) == 0
-    assert outbox.sent == []
+    assert await _queued(db_session) == []
 
 
-async def test_opting_everyone_out_really_stops_the_mail(db_session, monkeypatch):
+async def test_opting_everyone_out_really_stops_the_mail(
+    db_session, mailgun_configured
+):
     """« Aucun e-mail » is final: nothing anywhere can undo the choice.
 
     A team that has every account on « aucun e-mail » (or on the immediate
@@ -244,42 +249,18 @@ async def test_opting_everyone_out_really_stops_the_mail(db_session, monkeypatch
     await _user(db_session, "quiet@test.local", "none")
     await _user(db_session, "also-quiet@test.local", "immediate")
 
-    outbox = _Outbox()
-    monkeypatch.setattr(digest, "send_email", outbox)
-
     assert await digest.send_daily_digest(db_session) == 0
-    assert outbox.sent == []
+    assert await _queued(db_session) == []
 
 
-async def test_a_quiet_day_simply_sends_nothing(db_session, monkeypatch):
+async def test_a_quiet_day_simply_sends_nothing(db_session, mailgun_configured):
     """An events-only account on a calm day hears nothing — as it asked."""
     from app.features.notification import digest
 
     await _user(db_session, "events@test.local", "digest_events")
 
-    outbox = _Outbox()
-    monkeypatch.setattr(digest, "send_email", outbox)
-
     assert await digest.send_daily_digest(db_session) == 0
-    assert outbox.sent == []
-
-
-async def test_one_failing_address_does_not_cost_the_others_their_digest(
-    db_session, monkeypatch
-):
-    from app.features.notification import digest
-
-    await _user(db_session, "a@test.local", "digest_daily")
-    await _user(db_session, "b@test.local", "digest_daily")
-
-    async def flaky(subject, text, to=None):
-        if to == ["a@test.local"]:
-            raise RuntimeError("mailgun said no")
-        return True
-
-    monkeypatch.setattr(digest, "send_email", flaky)
-
-    assert await digest.send_daily_digest(db_session) == 1
+    assert await _queued(db_session) == []
 
 
 async def test_digest_counts_the_fleet_it_reads(db_session, monkeypatch):
@@ -360,7 +341,7 @@ def test_alert_names_the_poste_and_the_threat():
 
 
 async def test_immediate_alert_goes_only_to_the_immediate_cadence(
-    db_session, monkeypatch
+    db_session, mailgun_configured
 ):
     from app.features.machine.models import Machine
     from app.features.notification import threat_alert
@@ -368,35 +349,32 @@ async def test_immediate_alert_goes_only_to_the_immediate_cadence(
     await _user(db_session, "now@test.local", "immediate")
     await _user(db_session, "daily@test.local", "digest_daily")
 
-    outbox = _Outbox()
-    monkeypatch.setattr(threat_alert, "send_email", outbox)
-
     context = threat_alert.MachineContext.of(
         Machine(machine_uuid="uuid-2", hostname="PC-7")
     )
-    sent = await threat_alert.send_threat_alert(
+    queued = await threat_alert.queue_threat_alert(
         db_session, context, [_detection(datetime.now(UTC))]
     )
+    await db_session.commit()
 
-    assert sent == 1
-    assert outbox.recipients == ["now@test.local"]
+    assert queued == 1
+    assert await _recipients(db_session) == ["now@test.local"]
 
 
-async def test_no_alert_when_every_detection_is_old(db_session, monkeypatch):
+async def test_no_alert_when_every_detection_is_old(db_session, mailgun_configured):
     from app.features.machine.models import Machine
     from app.features.notification import threat_alert
 
     await _user(db_session, "now@test.local", "immediate")
-    outbox = _Outbox()
-    monkeypatch.setattr(threat_alert, "send_email", outbox)
 
     context = threat_alert.MachineContext.of(Machine(machine_uuid="uuid-3"))
-    sent = await threat_alert.send_threat_alert(
+    queued = await threat_alert.queue_threat_alert(
         db_session, context, [_detection(datetime.now(UTC) - timedelta(days=30))]
     )
+    await db_session.commit()
 
-    assert sent == 0
-    assert outbox.sent == []
+    assert queued == 0
+    assert await _queued(db_session) == []
 
 
 def test_a_long_alert_is_capped_like_the_digest():
@@ -417,7 +395,7 @@ def test_a_long_alert_is_capped_like_the_digest():
 
 
 def test_the_digest_hour_must_be_a_real_hour():
-    """Out of range, the ARQ cron would match nothing and fail silently."""
+    """Out of range, the daily job would never come due and fail silently."""
     import pydantic
     import pytest as pytest_module
 

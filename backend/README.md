@@ -1,13 +1,16 @@
 # Tia'i — Backend
 
-API FastAPI (async) + worker ARQ. Architecture « features » (inspirée de
-`fastapi-ecommerce`), SQLModel sur PostgreSQL (psycopg 3), migrations Alembic.
+API FastAPI (async) + worker (une boucle asyncio : outbox e-mail et tâches
+périodiques). Architecture « features » (inspirée de `fastapi-ecommerce`),
+SQLModel sur PostgreSQL (psycopg 3), migrations Alembic. Tout l'état passe par
+Postgres — commandes en attente, e-mails à envoyer — il n'y a ni Redis ni file
+de tâches externe.
 
 ## Layout
 
 ```
 app/
-  core/        config, db, security (tokens), ARQ pool & worker
+  core/        config, db, security (tokens), worker (outbox + tâches périodiques)
   api/         deps + routes (agent, machines, health)
   features/    machine/ threat/ command/ notification/ (modèles + logique)
   alembic/     migrations

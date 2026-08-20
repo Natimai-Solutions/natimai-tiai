@@ -209,23 +209,25 @@ async def test_upsert_reports_only_genuinely_new_detections(client, db_session):
     assert unchanged.new_detections == []
 
 
-async def test_heartbeat_mails_the_immediate_cadence_on_a_new_threat(
-    client, db_session, engine, monkeypatch
+async def test_heartbeat_queues_a_mail_for_the_immediate_cadence(
+    client, db_session, monkeypatch
 ):
-    """End to end: a detection arriving on a heartbeat reaches an inbox.
+    """End to end: a detection arriving on a heartbeat leaves a mail in the outbox.
 
-    The mail goes out as a background task, which the ASGI transport runs before
-    the response is handed back — so by the time the heartbeat returns here, the
-    send has been attempted. The task opens a session of its own on the
-    module-level engine (the request's is closed by then), which is pointed at
-    the test database here, exactly as the ARQ job tests do.
+    Queued in the heartbeat's own transaction — the alert row commits with the
+    detections it names, and the worker sends it later with retries. The
+    assertion therefore reads the outbox table, never a mail server.
     """
+    from sqlmodel import select
+
     from app.core.config import settings
-    from app.features.notification import threat_alert
+    from app.features.notification.models import EmailOutbox
     from app.features.user import crud
     from app.features.user.models import EmailPreference, Role
 
-    monkeypatch.setattr(threat_alert, "engine", engine)
+    # queue_email refuses to queue while Mailgun is unconfigured.
+    monkeypatch.setattr(settings, "MAILGUN_DOMAIN", "mg.test.local")
+    monkeypatch.setattr(settings, "MAILGUN_API_KEY", "key-test")
 
     user = await crud.create_user(
         db_session, email="oncall@test.local", password="pw", role=Role.ADMIN
@@ -233,14 +235,6 @@ async def test_heartbeat_mails_the_immediate_cadence_on_a_new_threat(
     user.email_preference = EmailPreference.IMMEDIATE
     db_session.add(user)
     await db_session.commit()
-
-    sent: list[dict] = []
-
-    async def fake_send_email(subject: str, text: str, to=None):
-        sent.append({"subject": subject, "text": text, "to": to})
-        return True
-
-    monkeypatch.setattr(threat_alert, "send_email", fake_send_email)
 
     enroll = await client.post(
         "/api/v1/agent/enroll",
@@ -261,18 +255,21 @@ async def test_heartbeat_mails_the_immediate_cadence_on_a_new_threat(
         json={"agent_version": "test", "threats": [threat]},
     )
     assert hb.status_code == 200
-    assert len(sent) == 1
-    assert sent[0]["to"] == ["oncall@test.local"]
-    assert "PC-ALERT" in sent[0]["subject"]
+    rows = (await db_session.exec(select(EmailOutbox))).all()
+    assert len(rows) == 1
+    assert rows[0].to_address == "oncall@test.local"
+    assert "PC-ALERT" in rows[0].subject
+    assert rows[0].status == "pending"
 
-    # The same detection re-reported must not mail anyone a second time.
+    # The same detection re-reported must not queue a second mail.
     hb = await client.post(
         "/api/v1/agent/heartbeat",
         headers=headers,
         json={"agent_version": "test", "threats": [threat]},
     )
     assert hb.status_code == 200
-    assert len(sent) == 1
+    rows = (await db_session.exec(select(EmailOutbox))).all()
+    assert len(rows) == 1
 
 
 async def test_a_mixed_batch_reports_only_the_new_row(client, db_session):

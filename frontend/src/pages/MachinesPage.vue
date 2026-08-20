@@ -510,7 +510,7 @@ async function loadAntivirusOptions() {
   try {
     const products = await listAntivirusProducts();
     antivirusOptions.value = [
-      { label: 'Tous antivirus', value: null },
+      { label: 'Tous les antivirus', value: null },
       ...products.map((p) => ({ label: `${p.name} (${p.count})`, value: p.name })),
     ];
   } catch {

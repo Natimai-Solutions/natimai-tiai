@@ -13,9 +13,12 @@ them is a mail that would otherwise be sent for nothing:
   Defender history in one call, and none of it happened today;
 * only accounts on the ``IMMEDIATE`` cadence — everyone else hears about it in
   the digest, which is what they asked for.
+
+The alert is queued in the outbox inside the heartbeat's own transaction: it
+exists exactly when the detections it names do, and the worker sends it with
+retries — a Mailgun outage delays the mail, never the heartbeat.
 """
 
-import logging
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
@@ -23,25 +26,22 @@ from datetime import timedelta
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
-from app.core.db import engine
 from app.features.base import utcnow
 from app.features.machine.models import Machine
-from app.features.notification.mailgun import send_email
+from app.features.notification.outbox import queue_email
 from app.features.notification.recipients import recipients_for
 from app.features.threat.crud import NewDetection
 from app.features.user.models import EmailPreference
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class MachineContext:
     """The poste as the alert names it, copied out of the ORM instance.
 
-    A snapshot and not the ``Machine`` row itself, because the mail is sent
-    *after* the heartbeat's transaction has committed: reading an attribute off
-    a committed instance would lazy-load it synchronously inside the event loop
-    (MissingGreenlet), and the heartbeat path is the last place to risk that.
+    A plain snapshot rather than the ``Machine`` row itself: the mail body is
+    rendered from these six fields alone, and taking them out of the ORM keeps
+    the rendering a pure function — testable without a session, and immune to
+    whatever the session does to the instance afterwards.
     """
 
     id: uuid.UUID
@@ -130,10 +130,16 @@ def render_alert(
     return subject, "\n".join(lines)
 
 
-async def send_threat_alert(
+async def queue_threat_alert(
     session: AsyncSession, machine: MachineContext, detections: list[NewDetection]
 ) -> int:
-    """Mail the accounts on the immediate cadence. Returns how many went out."""
+    """Queue the alert for the accounts on the immediate cadence.
+
+    No commit here — the caller is the heartbeat, mid-transaction, and the
+    whole point is that the alert commits with the detections it names: no mail
+    about a rolled-back detection, no detection whose mail was lost between the
+    commit and a Mailgun call. Returns how many mails were queued.
+    """
     fresh = recent_detections(detections)
     if not fresh:
         return 0
@@ -142,35 +148,8 @@ async def send_threat_alert(
         return 0
 
     subject, text = render_alert(machine, fresh)
-    sent = 0
+    queued = 0
     for address in recipients:
-        try:
-            if await send_email(subject=subject, text=text, to=[address]):
-                sent += 1
-        except Exception:
-            logger.exception("Threat alert could not be sent to %s", address)
-    return sent
-
-
-async def alert_new_threats(
-    machine: MachineContext, detections: list[NewDetection]
-) -> None:
-    """Background entry point: open a session of our own and send the alert.
-
-    Runs after the heartbeat's response has gone out, on a session that is not
-    the request's — that one is closed by then, and holding a database
-    transaction open across an HTTP call to Mailgun would be worse anyway.
-
-    Never raises. The caller is a background task with nobody to report to, and
-    a Mailgun outage must not surface as a failed heartbeat: the poste would
-    retry, and each retry would re-attempt a mail on a service already known to
-    be down.
-    """
-    try:
-        async with AsyncSession(engine) as session:
-            await send_threat_alert(session, machine, detections)
-    except Exception:
-        logger.exception(
-            "Threat alert failed for machine %s",
-            machine.hostname or machine.machine_uuid,
-        )
+        if queue_email(session, to=address, subject=subject, text=text):
+            queued += 1
+    return queued
