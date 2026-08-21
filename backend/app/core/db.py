@@ -1,8 +1,8 @@
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
@@ -30,5 +30,5 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def ping() -> bool:
     """Return True if the database answers a trivial query."""
     async with AsyncSession(engine) as session:
-        await session.execute(text("SELECT 1"))
+        await session.exec(select(1))
         return True

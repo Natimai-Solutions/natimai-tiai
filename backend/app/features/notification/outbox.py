@@ -120,10 +120,10 @@ async def purge_settled(session: AsyncSession) -> int:
     answered from the table for a while.
     """
     cutoff = utcnow() - timedelta(days=settings.EMAIL_OUTBOX_RETENTION_DAYS)
-    result = await session.execute(
+    result = await session.exec(
         delete(EmailOutbox)
         .where(col(EmailOutbox.status).in_([EmailStatus.SENT, EmailStatus.ABANDONED]))
         .where(col(EmailOutbox.created_at) < cutoff)
     )
     await session.commit()
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    return result.rowcount or 0

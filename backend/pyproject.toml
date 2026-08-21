@@ -52,11 +52,9 @@ plugins = ["pydantic.mypy"]
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
-filterwarnings = [
-    # SQLModel nudges toward session.exec(); kept execute() is intentional for
-    # text()/INSERT/UPDATE statements where exec() does not apply.
-    'ignore:(?s).*session\.exec\(\):DeprecationWarning',
-]
+# House rule: session.exec() everywhere, never session.execute() — SQLModel's
+# exec() covers SELECT and DML alike (and types CursorResult.rowcount), so the
+# old deprecation-warning filter for execute() is gone with its last caller.
 
 [tool.coverage.run]
 source = ["app"]

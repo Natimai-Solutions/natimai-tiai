@@ -27,7 +27,7 @@ async def merge_into(
     Update cycle re-establishes the truth.
     """
     # Commands carry no uniqueness constraint — reassign them wholesale.
-    await session.execute(
+    await session.exec(
         update(Command)
         .where(col(Command.machine_id) == source.id)
         .values(machine_id=target.id)
@@ -46,10 +46,10 @@ async def merge_into(
             )
         )
     )
-    await session.execute(colliding)
+    await session.exec(colliding)
 
     # Reassign the remaining source threats to the target.
-    await session.execute(
+    await session.exec(
         update(Threat)
         .where(col(Threat.machine_id) == source.id)
         .values(machine_id=target.id)

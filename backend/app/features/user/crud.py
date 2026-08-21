@@ -98,7 +98,7 @@ async def delete_user(session: AsyncSession, user: User) -> None:
     the constraint exists in the migration but not in the schema SQLModel builds
     for the tests, so leaning on it would behave differently in each.
     """
-    await session.execute(
+    await session.exec(
         delete(PasswordResetToken).where(col(PasswordResetToken.user_id) == user.id)
     )
     await session.delete(user)
@@ -113,7 +113,7 @@ async def create_reset_token(session: AsyncSession, user: User) -> str:
     Any previous token for the user is dropped, so the newest link is the only
     one that works.
     """
-    await session.execute(
+    await session.exec(
         delete(PasswordResetToken).where(col(PasswordResetToken.user_id) == user.id)
     )
     token = security.generate_token()
@@ -156,6 +156,6 @@ async def consume_reset_token(session: AsyncSession, token: str) -> User | None:
 
 async def purge_reset_tokens(session: AsyncSession, user_id: uuid.UUID) -> None:
     """Drop every reset token of a user (called after a password change)."""
-    await session.execute(
+    await session.exec(
         delete(PasswordResetToken).where(col(PasswordResetToken.user_id) == user_id)
     )

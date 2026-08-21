@@ -55,7 +55,7 @@ async def replace_pending(
         # first_seen is excluded from the update set on purpose: it is the age of
         # the machine's failure to patch, and re-reporting the same update every
         # cycle must not reset it.
-        await session.execute(
+        await session.exec(
             stmt.on_conflict_do_update(
                 constraint="uq_windows_updates_machine_update",
                 set_={
@@ -78,6 +78,6 @@ async def replace_pending(
         stale = stale.where(
             col(WindowsUpdate.update_id).not_in([r["update_id"] for r in rows])
         )
-    await session.execute(stale)
+    await session.exec(stale)
 
     return len(rows)

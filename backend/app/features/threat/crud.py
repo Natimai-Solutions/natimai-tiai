@@ -119,7 +119,7 @@ async def upsert_threats(
         literal_column("detected_at"),
         literal_column("xmax = 0").label("inserted"),
     )
-    result = await session.execute(returning)
+    result = await session.exec(returning)
     written = result.fetchall()
     new_detections = [
         NewDetection(

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlmodel import select
 
 from app.api.deps import SessionDep
 
@@ -22,7 +22,7 @@ async def health(session: SessionDep) -> HealthResponse:
     """Liveness + DB readiness probe."""
     database_ok = False
     try:
-        await session.execute(text("SELECT 1"))
+        await session.exec(select(1))
         database_ok = True
     except Exception:  # noqa: BLE001
         database_ok = False

@@ -53,14 +53,14 @@ async def expire_stale_commands() -> int:
     """Mark pending commands past their expires_at as expired."""
     now = utcnow()
     async with AsyncSession(engine) as session:
-        result = await session.execute(
+        result = await session.exec(
             update(Command)
             .where(col(Command.status) == CommandStatus.PENDING)
             .where(col(Command.expires_at) < now)
             .values(status=CommandStatus.EXPIRED)
         )
         await session.commit()
-        return result.rowcount or 0  # type: ignore[attr-defined]
+        return result.rowcount or 0
 
 
 async def flag_inactive_machines() -> int:
