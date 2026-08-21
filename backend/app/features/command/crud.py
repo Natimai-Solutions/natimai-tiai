@@ -116,5 +116,5 @@ async def mark_expired(
     )
     if machine_id is not None:
         stmt = stmt.where(col(Command.machine_id) == machine_id)
-    result = await session.execute(stmt)
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    result = await session.exec(stmt)
+    return result.rowcount or 0

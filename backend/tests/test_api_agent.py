@@ -68,10 +68,8 @@ async def test_heartbeat_deduplicates_threats(client, db_session):
         )
         assert hb.status_code == 200
 
-    rows = await db_session.execute(
-        select(Threat).where(Threat.detection_id == "DET-1")
-    )
-    stored = rows.scalars().all()
+    rows = await db_session.exec(select(Threat).where(Threat.detection_id == "DET-1"))
+    stored = rows.all()
     assert len(stored) == 1
     assert stored[0].threat_name == "EICAR-Test-File"
     assert stored[0].raw["severity"] == "high"
@@ -117,10 +115,8 @@ async def test_heartbeat_refreshes_a_threat_status(client, db_session):
         )
         assert hb.status_code == 200
 
-    rows = await db_session.execute(
-        select(Threat).where(Threat.detection_id == "DET-OLD")
-    )
-    stored = rows.scalars().all()
+    rows = await db_session.exec(select(Threat).where(Threat.detection_id == "DET-OLD"))
+    stored = rows.all()
     assert len(stored) == 1
     assert stored[0].status == "quarantined"
     # The detection date is the one thing that must not move: it says when the
@@ -164,10 +160,8 @@ async def test_heartbeat_tolerates_a_repeated_detection_id_in_one_batch(
     )
     assert hb.status_code == 200
 
-    rows = await db_session.execute(
-        select(Threat).where(Threat.detection_id == "DUP-1")
-    )
-    stored = rows.scalars().all()
+    rows = await db_session.exec(select(Threat).where(Threat.detection_id == "DUP-1"))
+    stored = rows.all()
     assert len(stored) == 1
     assert stored[0].threat_name == "B"  # last reading wins
 
