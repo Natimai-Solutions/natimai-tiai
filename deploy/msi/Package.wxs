@@ -17,7 +17,7 @@
   Ce que fait le paquet :
     - copie tiai-agent.exe dans %ProgramFiles%\Tiai ;
     - enregistre le service TiaiAgent (démarrage automatique, relance sur
-      échec 15 s — mêmes réglages que `tiai-agent install`) et le démarre ;
+      échec — mêmes réglages que `tiai-agent install`) et le démarre ;
     - écrit dans HKLM\SOFTWARE\Tiai les valeurs passées en propriétés
       (APIBASEURL, ENROLLMENTSECRET, …) — celles que l'agent lit déjà
       (agent/internal/config/registry_windows.go).
@@ -77,6 +77,11 @@
     <!-- 1 ou 0 (DWORD), pas true/false : voir ReportSessionUsername dans le
          README de l'agent — 0 = remonter la présence d'une session, pas le nom. -->
     <Property Id="REPORTSESSIONUSERNAME" Secure="yes" />
+    <!-- Mêmes règles : 1 ou 0 en DWORD. 0 = inventaire matériel seul, la liste
+         des logiciels installés n'est ni lue ni remontée (et celle déjà stockée
+         côté serveur est effacée au prochain cycle). -->
+    <Property Id="REPORTSOFTWARE" Secure="yes" />
+    <Property Id="INVENTORYCOLLECTINTERVALSECONDS" Secure="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Tiai" />
@@ -122,10 +127,17 @@
                         ErrorControl="normal"
                         Arguments="run">
           <!-- Relance sur échec, remise à zéro du compteur après 24 h — les
-               réglages de service.Install (service_windows.go). -->
+               réglages de service.Install (service_windows.go).
+
+               La troisième action est une relance et non "none", et c'est tout
+               l'objet du réglage : le SCM répète la dernière action pour chaque
+               panne suivante, donc "relance, relance, rien" laissait un poste
+               tombé trois fois dans la journée avec un service arrêté, un type
+               de démarrage toujours affiché en Automatique, et rien à l'écran
+               pour le dire. -->
           <util:ServiceConfig FirstFailureActionType="restart"
                               SecondFailureActionType="restart"
-                              ThirdFailureActionType="none"
+                              ThirdFailureActionType="restart"
                               RestartServiceDelayInSeconds="15"
                               ResetPeriodInDays="1" />
         </ServiceInstall>
@@ -182,6 +194,18 @@
                  Permanent="yes" Condition="REPORTSESSIONUSERNAME">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="ReportSessionUsername"
                        Type="integer" Value="[REPORTSESSIONUSERNAME]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegReportSoftware" Guid="7C0D3E38-1A5B-4C9E-9E4B-2E2C4F6B1D77"
+                 Permanent="yes" Condition="REPORTSOFTWARE">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="ReportSoftware"
+                       Type="integer" Value="[REPORTSOFTWARE]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegInventoryCollectInterval" Guid="1B7F5A64-9D02-4F35-8C77-30B6A9D6C412"
+                 Permanent="yes" Condition="INVENTORYCOLLECTINTERVALSECONDS">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="InventoryCollectIntervalSeconds"
+                       Type="integer" Value="[INVENTORYCOLLECTINTERVALSECONDS]" KeyPath="yes" />
       </Component>
 
     </ComponentGroup>

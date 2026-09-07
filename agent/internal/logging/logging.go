@@ -26,7 +26,7 @@ var debugEnabled atomic.Bool
 // the file can't be opened, logging stays on stderr and the cause is logged.
 // The returned func closes the file and restores stderr-only output.
 func Setup(dir, level string) func() {
-	debugEnabled.Store(strings.EqualFold(level, "debug"))
+	SetLevel(level)
 
 	rotate(dir)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -48,6 +48,15 @@ func Setup(dir, level string) func() {
 		log.SetOutput(os.Stderr)
 		_ = f.Close()
 	}
+}
+
+// SetLevel gates Debugf on level, after Setup has already opened the file.
+//
+// Its own function because the file has to be opened *before* the configuration
+// is read — a configuration that cannot be loaded is precisely the failure that
+// used to leave no trace at all — and the level only becomes known afterwards.
+func SetLevel(level string) {
+	debugEnabled.Store(strings.EqualFold(level, "debug"))
 }
 
 // Debugf logs only when the configured level is DEBUG.

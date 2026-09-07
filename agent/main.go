@@ -35,6 +35,8 @@ func main() {
 		doInitConfig(os.Args[2:])
 	case "install":
 		doInstall(os.Args[2:])
+	case "repair":
+		fatalIf(service.Repair())
 	case "uninstall":
 		fatalIf(service.Uninstall())
 	case "start":
@@ -61,6 +63,7 @@ func printUsage() {
 	fmt.Println("  run            Run the polling loop (foreground, or under the SCM)")
 	fmt.Println("  init-config    Generate a default config file (optional: registry alone is enough)")
 	fmt.Println("  install        Install and register the Windows service")
+	fmt.Println("  repair         Re-apply automatic start and restart-on-failure to an installed service")
 	fmt.Println("  uninstall      Remove the Windows service")
 	fmt.Println("  start          Start the installed service")
 	fmt.Println("  stop           Stop the service")
@@ -73,14 +76,13 @@ func doRun(args []string) {
 	cfgPath := fs.String("config", config.DefaultConfigPath(), "config file path")
 	_ = fs.Parse(args)
 
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Tee logs to <data dir>\agent.log — under the SCM, stderr goes nowhere.
-	closeLog := logging.Setup(filepath.Dir(*cfgPath), cfg.LogLevel)
+	// The log file is opened *before* the configuration is read, and that order
+	// is the fix for a whole class of silent deaths: under the SCM stderr goes
+	// nowhere, so an agent that gave up on its configuration used to leave the
+	// service stopped with not one line anywhere saying why. The level is not
+	// known yet — it lives in that configuration — so INFO applies until it is,
+	// which is exactly the level these messages are logged at.
+	closeLog := logging.Setup(filepath.Dir(*cfgPath), "")
 	defer closeLog()
 
 	// The config file is optional (registry-only GPO deployments). Say which
@@ -89,16 +91,27 @@ func doRun(args []string) {
 	if _, err := os.Stat(*cfgPath); os.IsNotExist(err) {
 		source = "registry + defaults, no " + *cfgPath
 	}
-	log.Printf("agent: v%s starting (config %s, log level %s)", agent.Version, source, cfg.LogLevel)
+	log.Printf("agent: v%s starting (config %s)", agent.Version, source)
 
-	// Started by the Service Control Manager → run under the service harness.
+	// Started by the Service Control Manager → run under the service harness,
+	// which loads the configuration itself and keeps retrying one it cannot use
+	// rather than ending the process (see service.runAgent).
 	if isSvc, _ := service.IsWindowsService(); isSvc {
-		if err := service.Run(cfg, *cfgPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Service error: %v\n", err)
+		if err := service.Run(*cfgPath); err != nil {
+			log.Printf("agent: service error: %v", err)
 			os.Exit(1)
 		}
 		return
 	}
+
+	// Foreground: a person is watching, so an unusable configuration is said
+	// once and the command ends. Retrying belongs to the service alone.
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+	logging.SetLevel(cfg.LogLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

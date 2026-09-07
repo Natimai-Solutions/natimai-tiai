@@ -194,6 +194,12 @@ func ReadInventory(ctx context.Context, includeSoftware bool) (*models.Inventory
 
 	if includeSoftware {
 		inv.Software = readInstalledSoftware()
+	} else {
+		// Empty and not nil, which is the whole point of the switch: nil tells
+		// the server "not read" and leaves whatever an earlier cycle stored
+		// sitting in the database, where the guarantee this setting makes is
+		// that the list *disappears*. See the contract on models.InventoryState.
+		inv.Software = []models.Software{}
 	}
 
 	InventoryHash(inv)

@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/yusufpapurcu/wmi"
 
+	"tiai/agent/internal/logging"
 	"tiai/agent/internal/models"
 )
 
@@ -18,15 +20,35 @@ const defenderNamespace = `root\Microsoft\Windows\Defender`
 
 // wmiClient tolerates Defender's large class schemas (AllowMissingFields) and
 // maps WMI NULLs to nil pointers (PtrNil) so absent timestamps stay nil.
-var wmiClient = &wmi.Client{AllowMissingFields: true, PtrNil: true}
+//
+// NonePtrZero does the same for the fields that are *not* pointers, and the
+// inventory is why it is here: its raw rows are plain strings and integers, and
+// a property WMI hands back empty rather than null — a motherboard serial no OEM
+// flashed, a resolution on an adapter nothing is plugged into — would otherwise
+// come back as an error for the whole class instead of as the zero value.
+var wmiClient = &wmi.Client{AllowMissingFields: true, PtrNil: true, NonePtrZero: true}
 
 // queryNamespace runs a WMI query against a namespace on a locked OS thread
 // (COM apartment hygiene for a long-running service).
+//
+// A field mismatch is logged and swallowed, and that is not indulgence: the
+// library reports it *after* filling the destination, so the rows are there and
+// only one property of them could not be mapped. Returning it would have every
+// caller throw away a complete reading — and for the inventory, whose first
+// query is its one hard failure, a single unmappable property on
+// Win32_ComputerSystem would cost the whole machine's hardware and software
+// report, day after day, with one debug line to show for it.
 func queryNamespace(query string, dst any, namespace string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	// Args mirror QueryNamespace: server=nil (local), then the namespace.
-	return wmiClient.Query(query, dst, nil, namespace)
+	err := wmiClient.Query(query, dst, nil, namespace)
+	var mismatch *wmi.ErrFieldMismatch
+	if errors.As(err, &mismatch) {
+		logging.Debugf("agent: wmi: %s: %v (rows kept)", query, err)
+		return nil
+	}
+	return err
 }
 
 // --- State -----------------------------------------------------------------

@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"tiai/agent/internal/models"
 )
@@ -66,5 +67,26 @@ func TestInventoryScanSummarySaysWhenSoftwareIsOff(t *testing.T) {
 	on := inventoryScanSummary(inv, true)
 	if !strings.Contains(on, "1 logiciel(s)") {
 		t.Errorf("an enabled collection must report its count, got %q", on)
+	}
+}
+
+// The first collection must stay off the boot path and still not have a whole
+// parc collect in unison — the pile-up that has every poste send its heaviest
+// payload at the same second.
+func TestInventoryFirstDelayIsSpread(t *testing.T) {
+	seen := make(map[time.Duration]bool)
+	for range 200 {
+		d := inventoryFirstDelay()
+		if d < inventoryFirstCollectDelay {
+			t.Fatalf("first collection must not run before %s, got %s",
+				inventoryFirstCollectDelay, d)
+		}
+		if d >= inventoryFirstCollectDelay+inventoryFirstCollectSpread {
+			t.Fatalf("first collection must stay inside the spread, got %s", d)
+		}
+		seen[d] = true
+	}
+	if len(seen) < 2 {
+		t.Error("a fixed delay would have every poste of the parc collect at once")
 	}
 }

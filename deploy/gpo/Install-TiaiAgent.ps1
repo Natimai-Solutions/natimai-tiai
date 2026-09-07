@@ -254,6 +254,17 @@ try {
         Invoke-Agent @('install') | Out-Null
         Write-Log "Service $ServiceName installe."
     }
+    else {
+        # Reapplique demarrage automatique et relance sur echec a un service
+        # deja installe : les postes poses par une version anterieure portent
+        # encore "relance, relance, RIEN", et le SCM repete la derniere action.
+        # Trois pannes dans la meme journee y laissaient donc le service arrete
+        # jusqu'a ce qu'un humain le relance a la main, type de demarrage
+        # toujours affiche en Automatique. En WARN et non fatal : un binaire
+        # anterieur ne connait pas encore la sous-commande.
+        try { Invoke-Agent @('repair') | Out-Null }
+        catch { Write-Log "Reglages de service non reappliques : $($_.Exception.Message)" 'WARN' }
+    }
     Set-Service -Name $ServiceName -StartupType Automatic
 
     $service = Get-Service -Name $ServiceName
@@ -269,4 +280,21 @@ try {
 catch {
     Write-Log $_.Exception.Message 'ERROR'
     exit 1
+}
+finally {
+    # Filet de securite, et il couvre le scenario qui a coute le plus cher : le
+    # script arrete le service pour remplacer son binaire, puis une etape
+    # suivante echoue (registre, ACL, droits), le catch journalise et sort --
+    # et le poste passe la journee sans agent, service arrete, sans rien a
+    # l'ecran pour le signaler. Quoi qu'il se soit passe au-dessus, on repart.
+    try {
+        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($null -ne $svc -and $svc.Status -ne 'Running') {
+            Start-Service -Name $ServiceName
+            Write-Log "Service $ServiceName relance (filet de securite)."
+        }
+    }
+    catch {
+        Write-Log "Impossible de relancer $ServiceName : $($_.Exception.Message)" 'ERROR'
+    }
 }

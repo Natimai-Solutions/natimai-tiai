@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"tiai/agent/internal/api"
+	"tiai/agent/internal/config"
 )
 
 func TestNextBackoffDoublesAndCaps(t *testing.T) {
@@ -50,5 +51,22 @@ func TestIsUnauthorized(t *testing.T) {
 	}
 	if isUnauthorized(nil) {
 		t.Error("nil error must not count as unauthorized")
+	}
+}
+
+// The heartbeat carrying an inventory gets a budget of its own: timing it out
+// at the poll timeout never loses just that heartbeat, it loses the inventory
+// on every retry after it, for as long as the poste keeps trying.
+func TestHeavyTimeoutOutlastsThePollTimeout(t *testing.T) {
+	a := &Agent{cfg: &config.Config{RequestTimeoutSeconds: config.DefaultRequestTimeout}}
+	if got := a.heavyTimeout(); got != heavyHeartbeatTimeout {
+		t.Errorf("expected the heavy budget %s, got %s", heavyHeartbeatTimeout, got)
+	}
+	// A parc that widened the request timeout meant it for this request above
+	// all — the wider value wins.
+	wide := int(heavyHeartbeatTimeout.Seconds()) * 2
+	a = &Agent{cfg: &config.Config{RequestTimeoutSeconds: wide}}
+	if got := a.heavyTimeout(); got != time.Duration(wide)*time.Second {
+		t.Errorf("a configured timeout above the default must win, got %s", got)
 	}
 }

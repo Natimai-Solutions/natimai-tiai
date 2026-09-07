@@ -220,3 +220,42 @@ func TestSaveOmitsToken(t *testing.T) {
 		t.Errorf("token must not be persisted in YAML, got %q", reloaded.AuthToken)
 	}
 }
+
+// A token nobody can read is a token the agent does not have. Never an error:
+// Load is called before the service has opened its log file, so failing here
+// used to leave a poste with a service that would not start and nothing
+// anywhere saying why — while re-enrolling costs one request.
+func TestLoadTokenTreatsACorruptFileAsNotEnrolled(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "token.dat"), []byte("not base64 at all !!"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	tok, err := LoadToken(dir)
+	if err != nil {
+		t.Fatalf("a corrupt token must not fail the load: %v", err)
+	}
+	if tok != "" {
+		t.Errorf("expected no token, got %q", tok)
+	}
+}
+
+// And the same must hold through Load, which is the path the service takes.
+func TestLoadSurvivesACorruptToken(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("api_base_url: https://tiai.example.local\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "token.dat"), []byte("\x00\x01truncated"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load must survive a corrupt token.dat: %v", err)
+	}
+	if cfg.AuthToken != "" {
+		t.Errorf("expected an empty token, got %q", cfg.AuthToken)
+	}
+}

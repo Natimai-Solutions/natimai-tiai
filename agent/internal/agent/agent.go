@@ -40,6 +40,21 @@ var Version = "0.1.0"
 // back on a later heartbeat.
 const maxPendingCommands = 16
 
+// heavyHeartbeatTimeout is the budget for the rare heartbeat that carries a
+// slow-cycle block — a Windows Update state, an inventory.
+//
+// Its own value, and far above the ten seconds a normal poll gets, because that
+// heartbeat is nothing like a normal poll: a first inventory is a few hundred
+// programs to insert into the catalogue and seven sets to replace, on a server
+// that may be doing the same for the rest of the parc at that moment. Timing it
+// out at ten seconds does not merely lose the inventory — the agent never
+// acknowledges the block, re-attaches the very same payload to the next
+// heartbeat, and a poste can spend days re-sending an inventory the server
+// finishes writing every time. The block also holds the machine's last_seen
+// hostage while it fails, so the console shows a poste offline for a reason
+// that has nothing to do with the poste.
+const heavyHeartbeatTimeout = 2 * time.Minute
+
 // Agent owns the runtime state and the polling loop.
 type Agent struct {
 	cfg      *config.Config
@@ -273,8 +288,17 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	// actually found something different. On a stable poste that is once, ever.
 	inv, invGen := a.inventory.pending()
 
+	// A heartbeat carrying one of those blocks gets the wider budget; every
+	// other one keeps the configured request timeout (see api.New).
+	hbCtx := ctx
+	if wu != nil || inv != nil {
+		var cancel context.CancelFunc
+		hbCtx, cancel = context.WithTimeout(ctx, a.heavyTimeout())
+		defer cancel()
+	}
+
 	fp := a.identity.Fingerprint
-	resp, err := a.client.Heartbeat(ctx, models.HeartbeatRequest{
+	resp, err := a.client.Heartbeat(hbCtx, models.HeartbeatRequest{
 		Hostname:       a.host.Hostname,
 		Domain:         a.host.Domain,
 		IPAddress:      netInfo.IP,
@@ -291,15 +315,30 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		Threats:        threats,
 	})
 	if err != nil {
+		// Named explicitly, because this is the failure nobody could diagnose
+		// from the log otherwise: "tick failed" says the server did not answer,
+		// not that the report it refused was the daily inventory — which is
+		// exactly what an administrator wondering why a poste shows no hardware
+		// needs to read.
+		if inv != nil {
+			log.Printf("agent: the heartbeat carrying the inventory failed, "+
+				"it will ride the next one: %v", err)
+		}
 		return err
 	}
 	if wu != nil {
 		// Only now: a heartbeat that never reached the server has not reported
 		// anything, and the block has to ride the next one.
 		a.wu.markSent(wuGen)
+		log.Printf("agent: windows update state reported (%d update(s) pending)",
+			len(wu.Pending))
 	}
 	if inv != nil {
 		a.inventory.markSent(invGen)
+		// At INFO and not debug: an inventory is sent once and then, on a stable
+		// poste, never again. The one line saying it landed is what tells a
+		// deployment it worked.
+		log.Printf("agent: inventory reported to the server (%d logiciel(s))", len(inv.Software))
 	}
 	if n := len(resp.Commands); n > 0 {
 		log.Printf("agent: heartbeat ok, %d command(s) to run", n)
@@ -310,6 +349,17 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		a.accept(cmd)
 	}
 	return nil
+}
+
+// heavyTimeout is the budget for a heartbeat carrying a slow-cycle block, never
+// below the configured request timeout — a parc that widened the latter for a
+// slow link meant it for this request above all.
+func (a *Agent) heavyTimeout() time.Duration {
+	configured := time.Duration(a.cfg.RequestTimeoutSeconds) * time.Second
+	if configured > heavyHeartbeatTimeout {
+		return configured
+	}
+	return heavyHeartbeatTimeout
 }
 
 // logAVError reports a Security Center read failure once, then at debug level.
