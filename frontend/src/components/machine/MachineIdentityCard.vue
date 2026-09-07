@@ -7,6 +7,7 @@ import { computed } from 'vue';
 import MachineInfoCard from './MachineInfoCard.vue';
 import type { InfoRow } from './types';
 import type { MachineDetail } from 'src/services/machines';
+import { agentVersionLabel } from 'src/utils/agentVersion';
 import {
   formatDateTime,
   ipAddressLabel,
@@ -31,7 +32,9 @@ const rows = computed<InfoRow[]>(() => {
     // switch when a wake did not work.
     { label: 'Adresse MAC', value: m.mac_address ?? '—' },
     { label: 'OS', value: m.os_version ?? '—' },
-    { label: 'Version agent', value: m.agent_version ?? '—' },
+    // With its standing, not just its number: "0.4.1" says nothing on its own,
+    // "0.4.1 — obsolète (référence 0.5.0)" says the deployment missed this one.
+    { label: 'Version agent', value: agentVersionLabel(m.agent_version, m.agent_latest_version) },
     { label: 'SMBIOS UUID', value: m.smbios_uuid ?? '—' },
     { label: 'MachineGuid', value: m.machine_guid ?? '—' },
     { label: 'Session', value: sessionLabel(m.session_user_present, m.session_username) },

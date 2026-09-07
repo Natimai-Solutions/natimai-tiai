@@ -30,12 +30,14 @@ from app.features.inventory.models import (
     Volume,
 )
 from app.features.machine import crud as machine_crud
+from app.features.machine.agent_version import fleet_versions
 from app.features.machine.fingerprint import trustworthy_smbios_uuid
 from app.features.machine.models import Machine
 from app.features.machine.status import (
     MachineStatus,
     ScanFilter,
     WindowsUpdateFilter,
+    agent_outdated_clause,
     disk_free_percent,
     is_online,
     low_disk_clause,
@@ -310,6 +312,10 @@ class MachineDetailOut(MachineOut):
     # pending updates: it is read on this page and nowhere else, and a few
     # hundred rows do not deserve a round trip of their own.
     software: list[InstalledSoftwareOut] = []
+    # The version this poste's agent is measured against — the highest one on
+    # the parc, or the configured one (see ``agent_version``). Served with the
+    # fiche so "0.4.1" can be read as "behind 0.5.0" rather than as a string.
+    agent_latest_version: str | None = None
 
 
 class MachineList(BaseModel):
@@ -319,6 +325,10 @@ class MachineList(BaseModel):
     total: int
     page: int
     page_size: int
+    # Same reference as on the fiche, once per page rather than per row: the
+    # list flags the postes below it, and a thousand rows carrying the same
+    # string would be a thousand copies of one fact.
+    agent_latest_version: str | None = None
 
 
 # The list's sortable columns, keyed by their API field names. A dict lookup
@@ -435,6 +445,11 @@ class MachineFilters:
     ram_max_gb: int | None = None
     disk_free_below: int | None = None
     software_id: int | None = None
+    # The agent itself. An exact version (the dropdown feeds fleet values), or
+    # "behind the reference" — the question asked the morning after a
+    # deployment, and the one that names the postes it has not reached.
+    agent_version: str | None = None
+    agent_outdated: bool | None = None
 
 
 def machine_filters(
@@ -456,6 +471,8 @@ def machine_filters(
     ram_max_gb: int | None = Query(None, ge=1),
     disk_free_below: int | None = Query(None, ge=1, le=100),
     software_id: int | None = None,
+    agent_version: str | None = None,
+    agent_outdated: bool | None = None,
 ) -> MachineFilters:
     """The list's facets as query parameters, shared by the list and the exports.
 
@@ -482,15 +499,31 @@ def machine_filters(
         ram_max_gb=ram_max_gb,
         disk_free_below=disk_free_below,
         software_id=software_id,
+        agent_version=agent_version,
+        agent_outdated=agent_outdated,
     )
 
 
 FiltersDep = Annotated[MachineFilters, Depends(machine_filters)]
 
 
-def _filtered_machines(filters: MachineFilters) -> Any:
-    """The machine SELECT with every requested facet applied."""
+def _filtered_machines(
+    filters: MachineFilters, outdated: list[str] | None = None
+) -> Any:
+    """The machine SELECT with every requested facet applied.
+
+    ``outdated`` is the list of agent versions ranking below the reference,
+    from ``fleet_versions`` — read by the caller, because this builds a
+    statement and does not touch the database.
+    """
     stmt = select(Machine)
+    if filters.agent_version:
+        # Equality, like the chassis kind: a version is a closed string the
+        # dropdown feeds exactly, and "0.5" as a substring of "0.5.0" and
+        # "10.5.0" alike would answer a question nobody asked.
+        stmt = stmt.where(col(Machine.agent_version) == filters.agent_version)
+    if filters.agent_outdated is not None:
+        stmt = stmt.where(agent_outdated_clause(outdated or [], filters.agent_outdated))
     if filters.search:
         stmt = stmt.where(_search_clause(filters.search))
     if filters.domain:
@@ -582,7 +615,8 @@ async def list_machines(
     "carries this program". Sortable on the console list's own columns; the
     default order is freshest contact first.
     """
-    stmt = _filtered_machines(filters)
+    versions = await fleet_versions(session)
+    stmt = _filtered_machines(filters, versions.outdated)
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     # last_seen then id behind the requested column: ties must land on the same
     # page from one request to the next, or rows duplicate and vanish across
@@ -597,7 +631,13 @@ async def list_machines(
         )
     rows = await session.exec(stmt.offset((page - 1) * page_size).limit(page_size))
     items = [MachineOut.model_validate(m) for m in rows.all()]
-    return MachineList(items=items, total=total or 0, page=page, page_size=page_size)
+    return MachineList(
+        items=items,
+        total=total or 0,
+        page=page,
+        page_size=page_size,
+        agent_latest_version=versions.latest,
+    )
 
 
 class AntivirusProduct(BaseModel):
@@ -635,6 +675,47 @@ async def list_antivirus_products(session: SessionDep) -> list[AntivirusProduct]
         for product, count in rows.all()
         if product
     ]
+
+
+class AgentVersionOut(BaseModel):
+    """One agent version present in the fleet, with how many machines run it."""
+
+    name: str
+    count: int
+    # Below the reference — what makes the dropdown a deployment progress bar
+    # rather than a list of strings.
+    outdated: bool
+
+
+class AgentVersions(BaseModel):
+    """The agent versions on the parc, and the one they are measured against."""
+
+    # The configured reference, or the highest version reported; None on an
+    # empty parc.
+    latest: str | None
+    # Configured (``AGENT_EXPECTED_VERSION``) rather than derived from the
+    # fleet: the console says which, because "latest" means two different
+    # things in the two cases.
+    pinned: bool
+    versions: list[AgentVersionOut]
+
+
+# Declared before ``/{machine_id}`` like the listings around it.
+@router.get("/agent-versions", response_model=AgentVersions)
+async def list_agent_versions(session: SessionDep) -> AgentVersions:
+    """Agent versions reported across the fleet, newest first, each flagged
+    against the reference. Feeds the console's agent filter, and the counts
+    are the deployment's progress bar ("combien restent sur 0.4.1")."""
+    fleet = await fleet_versions(session)
+    behind = set(fleet.outdated)
+    return AgentVersions(
+        latest=fleet.latest,
+        pinned=fleet.pinned,
+        versions=[
+            AgentVersionOut(name=name, count=count, outdated=name in behind)
+            for name, count in fleet.counts
+        ],
+    )
 
 
 class OsVersion(BaseModel):
@@ -773,7 +854,8 @@ async def _export_rows(session: SessionDep, filters: MachineFilters) -> list[Mac
     The filters are the same ones as the list, and they are what bounds it — a
     parc is thousands of rows, not millions.
     """
-    stmt = _filtered_machines(filters).order_by(
+    versions = await fleet_versions(session)
+    stmt = _filtered_machines(filters, versions.outdated).order_by(
         func.lower(col(Machine.hostname)).nulls_last(), col(Machine.id)
     )
     rows = await session.exec(stmt)
@@ -997,6 +1079,7 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
     detail = MachineDetailOut.model_validate(machine)
     detail.pending_updates = [PendingUpdateOut.model_validate(u) for u in rows.all()]
     await _attach_inventory(session, machine, detail)
+    detail.agent_latest_version = (await fleet_versions(session)).latest
     return detail
 
 

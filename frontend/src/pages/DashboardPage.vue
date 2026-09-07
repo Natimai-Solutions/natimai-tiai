@@ -238,6 +238,17 @@ const alertKpis = computed<Kpi[]>(() => {
       },
       caption: `moins de ${s.low_disk_free_percent} % libres`,
     },
+    {
+      // The deployment's progress bar: how many postes the new agent has not
+      // reached. Actionable like the others — the list it opens is the list to
+      // go and see (or to wake), and the caption names what "à jour" means.
+      label: 'Agents obsolètes',
+      value: s.machines_agent_outdated,
+      icon: 'system_update_alt',
+      color: 'orange',
+      to: { name: 'machines', query: { agent_outdated: 'true' } },
+      ...(s.agent_latest_version ? { caption: `référence ${s.agent_latest_version}` } : {}),
+    },
   ];
 });
 

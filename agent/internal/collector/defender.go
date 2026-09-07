@@ -12,7 +12,21 @@
 // platform-independent so they can be unit-tested anywhere.
 package collector
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// ErrWMIUnavailable is returned, without waiting, by every WMI read while a
+// previous query has not come back (see queryNamespace in the Windows file).
+// The heartbeat carries on without the blocks it could not read — the server
+// keeps their last known values — and, crucially, keeps carrying the machine's
+// presence and picking up its commands: a poste in this state is one an
+// administrator wants to be able to restart from the console.
+//
+// Declared off the build tag so the agent can recognise it on any platform.
+var ErrWMIUnavailable = errors.New(
+	"wmi: a previous query has not returned yet, reads are skipped until it does")
 
 // mapSeverity maps MSFT_MpThreat.SeverityID to a label.
 func mapSeverity(id uint32) string {

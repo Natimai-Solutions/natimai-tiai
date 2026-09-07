@@ -195,6 +195,7 @@ Il n'est jamais committé.
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif » |
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
 | `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence |
+| `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard |
 
 ### Réveil des postes (Wake-on-LAN)
 
@@ -530,6 +531,10 @@ lignes à chercher, dans l'ordre d'un cycle :
 | Ligne | Ce qu'elle dit |
 |---|---|
 | `agent: cannot run yet (...)` | Configuration inutilisable ; le service réessaie et se répare seul dès qu'elle arrive |
+| `agent: first heartbeat accepted by the server` | Le serveur est joint : « identity » n'est plus la dernière ligne d'un agent en bonne santé |
+| `agent: wmi: "..." has not returned after 1m30s` | Un fournisseur WMI ne répond plus. Les lectures WMI sont sautées, **les heartbeats continuent** (présence, commandes) sans état Defender ni inventaire, jusqu'à `WMI reads resume` |
+| `agent: no poll has completed for 10m0s — the current one is stuck in "..."` | Le cycle de poll ne rend plus la main ; la phase nommée est celle à examiner |
+| `panic:` suivi d'une pile Go | Le processus s'est arrêté brutalement ; la pile est maintenant écrite dans ce fichier, là où elle partait dans stderr, invisible sous le SCM |
 | `agent: inventory collected in ...` | L'inventaire a été lu sur le poste |
 | `agent: inventory reported to the server` | …et accepté par le serveur : la fiche est à jour |
 | `agent: the heartbeat carrying the inventory failed` | Lu mais pas transmis — regarder le serveur, pas le poste |
@@ -551,4 +556,5 @@ lignes à chercher, dans l'ordre d'un cycle :
 | `401 auth.enrollment_secret.invalid` à l'enrôlement | Secret agent ≠ `ENROLLMENT_SECRET` serveur | Aligner YAML/registre sur le `.env` du serveur |
 | Le service `TiaiAgent` est arrêté, sans message, démarrage pourtant *Automatique* | Le processus s'est arrêté (configuration illisible, WMI pas encore prêt au démarrage…) et les anciennes actions de récupération — « relance, relance, rien » — étaient épuisées | `tiai-agent repair` (ou le script GPO au démarrage suivant) ; à partir de cette version le service réessaie de lui-même et le SCM le relance indéfiniment. Cause : `agent.log` |
 | Une fiche poste reste sans matériel ni logiciels | L'inventaire est lu mais le heartbeat qui le porte n'aboutit pas | Chercher `the heartbeat carrying the inventory failed` dans `agent.log` : le budget de ce heartbeat est passé à 2 min, un échec restant vient du serveur (ou d'un proxy) |
+| Un poste affiché éteint alors qu'il est allumé, `agent.log` s'arrête après `identity`, service encore *En cours* | Une requête WMI qui ne revient jamais tenait le verrou global de la bibliothèque : tous les heartbeats bloquaient derrière, sans erreur ni ligne de journal | Corrigé : lecture WMI bornée à 90 s, puis sautée tant qu'elle n'est pas revenue ; le poste reste joignable et redémarrable depuis la console. Le journal nomme la classe fautive |
 | Un poste apparaît deux fois, l'un des deux muet | UUID SMBIOS illisible au démarrage (WMI pas encore prêt) : l'agent était reparti sur une identité de repli | Supprimer la fiche fantôme ; la lecture est désormais retentée avant tout repli, et le repli est journalisé |

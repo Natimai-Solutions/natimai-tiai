@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/yusufpapurcu/wmi"
@@ -28,8 +30,26 @@ const defenderNamespace = `root\Microsoft\Windows\Defender`
 // come back as an error for the whole class instead of as the zero value.
 var wmiClient = &wmi.Client{AllowMissingFields: true, PtrNil: true, NonePtrZero: true}
 
+// wmiQueryTimeout is how long one WMI query may run before the agent stops
+// waiting for it.
+//
+// Generous, because a first MSFT_MpComputerStatus on a loaded poste takes tens
+// of seconds and must not be mistaken for a hang. But finite, because the
+// alternative is the failure that produced "starting, identity, then nothing":
+// the WMI library serialises every query in the process behind one mutex, a
+// provider that never answers (BitLocker's, the Storage one, Defender's on a
+// broken repository) keeps that mutex for good, and from then on every
+// heartbeat blocks on its first Defender read — no error, no log line, no
+// contact, a poste shown off while it is on, and a service the SCM still calls
+// Running because nothing in it ever returned.
+const wmiQueryTimeout = 90 * time.Second
+
+// wmiStuck is set while a query is overdue, and cleared when it finally returns.
+var wmiStuck atomic.Bool
+
 // queryNamespace runs a WMI query against a namespace on a locked OS thread
-// (COM apartment hygiene for a long-running service).
+// (COM apartment hygiene for a long-running service), bounded by
+// wmiQueryTimeout.
 //
 // A field mismatch is logged and swallowed, and that is not indulgence: the
 // library reports it *after* filling the destination, so the rows are there and
@@ -39,10 +59,45 @@ var wmiClient = &wmi.Client{AllowMissingFields: true, PtrNil: true, NonePtrZero:
 // Win32_ComputerSystem would cost the whole machine's hardware and software
 // report, day after day, with one debug line to show for it.
 func queryNamespace(query string, dst any, namespace string) error {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	// Args mirror QueryNamespace: server=nil (local), then the namespace.
-	err := wmiClient.Query(query, dst, nil, namespace)
+	if wmiStuck.Load() {
+		return ErrWMIUnavailable
+	}
+
+	// On a goroutine of its own so the caller can stop waiting: a COM call has
+	// no cancellation, and the only way out of one that never returns is to
+	// leave it behind. The destination is written by that goroutine whenever
+	// the query does come back — every caller allocates it per call and reads
+	// it only on success, so a late write lands on memory nobody looks at.
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		// Args mirror QueryNamespace: server=nil (local), then the namespace.
+		done <- wmiClient.Query(query, dst, nil, namespace)
+	}()
+
+	select {
+	case err := <-done:
+		return tolerateMismatch(query, err)
+	case <-time.After(wmiQueryTimeout):
+	}
+
+	wmiStuck.Store(true)
+	log.Printf("agent: wmi: %q (%s) has not returned after %s — WMI reads are "+
+		"skipped until it does; heartbeats continue without them",
+		query, namespace, wmiQueryTimeout)
+	go func() {
+		err := <-done
+		wmiStuck.Store(false)
+		log.Printf("agent: wmi: the overdue query returned after %s (%v); WMI reads resume",
+			time.Since(start).Round(time.Second), err)
+	}()
+	return ErrWMIUnavailable
+}
+
+// tolerateMismatch turns the library's field-mismatch report into a debug line.
+func tolerateMismatch(query string, err error) error {
 	var mismatch *wmi.ErrFieldMismatch
 	if errors.As(err, &mismatch) {
 		logging.Debugf("agent: wmi: %s: %v (rows kept)", query, err)

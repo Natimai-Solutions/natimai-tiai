@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 )
@@ -44,7 +45,18 @@ func Setup(dir, level string) func() {
 	// File first: MultiWriter stops at the first failing writer, and under the
 	// SCM os.Stderr is an invalid handle — it must not block the file write.
 	log.SetOutput(io.MultiWriter(f, os.Stderr))
+
+	// A panic does not go through the log package: the runtime writes the
+	// goroutine dump straight to stderr, and under the SCM stderr is nowhere.
+	// That is how a poste ends up with a service Stopped, "identity" as the
+	// last line of its log, and nothing anywhere to say what killed the
+	// process. The runtime can be told to write the dump to a file as well —
+	// this one, so the death sits right after the last thing the agent said.
+	if err := debug.SetCrashOutput(f, debug.CrashOptions{}); err != nil {
+		log.Printf("logging: crash output stays on stderr only: %v", err)
+	}
 	return func() {
+		_ = debug.SetCrashOutput(nil, debug.CrashOptions{})
 		log.SetOutput(os.Stderr)
 		_ = f.Close()
 	}

@@ -136,6 +136,11 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   if (diskBelow !== null && diskBelow <= 100) params.disk_free_below = diskBelow;
   const software = queryInt(q.software_id);
   if (software !== null) params.software_id = software;
+  // The agent: an exact version travels as-is (the server matches equality),
+  // "behind" as the flag.
+  const agentVersion = queryValue(q.agent_version);
+  if (agentVersion) params.agent_version = agentVersion;
+  if (queryValue(q.agent_outdated) === 'true') params.agent_outdated = true;
   const sort = queryValue(q.sort_by);
   if (sort && MACHINE_SORT_FIELDS.includes(sort)) {
     params.sort_by = sort as MachineSortField;

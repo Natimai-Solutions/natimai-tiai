@@ -124,6 +124,17 @@
             @update:model-value="pushQuery"
           />
           <q-select
+            v-model="agent"
+            :options="agentOptions"
+            emit-value
+            map-options
+            dense
+            outlined
+            class="col-auto"
+            style="width: 220px"
+            @update:model-value="pushQuery"
+          />
+          <q-select
             v-model="manufacturer"
             :options="manufacturerOptions"
             emit-value
@@ -288,6 +299,20 @@
           </q-icon>
         </q-td>
       </template>
+      <template #body-cell-agent="props">
+        <q-td :props="props">
+          <span :class="{ 'text-grey': !props.value }">{{ props.value ?? '—' }}</span>
+          <q-icon
+            v-if="isAgentOutdated(props.value, agentLatest)"
+            name="system_update_alt"
+            color="orange"
+            size="16px"
+            class="q-ml-xs"
+          >
+            <q-tooltip>Agent obsolète — référence du parc : {{ agentLatest }}</q-tooltip>
+          </q-icon>
+        </q-td>
+      </template>
       <template #body-cell-antivirus="props">
         <q-td :props="props">
           <q-badge :color="protectionColor(props.row.is_up_to_date)">
@@ -376,6 +401,7 @@ import { useQuasar, type QTableColumn } from 'quasar';
 import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAutoRefresh';
 import MachineExportDialog from 'src/components/machine/MachineExportDialog.vue';
 import {
+  listAgentVersions,
   listAntivirusProducts,
   listChassisTypes,
   listMachines,
@@ -429,6 +455,7 @@ import {
   wuPendingColor,
   wuPendingLabel,
 } from 'src/utils/format';
+import { isAgentOutdated } from 'src/utils/agentVersion';
 
 const $q = useQuasar();
 const router = useRouter();
@@ -441,6 +468,12 @@ const search = ref('');
 const domain = ref('');
 const antivirus = ref<string | null>(null);
 const os = ref<string | null>(null);
+// One dropdown for two questions: "behind the reference" (the sentinel) or one
+// exact version. A version is never spelled like the sentinel.
+const AGENT_OUTDATED = 'outdated';
+const agent = ref<string | null>(null);
+// The reference the rows are flagged against, as the list response carries it.
+const agentLatest = ref<string | null>(null);
 const status = ref<MachineStatus | null>(null);
 const wu = ref<WindowsUpdateFilter | null>(null);
 // One token "<type>:<days>" (e.g. "quick:7"): the dropdown speaks in one value,
@@ -549,6 +582,13 @@ const osOptions = ref<{ label: string; value: string | null }[]>([
   { label: 'Tous les OS', value: null },
 ]);
 
+// Filled from the fleet like the OS list: the versions running are data, and
+// the counts are the deployment's progress bar. "Obsolète" first, because it
+// is the entry reached for the morning after a push.
+const agentOptions = ref<{ label: string; value: string | null }[]>([
+  { label: 'Agent : toutes versions', value: null },
+]);
+
 const modelOptions = ref<{ label: string; value: string | null }[]>([
   { label: 'Tous les modèles', value: null },
 ]);
@@ -592,7 +632,8 @@ type FilterKey =
   | 'chassis'
   | 'ram'
   | 'disk'
-  | 'software';
+  | 'software'
+  | 'agent';
 
 /** Whether the memory filter is complete enough to apply. */
 const ramActive = computed(() => ramOp.value !== null && ramGbValue.value !== null);
@@ -610,6 +651,7 @@ const filterChips = computed<{ key: FilterKey; label: string }[]>(() => {
   if (wu.value) chips.push({ key: 'wu', label: label(wuOptions, wu.value) });
   if (scan.value) chips.push({ key: 'scan', label: label(scanOptions, scan.value) });
   if (os.value) chips.push({ key: 'os', label: label(osOptions.value, os.value) });
+  if (agent.value) chips.push({ key: 'agent', label: label(agentOptions.value, agent.value) });
   if (manufacturer.value) {
     chips.push({
       key: 'manufacturer',
@@ -659,6 +701,7 @@ function clearFilter(key: FilterKey) {
       chassis,
       disk: diskFree,
       software: softwareId,
+      agent,
     };
     refs[key].value = null;
   }
@@ -683,6 +726,10 @@ const columns: QTableColumn<Machine>[] = [
     format: (val: string | null) => val ?? '—',
   },
   { name: 'os_version', label: 'OS', field: 'os_version', align: 'left' },
+  // The agent's version, flagged when below the parc's reference. In the list
+  // because the question it answers — "lesquels n'ont pas encore la nouvelle
+  // version" — is asked of the parc, not of one poste.
+  { name: 'agent', label: 'Agent', field: 'agent_version', align: 'left' },
   // name ≠ field like the session column below: the cell renders the product and
   // its state together, while `field` keeps a sensible sort key. Sortable because
   // grouping a mixed parc by product is exactly what this column is for.
@@ -766,6 +813,8 @@ function applyQuery() {
   domain.value = queryValue(q.domain) ?? '';
   antivirus.value = queryValue(q.antivirus);
   os.value = queryValue(q.os_version);
+  agent.value =
+    queryValue(q.agent_outdated) === 'true' ? AGENT_OUTDATED : queryValue(q.agent_version);
   const s = queryValue(q.status);
   status.value = s && MACHINE_STATUSES.includes(s) ? (s as MachineStatus) : null;
   const w = queryValue(q.wu_status);
@@ -825,6 +874,8 @@ function buildQuery(): Record<string, string> {
   if (domain.value) query.domain = domain.value;
   if (antivirus.value) query.antivirus = antivirus.value;
   if (os.value) query.os_version = os.value;
+  if (agent.value === AGENT_OUTDATED) query.agent_outdated = 'true';
+  else if (agent.value) query.agent_version = agent.value;
   if (status.value) query.status = status.value;
   if (wu.value) query.wu_status = wu.value;
   if (scan.value) {
@@ -904,6 +955,8 @@ const filterParams = computed<ListMachinesParams>(() => {
   if (domain.value) params.domain = domain.value;
   if (antivirus.value) params.antivirus = antivirus.value;
   if (os.value) params.os_version = os.value;
+  if (agent.value === AGENT_OUTDATED) params.agent_outdated = true;
+  else if (agent.value) params.agent_version = agent.value;
   if (status.value) params.status = status.value;
   if (wu.value) params.wu_status = wu.value;
   if (scan.value) {
@@ -956,6 +1009,7 @@ async function fetchMachines() {
     return;
   }
   rows.value = data.items;
+  agentLatest.value = data.agent_latest_version;
   // Merged into the *current* pagination, never the snapshot taken above: the
   // user may have turned the page while this request was in the air, and
   // writing the snapshot back would silently undo it.
@@ -999,6 +1053,23 @@ async function loadAntivirusOptions() {
   } catch {
     // A filter that failed to populate must not blank the machine list: the
     // dropdown simply keeps its "Tous antivirus" entry.
+  }
+}
+
+async function loadAgentOptions() {
+  try {
+    const fleet = await listAgentVersions();
+    const behind = fleet.versions.filter((v) => v.outdated).reduce((n, v) => n + v.count, 0);
+    agentOptions.value = [
+      { label: 'Agent : toutes versions', value: null },
+      { label: `Agent obsolète (${behind})`, value: AGENT_OUTDATED },
+      ...fleet.versions.map((v) => ({
+        label: `Agent ${v.name}${v.name === fleet.latest ? ' · référence' : ''} (${v.count})`,
+        value: v.name,
+      })),
+    ];
+  } catch {
+    // Same contract as the other dropdowns: degrade to "toutes versions".
   }
 }
 
@@ -1107,6 +1178,7 @@ onMounted(() => {
   void reload();
   void loadAntivirusOptions();
   void loadOsOptions();
+  void loadAgentOptions();
   void loadFleetOptions(modelOptions, listModels);
   void loadFleetOptions(manufacturerOptions, listManufacturers);
   void loadFleetOptions(processorOptions, listProcessors);

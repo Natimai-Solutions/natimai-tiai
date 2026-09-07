@@ -12,9 +12,11 @@ from app.api.deps import SessionDep, require_permission
 from app.core.config import settings
 from app.features.base import utcnow
 from app.features.inventory.models import MachineSoftware, Volume
+from app.features.machine.agent_version import fleet_versions
 from app.features.machine.models import Machine
 from app.features.machine.status import (
     MachineStatus,
+    agent_outdated_clause,
     aging_hardware_clause,
     low_disk_clause,
     status_clause,
@@ -61,6 +63,11 @@ class StatsOverview(BaseModel):
     # the server counts at 15 would be a lie nobody could see.
     low_disk_free_percent: int
     hardware_aging_years: int
+    # The agent itself: how many postes run something older than the
+    # reference, and what the reference is — the deployment's progress bar,
+    # on the wall screen the deployment is watched from.
+    machines_agent_outdated: int
+    agent_latest_version: str | None
 
 
 async def _count(session: SessionDep, clause: ColumnElement[bool] | None = None) -> int:
@@ -137,6 +144,16 @@ async def overview(session: SessionDep) -> StatsOverview:
         or 0
     )
 
+    # Postes below the reference agent version. The reference and the list of
+    # versions behind it are the machine list's own (``fleet_versions``), so
+    # the card and the list it opens cannot disagree.
+    fleet = await fleet_versions(session)
+    machines_agent_outdated = (
+        await _count(session, agent_outdated_clause(fleet.outdated, True))
+        if fleet.outdated
+        else 0
+    )
+
     return StatsOverview(
         total=total,
         up_to_date=up_to_date,
@@ -152,4 +169,6 @@ async def overview(session: SessionDep) -> StatsOverview:
         software_count=software_count,
         low_disk_free_percent=settings.LOW_DISK_FREE_PERCENT,
         hardware_aging_years=settings.HARDWARE_AGING_YEARS,
+        machines_agent_outdated=machines_agent_outdated,
+        agent_latest_version=fleet.latest,
     )
