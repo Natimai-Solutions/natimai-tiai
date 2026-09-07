@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"time"
 
 	"tiai/agent/internal/collector"
@@ -20,6 +21,18 @@ import (
 // daily tick would otherwise never be inventoried at all.
 const inventoryFirstCollectDelay = 3 * time.Minute
 
+// inventoryFirstCollectSpread staggers that first collection across the parc.
+//
+// Without it a fleet-wide deployment — a new agent pushed by GPO, a room of
+// postes started at eight — has every machine collect its inventory at the same
+// second and send the heaviest payload of its life to the server at once. The
+// server then writes a few hundred catalogue rows per poste against a connection
+// pool of twenty, every heartbeat waits on it, and the agents that time out
+// re-send exactly the same block on the next tick: a stampede that feeds itself
+// and reports nothing. Randomising the first delay over a few minutes costs one
+// morning's freshness and removes the pile-up.
+const inventoryFirstCollectSpread = 5 * time.Minute
+
 // inventoryCache is the daily cycle's cache. Same mechanism as the Windows
 // Update one, generation counter included — see cache.go.
 type inventoryCache = stateCache[models.InventoryState]
@@ -33,7 +46,7 @@ func (a *Agent) inventoryLoop(ctx context.Context) {
 	defer a.wg.Done()
 
 	interval := time.Duration(a.cfg.InventoryCollectIntervalSeconds) * time.Second
-	timer := time.NewTimer(inventoryFirstCollectDelay)
+	timer := time.NewTimer(inventoryFirstDelay())
 	defer timer.Stop()
 
 	for {
@@ -45,6 +58,13 @@ func (a *Agent) inventoryLoop(ctx context.Context) {
 		a.collectInventory(ctx)
 		timer.Reset(interval)
 	}
+}
+
+// inventoryFirstDelay is the wait before the first collection: the fixed delay
+// that keeps it off the boot path, plus a random share of the spread that keeps
+// the parc from collecting in unison.
+func inventoryFirstDelay() time.Duration {
+	return inventoryFirstCollectDelay + rand.N(inventoryFirstCollectSpread)
 }
 
 // collectInventory refreshes the cache — but only stores a reading that differs

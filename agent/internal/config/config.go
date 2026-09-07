@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -231,22 +232,30 @@ var (
 // LoadToken reads and decrypts the per-machine token, or returns "" if none is
 // stored yet.
 //
-// An *undecryptable* token is also "": the entropy may be gone (registry key
-// deleted, re-imaged system), and a token nobody can read is a token the agent
-// does not have — it re-enrolls with the fleet secret, which is the designed
-// recovery and covers every way the blob can die. Failing to start instead
-// would turn a lost registry value into a poste lost until someone logs on.
+// A token that cannot be read back is also "", whatever killed it: the entropy
+// may be gone (registry key deleted, re-imaged system), the file may be
+// truncated by a power cut mid-write or locked by an antivirus for the moment
+// we look at it. A token nobody can read is a token the agent does not have — it
+// re-enrolls with the fleet secret, which is the designed recovery and covers
+// every way the blob can die.
+//
+// Never an error, and that is the point rather than a shortcut. This is called
+// from Load, whose failure stops the service before its log file is even open:
+// a truncated token.dat used to leave a poste with a service that refuses to
+// start, no line anywhere saying why, and a start type of Automatic insisting
+// everything is fine.
 func LoadToken(dir string) (string, error) {
 	raw, err := os.ReadFile(tokenPath(dir))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
+		if !os.IsNotExist(err) {
+			log.Printf("config: stored token unreadable (%v); treating as not enrolled", err)
 		}
-		return "", err
+		return "", nil
 	}
-	blob, err := base64.StdEncoding.DecodeString(string(raw))
+	blob, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
 	if err != nil {
-		return "", fmt.Errorf("decode token: %w", err)
+		log.Printf("config: stored token is not decodable (%v); treating as not enrolled", err)
+		return "", nil
 	}
 	entropy := readEntropy()
 	plain, err := dpapi.Unprotect(blob, entropy)

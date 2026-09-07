@@ -11,7 +11,7 @@ Windows.
 ## Layout
 
 ```
-main.go                    commandes CLI (run / init-config / install / uninstall / start / stop / status / version)
+main.go                    commandes CLI (run / init-config / install / repair / uninstall / start / stop / status / version)
 internal/
   config/    config ProgramData (config.yaml) + surcharge registre (HKLM\SOFTWARE\Tiai) ; token chiffré DPAPI (token.dat)
   dpapi/     wrapper DPAPI (CryptProtectData, scope machine) ; passthrough hors Windows
@@ -590,9 +590,18 @@ Déploiement en service :
 
 ```bash
 ./tiai-agent.exe install        # enregistre le service (auto-start + recovery)
+./tiai-agent.exe repair         # réapplique ces deux réglages à un service déjà posé
 ./tiai-agent.exe start
 ./tiai-agent.exe status
 ```
+
+Le service ne s'arrête plus de lui-même sur une configuration inutilisable : il
+la relit, une minute plus tard puis de plus en plus espacé, et repart seul dès
+qu'elle arrive (`ApiBaseURL` posée par GPO après l'installation, WMI pas encore
+prêt au démarrage, `token.dat` illisible — qui vaut désormais un ré-enrôlement
+et non un refus de démarrer). Les trois actions de récupération du SCM sont des
+relances : un poste tombé plusieurs fois dans la journée revient tout seul au
+lieu d'attendre une main humaine.
 
 L'agent s'auto-enrôle au 1er démarrage (en-tête `X-Enrollment-Secret`), stocke
 le token reçu (DPAPI), puis n'utilise plus que `Authorization: Bearer <token>`.

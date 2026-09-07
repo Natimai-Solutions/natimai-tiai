@@ -40,6 +40,21 @@ var Version = "0.1.0"
 // back on a later heartbeat.
 const maxPendingCommands = 16
 
+// heavyHeartbeatTimeout is the budget for the rare heartbeat that carries a
+// slow-cycle block — a Windows Update state, an inventory.
+//
+// Its own value, and far above the ten seconds a normal poll gets, because that
+// heartbeat is nothing like a normal poll: a first inventory is a few hundred
+// programs to insert into the catalogue and seven sets to replace, on a server
+// that may be doing the same for the rest of the parc at that moment. Timing it
+// out at ten seconds does not merely lose the inventory — the agent never
+// acknowledges the block, re-attaches the very same payload to the next
+// heartbeat, and a poste can spend days re-sending an inventory the server
+// finishes writing every time. The block also holds the machine's last_seen
+// hostage while it fails, so the console shows a poste offline for a reason
+// that has nothing to do with the poste.
+const heavyHeartbeatTimeout = 2 * time.Minute
+
 // Agent owns the runtime state and the polling loop.
 type Agent struct {
 	cfg      *config.Config
@@ -89,7 +104,22 @@ type Agent struct {
 	// once one is scheduled (power.go). The last line of defence, and the only
 	// one that runs on the machine actually being taken down.
 	power powerGuard
+
+	// What the watchdog reads: when the last poll finished, and where the
+	// current one is. A poll that stops returning — a WMI provider that never
+	// answers, an API call that never comes back — is otherwise the one failure
+	// with no log line at all, and "no heartbeat for ten minutes, last seen
+	// reading the Defender state" is the line that names it.
+	lastPollDone atomic.Int64 // unix seconds; 0 until the first poll completes
+	pollPhase    atomic.Value // string
+	stallLogged  atomic.Bool
+	firstOK      atomic.Bool
 }
+
+// pollStallAfter is how long the watchdog tolerates without a completed poll
+// before saying so. Well above one heavy heartbeat plus the back-off cap: a
+// server that is merely slow or down produces "tick failed" lines of its own.
+const pollStallAfter = 10 * time.Minute
 
 // New creates an agent from config.
 func New(cfg *config.Config, cfgPath string) *Agent {
@@ -140,6 +170,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.wuLoop(ctx)
 	a.wg.Add(1)
 	go a.inventoryLoop(ctx)
+	a.wg.Add(1)
+	go a.watchdog(ctx)
 	defer a.wg.Wait()
 
 	base := time.Duration(a.cfg.HeartbeatIntervalSeconds) * time.Second
@@ -165,6 +197,8 @@ func (a *Agent) Run(ctx context.Context) error {
 // tick enrolls if needed, then runs one heartbeat cycle. A returned error means
 // the server was unreachable and the caller should back off.
 func (a *Agent) tick(ctx context.Context) error {
+	defer a.pollFinished()
+	a.phase("enroll")
 	if err := a.ensureEnrolled(ctx); err != nil {
 		return err
 	}
@@ -226,18 +260,22 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 // pollOnce flushes queued results, sends a heartbeat, and executes returned
 // commands. It returns an error only when the heartbeat itself fails.
 func (a *Agent) pollOnce(ctx context.Context) error {
+	a.phase("queue")
 	a.flushQueue(ctx)
 
+	a.phase("defender state")
 	state, err := collector.ReadDefenderState(ctx)
 	if err != nil {
-		log.Printf("agent: defender state: %v", err)
+		a.logCollector("defender state", err)
 	}
+	a.phase("defender threats")
 	threats, err := collector.ReadThreats(ctx)
 	if err != nil {
-		log.Printf("agent: defender threats: %v", err)
+		a.logCollector("defender threats", err)
 	}
 	// On failure sess stays nil, the block is omitted, and the server keeps the
 	// last known session rather than being told "nobody" on no evidence.
+	a.phase("session")
 	sess, err := collector.ReadSessionState(ctx, a.cfg.ReportsUsername())
 	if err != nil {
 		log.Printf("agent: session state: %v", err)
@@ -252,6 +290,7 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	// adapter holding the address reported, so the server can broadcast a magic
 	// packet on the subnet of that address without the three ever describing
 	// different NICs.
+	a.phase("network")
 	netInfo, err := collector.ReadNetwork(ctx)
 	if err != nil {
 		log.Printf("agent: network: %v", err)
@@ -260,6 +299,7 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	// cannot answer that once a third-party product has taken over. On failure av
 	// stays nil, the block is omitted, and the server keeps the last known
 	// product rather than being told "none" on no evidence.
+	a.phase("security center")
 	av, err := collector.ReadAVProduct(ctx)
 	if err != nil {
 		a.logAVError(err)
@@ -273,8 +313,18 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	// actually found something different. On a stable poste that is once, ever.
 	inv, invGen := a.inventory.pending()
 
+	// A heartbeat carrying one of those blocks gets the wider budget; every
+	// other one keeps the configured request timeout (see api.New).
+	hbCtx := ctx
+	if wu != nil || inv != nil {
+		var cancel context.CancelFunc
+		hbCtx, cancel = context.WithTimeout(ctx, a.heavyTimeout())
+		defer cancel()
+	}
+
+	a.phase("heartbeat")
 	fp := a.identity.Fingerprint
-	resp, err := a.client.Heartbeat(ctx, models.HeartbeatRequest{
+	resp, err := a.client.Heartbeat(hbCtx, models.HeartbeatRequest{
 		Hostname:       a.host.Hostname,
 		Domain:         a.host.Domain,
 		IPAddress:      netInfo.IP,
@@ -291,15 +341,36 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		Threats:        threats,
 	})
 	if err != nil {
+		// Named explicitly, because this is the failure nobody could diagnose
+		// from the log otherwise: "tick failed" says the server did not answer,
+		// not that the report it refused was the daily inventory — which is
+		// exactly what an administrator wondering why a poste shows no hardware
+		// needs to read.
+		if inv != nil {
+			log.Printf("agent: the heartbeat carrying the inventory failed, "+
+				"it will ride the next one: %v", err)
+		}
 		return err
+	}
+	if !a.firstOK.Swap(true) {
+		// Once per process: at INFO a quiet heartbeat leaves no trace, and
+		// "identity" as the last line of a log used to be indistinguishable
+		// from an agent that never reached the server at all.
+		log.Printf("agent: first heartbeat accepted by the server")
 	}
 	if wu != nil {
 		// Only now: a heartbeat that never reached the server has not reported
 		// anything, and the block has to ride the next one.
 		a.wu.markSent(wuGen)
+		log.Printf("agent: windows update state reported (%d update(s) pending)",
+			len(wu.Pending))
 	}
 	if inv != nil {
 		a.inventory.markSent(invGen)
+		// At INFO and not debug: an inventory is sent once and then, on a stable
+		// poste, never again. The one line saying it landed is what tells a
+		// deployment it worked.
+		log.Printf("agent: inventory reported to the server (%d logiciel(s))", len(inv.Software))
 	}
 	if n := len(resp.Commands); n > 0 {
 		log.Printf("agent: heartbeat ok, %d command(s) to run", n)
@@ -310,6 +381,72 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		a.accept(cmd)
 	}
 	return nil
+}
+
+// heavyTimeout is the budget for a heartbeat carrying a slow-cycle block, never
+// below the configured request timeout — a parc that widened the latter for a
+// slow link meant it for this request above all.
+func (a *Agent) heavyTimeout() time.Duration {
+	configured := time.Duration(a.cfg.RequestTimeoutSeconds) * time.Second
+	if configured > heavyHeartbeatTimeout {
+		return configured
+	}
+	return heavyHeartbeatTimeout
+}
+
+// logCollector reports a WMI collector failure — at debug only while WMI is
+// known to be stuck, because the gate said so once at INFO already and a line
+// per poll for as long as it lasts would bury everything else in the log.
+func (a *Agent) logCollector(what string, err error) {
+	if errors.Is(err, collector.ErrWMIUnavailable) {
+		logging.Debugf("agent: %s: %v", what, err)
+		return
+	}
+	log.Printf("agent: %s: %v", what, err)
+}
+
+// phase records where the current poll is, for the watchdog.
+func (a *Agent) phase(name string) { a.pollPhase.Store(name) }
+
+// pollFinished stamps the end of a poll, successful or not, and notes a
+// recovery if the watchdog had spoken.
+func (a *Agent) pollFinished() {
+	a.lastPollDone.Store(time.Now().Unix())
+	a.phase("idle")
+	if a.stallLogged.Swap(false) {
+		log.Printf("agent: polling resumed")
+	}
+}
+
+// watchdog says so, once, when polls have stopped completing.
+//
+// It cannot unstick anything — that is the WMI gate's job for the one hang we
+// know how to bound — but it turns "the poste went quiet" into a line that
+// says when and in which read, which is what the next diagnosis starts from.
+func (a *Agent) watchdog(ctx context.Context) {
+	defer a.wg.Done()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	started := time.Now().Unix()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		last := a.lastPollDone.Load()
+		if last == 0 {
+			last = started
+		}
+		since := time.Since(time.Unix(last, 0))
+		if since < pollStallAfter || a.stallLogged.Load() {
+			continue
+		}
+		a.stallLogged.Store(true)
+		phase, _ := a.pollPhase.Load().(string)
+		log.Printf("agent: no poll has completed for %s — the current one is stuck in %q",
+			since.Round(time.Minute), phase)
+	}
 }
 
 // logAVError reports a Security Center read failure once, then at debug level.

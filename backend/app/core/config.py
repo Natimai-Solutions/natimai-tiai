@@ -187,6 +187,15 @@ class Settings(BaseSettings):
     # not a policy: parcs amortise on their own schedule, hence a setting.
     HARDWARE_AGING_YEARS: int = 5
 
+    # --- Agent version ---
+    # The version every poste should be running. Left empty, the reference is
+    # the highest version reported anywhere on the parc — right the morning
+    # after a deployment, with no call to GitHub a server on an internal
+    # network could not make. Set it to flag against a chosen version instead:
+    # a parc rolling out to a pilot group first does not want the rest of the
+    # fleet reported as behind on the pilot's account.
+    AGENT_EXPECTED_VERSION: str | None = None
+
     # --- Wake-on-LAN ---
     # The magic packet is emitted by the server, not by an agent: the machine it
     # targets is off, and the whole point is to reach it anyway. What it needs is

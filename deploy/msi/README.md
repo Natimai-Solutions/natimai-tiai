@@ -42,6 +42,8 @@ défaut ou ce que la GPO a déjà posé dans le registre.
 | `WUCOLLECTINTERVALSECONDS` | `WUCollectIntervalSeconds` | entier > 0 |
 | `WUINSTALLTIMEOUTSECONDS` | `WUInstallTimeoutSeconds` | entier > 0 |
 | `REPORTSESSIONUSERNAME` | `ReportSessionUsername` | `1` ou `0` (pas `true`/`false`) |
+| `REPORTSOFTWARE` | `ReportSoftware` | `1` ou `0` (`0` = inventaire matériel seul) |
+| `INVENTORYCOLLECTINTERVALSECONDS` | `InventoryCollectIntervalSeconds` | entier > 0 |
 
 ```powershell
 # Installation silencieuse avec configuration
@@ -54,9 +56,10 @@ msiexec /i tiai-agent-windows-amd64.msi /qn /l*v install.log APIBASEURL=...
 ```
 
 Sans `APIBASEURL` (ni valeur registre préexistante), l'installation réussit
-quand même : le service démarre, constate l'absence d'URL et s'arrête ; il
-repartira au prochain démarrage du poste, une fois la valeur posée (par GPO par
-exemple).
+quand même : le service démarre, constate l'absence d'URL, l'écrit dans
+`%ProgramData%\Tiai\agent.log` et **réessaie** (une minute, puis de plus en plus
+espacé jusqu'à un quart d'heure). Il repart donc tout seul dès que la valeur est
+posée — par GPO, par exemple — sans attendre un redémarrage du poste.
 
 ## Mise à jour et désinstallation
 

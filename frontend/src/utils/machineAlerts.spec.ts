@@ -98,6 +98,7 @@ function healthy(overrides: Partial<MachineDetail> = {}): MachineDetail {
     nics: [],
     gpus: [],
     software: [],
+    agent_latest_version: '0.3.0',
     ...overrides,
   };
 }
@@ -250,5 +251,21 @@ describe('machineAlerts', () => {
     expect(alert?.tab).toBe('hardware');
     // Not read is not "not encrypted".
     expect(keys(healthy({ volumes: [] }))).not.toContain('unencrypted');
+  });
+});
+
+describe('machineAlerts — agent version', () => {
+  it('names a poste the deployment missed', () => {
+    const alerts = machineAlerts(healthy({ agent_latest_version: '0.5.0' }), 0, NOW);
+    const agent = alerts.find((a) => a.key === 'agent-outdated');
+    expect(agent?.level).toBe('info');
+    expect(agent?.text).toContain('0.3.0');
+    expect(agent?.text).toContain('0.5.0');
+  });
+
+  it('says nothing when the version is the reference, or unknown', () => {
+    expect(keys(healthy())).toEqual([]);
+    expect(keys(healthy({ agent_version: null, agent_latest_version: '0.5.0' }))).toEqual([]);
+    expect(keys(healthy({ agent_latest_version: null }))).toEqual([]);
   });
 });

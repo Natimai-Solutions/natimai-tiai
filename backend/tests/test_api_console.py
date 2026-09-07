@@ -1463,3 +1463,80 @@ async def test_reboot_cannot_be_stacked(client, db_session):
     assert (await client.post("/api/v1/commands", headers=headers, json=body)).json()[
         "count"
     ] == 0
+
+
+async def test_agent_versions_flag_the_postes_a_deployment_missed(client, db_session):
+    """The reference is the highest version on the parc; everything below it is
+    behind, and the list, the listing and the dashboard all say so the same way."""
+    headers = await _admin_headers(client, db_session)
+    for uuid, version in [
+        ("ver-old-1", "0.4.1"),
+        ("ver-old-2", "0.4.1"),
+        ("ver-new", "0.5.0"),
+        ("ver-dev", "0.5.0-dev.abc1234"),
+    ]:
+        enrolled = await _enroll(client, uuid)
+        await _heartbeat(client, enrolled["token"], agent_version=version)
+
+    listing = await client.get("/api/v1/machines/agent-versions", headers=headers)
+    assert listing.status_code == 200, listing.text
+    body = listing.json()
+    assert body["latest"] == "0.5.0"
+    assert body["pinned"] is False
+    # Newest first, each flagged; the pre-release counts as behind its release.
+    assert [(v["name"], v["count"], v["outdated"]) for v in body["versions"]] == [
+        ("0.5.0", 1, False),
+        ("0.5.0-dev.abc1234", 1, True),
+        ("0.4.1", 2, True),
+    ]
+
+    behind = await client.get(
+        "/api/v1/machines", params={"agent_outdated": "true"}, headers=headers
+    )
+    page = behind.json()
+    assert page["agent_latest_version"] == "0.5.0"
+    assert sorted(m["machine_uuid"] for m in page["items"]) == [
+        "ver-dev",
+        "ver-old-1",
+        "ver-old-2",
+    ]
+    current = await client.get(
+        "/api/v1/machines", params={"agent_outdated": "false"}, headers=headers
+    )
+    assert [m["machine_uuid"] for m in current.json()["items"]] == ["ver-new"]
+
+    exact = await client.get(
+        "/api/v1/machines", params={"agent_version": "0.4.1"}, headers=headers
+    )
+    assert exact.json()["total"] == 2
+
+    # The fiche carries the reference so "0.4.1" reads as "behind 0.5.0".
+    old = next(m for m in page["items"] if m["machine_uuid"] == "ver-old-1")
+    detail = await client.get(f"/api/v1/machines/{old['id']}", headers=headers)
+    assert detail.json()["agent_latest_version"] == "0.5.0"
+
+    stats = await client.get("/api/v1/stats/overview", headers=headers)
+    assert stats.json()["machines_agent_outdated"] == 3
+    assert stats.json()["agent_latest_version"] == "0.5.0"
+
+
+async def test_agent_reference_can_be_pinned(client, db_session, monkeypatch):
+    """A pinned reference flags against it, not against the fleet's best —
+    the pilot group's version must not report the rest of the parc as behind."""
+    from app.core.config import settings
+
+    headers = await _admin_headers(client, db_session)
+    for uuid, version in [("pin-a", "0.4.1"), ("pin-b", "0.6.0")]:
+        enrolled = await _enroll(client, uuid)
+        await _heartbeat(client, enrolled["token"], agent_version=version)
+    monkeypatch.setattr(settings, "AGENT_EXPECTED_VERSION", "0.4.1")
+
+    listing = await client.get("/api/v1/machines/agent-versions", headers=headers)
+    body = listing.json()
+    assert body["latest"] == "0.4.1"
+    assert body["pinned"] is True
+    assert all(v["outdated"] is False for v in body["versions"])
+    behind = await client.get(
+        "/api/v1/machines", params={"agent_outdated": "true"}, headers=headers
+    )
+    assert behind.json()["total"] == 0

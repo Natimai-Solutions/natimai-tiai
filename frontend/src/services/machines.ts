@@ -251,6 +251,12 @@ export interface MachineDetail extends Machine {
   nics: Nic[];
   gpus: Gpu[];
   software: InstalledSoftware[];
+  /**
+   * The agent version this poste is measured against: the highest one on the
+   * parc, or the one pinned server-side. null on an empty parc. What turns
+   * "0.4.1" into "behind 0.5.0" (see utils/agentVersion).
+   */
+  agent_latest_version: string | null;
 }
 
 export interface MachineList {
@@ -258,6 +264,8 @@ export interface MachineList {
   total: number;
   page: number;
   page_size: number;
+  /** Same reference as on the fiche, once per page: the list flags the rows below it. */
+  agent_latest_version: string | null;
 }
 
 /** Sortable columns of the machine list, named after the API's own fields. */
@@ -309,6 +317,10 @@ export interface ListMachinesParams {
   disk_free_below?: number;
   /** Only machines carrying this catalogue entry — the software drill-down. */
   software_id?: number;
+  /** Exact agent version, as the fleet listing names it. */
+  agent_version?: string;
+  /** true = only postes whose agent is below the reference — the ones a deployment missed. */
+  agent_outdated?: boolean;
   /** Server-side sort; omitted = freshest contact first. */
   sort_by?: MachineSortField;
   sort_desc?: boolean;
@@ -350,6 +362,33 @@ export interface OsVersion {
  */
 export async function listOsVersions(): Promise<OsVersion[]> {
   const { data } = await api.get<OsVersion[]>('/machines/os-versions');
+  return data;
+}
+
+/** One agent version present in the fleet, with how many postes run it. */
+export interface AgentVersion {
+  name: string;
+  count: number;
+  /** Below the reference — what makes the dropdown a deployment progress bar. */
+  outdated: boolean;
+}
+
+export interface AgentVersions {
+  /** The reference: the highest version on the parc, or the pinned one. */
+  latest: string | null;
+  /** Pinned in the server's configuration rather than derived from the fleet. */
+  pinned: boolean;
+  /** Newest first. */
+  versions: AgentVersion[];
+}
+
+/**
+ * Agent versions across the fleet, each flagged against the reference. Feeds
+ * the agent filter, and the counts are the deployment's progress bar
+ * ("combien restent sur 0.4.1").
+ */
+export async function listAgentVersions(): Promise<AgentVersions> {
+  const { data } = await api.get<AgentVersions>('/machines/agent-versions');
   return data;
 }
 

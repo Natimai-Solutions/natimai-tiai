@@ -34,15 +34,26 @@ func (e *StatusError) Error() string {
 type Client struct {
 	baseURL string
 	token   string
+	timeout time.Duration
 	http    *http.Client
 }
 
-// New builds a client with the given timeout.
+// New builds a client with the given per-request timeout.
+//
+// The budget lives on the *request* (a context deadline in do) and not on the
+// http.Client, and that is deliberate: http.Client.Timeout caps every request
+// at the same value whatever context it is handed, which would put the
+// heartbeat that carries an inventory — the largest thing the agent ever sends,
+// and the heaviest write the server ever does — on the same ten seconds as an
+// empty one. Applied per request, a caller can hand in a context that already
+// carries a wider deadline for that one case (see the agent's poll loop) and
+// everything else keeps the configured timeout.
 func New(baseURL, token string, timeout time.Duration) *Client {
 	return &Client{
 		baseURL: baseURL,
 		token:   token,
-		http:    &http.Client{Timeout: timeout},
+		timeout: timeout,
+		http:    &http.Client{},
 	}
 }
 
@@ -80,6 +91,16 @@ func (c *Client) authHeader() map[string]string {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, headers map[string]string, body, out any) error {
+	// The caller's deadline wins when it set one; otherwise the configured
+	// timeout applies. Nothing in the agent runs without a context, so this is
+	// the only place a request can be bounded. A non-positive timeout means
+	// "unbounded", as it did on http.Client — never "already expired".
+	if _, ok := ctx.Deadline(); !ok && c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)

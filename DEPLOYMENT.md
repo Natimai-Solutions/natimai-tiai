@@ -195,6 +195,7 @@ Il n'est jamais committé.
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif » |
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
 | `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence |
+| `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard |
 
 ### Réveil des postes (Wake-on-LAN)
 
@@ -489,8 +490,17 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'EnrollmentSecret' -Value '<s
 .\tiai-agent.exe init-config --api-url <url> [--machine-uuid <uuid>] [--config <chemin>]
 .\tiai-agent.exe run [--config <chemin>]   # premier plan (Ctrl+C), ou sous le SCM
 .\tiai-agent.exe install [--config <chemin>]
+.\tiai-agent.exe repair                    # réapplique démarrage auto + relance sur échec
 .\tiai-agent.exe start | stop | status | uninstall | version
 ```
+
+`repair` s'adresse aux postes installés par une version antérieure : elle posait
+« relance, relance, **rien** » comme actions de récupération, et le SCM répète la
+dernière action à chaque panne suivante — un poste tombé trois fois dans la même
+journée restait donc arrêté jusqu'à une relance manuelle, type de démarrage
+toujours affiché en *Automatique*. La commande remet les trois relances (15 s,
+30 s, 2 min) et le démarrage automatique, sans toucher au binaire ni à
+l'enrôlement. Le script GPO l'appelle à chaque démarrage.
 
 L'agent s'auto-enrôle au premier démarrage, stocke le token reçu, puis n'utilise
 plus que celui-ci. `uninstall` ne retire que l'enregistrement du service : le
@@ -513,6 +523,23 @@ Copy-Item .\tiai-agent-windows-amd64.exe 'C:\Program Files\Tiai\tiai-agent.exe' 
 stderr. Passer `log_level` à `DEBUG` pour tracer chaque heartbeat — le moyen le
 plus direct de vérifier qu'un poste poll bien pendant les tests.
 
+Le fichier est ouvert **avant** la lecture de la configuration : un poste dont
+l'agent ne démarre pas y écrit pourquoi, là où auparavant le service s'arrêtait
+sans laisser de trace nulle part (sous le SCM, stderr ne va nulle part). Les
+lignes à chercher, dans l'ordre d'un cycle :
+
+| Ligne | Ce qu'elle dit |
+|---|---|
+| `agent: cannot run yet (...)` | Configuration inutilisable ; le service réessaie et se répare seul dès qu'elle arrive |
+| `agent: first heartbeat accepted by the server` | Le serveur est joint : « identity » n'est plus la dernière ligne d'un agent en bonne santé |
+| `agent: wmi: "..." has not returned after 1m30s` | Un fournisseur WMI ne répond plus. Les lectures WMI sont sautées, **les heartbeats continuent** (présence, commandes) sans état Defender ni inventaire, jusqu'à `WMI reads resume` |
+| `agent: no poll has completed for 10m0s — the current one is stuck in "..."` | Le cycle de poll ne rend plus la main ; la phase nommée est celle à examiner |
+| `panic:` suivi d'une pile Go | Le processus s'est arrêté brutalement ; la pile est maintenant écrite dans ce fichier, là où elle partait dans stderr, invisible sous le SCM |
+| `agent: inventory collected in ...` | L'inventaire a été lu sur le poste |
+| `agent: inventory reported to the server` | …et accepté par le serveur : la fiche est à jour |
+| `agent: the heartbeat carrying the inventory failed` | Lu mais pas transmis — regarder le serveur, pas le poste |
+| `agent: inventory: ...` | La lecture elle-même a échoué (WMI) |
+
 ---
 
 ## Dépannage
@@ -527,3 +554,7 @@ plus direct de vérifier qu'un poste poll bien pendant les tests.
 | Le backend refuse de démarrer, message « `changeme` placeholder » | `ENVIRONMENT` ≠ `local` avec des secrets d'exemple | Renseigner les vrais secrets, ou utiliser l'override de dev |
 | Caddy ne démarre pas en mode C | `deploy/certs/tiai.crt` ou `.key` absent | Déposer le certificat, ou passer la ligne `tls` à `tls internal` |
 | `401 auth.enrollment_secret.invalid` à l'enrôlement | Secret agent ≠ `ENROLLMENT_SECRET` serveur | Aligner YAML/registre sur le `.env` du serveur |
+| Le service `TiaiAgent` est arrêté, sans message, démarrage pourtant *Automatique* | Le processus s'est arrêté (configuration illisible, WMI pas encore prêt au démarrage…) et les anciennes actions de récupération — « relance, relance, rien » — étaient épuisées | `tiai-agent repair` (ou le script GPO au démarrage suivant) ; à partir de cette version le service réessaie de lui-même et le SCM le relance indéfiniment. Cause : `agent.log` |
+| Une fiche poste reste sans matériel ni logiciels | L'inventaire est lu mais le heartbeat qui le porte n'aboutit pas | Chercher `the heartbeat carrying the inventory failed` dans `agent.log` : le budget de ce heartbeat est passé à 2 min, un échec restant vient du serveur (ou d'un proxy) |
+| Un poste affiché éteint alors qu'il est allumé, `agent.log` s'arrête après `identity`, service encore *En cours* | Une requête WMI qui ne revient jamais tenait le verrou global de la bibliothèque : tous les heartbeats bloquaient derrière, sans erreur ni ligne de journal | Corrigé : lecture WMI bornée à 90 s, puis sautée tant qu'elle n'est pas revenue ; le poste reste joignable et redémarrable depuis la console. Le journal nomme la classe fautive |
+| Un poste apparaît deux fois, l'un des deux muet | UUID SMBIOS illisible au démarrage (WMI pas encore prêt) : l'agent était reparti sur une identité de repli | Supprimer la fiche fantôme ; la lecture est désormais retentée avant tout repli, et le repli est journalisé |

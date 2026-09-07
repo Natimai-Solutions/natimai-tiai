@@ -27,6 +27,10 @@ export interface StatsOverview {
    */
   low_disk_free_percent: number;
   hardware_aging_years: number;
+  /** Postes whose agent is below the reference — the ones a deployment missed. */
+  machines_agent_outdated: number;
+  /** The reference itself, for the card's caption. null on an empty parc. */
+  agent_latest_version: string | null;
 }
 
 export async function getOverview(): Promise<StatsOverview> {

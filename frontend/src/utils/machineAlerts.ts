@@ -1,5 +1,6 @@
 import type { MachineTab } from 'src/components/machine/types';
 import type { MachineDetail } from 'src/services/machines';
+import { isAgentOutdated } from './agentVersion';
 import { freePercent, sizeLabel } from './format';
 
 /**
@@ -176,6 +177,19 @@ export function machineAlerts(
       icon: 'update_disabled',
       text: `Aucune recherche de mises à jour depuis ${searchAge} jours`,
       tab: 'windows_update',
+    });
+  }
+
+  // --- The agent itself. Info and not a warning: an old agent still reports,
+  // it just reports less — and the finding is what names the postes a
+  // deployment has not reached.
+  if (isAgentOutdated(m.agent_version, m.agent_latest_version)) {
+    alerts.push({
+      key: 'agent-outdated',
+      level: 'info',
+      icon: 'system_update_alt',
+      text: `Agent ${m.agent_version} obsolète : la référence du parc est ${m.agent_latest_version}`,
+      tab: 'identity',
     });
   }
 

@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 )
@@ -26,7 +27,7 @@ var debugEnabled atomic.Bool
 // the file can't be opened, logging stays on stderr and the cause is logged.
 // The returned func closes the file and restores stderr-only output.
 func Setup(dir, level string) func() {
-	debugEnabled.Store(strings.EqualFold(level, "debug"))
+	SetLevel(level)
 
 	rotate(dir)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -44,10 +45,30 @@ func Setup(dir, level string) func() {
 	// File first: MultiWriter stops at the first failing writer, and under the
 	// SCM os.Stderr is an invalid handle — it must not block the file write.
 	log.SetOutput(io.MultiWriter(f, os.Stderr))
+
+	// A panic does not go through the log package: the runtime writes the
+	// goroutine dump straight to stderr, and under the SCM stderr is nowhere.
+	// That is how a poste ends up with a service Stopped, "identity" as the
+	// last line of its log, and nothing anywhere to say what killed the
+	// process. The runtime can be told to write the dump to a file as well —
+	// this one, so the death sits right after the last thing the agent said.
+	if err := debug.SetCrashOutput(f, debug.CrashOptions{}); err != nil {
+		log.Printf("logging: crash output stays on stderr only: %v", err)
+	}
 	return func() {
+		_ = debug.SetCrashOutput(nil, debug.CrashOptions{})
 		log.SetOutput(os.Stderr)
 		_ = f.Close()
 	}
+}
+
+// SetLevel gates Debugf on level, after Setup has already opened the file.
+//
+// Its own function because the file has to be opened *before* the configuration
+// is read — a configuration that cannot be loaded is precisely the failure that
+// used to leave no trace at all — and the level only becomes known afterwards.
+func SetLevel(level string) {
+	debugEnabled.Store(strings.EqualFold(level, "debug"))
 }
 
 // Debugf logs only when the configured level is DEBUG.

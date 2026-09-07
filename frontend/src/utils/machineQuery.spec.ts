@@ -157,3 +157,18 @@ describe('shared page-size defaults', () => {
     expect(PAGE_SIZE_OPTIONS).toContain(DEFAULT_PAGE_SIZE);
   });
 });
+
+describe('machineListParamsFromQuery — agent facet', () => {
+  it('carries an exact version and the "behind" flag', () => {
+    expect(machineListParamsFromQuery({ agent_version: '0.4.1' })).toEqual({
+      agent_version: '0.4.1',
+    });
+    expect(machineListParamsFromQuery({ agent_outdated: 'true' })).toEqual({
+      agent_outdated: true,
+    });
+  });
+
+  it('drops anything but "true" for the flag', () => {
+    expect(machineListParamsFromQuery({ agent_outdated: 'yes' })).toEqual({});
+  });
+});

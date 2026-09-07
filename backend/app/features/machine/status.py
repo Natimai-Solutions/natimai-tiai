@@ -12,7 +12,7 @@ import enum
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, false, func, or_
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
@@ -171,6 +171,24 @@ def windows_update_clause(wu: WindowsUpdateFilter) -> ColumnElement[bool]:
             return col(Machine.wu_pending_count) > 0
         case WindowsUpdateFilter.REBOOT_REQUIRED:
             return col(Machine.wu_reboot_required).is_(True)
+
+
+def agent_outdated_clause(outdated: list[str], value: bool) -> ColumnElement[bool]:
+    """Machines whose agent version is (or is not) among ``outdated``.
+
+    The list comes from ``agent_version.outdated_versions``: which strings rank
+    below the reference is decided in Python, on the handful of distinct
+    versions a parc carries, because a version compare has no honest SQL.
+
+    A machine that never reported a version matches neither side — unknown is
+    not behind, and it is not current either.
+    """
+    version = col(Machine.agent_version)
+    if not outdated:
+        # Nothing is behind: "outdated" is empty, "current" is every poste
+        # that reported anything at all.
+        return false() if value else version.is_not(None)
+    return version.in_(outdated) if value else version.not_in(outdated)
 
 
 class ScanFilter(enum.StrEnum):

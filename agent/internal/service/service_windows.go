@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"tiai/agent/internal/agent"
 	"tiai/agent/internal/config"
+	"tiai/agent/internal/logging"
 )
 
 const (
@@ -25,10 +27,38 @@ const (
 	// its PowerShell process when the context is cancelled (exec.CommandContext),
 	// so this is a safety net rather than the normal path.
 	stopTimeout = 30 * time.Second
+
+	// startRetryDelay and startRetryMax pace the retries of a service that
+	// cannot start its agent yet.
+	//
+	// They exist because the alternative — the one this replaced — is a service
+	// that stops for good. A poste whose ApiBaseURL has not been pushed yet (the
+	// MSI installs and starts the service, the GPO writes the registry value at
+	// the next boot), a token.dat truncated by a power cut, a WMI service not
+	// up yet on a slow machine: each of those used to end the process, the SCM
+	// spent its two recovery restarts inside the minute, and the poste was then
+	// left with a service Stopped, its start type still saying Automatic, and
+	// nothing anywhere to say why. Retrying from inside the service means the
+	// same poste heals itself the moment the missing piece arrives.
+	startRetryDelay = 1 * time.Minute
+	startRetryMax   = 15 * time.Minute
+
+	// stopProgressInterval and stopGraceTimeout govern what the SCM is told
+	// while the agent unwinds.
+	//
+	// A stop is not instant: the poll loop, the command worker, the Windows
+	// Update cycle and the inventory cycle are all waited for, and a WMI query
+	// or a WUA search already in flight is not cancellable. A service that goes
+	// silent during that is a service the SCM eventually declares hung — and the
+	// GPO script, which stops the service to replace its binary, then fails and
+	// leaves the poste with nothing running. So: a checkpoint every second with
+	// a wait hint that covers it, and a bound past which we report Stopped and
+	// let the process exit rather than hang the SCM.
+	stopProgressInterval = 1 * time.Second
+	stopGraceTimeout     = 90 * time.Second
 )
 
 type tiaiService struct {
-	cfg     *config.Config
 	cfgPath string
 }
 
@@ -41,9 +71,11 @@ func (s *tiaiService) Execute(_ []string, r <-chan svc.ChangeRequest, changes ch
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Running is reported before the configuration is even read, and that is
+	// deliberate: runAgent keeps retrying a configuration it cannot use, so the
+	// service is genuinely up — waiting on its settings, not failing to start.
 	errCh := make(chan error, 1)
-	a := agent.New(s.cfg, s.cfgPath)
-	go func() { errCh <- a.Run(ctx) }()
+	go func() { errCh <- runAgent(ctx, s.cfgPath) }()
 
 	changes <- svc.Status{State: svc.Running, Accepts: accepted}
 
@@ -54,15 +86,86 @@ func (s *tiaiService) Execute(_ []string, r <-chan svc.ChangeRequest, changes ch
 			case svc.Interrogate:
 				changes <- c.CurrentStatus
 			case svc.Stop, svc.Shutdown:
-				changes <- svc.Status{State: svc.StopPending}
 				cancel()
-				<-errCh // wait for the loop to unwind
-				return false, 0
+				return waitForStop(errCh, changes)
 			}
-		case <-errCh:
-			// Agent exited on its own (fatal error) → stop the service.
+		case err := <-errCh:
+			// runAgent only returns on a cancelled context, so this is the path
+			// nothing takes. Logged rather than silently stopped: it is the one
+			// case where the service ends and nobody asked it to.
+			log.Printf("agent: polling loop ended on its own (%v), stopping the service", err)
 			changes <- svc.Status{State: svc.StopPending}
 			return false, 1
+		}
+	}
+}
+
+// runAgent loads the configuration and runs the agent, retrying until the
+// context is cancelled.
+//
+// The loop covers both halves of a failed start: a configuration that is not
+// usable *yet* (see startRetryDelay) and an agent that could not open what it
+// needs — the WMI identity read, the local result queue. Neither is worth
+// stopping a monitoring agent over, because a poste whose agent stopped is
+// precisely a poste nobody is watching, and nothing on it will say so.
+func runAgent(ctx context.Context, cfgPath string) error {
+	wait := startRetryDelay
+	for {
+		cfg, err := config.Load(cfgPath)
+		if err == nil {
+			logging.SetLevel(cfg.LogLevel)
+			log.Printf("agent: v%s starting under the SCM (log level %s)",
+				agent.Version, cfg.LogLevel)
+			err = agent.New(cfg, cfgPath).Run(ctx)
+			if err == nil {
+				return nil // clean stop: the context was cancelled
+			}
+			wait = startRetryDelay // it ran; the next failure starts over
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		log.Printf("agent: cannot run yet (%v); retrying in %s", err, wait)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(wait):
+		}
+		if wait *= 2; wait > startRetryMax {
+			wait = startRetryMax
+		}
+	}
+}
+
+// waitForStop keeps the SCM informed while the agent unwinds.
+//
+// Checkpoint and wait hint together are the protocol: each checkpoint says
+// "still working", each hint says "give me this much longer". Without them the
+// SCM applies its own patience to a stop that legitimately takes longer than a
+// heartbeat interval, and kills the process — or, worse for the parc, reports
+// the stop as failed to whoever asked for it.
+func waitForStop(errCh <-chan error, changes chan<- svc.Status) (bool, uint32) {
+	hint := uint32(stopGraceTimeout / time.Millisecond)
+	checkpoint := uint32(1)
+	changes <- svc.Status{State: svc.StopPending, CheckPoint: checkpoint, WaitHint: hint}
+
+	ticker := time.NewTicker(stopProgressInterval)
+	defer ticker.Stop()
+	deadline := time.After(stopGraceTimeout)
+
+	for {
+		select {
+		case <-errCh:
+			return false, 0
+		case <-ticker.C:
+			checkpoint++
+			changes <- svc.Status{State: svc.StopPending, CheckPoint: checkpoint, WaitHint: hint}
+		case <-deadline:
+			// Something that cannot be cancelled — a WMI query, a WUA search —
+			// is still in flight. Reporting Stopped and letting the process go
+			// beats holding the SCM (and a shutting-down machine) on it.
+			log.Printf("agent: still unwinding after %s, reporting the service stopped", stopGraceTimeout)
+			return false, 0
 		}
 	}
 }
@@ -71,8 +174,12 @@ func (s *tiaiService) Execute(_ []string, r <-chan svc.ChangeRequest, changes ch
 func IsWindowsService() (bool, error) { return svc.IsWindowsService() }
 
 // Run hands control to the SCM (used when started as a service).
-func Run(cfg *config.Config, cfgPath string) error {
-	return svc.Run(ServiceName, &tiaiService{cfg: cfg, cfgPath: cfgPath})
+//
+// It takes the config *path* and not a loaded config: the configuration is read
+// inside the service, where a failure to read it can be retried instead of
+// killing the process before its log file is even open.
+func Run(cfgPath string) error {
+	return svc.Run(ServiceName, &tiaiService{cfgPath: cfgPath})
 }
 
 // Install registers the service to auto-start and run `run --config <path>`.
@@ -110,16 +217,56 @@ func Install(cfgPath string) error {
 	}
 	defer s.Close()
 
-	// Restart on failure (15s, then 30s), reset the failure count after 24h.
-	if err := s.SetRecoveryActions([]mgr.RecoveryAction{
-		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
-		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
-		{Type: mgr.NoAction},
-	}, 86400); err != nil {
+	if err := setRecoveryActions(s); err != nil {
 		fmt.Printf("warning: could not set recovery actions: %v\n", err)
 	}
 	fmt.Printf("Service %s installed.\n", ServiceName)
 	return nil
+}
+
+// setRecoveryActions makes the SCM bring the service back after a crash.
+//
+// The third action is a restart and not NoAction, which is the whole point of
+// the change: the SCM repeats the *last* action for every failure beyond the
+// third, so "restart, restart, nothing" means a service that fails three times
+// inside its reset period stays Stopped until a human notices — start type
+// Automatic, no error dialog, nothing in the console but a poste that went
+// quiet. Two minutes is the third delay: long enough to sit out whatever kept
+// failing (a boot storm, a WMI service not up yet), short enough that nobody
+// has to drive to the poste.
+func setRecoveryActions(s *mgr.Service) error {
+	return s.SetRecoveryActions([]mgr.RecoveryAction{
+		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 2 * time.Minute},
+	}, 86400)
+}
+
+// Repair re-applies to an already-installed service the settings a fresh
+// install would give it: automatic start and the recovery actions above.
+//
+// It exists for the postes installed by an earlier version, which carry the old
+// "restart, restart, nothing" and would otherwise keep it for the life of the
+// machine — an upgrade replaces the binary, never the SCM's idea of what to do
+// when it dies.
+func Repair() error {
+	return withService(func(s *mgr.Service) error {
+		cfg, err := s.Config()
+		if err != nil {
+			return fmt.Errorf("read service config: %w", err)
+		}
+		if cfg.StartType != mgr.StartAutomatic {
+			cfg.StartType = mgr.StartAutomatic
+			if err := s.UpdateConfig(cfg); err != nil {
+				return fmt.Errorf("set automatic start: %w", err)
+			}
+		}
+		if err := setRecoveryActions(s); err != nil {
+			return fmt.Errorf("set recovery actions: %w", err)
+		}
+		fmt.Printf("Service %s: automatic start and restart-on-failure re-applied.\n", ServiceName)
+		return nil
+	})
 }
 
 // Uninstall stops the service, then removes it.

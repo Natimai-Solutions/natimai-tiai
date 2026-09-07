@@ -5,20 +5,18 @@
 // the foreground via `run`).
 package service
 
-import (
-	"errors"
-
-	"tiai/agent/internal/config"
-)
+import "errors"
 
 var errUnsupported = errors.New("windows service management is only available on windows")
 
 // IsWindowsService is always false off Windows.
 func IsWindowsService() (bool, error) { return false, nil }
 
-func Run(*config.Config, string) error { return errUnsupported }
+func Run(string) error { return errUnsupported }
 
 func Install(string) error { return errUnsupported }
+
+func Repair() error { return errUnsupported }
 
 func Uninstall() error { return errUnsupported }
 
