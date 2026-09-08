@@ -37,7 +37,14 @@ type rawSystem struct {
 
 type rawEnclosure struct {
 	SerialNumber string
-	ChassisTypes []uint16
+	// []int32 and not []uint16, although CIM declares the property uint16[]:
+	// WMI hands a uint16 array over COM as a SafeArray of VT_I4, so the
+	// elements arrive as int32 — and the WMI library, asked to fill a []uint16
+	// from them, calls reflect.Value.Uint on an int32 and *panics* rather than
+	// erring. That panic was the death of every agent of the parc four minutes
+	// after start, on its first inventory (v0.0.8 field logs). The only array
+	// property the inventory reads, and it is read into what actually arrives.
+	ChassisTypes []int32
 }
 
 type rawBaseBoard struct {
@@ -138,9 +145,9 @@ var chassisNames = map[uint16]string{
 // chassisType names the enclosure, or reports the raw code when it is not one
 // we fold. An unrecognised code is kept rather than dropped: "chassis-25" in the
 // console is a question someone can answer, where an empty cell is not.
-func chassisType(codes []uint16) string {
+func chassisType(codes []int32) string {
 	for _, code := range codes {
-		if name, ok := chassisNames[code]; ok {
+		if name, ok := chassisNames[uint16(code)]; ok {
 			return name
 		}
 	}

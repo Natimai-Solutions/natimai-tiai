@@ -10,23 +10,23 @@ import (
 func TestChassisTypeFoldsTheCodesThatMatter(t *testing.T) {
 	cases := []struct {
 		name  string
-		codes []uint16
+		codes []int32
 		want  string
 	}{
-		{"tower", []uint16{7}, "desktop"},
-		{"notebook", []uint16{10}, "laptop"},
-		{"convertible", []uint16{31}, "tablet"},
-		{"all in one", []uint16{13}, "all-in-one"},
+		{"tower", []int32{7}, "desktop"},
+		{"notebook", []int32{10}, "laptop"},
+		{"convertible", []int32{31}, "tablet"},
+		{"all in one", []int32{13}, "all-in-one"},
 		// A firmware that says "other" and "unknown" is saying it does not know,
 		// which is not information worth carrying.
-		{"no information", []uint16{1, 2}, ""},
+		{"no information", []int32{1, 2}, ""},
 		{"nothing at all", nil, ""},
 		// An unrecognised code is kept: a question someone can answer beats an
 		// empty cell.
-		{"unfolded", []uint16{25}, "chassis-25"},
+		{"unfolded", []int32{25}, "chassis-25"},
 		// A machine reporting several picks the first one we fold, not the first
 		// one reported: SMBIOS lists them in no useful order.
-		{"several", []uint16{1, 9}, "laptop"},
+		{"several", []int32{1, 9}, "laptop"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -71,6 +71,15 @@ func queryNamespace(query string, dst any, namespace string) error {
 	start := time.Now()
 	done := make(chan error, 1)
 	go func() {
+		// A panic in the library — it has one, reflect.Value.Uint on a
+		// property that arrives as int32 — must come back as an error for the
+		// class it happened on, not as the end of the process. Here rather
+		// than in the caller, because this goroutine is the one it would kill.
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("wmi: %s: panic: %v", query, r)
+			}
+		}()
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		// Args mirror QueryNamespace: server=nil (local), then the namespace.
