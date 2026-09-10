@@ -239,6 +239,11 @@
           </q-badge>
         </q-tab>
         <q-tab name="commands" icon="history" label="Commandes" />
+        <q-tab name="history" icon="handyman" label="Historique">
+          <q-badge v-if="interventionTotal" color="grey-7" floating>{{
+            interventionTotal
+          }}</q-badge>
+        </q-tab>
       </q-tabs>
       <q-separator />
 
@@ -283,6 +288,18 @@
           <MachineSoftwareCard :machine="machine" :loading="loading" />
         </q-tab-panel>
 
+        <q-tab-panel name="history" class="q-px-none">
+          <MachineHistoryCard
+            :machine-id="props.id"
+            :items="interventions"
+            :total="interventionTotal"
+            :loading="interventionsLoading"
+            :can-write="auth.can('intervention', 'write')"
+            @changed="loadInterventions(1)"
+            @more="loadInterventions(interventionPage + 1)"
+          />
+        </q-tab-panel>
+
         <q-tab-panel name="commands" class="q-px-none">
           <MachineCommandsCard
             v-model:pagination="commandPagination"
@@ -319,6 +336,7 @@ import MachineCommandsCard from 'src/components/machine/MachineCommandsCard.vue'
 import MachineDefenderCard from 'src/components/machine/MachineDefenderCard.vue';
 import MachineGpuCard from 'src/components/machine/MachineGpuCard.vue';
 import MachineHardwareCard from 'src/components/machine/MachineHardwareCard.vue';
+import MachineHistoryCard from 'src/components/machine/MachineHistoryCard.vue';
 import MachineIdentityCard from 'src/components/machine/MachineIdentityCard.vue';
 import MachineMemoryCard from 'src/components/machine/MachineMemoryCard.vue';
 import MachineMergeDialog from 'src/components/machine/MachineMergeDialog.vue';
@@ -357,6 +375,7 @@ import {
   type CommandAction,
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
+import { listInterventions, type Intervention } from 'src/services/interventions';
 import {
   getRoomConfig,
   listRooms,
@@ -435,6 +454,31 @@ const commandPagination = ref<TablePagination>({
 const actionGroups = computed(() => commandActionGroups({ permissions: auth.permissions }));
 // Revoke, re-enroll, merge: the machine:write half of the fiche.
 const canManage = computed(() => auth.can('machine', 'write'));
+
+// --- The journal. Loaded with the fiche and paged by « Afficher plus »:
+// a poste's journal is a few dozen lines at most, read top to bottom.
+const interventions = ref<Intervention[]>([]);
+const interventionTotal = ref(0);
+const interventionPage = ref(1);
+const interventionsLoading = ref(false);
+const INTERVENTION_PAGE_SIZE = 25;
+
+async function loadInterventions(page: number) {
+  if (!auth.can('intervention', 'read')) return;
+  interventionsLoading.value = true;
+  try {
+    const id = props.id;
+    const res = await listInterventions(id, { page, page_size: INTERVENTION_PAGE_SIZE });
+    if (id !== props.id) return;
+    interventions.value = page === 1 ? res.items : [...interventions.value, ...res.items];
+    interventionTotal.value = res.total;
+    interventionPage.value = page;
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Historique indisponible') });
+  } finally {
+    interventionsLoading.value = false;
+  }
+}
 
 // --- Placement: the room the console files the poste in. By hand only
 // when the server is not in a directory mode.
@@ -701,6 +745,9 @@ watch(
   () => props.id,
   () => {
     machine.value = null;
+    interventions.value = [];
+    interventionTotal.value = 0;
+    void loadInterventions(1);
     threats.value = [];
     activeThreats.value = 0;
     commands.value = [];
@@ -721,5 +768,17 @@ watch(canManage, (allowed) => {
   if (allowed) void fetchDuplicates();
 });
 
-onMounted(load);
+// Same reasoning as the duplicate lookup: on a hard reload the profile is
+// not there yet when the first load runs, and the journal would stay empty.
+watch(
+  () => auth.can('intervention', 'read'),
+  (allowed) => {
+    if (allowed && !interventions.value.length) void loadInterventions(1);
+  },
+);
+
+onMounted(() => {
+  void load();
+  void loadInterventions(1);
+});
 </script>

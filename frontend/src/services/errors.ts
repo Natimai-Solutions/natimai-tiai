@@ -40,6 +40,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'building.name.taken': 'Un bâtiment porte déjà ce nom sur cet emplacement',
   'room.not_found': 'Salle introuvable',
   'room.name.taken': 'Une salle porte déjà ce nom dans ce bâtiment',
+  'intervention.not_found': 'Intervention introuvable',
   'room.placement.locked':
     "Les postes sont rangés par l'annuaire (ROOM_SOURCE) : le rattachement manuel est désactivé",
   'request.validation_error': 'Requête invalide',

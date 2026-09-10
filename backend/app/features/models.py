@@ -6,6 +6,7 @@ Importing this module guarantees every table is registered on
 
 from app.features.audit.models import AuditEntry  # noqa: F401
 from app.features.command.models import Command  # noqa: F401
+from app.features.intervention.models import Intervention  # noqa: F401
 from app.features.inventory.models import (  # noqa: F401
     Disk,
     Gpu,
@@ -49,4 +50,5 @@ __all__ = [
     "AuditEntry",
     "Building",
     "Room",
+    "Intervention",
 ]

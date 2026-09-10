@@ -6,7 +6,7 @@
  */
 
 export type Resource =
-  'machine' | 'threat' | 'command' | 'risky_command' | 'room' | 'user' | 'audit';
+  'machine' | 'threat' | 'command' | 'risky_command' | 'room' | 'intervention' | 'user' | 'audit';
 
 export type Action = 'read' | 'write' | 'execute';
 
@@ -87,6 +87,21 @@ export const PERMISSION_CATALOGUE: PermissionEntry[] = [
     resourceLabel: 'Salles et bâtiments',
     label: 'Gérer',
     hint: 'Créer et modifier les salles et les bâtiments, y affecter des postes.',
+  },
+  {
+    key: 'intervention:read',
+    resource: 'intervention',
+    action: 'read',
+    resourceLabel: 'Historique des interventions',
+    label: 'Consulter',
+  },
+  {
+    key: 'intervention:write',
+    resource: 'intervention',
+    action: 'write',
+    resourceLabel: 'Historique des interventions',
+    label: 'Saisir',
+    hint: 'Ajouter, modifier et supprimer des interventions sur tout poste ; les suppressions sont tracées.',
   },
   {
     key: 'user:read',

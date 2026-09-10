@@ -58,6 +58,7 @@ class ErrorCode(enum.StrEnum):
     # ROOM_SOURCE is a directory mode: postes are filed by the directory, and
     # a placement made by hand here would be undone on the next inventory.
     ROOM_PLACEMENT_LOCKED = "room.placement.locked"
+    INTERVENTION_NOT_FOUND = "intervention.not_found"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     RATE_LIMITED = "request.rate_limited"

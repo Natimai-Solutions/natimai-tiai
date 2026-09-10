@@ -53,6 +53,10 @@ gère naturellement les postes éteints.
   salle — jamais refusé. À la main, ou **depuis l'annuaire** : l'agent remonte
   l'unité d'organisation de son objet ordinateur et son attribut Emplacement,
   et le serveur en fait des salles (`ROOM_SOURCE`).
+- **Historique des interventions** — chaque poste porte son journal : panne,
+  installation logicielle, mise à niveau, maintenance, vérification, saisi
+  depuis sa fiche avec une date qui peut être antérieure à la console, lu de
+  haut en bas comme un cahier. Les suppressions sont tracées.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.

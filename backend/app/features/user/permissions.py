@@ -30,6 +30,8 @@ class Resource(enum.StrEnum):
     RISKY_COMMAND = "risky_command"
     # Buildings and rooms — where the postes are, as the console organises it.
     ROOM = "room"
+    # The journal of a poste: interventions recorded by hand.
+    INTERVENTION = "intervention"
     USER = "user"
     # The audit log. Admin material like USER: who did what to the parc's
     # accounts and tokens.
@@ -56,6 +58,8 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.RISKY_COMMAND, Action.EXECUTE),
     (Resource.ROOM, Action.READ),
     (Resource.ROOM, Action.WRITE),
+    (Resource.INTERVENTION, Action.READ),
+    (Resource.INTERVENTION, Action.WRITE),
     (Resource.USER, Action.READ),
     (Resource.USER, Action.WRITE),
     (Resource.AUDIT, Action.READ),
@@ -79,6 +83,7 @@ _SUPERVISION_READ = frozenset(
         permission_key(Resource.THREAT, Action.READ),
         permission_key(Resource.COMMAND, Action.READ),
         permission_key(Resource.ROOM, Action.READ),
+        permission_key(Resource.INTERVENTION, Action.READ),
     }
 )
 
@@ -113,6 +118,7 @@ BUILTIN_GROUP_DEFAULTS: dict[BuiltinGroup, tuple[str, str, frozenset[str]]] = {
         | {
             permission_key(Resource.COMMAND, Action.EXECUTE),
             permission_key(Resource.RISKY_COMMAND, Action.EXECUTE),
+            permission_key(Resource.INTERVENTION, Action.WRITE),
         },
     ),
 }
