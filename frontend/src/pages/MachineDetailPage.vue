@@ -69,7 +69,14 @@
       <q-btn flat dense round icon="refresh" :loading="loading" class="q-mr-sm" @click="load">
         <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
       </q-btn>
-      <q-btn-dropdown color="primary" dense label="Action" icon="bolt" :disable="!machine">
+      <q-btn-dropdown
+        v-if="actionGroups.length"
+        color="primary"
+        dense
+        label="Action"
+        icon="bolt"
+        :disable="!machine"
+      >
         <q-list>
           <template v-for="section in actionGroups" :key="section.group">
             <q-item-label header class="q-py-xs">{{ section.label }}</q-item-label>
@@ -86,12 +93,12 @@
           </template>
         </q-list>
       </q-btn-dropdown>
-      <!-- Admin only: the merge endpoint requires machine:write, so for a
-           read-only operator the button could only ever open a dialog and 403.
+      <!-- machine:write only: the merge endpoint requires it, so for anyone
+           else the button could only ever open a dialog and 403.
            The count rides in the label — "Fusionner" said nothing about whether
            there was anything to fuse, which is what made it look inert. -->
       <q-btn
-        v-if="auth.isAdmin"
+        v-if="canManage"
         flat
         dense
         color="primary"
@@ -107,7 +114,7 @@
            two halves of the same kill-switch, and showing both at once would
            read as a choice when only one ever applies. -->
       <q-btn
-        v-if="auth.isAdmin && machine?.token_revoked"
+        v-if="canManage && machine?.token_revoked"
         flat
         dense
         color="positive"
@@ -117,7 +124,7 @@
         @click="confirmAllowReenroll"
       />
       <q-btn
-        v-else-if="auth.isAdmin"
+        v-else-if="canManage"
         flat
         dense
         color="negative"
@@ -135,7 +142,7 @@
       secret du parc, tant que le ré-enrôlement n'est pas autorisé ici.
       <template #action>
         <q-btn
-          v-if="auth.isAdmin"
+          v-if="canManage"
           flat
           dense
           label="Autoriser le ré-enrôlement"
@@ -149,7 +156,7 @@
       Empreinte divergente : ce poste nécessite une vérification manuelle (clone, swap matériel ou
       ré-image).
       <template #action>
-        <q-btn v-if="auth.isAdmin" flat dense label="Fusionner un doublon" @click="openMerge" />
+        <q-btn v-if="canManage" flat dense label="Fusionner un doublon" @click="openMerge" />
       </template>
     </q-banner>
 
@@ -372,7 +379,11 @@ const commandPagination = ref<TablePagination>({
 
 // The whole catalogue here, diagnostics included: reading one machine's
 // gpresult or ipconfig is exactly what this page is for.
-const actionGroups = commandActionGroups();
+// What this profile may trigger: the menu never offers what the backend would
+// refuse, and goes away entirely for an account that may run nothing.
+const actionGroups = computed(() => commandActionGroups({ permissions: auth.permissions }));
+// Revoke, re-enroll, merge: the machine:write half of the fiche.
+const canManage = computed(() => auth.can('machine', 'write'));
 
 const title = computed(() => machine.value?.hostname || machine.value?.machine_uuid || 'Poste');
 
@@ -558,10 +569,10 @@ const mergeHint = computed(() =>
     : 'Aucun doublon détecté — la recherche manuelle reste possible',
 );
 
-/** Candidates for the button's count, refreshed with the page. Admin-only: the
- * merge itself is, and a read-only console has no use for the list. */
+/** Candidates for the button's count, refreshed with the page. machine:write
+ * only: the merge itself is, and a read-only console has no use for the list. */
 async function fetchDuplicates() {
-  if (!auth.isAdmin) return;
+  if (!canManage.value) return;
   try {
     const id = props.id;
     const found = await getDuplicates(id);
@@ -601,17 +612,14 @@ watch(
 );
 
 // The profile is fetched by the layout without being awaited, so on a hard
-// reload of this page `isAdmin` is still false when the first load runs and the
-// admin-only candidate lookup is skipped. The buttons appear on their own once
-// it resolves; the count behind them would not, and a merge button reading
+// reload of this page `canManage` is still false when the first load runs and
+// the candidate lookup is skipped. The buttons appear on their own once it
+// resolves; the count behind them would not, and a merge button reading
 // "aucun doublon" on a poste that has one is the very thing this change set out
 // to fix.
-watch(
-  () => auth.isAdmin,
-  (isAdmin) => {
-    if (isAdmin) void fetchDuplicates();
-  },
-);
+watch(canManage, (allowed) => {
+  if (allowed) void fetchDuplicates();
+});
 
 onMounted(load);
 </script>

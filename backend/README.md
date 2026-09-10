@@ -49,13 +49,14 @@ Ajouter une dépendance : `uv add <pkg>` (ou `uv add --dev <pkg>` pour le groupe
 
 **Console** (auth : JWT utilisateur)
 - `POST /api/v1/auth/login` — email + mot de passe (OAuth2 password), renvoie un JWT.
-- `GET  /api/v1/auth/me` — utilisateur courant.
+- `GET  /api/v1/auth/me` — utilisateur courant, ses groupes et ses permissions.
+- `GET/POST/PATCH/DELETE /api/v1/groups` — groupes et leurs droits (permission `user:read` / `user:write`) ; `GET /api/v1/groups/permissions` liste le catalogue.
 - `GET  /api/v1/machines` / `GET /api/v1/machines/{id}` — lecture (permission `machine:read`).
-- `POST /api/v1/commands` — file une commande par poste (permission `command:execute`, admin).
+- `POST /api/v1/commands` — file une commande par poste (permission `command:execute`, plus `risky_command:execute` pour les types à risque).
   Champ optionnel `ttl_minutes` (borné à 1 min → 30 j) ; omis, le déploiement
   décide via `COMMAND_DEFAULT_TTL_MINUTES` (**60** par défaut). Au-delà, une
   commande jamais distribuée est périmée — voir *Cycle de vie d'une commande*.
-- `POST /api/v1/machines/wake` — réveil Wake-on-LAN (permission `command:execute`, admin).
+- `POST /api/v1/machines/wake` — réveil Wake-on-LAN (permission `command:execute`).
   La seule action que le **serveur** exécute lui-même : le poste visé est éteint,
   il n'a pas d'agent à qui la confier. Le paquet magique est diffusé sur le
   sous-réseau du poste ([features/wol/](app/features/wol/)) et la tentative est
@@ -104,22 +105,39 @@ comportement attendu, pas une ligne oubliée. Passé son délai, elle cesse
 simplement de verrouiller son type sur ce poste, et si l'agent finit par
 répondre, son résultat s'inscrit malgré tout sur la ligne d'origine.
 
-## Utilisateurs & permissions
+## Utilisateurs, groupes & permissions
 
-Les opérateurs se connectent en **JWT** (email + mot de passe, hash bcrypt). Deux
-rôles ([models.py](app/features/user/models.py)) :
+Les opérateurs se connectent en **JWT** (email + mot de passe, hash bcrypt). Ce
+qu'un compte peut faire est l'**union des droits de ses groupes**
+([models.py](app/features/user/models.py) : `groups`, `group_permissions`,
+`user_groups`). Un groupe est un ensemble nommé de permissions
+`ressource:action`, composé depuis la console (`/groups`). Trois groupes sont
+intégrés et créés par la migration `0016` puis par
+[seed_admin.py](app/scripts/seed_admin.py) à chaque démarrage s'ils manquent :
 
-| Rôle | Capacités |
-|---|---|
-| `admin` | lecture + écriture + exécution de commandes à distance |
-| `readonly` | lecture seule |
+| Groupe intégré | Clé | Droits par défaut |
+|---|---|---|
+| Administrateurs | `admin` | **tous**, implicitement — y compris ceux des ressources à venir ; non modifiables |
+| Lecture seule | `readonly` | `machine:read`, `threat:read`, `command:read` |
+| Techniciens | `technician` | lecture seule + `command:execute` + `risky_command:execute` |
+
+Les groupes intégrés se renomment et, sauf les administrateurs, se modifient
+comme les autres ; ils ne se suppriment pas. Aucune modification ne peut laisser
+la console sans compte actif détenant `user:write` (erreur `user.lockout`), et
+personne ne modifie ses propres groupes.
 
 L'autorisation passe par des permissions `(ressource, action)`
 ([permissions.py](app/features/user/permissions.py)) : les routes demandent une
-capacité via `require_permission(Resource.X, Action.Y)`, jamais un test de rôle
-en dur. Le mapping rôle→permissions est statique aujourd'hui ; il pourra être
-remplacé par des **grants en base par utilisateur/table** (lecture/écriture fine)
-en ne modifiant que `has_permission`, sans toucher aux routes.
+capacité via `require_permission(Resource.X, Action.Y)`, jamais un test de
+groupe en dur. Le catalogue (`PERMISSION_CATALOGUE`) est ce que la grille de la
+console propose ; une permission hors catalogue est refusée à l'écriture.
+
+Les commandes sont coupées en deux : `command:execute` ouvre `POST /commands`
+et le réveil Wake-on-LAN ; les types de `RISKY_COMMAND_TYPES`
+([command/models.py](app/features/command/models.py) — redémarrage, arrêt,
+installation de mises à jour, réinitialisation de Windows Update, réparations
+DISM, réinitialisation du spouleur) demandent en plus `risky_command:execute`,
+vérifié dans la route puisque le type est dans le corps.
 
 Le premier admin est créé au démarrage depuis `FIRST_ADMIN_EMAIL` /
 `FIRST_ADMIN_PASSWORD` (script [seed_admin.py](app/scripts/seed_admin.py)).

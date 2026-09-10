@@ -252,7 +252,7 @@
       </q-chip>
     </div>
 
-    <div v-if="selected.length" class="row items-center q-mb-sm">
+    <div v-if="selected.length && actionGroups.length" class="row items-center q-mb-sm">
       <div class="text-caption text-grey q-mr-md">{{ selected.length }} sélectionné(s)</div>
       <q-btn-dropdown color="primary" dense label="Action groupée" icon="bolt">
         <q-list>
@@ -308,7 +308,9 @@
             size="16px"
             class="q-ml-xs"
           >
-            <q-tooltip>À vérifier — identité du poste à confirmer (doublon possible)</q-tooltip>
+            <q-tooltip
+              >Identité à confirmer — empreinte matérielle divergente (doublon possible)</q-tooltip
+            >
           </q-icon>
         </q-td>
       </template>
@@ -440,6 +442,7 @@ import {
   type CommandAction,
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
+import { useAuthStore } from 'src/stores/auth';
 import {
   CHASSIS_TYPES,
   DEFAULT_PAGE_SIZE,
@@ -570,7 +573,7 @@ const statusOptions = [
   { label: 'Antivirus : Tous statuts', value: null },
   { label: 'Antivirus à jour', value: 'up_to_date' },
   { label: 'Antivirus périmé', value: 'outdated' },
-  { label: 'À vérifier', value: 'needs_verification' },
+  { label: 'Identité à confirmer', value: 'needs_verification' },
   { label: 'Inactif', value: 'inactive' },
 ];
 
@@ -737,8 +740,13 @@ function clearFilter(key: FilterKey) {
 
 // bulkOnly: the two diagnostics stay on the detail page. Their value is reading
 // one machine's output; fired on a selection they queue a report per poste that
-// nobody will open.
-const actionGroups = commandActionGroups({ bulkOnly: true });
+// nobody will open. Filtered on the profile's permissions, so the menu never
+// offers what the backend would refuse — and disappears for an account that
+// may run nothing.
+const auth = useAuthStore();
+const actionGroups = computed(() =>
+  commandActionGroups({ bulkOnly: true, permissions: auth.permissions }),
+);
 
 const columns: QTableColumn<Machine>[] = [
   { name: 'hostname', label: 'Nom', field: 'hostname', align: 'left', sortable: true },

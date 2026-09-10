@@ -14,12 +14,24 @@ export interface Token {
  */
 export type EmailPreference = 'none' | 'immediate' | 'digest_events' | 'digest_daily';
 
+/** A group as the profile names it: enough to display, not to edit. */
+export interface GroupRef {
+  id: string;
+  name: string;
+}
+
 export interface User {
   id: string;
   email: string;
   full_name: string | null;
-  role: string;
   email_preference: EmailPreference;
+  groups: GroupRef[];
+  /**
+   * What the account may do — the union of its groups' grants, as
+   * `resource:action` keys (see `utils/permissions`). Read by the console to
+   * decide what to show; the backend re-checks every call.
+   */
+  permissions: string[];
 }
 
 export async function login(email: string, password: string): Promise<Token> {

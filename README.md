@@ -172,7 +172,10 @@ et un accès réseau au serveur.
 - **Auto-enrôlement contrôlé** : un secret partagé ne sert qu'à s'enregistrer,
   chaque poste reçoit ensuite un token qui lui est propre, révocable, chiffré sur
   le poste.
-- **Console authentifiée** (JWT), journal d'audit et limitation de débit.
+- **Console authentifiée** (JWT), **groupes de droits** composés dans la console
+  — lecture seule, techniciens, administrateurs, ou n'importe quel assemblage,
+  les commandes à risque (arrêt, redémarrage, installation de mises à jour)
+  étant un droit à part —, journal d'audit et limitation de débit.
 - **Catalogue de commandes fermé** : aucun exécuteur de scripts, aucune
   modification du registre, des fichiers, du pare-feu ou des comptes — un serveur
   compromis ne peut déclencher que les actions prévues.

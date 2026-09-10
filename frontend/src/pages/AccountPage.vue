@@ -13,11 +13,21 @@
           <div class="col">{{ auth.user?.full_name || '—' }}</div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-grey-7">Rôle</div>
+          <div class="col-4 text-grey-7">Groupes</div>
           <div class="col">
-            <q-badge :color="auth.isAdmin ? 'primary' : 'grey-7'">
-              {{ auth.isAdmin ? 'Administrateur' : 'Lecture seule' }}
-            </q-badge>
+            <template v-if="auth.user?.groups.length">
+              <q-chip
+                v-for="group in auth.user.groups"
+                :key="group.id"
+                dense
+                color="primary"
+                text-color="white"
+                class="q-ml-none"
+              >
+                {{ group.name }}
+              </q-chip>
+            </template>
+            <span v-else class="text-grey">Aucun — ce compte ne peut rien consulter</span>
           </div>
         </div>
       </q-card-section>

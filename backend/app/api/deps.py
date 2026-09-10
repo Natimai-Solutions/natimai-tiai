@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.errors import AppError, ErrorCode
 from app.features.machine.models import Machine
+from app.features.user import crud as user_crud
 from app.features.user.models import User
 from app.features.user.permissions import Action, Resource, has_permission
 
@@ -118,13 +119,28 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def get_current_permissions(
+    session: SessionDep, user: CurrentUser
+) -> frozenset[str]:
+    """The caller's permission set — the union of their groups' grants.
+
+    Read once per request: FastAPI caches a dependency's value for the
+    request, so a route guarded by ``require_permission`` and a handler that
+    asks for ``CurrentPermissions`` share the same query.
+    """
+    return await user_crud.user_permissions(session, user.id)
+
+
+CurrentPermissions = Annotated[frozenset[str], Depends(get_current_permissions)]
+
+
 def require_permission(
     resource: Resource, action: Action
 ) -> Callable[..., Awaitable[User]]:
     """Build a dependency that authorizes the current user for (resource, action)."""
 
-    async def checker(user: CurrentUser) -> User:
-        if not has_permission(user.role, resource.value, action.value):
+    async def checker(user: CurrentUser, permissions: CurrentPermissions) -> User:
+        if not has_permission(permissions, resource.value, action.value):
             # A read-only operator poking at admin endpoints is exactly what a
             # security review greps for after the fact.
             security_log.warning(

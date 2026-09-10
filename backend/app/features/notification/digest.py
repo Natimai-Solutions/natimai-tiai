@@ -241,7 +241,9 @@ def render_digest(digest: Digest) -> tuple[str, str]:
     elif digest.with_high_severity_updates:
         headline = f"{digest.with_high_severity_updates} poste(s) à mettre à jour"
     elif digest.needs_verification:
-        headline = f"{digest.needs_verification} poste(s) à vérifier"
+        headline = (
+            f"{digest.needs_verification} poste(s) dont l'identité est à confirmer"
+        )
     else:
         headline = "rien à signaler"
     subject = f"{settings.PROJECT_NAME} — parc du {date} : {headline}"
@@ -271,8 +273,8 @@ def render_digest(digest: Digest) -> tuple[str, str]:
             )
         if digest.needs_verification:
             body.append(
-                f"  {digest.needs_verification} poste(s) à vérifier (empreinte matérielle "
-                "divergente ou doublon)"
+                f"  {digest.needs_verification} poste(s) dont l'identité est à "
+                "confirmer (empreinte matérielle divergente ou doublon)"
             )
         body.append("")
     else:

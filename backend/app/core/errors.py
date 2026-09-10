@@ -43,6 +43,14 @@ class ErrorCode(enum.StrEnum):
     USER_NOT_FOUND = "user.not_found"
     USER_EMAIL_TAKEN = "user.email.taken"
     USER_SELF_FORBIDDEN = "user.self.forbidden"
+    # Refused because it would leave no active account able to manage accounts.
+    USER_LOCKOUT = "user.lockout"
+    GROUP_NOT_FOUND = "group.not_found"
+    GROUP_NAME_TAKEN = "group.name.taken"
+    # The built-in groups cannot be deleted, and the administrators' permissions
+    # cannot be edited: they are implicit.
+    GROUP_BUILTIN_PROTECTED = "group.builtin.protected"
+    GROUP_PERMISSION_UNKNOWN = "group.permission.unknown"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     RATE_LIMITED = "request.rate_limited"

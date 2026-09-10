@@ -34,9 +34,13 @@
           <q-item-section avatar><q-icon name="inventory_2" /></q-item-section>
           <q-item-section>Logiciels</q-item-section>
         </q-item>
-        <q-item v-if="auth.isAdmin" v-ripple clickable :to="{ name: 'users' }">
-          <q-item-section avatar><q-icon name="group" /></q-item-section>
+        <q-item v-if="auth.canManageUsers" v-ripple clickable :to="{ name: 'users' }">
+          <q-item-section avatar><q-icon name="person" /></q-item-section>
           <q-item-section>Utilisateurs</q-item-section>
+        </q-item>
+        <q-item v-if="auth.canManageUsers" v-ripple clickable :to="{ name: 'groups' }">
+          <q-item-section avatar><q-icon name="group" /></q-item-section>
+          <q-item-section>Groupes</q-item-section>
         </q-item>
       </q-list>
     </q-drawer>

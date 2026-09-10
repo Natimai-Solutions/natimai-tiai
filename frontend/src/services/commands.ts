@@ -49,6 +49,12 @@ export interface CommandAction {
   /** Extra sentence for the confirmation dialog, when the cost is not obvious. */
   hint?: string;
   /**
+   * Needs `risky_command:execute` on top of `command:execute`: the action can
+   * cost somebody their work or change the poste for good. Mirrors the
+   * backend's `RISKY_COMMAND_TYPES`, which is what actually refuses it.
+   */
+  risky?: boolean;
+  /**
    * Executed by the *server*, not queued for the poste's agent.
    *
    * True of exactly one action, and it could not be otherwise: a Wake-on-LAN
@@ -121,6 +127,7 @@ export const commandActions: CommandAction[] = [
   },
   {
     type: 'wu_install',
+    risky: true,
     label: 'Installer les mises à jour (hors pilotes)',
     icon: 'system_update',
     group: 'windows_update',
@@ -130,6 +137,7 @@ export const commandActions: CommandAction[] = [
   },
   {
     type: 'wu_install_full',
+    risky: true,
     label: 'Installer les mises à jour (pilotes compris)',
     icon: 'browser_updated',
     group: 'windows_update',
@@ -141,6 +149,7 @@ export const commandActions: CommandAction[] = [
     // Last in the section, after the two installs: it is what an admin reaches
     // for once those have failed on a poste, not something to try first.
     type: 'wu_reset',
+    risky: true,
     label: 'Réinitialiser Windows Update',
     icon: 'settings_backup_restore',
     group: 'windows_update',
@@ -162,6 +171,7 @@ export const commandActions: CommandAction[] = [
     // Never automatic, whatever a poste reports as needing one: restarting a
     // machine somebody is working on is an explicit decision.
     type: 'reboot',
+    risky: true,
     label: 'Redémarrer le poste',
     icon: 'restart_alt',
     group: 'power',
@@ -174,6 +184,7 @@ export const commandActions: CommandAction[] = [
     // somebody switches off in the evening is a parc somebody has to switch
     // back on in the morning.
     type: 'shutdown',
+    risky: true,
     label: 'Arrêter le poste',
     icon: 'power_settings_new',
     group: 'power',
@@ -233,6 +244,7 @@ export const commandActions: CommandAction[] = [
   },
   {
     type: 'spooler_reset',
+    risky: true,
     label: 'Réinitialiser le spouleur d’impression',
     icon: 'print',
     group: 'maintenance',
@@ -251,6 +263,7 @@ export const commandActions: CommandAction[] = [
   },
   {
     type: 'dism_restore_health',
+    risky: true,
     label: 'Réparer l’image système (DISM)',
     icon: 'build',
     group: 'maintenance',
@@ -260,6 +273,7 @@ export const commandActions: CommandAction[] = [
   },
   {
     type: 'dism_component_cleanup',
+    risky: true,
     label: 'Nettoyer le magasin de composants (DISM)',
     icon: 'cleaning_services',
     group: 'maintenance',
@@ -312,17 +326,33 @@ const groupOrder: CommandGroup[] = [
 ];
 
 /**
+ * Whether a permission set lets someone trigger `action`: the everyday grant
+ * for everything, the risky one on top for the actions flagged so.
+ */
+export function canRunCommand(permissions: Set<string>, action: CommandAction): boolean {
+  if (!permissions.has('command:execute')) return false;
+  return !action.risky || permissions.has('risky_command:execute');
+}
+
+/**
  * The catalogue split into menu sections. Twenty entries in one flat dropdown
  * is unusable; grouped, an admin finds "Maintenance" without reading the list.
  *
- * `bulkOnly` keeps the diagnostics out of the mass-action menu.
+ * `bulkOnly` keeps the diagnostics out of the mass-action menu; `permissions`
+ * drops what the caller may not run, so a menu never offers a 403.
  */
-export function commandActionGroups(options: { bulkOnly?: boolean } = {}): CommandActionGroup[] {
+export function commandActionGroups(
+  options: { bulkOnly?: boolean; permissions?: Set<string> } = {},
+): CommandActionGroup[] {
+  const allowed = (a: CommandAction) =>
+    options.permissions === undefined || canRunCommand(options.permissions, a);
   return groupOrder
     .map((group) => ({
       group,
       label: commandGroupLabels[group],
-      actions: commandActions.filter((a) => a.group === group && (!options.bulkOnly || a.bulk)),
+      actions: commandActions.filter(
+        (a) => a.group === group && (!options.bulkOnly || a.bulk) && allowed(a),
+      ),
     }))
     .filter((section) => section.actions.length > 0);
 }

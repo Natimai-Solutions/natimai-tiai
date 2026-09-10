@@ -210,7 +210,7 @@ const alertKpis = computed<Kpi[]>(() => {
       to: { name: 'machines', query: { with_active_threats: 'true' } },
     },
     {
-      label: 'À vérifier',
+      label: 'Identité à confirmer',
       value: s.needs_verification,
       icon: 'help',
       color: 'orange',

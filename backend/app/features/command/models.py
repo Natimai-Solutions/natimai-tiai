@@ -85,6 +85,31 @@ class CommandType(enum.StrEnum):
     NET_CONFIG = "net_config"
 
 
+# The half of the catalogue that can cost somebody their work or change the
+# poste for good: a group granted ``command:execute`` alone runs everything
+# else — scans, cache flushes, a GPO refresh, the diagnostics — and needs
+# ``risky_command:execute`` for these (``user.permissions.Resource``). The
+# console's catalogue carries the same list (``services/commands.ts``, ``risky``).
+#
+# What qualifies: the two power actions and the update installs, which end in a
+# reboot or lose unsaved work; the update-store reset and the DISM repairs,
+# which rewrite system state; the spooler reset, which drops queued print jobs.
+# A full scan or a chkdsk ties the poste up but changes nothing, so it stays
+# everyday.
+RISKY_COMMAND_TYPES = frozenset(
+    {
+        CommandType.REBOOT,
+        CommandType.SHUTDOWN,
+        CommandType.WU_INSTALL,
+        CommandType.WU_INSTALL_FULL,
+        CommandType.WU_RESET,
+        CommandType.SPOOLER_RESET,
+        CommandType.DISM_RESTORE_HEALTH,
+        CommandType.DISM_COMPONENT_CLEANUP,
+    }
+)
+
+
 class CommandStatus(enum.StrEnum):
     """Lifecycle of a queued command."""
 

@@ -7,6 +7,7 @@ vi.mock('boot/axios', () => ({
 import { api } from 'boot/axios';
 import {
   bulkSendNotification,
+  canRunCommand,
   commandActionGroups,
   commandActions,
   commandTypeLabel,
@@ -135,6 +136,47 @@ describe('command catalogue', () => {
   // it would send a command to a poste through an endpoint that wakes it.
   it('marks exactly one action as executed by the server', () => {
     expect(commandActions.filter((a) => a.serverSide).map((a) => a.type)).toEqual(['wake_on_lan']);
+  });
+});
+
+describe('risky commands', () => {
+  // The same list as the backend's RISKY_COMMAND_TYPES: what can cost somebody
+  // their work or change the poste for good.
+  const risky: CommandType[] = [
+    'wu_install',
+    'wu_install_full',
+    'wu_reset',
+    'reboot',
+    'shutdown',
+    'spooler_reset',
+    'dism_restore_health',
+    'dism_component_cleanup',
+  ];
+
+  it('flags exactly the backend list', () => {
+    expect(commandActions.filter((a) => a.risky).map((a) => a.type)).toEqual(risky);
+  });
+
+  it('needs the everyday grant first, then the risky one on top', () => {
+    const scan = commandActions.find((a) => a.type === 'quick_scan')!;
+    const reboot = commandActions.find((a) => a.type === 'reboot')!;
+    expect(canRunCommand(new Set(), scan)).toBe(false);
+    expect(canRunCommand(new Set(['command:execute']), scan)).toBe(true);
+    expect(canRunCommand(new Set(['command:execute']), reboot)).toBe(false);
+    expect(canRunCommand(new Set(['risky_command:execute']), reboot)).toBe(false);
+    expect(canRunCommand(new Set(['command:execute', 'risky_command:execute']), reboot)).toBe(true);
+  });
+
+  it('keeps the risky half out of a menu built for the everyday grant', () => {
+    const sections = commandActionGroups({ permissions: new Set(['command:execute']) });
+    const offered = sections.flatMap((s) => s.actions.map((a) => a.type));
+    expect(offered).toContain('quick_scan');
+    expect(offered).toContain('wake_on_lan');
+    for (const type of risky) expect(offered).not.toContain(type);
+  });
+
+  it('offers nothing at all without the everyday grant', () => {
+    expect(commandActionGroups({ permissions: new Set() })).toEqual([]);
   });
 });
 

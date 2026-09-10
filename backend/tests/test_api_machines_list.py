@@ -12,10 +12,10 @@ from datetime import UTC, datetime, timedelta
 
 async def _admin_headers(client, db_session) -> dict[str, str]:
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     await crud.create_user(
-        db_session, email="admin@list.local", password="pw", role=Role.ADMIN
+        db_session, email="admin@list.local", password="pw", groups=[BuiltinGroup.ADMIN]
     )
     resp = await client.post(
         "/api/v1/auth/login",
@@ -671,14 +671,14 @@ async def test_merge_keeps_the_path_machine_and_moves_the_history(client, db_ses
 
 async def test_merging_is_refused_to_a_read_only_operator(client, db_session):
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     kept, removed = await _machines(
         db_session,
         [{"machine_uuid": "ro-keep"}, {"machine_uuid": "ro-remove"}],
     )
     await crud.create_user(
-        db_session, email="ro@list.local", password="pw", role=Role.READONLY
+        db_session, email="ro@list.local", password="pw", groups=[BuiltinGroup.READONLY]
     )
     login = await client.post(
         "/api/v1/auth/login", data={"username": "ro@list.local", "password": "pw"}
