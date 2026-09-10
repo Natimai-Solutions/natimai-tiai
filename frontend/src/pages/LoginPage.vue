@@ -6,7 +6,7 @@
         <q-card style="width: 360px; max-width: 90vw">
           <q-card-section class="text-center">
             <q-icon name="shield" size="48px" color="primary" />
-            <div class="text-h6 q-mt-sm">Tiai — Console</div>
+            <div class="text-h6 q-mt-sm">Tia'i — Console</div>
             <div class="text-caption text-grey">Supervision du parc</div>
           </q-card-section>
 
