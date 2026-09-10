@@ -47,6 +47,8 @@ from app.features.machine.status import (
     status_clause,
     windows_update_clause,
 )
+from app.features.room import crud as room_crud
+from app.features.room.models import Building, Room
 from app.features.threat.models import Threat
 from app.features.user.permissions import Action, Resource
 from app.features.windows_update.models import WindowsUpdate
@@ -71,6 +73,20 @@ class MachineOut(BaseModel):
     # is what the list is scanned by on a multi-site parc — "which postes are
     # at Taravao" — and null for every poste whose deployment set none.
     location: str | None
+    # Where the console placed the poste (``features/room``): its room, the
+    # room's building, and the site those two resolve to. Defaults rather than
+    # required, because a ``MachineOut`` is also built off a bare ``Machine``
+    # (duplicate candidates); the list and the fiche fill them in.
+    room_id: uuid.UUID | None = None
+    room_name: str | None = None
+    building_id: uuid.UUID | None = None
+    building_name: str | None = None
+    # The site the room says — its building's, or its own.
+    room_location: str | None = None
+    # The agent and the room disagree on the site. A finding, not a refusal:
+    # it is what reveals a GPO aimed at the wrong OU or a poste moved without
+    # its room. False when either side has no opinion.
+    location_mismatch: bool = False
     ip_address: str | None
     os_version: str | None
     agent_version: str | None
@@ -113,6 +129,28 @@ class MachineOut(BaseModel):
     def is_online(self) -> bool:
         """Whether the agent has phoned home within the online window."""
         return is_online(self.last_seen, utcnow(), settings.OFFLINE_AFTER_SECONDS)
+
+
+def _place(out: MachineOut, machine: Machine, placement: room_crud.Placement) -> None:
+    """Fill a payload's room fields from a resolved placement."""
+    room, building = placement.room, placement.building
+    out.room_id = room.id if room else None
+    out.room_name = room.name if room else None
+    out.building_id = building.id if building else None
+    out.building_name = building.name if building else None
+    out.room_location = placement.location
+    out.location_mismatch = room_crud.location_mismatch(
+        machine.location, placement.location
+    )
+
+
+def _machine_out(
+    machine: Machine, room: Room | None, building: Building | None
+) -> MachineOut:
+    """A list row, with its placement as the joined query returned it."""
+    out = MachineOut.model_validate(machine)
+    _place(out, machine, room_crud.Placement(room=room, building=building))
+    return out
 
 
 class PendingUpdateOut(BaseModel):
@@ -343,6 +381,10 @@ MachineSortField = Literal[
     "hostname",
     "domain",
     "location",
+    # The console's placement, off the joined tables: grouping a parc by room
+    # is what the column is for.
+    "building",
+    "room",
     "av_product_name",
     "wu_pending_count",
     "session_user_present",
@@ -375,6 +417,10 @@ def _sort_key(field: MachineSortField) -> Any:
     """
     if field == "disk_free_percent":
         return disk_free_percent()
+    if field == "building":
+        return func.lower(col(Building.name))
+    if field == "room":
+        return func.lower(col(Room.name))
     column = col(getattr(Machine, field))
     return func.lower(column) if field in _CASEFOLD_SORT_FIELDS else column
 
@@ -441,6 +487,14 @@ class MachineFilters:
     # Exact, like the domain: the dropdown feeds it values the fleet reported,
     # and "Lycée" as a substring would gather every lycée of the académie.
     location: str | None = None
+    # The console's placement. ``room_id`` and ``building_id`` are exact;
+    # ``without_room`` selects the postes nobody placed — the ones a manual
+    # classification still has to file. ``location_mismatch`` is the finding
+    # the rooms page counts: agent and room disagreeing on the site.
+    room_id: uuid.UUID | None = None
+    building_id: uuid.UUID | None = None
+    without_room: bool | None = None
+    location_mismatch: bool | None = None
     antivirus: str | None = None
     os_version: str | None = None
     status: MachineStatus | None = None
@@ -471,6 +525,10 @@ def machine_filters(
     search: str | None = None,
     domain: str | None = None,
     location: str | None = None,
+    room_id: uuid.UUID | None = None,
+    building_id: uuid.UUID | None = None,
+    without_room: bool | None = None,
+    location_mismatch: bool | None = None,
     antivirus: str | None = None,
     os_version: str | None = None,
     status: MachineStatus | None = None,
@@ -500,6 +558,10 @@ def machine_filters(
         search=search,
         domain=domain,
         location=location,
+        room_id=room_id,
+        building_id=building_id,
+        without_room=without_room,
+        location_mismatch=location_mismatch,
         antivirus=antivirus,
         os_version=os_version,
         status=status,
@@ -524,16 +586,49 @@ def machine_filters(
 FiltersDep = Annotated[MachineFilters, Depends(machine_filters)]
 
 
+def _room_location() -> Any:
+    """The site a poste's room says, as SQL: its building's, else its own."""
+    return func.coalesce(col(Building.location), col(Room.location))
+
+
+def _mismatch_clause() -> Any:
+    """Agent and room both name a site, and not the same one."""
+    site = _room_location()
+    return (
+        col(Machine.location).is_not(None)
+        & site.is_not(None)
+        & (col(Machine.location) != site)
+    )
+
+
 def _filtered_machines(
     filters: MachineFilters, outdated: list[str] | None = None
 ) -> Any:
     """The machine SELECT with every requested facet applied.
 
+    Returns ``(Machine, Room | None, Building | None)`` rows: the placement is
+    joined in rather than fetched per row, because it is also what two facets
+    filter on and two columns sort by.
+
     ``outdated`` is the list of agent versions ranking below the reference,
     from ``fleet_versions`` — read by the caller, because this builds a
     statement and does not touch the database.
     """
-    stmt = select(Machine)
+    stmt = (
+        select(Machine, Room, Building)
+        .outerjoin(Room, col(Room.id) == col(Machine.room_id))
+        .outerjoin(Building, col(Building.id) == col(Room.building_id))
+    )
+    if filters.room_id is not None:
+        stmt = stmt.where(col(Machine.room_id) == filters.room_id)
+    if filters.building_id is not None:
+        stmt = stmt.where(col(Room.building_id) == filters.building_id)
+    if filters.without_room:
+        stmt = stmt.where(col(Machine.room_id).is_(None))
+    if filters.location_mismatch is not None:
+        stmt = stmt.where(
+            _mismatch_clause() if filters.location_mismatch else ~_mismatch_clause()
+        )
     if filters.agent_version:
         # Equality, like the chassis kind: a version is a closed string the
         # dropdown feeds exactly, and "0.5" as a substring of "0.5.0" and
@@ -649,7 +744,7 @@ async def list_machines(
             col(Machine.id),
         )
     rows = await session.exec(stmt.offset((page - 1) * page_size).limit(page_size))
-    items = [MachineOut.model_validate(m) for m in rows.all()]
+    items = [_machine_out(m, room, building) for m, room, building in rows.all()]
     return MachineList(
         items=items,
         total=total or 0,
@@ -877,7 +972,9 @@ async def list_export_columns() -> list[ExportColumnOut]:
     ]
 
 
-async def _export_rows(session: SessionDep, filters: MachineFilters) -> list[Machine]:
+async def _export_rows(
+    session: SessionDep, filters: MachineFilters
+) -> list[machine_export.ExportRow]:
     """The filtered fleet, every row, hostname order.
 
     Unpaginated on purpose: an export of the first fifty rows is not an export.
@@ -889,7 +986,10 @@ async def _export_rows(session: SessionDep, filters: MachineFilters) -> list[Mac
         func.lower(col(Machine.hostname)).nulls_last(), col(Machine.id)
     )
     rows = await session.exec(stmt)
-    return list(rows.all())
+    return [
+        machine_export.ExportRow(machine=m, room=room, building=building)
+        for m, room, building in rows.all()
+    ]
 
 
 # The fleet export, and deliberately not a per-machine one. A fiche is read on
@@ -1139,6 +1239,7 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
         .order_by(severity_rank, col(WindowsUpdate.title))
     )
     detail = MachineDetailOut.model_validate(machine)
+    _place(detail, machine, await room_crud.placement(session, machine.room_id))
     detail.pending_updates = [PendingUpdateOut.model_validate(u) for u in rows.all()]
     await _attach_inventory(session, machine, detail)
     detail.agent_latest_version = (await fleet_versions(session)).latest

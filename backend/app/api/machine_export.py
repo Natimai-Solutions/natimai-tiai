@@ -25,6 +25,27 @@ from app.core.errors import AppError, ErrorCode
 from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.machine.status import is_online
+from app.features.room import crud as room_crud
+from app.features.room.models import Building, Room
+
+
+@dataclass(frozen=True)
+class ExportRow:
+    """One poste as the export reads it: the machine and, joined, its placement.
+
+    The placement rides along rather than being looked up per column: the
+    room and building columns are three of fifty, but the join that serves
+    them is the same one the list runs, and a row is read once.
+    """
+
+    machine: Machine
+    room: Room | None = None
+    building: Building | None = None
+
+    @property
+    def room_location(self) -> str | None:
+        return room_crud.effective_location(self.room, self.building)
+
 
 Kind = Literal["text", "int", "float", "bool", "date", "datetime"]
 Group = Literal["identity", "antivirus", "windows_update", "hardware"]
@@ -57,36 +78,54 @@ class ExportColumn:
     label: str
     group: Group
     kind: Kind
-    read: Callable[[Machine], object]
+    read: Callable[[ExportRow], object]
     # Part of the set a reader gets without choosing anything.
     default: bool = False
 
 
-def _attr(name: str) -> Callable[[Machine], object]:
-    return lambda m: getattr(m, name)
+def _attr(name: str) -> Callable[[ExportRow], object]:
+    return lambda r: getattr(r.machine, name)
 
 
-def _chassis(m: Machine) -> object:
+def _building(r: ExportRow) -> object:
+    return r.building.name if r.building else None
+
+
+def _room(r: ExportRow) -> object:
+    return r.room.name if r.room else None
+
+
+def _location_mismatch(r: ExportRow) -> object:
+    """Only meaningful for a placed poste; blank otherwise, like the room."""
+    if r.room is None:
+        return None
+    return room_crud.location_mismatch(r.machine.location, r.room_location)
+
+
+def _chassis(r: ExportRow) -> object:
+    m = r.machine
     value = m.hw_chassis_type
     return CHASSIS_LABELS.get(value, value) if value else None
 
 
-def _ram_gb(m: Machine) -> object:
+def _ram_gb(r: ExportRow) -> object:
     """Nominal size in GiB — 16, not 15.9.
 
     Windows reports the memory it can address, which is a few hundred MiB short
     of the sticks' sum; rounding up recovers the figure printed on the box, and
     the one the reader will filter and sort on.
     """
+    m = r.machine
     return None if m.ram_total_mb is None else math.ceil(m.ram_total_mb / 1024)
 
 
-def _free_percent(m: Machine) -> object:
+def _free_percent(r: ExportRow) -> object:
     """Free space as a whole percentage, or NULL when there is nothing to divide.
 
     Rounded for the spreadsheet: "12" is what the column is read for, and
     "12.34567901234568" is what a float would put in the cell.
     """
+    m = r.machine
     total = m.system_volume_total_mb
     free = m.system_volume_free_mb
     if not total or free is None:
@@ -94,12 +133,14 @@ def _free_percent(m: Machine) -> object:
     return round(free * 100 / total)
 
 
-def _online(m: Machine) -> object:
+def _online(r: ExportRow) -> object:
+    m = r.machine
     return is_online(m.last_seen, utcnow(), settings.OFFLINE_AFTER_SECONDS)
 
 
-def _session(m: Machine) -> object:
+def _session(r: ExportRow) -> object:
     """The logged-on user, or what the poste said instead of a name."""
+    m = r.machine
     if m.session_user_present is None:
         return None
     if not m.session_user_present:
@@ -107,8 +148,9 @@ def _session(m: Machine) -> object:
     return m.session_username or "Utilisateur connecté"
 
 
-def _antivirus(m: Machine) -> object:
+def _antivirus(r: ExportRow) -> object:
     """The Security Center product; "" is a finding and reads as such."""
+    m = r.machine
     if m.av_product_name is None:
         return None
     return m.av_product_name or "Aucun"
@@ -123,6 +165,17 @@ COLUMNS: Sequence[ExportColumn] = (
     # On offer, not in the default set: a single-site parc would export an
     # empty column, and the multi-site one adds it in two clicks.
     ExportColumn("location", "Emplacement", "identity", "text", _attr("location")),
+    # The console's placement, next to the site the agent reports: on offer
+    # like it, since a parc that files nothing would export two empty columns.
+    ExportColumn("building", "Bâtiment", "identity", "text", _building),
+    ExportColumn("room", "Salle", "identity", "text", _room),
+    ExportColumn(
+        "location_mismatch",
+        "Emplacement divergent",
+        "identity",
+        "bool",
+        _location_mismatch,
+    ),
     ExportColumn(
         "ip_address", "Adresse IP", "identity", "text", _attr("ip_address"), True
     ),

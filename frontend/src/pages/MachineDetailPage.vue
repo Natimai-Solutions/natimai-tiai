@@ -93,6 +93,18 @@
           </template>
         </q-list>
       </q-btn-dropdown>
+      <!-- room:write: where the console files the poste. -->
+      <q-btn
+        v-if="auth.can('room', 'write')"
+        flat
+        dense
+        color="primary"
+        icon="meeting_room"
+        :label="machine?.room_name ? 'Changer de salle' : 'Affecter à une salle'"
+        class="q-ml-sm"
+        :disable="!machine"
+        @click="openPlace"
+      />
       <!-- machine:write only: the merge endpoint requires it, so for anyone
            else the button could only ever open a dialog and 403.
            The count rides in the label — "Fusionner" said nothing about whether
@@ -159,6 +171,36 @@
         <q-btn v-if="canManage" flat dense label="Fusionner un doublon" @click="openMerge" />
       </template>
     </q-banner>
+
+    <q-banner v-if="machine?.location_mismatch" class="bg-orange-1 q-mb-md" rounded>
+      <template #avatar><q-icon name="wrong_location" color="orange" /></template>
+      Emplacement divergent : l'agent déclare « {{ machine.location }} », mais la salle
+      {{ machine.room_name }} est à « {{ machine.room_location }} ». Une GPO mal ciblée, ou un poste
+      déplacé sans sa salle.
+    </q-banner>
+
+    <!-- Placing the poste: one room, or none. -->
+    <q-dialog v-model="placeOpen">
+      <q-card style="width: 420px; max-width: 90vw">
+        <q-card-section class="text-h6">Salle du poste</q-card-section>
+        <q-card-section>
+          <q-select
+            v-model="placeRoomId"
+            :options="placeRoomOptions"
+            emit-value
+            map-options
+            label="Salle"
+            outlined
+            dense
+            autofocus
+          />
+        </q-card-section>
+        <q-card-actions align="right" class="q-px-md q-pb-md">
+          <q-btn v-close-popup flat label="Annuler" />
+          <q-btn color="primary" label="Enregistrer" :loading="placing" @click="savePlace" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
 
     <!-- First the state and the findings, then the detail behind them by
          tab: the fiche used to open on eleven cards of facts and leave the
@@ -315,6 +357,14 @@ import {
   type CommandAction,
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
+import {
+  listRooms,
+  placeMachines,
+  placementNotification,
+  roomLabel,
+  unassignMachines,
+  type Room,
+} from 'src/services/rooms';
 import { onlineColor, onlineIcon, onlineLabel, timeAgoLabel } from 'src/utils/format';
 
 const props = defineProps<{ id: string }>();
@@ -384,6 +434,45 @@ const commandPagination = ref<TablePagination>({
 const actionGroups = computed(() => commandActionGroups({ permissions: auth.permissions }));
 // Revoke, re-enroll, merge: the machine:write half of the fiche.
 const canManage = computed(() => auth.can('machine', 'write'));
+
+// --- Placement: the room the console files the poste in. ---
+const ROOM_NONE = 'none';
+const placeOpen = ref(false);
+const placing = ref(false);
+const placeRoomId = ref<string | null>(null);
+const rooms = ref<Room[]>([]);
+const placeRoomOptions = computed(() => [
+  { label: 'Sans salle', value: ROOM_NONE },
+  ...rooms.value.map((r) => ({ label: roomLabel(r), value: r.id })),
+]);
+
+async function openPlace() {
+  placeRoomId.value = machine.value?.room_id ?? ROOM_NONE;
+  placeOpen.value = true;
+  try {
+    rooms.value = await listRooms();
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Salles indisponibles') });
+  }
+}
+
+async function savePlace() {
+  if (!machine.value || !placeRoomId.value) return;
+  placing.value = true;
+  try {
+    const res =
+      placeRoomId.value === ROOM_NONE
+        ? await unassignMachines([machine.value.id])
+        : await placeMachines(placeRoomId.value, [machine.value.id]);
+    $q.notify(placementNotification(res));
+    placeOpen.value = false;
+    await load();
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
+  } finally {
+    placing.value = false;
+  }
+}
 
 const title = computed(() => machine.value?.hostname || machine.value?.machine_uuid || 'Poste');
 

@@ -55,9 +55,13 @@ async def merge_into(
         .values(machine_id=target.id)
     )
 
-    # Keep the freshest last-seen; the merge resolves the verification.
+    # Keep the freshest last-seen; the merge resolves the verification. The
+    # room follows too, when the kept record has none: a duplicate was often
+    # the one somebody filed.
     if source.last_seen > target.last_seen:
         target.last_seen = source.last_seen
+    if target.room_id is None:
+        target.room_id = source.room_id
     target.needs_verification = False
     target.updated_at = utcnow()
 

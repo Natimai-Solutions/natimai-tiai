@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Index
+from sqlalchemy import Column, ForeignKey, Index
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
@@ -51,6 +51,17 @@ class Machine(SQLModel, table=True):
     # asks the same question for a harder reason: only a poste on the same wire
     # can put a magic packet in front of the one to wake (``features/wol``).
     location: str | None = None
+    # The room the console (or the directory, ``ROOM_SOURCE``) placed the poste
+    # in — ``features/room``. Distinct from ``location`` above, which the agent
+    # owns: a room belongs to a building, which sits on a site, and a poste
+    # whose two answers disagree is flagged in the list. SET NULL: deleting a
+    # room leaves its postes standing, room-less.
+    room_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True, index=True
+        ),
+    )
     os_version: str | None = None
     agent_version: str | None = None
     # Primary IP address elected by the agent among the machine's addresses

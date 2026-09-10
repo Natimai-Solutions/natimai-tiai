@@ -28,6 +28,8 @@ class Resource(enum.StrEnum):
     # that the everyday catalogue can be handed to a group without the
     # dangerous half. Which types are which: ``command.models.RISKY_COMMAND_TYPES``.
     RISKY_COMMAND = "risky_command"
+    # Buildings and rooms — where the postes are, as the console organises it.
+    ROOM = "room"
     USER = "user"
     # The audit log. Admin material like USER: who did what to the parc's
     # accounts and tokens.
@@ -52,6 +54,8 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.COMMAND, Action.READ),
     (Resource.COMMAND, Action.EXECUTE),
     (Resource.RISKY_COMMAND, Action.EXECUTE),
+    (Resource.ROOM, Action.READ),
+    (Resource.ROOM, Action.WRITE),
     (Resource.USER, Action.READ),
     (Resource.USER, Action.WRITE),
     (Resource.AUDIT, Action.READ),
@@ -74,6 +78,7 @@ _SUPERVISION_READ = frozenset(
         permission_key(Resource.MACHINE, Action.READ),
         permission_key(Resource.THREAT, Action.READ),
         permission_key(Resource.COMMAND, Action.READ),
+        permission_key(Resource.ROOM, Action.READ),
     }
 )
 

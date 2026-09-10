@@ -51,6 +51,10 @@ class ErrorCode(enum.StrEnum):
     # cannot be edited: they are implicit.
     GROUP_BUILTIN_PROTECTED = "group.builtin.protected"
     GROUP_PERMISSION_UNKNOWN = "group.permission.unknown"
+    BUILDING_NOT_FOUND = "building.not_found"
+    BUILDING_NAME_TAKEN = "building.name.taken"
+    ROOM_NOT_FOUND = "room.not_found"
+    ROOM_NAME_TAKEN = "room.name.taken"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     RATE_LIMITED = "request.rate_limited"

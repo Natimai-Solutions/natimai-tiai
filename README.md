@@ -42,11 +42,15 @@ gère naturellement les postes éteints.
   salle. Serveur hébergé loin des postes ? Le réveil est **relayé par un poste
   voisin** : le premier poste allumé du même emplacement à contacter le serveur
   émet le paquet magique à sa place.
-- **Emplacements** — chaque agent peut déclarer où se trouve son poste
-  (« Lycée de Taravao »), par sa configuration ou par le registre, donc par GPO.
-  La liste des postes se filtre et se trie par emplacement, une commande peut
-  viser tout un site, et c'est ce qui dit au relais Wake-on-LAN quel poste est
-  sur le bon fil.
+- **Emplacements, bâtiments et salles** — chaque agent peut déclarer où se
+  trouve son poste (« Lycée de Taravao »), par sa configuration ou par le
+  registre, donc par GPO. La liste des postes se filtre et se trie par
+  emplacement, une commande peut viser tout un site, et c'est ce qui dit au
+  relais Wake-on-LAN quel poste est sur le bon fil. La console range ensuite
+  les postes par **bâtiment et salle** : un bâtiment porte l'emplacement, une
+  salle en hérite, et un poste dont l'agent déclare un autre emplacement que sa
+  salle est **signalé** — une GPO mal ciblée ou un poste déménagé sans sa
+  salle — jamais refusé.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.

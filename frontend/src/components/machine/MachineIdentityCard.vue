@@ -19,6 +19,13 @@ import {
 
 const props = defineProps<{ machine: MachineDetail }>();
 
+/** The room, and the site it puts the poste on when the agent disagrees. */
+function roomRow(m: MachineDetail): string {
+  if (!m.room_name) return '—';
+  if (!m.location_mismatch) return m.room_name;
+  return `${m.room_name} — emplacement divergent (la salle est à « ${m.room_location} »)`;
+}
+
 const rows = computed<InfoRow[]>(() => {
   const m = props.machine;
   return [
@@ -28,6 +35,10 @@ const rows = computed<InfoRow[]>(() => {
     // As the agent's configuration names it — a dash means the deployment set
     // none, and the wake relay then falls back on the domain.
     { label: 'Emplacement', value: m.location ?? '—' },
+    // Where the console filed it, right under where the agent says it is —
+    // the two are read together, and the fiche says so when they disagree.
+    { label: 'Bâtiment', value: m.building_name ?? '—' },
+    { label: 'Salle', value: roomRow(m) },
     { label: 'Adresse IP', value: ipAddressLabel(m.ip_address, m.ip_prefix_length) },
     // Right under the address it was elected with, and for two reasons: it
     // is the wake target — a dash here means « Réveiller le poste » has

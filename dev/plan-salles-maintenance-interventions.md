@@ -1,9 +1,8 @@
 # Salles, vérifications, maintenance et interventions — plan de travail
 
-> **Statut : cadrage validé le 2026-09-10** (§2). **J1 livré** (groupes de
-> droits, commandes à risque, relibellé « Identité à confirmer ») — voir §11.
-> Le rattachement de l'emplacement aux bâtiments et aux salles (§2.2) reste
-> une proposition à confirmer avant J2.
+> **Statut : cadrage validé le 2026-09-10** (§2), §2.2 compris. **J1 et J2
+> livrés** (groupes de droits, commandes à risque, bâtiments et salles) —
+> voir §11.
 >
 > Branche de travail : `claude/postes-maintenance-features-85buig`, fondée sur
 > `claude/agent-location-wol-ughnse` (emplacement des postes + réveil relayé),
@@ -61,7 +60,7 @@
 | **Suppression / fusion d'un poste** | Fusion : l'historique, la salle, la dernière maintenance suivent le poste conservé. Suppression : cascade ; l'export préalable est la sauvegarde. |
 | **Livraison** | **Deux PR** : Salles + Journal (J1–J4), puis Vérifications + Maintenance (J5–J7). |
 
-### 2.2 L'emplacement dans la hiérarchie — proposition à confirmer
+### 2.2 L'emplacement dans la hiérarchie (validé)
 
 L'emplacement a deux natures qu'il faut tenir ensemble : **une valeur que
 l'agent déclare** sur chaque poste (GPO), et **un lieu physique** dont un
@@ -134,7 +133,7 @@ Contrat :
 
 ## 4. Modèle de données
 
-Une seule migration, `0017_rooms_checks_maintenance` (la `0016` est celle des groupes).
+Une migration par jalon (`0017_rooms` pour J2 ; les colonnes de maintenance, d'annuaire et les tables de vérifications et d'interventions arrivent avec leur jalon), pour que chaque PR reste lisible seule.
 
 ### 4.1 Bâtiments et salles
 
@@ -388,7 +387,7 @@ L'ordre place le **journal** avant la **maintenance**, parce que la seconde
 |---|---|---|
 | **J0 — Cadrage** | Confirmation du §2.2, fusion préalable de la branche emplacement/WoL (§10). | 0,5 j |
 | **J1 — Groupes de droits** ✅ | Tables `groups`, `group_permissions`, `user_groups` (migration `0016`, `users.role` supprimée), trois groupes intégrés, union des droits par requête, garde anti-verrouillage, commandes à risque (`risky_command:execute`), routes `/groups`, page Groupes avec grille, multi-sélecteur de groupes sur les comptes, `can()` côté console, relibellé « Identité à confirmer ». | 3 j |
-| **J2 — Bâtiments et salles** | Migration `0017` (toutes les tables du chantier, en une fois), ressource `room`, modèles `Building` et `Room`, CRUD, rattachement manuel, divergence d'emplacement, filtres et colonnes dans la liste et l'export, page Salles. | 2,5 j |
+| **J2 — Bâtiments et salles** ✅ | Migration `0017` (bâtiments, salles, `machines.room_id`), ressource `room`, modèles `Building` et `Room`, CRUD, rattachement manuel, divergence d'emplacement, filtres et colonnes dans la liste et l'export, page Salles. | 2,5 j |
 | **J3 — Agent : bloc `directory`** | Lecture du DN (registre) et de l'attribut `location` (ADSI), hachage et envoi ; réception serveur, `ROOM_SOURCE`, création automatique des salles. Tests Go (parse du DN) et Python (get-or-create, verrouillage en mode auto). | 1,5 j |
 | **J4 — Journal des interventions** | Modèle, routes, ressource `intervention`, onglet Historique, formulaire d'ajout, prise en compte dans la fusion de postes. **→ PR 1** | 1 j |
 | **J5 — Vérifications** | Modèle, routes, ressource `check`, `GET /users/assignable`, contrainte « une ouverte par poste », bandeau sur la fiche, action groupée, section dans Mes tâches, clôture → intervention. | 1,5 j |
@@ -473,6 +472,32 @@ texte. Reste ouvert : le §2.2.
 - Le statut d'identité s'appelle désormais « Identité à confirmer » dans la
   liste, le tableau de bord et le résumé quotidien ; sa valeur d'API
   (`needs_verification`) ne change pas.
+
+### J2 — écarts constatés à l'implémentation
+
+- **Une migration par jalon** plutôt qu'une seule pour tout le chantier :
+  `0017_rooms` ne crée que `buildings`, `rooms` et `machines.room_id`. Les
+  colonnes de maintenance sur `rooms` et `machines`, les colonnes `ad_*` et
+  `rooms.ad_key`, les tables de vérifications et d'interventions viennent
+  avec leur jalon.
+- **`room:read` est aussi donné à Lecture seule** (pas seulement aux
+  Techniciens) : consulter les salles est de la supervision. La migration
+  l'insère pour les deux groupes intégrés existants.
+- **La liste des postes joint `rooms` et `buildings`** (une seule requête,
+  `select(Machine, Room, Building)`), ce qui donne le filtre et le tri sur la
+  salle et le bâtiment, et le filtre « emplacement divergent » calculé en
+  SQL. L'export lit la même jointure (`ExportRow`) : colonnes Bâtiment,
+  Salle, Emplacement divergent, proposées et non par défaut.
+- **Une salle dans un bâtiment ne stocke pas d'emplacement propre** : la
+  route l'efface au rattachement, pour qu'il n'y ait jamais deux réponses.
+  À la suppression du bâtiment, l'emplacement est recopié sur ses salles.
+- **Rattachement manuel toujours possible** en J2 : le verrouillage en mode
+  `ad_*` arrive avec `ROOM_SOURCE` en J3.
+- **Fusion de doublons** : le poste conservé prend la salle du doublon
+  s'il n'en avait pas.
+- Route de retrait groupée `POST /rooms/unassign` en plus du rattachement
+  `POST /rooms/{id}/machines` ; les deux renvoient les postes dont
+  l'emplacement diverge, que la console signale dans la notification.
 
 ## 12. Plus tard — portée par emplacement
 

@@ -26,6 +26,21 @@ export interface Machine {
    * parc filters by — and what the Wake-on-LAN relay picks a neighbour with.
    */
   location: string | null;
+  /**
+   * Where the console placed the poste (`services/rooms`): its room, the
+   * room's building, and the site those resolve to. All null for a poste
+   * nobody filed.
+   */
+  room_id: string | null;
+  room_name: string | null;
+  building_id: string | null;
+  building_name: string | null;
+  room_location: string | null;
+  /**
+   * The agent and the room disagree on the site. A finding, not an error: a
+   * GPO aimed at the wrong OU, or a poste moved without its room.
+   */
+  location_mismatch: boolean;
   /** Primary address elected by the agent; null = never reported. */
   ip_address: string | null;
   os_version: string | null;
@@ -279,6 +294,9 @@ export type MachineSortField =
   | 'hostname'
   | 'domain'
   | 'location'
+  /** The console's placement, off the joined tables. */
+  | 'building'
+  | 'room'
   | 'av_product_name'
   | 'wu_pending_count'
   | 'session_user_present'
@@ -295,6 +313,12 @@ export interface ListMachinesParams {
   domain?: string;
   /** Site, matched exactly (the dropdown feeds fleet values). */
   location?: string;
+  /** The console's placement: one room, one building, or the postes nobody filed. */
+  room_id?: string;
+  building_id?: string;
+  without_room?: boolean;
+  /** true = agent and room disagree on the site; false = the rest. */
+  location_mismatch?: boolean;
   /** Antivirus name, matched as a substring server-side. */
   antivirus?: string;
   /** OS version, matched as a substring server-side ("Windows 10" = every build). */

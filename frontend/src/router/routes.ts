@@ -27,6 +27,19 @@ const routes: RouteRecordRaw[] = [
       { path: 'machines', name: 'machines', component: () => import('pages/MachinesPage.vue') },
       { path: 'software', name: 'software', component: () => import('pages/SoftwarePage.vue') },
       {
+        path: 'rooms',
+        name: 'rooms',
+        component: () => import('pages/RoomsPage.vue'),
+        meta: { requiresPermission: 'room:read' },
+      },
+      {
+        path: 'rooms/:id',
+        name: 'room-detail',
+        component: () => import('pages/RoomDetailPage.vue'),
+        props: true,
+        meta: { requiresPermission: 'room:read' },
+      },
+      {
         path: 'machines/:id',
         name: 'machine-detail',
         component: () => import('pages/MachineDetailPage.vue'),

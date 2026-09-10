@@ -5,7 +5,8 @@
  * order of the grid on the groups page.
  */
 
-export type Resource = 'machine' | 'threat' | 'command' | 'risky_command' | 'user' | 'audit';
+export type Resource =
+  'machine' | 'threat' | 'command' | 'risky_command' | 'room' | 'user' | 'audit';
 
 export type Action = 'read' | 'write' | 'execute';
 
@@ -71,6 +72,21 @@ export const PERMISSION_CATALOGUE: PermissionEntry[] = [
     resourceLabel: 'Commandes à risque',
     label: 'Exécuter les commandes à risque',
     hint: 'Redémarrage, arrêt, installation des mises à jour, réinitialisation de Windows Update, réparations DISM, réinitialisation du spouleur. Requiert aussi les commandes courantes.',
+  },
+  {
+    key: 'room:read',
+    resource: 'room',
+    action: 'read',
+    resourceLabel: 'Salles et bâtiments',
+    label: 'Consulter',
+  },
+  {
+    key: 'room:write',
+    resource: 'room',
+    action: 'write',
+    resourceLabel: 'Salles et bâtiments',
+    label: 'Gérer',
+    hint: 'Créer et modifier les salles et les bâtiments, y affecter des postes.',
   },
   {
     key: 'user:read',

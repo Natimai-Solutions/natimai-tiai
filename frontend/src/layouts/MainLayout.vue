@@ -34,6 +34,10 @@
           <q-item-section avatar><q-icon name="inventory_2" /></q-item-section>
           <q-item-section>Logiciels</q-item-section>
         </q-item>
+        <q-item v-if="auth.can('room', 'read')" v-ripple clickable :to="{ name: 'rooms' }">
+          <q-item-section avatar><q-icon name="meeting_room" /></q-item-section>
+          <q-item-section>Salles</q-item-section>
+        </q-item>
         <q-item v-if="auth.canManageUsers" v-ripple clickable :to="{ name: 'users' }">
           <q-item-section avatar><q-icon name="person" /></q-item-section>
           <q-item-section>Utilisateurs</q-item-section>
