@@ -1,8 +1,9 @@
 # Salles, vérifications, maintenance et interventions — plan de travail
 
-> **Statut : cadrage validé le 2026-09-10** (§2), à une réserve près : le
-> rattachement de l'emplacement aux bâtiments et aux salles (§2.2) est une
-> proposition à confirmer avant J2. Rien n'est encore implémenté.
+> **Statut : cadrage validé le 2026-09-10** (§2). **J1 livré** (groupes de
+> droits, commandes à risque, relibellé « Identité à confirmer ») — voir §11.
+> Le rattachement de l'emplacement aux bâtiments et aux salles (§2.2) reste
+> une proposition à confirmer avant J2.
 >
 > Branche de travail : `claude/postes-maintenance-features-85buig`, fondée sur
 > `claude/agent-location-wol-ughnse` (emplacement des postes + réveil relayé),
@@ -49,7 +50,9 @@
 | **Classement automatique** | `ROOM_SOURCE` = `manual` (défaut) · `ad_ou` · `ad_location`. En mode `ad_*`, le rattachement manuel des postes est **interdit** (l'annuaire fait foi, aucun conflit possible) ; l'épinglage d'un poste se rajoutera si le besoin apparaît. Le site AD n'alimente **pas** l'emplacement (hors périmètre). |
 | **Nom d'une salle auto-créée** | Le nom de l'OU (ou la valeur `location` AD) à la création, **renommable** ensuite en console — la clé est le DN, pas le nom. Une OU renommée = une nouvelle salle ; l'ancienne reste vide. Le bâtiment d'une salle auto-créée se choisit en console. |
 | **Vérifications** | Le statut d'identité existant est **renommé « Identité à confirmer »** ; « Vérification » désigne la demande humaine. **Une seule** demande ouverte par poste. |
-| **Rôles** | Nouveau rôle **`technician`** (« Technicien ») : lecture seule + création et clôture de vérifications, saisie d'interventions et de maintenances sur **tout** poste, **et exécution des commandes à distance**. La transmission de maintenance, les salles, les bâtiments, les cycles, les responsables et les paramètres restent **admin**. |
+| **Droits** | **Groupes flexibles** plutôt que des rôles fixes : un groupe est un ensemble de permissions `ressource:action` composé dans la console, un compte cumule les droits de ses groupes. Trois groupes intégrés : Administrateurs (tous les droits, implicites), Lecture seule, Techniciens (lecture + commandes courantes et à risque). Les nouvelles ressources du chantier (salles, vérifications, maintenance, interventions, paramètres) entrent dans le catalogue au jalon qui les crée, et les Techniciens reçoivent par défaut l'écriture sur vérifications, interventions et maintenances. |
+| **Commandes à risque** | Deux permissions : `command:execute` (scans, signatures, recherche de mises à jour, cache DNS, stratégies, diagnostics, réveil) et `risky_command:execute` en plus pour redémarrage, arrêt, installation de mises à jour, réinitialisation de Windows Update, réparations DISM, réinitialisation du spouleur. Liste côté serveur (`RISKY_COMMAND_TYPES`), miroir dans le catalogue de la console. |
+| **Portée par emplacement** | **Plus tard.** Restreindre un groupe à certains emplacements ou salles (« les techniciens de Taravao ne voient que Taravao ») est du filtrage ligne par ligne dans chaque requête de liste, de fiche et de commande : un chantier à part, noté §12. Le modèle de groupes le permet sans refonte (une table `group_scopes` et un filtre commun aux requêtes). |
 | **Transmettre la maintenance** | Changement **durable** du responsable de la salle ou du poste, par un admin. La délégation d'une seule occurrence n'est pas en v1. |
 | **Réglages globaux** | Table `settings` + page **Paramètres** (admin) : cycle par défaut (initialisé depuis `MAINTENANCE_DEFAULT_CYCLE_DAYS`, 90 j), responsable par défaut, fenêtre « à échéance » (14 j). |
 | **Cycle** | `NULL` = hérite ; `0` = **pas de maintenance** (salle de serveurs, VM). Poste jamais maintenu : dû à `first_seen + cycle`, pas immédiatement. Une intervention `maintenance` **antidatée** amorce le cycle pour un poste maintenu avant Tia'i. |
@@ -131,7 +134,7 @@ Contrat :
 
 ## 4. Modèle de données
 
-Une seule migration, `0016_rooms_checks_maintenance`.
+Une seule migration, `0017_rooms_checks_maintenance` (la `0016` est celle des groupes).
 
 ### 4.1 Bâtiments et salles
 
@@ -259,28 +262,31 @@ bâtiment n'entre pas dans la résolution.
 
 ---
 
-## 5. Rôles et permissions
+## 5. Groupes et permissions (livré en J1)
 
-Nouvelles ressources dans `permissions.py` : `ROOM` (bâtiments compris),
-`CHECK`, `MAINTENANCE`, `INTERVENTION`, `SETTINGS`.
+Le vocabulaire est `ressource:action`, tenu dans `PERMISSION_CATALOGUE`
+(`permissions.py`) et son miroir `utils/permissions.ts` ; un groupe ne peut
+recevoir qu'une permission du catalogue. Les jalons suivants l'étendent :
 
-| | readonly | technician | admin |
-|---|---|---|---|
-| Lire postes, salles, historiques, tâches | ✔ | ✔ | ✔ |
-| Commandes à distance (`COMMAND/EXECUTE`) | — | ✔ | ✔ |
-| Créer une vérification, la clore, saisir une intervention ou une maintenance, sur tout poste | — | ✔ | ✔ |
-| Salles, bâtiments, rattachement des postes, cycles, responsables, **transmettre** une maintenance | — | — | ✔ |
-| Révocation de token, fusion de postes (`MACHINE/WRITE`) | — | — | ✔ |
-| Comptes, audit, paramètres | — | — | ✔ |
+| Jalon | Ressources ajoutées | Défaut Techniciens |
+|---|---|---|
+| J2 | `room:read`, `room:write` (bâtiments compris) | lecture |
+| J4 | `intervention:read`, `intervention:write` | lecture + écriture |
+| J5 | `check:read`, `check:write` | lecture + écriture |
+| J6 | `maintenance:read`, `maintenance:write`, `settings:read`, `settings:write` | maintenance : lecture + écriture ; paramètres : rien |
 
-Une route `GET /users/assignable` (id + nom, sans e-mail ni rôle) sert les
-listes d'affectation à quiconque peut affecter, sans ouvrir la gestion des
-comptes. Côté console, `auth.isAdmin` est complété d'un `can(resource,
-action)` miroir de la table serveur, pour masquer les boutons plutôt que
-d'attendre un 403 ; la garde de route `requiresAdmin` reste pour les pages
-Comptes et Paramètres.
+« Transmettre » une maintenance, gérer salles et bâtiments, fixer cycles et
+responsables = `room:write` / `maintenance:write` — un groupe qui les a, pas
+un rôle. Les Administrateurs ont tout implicitement, donc rien à leur
+accorder quand une ressource apparaît.
 
----
+Une route `GET /users/assignable` (id + nom, sans e-mail ni rôle) servira les
+listes d'affectation à quiconque détient `check:write` ou `maintenance:write`,
+sans ouvrir la gestion des comptes (J5).
+
+Côté console, `auth.can(resource, action)` remplace l'ancien `isAdmin` ; le
+catalogue de commandes se filtre sur les permissions du profil, si bien qu'un
+menu n'offre jamais un 403.
 
 ## 6. API (esquisse)
 
@@ -381,24 +387,25 @@ L'ordre place le **journal** avant la **maintenance**, parce que la seconde
 | Jalon | Contenu | Estimation |
 |---|---|---|
 | **J0 — Cadrage** | Confirmation du §2.2, fusion préalable de la branche emplacement/WoL (§10). | 0,5 j |
-| **J1 — Rôles et socle** | Rôle `technician`, ressources et table de permissions, `GET /users/assignable`, `can()` côté console, sélecteur de rôle, table `settings` + page Paramètres, relibellé « Identité à confirmer ». Tests de permissions. | 1 j |
-| **J2 — Bâtiments et salles** | Migration `0016` (toutes les tables, en une fois), modèles `Building` et `Room`, CRUD, rattachement manuel, divergence d'emplacement, filtres et colonnes dans la liste et l'export, page Salles. | 2,5 j |
+| **J1 — Groupes de droits** ✅ | Tables `groups`, `group_permissions`, `user_groups` (migration `0016`, `users.role` supprimée), trois groupes intégrés, union des droits par requête, garde anti-verrouillage, commandes à risque (`risky_command:execute`), routes `/groups`, page Groupes avec grille, multi-sélecteur de groupes sur les comptes, `can()` côté console, relibellé « Identité à confirmer ». | 3 j |
+| **J2 — Bâtiments et salles** | Migration `0017` (toutes les tables du chantier, en une fois), ressource `room`, modèles `Building` et `Room`, CRUD, rattachement manuel, divergence d'emplacement, filtres et colonnes dans la liste et l'export, page Salles. | 2,5 j |
 | **J3 — Agent : bloc `directory`** | Lecture du DN (registre) et de l'attribut `location` (ADSI), hachage et envoi ; réception serveur, `ROOM_SOURCE`, création automatique des salles. Tests Go (parse du DN) et Python (get-or-create, verrouillage en mode auto). | 1,5 j |
-| **J4 — Journal des interventions** | Modèle, routes, onglet Historique, formulaire d'ajout, prise en compte dans la fusion de postes. **→ PR 1** | 1 j |
-| **J5 — Vérifications** | Modèle, routes, contrainte « une ouverte par poste », bandeau sur la fiche, action groupée, section dans Mes tâches, clôture → intervention. | 1,5 j |
-| **J6 — Maintenance** | Résolution cycle/responsable, `last_maintenance_at`, `/maintenance/due`, formulaire de séance (salle ou poste), transmission, section dans Mes tâches, cartes du tableau de bord, filtre « en retard ». | 2,5 j |
+| **J4 — Journal des interventions** | Modèle, routes, ressource `intervention`, onglet Historique, formulaire d'ajout, prise en compte dans la fusion de postes. **→ PR 1** | 1 j |
+| **J5 — Vérifications** | Modèle, routes, ressource `check`, `GET /users/assignable`, contrainte « une ouverte par poste », bandeau sur la fiche, action groupée, section dans Mes tâches, clôture → intervention. | 1,5 j |
+| **J6 — Maintenance** | Ressources `maintenance` et `settings`, table `settings` + page Paramètres, résolution cycle/responsable, `last_maintenance_at`, `/maintenance/due`, formulaire de séance (salle ou poste), transmission, section dans Mes tâches, cartes du tableau de bord, filtre « en retard ». | 2,5 j |
 | **J7 — Notifications** | E-mail à l'affectation d'une vérification ; ligne « vos maintenances en retard » dans le résumé quotidien ; rappel hebdomadaire par responsable. | 1 j |
 | **J8 — Validation et documentation** | Couverture, `alembic check`, README (Fonctionnalités), DEPLOYMENT.md (variables, clés de registre), captures. **→ PR 2** | 1 j |
 
-Total indicatif : **12 à 13 jours**.
+Total indicatif : **14 à 15 jours**, J1 compris.
 
 ---
 
 ## 9. Questions tranchées
 
 Les quinze questions du premier brouillon sont reportées dans le §2.1 avec
-leur réponse. Écarts par rapport aux défauts proposés : le technicien
-**exécute les commandes** ; le bâtiment est **une table**, pas un champ
+leur réponse. Écarts par rapport aux défauts proposés : des **groupes
+flexibles** plutôt qu'un rôle technicien codé en dur, avec les **commandes à
+risque** comme droit distinct ; le bâtiment est **une table**, pas un champ
 texte. Reste ouvert : le §2.2.
 
 ---
@@ -427,11 +434,52 @@ texte. Reste ouvert : le §2.2.
   garde-fou que WMI (délai, échec silencieux → bloc absent, log une fois).
   Tester sur un poste dont le DC est injoignable : l'appel doit échouer vite
   et l'agent continuer.
-- **Technicien et commandes** : la garde `COMMAND/EXECUTE` couvre déjà les
-  actions groupées et le réveil ; aucune route à toucher, seulement la table
-  des rôles. Le journal des commandes (`created_by`) dit qui a lancé quoi.
+- **Nouvelle ressource = trois endroits** : `PERMISSION_CATALOGUE` côté
+  serveur, `utils/permissions.ts` côté console (libellés de la grille), et
+  les défauts des Techniciens dans `BUILTIN_GROUP_DEFAULTS` **plus** une
+  insertion dans la migration du jalon pour les installations déjà migrées
+  (le seed ne crée que les groupes manquants, il ne complète pas leurs
+  droits). Les Administrateurs n'ont rien à recevoir.
 - **Charge** : `/maintenance/due` et les compteurs par salle sont des
   agrégats sur `machines` (une colonne dénormalisée, un index sur `room_id`) ;
   rien qui ne tienne pas sur un parc de mille postes.
 - **RGPD** : les notes sont du texte libre ; rien n'empêche d'y écrire un nom
   d'utilisateur. Pas de règle technique, mais une phrase dans la doc.
+
+---
+
+## 11. J1 — écarts constatés à l'implémentation
+
+- `users.role` est **supprimée** (pas conservée en doublon) : la migration
+  range les `admin` dans Administrateurs et le reste dans Lecture seule, et
+  le `downgrade` refait le chemin inverse depuis l'appartenance au groupe
+  intégré. Les tests créent leurs comptes avec `groups=[BuiltinGroup.X]`, le
+  groupe intégré étant créé à la volée s'il manque.
+- Les Administrateurs n'ont **aucune permission stockée** : `is_admin` est
+  implicite sur la clé `admin`, la grille les affiche cochés et verrouillés.
+  Ainsi une ressource nouvelle ne leur est jamais à accorder.
+- La garde anti-verrouillage compte les **comptes actifs détenant
+  `user:write`** après la modification (flush puis comptage, rollback si
+  zéro), sur les comptes comme sur les groupes. Un compte désactivé ne
+  compte pas. À cela s'ajoute la règle existante : personne ne se désactive,
+  ne se supprime ni ne change ses propres groupes.
+- `risky_command:execute` seul n'ouvre rien : la route reste gardée par
+  `command:execute`, le risque est un supplément. La console le dit dans le
+  formulaire de groupe quand la case est cochée sans l'autre.
+- Les permissions sont **lues à chaque requête** (une jointure), pas mises
+  dans le JWT : modifier un groupe prend effet immédiatement, sans
+  reconnexion. Le profil `/auth/me` les renvoie pour la console, qui les
+  cache dans `localStorage` pour la garde de route.
+- Le statut d'identité s'appelle désormais « Identité à confirmer » dans la
+  liste, le tableau de bord et le résumé quotidien ; sa valeur d'API
+  (`needs_verification`) ne change pas.
+
+## 12. Plus tard — portée par emplacement
+
+Restreindre un groupe à des emplacements, bâtiments ou salles : une table
+`group_scopes (group_id, kind, value)` et, dans chaque requête de liste, de
+fiche, de commande et d'export, un filtre commun dérivé des scopes du
+profil (`machines.location IN (...)` ou `room_id IN (...)`), plus la même
+règle sur les cibles d'une commande groupée et sur les agrégats du tableau
+de bord. Un groupe sans scope voit tout — c'est la compatibilité. À chiffrer
+quand le besoin se présente ; rien dans le modèle de J1 ne s'y oppose.
