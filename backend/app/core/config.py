@@ -21,7 +21,7 @@ class Settings(BaseSettings):
         env_file=".env", env_ignore_empty=True, extra="ignore"
     )
 
-    PROJECT_NAME: str = "Tiai"
+    PROJECT_NAME: str = "Tia'i"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
     SECRET_KEY: str = "changeme"
@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     MAILGUN_DOMAIN: str | None = None
     MAILGUN_API_KEY: str | None = None
     MAILGUN_FROM_EMAIL: str | None = None
-    MAILGUN_FROM_NAME: str | None = "Tiai"
+    MAILGUN_FROM_NAME: str | None = "Tia'i"
     MAILGUN_TIMEOUT_SECONDS: int = 10
     # Outbound HTTP proxy for the Mailgun client alone (e.g. "http://10.0.0.1:3128").
     # School networks often force outbound traffic through a proxy; a dedicated
