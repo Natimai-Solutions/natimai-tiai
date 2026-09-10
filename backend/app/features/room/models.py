@@ -73,6 +73,11 @@ class Room(SQLModel, table=True):
             ForeignKey("buildings.id", ondelete="SET NULL"), nullable=True, index=True
         ),
     )
+    # What the directory names this room by, when ``ROOM_SOURCE`` created it:
+    # the OU's DN, or the location string. Unique, so the same OU always lands
+    # in the same room however the room is renamed since; NULL on a room made
+    # by hand.
+    ad_key: str | None = Field(default=None, unique=True, max_length=500)
     # Only read when ``building_id`` is NULL: a room in a building is where its
     # building is. Kept when a building is deleted (the route copies it down)
     # so the room does not lose its site with its building.

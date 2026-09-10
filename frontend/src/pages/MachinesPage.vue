@@ -543,6 +543,7 @@ import {
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import {
+  getRoomConfig,
   listBuildings,
   listRooms,
   placeMachines,
@@ -752,6 +753,11 @@ const rooms = ref<Room[]>([]);
 
 async function loadRooms() {
   try {
+    manualMode.value = (await getRoomConfig()).manual;
+  } catch {
+    // Assumed manual: the worst case is a 409 the notification explains.
+  }
+  try {
     rooms.value = await listRooms();
     roomOptions.value = [
       { label: 'Toutes les salles', value: null },
@@ -776,7 +782,9 @@ async function loadRooms() {
 
 // Placing the selection. The « Sans salle » entry unassigns.
 const auth = useAuthStore();
-const canPlace = computed(() => auth.can('room', 'write'));
+// Moving postes by hand: the permission, and a server not in a directory mode.
+const manualMode = ref(true);
+const canPlace = computed(() => auth.can('room', 'write') && manualMode.value);
 const placeOpen = ref(false);
 const placing = ref(false);
 const placeRoomId = ref<string | null>(null);

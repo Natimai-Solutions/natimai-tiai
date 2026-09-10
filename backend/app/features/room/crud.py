@@ -226,3 +226,104 @@ async def detach_building(session: AsyncSession, building: Building) -> None:
         .where(col(Room.building_id) == building.id, col(Room.location).is_(None))
         .values(location=building.location, updated_at=utcnow())
     )
+
+
+# --- Directory-driven placement (ROOM_SOURCE) -------------------------------
+
+
+def directory_key(machine: Machine, source: str) -> tuple[str, str] | None:
+    """What the directory files ``machine`` by under ``source``: the room's
+    key and the name to give it when it has to be created. None when the
+    poste has nothing to be filed by — no OU, no location attribute — which
+    unfiles it rather than leaving it where it was: the directory has spoken,
+    and it said "nowhere"."""
+    if source == "ad_ou":
+        if machine.ad_ou_dn and machine.ad_ou:
+            return machine.ad_ou_dn, machine.ad_ou
+        return None
+    if source == "ad_location":
+        if machine.ad_location:
+            return machine.ad_location, machine.ad_location
+        return None
+    return None
+
+
+async def room_for_key(session: AsyncSession, key: str, name: str) -> tuple[Room, bool]:
+    """The room the directory names by ``key``, created if missing.
+
+    Creation adopts a room of the same name that was made by hand and sits in
+    no building — the usual case on a parc that filed by hand before turning
+    the directory on, where "B12" already exists. Otherwise the name is taken
+    as is, or suffixed when another key already holds it (two "Salle B12"
+    OUs under two branches of the tree). Does not commit. Returns the room and
+    whether it was created.
+    """
+    result = await session.exec(select(Room).where(Room.ad_key == key))
+    room = result.one_or_none()
+    if room is not None:
+        return room, False
+    loose = await room_by_name(session, None, name)
+    if loose is not None and loose.ad_key is None:
+        loose.ad_key = key
+        loose.updated_at = utcnow()
+        session.add(loose)
+        await session.flush()
+        return loose, False
+    candidate = name
+    n = 2
+    while await room_by_name(session, None, candidate) is not None:
+        candidate = f"{name} ({n})"
+        n += 1
+    room = Room(name=candidate, ad_key=key)
+    session.add(room)
+    await session.flush()
+    return room, True
+
+
+async def place_from_directory(
+    session: AsyncSession, machine: Machine, source: str
+) -> bool:
+    """File ``machine`` where the directory says, under ``source``. Returns
+    whether a room was created on the way. A no-op in manual mode. Does not
+    commit."""
+    if source == "manual":
+        return False
+    key = directory_key(machine, source)
+    if key is None:
+        if machine.room_id is not None:
+            machine.room_id = None
+            machine.updated_at = utcnow()
+            session.add(machine)
+        return False
+    room, created = await room_for_key(session, *key)
+    if machine.room_id != room.id:
+        machine.room_id = room.id
+        machine.updated_at = utcnow()
+        session.add(machine)
+    return created
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    placed: int = 0
+    unplaced: int = 0
+    rooms_created: int = 0
+
+
+async def sync_from_directory(session: AsyncSession, source: str) -> SyncResult:
+    """Re-file every poste from its stored directory reading — what the console
+    runs after ``ROOM_SOURCE`` changed, since the agents only send the block
+    when *their* reading changes. Does not commit."""
+    if source == "manual":
+        return SyncResult()
+    result = await session.exec(select(Machine))
+    placed = unplaced = created = 0
+    for machine in result.all():
+        if directory_key(machine, source) is None:
+            if machine.room_id is not None:
+                unplaced += 1
+        else:
+            placed += 1
+        if await place_from_directory(session, machine, source):
+            created += 1
+    return SyncResult(placed=placed, unplaced=unplaced, rooms_created=created)

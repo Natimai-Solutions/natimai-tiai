@@ -7,6 +7,8 @@ vi.mock('boot/axios', () => ({
 import { api } from 'boot/axios';
 import {
   createRoom,
+  getRoomConfig,
+  syncDirectory,
   deleteBuilding,
   listRooms,
   placeMachines,
@@ -53,6 +55,20 @@ describe('rooms service', () => {
       machine_ids: ['m-1', 'm-2'],
     });
     expect(api.post).toHaveBeenNthCalledWith(2, '/rooms/unassign', { machine_ids: ['m-3'] });
+  });
+});
+
+describe('room config and directory sync', () => {
+  it('reads the placement mode once and posts a sync', async () => {
+    vi.mocked(api.get).mockResolvedValue({ data: { source: 'ad_ou', manual: false } });
+    vi.mocked(api.post).mockResolvedValue({
+      data: { placed: 3, unplaced: 1, rooms_created: 2 },
+    });
+    expect(await getRoomConfig()).toEqual({ source: 'ad_ou', manual: false });
+    expect(await getRoomConfig()).toEqual({ source: 'ad_ou', manual: false });
+    expect(api.get).toHaveBeenCalledTimes(1);
+    expect(await syncDirectory()).toEqual({ placed: 3, unplaced: 1, rooms_created: 2 });
+    expect(api.post).toHaveBeenCalledWith('/rooms/sync-directory');
   });
 });
 

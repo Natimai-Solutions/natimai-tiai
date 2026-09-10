@@ -39,6 +39,15 @@ const rows = computed<InfoRow[]>(() => {
     // the two are read together, and the fiche says so when they disagree.
     { label: 'Bâtiment', value: m.building_name ?? '—' },
     { label: 'Salle', value: roomRow(m) },
+    // What the directory says, whatever ROOM_SOURCE does with it: the
+    // input of an automatic placement, and what explains one.
+    ...(m.ad_ou || m.ad_location || m.ad_distinguished_name
+      ? [
+          { label: 'Unité d’organisation (AD)', value: m.ad_ou ?? '—' },
+          { label: 'Emplacement (AD)', value: m.ad_location ?? '—' },
+          { label: 'Objet AD', value: m.ad_distinguished_name ?? '—' },
+        ]
+      : []),
     { label: 'Adresse IP', value: ipAddressLabel(m.ip_address, m.ip_prefix_length) },
     // Right under the address it was elected with, and for two reasons: it
     // is the wake target — a dash here means « Réveiller le poste » has

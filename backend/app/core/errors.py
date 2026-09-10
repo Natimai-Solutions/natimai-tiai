@@ -55,6 +55,9 @@ class ErrorCode(enum.StrEnum):
     BUILDING_NAME_TAKEN = "building.name.taken"
     ROOM_NOT_FOUND = "room.not_found"
     ROOM_NAME_TAKEN = "room.name.taken"
+    # ROOM_SOURCE is a directory mode: postes are filed by the directory, and
+    # a placement made by hand here would be undone on the next inventory.
+    ROOM_PLACEMENT_LOCKED = "room.placement.locked"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     RATE_LIMITED = "request.rate_limited"

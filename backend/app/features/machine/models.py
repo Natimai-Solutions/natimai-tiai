@@ -62,6 +62,17 @@ class Machine(SQLModel, table=True):
             ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True, index=True
         ),
     )
+    # What the domain says about the poste, as its agent read it on the
+    # inventory cycle: the computer object's DN, the OU holding it (name and
+    # DN), and the object's "location" attribute. Stored whatever
+    # ``ROOM_SOURCE`` says — shown on the fiche regardless, and the input of
+    # a directory-driven placement, re-runnable from the console when the
+    # setting changes. NULL = never reported: a workgroup poste, or an agent
+    # older than the field.
+    ad_distinguished_name: str | None = None
+    ad_ou: str | None = None
+    ad_ou_dn: str | None = None
+    ad_location: str | None = None
     os_version: str | None = None
     agent_version: str | None = None
     # Primary IP address elected by the agent among the machine's addresses

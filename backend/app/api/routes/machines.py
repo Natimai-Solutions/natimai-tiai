@@ -306,6 +306,13 @@ class MachineDetailOut(MachineOut):
     machine_guid: str | None
     smbios_uuid: str | None
     tpm_ek_hash: str | None
+    # What the domain says about the poste, as its agent last read it. On the
+    # fiche whatever ROOM_SOURCE says: it is what a directory-driven placement
+    # reads, and what explains one.
+    ad_distinguished_name: str | None
+    ad_ou: str | None
+    ad_ou_dn: str | None
+    ad_location: str | None
     # Lets the console show that a poste is cut off and offer the only way
     # back: « autoriser le ré-enrôlement » (the fleet secret no longer clears
     # a revocation on its own).

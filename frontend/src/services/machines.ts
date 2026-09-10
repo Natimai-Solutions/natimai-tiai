@@ -224,6 +224,15 @@ export interface MachineDetail extends Machine {
   wu_last_install: string | null;
   /** Sorted critical-first by the server; empty when nothing is pending. */
   pending_updates: PendingUpdate[];
+  /**
+   * What the domain says about the poste, as its agent last read it: the
+   * computer object's DN, the OU holding it, the object's location attribute.
+   * All null on a workgroup poste or an older agent.
+   */
+  ad_distinguished_name: string | null;
+  ad_ou: string | null;
+  ad_ou_dn: string | null;
+  ad_location: string | null;
   machine_guid: string | null;
   smbios_uuid: string | null;
   tpm_ek_hash: string | null;

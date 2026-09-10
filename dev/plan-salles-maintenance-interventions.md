@@ -1,8 +1,8 @@
 # Salles, vérifications, maintenance et interventions — plan de travail
 
-> **Statut : cadrage validé le 2026-09-10** (§2), §2.2 compris. **J1 et J2
-> livrés** (groupes de droits, commandes à risque, bâtiments et salles) —
-> voir §11.
+> **Statut : cadrage validé le 2026-09-10** (§2), §2.2 compris. **J1, J2 et
+> J3 livrés** (groupes de droits, commandes à risque, bâtiments et salles,
+> classement depuis l'annuaire) — voir §11.
 >
 > Branche de travail : `claude/postes-maintenance-features-85buig`, fondée sur
 > `claude/agent-location-wol-ughnse` (emplacement des postes + réveil relayé),
@@ -388,7 +388,7 @@ L'ordre place le **journal** avant la **maintenance**, parce que la seconde
 | **J0 — Cadrage** | Confirmation du §2.2, fusion préalable de la branche emplacement/WoL (§10). | 0,5 j |
 | **J1 — Groupes de droits** ✅ | Tables `groups`, `group_permissions`, `user_groups` (migration `0016`, `users.role` supprimée), trois groupes intégrés, union des droits par requête, garde anti-verrouillage, commandes à risque (`risky_command:execute`), routes `/groups`, page Groupes avec grille, multi-sélecteur de groupes sur les comptes, `can()` côté console, relibellé « Identité à confirmer ». | 3 j |
 | **J2 — Bâtiments et salles** ✅ | Migration `0017` (bâtiments, salles, `machines.room_id`), ressource `room`, modèles `Building` et `Room`, CRUD, rattachement manuel, divergence d'emplacement, filtres et colonnes dans la liste et l'export, page Salles. | 2,5 j |
-| **J3 — Agent : bloc `directory`** | Lecture du DN (registre) et de l'attribut `location` (ADSI), hachage et envoi ; réception serveur, `ROOM_SOURCE`, création automatique des salles. Tests Go (parse du DN) et Python (get-or-create, verrouillage en mode auto). | 1,5 j |
+| **J3 — Agent : bloc `directory`** ✅ | Lecture du DN (registre) et de l'attribut `location` (ADSI), hachage et envoi ; réception serveur, `ROOM_SOURCE`, création automatique des salles. Tests Go (parse du DN) et Python (get-or-create, verrouillage en mode auto). | 1,5 j |
 | **J4 — Journal des interventions** | Modèle, routes, ressource `intervention`, onglet Historique, formulaire d'ajout, prise en compte dans la fusion de postes. **→ PR 1** | 1 j |
 | **J5 — Vérifications** | Modèle, routes, ressource `check`, `GET /users/assignable`, contrainte « une ouverte par poste », bandeau sur la fiche, action groupée, section dans Mes tâches, clôture → intervention. | 1,5 j |
 | **J6 — Maintenance** | Ressources `maintenance` et `settings`, table `settings` + page Paramètres, résolution cycle/responsable, `last_maintenance_at`, `/maintenance/due`, formulaire de séance (salle ou poste), transmission, section dans Mes tâches, cartes du tableau de bord, filtre « en retard ». | 2,5 j |
@@ -498,6 +498,38 @@ texte. Reste ouvert : le §2.2.
 - Route de retrait groupée `POST /rooms/unassign` en plus du rattachement
   `POST /rooms/{id}/machines` ; les deux renvoient les postes dont
   l'emplacement diverge, que la console signale dans la notification.
+
+### J3 — écarts constatés à l'implémentation
+
+- **Le bloc `directory` voyage dans l'inventaire** (`inventory.directory`)
+  plutôt que comme bloc séparé du heartbeat : même cycle quotidien, même
+  hachage, même acquittement par génération, et `inventory_scan` le
+  rafraîchit à la demande. Aucune plomberie nouvelle côté agent.
+- **Deux lectures, deux coûts.** Le DN vient du cache des stratégies de
+  groupe dans le registre (zéro dépendance, hors ligne compris) ; l'attribut
+  Emplacement passe par ADSI (`go-ole`, désormais dépendance directe), sur
+  un thread verrouillé avec son propre appartement COM, borné à 30 s comme
+  les requêtes WMI. Le bind utilise un BSTR nul construit à la main pour
+  que ADSI prenne le compte machine — un `nil` go-ole serait un VT_NULL
+  refusé par la couche dispatch. **Non testé sur un domaine réel dans cette
+  session** : à valider sur un poste joint avant de déployer.
+- **La clé d'une salle OU est le DN de l'OU** (`rooms.ad_key`, unique), son
+  nom celui de l'OU à la création. Une OU renommée = nouvelle salle,
+  l'ancienne reste vide ; une salle renommée en console garde sa clé.
+- **Adoption d'une salle manuelle** : une OU nommée comme une salle créée à
+  la main sans bâtiment ni clé la reprend au lieu de créer « Salle B12
+  (2) » — le cas du parc qui a classé à la main avant d'activer l'annuaire.
+  Deux OU homonymes sous deux branches donnent bien deux salles, la
+  seconde suffixée.
+- **Un poste sans OU (ou sans attribut) est retiré de sa salle** en mode
+  annuaire : l'annuaire a parlé et a dit « nulle part ».
+- **Le bloc est appliqué même à hachage inchangé** (il est bon marché), et
+  `POST /rooms/sync-directory` reclasse tout le parc depuis les lectures
+  mémorisées : un `ROOM_SOURCE` changé côté serveur ne dépend pas du jour
+  où chaque agent bougera. Les lectures `ad_*` sont stockées et affichées
+  quel que soit le mode.
+- Pas de clé de configuration agent ni de registre : la lecture est
+  automatique sur tout poste joint, et n'échoue jamais bruyamment.
 
 ## 12. Plus tard — portée par emplacement
 

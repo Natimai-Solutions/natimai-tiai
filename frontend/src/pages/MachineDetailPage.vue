@@ -95,7 +95,7 @@
       </q-btn-dropdown>
       <!-- room:write: where the console files the poste. -->
       <q-btn
-        v-if="auth.can('room', 'write')"
+        v-if="canPlace"
         flat
         dense
         color="primary"
@@ -358,6 +358,7 @@ import {
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import {
+  getRoomConfig,
   listRooms,
   placeMachines,
   placementNotification,
@@ -435,7 +436,17 @@ const actionGroups = computed(() => commandActionGroups({ permissions: auth.perm
 // Revoke, re-enroll, merge: the machine:write half of the fiche.
 const canManage = computed(() => auth.can('machine', 'write'));
 
-// --- Placement: the room the console files the poste in. ---
+// --- Placement: the room the console files the poste in. By hand only
+// when the server is not in a directory mode.
+const manualMode = ref(true);
+const canPlace = computed(() => auth.can('room', 'write') && manualMode.value);
+void getRoomConfig()
+  .then((c) => {
+    manualMode.value = c.manual;
+  })
+  .catch(() => {
+    // Assumed manual: the worst case is a 409 the notification explains.
+  });
 const ROOM_NONE = 'none';
 const placeOpen = ref(false);
 const placing = ref(false);

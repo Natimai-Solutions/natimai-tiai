@@ -20,6 +20,24 @@
       />
     </div>
 
+    <!-- A directory mode: the membership is the directory's, and a sync is
+         how a setting switched on the server reaches the whole parc at once. -->
+    <q-banner v-if="config && !config.manual" class="bg-blue-1 q-mb-md" rounded>
+      <template #avatar><q-icon name="account_tree" color="primary" /></template>
+      Les postes sont rangés {{ sourceLabel }} (<code>ROOM_SOURCE={{ config.source }}</code
+      >) : les salles se créent toutes seules et le rattachement manuel est désactivé. Nom, bâtiment
+      et notes des salles restent modifiables.
+      <template v-if="canWrite" #action>
+        <q-btn
+          flat
+          dense
+          label="Resynchroniser depuis l'annuaire"
+          :loading="syncing"
+          @click="sync"
+        />
+      </template>
+    </q-banner>
+
     <q-tabs v-model="tab" dense align="left" class="text-grey-8 q-mb-sm" active-color="primary">
       <q-tab name="rooms" icon="meeting_room" label="Salles" />
       <q-tab name="buildings" icon="apartment" label="Bâtiments" />
@@ -45,7 +63,17 @@
         >
           <template #body-cell-name="props">
             <q-td :props="props">
-              <div>{{ props.row.name }}</div>
+              <div>
+                {{ props.row.name }}
+                <q-icon
+                  v-if="props.row.ad_key"
+                  name="account_tree"
+                  size="16px"
+                  class="q-ml-xs text-grey-7"
+                >
+                  <q-tooltip>Créée depuis l'annuaire : {{ props.row.ad_key }}</q-tooltip>
+                </q-icon>
+              </div>
               <div
                 v-if="props.row.notes"
                 class="text-caption text-grey ellipsis"
@@ -184,10 +212,14 @@ import { listLocations } from 'src/services/machines';
 import {
   deleteBuilding,
   deleteRoom,
+  getRoomConfig,
   listBuildings,
   listRooms,
+  ROOM_SOURCE_LABELS,
+  syncDirectory,
   type Building,
   type Room,
+  type RoomConfig,
 } from 'src/services/rooms';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
@@ -206,6 +238,36 @@ const locations = ref<string[]>([]);
 const loading = ref(false);
 
 const canWrite = computed(() => auth.can('room', 'write'));
+
+const config = ref<RoomConfig | null>(null);
+const syncing = ref(false);
+const sourceLabel = computed(() =>
+  config.value ? (ROOM_SOURCE_LABELS[config.value.source] ?? config.value.source) : '',
+);
+
+async function loadConfig() {
+  try {
+    config.value = await getRoomConfig();
+  } catch {
+    // Without it the page assumes manual, which only ever shows a 409.
+  }
+}
+
+async function sync() {
+  syncing.value = true;
+  try {
+    const res = await syncDirectory();
+    $q.notify({
+      type: 'positive',
+      message: `${res.placed} poste(s) rangé(s), ${res.unplaced} retiré(s), ${res.rooms_created} salle(s) créée(s)`,
+    });
+    await reload();
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Resynchronisation impossible') });
+  } finally {
+    syncing.value = false;
+  }
+}
 
 const roomFormOpen = ref(false);
 const editingRoom = ref<Room | null>(null);
@@ -314,5 +376,6 @@ function confirmDeleteBuilding(building: Building) {
 onMounted(() => {
   void reload();
   void loadLocations();
+  void loadConfig();
 });
 </script>

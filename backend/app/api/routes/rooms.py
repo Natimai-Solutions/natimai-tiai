@@ -18,6 +18,7 @@ from sqlmodel import col, select
 
 from app.api.deps import CurrentUser, SessionDep, require_permission
 from app.api.routes.agent import clean_location
+from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
@@ -80,6 +81,9 @@ class RoomOut(BaseModel):
     # agent is compared against.
     effective_location: str | None
     notes: str | None
+    # Set on a room the directory created (the OU's DN, or the location
+    # string): the console says so, and its membership is not editable.
+    ad_key: str | None
     machine_count: int
     # Postes of this room whose agent names another site.
     mismatch_count: int
@@ -102,6 +106,22 @@ class RoomUpdate(BaseModel):
     building_id: uuid.UUID | None = None
     location: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class RoomConfigOut(BaseModel):
+    """How postes are filed: by hand, or by the directory (``ROOM_SOURCE``).
+    The console reads it to lock the placement controls in a directory mode."""
+
+    source: str
+    manual: bool
+
+
+class SyncOut(BaseModel):
+    """What re-filing the parc from the directory did."""
+
+    placed: int
+    unplaced: int
+    rooms_created: int
 
 
 class MachineIds(BaseModel):
@@ -175,6 +195,20 @@ def _clean_name(name: str) -> str:
     return " ".join(name.split())
 
 
+def _reject_locked_placement() -> None:
+    """In a directory mode, a placement made by hand would be undone on the
+    poste's next inventory: refused, with the mode named, rather than
+    silently overwritten."""
+    if settings.ROOM_SOURCE != "manual":
+        raise AppError(
+            code=ErrorCode.ROOM_PLACEMENT_LOCKED,
+            status_code=409,
+            message="Postes are filed by the directory (ROOM_SOURCE); "
+            "manual placement is disabled",
+            details={"source": settings.ROOM_SOURCE},
+        )
+
+
 async def _buildings_out(
     session: SessionDep, buildings: list[Building]
 ) -> list[BuildingOut]:
@@ -206,6 +240,7 @@ async def _rooms_out(
             location=r.location,
             effective_location=crud.effective_location(r, b),
             notes=r.notes,
+            ad_key=r.ad_key,
             machine_count=counts[r.id].machines,
             mismatch_count=counts[r.id].mismatched,
             created_at=r.created_at,
@@ -313,6 +348,45 @@ async def delete_building(
 
 
 # --- Rooms ------------------------------------------------------------------
+
+
+@rooms_router.get("/config", response_model=RoomConfigOut)
+async def room_config() -> RoomConfigOut:
+    """Declared before ``/{room_id}`` so the path is not read as an id."""
+    return RoomConfigOut(
+        source=settings.ROOM_SOURCE, manual=settings.ROOM_SOURCE == "manual"
+    )
+
+
+@rooms_router.post("/sync-directory", response_model=SyncOut, dependencies=[_WRITE])
+async def sync_directory(session: SessionDep, current: CurrentUser) -> SyncOut:
+    """Re-file every poste from what its agent last said of the directory.
+
+    The agents send the block only when *their* reading changes, so a
+    ``ROOM_SOURCE`` switched on the server would otherwise take effect one
+    poste at a time, on the day each one moves. In manual mode this does
+    nothing and says so.
+    """
+    result = await crud.sync_from_directory(session, settings.ROOM_SOURCE)
+    audit.record(
+        session,
+        actor=current.email,
+        action="room.sync_directory",
+        resource_type="room",
+        resource_id="",
+        details={
+            "source": settings.ROOM_SOURCE,
+            "placed": result.placed,
+            "unplaced": result.unplaced,
+            "rooms_created": result.rooms_created,
+        },
+    )
+    await session.commit()
+    return SyncOut(
+        placed=result.placed,
+        unplaced=result.unplaced,
+        rooms_created=result.rooms_created,
+    )
 
 
 @rooms_router.get("", response_model=list[RoomOut])
@@ -443,6 +517,7 @@ async def place_machines(
     ones do, and the console says so. The mismatch is a finding to act on
     (a GPO, a move), not a reason to leave a poste unfiled.
     """
+    _reject_locked_placement()
     room = await _require_room(session, room_id)
     machines = await _require_machines(session, payload.machine_ids)
     site = (await crud.placement(session, room.id)).location
@@ -468,6 +543,7 @@ async def unassign_machines(
     payload: MachineIds, session: SessionDep, current: CurrentUser
 ) -> PlacementResult:
     """Take postes out of whatever room they are in."""
+    _reject_locked_placement()
     await _require_machines(session, payload.machine_ids)
     moved = await crud.set_room(session, payload.machine_ids, None)
     audit.record(

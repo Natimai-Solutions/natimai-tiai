@@ -202,6 +202,11 @@ func ReadInventory(ctx context.Context, includeSoftware bool) (*models.Inventory
 		inv.Software = []models.Software{}
 	}
 
+	// Last, and off WMI entirely: what the domain says about this computer,
+	// for the server to file the poste by. Part of the hash like everything
+	// else, so a poste moved to another OU reports on the day it moves.
+	inv.Directory = readDirectory(ctx)
+
 	InventoryHash(inv)
 	return inv, nil
 }

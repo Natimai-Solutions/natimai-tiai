@@ -195,6 +195,7 @@ Il n'est jamais committé.
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif » |
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
 | `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence |
+| `ROOM_SOURCE` | `manual` | Comment les postes sont rangés en salles. `manual` : depuis la console, à la main. `ad_ou` : par l'**unité d'organisation** qui contient l'objet ordinateur — l'agent lit son propre DN dans le registre, sans interroger l'annuaire — une salle par OU, nommée comme elle. `ad_location` : par l'attribut **Emplacement** de l'objet ordinateur (onglet Emplacement d'ADUC), que l'agent lit via ADSI. Dans les deux modes annuaire, le rattachement manuel est verrouillé ; les salles créées gardent nom, bâtiment et notes modifiables. Après un changement de ce réglage, « Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc d'un coup |
 | `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard |
 
 ### Réveil des postes (Wake-on-LAN)
@@ -541,6 +542,18 @@ trie le parc par emplacement, et le relais Wake-on-LAN s'en sert pour désigner
 un poste voisin (section « Réveil des postes », point 4). Une valeur vide
 **efface** l'emplacement mémorisé côté serveur : un poste déplacé, ou dont la GPO
 a retiré le réglage, ne reste pas classé sous l'ancien.
+
+**Annuaire.** Sans aucun réglage, l'agent d'un poste joint à un domaine remonte
+aussi, avec l'inventaire quotidien, ce que l'annuaire dit de lui : le DN de
+l'objet ordinateur (lu dans le cache des stratégies de groupe, sous
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\State\Machine`),
+l'unité d'organisation qui le contient, et l'attribut *Emplacement* de l'objet,
+lu via ADSI avec le compte machine. Ces trois valeurs s'affichent sur la fiche
+du poste et, selon `ROOM_SOURCE` côté serveur, rangent le poste dans une salle.
+Un poste hors domaine, ou dont le contrôleur est injoignable, remonte ce qu'il
+peut : l'OU sans l'attribut, ou rien — jamais une erreur. Le bloc n'est envoyé
+que lorsqu'il change, comme le reste de l'inventaire ; « Rafraîchir
+l'inventaire » depuis la console force une relecture.
 
 Toute valeur absente ou non positive retombe sur son défaut : un YAML partiel
 reste utilisable, et **le fichier lui-même est facultatif** — c'est le mode

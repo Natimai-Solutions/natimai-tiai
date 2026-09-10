@@ -34,6 +34,8 @@ export interface Room {
   /** The site the room is on: its building's, else its own. */
   effective_location: string | null;
   notes: string | null;
+  /** Set on a room the directory created: its membership is the directory's. */
+  ad_key: string | null;
   machine_count: number;
   /** Postes of this room whose agent names another site. */
   mismatch_count: number;
@@ -124,6 +126,46 @@ export async function unassignMachines(machineIds: string[]): Promise<PlacementR
   });
   return data;
 }
+
+/** How postes are filed: by hand, or by the directory (`ROOM_SOURCE`). */
+export interface RoomConfig {
+  source: 'manual' | 'ad_ou' | 'ad_location' | string;
+  manual: boolean;
+}
+
+let cachedConfig: Promise<RoomConfig> | null = null;
+
+/**
+ * The server's placement mode, fetched once per session: a server setting,
+ * read by every page that offers to move a poste so that none offers what the
+ * backend would refuse.
+ */
+export function getRoomConfig(): Promise<RoomConfig> {
+  cachedConfig ??= api.get<RoomConfig>('/rooms/config').then(({ data }) => data);
+  return cachedConfig.catch((e: unknown) => {
+    cachedConfig = null;
+    throw e;
+  });
+}
+
+/** What re-filing the parc from the directory did. */
+export interface SyncResult {
+  placed: number;
+  unplaced: number;
+  rooms_created: number;
+}
+
+/** Re-file every poste from what its agent last said of the directory. */
+export async function syncDirectory(): Promise<SyncResult> {
+  const { data } = await api.post<SyncResult>('/rooms/sync-directory');
+  return data;
+}
+
+export const ROOM_SOURCE_LABELS: Record<string, string> = {
+  manual: 'à la main, depuis la console',
+  ad_ou: "par l'unité d'organisation de l'objet ordinateur",
+  ad_location: "par l'attribut Emplacement de l'objet ordinateur",
+};
 
 /** "Bâtiment B › B12", or the room alone when it has no building. */
 export function roomLabel(room: Pick<Room, 'name' | 'building'>): string {

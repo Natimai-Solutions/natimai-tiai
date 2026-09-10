@@ -12,6 +12,7 @@
       <q-space />
       <template v-if="room && canWrite">
         <q-btn
+          v-if="canPlace"
           flat
           dense
           color="primary"
@@ -43,6 +44,10 @@
               {{ room.mismatch_count }} divergent(s)
             </q-badge>
           </div>
+        </div>
+        <div v-if="room.ad_key" class="row items-center">
+          <div class="col-4 text-grey-7">Annuaire</div>
+          <div class="col text-caption">{{ room.ad_key }}</div>
         </div>
         <div v-if="room.notes" class="row">
           <div class="col-4 text-grey-7">Notes</div>
@@ -93,7 +98,7 @@
       <template #body-cell-actions="props">
         <q-td :props="props" class="text-right" @click.stop>
           <q-btn
-            v-if="canWrite"
+            v-if="canPlace"
             flat
             dense
             round
@@ -179,6 +184,7 @@ import RoomFormDialog from 'src/components/room/RoomFormDialog.vue';
 import { listLocations, listMachines, type Machine } from 'src/services/machines';
 import {
   getRoom,
+  getRoomConfig,
   listBuildings,
   placeMachines,
   placementNotification,
@@ -204,6 +210,9 @@ const loading = ref(false);
 const formOpen = ref(false);
 
 const canWrite = computed(() => auth.can('room', 'write'));
+// Moving postes by hand: the permission, and a server not in a directory mode.
+const manualMode = ref(true);
+const canPlace = computed(() => canWrite.value && manualMode.value);
 
 const columns: QTableColumn<Machine>[] = [
   { name: 'hostname', label: 'Nom', field: 'hostname', align: 'left', sortable: true },
@@ -250,6 +259,11 @@ async function loadRefs() {
     ]);
   } catch {
     // The form still works without them.
+  }
+  try {
+    manualMode.value = (await getRoomConfig()).manual;
+  } catch {
+    // Assumed manual: the worst case is a 409 the notification explains.
   }
 }
 

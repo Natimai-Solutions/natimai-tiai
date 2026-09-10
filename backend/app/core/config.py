@@ -196,6 +196,19 @@ class Settings(BaseSettings):
     # fleet reported as behind on the pilot's account.
     AGENT_EXPECTED_VERSION: str | None = None
 
+    # --- Rooms ---
+    # How postes are filed into rooms. ``manual``: from the console, by hand.
+    # ``ad_ou``: by the organisational unit the computer object sits in — the
+    # agent reads its own DN off the registry, no directory round trip — one
+    # room per OU, named after it. ``ad_location``: by the "location"
+    # attribute of the computer object (the Emplacement field of ADUC), which
+    # the agent reads through ADSI. In either directory mode the console can
+    # no longer move a poste by hand: the directory is the source of truth,
+    # and a placement it would overwrite on the next inventory is a placement
+    # nobody can rely on. Rooms created this way keep their name, building and
+    # settings editable — only the membership is the directory's.
+    ROOM_SOURCE: Literal["manual", "ad_ou", "ad_location"] = "manual"
+
     # --- Wake-on-LAN ---
     # The magic packet is emitted by the server, not by an agent: the machine it
     # targets is off, and the whole point is to reach it anyway. What it needs is

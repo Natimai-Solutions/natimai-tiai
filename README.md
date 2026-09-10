@@ -50,7 +50,9 @@ gère naturellement les postes éteints.
   les postes par **bâtiment et salle** : un bâtiment porte l'emplacement, une
   salle en hérite, et un poste dont l'agent déclare un autre emplacement que sa
   salle est **signalé** — une GPO mal ciblée ou un poste déménagé sans sa
-  salle — jamais refusé.
+  salle — jamais refusé. À la main, ou **depuis l'annuaire** : l'agent remonte
+  l'unité d'organisation de son objet ordinateur et son attribut Emplacement,
+  et le serveur en fait des salles (`ROOM_SOURCE`).
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
