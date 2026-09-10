@@ -385,35 +385,63 @@ le segment concerné.
 ### 3. L'hôte Docker
 
 C'est le point qui surprend, et il n'apparaît qu'au déploiement : le backend
-tourne dans un conteneur sur le *bridge* Docker. Le datagramme part vers
-l'adresse de diffusion du sous-réseau du poste, arrive à l'hôte qui sert de
-passerelle — et **Linux ne relaie pas une diffusion dirigée par défaut**
-(RFC 2644). Sans l'un des deux réglages ci-dessous, le paquet meurt sur l'hôte et
-la console annonce pourtant une émission réussie, puisqu'elle l'a bien émise.
+tourne dans un conteneur sur un *pont* Docker (`br-xxxx`, créé par compose). Le
+datagramme part vers l'adresse de diffusion du sous-réseau du poste, entre dans
+l'hôte **par ce pont** — et **Linux ne relaie pas une diffusion dirigée d'une
+interface vers une autre par défaut** (RFC 2644). Sans le réglage ci-dessous,
+le paquet meurt sur l'hôte et la console annonce pourtant une émission réussie,
+puisqu'elle l'a bien émise.
 
-Le moins invasif — le `docker-compose.yml` reste inchangé :
+Le noyau ne relaie que si `bc_forwarding` vaut 1 **sur `all` et sur l'interface
+par laquelle le paquet entre** — le pont Docker, donc, pas la carte LAN, qui
+n'est que la sortie. Un réglage posé sur la seule carte LAN (ce que ce guide
+indiquait auparavant) ne change rien : le réveil reste muet. Et le nom du pont
+(`br-<id>`) change à chaque recréation du réseau compose, d'où le passage par
+`default`, dont héritent les ponts créés ensuite. Le script fourni fait tout
+cela, et le persiste dans `/etc/sysctl.d/` :
 
 ```bash
-# <iface> = l'interface LAN de l'hôte (ip -br addr)
-sudo sysctl -w net.ipv4.conf.<iface>.bc_forwarding=1
-echo "net.ipv4.conf.<iface>.bc_forwarding = 1" | sudo tee /etc/sysctl.d/99-tiai-wol.conf
+sudo sh deploy/wol/enable-directed-broadcast.sh
 ```
 
-L'alternative est de donner au service `backend` le réseau de l'hôte
+À la main, c'est l'équivalent de :
+
+```bash
+printf 'net.ipv4.conf.all.bc_forwarding = 1\nnet.ipv4.conf.default.bc_forwarding = 1\n' \
+  | sudo tee /etc/sysctl.d/99-tiai-wol.conf
+sudo sysctl -p /etc/sysctl.d/99-tiai-wol.conf
+# les ponts déjà créés n'ont pas hérité du nouveau `default`
+for f in /proc/sys/net/ipv4/conf/br-*/bc_forwarding; do echo 1 | sudo tee "$f"; done
+```
+
+**Docker Desktop (Windows, macOS)** : les conteneurs y tournent dans une machine
+virtuelle derrière un NAT que l'hôte ne traverse pas pour une diffusion, et le
+`sysctl` ci-dessus n'y est ni accessible ni suffisant. Le réveil ne peut alors
+pas partir de la stack : il faut un hôte Linux sur le segment des postes, ou un
+autre émetteur.
+
+L'alternative sur Linux est de donner au service `backend` le réseau de l'hôte
 (`network_mode: host`) : la pile réseau du conteneur devient celle de l'hôte et
 la question disparaît, mais `db` n'est plus joignable par son nom de service et
 le proxy Caddy est à revoir. À réserver aux déploiements qui ne peuvent pas
 toucher aux `sysctl`.
 
-**Vérifier**, depuis une machine du même segment que les postes, pendant qu'on
-appuie sur « Réveiller le poste » dans la console :
+**Vérifier**, sur l'hôte Docker, pendant qu'on appuie sur « Réveiller le poste »
+dans la console — deux captures qui disent chacune où le paquet s'arrête :
 
 ```bash
+# 1. Le paquet sort-il du conteneur ? (le pont compose : docker network ls, puis br-<12 premiers hex de l'id>)
+sudo tcpdump -ni br-xxxx udp port 9
+# 2. Sort-il de l'hôte vers le LAN ? (<iface> = l'interface LAN : ip -br addr)
 sudo tcpdump -ni <iface> udp port 9
 ```
 
-Une trame par `WOL_PACKET_COUNT` doit apparaître. Si rien ne sort de l'hôte,
-c'est le §3 ; si les trames sortent mais que le poste ne démarre pas, c'est le §1.
+`WOL_PACKET_COUNT` trames doivent apparaître dans chaque capture, la seconde
+avec l'adresse IP de l'hôte en source et `ff:ff:ff:ff:ff:ff` en destination
+Ethernet (`-e` pour l'afficher). Rien en 1 : le backend n'a pas émis, la fiche
+de commande dit pourquoi (MAC ou IP inconnue). En 1 mais pas en 2 : c'est ce
+§3, `bc_forwarding` manque sur `all` ou sur le pont. En 2 mais le poste ne
+démarre pas : c'est le §1 — ou le §2 si le poste est sur un autre segment.
 
 ---
 
