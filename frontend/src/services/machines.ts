@@ -44,6 +44,14 @@ export interface Machine {
   /** A verification somebody asked for is open on this poste, and for whom. */
   check_open: boolean;
   check_assigned_to: string | null;
+  /**
+   * Maintenance as it resolves for this poste (`services/maintenance`): when
+   * it is due, where it stands, who owns it. null due = excluded.
+   */
+  last_maintenance_at: string | null;
+  maintenance_due_at: string | null;
+  maintenance_state: string | null;
+  maintenance_owner: string | null;
   /** Primary address elected by the agent; null = never reported. */
   ip_address: string | null;
   os_version: string | null;
@@ -318,6 +326,8 @@ export type MachineSortField =
   /** The console's placement, off the joined tables. */
   | 'building'
   | 'room'
+  /** When the poste is next due for maintenance; excluded ones last. */
+  | 'maintenance_due_at'
   | 'av_product_name'
   | 'wu_pending_count'
   | 'session_user_present'
@@ -342,6 +352,8 @@ export interface ListMachinesParams {
   location_mismatch?: boolean;
   /** true = a verification request is open; false = none. */
   check_open?: boolean;
+  /** Where the poste stands on its maintenance cycle. */
+  maintenance_state?: 'excluded' | 'overdue' | 'due_soon' | 'ok';
   /** Antivirus name, matched as a substring server-side. */
   antivirus?: string;
   /** OS version, matched as a substring server-side ("Windows 10" = every build). */

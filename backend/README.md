@@ -51,6 +51,8 @@ Ajouter une dépendance : `uv add <pkg>` (ou `uv add --dev <pkg>` pour le groupe
 - `POST /api/v1/auth/login` — email + mot de passe (OAuth2 password), renvoie un JWT.
 - `GET  /api/v1/auth/me` — utilisateur courant, ses groupes et ses permissions.
 - `GET/POST/PATCH/DELETE /api/v1/groups` — groupes et leurs droits (permission `user:read` / `user:write`) ; `GET /api/v1/groups/permissions` liste le catalogue.
+- `GET /api/v1/maintenance/due?owner=me|none|<id>`, `POST /api/v1/maintenance`, `GET /api/v1/maintenance[/{id}]`, `GET/PATCH /api/v1/rooms/{id}/maintenance`, `GET/PATCH /api/v1/machines/{id}/maintenance` — maintenance : ce qui est dû par salle et par responsable, enregistrement d'une séance (note globale + note par poste, une ligne « maintenance » dans le journal de chacun, cycle relancé), cycle et responsable par salle et par poste (permission `maintenance:read` / `maintenance:write`). La résolution est à trois niveaux, poste › salle › parc (`features/maintenance/policy.py`), en Python pour les réponses et en SQL pour le filtre `maintenance_state`, le tri `maintenance_due_at` et les compteurs du tableau de bord.
+- `GET/PATCH /api/v1/settings` — les défauts du parc (cycle, responsable, fenêtre « à échéance »), table `app_settings`, permission `settings:read` / `settings:write` (administrateurs seuls par défaut).
 - `POST /api/v1/machines/{id}/check`, `GET /api/v1/checks?open&assigned_to=me|none|<id>`, `PATCH /api/v1/checks/{id}`, `POST /api/v1/checks/{id}/close`, `POST /api/v1/checks/bulk`, `GET /api/v1/checks/assignable-users` — vérifications demandées sur un poste, affectables à un compte, une seule ouverte par poste, closes avec une note qui s'inscrit dans le journal (permission `check:read` / `check:write`). La liste des postes se filtre par `check_open`.
 - `GET/POST /api/v1/machines/{id}/interventions`, `PATCH/DELETE /api/v1/interventions/{id}` — le journal d'un poste : panne, installation logicielle, mise à niveau, maintenance, vérification, autre (permission `intervention:read` / `intervention:write`). Antidatable ; les suppressions et les modifications par un autre que l'auteur sont tracées dans l'audit ; une fusion de doublons déplace le journal sur le poste conservé.
 - `GET/POST/PATCH/DELETE /api/v1/buildings` et `/api/v1/rooms` — bâtiments et salles (permission `room:read` / `room:write`) ; `POST /api/v1/rooms/{id}/machines` et `POST /api/v1/rooms/unassign` déplacent des postes. La liste des postes se filtre par `room_id`, `building_id`, `without_room`, `location_mismatch` et se trie par `building` / `room`. Avec `ROOM_SOURCE=ad_ou` ou `ad_location`, le bloc `directory` de l'inventaire range les postes tout seul (`features/room/crud.py`, `place_from_directory`), le rattachement manuel répond `room.placement.locked`, et `POST /api/v1/rooms/sync-directory` reclasse le parc depuis les lectures mémorisées ; `GET /api/v1/rooms/config` dit le mode.
@@ -121,8 +123,8 @@ intégrés et créés par la migration `0016` puis par
 | Groupe intégré | Clé | Droits par défaut |
 |---|---|---|
 | Administrateurs | `admin` | **tous**, implicitement — y compris ceux des ressources à venir ; non modifiables |
-| Lecture seule | `readonly` | `machine:read`, `threat:read`, `command:read`, `room:read`, `intervention:read`, `check:read` |
-| Techniciens | `technician` | lecture seule + `command:execute` + `risky_command:execute` + `intervention:write` + `check:write` |
+| Lecture seule | `readonly` | `machine:read`, `threat:read`, `command:read`, `room:read`, `intervention:read`, `check:read`, `maintenance:read` |
+| Techniciens | `technician` | lecture seule + `command:execute` + `risky_command:execute` + `intervention:write` + `check:write` + `maintenance:write` |
 
 Les groupes intégrés se renomment et, sauf les administrateurs, se modifient
 comme les autres ; ils ne se suppriment pas. Aucune modification ne peut laisser

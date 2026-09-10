@@ -89,6 +89,29 @@
           <template #body-cell-effective_location="props">
             <q-td :props="props">{{ props.value ?? '—' }}</q-td>
           </template>
+          <template #body-cell-maintenance="props">
+            <q-td :props="props">
+              <q-badge v-if="props.row.maintenance_overdue" color="negative" class="q-mr-xs">
+                {{ props.row.maintenance_overdue }} en retard
+              </q-badge>
+              <q-badge v-if="props.row.maintenance_due_soon" color="orange">
+                {{ props.row.maintenance_due_soon }} à échéance
+              </q-badge>
+              <span
+                v-if="!props.row.maintenance_overdue && !props.row.maintenance_due_soon"
+                class="text-grey"
+                >—</span
+              >
+              <div class="text-caption text-grey">
+                {{
+                  props.row.effective_cycle_days > 0
+                    ? `${props.row.effective_cycle_days} j`
+                    : 'exclue'
+                }}
+                {{ props.row.effective_owner_name ? `· ${props.row.effective_owner_name}` : '' }}
+              </div>
+            </q-td>
+          </template>
           <template #body-cell-mismatch_count="props">
             <q-td :props="props">
               <q-badge v-if="props.value" color="orange" :label="props.value">
@@ -285,6 +308,7 @@ const roomColumns: QTableColumn<Room>[] = [
   },
   { name: 'machine_count', label: 'Postes', field: 'machine_count', align: 'center' },
   { name: 'mismatch_count', label: 'Divergents', field: 'mismatch_count', align: 'center' },
+  { name: 'maintenance', label: 'Maintenance', field: 'maintenance_overdue', align: 'left' },
   { name: 'actions', label: '', field: 'id', align: 'right' },
 ];
 

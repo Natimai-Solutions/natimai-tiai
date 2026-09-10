@@ -13,6 +13,8 @@ export type Resource =
   | 'room'
   | 'intervention'
   | 'check'
+  | 'maintenance'
+  | 'settings'
   | 'user'
   | 'audit';
 
@@ -125,6 +127,37 @@ export const PERMISSION_CATALOGUE: PermissionEntry[] = [
     resourceLabel: 'Vérifications demandées',
     label: 'Demander, affecter et clore',
     hint: 'Demander une vérification sur tout poste, l’affecter à un compte, la clore avec une note.',
+  },
+  {
+    key: 'maintenance:read',
+    resource: 'maintenance',
+    action: 'read',
+    resourceLabel: 'Maintenance',
+    label: 'Consulter',
+    hint: 'Ce qui est dû, les séances enregistrées, les cycles et responsables.',
+  },
+  {
+    key: 'maintenance:write',
+    resource: 'maintenance',
+    action: 'write',
+    resourceLabel: 'Maintenance',
+    label: 'Effectuer et régler',
+    hint: 'Enregistrer une séance, fixer le cycle et le responsable d’une salle ou d’un poste, transmettre une maintenance.',
+  },
+  {
+    key: 'settings:read',
+    resource: 'settings',
+    action: 'read',
+    resourceLabel: 'Paramètres',
+    label: 'Consulter',
+  },
+  {
+    key: 'settings:write',
+    resource: 'settings',
+    action: 'write',
+    resourceLabel: 'Paramètres',
+    label: 'Modifier',
+    hint: 'Les défauts du parc : cycle et responsable de maintenance, fenêtre « à échéance ».',
   },
   {
     key: 'user:read',

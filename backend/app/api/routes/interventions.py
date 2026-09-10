@@ -44,6 +44,7 @@ class InterventionOut(BaseModel):
     performed_by: str
     performed_at: datetime
     check_id: uuid.UUID | None
+    maintenance_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 

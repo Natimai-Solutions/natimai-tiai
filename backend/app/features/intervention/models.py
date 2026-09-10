@@ -66,5 +66,15 @@ class Intervention(SQLModel, table=True):
             ForeignKey("machine_checks.id", ondelete="SET NULL"), nullable=True
         ),
     )
+    # The maintenance session this entry was written by, for a
+    # ``maintenance`` kind: the session holds the visit's global note.
+    maintenance_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("maintenances.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)

@@ -338,6 +338,13 @@
         </q-tab-panel>
 
         <q-tab-panel name="history" class="q-px-none">
+          <MachineMaintenanceCard
+            v-if="auth.can('maintenance', 'read')"
+            :machine-id="props.id"
+            :hostname="machine.hostname ?? machine.machine_uuid"
+            :can-write="auth.can('maintenance', 'write')"
+            @changed="onMaintenanceChanged"
+          />
           <MachineHistoryCard
             :machine-id="props.id"
             :items="interventions"
@@ -386,6 +393,7 @@ import MachineDefenderCard from 'src/components/machine/MachineDefenderCard.vue'
 import MachineGpuCard from 'src/components/machine/MachineGpuCard.vue';
 import MachineHardwareCard from 'src/components/machine/MachineHardwareCard.vue';
 import MachineHistoryCard from 'src/components/machine/MachineHistoryCard.vue';
+import MachineMaintenanceCard from 'src/components/machine/MachineMaintenanceCard.vue';
 import CheckCloseDialog from 'src/components/check/CheckCloseDialog.vue';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
 import { createCheck, updateCheck, type Check, type CheckPayload } from 'src/services/checks';
@@ -545,6 +553,11 @@ async function editCheck(payload: CheckPayload) {
   $q.notify({ type: 'positive', message: 'Demande mise à jour' });
   await load();
 }
+async function onMaintenanceChanged() {
+  await load();
+  await loadInterventions(1);
+}
+
 async function onCheckClosed() {
   await load();
   await loadInterventions(1);

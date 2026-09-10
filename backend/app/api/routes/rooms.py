@@ -23,8 +23,11 @@ from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.machine.models import Machine
+from app.features.maintenance import crud as maintenance_crud
+from app.features.maintenance.policy import MaintenanceState
 from app.features.room import crud
 from app.features.room.models import Building, Room
+from app.features.setting import crud as setting_crud
 from app.features.user.permissions import Action, Resource
 
 _READ = Depends(require_permission(Resource.ROOM, Action.READ))
@@ -87,6 +90,14 @@ class RoomOut(BaseModel):
     machine_count: int
     # Postes of this room whose agent names another site.
     mismatch_count: int
+    # Maintenance: the room's own settings (null = inherit) and what they
+    # resolve to, and where its postes stand on the cycle.
+    maintenance_cycle_days: int | None
+    maintenance_owner_name: str | None
+    effective_cycle_days: int
+    effective_owner_name: str | None
+    maintenance_overdue: int
+    maintenance_due_soon: int
     created_at: datetime
     updated_at: datetime
 
@@ -232,6 +243,30 @@ async def _rooms_out(
     session: SessionDep, rooms: list[tuple[Room, Building | None]]
 ) -> list[RoomOut]:
     counts = await crud.room_counts(session, [r.id for r, _ in rooms])
+    policy = await setting_crud.maintenance_policy(session)
+    resolved = await maintenance_crud.fleet_resolved(session, policy, utcnow())
+    overdue: dict[uuid.UUID, int] = {}
+    due_soon: dict[uuid.UUID, int] = {}
+    for m, _room, _building, res in resolved:
+        if m.room_id is None:
+            continue
+        if res.state == MaintenanceState.OVERDUE:
+            overdue[m.room_id] = overdue.get(m.room_id, 0) + 1
+        elif res.state == MaintenanceState.DUE_SOON:
+            due_soon[m.room_id] = due_soon.get(m.room_id, 0) + 1
+    owner_ids = {r.maintenance_owner_id for r, _ in rooms if r.maintenance_owner_id}
+    if policy.owner_id:
+        owner_ids.add(policy.owner_id)
+    names = await setting_crud.user_names(session, owner_ids)
+
+    def effective_owner_name(r: Room) -> str | None:
+        owner = (
+            r.maintenance_owner_id
+            if r.maintenance_owner_id is not None
+            else policy.owner_id
+        )
+        return names.get(owner) if owner is not None else None
+
     return [
         RoomOut(
             id=r.id,
@@ -243,6 +278,18 @@ async def _rooms_out(
             ad_key=r.ad_key,
             machine_count=counts[r.id].machines,
             mismatch_count=counts[r.id].mismatched,
+            maintenance_cycle_days=r.maintenance_cycle_days,
+            maintenance_owner_name=(
+                names.get(r.maintenance_owner_id) if r.maintenance_owner_id else None
+            ),
+            effective_cycle_days=(
+                r.maintenance_cycle_days
+                if r.maintenance_cycle_days is not None
+                else policy.cycle_days
+            ),
+            effective_owner_name=effective_owner_name(r),
+            maintenance_overdue=overdue.get(r.id, 0),
+            maintenance_due_soon=due_soon.get(r.id, 0),
             created_at=r.created_at,
             updated_at=r.updated_at,
         )

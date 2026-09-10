@@ -52,6 +52,7 @@ export const MACHINE_SORT_FIELDS: readonly string[] = [
   'location',
   'building',
   'room',
+  'maintenance_due_at',
   'av_product_name',
   'wu_pending_count',
   'session_user_present',
@@ -112,6 +113,10 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   const mismatch = queryValue(q.location_mismatch);
   if (mismatch === 'true') params.location_mismatch = true;
   if (queryValue(q.check_open) === 'true') params.check_open = true;
+  const maintenance = queryValue(q.maintenance_state);
+  if (maintenance && ['excluded', 'overdue', 'due_soon', 'ok'].includes(maintenance)) {
+    params.maintenance_state = maintenance as 'excluded' | 'overdue' | 'due_soon' | 'ok';
+  }
   const antivirus = queryValue(q.antivirus);
   if (antivirus) params.antivirus = antivirus;
   const os = queryValue(q.os_version);

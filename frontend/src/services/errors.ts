@@ -44,6 +44,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'check.not_found': 'Vérification introuvable',
   'check.already_open': 'Une vérification est déjà ouverte sur ce poste',
   'check.closed': 'Cette vérification est déjà close',
+  'maintenance.not_found': 'Séance de maintenance introuvable',
   'room.placement.locked':
     "Les postes sont rangés par l'annuaire (ROOM_SOURCE) : le rattachement manuel est désactivé",
   'request.validation_error': 'Requête invalide',

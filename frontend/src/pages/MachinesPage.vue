@@ -151,6 +151,17 @@
             @update:model-value="pushQuery"
           />
           <q-select
+            v-model="maintenance"
+            :options="maintenanceOptions"
+            emit-value
+            map-options
+            dense
+            outlined
+            class="col-auto"
+            style="width: 220px"
+            @update:model-value="pushQuery"
+          />
+          <q-select
             v-model="checkOpen"
             :options="checkOptions"
             emit-value
@@ -405,6 +416,24 @@
           </q-icon>
         </q-td>
       </template>
+      <template #body-cell-maintenance="props">
+        <q-td :props="props">
+          <q-badge
+            v-if="props.row.maintenance_state"
+            :color="maintenanceStateColor(props.row.maintenance_state)"
+            :label="maintenanceStateLabel(props.row.maintenance_state)"
+          >
+            <q-tooltip>
+              {{
+                props.row.maintenance_due_at
+                  ? `Due le ${formatDateTime(props.row.maintenance_due_at)}`
+                  : 'Exclu de la maintenance'
+              }}
+              {{ props.row.maintenance_owner ? ` · ${props.row.maintenance_owner}` : '' }}
+            </q-tooltip>
+          </q-badge>
+        </q-td>
+      </template>
       <template #body-cell-room="props">
         <q-td :props="props">
           {{ props.value || '—' }}
@@ -586,6 +615,7 @@ import {
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
+import { maintenanceStateColor, maintenanceStateLabel } from 'src/services/maintenance';
 import { bulkCheckNotification, createChecksBulk, type CheckPayload } from 'src/services/checks';
 import {
   getRoomConfig,
@@ -645,6 +675,15 @@ const building = ref<string | null>(null);
 const ROOM_NONE = 'none';
 const room = ref<string | null>(null);
 const mismatch = ref<string | null>(null);
+// Where the poste stands on its maintenance cycle.
+const maintenance = ref<string | null>(null);
+const maintenanceOptions = [
+  { label: 'Maintenance : tous', value: null },
+  { label: 'Maintenance en retard', value: 'overdue' },
+  { label: 'Maintenance à échéance', value: 'due_soon' },
+  { label: 'Maintenance à jour', value: 'ok' },
+  { label: 'Exclus de la maintenance', value: 'excluded' },
+];
 // A verification request is open on the poste.
 const checkOpen = ref<string | null>(null);
 const checkOptions = [
@@ -706,6 +745,7 @@ const SORT_FIELD_BY_COLUMN: Record<string, MachineSortField> = {
   location: 'location',
   building: 'building',
   room: 'room',
+  maintenance: 'maintenance_due_at',
   antivirus: 'av_product_name',
   windows_update: 'wu_pending_count',
   session: 'session_user_present',
@@ -908,6 +948,7 @@ type FilterKey =
   | 'room'
   | 'mismatch'
   | 'check'
+  | 'maintenance'
   | 'antivirus'
   | 'status'
   | 'wu'
@@ -940,6 +981,8 @@ const filterChips = computed<{ key: FilterKey; label: string }[]>(() => {
   if (mismatch.value)
     chips.push({ key: 'mismatch', label: label(mismatchOptions, mismatch.value) });
   if (checkOpen.value) chips.push({ key: 'check', label: label(checkOptions, checkOpen.value) });
+  if (maintenance.value)
+    chips.push({ key: 'maintenance', label: label(maintenanceOptions, maintenance.value) });
   if (antivirus.value)
     chips.push({ key: 'antivirus', label: label(antivirusOptions.value, antivirus.value) });
   if (status.value) chips.push({ key: 'status', label: label(statusOptions, status.value) });
@@ -990,6 +1033,7 @@ function clearFilter(key: FilterKey) {
       room,
       mismatch,
       check: checkOpen,
+      maintenance,
       antivirus,
       status,
       wu,
@@ -1040,6 +1084,15 @@ const columns: QTableColumn<Machine>[] = [
     format: (val: string | null) => val ?? '—',
   },
   { name: 'room', label: 'Salle', field: 'room_name', align: 'left', sortable: true },
+  // Where the poste stands on its cycle, sortable by due date: the "what do
+  // I do this week" column.
+  {
+    name: 'maintenance',
+    label: 'Maintenance',
+    field: 'maintenance_state',
+    align: 'center',
+    sortable: true,
+  },
   // Not sortable: a string sort would put 192.168.1.10 before 192.168.1.9, and
   // an octet-aware comparator is not worth it on a column people search, not sort.
   {
@@ -1140,6 +1193,8 @@ function applyQuery() {
   room.value = queryValue(q.room);
   mismatch.value = queryValue(q.location_mismatch) === 'true' ? 'true' : null;
   checkOpen.value = queryValue(q.check_open) === 'true' ? 'true' : null;
+  const ms = queryValue(q.maintenance_state);
+  maintenance.value = ms && maintenanceOptions.some((o) => o.value === ms) ? ms : null;
   antivirus.value = queryValue(q.antivirus);
   os.value = queryValue(q.os_version);
   agent.value =
@@ -1206,6 +1261,7 @@ function buildQuery(): Record<string, string> {
   if (room.value) query.room = room.value;
   if (mismatch.value) query.location_mismatch = mismatch.value;
   if (checkOpen.value) query.check_open = checkOpen.value;
+  if (maintenance.value) query.maintenance_state = maintenance.value;
   if (antivirus.value) query.antivirus = antivirus.value;
   if (os.value) query.os_version = os.value;
   if (agent.value === AGENT_OUTDATED) query.agent_outdated = 'true';
@@ -1293,6 +1349,9 @@ const filterParams = computed<ListMachinesParams>(() => {
   else if (room.value) params.room_id = room.value;
   if (mismatch.value) params.location_mismatch = true;
   if (checkOpen.value) params.check_open = true;
+  if (maintenance.value) {
+    params.maintenance_state = maintenance.value as 'excluded' | 'overdue' | 'due_soon' | 'ok';
+  }
   if (antivirus.value) params.antivirus = antivirus.value;
   if (os.value) params.os_version = os.value;
   if (agent.value === AGENT_OUTDATED) params.agent_outdated = true;

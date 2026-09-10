@@ -19,6 +19,8 @@ describe('getOverview', () => {
       outdated: 3,
       needs_verification: 1,
       open_checks: 0,
+      machines_maintenance_overdue: 0,
+      machines_maintenance_due_soon: 0,
       inactive: 2,
       with_active_threats: 1,
       machines_wu_pending: 4,

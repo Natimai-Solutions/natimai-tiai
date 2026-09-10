@@ -226,6 +226,16 @@ const alertKpis = computed<Kpi[]>(() => {
       to: { name: 'machines', query: { check_open: 'true' } },
     },
     {
+      label: 'Maintenance en retard',
+      value: s.machines_maintenance_overdue,
+      icon: 'build',
+      color: 'negative',
+      to: { name: 'machines', query: { maintenance_state: 'overdue' } },
+      ...(s.machines_maintenance_due_soon
+        ? { caption: `${s.machines_maintenance_due_soon} à échéance` }
+        : {}),
+    },
+    {
       label: 'Inactifs',
       value: s.inactive,
       icon: 'power_off',

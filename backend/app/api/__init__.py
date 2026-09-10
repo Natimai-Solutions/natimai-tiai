@@ -10,7 +10,11 @@ from app.api.routes.groups import router as groups_router
 from app.api.routes.interventions import machine_router as machine_interventions_router
 from app.api.routes.interventions import router as interventions_router
 from app.api.routes.machines import router as machines_router
+from app.api.routes.maintenance import machine_router as machine_maintenance_router
+from app.api.routes.maintenance import room_router as room_maintenance_router
+from app.api.routes.maintenance import router as maintenance_router
 from app.api.routes.rooms import buildings_router, rooms_router
+from app.api.routes.settings_routes import router as settings_router
 from app.api.routes.software import router as software_router
 from app.api.routes.stats import router as stats_router
 from app.api.routes.threats import router as threats_router
@@ -26,6 +30,10 @@ api_router.include_router(machine_interventions_router)
 api_router.include_router(interventions_router)
 api_router.include_router(machine_checks_router)
 api_router.include_router(checks_router)
+api_router.include_router(maintenance_router)
+api_router.include_router(room_maintenance_router)
+api_router.include_router(machine_maintenance_router)
+api_router.include_router(settings_router)
 api_router.include_router(commands_router)
 api_router.include_router(software_router)
 api_router.include_router(stats_router)

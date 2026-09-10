@@ -196,6 +196,15 @@ class Settings(BaseSettings):
     # fleet reported as behind on the pilot's account.
     AGENT_EXPECTED_VERSION: str | None = None
 
+    # --- Maintenance ---
+    # The parc-wide cycle, in days, a poste is due for a maintenance visit
+    # after — unless its room or itself says otherwise, and unless the console
+    # has written another default (``app_settings``, page Paramètres), which
+    # then wins over this. Ninety days is a starting point, not a policy.
+    MAINTENANCE_DEFAULT_CYCLE_DAYS: int = Field(default=90, ge=0, le=3650)
+    # How many days before its due date a poste is reported "à échéance".
+    MAINTENANCE_DUE_SOON_DAYS: int = Field(default=14, ge=0, le=365)
+
     # --- Rooms ---
     # How postes are filed into rooms. ``manual``: from the console, by hand.
     # ``ad_ou``: by the organisational unit the computer object sits in — the

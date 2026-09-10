@@ -62,6 +62,7 @@ class ErrorCode(enum.StrEnum):
     CHECK_NOT_FOUND = "check.not_found"
     CHECK_ALREADY_OPEN = "check.already_open"
     CHECK_CLOSED = "check.closed"
+    MAINTENANCE_NOT_FOUND = "maintenance.not_found"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     RATE_LIMITED = "request.rate_limited"

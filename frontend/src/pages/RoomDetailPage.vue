@@ -23,6 +23,14 @@
         />
         <q-btn flat dense icon="edit" label="Modifier" class="q-mr-sm" @click="formOpen = true" />
       </template>
+      <q-btn
+        v-if="room && canMaintain && machines.length"
+        dense
+        color="primary"
+        icon="build"
+        label="Effectuer la maintenance"
+        @click="sessionOpen = true"
+      />
     </div>
 
     <q-card v-if="room" flat bordered class="q-mb-md" style="max-width: 640px">
@@ -52,6 +60,79 @@
         <div v-if="room.notes" class="row">
           <div class="col-4 text-grey-7">Notes</div>
           <div class="col" style="white-space: pre-line">{{ room.notes }}</div>
+        </div>
+      </q-card-section>
+    </q-card>
+
+    <q-card v-if="room && maintenance" flat bordered class="q-mb-md" style="max-width: 640px">
+      <q-card-section class="row items-center text-subtitle1">
+        Maintenance
+        <q-space />
+        <q-btn
+          v-if="canMaintain"
+          flat
+          dense
+          icon="tune"
+          label="Régler"
+          @click="maintenanceOpen = true"
+        />
+      </q-card-section>
+      <q-separator />
+      <q-card-section class="q-gutter-xs">
+        <div class="row items-center">
+          <div class="col-4 text-grey-7">Cycle</div>
+          <div class="col">
+            {{
+              maintenance.effective_cycle_days > 0
+                ? `${maintenance.effective_cycle_days} jours`
+                : 'exclue'
+            }}
+            <span class="text-caption text-grey">
+              ({{
+                maintenance.maintenance_cycle_days === null
+                  ? 'défaut du parc'
+                  : 'propre à la salle'
+              }})
+            </span>
+          </div>
+        </div>
+        <div class="row items-center">
+          <div class="col-4 text-grey-7">Responsable</div>
+          <div class="col">
+            <template v-if="maintenance.effective_owner">
+              {{ maintenance.effective_owner.name }}
+              <span class="text-caption text-grey">
+                ({{ maintenance.maintenance_owner ? 'propre à la salle' : 'défaut du parc' }})
+              </span>
+            </template>
+            <span v-else class="text-grey">personne</span>
+          </div>
+        </div>
+        <div class="row items-center">
+          <div class="col-4 text-grey-7">Postes</div>
+          <div class="col">
+            <q-badge v-if="room.maintenance_overdue" color="negative" class="q-mr-xs">
+              {{ room.maintenance_overdue }} en retard
+            </q-badge>
+            <q-badge v-if="room.maintenance_due_soon" color="orange" class="q-mr-xs">
+              {{ room.maintenance_due_soon }} à échéance
+            </q-badge>
+            <span v-if="!room.maintenance_overdue && !room.maintenance_due_soon" class="text-grey">
+              rien à faire
+            </span>
+          </div>
+        </div>
+        <div v-if="sessions.length" class="row">
+          <div class="col-4 text-grey-7">Dernières séances</div>
+          <div class="col">
+            <div v-for="s in sessions" :key="s.id" class="q-mb-xs">
+              {{ formatDateTime(s.performed_at) }} · {{ s.performed_by }} ·
+              {{ s.machine_count }} poste(s)
+              <div v-if="s.note" class="text-caption text-grey" style="white-space: pre-line">
+                {{ s.note }}
+              </div>
+            </div>
+          </div>
         </div>
       </q-card-section>
     </q-card>
@@ -90,6 +171,15 @@
           >
             <q-tooltip>L'agent déclare un autre emplacement que la salle</q-tooltip>
           </q-icon>
+        </q-td>
+      </template>
+      <template #body-cell-maintenance="props">
+        <q-td :props="props">
+          <q-badge
+            v-if="props.row.maintenance_state"
+            :color="maintenanceStateColor(props.row.maintenance_state)"
+            :label="maintenanceStateLabel(props.row.maintenance_state)"
+          />
         </q-td>
       </template>
       <template #body-cell-last_seen="props">
@@ -166,6 +256,22 @@
       </q-card>
     </q-dialog>
 
+    <MaintenanceSettingsDialog
+      v-model="maintenanceOpen"
+      :subject="room?.name ?? ''"
+      :cycle-days="maintenance?.maintenance_cycle_days ?? null"
+      :owner-id="maintenance?.maintenance_owner?.id ?? null"
+      inherit-hint="Vide : le responsable par défaut du parc"
+      :save="saveMaintenance"
+    />
+    <MaintenanceSessionDialog
+      v-model="sessionOpen"
+      :room-id="props.id"
+      :room-name="room?.name ?? null"
+      :machines="sessionMachines"
+      @recorded="load"
+    />
+
     <RoomFormDialog
       v-model="formOpen"
       :room="room"
@@ -181,6 +287,18 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import RoomFormDialog from 'src/components/room/RoomFormDialog.vue';
+import MaintenanceSessionDialog from 'src/components/maintenance/MaintenanceSessionDialog.vue';
+import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
+import {
+  getRoomMaintenance,
+  listSessions,
+  maintenanceStateColor,
+  maintenanceStateLabel,
+  updateRoomMaintenance,
+  type MaintenanceSession,
+  type MaintenanceSettingsPayload,
+  type RoomMaintenance,
+} from 'src/services/maintenance';
 import { listLocations, listMachines, type Machine } from 'src/services/machines';
 import {
   getRoom,
@@ -194,7 +312,7 @@ import {
 } from 'src/services/rooms';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
-import { onlineColor, onlineIcon, timeAgoLabel } from 'src/utils/format';
+import { formatDateTime, onlineColor, onlineIcon, timeAgoLabel } from 'src/utils/format';
 
 const props = defineProps<{ id: string }>();
 
@@ -231,9 +349,44 @@ const columns: QTableColumn<Machine>[] = [
     align: 'left',
     format: (v: string | null) => v ?? '—',
   },
+  { name: 'maintenance', label: 'Maintenance', field: 'maintenance_state', align: 'center' },
   { name: 'last_seen', label: 'Vu', field: 'last_seen', align: 'left', sortable: true },
   { name: 'actions', label: '', field: 'id', align: 'right' },
 ];
+
+// Maintenance of the room: its settings, its last visits, the postes done.
+const canMaintain = computed(() => auth.can('maintenance', 'write'));
+const maintenance = ref<RoomMaintenance | null>(null);
+const sessions = ref<MaintenanceSession[]>([]);
+const maintenanceOpen = ref(false);
+const sessionOpen = ref(false);
+const sessionMachines = computed(() =>
+  machines.value.map((m) => ({
+    id: m.id,
+    hostname: m.hostname ?? m.machine_uuid,
+    hint: `${maintenanceStateLabel(m.maintenance_state)}${
+      m.last_maintenance_at ? ` · dernière le ${formatDateTime(m.last_maintenance_at)}` : ''
+    }`,
+  })),
+);
+
+async function loadMaintenance() {
+  if (!auth.can('maintenance', 'read')) return;
+  try {
+    [maintenance.value, sessions.value] = await Promise.all([
+      getRoomMaintenance(props.id),
+      listSessions({ room_id: props.id, page_size: 3 }).then((l) => l.items),
+    ]);
+  } catch {
+    // The card simply stays absent.
+  }
+}
+
+async function saveMaintenance(payload: MaintenanceSettingsPayload) {
+  maintenance.value = await updateRoomMaintenance(props.id, payload);
+  $q.notify({ type: 'positive', message: 'Réglages de maintenance enregistrés' });
+  await load();
+}
 
 async function load() {
   loading.value = true;
@@ -244,6 +397,7 @@ async function load() {
     ]);
     room.value = r;
     machines.value = list.items;
+    void loadMaintenance();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
   } finally {

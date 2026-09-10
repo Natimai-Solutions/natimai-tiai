@@ -82,6 +82,14 @@ class Room(SQLModel, table=True):
     # building is. Kept when a building is deleted (the route copies it down)
     # so the room does not lose its site with its building.
     location: str | None = Field(default=None, max_length=120)
+    # The room's maintenance cycle and owner, overriding the parc's defaults
+    # for every poste in it that does not override them itself. NULL =
+    # inherit; a cycle of 0 = no maintenance (``maintenance/policy.py``).
+    maintenance_cycle_days: int | None = None
+    maintenance_owner_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+    )
     notes: str | None = Field(default=None, max_length=2000)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)

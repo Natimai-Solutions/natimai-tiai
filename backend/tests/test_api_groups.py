@@ -117,6 +117,7 @@ async def test_profile_reports_the_union_of_group_permissions(client, db_session
         "room:read",
         "intervention:read",
         "check:read",
+        "maintenance:read",
         "command:execute",
     }
 

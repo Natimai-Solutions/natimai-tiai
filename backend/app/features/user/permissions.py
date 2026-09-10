@@ -34,6 +34,10 @@ class Resource(enum.StrEnum):
     INTERVENTION = "intervention"
     # Verification requests: "go and look at this poste".
     CHECK = "check"
+    # Maintenance: cycles, owners, sessions, the "to do" list.
+    MAINTENANCE = "maintenance"
+    # Console settings (page Paramètres).
+    SETTINGS = "settings"
     USER = "user"
     # The audit log. Admin material like USER: who did what to the parc's
     # accounts and tokens.
@@ -64,6 +68,10 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.INTERVENTION, Action.WRITE),
     (Resource.CHECK, Action.READ),
     (Resource.CHECK, Action.WRITE),
+    (Resource.MAINTENANCE, Action.READ),
+    (Resource.MAINTENANCE, Action.WRITE),
+    (Resource.SETTINGS, Action.READ),
+    (Resource.SETTINGS, Action.WRITE),
     (Resource.USER, Action.READ),
     (Resource.USER, Action.WRITE),
     (Resource.AUDIT, Action.READ),
@@ -89,6 +97,7 @@ _SUPERVISION_READ = frozenset(
         permission_key(Resource.ROOM, Action.READ),
         permission_key(Resource.INTERVENTION, Action.READ),
         permission_key(Resource.CHECK, Action.READ),
+        permission_key(Resource.MAINTENANCE, Action.READ),
     }
 )
 
@@ -125,6 +134,7 @@ BUILTIN_GROUP_DEFAULTS: dict[BuiltinGroup, tuple[str, str, frozenset[str]]] = {
             permission_key(Resource.RISKY_COMMAND, Action.EXECUTE),
             permission_key(Resource.INTERVENTION, Action.WRITE),
             permission_key(Resource.CHECK, Action.WRITE),
+            permission_key(Resource.MAINTENANCE, Action.WRITE),
         },
     ),
 }

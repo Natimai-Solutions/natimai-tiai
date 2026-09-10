@@ -57,6 +57,13 @@ gère naturellement les postes éteints.
   consignes, affectée à quelqu'un ou laissée à prendre, une seule ouverte par
   poste, close avec une note datée qui reste sur la demande et s'inscrit dans
   l'historique du poste. Chacun retrouve les siennes dans « Mes tâches ».
+- **Maintenance** — un cycle par défaut pour le parc, à surcharger par salle ou
+  par poste (ou à exclure), un responsable aux mêmes trois niveaux, et pour
+  chacun sa liste de salles et de postes à faire, en retard ou à échéance. Une
+  séance se saisit d'un coup pour toute une salle : une observation générale,
+  une case et une note par poste, et chaque poste repart pour un cycle avec sa
+  ligne dans son historique. Transmettre une maintenance, c'est changer son
+  responsable.
 - **Historique des interventions** — chaque poste porte son journal : panne,
   installation logicielle, mise à niveau, maintenance, vérification, saisi
   depuis sa fiche avec une date qui peut être antérieure à la console, lu de

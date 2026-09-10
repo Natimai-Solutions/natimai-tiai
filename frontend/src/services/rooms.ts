@@ -39,6 +39,13 @@ export interface Room {
   machine_count: number;
   /** Postes of this room whose agent names another site. */
   mismatch_count: number;
+  /** Maintenance: the room's own settings (null = inherit), what they resolve to, and where its postes stand. */
+  maintenance_cycle_days: number | null;
+  maintenance_owner_name: string | null;
+  effective_cycle_days: number;
+  effective_owner_name: string | null;
+  maintenance_overdue: number;
+  maintenance_due_soon: number;
   created_at: string;
   updated_at: string;
 }

@@ -14,9 +14,10 @@
     </div>
 
     <div class="text-body2 text-grey-8 q-mb-md" style="max-width: 760px">
-      Les vérifications demandées sur des postes : celles qui vous sont affectées, celles que
-      personne n'a encore prises, ou toutes. La plus ancienne d'abord.
+      Les vérifications demandées sur des postes et les maintenances à faire : les vôtres, celles
+      que personne n'a encore prises, ou toutes.
     </div>
+    <div class="text-h6 q-mb-sm">Vérifications</div>
 
     <q-table
       :rows="rows"
@@ -91,6 +92,112 @@
       </template>
     </q-table>
 
+    <!-- Maintenance: rooms with something due, then the loose postes. -->
+    <div v-if="auth.can('maintenance', 'read')" class="q-mt-xl">
+      <div class="row items-center q-mb-sm">
+        <div class="text-h6">Maintenances à faire</div>
+        <q-space />
+        <div v-if="due" class="text-caption text-grey">
+          {{ due.overdue }} en retard · {{ due.due_soon }} à échéance
+        </div>
+      </div>
+      <q-list v-if="due && (due.rooms.length || due.machines.length)" bordered separator>
+        <q-expansion-item
+          v-for="r in due.rooms"
+          :key="r.id"
+          :label="r.name"
+          group="rooms"
+          expand-separator
+        >
+          <template #header>
+            <q-item-section>
+              <q-item-label>
+                <span v-if="r.building_name" class="text-grey-7">{{ r.building_name }} › </span
+                >{{ r.name }}
+              </q-item-label>
+              <q-item-label caption>
+                {{ r.total }} poste(s) · cycle {{ r.cycle_days }} jours ·
+                {{ r.owner ? r.owner.name : 'sans responsable' }}
+                {{ r.next_due_at ? ` · prochaine échéance ${formatDateTime(r.next_due_at)}` : '' }}
+              </q-item-label>
+            </q-item-section>
+            <q-item-section side>
+              <div>
+                <q-badge v-if="r.overdue" color="negative" class="q-mr-xs"
+                  >{{ r.overdue }} en retard</q-badge
+                >
+                <q-badge v-if="r.due_soon" color="orange" class="q-mr-xs"
+                  >{{ r.due_soon }} à échéance</q-badge
+                >
+                <q-badge v-if="!r.overdue && !r.due_soon" color="positive">à jour</q-badge>
+              </div>
+            </q-item-section>
+          </template>
+          <q-card>
+            <q-card-section class="q-pt-none">
+              <div class="row q-mb-sm">
+                <q-space />
+                <q-btn
+                  flat
+                  dense
+                  icon="meeting_room"
+                  label="Voir la salle"
+                  class="q-mr-sm"
+                  :to="{ name: 'room-detail', params: { id: r.id } }"
+                />
+                <q-btn
+                  v-if="canMaintain"
+                  dense
+                  color="primary"
+                  icon="build"
+                  label="Effectuer la maintenance"
+                  @click="openSession(r)"
+                />
+              </div>
+              <q-list dense>
+                <q-item
+                  v-for="m in r.machines"
+                  :key="m.id"
+                  clickable
+                  :to="{ name: 'machine-detail', params: { id: m.id } }"
+                >
+                  <q-item-section>{{ m.hostname ?? m.id }}</q-item-section>
+                  <q-item-section side>
+                    <q-badge :color="maintenanceStateColor(m.state)" :label="stateWithDate(m)" />
+                  </q-item-section>
+                </q-item>
+              </q-list>
+            </q-card-section>
+          </q-card>
+        </q-expansion-item>
+        <q-item
+          v-for="m in due.machines"
+          :key="m.id"
+          clickable
+          :to="{ name: 'machine-detail', params: { id: m.id } }"
+        >
+          <q-item-section>
+            <q-item-label>{{ m.hostname ?? m.id }}</q-item-label>
+            <q-item-label caption
+              >sans salle · {{ m.owner ? m.owner.name : 'sans responsable' }}</q-item-label
+            >
+          </q-item-section>
+          <q-item-section side>
+            <q-badge :color="maintenanceStateColor(m.state)" :label="stateWithDate(m)" />
+          </q-item-section>
+        </q-item>
+      </q-list>
+      <div v-else-if="due" class="text-grey">Rien à faire.</div>
+    </div>
+
+    <MaintenanceSessionDialog
+      v-model="sessionOpen"
+      :room-id="sessionRoom?.id ?? null"
+      :room-name="sessionRoom?.name ?? null"
+      :machines="sessionMachines"
+      @recorded="reload"
+    />
+
     <CheckCloseDialog v-model="closeOpen" :check="closing" @closed="reload" />
     <CheckRequestDialog
       v-model="editOpen"
@@ -107,6 +214,15 @@ import { useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import CheckCloseDialog from 'src/components/check/CheckCloseDialog.vue';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
+import MaintenanceSessionDialog from 'src/components/maintenance/MaintenanceSessionDialog.vue';
+import {
+  getDue,
+  maintenanceStateColor,
+  maintenanceStateLabel,
+  type Due,
+  type DueMachine,
+  type DueRoom,
+} from 'src/services/maintenance';
 import {
   listChecks,
   updateCheck,
@@ -116,7 +232,7 @@ import {
 } from 'src/services/checks';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
-import { timeAgoLabel } from 'src/utils/format';
+import { formatDateTime, timeAgoLabel } from 'src/utils/format';
 
 const $q = useQuasar();
 const router = useRouter();
@@ -153,8 +269,41 @@ function placeLabel(m: CheckMachineRef | null): string {
   return place || m.location || 'sans salle';
 }
 
+// --- Maintenance
+const due = ref<Due | null>(null);
+const canMaintain = computed(() => auth.can('maintenance', 'write'));
+const sessionOpen = ref(false);
+const sessionRoom = ref<DueRoom | null>(null);
+const sessionMachines = computed(() =>
+  (sessionRoom.value?.machines ?? []).map((m) => ({
+    id: m.id,
+    hostname: m.hostname ?? m.id,
+    hint: stateWithDate(m),
+  })),
+);
+
+function stateWithDate(m: DueMachine): string {
+  const label = maintenanceStateLabel(m.state);
+  return m.due_at ? `${label} · ${formatDateTime(m.due_at)}` : label;
+}
+
+function openSession(r: DueRoom) {
+  sessionRoom.value = r;
+  sessionOpen.value = true;
+}
+
+async function loadDue() {
+  if (!auth.can('maintenance', 'read')) return;
+  try {
+    due.value = await getDue(scope.value === 'all' ? undefined : scope.value);
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Maintenances indisponibles') });
+  }
+}
+
 async function reload() {
   loading.value = true;
+  void loadDue();
   try {
     const res = await listChecks({
       open: true,

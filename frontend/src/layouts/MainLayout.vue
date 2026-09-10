@@ -53,6 +53,10 @@
           <q-item-section avatar><q-icon name="group" /></q-item-section>
           <q-item-section>Groupes</q-item-section>
         </q-item>
+        <q-item v-if="auth.can('settings', 'read')" v-ripple clickable :to="{ name: 'settings' }">
+          <q-item-section avatar><q-icon name="settings" /></q-item-section>
+          <q-item-section>Paramètres</q-item-section>
+        </q-item>
       </q-list>
     </q-drawer>
 

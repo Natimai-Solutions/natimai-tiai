@@ -1,9 +1,10 @@
 # Salles, vérifications, maintenance et interventions — plan de travail
 
-> **Statut : cadrage validé le 2026-09-10** (§2), §2.2 compris. **J1 à J5
+> **Statut : cadrage validé le 2026-09-10** (§2), §2.2 compris. **J1 à J6
 > livrés** (groupes de droits, commandes à risque, bâtiments et salles,
 > classement depuis l'annuaire, journal des interventions, vérifications
-> demandées) — voir §11.
+> demandées, maintenance) — voir §11. Restent J7 (notifications) et J8
+> (documentation, captures).
 >
 > Branche de travail : `claude/postes-maintenance-features-85buig`, fondée sur
 > `claude/agent-location-wol-ughnse` (emplacement des postes + réveil relayé),
@@ -392,7 +393,7 @@ L'ordre place le **journal** avant la **maintenance**, parce que la seconde
 | **J3 — Agent : bloc `directory`** ✅ | Lecture du DN (registre) et de l'attribut `location` (ADSI), hachage et envoi ; réception serveur, `ROOM_SOURCE`, création automatique des salles. Tests Go (parse du DN) et Python (get-or-create, verrouillage en mode auto). | 1,5 j |
 | **J4 — Journal des interventions** ✅ | Modèle, routes, ressource `intervention`, onglet Historique, formulaire d'ajout, prise en compte dans la fusion de postes. **→ PR 1** | 1 j |
 | **J5 — Vérifications** ✅ | Modèle, routes, ressource `check`, `GET /checks/assignable-users`, contrainte « une ouverte par poste », bandeau sur la fiche, action groupée, section dans Mes tâches, clôture → intervention. | 1,5 j |
-| **J6 — Maintenance** | Ressources `maintenance` et `settings`, table `settings` + page Paramètres, résolution cycle/responsable, `last_maintenance_at`, `/maintenance/due`, formulaire de séance (salle ou poste), transmission, section dans Mes tâches, cartes du tableau de bord, filtre « en retard ». | 2,5 j |
+| **J6 — Maintenance** ✅ | Ressources `maintenance` et `settings`, table `app_settings` + page Paramètres, résolution cycle/responsable, `last_maintenance_at`, `/maintenance/due`, formulaire de séance (salle ou poste), transmission, section dans Mes tâches, cartes du tableau de bord, filtre « en retard ». | 2,5 j |
 | **J7 — Notifications** | E-mail à l'affectation d'une vérification ; ligne « vos maintenances en retard » dans le résumé quotidien ; rappel hebdomadaire par responsable. | 1 j |
 | **J8 — Validation et documentation** | Couverture, `alembic check`, README (Fonctionnalités), DEPLOYMENT.md (variables, clés de registre), captures. **→ PR 2** | 1 j |
 
@@ -571,6 +572,39 @@ texte. Reste ouvert : le §2.2.
   fiche, colonnes d'export.
 - **Pas d'e-mail** à l'affectation : prévu en J7 avec le reste des
   notifications.
+
+### J6 — écarts constatés à l'implémentation
+
+- **Table `app_settings`** (clé, valeur JSONB, qui, quand) ; les variables
+  d'environnement `MAINTENANCE_DEFAULT_CYCLE_DAYS` et
+  `MAINTENANCE_DUE_SOON_DAYS` ne sont que des valeurs initiales, la ligne
+  écrite par la console prend le dessus. Le responsable par défaut n'a pas
+  de variable d'environnement : c'est un compte.
+- **La règle est écrite deux fois, volontairement** : en Python
+  (`policy.resolve`) pour les réponses et l'origine de chaque valeur, en
+  SQL (`due_expr`, `state_clause`) pour le filtre, le tri et les compteurs.
+  Même entrées, même sortie ; un poste exclu a une date due NULL en SQL
+  pour se trier en dernier.
+- **« Transmettre » n'est pas une route** : c'est `PATCH …/maintenance`
+  avec un nouveau responsable, audité comme le reste des réglages. Les
+  réglages de salle et de poste demandent `maintenance:write` (pas
+  `room:write`), les Techniciens l'ont par défaut.
+- **La liste « à faire » est calculée en Python** sur le parc entier joint
+  aux salles (`fleet_resolved`) : un poste qui surcharge son responsable
+  sort de la liste de celui de sa salle. Les postes exclus sont comptés
+  dans leur salle, pas listés.
+- **Une séance antidatée ne recule jamais le cycle** : `last_maintenance_at`
+  n'avance que.
+- **Titre de l'entrée du journal** : « Maintenance — B12 » pour une salle,
+  « Maintenance » seul depuis la fiche d'un poste ; `maintenance_id`
+  ajouté à `interventions` par `0021`.
+- Console : carte Maintenance dans l'onglet Historique de la fiche (état,
+  cycle et responsable avec leur origine, réglages, séance pour ce poste),
+  carte et bouton « Effectuer la maintenance » sur la fiche salle avec les
+  trois dernières séances, section « Maintenances à faire » dans Mes tâches
+  (salles dépliables, séance depuis la liste), filtre et colonne dans la
+  liste des postes, carte du tableau de bord, colonne dans la page Salles,
+  page Paramètres.
 
 ## 12. Plus tard — portée par emplacement
 

@@ -68,6 +68,12 @@ async def merge_into(
         target.last_seen = source.last_seen
     if target.room_id is None:
         target.room_id = source.room_id
+    # The maintenance record follows the journal: the latest visit counts.
+    if source.last_maintenance_at is not None and (
+        target.last_maintenance_at is None
+        or source.last_maintenance_at > target.last_maintenance_at
+    ):
+        target.last_maintenance_at = source.last_maintenance_at
     target.needs_verification = False
     target.updated_at = utcnow()
 

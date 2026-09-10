@@ -73,6 +73,17 @@ class Machine(SQLModel, table=True):
     ad_ou: str | None = None
     ad_ou_dn: str | None = None
     ad_location: str | None = None
+    # Maintenance: the poste's own cycle and owner, overriding its room's and
+    # the parc's (``maintenance/policy.py``); NULL = inherit, 0 = excluded.
+    # ``last_maintenance_at`` is denormalised from the journal — it is what
+    # the list sorts and filters on, and a poste is due at
+    # ``COALESCE(last_maintenance_at, first_seen) + cycle``.
+    maintenance_cycle_days: int | None = None
+    maintenance_owner_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+    )
+    last_maintenance_at: datetime | None = utc_field(default=None, nullable=True)
     os_version: str | None = None
     agent_version: str | None = None
     # Primary IP address elected by the agent among the machine's addresses

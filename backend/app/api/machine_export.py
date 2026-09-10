@@ -26,6 +26,7 @@ from app.features.base import utcnow
 from app.features.check.models import MachineCheck
 from app.features.machine.models import Machine
 from app.features.machine.status import is_online
+from app.features.maintenance.policy import MaintenanceState, Resolved
 from app.features.room import crud as room_crud
 from app.features.room.models import Building, Room
 
@@ -45,6 +46,9 @@ class ExportRow:
     # The open verification request, and the display name of its assignee.
     check: MachineCheck | None = None
     check_assigned_to: str | None = None
+    # Where the poste stands on its maintenance cycle, and who owns it.
+    maintenance: Resolved | None = None
+    maintenance_owner: str | None = None
 
     @property
     def room_location(self) -> str | None:
@@ -109,6 +113,26 @@ def _check_assigned_to(r: ExportRow) -> object:
 
 def _check_instructions(r: ExportRow) -> object:
     return r.check.instructions if r.check is not None else None
+
+
+MAINTENANCE_LABELS = {
+    MaintenanceState.EXCLUDED: "Exclu",
+    MaintenanceState.OVERDUE: "En retard",
+    MaintenanceState.DUE_SOON: "À échéance",
+    MaintenanceState.OK: "À jour",
+}
+
+
+def _maintenance_state(r: ExportRow) -> object:
+    return MAINTENANCE_LABELS.get(r.maintenance.state) if r.maintenance else None
+
+
+def _maintenance_due(r: ExportRow) -> object:
+    return r.maintenance.due_at if r.maintenance else None
+
+
+def _maintenance_owner(r: ExportRow) -> object:
+    return r.maintenance_owner
 
 
 def _location_mismatch(r: ExportRow) -> object:
@@ -210,6 +234,31 @@ COLUMNS: Sequence[ExportColumn] = (
         "identity",
         "text",
         _check_instructions,
+    ),
+    # Maintenance: the standing, the date, the owner, the last visit.
+    ExportColumn(
+        "maintenance_state", "Maintenance", "identity", "text", _maintenance_state
+    ),
+    ExportColumn(
+        "maintenance_due_at",
+        "Maintenance due le",
+        "identity",
+        "datetime",
+        _maintenance_due,
+    ),
+    ExportColumn(
+        "maintenance_owner",
+        "Responsable maintenance",
+        "identity",
+        "text",
+        _maintenance_owner,
+    ),
+    ExportColumn(
+        "last_maintenance_at",
+        "Dernière maintenance",
+        "identity",
+        "datetime",
+        _attr("last_maintenance_at"),
     ),
     ExportColumn(
         "ip_address", "Adresse IP", "identity", "text", _attr("ip_address"), True
