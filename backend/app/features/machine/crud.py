@@ -6,6 +6,7 @@ from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
+from app.features.check import crud as check_crud
 from app.features.command.models import Command
 from app.features.intervention import crud as intervention_crud
 from app.features.machine.models import Machine
@@ -58,6 +59,7 @@ async def merge_into(
 
     # The journal follows: what was done to the duplicate was done to the poste.
     await intervention_crud.move_to(session, source_id=source.id, target_id=target.id)
+    await check_crud.move_to(session, source_id=source.id, target_id=target.id)
 
     # Keep the freshest last-seen; the merge resolves the verification. The
     # room follows too, when the kept record has none: a duplicate was often

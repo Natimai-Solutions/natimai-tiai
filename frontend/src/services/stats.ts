@@ -29,6 +29,8 @@ export interface StatsOverview {
   hardware_aging_years: number;
   /** Postes whose agent is below the reference — the ones a deployment missed. */
   machines_agent_outdated: number;
+  /** Verification requests waiting on somebody. */
+  open_checks: number;
   /** The reference itself, for the card's caption. null on an empty parc. */
   agent_latest_version: string | null;
 }

@@ -151,6 +151,17 @@
             @update:model-value="pushQuery"
           />
           <q-select
+            v-model="checkOpen"
+            :options="checkOptions"
+            emit-value
+            map-options
+            dense
+            outlined
+            class="col-auto"
+            style="width: 220px"
+            @update:model-value="pushQuery"
+          />
+          <q-select
             v-model="mismatch"
             :options="mismatchOptions"
             emit-value
@@ -289,7 +300,7 @@
     </div>
 
     <div
-      v-if="selected.length && (actionGroups.length || canPlace)"
+      v-if="selected.length && (actionGroups.length || canPlace || auth.can('check', 'write'))"
       class="row items-center q-mb-sm"
     >
       <div class="text-caption text-grey q-mr-md">{{ selected.length }} sélectionné(s)</div>
@@ -302,6 +313,16 @@
         label="Affecter à une salle"
         class="q-mr-sm"
         @click="placeOpen = true"
+      />
+      <q-btn
+        v-if="auth.can('check', 'write')"
+        flat
+        dense
+        color="primary"
+        icon="fact_check"
+        label="Demander une vérification"
+        class="q-mr-sm"
+        @click="askOpen = true"
       />
       <q-btn-dropdown
         v-if="actionGroups.length"
@@ -356,6 +377,21 @@
             </q-tooltip>
           </q-icon>
           {{ props.value || props.row.machine_uuid }}
+          <q-icon
+            v-if="props.row.check_open"
+            name="fact_check"
+            color="primary"
+            size="16px"
+            class="q-ml-xs"
+          >
+            <q-tooltip>
+              Vérification demandée{{
+                props.row.check_assigned_to
+                  ? `, affectée à ${props.row.check_assigned_to}`
+                  : ', à prendre'
+              }}
+            </q-tooltip>
+          </q-icon>
           <q-icon
             v-if="props.row.needs_verification"
             name="warning"
@@ -473,6 +509,13 @@
       </template>
     </q-table>
 
+    <CheckRequestDialog
+      v-model="askOpen"
+      :check="null"
+      :subtitle="`${selected.length} poste(s) sélectionné(s)`"
+      :save="askSelection"
+    />
+
     <!-- Placing the selection: one room, or none. The server reports which
          postes now disagree on the site rather than refusing them. -->
     <q-dialog v-model="placeOpen">
@@ -542,6 +585,8 @@ import {
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
+import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
+import { bulkCheckNotification, createChecksBulk, type CheckPayload } from 'src/services/checks';
 import {
   getRoomConfig,
   listBuildings,
@@ -600,6 +645,12 @@ const building = ref<string | null>(null);
 const ROOM_NONE = 'none';
 const room = ref<string | null>(null);
 const mismatch = ref<string | null>(null);
+// A verification request is open on the poste.
+const checkOpen = ref<string | null>(null);
+const checkOptions = [
+  { label: 'Vérifications : toutes', value: null },
+  { label: 'Vérification demandée (ouverte)', value: 'true' },
+];
 const antivirus = ref<string | null>(null);
 const os = ref<string | null>(null);
 // One dropdown for two questions: "behind the reference" (the sentinel) or one
@@ -793,6 +844,16 @@ const placeRoomOptions = computed(() => [
   ...rooms.value.map((r) => ({ label: roomLabel(r), value: r.id })),
 ]);
 
+// Asking for a verification on the selection.
+const askOpen = ref(false);
+async function askSelection(payload: CheckPayload) {
+  const ids = selected.value.map((m) => m.id);
+  if (!ids.length) return;
+  $q.notify(bulkCheckNotification(await createChecksBulk(ids, payload)));
+  selected.value = [];
+  await reload();
+}
+
 async function placeSelection() {
   const ids = selected.value.map((m) => m.id);
   if (!ids.length || !placeRoomId.value) return;
@@ -846,6 +907,7 @@ type FilterKey =
   | 'building'
   | 'room'
   | 'mismatch'
+  | 'check'
   | 'antivirus'
   | 'status'
   | 'wu'
@@ -877,6 +939,7 @@ const filterChips = computed<{ key: FilterKey; label: string }[]>(() => {
   if (room.value) chips.push({ key: 'room', label: label(roomOptions.value, room.value) });
   if (mismatch.value)
     chips.push({ key: 'mismatch', label: label(mismatchOptions, mismatch.value) });
+  if (checkOpen.value) chips.push({ key: 'check', label: label(checkOptions, checkOpen.value) });
   if (antivirus.value)
     chips.push({ key: 'antivirus', label: label(antivirusOptions.value, antivirus.value) });
   if (status.value) chips.push({ key: 'status', label: label(statusOptions, status.value) });
@@ -926,6 +989,7 @@ function clearFilter(key: FilterKey) {
       building,
       room,
       mismatch,
+      check: checkOpen,
       antivirus,
       status,
       wu,
@@ -1075,6 +1139,7 @@ function applyQuery() {
   building.value = queryValue(q.building);
   room.value = queryValue(q.room);
   mismatch.value = queryValue(q.location_mismatch) === 'true' ? 'true' : null;
+  checkOpen.value = queryValue(q.check_open) === 'true' ? 'true' : null;
   antivirus.value = queryValue(q.antivirus);
   os.value = queryValue(q.os_version);
   agent.value =
@@ -1140,6 +1205,7 @@ function buildQuery(): Record<string, string> {
   if (building.value) query.building = building.value;
   if (room.value) query.room = room.value;
   if (mismatch.value) query.location_mismatch = mismatch.value;
+  if (checkOpen.value) query.check_open = checkOpen.value;
   if (antivirus.value) query.antivirus = antivirus.value;
   if (os.value) query.os_version = os.value;
   if (agent.value === AGENT_OUTDATED) query.agent_outdated = 'true';
@@ -1226,6 +1292,7 @@ const filterParams = computed<ListMachinesParams>(() => {
   if (room.value === ROOM_NONE) params.without_room = true;
   else if (room.value) params.room_id = room.value;
   if (mismatch.value) params.location_mismatch = true;
+  if (checkOpen.value) params.check_open = true;
   if (antivirus.value) params.antivirus = antivirus.value;
   if (os.value) params.os_version = os.value;
   if (agent.value === AGENT_OUTDATED) params.agent_outdated = true;

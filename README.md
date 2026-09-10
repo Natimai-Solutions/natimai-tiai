@@ -53,6 +53,10 @@ gère naturellement les postes éteints.
   salle — jamais refusé. À la main, ou **depuis l'annuaire** : l'agent remonte
   l'unité d'organisation de son objet ordinateur et son attribut Emplacement,
   et le serveur en fait des salles (`ROOM_SOURCE`).
+- **Vérifications demandées** — « va voir ce poste » : une demande avec des
+  consignes, affectée à quelqu'un ou laissée à prendre, une seule ouverte par
+  poste, close avec une note datée qui reste sur la demande et s'inscrit dans
+  l'historique du poste. Chacun retrouve les siennes dans « Mes tâches ».
 - **Historique des interventions** — chaque poste porte son journal : panne,
   installation logicielle, mise à niveau, maintenance, vérification, saisi
   depuis sa fiche avec une date qui peut être antérieure à la console, lu de

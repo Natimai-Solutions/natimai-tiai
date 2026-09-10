@@ -59,6 +59,9 @@ class ErrorCode(enum.StrEnum):
     # a placement made by hand here would be undone on the next inventory.
     ROOM_PLACEMENT_LOCKED = "room.placement.locked"
     INTERVENTION_NOT_FOUND = "intervention.not_found"
+    CHECK_NOT_FOUND = "check.not_found"
+    CHECK_ALREADY_OPEN = "check.already_open"
+    CHECK_CLOSED = "check.closed"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     RATE_LIMITED = "request.rate_limited"

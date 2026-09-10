@@ -41,6 +41,9 @@ export interface Machine {
    * GPO aimed at the wrong OU, or a poste moved without its room.
    */
   location_mismatch: boolean;
+  /** A verification somebody asked for is open on this poste, and for whom. */
+  check_open: boolean;
+  check_assigned_to: string | null;
   /** Primary address elected by the agent; null = never reported. */
   ip_address: string | null;
   os_version: string | null;
@@ -233,6 +236,15 @@ export interface MachineDetail extends Machine {
   ad_ou: string | null;
   ad_ou_dn: string | null;
   ad_location: string | null;
+  /** The open verification request, if any: the banner of the fiche. */
+  open_check: {
+    id: string;
+    requested_by: string;
+    assigned_to_id: string | null;
+    assigned_to_name: string | null;
+    instructions: string | null;
+    created_at: string;
+  } | null;
   machine_guid: string | null;
   smbios_uuid: string | null;
   tpm_ek_hash: string | null;
@@ -328,6 +340,8 @@ export interface ListMachinesParams {
   without_room?: boolean;
   /** true = agent and room disagree on the site; false = the rest. */
   location_mismatch?: boolean;
+  /** true = a verification request is open; false = none. */
+  check_open?: boolean;
   /** Antivirus name, matched as a substring server-side. */
   antivirus?: string;
   /** OS version, matched as a substring server-side ("Windows 10" = every build). */

@@ -3,6 +3,8 @@ from fastapi import APIRouter
 from app.api.routes.agent import router as agent_router
 from app.api.routes.audit import router as audit_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.checks import machine_router as machine_checks_router
+from app.api.routes.checks import router as checks_router
 from app.api.routes.commands import router as commands_router
 from app.api.routes.groups import router as groups_router
 from app.api.routes.interventions import machine_router as machine_interventions_router
@@ -22,6 +24,8 @@ api_router.include_router(buildings_router)
 api_router.include_router(rooms_router)
 api_router.include_router(machine_interventions_router)
 api_router.include_router(interventions_router)
+api_router.include_router(machine_checks_router)
+api_router.include_router(checks_router)
 api_router.include_router(commands_router)
 api_router.include_router(software_router)
 api_router.include_router(stats_router)

@@ -111,6 +111,7 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   if (building) params.building_id = building;
   const mismatch = queryValue(q.location_mismatch);
   if (mismatch === 'true') params.location_mismatch = true;
+  if (queryValue(q.check_open) === 'true') params.check_open = true;
   const antivirus = queryValue(q.antivirus);
   if (antivirus) params.antivirus = antivirus;
   const os = queryValue(q.os_version);

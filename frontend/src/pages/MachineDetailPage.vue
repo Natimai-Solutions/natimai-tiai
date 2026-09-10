@@ -93,6 +93,18 @@
           </template>
         </q-list>
       </q-btn-dropdown>
+      <!-- check:write: ask somebody to go and look. One open at a time, so
+           the button reads as the state. -->
+      <q-btn
+        v-if="auth.can('check', 'write') && machine && !machine.check_open"
+        flat
+        dense
+        color="primary"
+        icon="fact_check"
+        label="Demander une vérification"
+        class="q-ml-sm"
+        @click="askOpen = true"
+      />
       <!-- room:write: where the console files the poste. -->
       <q-btn
         v-if="canPlace"
@@ -171,6 +183,43 @@
         <q-btn v-if="canManage" flat dense label="Fusionner un doublon" @click="openMerge" />
       </template>
     </q-banner>
+
+    <q-banner v-if="machine?.open_check" class="bg-blue-1 q-mb-md" rounded>
+      <template #avatar><q-icon name="fact_check" color="primary" /></template>
+      <div>
+        <span class="text-weight-medium">Vérification demandée</span>
+        par {{ machine.open_check.requested_by }} {{ timeAgoLabel(machine.open_check.created_at) }},
+        <template v-if="machine.open_check.assigned_to_name">
+          affectée à {{ machine.open_check.assigned_to_name }}.
+        </template>
+        <template v-else>à prendre.</template>
+      </div>
+      <div v-if="machine.open_check.instructions" class="q-mt-xs" style="white-space: pre-line">
+        {{ machine.open_check.instructions }}
+      </div>
+      <template v-if="auth.can('check', 'write')" #action>
+        <q-btn flat dense label="Réaffecter / modifier" @click="editCheckOpen = true" />
+        <q-btn flat dense color="primary" label="Clore" @click="closeCheckOpen = true" />
+      </template>
+    </q-banner>
+
+    <CheckRequestDialog
+      v-model="askOpen"
+      :check="null"
+      :subtitle="machine?.hostname ?? undefined"
+      :save="askCheck"
+    />
+    <CheckRequestDialog
+      v-model="editCheckOpen"
+      :check="openCheckAsCheck"
+      :subtitle="machine?.hostname ?? undefined"
+      :save="editCheck"
+    />
+    <CheckCloseDialog
+      v-model="closeCheckOpen"
+      :check="machine?.open_check ?? null"
+      @closed="onCheckClosed"
+    />
 
     <q-banner v-if="machine?.location_mismatch" class="bg-orange-1 q-mb-md" rounded>
       <template #avatar><q-icon name="wrong_location" color="orange" /></template>
@@ -337,6 +386,9 @@ import MachineDefenderCard from 'src/components/machine/MachineDefenderCard.vue'
 import MachineGpuCard from 'src/components/machine/MachineGpuCard.vue';
 import MachineHardwareCard from 'src/components/machine/MachineHardwareCard.vue';
 import MachineHistoryCard from 'src/components/machine/MachineHistoryCard.vue';
+import CheckCloseDialog from 'src/components/check/CheckCloseDialog.vue';
+import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
+import { createCheck, updateCheck, type Check, type CheckPayload } from 'src/services/checks';
 import MachineIdentityCard from 'src/components/machine/MachineIdentityCard.vue';
 import MachineMemoryCard from 'src/components/machine/MachineMemoryCard.vue';
 import MachineMergeDialog from 'src/components/machine/MachineMergeDialog.vue';
@@ -454,6 +506,49 @@ const commandPagination = ref<TablePagination>({
 const actionGroups = computed(() => commandActionGroups({ permissions: auth.permissions }));
 // Revoke, re-enroll, merge: the machine:write half of the fiche.
 const canManage = computed(() => auth.can('machine', 'write'));
+
+// --- Verification requests: ask, reassign, close. The fiche reloads after
+// each, since the banner and the journal both change.
+const askOpen = ref(false);
+const editCheckOpen = ref(false);
+const closeCheckOpen = ref(false);
+// The dialog edits a Check; the fiche carries a lighter shape of the open
+// one. Bridged here rather than by a second payload on the API.
+const openCheckAsCheck = computed<Check | null>(() => {
+  const c = machine.value?.open_check;
+  if (!c || !machine.value) return null;
+  return {
+    id: c.id,
+    machine_id: machine.value.id,
+    requested_by: c.requested_by,
+    assigned_to:
+      c.assigned_to_id && c.assigned_to_name
+        ? { id: c.assigned_to_id, name: c.assigned_to_name }
+        : null,
+    instructions: c.instructions,
+    created_at: c.created_at,
+    updated_at: c.created_at,
+    closed_at: null,
+    closed_by: null,
+    closing_note: null,
+    machine: null,
+  };
+});
+async function askCheck(payload: CheckPayload) {
+  await createCheck(props.id, payload);
+  $q.notify({ type: 'positive', message: 'Vérification demandée' });
+  await load();
+}
+async function editCheck(payload: CheckPayload) {
+  if (!machine.value?.open_check) return;
+  await updateCheck(machine.value.open_check.id, payload);
+  $q.notify({ type: 'positive', message: 'Demande mise à jour' });
+  await load();
+}
+async function onCheckClosed() {
+  await load();
+  await loadInterventions(1);
+}
 
 // --- The journal. Loaded with the fiche and paged by « Afficher plus »:
 // a poste's journal is a few dozen lines at most, read top to bottom.

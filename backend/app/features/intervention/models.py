@@ -58,5 +58,13 @@ class Intervention(SQLModel, table=True):
     # useful: a poste maintained before Tia'i existed can have its journal
     # started from the right date.
     performed_at: datetime = utc_field(default_factory=utcnow)
+    # The verification request whose closing wrote this entry, when that is
+    # what it is. SET NULL: the entry is the record, the request the cause.
+    check_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("machine_checks.id", ondelete="SET NULL"), nullable=True
+        ),
+    )
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)

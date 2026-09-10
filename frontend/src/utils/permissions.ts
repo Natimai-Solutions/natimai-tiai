@@ -6,7 +6,15 @@
  */
 
 export type Resource =
-  'machine' | 'threat' | 'command' | 'risky_command' | 'room' | 'intervention' | 'user' | 'audit';
+  | 'machine'
+  | 'threat'
+  | 'command'
+  | 'risky_command'
+  | 'room'
+  | 'intervention'
+  | 'check'
+  | 'user'
+  | 'audit';
 
 export type Action = 'read' | 'write' | 'execute';
 
@@ -102,6 +110,21 @@ export const PERMISSION_CATALOGUE: PermissionEntry[] = [
     resourceLabel: 'Historique des interventions',
     label: 'Saisir',
     hint: 'Ajouter, modifier et supprimer des interventions sur tout poste ; les suppressions sont tracées.',
+  },
+  {
+    key: 'check:read',
+    resource: 'check',
+    action: 'read',
+    resourceLabel: 'Vérifications demandées',
+    label: 'Consulter',
+  },
+  {
+    key: 'check:write',
+    resource: 'check',
+    action: 'write',
+    resourceLabel: 'Vérifications demandées',
+    label: 'Demander, affecter et clore',
+    hint: 'Demander une vérification sur tout poste, l’affecter à un compte, la clore avec une note.',
   },
   {
     key: 'user:read',

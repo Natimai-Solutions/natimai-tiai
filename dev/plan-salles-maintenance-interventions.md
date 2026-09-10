@@ -1,9 +1,9 @@
 # Salles, vérifications, maintenance et interventions — plan de travail
 
-> **Statut : cadrage validé le 2026-09-10** (§2), §2.2 compris. **J1 à J4
+> **Statut : cadrage validé le 2026-09-10** (§2), §2.2 compris. **J1 à J5
 > livrés** (groupes de droits, commandes à risque, bâtiments et salles,
-> classement depuis l'annuaire, journal des interventions) — voir §11. La
-> première PR du plan (J1–J4) est complète sur la branche.
+> classement depuis l'annuaire, journal des interventions, vérifications
+> demandées) — voir §11.
 >
 > Branche de travail : `claude/postes-maintenance-features-85buig`, fondée sur
 > `claude/agent-location-wol-ughnse` (emplacement des postes + réveil relayé),
@@ -391,7 +391,7 @@ L'ordre place le **journal** avant la **maintenance**, parce que la seconde
 | **J2 — Bâtiments et salles** ✅ | Migration `0017` (bâtiments, salles, `machines.room_id`), ressource `room`, modèles `Building` et `Room`, CRUD, rattachement manuel, divergence d'emplacement, filtres et colonnes dans la liste et l'export, page Salles. | 2,5 j |
 | **J3 — Agent : bloc `directory`** ✅ | Lecture du DN (registre) et de l'attribut `location` (ADSI), hachage et envoi ; réception serveur, `ROOM_SOURCE`, création automatique des salles. Tests Go (parse du DN) et Python (get-or-create, verrouillage en mode auto). | 1,5 j |
 | **J4 — Journal des interventions** ✅ | Modèle, routes, ressource `intervention`, onglet Historique, formulaire d'ajout, prise en compte dans la fusion de postes. **→ PR 1** | 1 j |
-| **J5 — Vérifications** | Modèle, routes, ressource `check`, `GET /users/assignable`, contrainte « une ouverte par poste », bandeau sur la fiche, action groupée, section dans Mes tâches, clôture → intervention. | 1,5 j |
+| **J5 — Vérifications** ✅ | Modèle, routes, ressource `check`, `GET /checks/assignable-users`, contrainte « une ouverte par poste », bandeau sur la fiche, action groupée, section dans Mes tâches, clôture → intervention. | 1,5 j |
 | **J6 — Maintenance** | Ressources `maintenance` et `settings`, table `settings` + page Paramètres, résolution cycle/responsable, `last_maintenance_at`, `/maintenance/due`, formulaire de séance (salle ou poste), transmission, section dans Mes tâches, cartes du tableau de bord, filtre « en retard ». | 2,5 j |
 | **J7 — Notifications** | E-mail à l'affectation d'une vérification ; ligne « vos maintenances en retard » dans le résumé quotidien ; rappel hebdomadaire par responsable. | 1 j |
 | **J8 — Validation et documentation** | Couverture, `alembic check`, README (Fonctionnalités), DEPLOYMENT.md (variables, clés de registre), captures. **→ PR 2** | 1 j |
@@ -547,6 +547,30 @@ texte. Reste ouvert : le §2.2.
   les installations déjà migrées.
 - Pagination par « Afficher plus » (25 par page) plutôt qu'un tableau : un
   journal se lit de haut en bas.
+
+### J5 — écarts constatés à l'implémentation
+
+- **`GET /checks/assignable-users`** plutôt que `/users/assignable` : le
+  routeur des comptes exige `user:read` à sa racine, et la liste des
+  affectables doit être lisible par qui détient `check:write` seulement.
+  Elle ne renvoie que l'identifiant et un nom d'affichage.
+- **Affectation à un compte désactivé refusée** (404) ; un compte supprimé
+  laisse ses demandes ouvertes « à prendre » (`SET NULL`).
+- **Clôture antidatable** comme une intervention ; elle crée l'entrée
+  `verification` du journal avec `check_id`, colonne ajoutée à
+  `interventions` par la migration `0020`.
+- **Fusion de doublons** : les demandes suivent le poste conservé ; si les
+  deux en ont une ouverte, celle du doublon est close par « system » avec
+  une note, pour respecter « une seule ouverte par poste ».
+- **Demande groupée** (`POST /checks/bulk`) depuis la liste : les postes
+  qui en ont déjà une ouverte sont sautés et comptés.
+- **Page « Mes tâches »** avec trois portées (les miennes, à prendre,
+  toutes), « Me l'affecter », réaffectation et clôture ; pastille du menu
+  = mes demandes ouvertes. Carte « Vérifications demandées » sur le
+  tableau de bord, filtre et icône dans la liste, bandeau et boutons sur la
+  fiche, colonnes d'export.
+- **Pas d'e-mail** à l'affectation : prévu en J7 avec le reste des
+  notifications.
 
 ## 12. Plus tard — portée par emplacement
 

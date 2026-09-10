@@ -11,6 +11,7 @@ from sqlmodel import col, select
 from app.api.deps import SessionDep, require_permission
 from app.core.config import settings
 from app.features.base import utcnow
+from app.features.check.models import MachineCheck
 from app.features.inventory.models import MachineSoftware, Volume
 from app.features.machine.agent_version import fleet_versions
 from app.features.machine.models import Machine
@@ -67,6 +68,9 @@ class StatsOverview(BaseModel):
     # reference, and what the reference is — the deployment's progress bar,
     # on the wall screen the deployment is watched from.
     machines_agent_outdated: int
+    # Verification requests waiting on somebody — the task the console can
+    # hand out, as opposed to the findings above that the parc raised itself.
+    open_checks: int
     agent_latest_version: str | None
 
 
@@ -154,6 +158,13 @@ async def overview(session: SessionDep) -> StatsOverview:
         else 0
     )
 
+    open_checks_result = await session.exec(
+        select(func.count())
+        .select_from(MachineCheck)
+        .where(col(MachineCheck.closed_at).is_(None))
+    )
+    open_checks = open_checks_result.one() or 0
+
     return StatsOverview(
         total=total,
         up_to_date=up_to_date,
@@ -170,5 +181,6 @@ async def overview(session: SessionDep) -> StatsOverview:
         low_disk_free_percent=settings.LOW_DISK_FREE_PERCENT,
         hardware_aging_years=settings.HARDWARE_AGING_YEARS,
         machines_agent_outdated=machines_agent_outdated,
+        open_checks=open_checks,
         agent_latest_version=fleet.latest,
     )

@@ -217,6 +217,15 @@ const alertKpis = computed<Kpi[]>(() => {
       to: { name: 'machines', query: { status: 'needs_verification' } },
     },
     {
+      // The task the console hands out, beside the findings the parc raised
+      // itself: what somebody was asked to go and look at.
+      label: 'Vérifications demandées',
+      value: s.open_checks,
+      icon: 'fact_check',
+      color: 'primary',
+      to: { name: 'machines', query: { check_open: 'true' } },
+    },
+    {
       label: 'Inactifs',
       value: s.inactive,
       icon: 'power_off',

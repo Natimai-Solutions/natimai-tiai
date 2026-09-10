@@ -19,6 +19,8 @@ from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
+from app.features.check import crud as check_crud
+from app.features.check.models import MachineCheck
 from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.inventory.models import (
     Disk,
@@ -50,6 +52,7 @@ from app.features.machine.status import (
 from app.features.room import crud as room_crud
 from app.features.room.models import Building, Room
 from app.features.threat.models import Threat
+from app.features.user.models import User
 from app.features.user.permissions import Action, Resource
 from app.features.windows_update.models import WindowsUpdate
 from app.features.wol import relay as wol_relay
@@ -87,6 +90,10 @@ class MachineOut(BaseModel):
     # it is what reveals a GPO aimed at the wrong OU or a poste moved without
     # its room. False when either side has no opinion.
     location_mismatch: bool = False
+    # A verification somebody asked for is open on this poste. In the list
+    # because it is what the list is filtered by to see what is waiting.
+    check_open: bool = False
+    check_assigned_to: str | None = None
     ip_address: str | None
     os_version: str | None
     agent_version: str | None
@@ -145,12 +152,32 @@ def _place(out: MachineOut, machine: Machine, placement: room_crud.Placement) ->
 
 
 def _machine_out(
-    machine: Machine, room: Room | None, building: Building | None
+    machine: Machine,
+    room: Room | None,
+    building: Building | None,
+    check: MachineCheck | None = None,
+    assignees: dict[uuid.UUID, str] | None = None,
 ) -> MachineOut:
-    """A list row, with its placement as the joined query returned it."""
+    """A list row, with its placement and open request as the joined query
+    returned them."""
     out = MachineOut.model_validate(machine)
     _place(out, machine, room_crud.Placement(room=room, building=building))
+    if check is not None:
+        out.check_open = True
+        if check.assigned_to_id and assignees:
+            out.check_assigned_to = assignees.get(check.assigned_to_id)
     return out
+
+
+async def _assignee_names(
+    session: SessionDep, checks: list[MachineCheck | None]
+) -> dict[uuid.UUID, str]:
+    """Display names of the accounts the page's open requests are assigned to."""
+    ids = {c.assigned_to_id for c in checks if c is not None and c.assigned_to_id}
+    if not ids:
+        return {}
+    rows = await session.exec(select(User).where(col(User.id).in_(ids)))
+    return {u.id: u.full_name or u.email for u in rows.all()}
 
 
 class PendingUpdateOut(BaseModel):
@@ -279,6 +306,15 @@ class InstalledSoftwareOut(BaseModel):
     first_seen: datetime
 
 
+class OpenCheckOut(BaseModel):
+    id: uuid.UUID
+    requested_by: str
+    assigned_to_id: uuid.UUID | None
+    assigned_to_name: str | None
+    instructions: str | None
+    created_at: datetime
+
+
 class MachineDetailOut(MachineOut):
     """Full machine detail (Defender state, session type, fingerprint, times)."""
 
@@ -313,6 +349,9 @@ class MachineDetailOut(MachineOut):
     ad_ou: str | None
     ad_ou_dn: str | None
     ad_location: str | None
+    # The verification request open on this poste, if any: who asked, who is
+    # asked, what to look at. The banner of the fiche.
+    open_check: OpenCheckOut | None = None
     # Lets the console show that a poste is cut off and offer the only way
     # back: « autoriser le ré-enrôlement » (the fleet secret no longer clears
     # a revocation on its own).
@@ -502,6 +541,8 @@ class MachineFilters:
     building_id: uuid.UUID | None = None
     without_room: bool | None = None
     location_mismatch: bool | None = None
+    # A verification request is open (true) or not (false).
+    check_open: bool | None = None
     antivirus: str | None = None
     os_version: str | None = None
     status: MachineStatus | None = None
@@ -536,6 +577,7 @@ def machine_filters(
     building_id: uuid.UUID | None = None,
     without_room: bool | None = None,
     location_mismatch: bool | None = None,
+    check_open: bool | None = None,
     antivirus: str | None = None,
     os_version: str | None = None,
     status: MachineStatus | None = None,
@@ -569,6 +611,7 @@ def machine_filters(
         building_id=building_id,
         without_room=without_room,
         location_mismatch=location_mismatch,
+        check_open=check_open,
         antivirus=antivirus,
         os_version=os_version,
         status=status,
@@ -613,19 +656,32 @@ def _filtered_machines(
 ) -> Any:
     """The machine SELECT with every requested facet applied.
 
-    Returns ``(Machine, Room | None, Building | None)`` rows: the placement is
-    joined in rather than fetched per row, because it is also what two facets
-    filter on and two columns sort by.
+    Returns ``(Machine, Room | None, Building | None, MachineCheck | None)``
+    rows: the placement and the open verification request are joined in
+    rather than fetched per row, because they are also what facets filter
+    on and columns sort by. At most one open request per poste (partial
+    unique index), so the join never multiplies rows.
 
     ``outdated`` is the list of agent versions ranking below the reference,
     from ``fleet_versions`` — read by the caller, because this builds a
     statement and does not touch the database.
     """
     stmt = (
-        select(Machine, Room, Building)
+        select(Machine, Room, Building, MachineCheck)
         .outerjoin(Room, col(Room.id) == col(Machine.room_id))
         .outerjoin(Building, col(Building.id) == col(Room.building_id))
+        .outerjoin(
+            MachineCheck,
+            (col(MachineCheck.machine_id) == col(Machine.id))
+            & (col(MachineCheck.closed_at).is_(None)),
+        )
     )
+    if filters.check_open is not None:
+        stmt = stmt.where(
+            col(MachineCheck.id).is_not(None)
+            if filters.check_open
+            else col(MachineCheck.id).is_(None)
+        )
     if filters.room_id is not None:
         stmt = stmt.where(col(Machine.room_id) == filters.room_id)
     if filters.building_id is not None:
@@ -751,7 +807,12 @@ async def list_machines(
             col(Machine.id),
         )
     rows = await session.exec(stmt.offset((page - 1) * page_size).limit(page_size))
-    items = [_machine_out(m, room, building) for m, room, building in rows.all()]
+    page_rows = rows.all()
+    assignees = await _assignee_names(session, [r[3] for r in page_rows])
+    items = [
+        _machine_out(m, room, building, check, assignees)
+        for m, room, building, check in page_rows
+    ]
     return MachineList(
         items=items,
         total=total or 0,
@@ -993,9 +1054,21 @@ async def _export_rows(
         func.lower(col(Machine.hostname)).nulls_last(), col(Machine.id)
     )
     rows = await session.exec(stmt)
+    all_rows = rows.all()
+    assignees = await _assignee_names(session, [r[3] for r in all_rows])
     return [
-        machine_export.ExportRow(machine=m, room=room, building=building)
-        for m, room, building in rows.all()
+        machine_export.ExportRow(
+            machine=m,
+            room=room,
+            building=building,
+            check=check,
+            check_assigned_to=(
+                assignees.get(check.assigned_to_id)
+                if check and check.assigned_to_id
+                else None
+            ),
+        )
+        for m, room, building, check in all_rows
     ]
 
 
@@ -1247,6 +1320,25 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
     )
     detail = MachineDetailOut.model_validate(machine)
     _place(detail, machine, await room_crud.placement(session, machine.room_id))
+    open_check = await check_crud.open_for_machine(session, machine.id)
+    if open_check is not None:
+        detail.check_open = True
+        assignee = (
+            await session.get(User, open_check.assigned_to_id)
+            if open_check.assigned_to_id
+            else None
+        )
+        detail.check_assigned_to = (
+            (assignee.full_name or assignee.email) if assignee else None
+        )
+        detail.open_check = OpenCheckOut(
+            id=open_check.id,
+            requested_by=open_check.requested_by,
+            assigned_to_id=open_check.assigned_to_id,
+            assigned_to_name=detail.check_assigned_to,
+            instructions=open_check.instructions,
+            created_at=open_check.created_at,
+        )
     detail.pending_updates = [PendingUpdateOut.model_validate(u) for u in rows.all()]
     await _attach_inventory(session, machine, detail)
     detail.agent_latest_version = (await fleet_versions(session)).latest

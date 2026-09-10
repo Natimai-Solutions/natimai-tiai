@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.base import utcnow
+from app.features.check.models import MachineCheck
 from app.features.machine.models import Machine
 from app.features.machine.status import is_online
 from app.features.room import crud as room_crud
@@ -41,6 +42,9 @@ class ExportRow:
     machine: Machine
     room: Room | None = None
     building: Building | None = None
+    # The open verification request, and the display name of its assignee.
+    check: MachineCheck | None = None
+    check_assigned_to: str | None = None
 
     @property
     def room_location(self) -> str | None:
@@ -93,6 +97,18 @@ def _building(r: ExportRow) -> object:
 
 def _room(r: ExportRow) -> object:
     return r.room.name if r.room else None
+
+
+def _check_open(r: ExportRow) -> object:
+    return r.check is not None
+
+
+def _check_assigned_to(r: ExportRow) -> object:
+    return r.check_assigned_to if r.check is not None else None
+
+
+def _check_instructions(r: ExportRow) -> object:
+    return r.check.instructions if r.check is not None else None
 
 
 def _location_mismatch(r: ExportRow) -> object:
@@ -175,6 +191,25 @@ COLUMNS: Sequence[ExportColumn] = (
         "identity",
         "bool",
         _location_mismatch,
+    ),
+    # The open verification request: on offer, for the list of what is
+    # waiting to be printed and handed round.
+    ExportColumn(
+        "check_open", "Vérification demandée", "identity", "bool", _check_open
+    ),
+    ExportColumn(
+        "check_assigned_to",
+        "Vérification affectée à",
+        "identity",
+        "text",
+        _check_assigned_to,
+    ),
+    ExportColumn(
+        "check_instructions",
+        "Vérification : consignes",
+        "identity",
+        "text",
+        _check_instructions,
     ),
     ExportColumn(
         "ip_address", "Adresse IP", "identity", "text", _attr("ip_address"), True
