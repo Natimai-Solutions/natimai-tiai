@@ -209,6 +209,9 @@ variables ci-dessous ne décrivent que la destination du paquet.
 | `WOL_BROADCAST_ADDRESSES` | *(vide)* | Adresses de diffusion explicites, séparées par des virgules. Renseignées, elles **remplacent** l'adresse déduite et servent pour *tous* les postes — la réponse pour un serveur qui doit joindre des segments où il n'a pas d'adresse, et le seul moyen de réveiller un poste qui n'a jamais remonté d'IP |
 | `WOL_PORT` | `9` | Port UDP du paquet magique. Indifférent au matériel (la carte reconnaît le motif n'importe où dans la trame) ; ne compte que pour un pare-feu sur le trajet |
 | `WOL_PACKET_COUNT` | `3` | Nombre de copies émises. Une diffusion UDP n'accuse rien et se perd sans bruit ; trois copies coûtent trois datagrammes |
+| `WOL_RELAY_ENABLED` | `false` | **Serveur distant.** À `true`, le serveur n'émet plus rien lui-même : il confie le réveil au premier poste allumé du **même emplacement** que la cible (à défaut d'emplacement, du même domaine) qui le contacte, et c'est l'agent de ce poste qui diffuse le paquet magique sur ses propres sous-réseaux. Voir le point 4 de la section « Réveil des postes » |
+| `WOL_RELAY_TTL_MINUTES` | `10` | Délai laissé à un poste relais pour prendre un réveil en attente ; passé ce délai, il expire. Court à dessein : un réveil relayé une heure plus tard rencontre un poste que quelqu'un a déjà rallumé à la main |
+| `WOL_RELAY_SUBNET_GRACE_SECONDS` | `90` | Un poste du **même sous-réseau** que la cible prend le réveil aussitôt ; un poste d'un autre VLAN du même emplacement attend ce délai — un cycle d'agent — pour laisser la priorité au mieux placé. `0` supprime la préférence |
 
 ### Alertes e-mail et e-mails de compte
 
@@ -443,6 +446,70 @@ de commande dit pourquoi (MAC ou IP inconnue). En 1 mais pas en 2 : c'est ce
 §3, `bc_forwarding` manque sur `all` ou sur le pont. En 2 mais le poste ne
 démarre pas : c'est le §1 — ou le §2 si le poste est sur un autre segment.
 
+### 4. Serveur distant : le réveil relayé par un agent
+
+Tout ce qui précède suppose un serveur **sur le réseau des postes**. Un serveur
+hébergé ailleurs — dans un autre établissement, chez un hébergeur — n'a aucun
+moyen de déposer une trame sur leur fil : aucune route ne transporte une
+diffusion à travers Internet, et aucun routeur ne relaie une diffusion dirigée
+vers le VLAN d'un lycée. Ce que ce serveur a, en revanche, c'est le parc
+lui-même : chaque poste encore allumé sur le site est une machine du bon
+domaine de diffusion.
+
+`WOL_RELAY_ENABLED=true` change donc ce que fait le bouton « Réveiller » :
+
+1. le serveur **n'émet plus rien** ; il met le réveil en file, sur la fiche du
+   poste visé, comme une commande ordinaire (`wake_on_lan`, statut « en
+   attente ») ;
+2. **le premier poste éligible à contacter le serveur** — au rythme du
+   heartbeat, donc dans la minute — reçoit l'instruction avec l'adresse MAC à
+   réveiller, et son agent diffuse le paquet magique sur les sous-réseaux IPv4
+   de ses propres cartes (UDP/9, trois copies). Le poste visé lui-même n'est
+   jamais servi : il est éteint, et s'il ne l'est pas, le réveil est clos comme
+   réussi à sa première remontée ;
+3. le relais rend compte sur la fiche du poste visé — « Relayé par POSTE-12 —
+   paquet magique émis vers … » — et le poste réveillé se constate, comme
+   avant, à la remontée de son agent.
+
+**Éligible** veut dire *sur le même fil*, et le serveur en juge d'après ce que
+remontent les agents :
+
+- l'**emplacement** d'abord (`location` dans la configuration de l'agent, ou
+  `Location` dans le registre — voir « Paramètres de l'agent Windows ») : c'est
+  le réglage fait pour ça. Un domaine couvre tous les sites d'une académie, un
+  nom de site non. Un parc **multi-sites sans emplacements** relaierait depuis
+  n'importe quel poste du domaine, c'est-à-dire souvent depuis le mauvais site ;
+- le **domaine** à défaut, pour un poste dont l'agent n'a pas d'emplacement —
+  juste sur un parc à site unique, et la raison de renseigner les emplacements
+  partout ailleurs ;
+- au sein d'un site, un poste du **même sous-réseau IPv4** que la cible (d'après
+  les adresses et masques remontés) prend le réveil aussitôt : sa diffusion
+  atteint la cible à coup sûr. Les postes d'un autre VLAN du même site attendent
+  `WOL_RELAY_SUBNET_GRACE_SECONDS` — un cycle d'agent — avant de le prendre à
+  leur tour, au cas où rien ne serait allumé sur le bon segment.
+
+Si **aucun poste éligible n'est allumé** au moment du clic, le réveil est refusé
+sur-le-champ (« Aucun poste allumé sur l'emplacement … ») plutôt que laissé en
+file jusqu'à son expiration : un site où tout est éteint n'a rien pour relayer,
+et il faut alors un poste allumé à la main — ou un poste qu'on ne s'autorise
+jamais à éteindre, ce qui est la configuration recommandée pour un site qui
+compte sur cette fonction.
+
+Ce mode **remplace** l'émission par le serveur, il ne s'y ajoute pas : un serveur
+distant qui émettrait dans le vide annoncerait un succès qu'il ne peut pas avoir.
+Le § 3 (`bc_forwarding`) ne s'applique plus ; le § 1 (BIOS, carte, démarrage
+rapide) reste entier.
+
+**Sécurité.** C'est la seule commande du catalogue qui transporte un argument —
+l'adresse MAC de la cible — là où toutes les autres ne sont qu'un nom de type.
+L'agent le borne : la valeur est lue comme une adresse EUI-48 et rien d'autre
+(six octets ou refus, jamais une chaîne qui atteint un shell ou le registre),
+et **la destination n'est jamais prise au serveur** — le paquet part sur les
+sous-réseaux du poste relais, sur UDP/9, et nulle part ailleurs. Un serveur
+compromis peut au pire faire réveiller des machines du segment d'un relais, ce
+qui est la fonction. Le mode reste désactivé par défaut parce qu'il change ce
+que fait le bouton, pas parce qu'il ouvre quelque chose.
+
 ---
 
 ## Paramètres de l'agent Windows
@@ -465,7 +532,15 @@ inventory_collect_interval_seconds: 86400 # cycle inventaire matériel/logiciel 
 log_level: INFO                           # DEBUG logge aussi les heartbeats silencieux
 report_session_username: true             # false = remonter la présence sans le nom
 report_software: true                     # false = inventaire matériel seul, sans les logiciels
+location: ""                              # emplacement du poste ("Lycée de Taravao") ; vide = aucun
 ```
+
+`location` est un texte libre choisi par le déploiement — rien sur un poste ne
+dit dans quel bâtiment il se trouve — et vide par défaut. La console filtre et
+trie le parc par emplacement, et le relais Wake-on-LAN s'en sert pour désigner
+un poste voisin (section « Réveil des postes », point 4). Une valeur vide
+**efface** l'emplacement mémorisé côté serveur : un poste déplacé, ou dont la GPO
+a retiré le réglage, ne reste pas classé sous l'ancien.
 
 Toute valeur absente ou non positive retombe sur son défaut : un YAML partiel
 reste utilisable, et **le fichier lui-même est facultatif** — c'est le mode
@@ -492,10 +567,14 @@ le secret d'enrôlement, plutôt qu'en clair dans le YAML.
 | `InventoryCollectIntervalSeconds` | `REG_DWORD` | `inventory_collect_interval_seconds` |
 | `ReportSessionUsername` | `REG_DWORD` | `report_session_username` |
 | `ReportSoftware` | `REG_DWORD` | `report_software` |
+| `Location` | `REG_SZ` | `location` |
 
 Pour les intervalles, `0` est ignoré et signifie « laisser le défaut ». Pour
 `ReportSessionUsername` et `ReportSoftware`, c'est la **présence de la clé** qui
-l'emporte : `0` coupe la remontée, `1` la rétablit.
+l'emporte : `0` coupe la remontée, `1` la rétablit. Même règle pour `Location` :
+une valeur présente et vide retire l'emplacement, y compris celui du YAML — c'est
+ce qui permet à une GPO liée à l'OU d'un site de poser le nom du site sur tous
+ses postes, et à une autre de le retirer.
 
 `ReportSessionUsername` à `0` coupe la remontée du nom de l'utilisateur connecté
 (la console affiche alors la présence sans identité). `ReportSoftware` à `0`

@@ -24,6 +24,7 @@ describe('machineListParamsFromQuery', () => {
     const params = machineListParamsFromQuery({
       search: 'pc-01',
       domain: 'CORP',
+      location: 'Lycée de Taravao',
       antivirus: 'ESET',
       os_version: 'Windows 11 23H2',
       status: 'outdated',
@@ -39,6 +40,7 @@ describe('machineListParamsFromQuery', () => {
     expect(params).toEqual({
       search: 'pc-01',
       domain: 'CORP',
+      location: 'Lycée de Taravao',
       antivirus: 'ESET',
       os_version: 'Windows 11 23H2',
       status: 'outdated',

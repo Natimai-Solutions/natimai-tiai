@@ -14,6 +14,7 @@ class Machine(SQLModel, table=True):
     __table_args__ = (
         Index("ix_machines_hostname", "hostname"),
         Index("ix_machines_domain", "domain"),
+        Index("ix_machines_location", "location"),
         Index("ix_machines_last_seen", "last_seen"),
         Index("ix_machines_is_up_to_date", "is_up_to_date"),
         Index("ix_machines_needs_verification", "needs_verification"),
@@ -38,6 +39,18 @@ class Machine(SQLModel, table=True):
     # Attributes (may change over time)
     hostname: str | None = None
     domain: str | None = None
+    # Where the poste physically is — "Lycée de Taravao" — as its agent's
+    # configuration names it (YAML ``location`` or registry ``Location``). Free
+    # text chosen by the deployment, never derived: nothing on a machine says
+    # which building it is in. NULL = the agent reports none, which is the
+    # default, and an agent that clears its setting clears this too.
+    #
+    # Two readers. The console, which filters and groups the parc by it — the
+    # question "which postes are at this site" that the domain cannot answer
+    # once one domain spans several sites. And the Wake-on-LAN relay, which
+    # asks the same question for a harder reason: only a poste on the same wire
+    # can put a magic packet in front of the one to wake (``features/wol``).
+    location: str | None = None
     os_version: str | None = None
     agent_version: str | None = None
     # Primary IP address elected by the agent among the machine's addresses

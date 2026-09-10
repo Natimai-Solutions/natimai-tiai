@@ -20,6 +20,12 @@ export interface Machine {
   machine_uuid: string;
   hostname: string | null;
   domain: string | null;
+  /**
+   * The site, as the agent's configuration names it ("Lycée de Taravao").
+   * null = the agent reports none, which is the default. What a multi-site
+   * parc filters by — and what the Wake-on-LAN relay picks a neighbour with.
+   */
+  location: string | null;
   /** Primary address elected by the agent; null = never reported. */
   ip_address: string | null;
   os_version: string | null;
@@ -272,6 +278,7 @@ export interface MachineList {
 export type MachineSortField =
   | 'hostname'
   | 'domain'
+  | 'location'
   | 'av_product_name'
   | 'wu_pending_count'
   | 'session_user_present'
@@ -286,6 +293,8 @@ export interface ListMachinesParams {
   /** Free search: hostname, UUID, IP, antivirus name — and MAC in any notation. */
   search?: string;
   domain?: string;
+  /** Site, matched exactly (the dropdown feeds fleet values). */
+  location?: string;
   /** Antivirus name, matched as a substring server-side. */
   antivirus?: string;
   /** OS version, matched as a substring server-side ("Windows 10" = every build). */
@@ -425,6 +434,16 @@ export async function listChassisTypes(): Promise<FleetValue[]> {
   return data;
 }
 
+/**
+ * Sites the agents report, most populated first. Feeds the location filter;
+ * postes whose agent names no site are not listed — they are reached by
+ * clearing the filter.
+ */
+export async function listLocations(): Promise<FleetValue[]> {
+  const { data } = await api.get<FleetValue[]>('/machines/locations');
+  return data;
+}
+
 /** One column the fleet export can produce, as the server's catalogue lists it. */
 export interface ExportColumn {
   key: string;
@@ -531,6 +550,13 @@ export interface WakeResponse {
   results: WakeResult[];
   woken: number;
   failed: number;
+  /**
+   * The server handed the wake to a poste of the target's site to emit,
+   * rather than emitting itself (WOL_RELAY_ENABLED). Nothing has left any
+   * wire yet when this answer arrives; the notification says so. Optional so
+   * an older server reads as the emitting one.
+   */
+  relayed?: boolean;
 }
 
 /**
@@ -572,9 +598,15 @@ export function wakeNotification(res: WakeResponse): {
         : `Réveil impossible sur ${res.failed} poste(s) : aucun paquet émis.`,
     };
   }
-  const sent = `Paquet de réveil émis vers ${res.woken} poste(s)`;
+  // In relay mode the packet has not left anywhere yet: a poste of the site
+  // will emit it on its next contact with the server, and the sentence must
+  // not claim more than that.
+  const sent = res.relayed
+    ? `Réveil confié aux postes voisins de ${res.woken} poste(s)`
+    : `Paquet de réveil émis vers ${res.woken} poste(s)`;
   if (res.failed > 0) {
-    return { type: 'warning', message: `${sent} — ${res.failed} sans cible connue` };
+    const left = res.relayed ? 'sans cible ni relais' : 'sans cible connue';
+    return { type: 'warning', message: `${sent} — ${res.failed} ${left}` };
   }
   return { type: 'positive', message: `${sent} — le poste remontera à son prochain démarrage` };
 }

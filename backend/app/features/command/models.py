@@ -19,8 +19,9 @@ class CommandType(enum.StrEnum):
     one row in the agent's table and one entry in the console catalogue; the
     protocol and the schema stay untouched (``type`` is stored as a plain str).
 
-    One value — ``WAKE_ON_LAN`` — is executed by the *server* and never
-    delivered to an agent; see its comment below.
+    One value — ``WAKE_ON_LAN`` — is executed by the *server*, or relayed
+    through another poste's agent, and never delivered to the agent of the
+    machine it targets; see its comment below.
     """
 
     # Defender (Phase 1).
@@ -61,15 +62,22 @@ class CommandType(enum.StrEnum):
     # well (``agent/internal/agent/power.go``).
     REBOOT = "reboot"
     SHUTDOWN = "shutdown"
-    # The one type in this enum the agent never runs, and cannot: the machine it
-    # targets is off. The server emits the magic packet itself and writes the row
-    # already closed — it is never handed out on a heartbeat, so nothing can pick
-    # it up (``app/features/wol/``).
-    #
-    # It lives here rather than in a history of its own so that "who woke this
-    # poste, and when" is answered in the same place as "who restarted it": the
+    # The one type in this enum the *targeted* agent never runs, and cannot: the
+    # machine it targets is off. Two ways it is executed instead, and the row
+    # always sits on the machine being woken, so that "who woke this poste, and
+    # when" is answered in the same place as "who restarted it" — the
     # ``commands`` table is this product's audit trail, and a wake is an
-    # administrator acting on a machine like any other.
+    # administrator acting on a machine like any other:
+    #
+    # * by the server itself (the default), which emits the magic packet and
+    #   writes the row already closed. It is never offered on a heartbeat;
+    # * by a *relay* — another poste of the same site, whose agent puts the
+    #   frame on the wire the server cannot reach (``WOL_RELAY_ENABLED``). The
+    #   row is then queued PENDING like any command, but it is not the
+    #   target's heartbeat that picks it up: the first eligible poste to
+    #   contact the server claims it (``relay_machine_id``), and it is the one
+    #   command whose delivery carries an argument — the MAC to wake. See
+    #   ``app/features/wol/relay.py`` for what bounds that.
     WAKE_ON_LAN = "wake_on_lan"
 
     # Diagnostics: read-only, the value is in reading ``result_output``.
@@ -108,6 +116,7 @@ class Command(SQLModel, table=True):
     __table_args__ = (
         Index("ix_commands_machine_status", "machine_id", "status"),
         Index("ix_commands_expires_at", "expires_at"),
+        Index("ix_commands_type_status", "type", "status"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -126,3 +135,12 @@ class Command(SQLModel, table=True):
     finished_at: datetime | None = utc_field(default=None, nullable=True)
     result_output: str | None = None
     error: str | None = None
+    # Set on a ``wake_on_lan`` alone: the poste whose agent emitted — or is
+    # about to emit — the magic packet on behalf of ``machine_id``, which is
+    # off. NULL while no poste has claimed it, and always NULL on every other
+    # type and on a wake the server emitted itself. ON DELETE SET NULL: the
+    # relay being retired must not erase the target's history.
+    relay_machine_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(ForeignKey("machines.id", ondelete="SET NULL"), nullable=True),
+    )

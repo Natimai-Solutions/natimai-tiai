@@ -25,6 +25,9 @@ const rows = computed<InfoRow[]>(() => {
     { label: 'Nom', value: m.hostname ?? '—' },
     { label: 'UUID machine', value: m.machine_uuid },
     { label: 'Domaine', value: m.domain ?? '—' },
+    // As the agent's configuration names it — a dash means the deployment set
+    // none, and the wake relay then falls back on the domain.
+    { label: 'Emplacement', value: m.location ?? '—' },
     { label: 'Adresse IP', value: ipAddressLabel(m.ip_address, m.ip_prefix_length) },
     // Right under the address it was elected with, and for two reasons: it
     // is the wake target — a dash here means « Réveiller le poste » has

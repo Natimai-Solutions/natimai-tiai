@@ -1,6 +1,10 @@
 package config
 
-import "golang.org/x/sys/windows/registry"
+import (
+	"strings"
+
+	"golang.org/x/sys/windows/registry"
+)
 
 // applyRegistryOverrides overlays values from HKLM\SOFTWARE\Tiai onto cfg. Any
 // present key wins over the YAML file, letting GPO push a single setting (e.g.
@@ -27,6 +31,12 @@ func applyRegistryOverrides(cfg *Config) {
 	}
 	if v, _, err := k.GetStringValue("LogLevel"); err == nil && v != "" {
 		cfg.LogLevel = v
+	}
+	// Presence wins, like the two flags below and unlike the strings above: an
+	// empty Location pushed by a GPO is the way to *remove* a site name a YAML
+	// still carries, and it has to be able to.
+	if v, _, err := k.GetStringValue("Location"); err == nil {
+		cfg.Location = strings.TrimSpace(v)
 	}
 	// No `v > 0` guard here, unlike the intervals below: 0 is the meaningful
 	// value (report presence only), so it is the key's *presence* that wins.
