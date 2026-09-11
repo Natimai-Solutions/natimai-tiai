@@ -13,6 +13,8 @@ app/
   core/        config, db, security (tokens), worker (outbox + tâches périodiques)
   api/         deps + routes (agent, machines, health)
   features/    machine/ threat/ command/ notification/ (modèles + logique)
+               user/ (comptes, groupes, permissions) room/ (bâtiments, salles, annuaire)
+               intervention/ check/ maintenance/ setting/ (exploitation du parc)
   alembic/     migrations
   scripts/     entrypoint.sh (api | worker | migrate)
 ```
@@ -49,13 +51,19 @@ Ajouter une dépendance : `uv add <pkg>` (ou `uv add --dev <pkg>` pour le groupe
 
 **Console** (auth : JWT utilisateur)
 - `POST /api/v1/auth/login` — email + mot de passe (OAuth2 password), renvoie un JWT.
-- `GET  /api/v1/auth/me` — utilisateur courant.
+- `GET  /api/v1/auth/me` — utilisateur courant, ses groupes et ses permissions.
+- `GET/POST/PATCH/DELETE /api/v1/groups` — groupes et leurs droits (permission `user:read` / `user:write`) ; `GET /api/v1/groups/permissions` liste le catalogue.
+- `GET /api/v1/maintenance/due?owner=me|none|<id>`, `POST /api/v1/maintenance`, `GET /api/v1/maintenance[/{id}]`, `GET/PATCH /api/v1/rooms/{id}/maintenance`, `GET/PATCH /api/v1/machines/{id}/maintenance` — maintenance : ce qui est dû par salle et par responsable, enregistrement d'une séance (note globale + note par poste, une ligne « maintenance » dans le journal de chacun, cycle relancé), cycle et responsable par salle et par poste (permission `maintenance:read` / `maintenance:write`). La résolution est à trois niveaux, poste › salle › parc (`features/maintenance/policy.py`), en Python pour les réponses et en SQL pour le filtre `maintenance_state`, le tri `maintenance_due_at` et les compteurs du tableau de bord.
+- `GET/PATCH /api/v1/settings` — les défauts du parc (cycle, responsable, fenêtre « à échéance »), table `app_settings`, permission `settings:read` / `settings:write` (administrateurs seuls par défaut).
+- `POST /api/v1/machines/{id}/check`, `GET /api/v1/checks?open&assigned_to=me|none|<id>`, `PATCH /api/v1/checks/{id}`, `POST /api/v1/checks/{id}/close`, `POST /api/v1/checks/bulk`, `GET /api/v1/checks/assignable-users` — vérifications demandées sur un poste, affectables à un compte, une seule ouverte par poste, closes avec une note qui s'inscrit dans le journal (permission `check:read` / `check:write`). La liste des postes se filtre par `check_open`.
+- `GET/POST /api/v1/machines/{id}/interventions`, `PATCH/DELETE /api/v1/interventions/{id}` — le journal d'un poste : panne, installation logicielle, mise à niveau, maintenance, vérification, autre (permission `intervention:read` / `intervention:write`). Antidatable ; les suppressions et les modifications par un autre que l'auteur sont tracées dans l'audit ; une fusion de doublons déplace le journal sur le poste conservé.
+- `GET/POST/PATCH/DELETE /api/v1/buildings` et `/api/v1/rooms` — bâtiments et salles (permission `room:read` / `room:write`) ; `POST /api/v1/rooms/{id}/machines` et `POST /api/v1/rooms/unassign` déplacent des postes. La liste des postes se filtre par `room_id`, `building_id`, `without_room`, `location_mismatch` et se trie par `building` / `room`. Avec `ROOM_SOURCE=ad_ou` ou `ad_location`, le bloc `directory` de l'inventaire range les postes tout seul (`features/room/crud.py`, `place_from_directory`), le rattachement manuel répond `room.placement.locked`, et `POST /api/v1/rooms/sync-directory` reclasse le parc depuis les lectures mémorisées ; `GET /api/v1/rooms/config` dit le mode.
 - `GET  /api/v1/machines` / `GET /api/v1/machines/{id}` — lecture (permission `machine:read`).
-- `POST /api/v1/commands` — file une commande par poste (permission `command:execute`, admin).
+- `POST /api/v1/commands` — file une commande par poste (permission `command:execute`, plus `risky_command:execute` pour les types à risque).
   Champ optionnel `ttl_minutes` (borné à 1 min → 30 j) ; omis, le déploiement
   décide via `COMMAND_DEFAULT_TTL_MINUTES` (**60** par défaut). Au-delà, une
   commande jamais distribuée est périmée — voir *Cycle de vie d'une commande*.
-- `POST /api/v1/machines/wake` — réveil Wake-on-LAN (permission `command:execute`, admin).
+- `POST /api/v1/machines/wake` — réveil Wake-on-LAN (permission `command:execute`).
   La seule action que le **serveur** exécute lui-même : le poste visé est éteint,
   il n'a pas d'agent à qui la confier. Le paquet magique est diffusé sur le
   sous-réseau du poste ([features/wol/](app/features/wol/)) et la tentative est
@@ -104,22 +112,54 @@ comportement attendu, pas une ligne oubliée. Passé son délai, elle cesse
 simplement de verrouiller son type sur ce poste, et si l'agent finit par
 répondre, son résultat s'inscrit malgré tout sur la ligne d'origine.
 
-## Utilisateurs & permissions
+## Exploitation du parc : salles, vérifications, maintenance, journal
 
-Les opérateurs se connectent en **JWT** (email + mot de passe, hash bcrypt). Deux
-rôles ([models.py](app/features/user/models.py)) :
+Quatre chantiers livrés ensemble (cf. `dev/plan-salles-maintenance-interventions.md`),
+migrations `0016` à `0021`, chacun sa ressource de permission :
 
-| Rôle | Capacités |
-|---|---|
-| `admin` | lecture + écriture + exécution de commandes à distance |
-| `readonly` | lecture seule |
+| Objet | Tables | Ce qu'il porte |
+|---|---|---|
+| Bâtiments et salles (`room`) | `buildings`, `rooms`, `machines.room_id` | Un bâtiment porte l'emplacement (le site que l'agent déclare), une salle en hérite. Un poste dont l'agent nomme un autre site que sa salle est **signalé** (`location_mismatch`), jamais refusé. `ROOM_SOURCE` fait ranger les postes par l'annuaire (OU ou attribut Emplacement, lus par l'agent avec l'inventaire) au lieu de la console. |
+| Journal (`intervention`) | `interventions` | Toute intervention humaine sur un poste, une chronologie ; les vérifications closes et les séances de maintenance y écrivent leur ligne (`check_id`, `maintenance_id`). |
+| Vérifications (`check`) | `machine_checks` | « Va voir ce poste » : consignes, affectataire, une seule ouverte par poste (index partiel), close avec une note datée. |
+| Maintenance (`maintenance`, `settings`) | `maintenances`, `app_settings`, `*.maintenance_cycle_days`, `*.maintenance_owner_id`, `machines.last_maintenance_at` | Cycle et responsable résolus poste › salle › parc (`features/maintenance/policy.py`, en Python pour les réponses et en SQL pour les filtres et compteurs) ; une séance = une visite, une ligne de journal par poste fait, le cycle relancé. |
+
+Les trois groupes intégrés reçoivent les droits de ces ressources par les
+migrations qui les créent ; les administrateurs ont tout implicitement.
+
+## Utilisateurs, groupes & permissions
+
+Les opérateurs se connectent en **JWT** (email + mot de passe, hash bcrypt). Ce
+qu'un compte peut faire est l'**union des droits de ses groupes**
+([models.py](app/features/user/models.py) : `groups`, `group_permissions`,
+`user_groups`). Un groupe est un ensemble nommé de permissions
+`ressource:action`, composé depuis la console (`/groups`). Trois groupes sont
+intégrés et créés par la migration `0016` puis par
+[seed_admin.py](app/scripts/seed_admin.py) à chaque démarrage s'ils manquent :
+
+| Groupe intégré | Clé | Droits par défaut |
+|---|---|---|
+| Administrateurs | `admin` | **tous**, implicitement — y compris ceux des ressources à venir ; non modifiables |
+| Lecture seule | `readonly` | `machine:read`, `threat:read`, `command:read`, `room:read`, `intervention:read`, `check:read`, `maintenance:read` |
+| Techniciens | `technician` | lecture seule + `command:execute` + `risky_command:execute` + `intervention:write` + `check:write` + `maintenance:write` |
+
+Les groupes intégrés se renomment et, sauf les administrateurs, se modifient
+comme les autres ; ils ne se suppriment pas. Aucune modification ne peut laisser
+la console sans compte actif détenant `user:write` (erreur `user.lockout`), et
+personne ne modifie ses propres groupes.
 
 L'autorisation passe par des permissions `(ressource, action)`
 ([permissions.py](app/features/user/permissions.py)) : les routes demandent une
-capacité via `require_permission(Resource.X, Action.Y)`, jamais un test de rôle
-en dur. Le mapping rôle→permissions est statique aujourd'hui ; il pourra être
-remplacé par des **grants en base par utilisateur/table** (lecture/écriture fine)
-en ne modifiant que `has_permission`, sans toucher aux routes.
+capacité via `require_permission(Resource.X, Action.Y)`, jamais un test de
+groupe en dur. Le catalogue (`PERMISSION_CATALOGUE`) est ce que la grille de la
+console propose ; une permission hors catalogue est refusée à l'écriture.
+
+Les commandes sont coupées en deux : `command:execute` ouvre `POST /commands`
+et le réveil Wake-on-LAN ; les types de `RISKY_COMMAND_TYPES`
+([command/models.py](app/features/command/models.py) — redémarrage, arrêt,
+installation de mises à jour, réinitialisation de Windows Update, réparations
+DISM, réinitialisation du spouleur) demandent en plus `risky_command:execute`,
+vérifié dans la route puisque le type est dans le corps.
 
 Le premier admin est créé au démarrage depuis `FIRST_ADMIN_EMAIL` /
 `FIRST_ADMIN_PASSWORD` (script [seed_admin.py](app/scripts/seed_admin.py)).

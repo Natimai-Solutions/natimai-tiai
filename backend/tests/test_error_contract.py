@@ -10,10 +10,10 @@ import uuid
 
 async def _admin_headers(client, db_session) -> dict[str, str]:
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     await crud.create_user(
-        db_session, email="admin@test.local", password="pw", role=Role.ADMIN
+        db_session, email="admin@test.local", password="pw", groups=[BuiltinGroup.ADMIN]
     )
     resp = await client.post(
         "/api/v1/auth/login", data={"username": "admin@test.local", "password": "pw"}
@@ -72,10 +72,10 @@ async def test_machine_not_found(client, db_session):
 
 async def test_permission_denied(client, db_session):
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     await crud.create_user(
-        db_session, email="ro@test.local", password="pw", role=Role.READONLY
+        db_session, email="ro@test.local", password="pw", groups=[BuiltinGroup.READONLY]
     )
     login = await client.post(
         "/api/v1/auth/login", data={"username": "ro@test.local", "password": "pw"}

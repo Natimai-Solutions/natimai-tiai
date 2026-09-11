@@ -1,7 +1,5 @@
 import { api } from 'boot/axios';
-import type { EmailPreference } from 'src/services/auth';
-
-export type Role = 'admin' | 'readonly';
+import type { EmailPreference, GroupRef } from 'src/services/auth';
 
 /** Minimum enforced by the backend (PASSWORD_MIN_LENGTH). */
 export const PASSWORD_MIN_LENGTH = 12;
@@ -10,12 +8,12 @@ export interface ConsoleUser {
   id: string;
   email: string;
   full_name: string | null;
-  role: Role;
   is_active: boolean;
   /** Which mails this account receives. Visible to an administrator because
    * "who gets told when a poste catches something" is a property of the parc's
    * supervision, not a private setting. */
   email_preference: EmailPreference;
+  groups: GroupRef[];
   created_at: string;
   updated_at: string;
 }
@@ -37,14 +35,16 @@ export interface CreateUserPayload {
   email: string;
   password: string;
   full_name?: string | null;
-  role?: Role;
+  /** None is a valid account: it can log in and sees nothing. */
+  group_ids?: string[];
 }
 
 /** Partial update — only the supplied fields are changed. */
 export interface UpdateUserPayload {
   email?: string;
   full_name?: string | null;
-  role?: Role;
+  /** Replaces the memberships. Refused on one's own account. */
+  group_ids?: string[];
   is_active?: boolean;
   email_preference?: EmailPreference;
 }

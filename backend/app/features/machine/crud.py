@@ -6,7 +6,9 @@ from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
+from app.features.check import crud as check_crud
 from app.features.command.models import Command
+from app.features.intervention import crud as intervention_crud
 from app.features.machine.models import Machine
 from app.features.threat.models import Threat
 
@@ -55,9 +57,23 @@ async def merge_into(
         .values(machine_id=target.id)
     )
 
-    # Keep the freshest last-seen; the merge resolves the verification.
+    # The journal follows: what was done to the duplicate was done to the poste.
+    await intervention_crud.move_to(session, source_id=source.id, target_id=target.id)
+    await check_crud.move_to(session, source_id=source.id, target_id=target.id)
+
+    # Keep the freshest last-seen; the merge resolves the verification. The
+    # room follows too, when the kept record has none: a duplicate was often
+    # the one somebody filed.
     if source.last_seen > target.last_seen:
         target.last_seen = source.last_seen
+    if target.room_id is None:
+        target.room_id = source.room_id
+    # The maintenance record follows the journal: the latest visit counts.
+    if source.last_maintenance_at is not None and (
+        target.last_maintenance_at is None
+        or source.last_maintenance_at > target.last_maintenance_at
+    ):
+        target.last_maintenance_at = source.last_maintenance_at
     target.needs_verification = False
     target.updated_at = utcnow()
 

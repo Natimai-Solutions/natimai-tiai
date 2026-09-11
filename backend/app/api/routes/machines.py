@@ -19,6 +19,8 @@ from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
+from app.features.check import crud as check_crud
+from app.features.check.models import MachineCheck
 from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.inventory.models import (
     Disk,
@@ -47,7 +49,14 @@ from app.features.machine.status import (
     status_clause,
     windows_update_clause,
 )
+from app.features.maintenance import policy as maintenance_policy
+from app.features.maintenance.policy import MaintenanceState
+from app.features.room import crud as room_crud
+from app.features.room.models import Building, Room
+from app.features.setting import crud as setting_crud
+from app.features.setting.crud import MaintenancePolicy
 from app.features.threat.models import Threat
+from app.features.user.models import User
 from app.features.user.permissions import Action, Resource
 from app.features.windows_update.models import WindowsUpdate
 from app.features.wol import relay as wol_relay
@@ -71,6 +80,30 @@ class MachineOut(BaseModel):
     # is what the list is scanned by on a multi-site parc — "which postes are
     # at Taravao" — and null for every poste whose deployment set none.
     location: str | None
+    # Where the console placed the poste (``features/room``): its room, the
+    # room's building, and the site those two resolve to. Defaults rather than
+    # required, because a ``MachineOut`` is also built off a bare ``Machine``
+    # (duplicate candidates); the list and the fiche fill them in.
+    room_id: uuid.UUID | None = None
+    room_name: str | None = None
+    building_id: uuid.UUID | None = None
+    building_name: str | None = None
+    # The site the room says — its building's, or its own.
+    room_location: str | None = None
+    # The agent and the room disagree on the site. A finding, not a refusal:
+    # it is what reveals a GPO aimed at the wrong OU or a poste moved without
+    # its room. False when either side has no opinion.
+    location_mismatch: bool = False
+    # A verification somebody asked for is open on this poste. In the list
+    # because it is what the list is filtered by to see what is waiting.
+    check_open: bool = False
+    check_assigned_to: str | None = None
+    # Maintenance, as it resolves for this poste (``maintenance/policy.py``):
+    # when it is due, where it stands, who owns it. Null due = excluded.
+    last_maintenance_at: datetime | None = None
+    maintenance_due_at: datetime | None = None
+    maintenance_state: str | None = None
+    maintenance_owner: str | None = None
     ip_address: str | None
     os_version: str | None
     agent_version: str | None
@@ -113,6 +146,70 @@ class MachineOut(BaseModel):
     def is_online(self) -> bool:
         """Whether the agent has phoned home within the online window."""
         return is_online(self.last_seen, utcnow(), settings.OFFLINE_AFTER_SECONDS)
+
+
+def _place(out: MachineOut, machine: Machine, placement: room_crud.Placement) -> None:
+    """Fill a payload's room fields from a resolved placement."""
+    room, building = placement.room, placement.building
+    out.room_id = room.id if room else None
+    out.room_name = room.name if room else None
+    out.building_id = building.id if building else None
+    out.building_name = building.name if building else None
+    out.room_location = placement.location
+    out.location_mismatch = room_crud.location_mismatch(
+        machine.location, placement.location
+    )
+
+
+def _machine_out(
+    machine: Machine,
+    room: Room | None,
+    building: Building | None,
+    check: MachineCheck | None = None,
+    names: dict[uuid.UUID, str] | None = None,
+    policy: MaintenancePolicy | None = None,
+    now: datetime | None = None,
+) -> MachineOut:
+    """A list row, with its placement, open request and maintenance standing
+    as the joined query and the policy give them."""
+    out = MachineOut.model_validate(machine)
+    _place(out, machine, room_crud.Placement(room=room, building=building))
+    if check is not None:
+        out.check_open = True
+        if check.assigned_to_id and names:
+            out.check_assigned_to = names.get(check.assigned_to_id)
+    if policy is not None:
+        res = maintenance_policy.resolve(machine, room, policy, now or utcnow())
+        out.last_maintenance_at = machine.last_maintenance_at
+        out.maintenance_due_at = res.due_at
+        out.maintenance_state = res.state.value
+        out.maintenance_owner = (
+            names.get(res.owner_id) if names and res.owner_id else None
+        )
+    return out
+
+
+def _owner_ids(rows: list[Any], policy: MaintenancePolicy) -> set[uuid.UUID]:
+    """Every account a page's rows may name: assignees, owners at each level."""
+    ids: set[uuid.UUID] = set()
+    if policy.owner_id:
+        ids.add(policy.owner_id)
+    for m, room, _b, check in rows:
+        if m.maintenance_owner_id:
+            ids.add(m.maintenance_owner_id)
+        if room is not None and room.maintenance_owner_id:
+            ids.add(room.maintenance_owner_id)
+        if check is not None and check.assigned_to_id:
+            ids.add(check.assigned_to_id)
+    return ids
+
+
+async def _assignee_names(
+    session: SessionDep, checks: list[MachineCheck | None]
+) -> dict[uuid.UUID, str]:
+    """Display names of the accounts the page's open requests are assigned to."""
+    ids = {c.assigned_to_id for c in checks if c is not None and c.assigned_to_id}
+    return await setting_crud.user_names(session, ids)
 
 
 class PendingUpdateOut(BaseModel):
@@ -241,6 +338,15 @@ class InstalledSoftwareOut(BaseModel):
     first_seen: datetime
 
 
+class OpenCheckOut(BaseModel):
+    id: uuid.UUID
+    requested_by: str
+    assigned_to_id: uuid.UUID | None
+    assigned_to_name: str | None
+    instructions: str | None
+    created_at: datetime
+
+
 class MachineDetailOut(MachineOut):
     """Full machine detail (Defender state, session type, fingerprint, times)."""
 
@@ -268,6 +374,16 @@ class MachineDetailOut(MachineOut):
     machine_guid: str | None
     smbios_uuid: str | None
     tpm_ek_hash: str | None
+    # What the domain says about the poste, as its agent last read it. On the
+    # fiche whatever ROOM_SOURCE says: it is what a directory-driven placement
+    # reads, and what explains one.
+    ad_distinguished_name: str | None
+    ad_ou: str | None
+    ad_ou_dn: str | None
+    ad_location: str | None
+    # The verification request open on this poste, if any: who asked, who is
+    # asked, what to look at. The banner of the fiche.
+    open_check: OpenCheckOut | None = None
     # Lets the console show that a poste is cut off and offer the only way
     # back: « autoriser le ré-enrôlement » (the fleet secret no longer clears
     # a revocation on its own).
@@ -343,6 +459,13 @@ MachineSortField = Literal[
     "hostname",
     "domain",
     "location",
+    # The console's placement, off the joined tables: grouping a parc by room
+    # is what the column is for.
+    "building",
+    "room",
+    # When the poste is next due: the "what do I do this week" sort. Needs
+    # the policy, so ``_sort_key`` takes it.
+    "maintenance_due_at",
     "av_product_name",
     "wu_pending_count",
     "session_user_present",
@@ -366,7 +489,7 @@ _CASEFOLD_SORT_FIELDS = {
 }
 
 
-def _sort_key(field: MachineSortField) -> Any:
+def _sort_key(field: MachineSortField, policy: MaintenancePolicy | None = None) -> Any:
     """The expression a sort orders by.
 
     Expressions and not columns, since this one was extended: the free-space
@@ -375,17 +498,25 @@ def _sort_key(field: MachineSortField) -> Any:
     """
     if field == "disk_free_percent":
         return disk_free_percent()
+    if field == "maintenance_due_at" and policy is not None:
+        return maintenance_policy.due_expr(policy)
+    if field == "building":
+        return func.lower(col(Building.name))
+    if field == "room":
+        return func.lower(col(Room.name))
     column = col(getattr(Machine, field))
     return func.lower(column) if field in _CASEFOLD_SORT_FIELDS else column
 
 
-def _sort_clause(field: MachineSortField, descending: bool) -> UnaryExpression[Any]:
+def _sort_clause(
+    field: MachineSortField, descending: bool, policy: MaintenancePolicy | None = None
+) -> UnaryExpression[Any]:
     """ORDER BY expression for one sortable column.
 
     NULLs last in both directions: "never reported" is an absence, not a value,
     and it must not lead the list whichever way the reader flips the arrow.
     """
-    key: Any = _sort_key(field)
+    key: Any = _sort_key(field, policy)
     ordered: UnaryExpression[Any] = key.desc() if descending else key.asc()
     return ordered.nulls_last()
 
@@ -441,6 +572,18 @@ class MachineFilters:
     # Exact, like the domain: the dropdown feeds it values the fleet reported,
     # and "Lycée" as a substring would gather every lycée of the académie.
     location: str | None = None
+    # The console's placement. ``room_id`` and ``building_id`` are exact;
+    # ``without_room`` selects the postes nobody placed — the ones a manual
+    # classification still has to file. ``location_mismatch`` is the finding
+    # the rooms page counts: agent and room disagreeing on the site.
+    room_id: uuid.UUID | None = None
+    building_id: uuid.UUID | None = None
+    without_room: bool | None = None
+    location_mismatch: bool | None = None
+    # A verification request is open (true) or not (false).
+    check_open: bool | None = None
+    # Where the poste stands on its maintenance cycle.
+    maintenance_state: MaintenanceState | None = None
     antivirus: str | None = None
     os_version: str | None = None
     status: MachineStatus | None = None
@@ -471,6 +614,12 @@ def machine_filters(
     search: str | None = None,
     domain: str | None = None,
     location: str | None = None,
+    room_id: uuid.UUID | None = None,
+    building_id: uuid.UUID | None = None,
+    without_room: bool | None = None,
+    location_mismatch: bool | None = None,
+    check_open: bool | None = None,
+    maintenance_state: MaintenanceState | None = None,
     antivirus: str | None = None,
     os_version: str | None = None,
     status: MachineStatus | None = None,
@@ -500,6 +649,12 @@ def machine_filters(
         search=search,
         domain=domain,
         location=location,
+        room_id=room_id,
+        building_id=building_id,
+        without_room=without_room,
+        location_mismatch=location_mismatch,
+        check_open=check_open,
+        maintenance_state=maintenance_state,
         antivirus=antivirus,
         os_version=os_version,
         status=status,
@@ -524,16 +679,68 @@ def machine_filters(
 FiltersDep = Annotated[MachineFilters, Depends(machine_filters)]
 
 
+def _room_location() -> Any:
+    """The site a poste's room says, as SQL: its building's, else its own."""
+    return func.coalesce(col(Building.location), col(Room.location))
+
+
+def _mismatch_clause() -> Any:
+    """Agent and room both name a site, and not the same one."""
+    site = _room_location()
+    return (
+        col(Machine.location).is_not(None)
+        & site.is_not(None)
+        & (col(Machine.location) != site)
+    )
+
+
 def _filtered_machines(
-    filters: MachineFilters, outdated: list[str] | None = None
+    filters: MachineFilters,
+    outdated: list[str] | None = None,
+    policy: MaintenancePolicy | None = None,
 ) -> Any:
     """The machine SELECT with every requested facet applied.
+
+    Returns ``(Machine, Room | None, Building | None, MachineCheck | None)``
+    rows: the placement and the open verification request are joined in
+    rather than fetched per row, because they are also what facets filter
+    on and columns sort by. At most one open request per poste (partial
+    unique index), so the join never multiplies rows.
 
     ``outdated`` is the list of agent versions ranking below the reference,
     from ``fleet_versions`` — read by the caller, because this builds a
     statement and does not touch the database.
     """
-    stmt = select(Machine)
+    stmt = (
+        select(Machine, Room, Building, MachineCheck)
+        .outerjoin(Room, col(Room.id) == col(Machine.room_id))
+        .outerjoin(Building, col(Building.id) == col(Room.building_id))
+        .outerjoin(
+            MachineCheck,
+            (col(MachineCheck.machine_id) == col(Machine.id))
+            & (col(MachineCheck.closed_at).is_(None)),
+        )
+    )
+    if filters.check_open is not None:
+        stmt = stmt.where(
+            col(MachineCheck.id).is_not(None)
+            if filters.check_open
+            else col(MachineCheck.id).is_(None)
+        )
+    if filters.maintenance_state is not None and policy is not None:
+        stmt = stmt.where(
+            maintenance_policy.state_clause(filters.maintenance_state, policy, utcnow())
+        )
+    if filters.room_id is not None:
+        stmt = stmt.where(col(Machine.room_id) == filters.room_id)
+    if filters.building_id is not None:
+        stmt = stmt.where(col(Room.building_id) == filters.building_id)
+    if filters.without_room:
+        stmt = stmt.where(col(Machine.room_id).is_(None))
+    if filters.location_mismatch is not None:
+        stmt = stmt.where(
+            _mismatch_clause() if filters.location_mismatch else ~_mismatch_clause()
+        )
     if filters.agent_version:
         # Equality, like the chassis kind: a version is a closed string the
         # dropdown feeds exactly, and "0.5" as a substring of "0.5.0" and
@@ -635,7 +842,8 @@ async def list_machines(
     default order is freshest contact first.
     """
     versions = await fleet_versions(session)
-    stmt = _filtered_machines(filters, versions.outdated)
+    policy = await setting_crud.maintenance_policy(session)
+    stmt = _filtered_machines(filters, versions.outdated, policy)
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     # last_seen then id behind the requested column: ties must land on the same
     # page from one request to the next, or rows duplicate and vanish across
@@ -644,12 +852,18 @@ async def list_machines(
         stmt = stmt.order_by(col(Machine.last_seen).desc(), col(Machine.id))
     else:
         stmt = stmt.order_by(
-            _sort_clause(sort_by, sort_desc),
+            _sort_clause(sort_by, sort_desc, policy),
             col(Machine.last_seen).desc(),
             col(Machine.id),
         )
     rows = await session.exec(stmt.offset((page - 1) * page_size).limit(page_size))
-    items = [MachineOut.model_validate(m) for m in rows.all()]
+    page_rows = rows.all()
+    names = await setting_crud.user_names(session, _owner_ids(page_rows, policy))
+    now = utcnow()
+    items = [
+        _machine_out(m, room, building, check, names, policy, now)
+        for m, room, building, check in page_rows
+    ]
     return MachineList(
         items=items,
         total=total or 0,
@@ -877,7 +1091,9 @@ async def list_export_columns() -> list[ExportColumnOut]:
     ]
 
 
-async def _export_rows(session: SessionDep, filters: MachineFilters) -> list[Machine]:
+async def _export_rows(
+    session: SessionDep, filters: MachineFilters
+) -> list[machine_export.ExportRow]:
     """The filtered fleet, every row, hostname order.
 
     Unpaginated on purpose: an export of the first fifty rows is not an export.
@@ -885,11 +1101,34 @@ async def _export_rows(session: SessionDep, filters: MachineFilters) -> list[Mac
     parc is thousands of rows, not millions.
     """
     versions = await fleet_versions(session)
-    stmt = _filtered_machines(filters, versions.outdated).order_by(
+    policy = await setting_crud.maintenance_policy(session)
+    stmt = _filtered_machines(filters, versions.outdated, policy).order_by(
         func.lower(col(Machine.hostname)).nulls_last(), col(Machine.id)
     )
     rows = await session.exec(stmt)
-    return list(rows.all())
+    all_rows = rows.all()
+    names = await setting_crud.user_names(session, _owner_ids(all_rows, policy))
+    now = utcnow()
+    return [
+        machine_export.ExportRow(
+            machine=m,
+            room=room,
+            building=building,
+            check=check,
+            check_assigned_to=(
+                names.get(check.assigned_to_id)
+                if check and check.assigned_to_id
+                else None
+            ),
+            maintenance=maintenance_policy.resolve(m, room, policy, now),
+            maintenance_owner=(
+                names.get(res.owner_id)
+                if (res := maintenance_policy.resolve(m, room, policy, now)).owner_id
+                else None
+            ),
+        )
+        for m, room, building, check in all_rows
+    ]
 
 
 # The fleet export, and deliberately not a per-machine one. A fiche is read on
@@ -1139,6 +1378,36 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
         .order_by(severity_rank, col(WindowsUpdate.title))
     )
     detail = MachineDetailOut.model_validate(machine)
+    _place(detail, machine, await room_crud.placement(session, machine.room_id))
+    policy = await setting_crud.maintenance_policy(session)
+    placement = await room_crud.placement(session, machine.room_id)
+    res = maintenance_policy.resolve(machine, placement.room, policy, utcnow())
+    detail.last_maintenance_at = machine.last_maintenance_at
+    detail.maintenance_due_at = res.due_at
+    detail.maintenance_state = res.state.value
+    if res.owner_id:
+        detail.maintenance_owner = (
+            await setting_crud.user_names(session, {res.owner_id})
+        ).get(res.owner_id)
+    open_check = await check_crud.open_for_machine(session, machine.id)
+    if open_check is not None:
+        detail.check_open = True
+        assignee = (
+            await session.get(User, open_check.assigned_to_id)
+            if open_check.assigned_to_id
+            else None
+        )
+        detail.check_assigned_to = (
+            (assignee.full_name or assignee.email) if assignee else None
+        )
+        detail.open_check = OpenCheckOut(
+            id=open_check.id,
+            requested_by=open_check.requested_by,
+            assigned_to_id=open_check.assigned_to_id,
+            assigned_to_name=detail.check_assigned_to,
+            instructions=open_check.instructions,
+            created_at=open_check.created_at,
+        )
     detail.pending_updates = [PendingUpdateOut.model_validate(u) for u in rows.all()]
     await _attach_inventory(session, machine, detail)
     detail.agent_latest_version = (await fleet_versions(session)).latest

@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Index
+from sqlalchemy import Column, ForeignKey, Index
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
@@ -51,6 +51,39 @@ class Machine(SQLModel, table=True):
     # asks the same question for a harder reason: only a poste on the same wire
     # can put a magic packet in front of the one to wake (``features/wol``).
     location: str | None = None
+    # The room the console (or the directory, ``ROOM_SOURCE``) placed the poste
+    # in — ``features/room``. Distinct from ``location`` above, which the agent
+    # owns: a room belongs to a building, which sits on a site, and a poste
+    # whose two answers disagree is flagged in the list. SET NULL: deleting a
+    # room leaves its postes standing, room-less.
+    room_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True, index=True
+        ),
+    )
+    # What the domain says about the poste, as its agent read it on the
+    # inventory cycle: the computer object's DN, the OU holding it (name and
+    # DN), and the object's "location" attribute. Stored whatever
+    # ``ROOM_SOURCE`` says — shown on the fiche regardless, and the input of
+    # a directory-driven placement, re-runnable from the console when the
+    # setting changes. NULL = never reported: a workgroup poste, or an agent
+    # older than the field.
+    ad_distinguished_name: str | None = None
+    ad_ou: str | None = None
+    ad_ou_dn: str | None = None
+    ad_location: str | None = None
+    # Maintenance: the poste's own cycle and owner, overriding its room's and
+    # the parc's (``maintenance/policy.py``); NULL = inherit, 0 = excluded.
+    # ``last_maintenance_at`` is denormalised from the journal — it is what
+    # the list sorts and filters on, and a poste is due at
+    # ``COALESCE(last_maintenance_at, first_seen) + cycle``.
+    maintenance_cycle_days: int | None = None
+    maintenance_owner_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+    )
+    last_maintenance_at: datetime | None = utc_field(default=None, nullable=True)
     os_version: str | None = None
     agent_version: str | None = None
     # Primary IP address elected by the agent among the machine's addresses

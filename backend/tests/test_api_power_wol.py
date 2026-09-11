@@ -13,10 +13,13 @@ import pytest
 
 async def _admin_headers(client, db_session) -> dict[str, str]:
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     await crud.create_user(
-        db_session, email="power-admin@test.local", password="pw", role=Role.ADMIN
+        db_session,
+        email="power-admin@test.local",
+        password="pw",
+        groups=[BuiltinGroup.ADMIN],
     )
     resp = await client.post(
         "/api/v1/auth/login",
@@ -28,10 +31,13 @@ async def _admin_headers(client, db_session) -> dict[str, str]:
 
 async def _readonly_headers(client, db_session) -> dict[str, str]:
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     await crud.create_user(
-        db_session, email="power-ro@test.local", password="pw", role=Role.READONLY
+        db_session,
+        email="power-ro@test.local",
+        password="pw",
+        groups=[BuiltinGroup.READONLY],
     )
     resp = await client.post(
         "/api/v1/auth/login",

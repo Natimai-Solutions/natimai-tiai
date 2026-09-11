@@ -46,13 +46,13 @@ describe('createUser', () => {
     const result = await createUser({
       email: 'marie@test.local',
       password: 'correct-horse-battery',
-      role: 'admin',
+      group_ids: ['g-admin'],
     });
 
     expect(api.post).toHaveBeenCalledWith('/users', {
       email: 'marie@test.local',
       password: 'correct-horse-battery',
-      role: 'admin',
+      group_ids: ['g-admin'],
     });
     expect(result).toEqual(created);
   });

@@ -125,6 +125,64 @@
             style="width: 220px"
             @update:model-value="pushQuery"
           />
+          <!-- The console's placement, next to the site the agent reports:
+               a building, a room (« Sans salle » for the unfiled), and the
+               finding that ties the two — agent and room disagreeing. -->
+          <q-select
+            v-model="building"
+            :options="buildingOptions"
+            emit-value
+            map-options
+            dense
+            outlined
+            class="col-auto"
+            style="width: 200px"
+            @update:model-value="pushQuery"
+          />
+          <q-select
+            v-model="room"
+            :options="roomOptions"
+            emit-value
+            map-options
+            dense
+            outlined
+            class="col-auto"
+            style="width: 220px"
+            @update:model-value="pushQuery"
+          />
+          <q-select
+            v-model="maintenance"
+            :options="maintenanceOptions"
+            emit-value
+            map-options
+            dense
+            outlined
+            class="col-auto"
+            style="width: 220px"
+            @update:model-value="pushQuery"
+          />
+          <q-select
+            v-model="checkOpen"
+            :options="checkOptions"
+            emit-value
+            map-options
+            dense
+            outlined
+            class="col-auto"
+            style="width: 220px"
+            @update:model-value="pushQuery"
+          />
+          <q-select
+            v-model="mismatch"
+            :options="mismatchOptions"
+            emit-value
+            map-options
+            dense
+            outlined
+            class="col-auto"
+            style="width: 230px"
+            @update:model-value="pushQuery"
+          />
           <q-select
             v-model="os"
             :options="osOptions"
@@ -252,9 +310,38 @@
       </q-chip>
     </div>
 
-    <div v-if="selected.length" class="row items-center q-mb-sm">
+    <div
+      v-if="selected.length && (actionGroups.length || canPlace || auth.can('check', 'write'))"
+      class="row items-center q-mb-sm"
+    >
       <div class="text-caption text-grey q-mr-md">{{ selected.length }} sélectionné(s)</div>
-      <q-btn-dropdown color="primary" dense label="Action groupée" icon="bolt">
+      <q-btn
+        v-if="canPlace"
+        flat
+        dense
+        color="primary"
+        icon="meeting_room"
+        label="Affecter à une salle"
+        class="q-mr-sm"
+        @click="placeOpen = true"
+      />
+      <q-btn
+        v-if="auth.can('check', 'write')"
+        flat
+        dense
+        color="primary"
+        icon="fact_check"
+        label="Demander une vérification"
+        class="q-mr-sm"
+        @click="askOpen = true"
+      />
+      <q-btn-dropdown
+        v-if="actionGroups.length"
+        color="primary"
+        dense
+        label="Action groupée"
+        icon="bolt"
+      >
         <q-list>
           <template v-for="section in actionGroups" :key="section.group">
             <q-item-label header class="q-py-xs">{{ section.label }}</q-item-label>
@@ -302,13 +389,65 @@
           </q-icon>
           {{ props.value || props.row.machine_uuid }}
           <q-icon
+            v-if="props.row.check_open"
+            name="fact_check"
+            color="primary"
+            size="16px"
+            class="q-ml-xs"
+          >
+            <q-tooltip>
+              Vérification demandée{{
+                props.row.check_assigned_to
+                  ? `, affectée à ${props.row.check_assigned_to}`
+                  : ', à prendre'
+              }}
+            </q-tooltip>
+          </q-icon>
+          <q-icon
             v-if="props.row.needs_verification"
             name="warning"
             color="orange"
             size="16px"
             class="q-ml-xs"
           >
-            <q-tooltip>À vérifier — identité du poste à confirmer (doublon possible)</q-tooltip>
+            <q-tooltip
+              >Identité à confirmer — empreinte matérielle divergente (doublon possible)</q-tooltip
+            >
+          </q-icon>
+        </q-td>
+      </template>
+      <template #body-cell-maintenance="props">
+        <q-td :props="props">
+          <q-badge
+            v-if="props.row.maintenance_state"
+            :color="maintenanceStateColor(props.row.maintenance_state)"
+            :label="maintenanceStateLabel(props.row.maintenance_state)"
+          >
+            <q-tooltip>
+              {{
+                props.row.maintenance_due_at
+                  ? `Due le ${formatDateTime(props.row.maintenance_due_at)}`
+                  : 'Exclu de la maintenance'
+              }}
+              {{ props.row.maintenance_owner ? ` · ${props.row.maintenance_owner}` : '' }}
+            </q-tooltip>
+          </q-badge>
+        </q-td>
+      </template>
+      <template #body-cell-room="props">
+        <q-td :props="props">
+          {{ props.value || '—' }}
+          <q-icon
+            v-if="props.row.location_mismatch"
+            name="wrong_location"
+            color="orange"
+            size="16px"
+            class="q-ml-xs"
+          >
+            <q-tooltip>
+              Emplacement divergent : l'agent déclare « {{ props.row.location }} », la salle est à «
+              {{ props.row.room_location }} »
+            </q-tooltip>
           </q-icon>
         </q-td>
       </template>
@@ -399,6 +538,40 @@
       </template>
     </q-table>
 
+    <CheckRequestDialog
+      v-model="askOpen"
+      :check="null"
+      :subtitle="`${selected.length} poste(s) sélectionné(s)`"
+      :save="askSelection"
+    />
+
+    <!-- Placing the selection: one room, or none. The server reports which
+         postes now disagree on the site rather than refusing them. -->
+    <q-dialog v-model="placeOpen">
+      <q-card style="width: 420px; max-width: 90vw">
+        <q-card-section class="text-h6">Affecter à une salle</q-card-section>
+        <q-card-section class="q-pt-none text-body2 text-grey-8">
+          {{ selected.length }} poste(s) sélectionné(s)
+        </q-card-section>
+        <q-card-section>
+          <q-select
+            v-model="placeRoomId"
+            :options="placeRoomOptions"
+            emit-value
+            map-options
+            label="Salle"
+            outlined
+            dense
+            autofocus
+          />
+        </q-card-section>
+        <q-card-actions align="right" class="q-px-md q-pb-md">
+          <q-btn v-close-popup flat label="Annuler" />
+          <q-btn color="primary" label="Affecter" :loading="placing" @click="placeSelection" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <MachineExportDialog
       v-model="exportOpen"
       :params="filterParams"
@@ -440,6 +613,20 @@ import {
   type CommandAction,
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
+import { useAuthStore } from 'src/stores/auth';
+import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
+import { maintenanceStateColor, maintenanceStateLabel } from 'src/services/maintenance';
+import { bulkCheckNotification, createChecksBulk, type CheckPayload } from 'src/services/checks';
+import {
+  getRoomConfig,
+  listBuildings,
+  listRooms,
+  placeMachines,
+  placementNotification,
+  roomLabel,
+  unassignMachines,
+  type Room,
+} from 'src/services/rooms';
 import {
   CHASSIS_TYPES,
   DEFAULT_PAGE_SIZE,
@@ -482,6 +669,27 @@ const search = ref('');
 const domain = ref('');
 // The site, exact like the domain: the dropdown feeds it fleet values.
 const location = ref<string | null>(null);
+// The console's placement: a building id, a room id or the sentinel for the
+// unfiled, and the agent/room disagreement.
+const building = ref<string | null>(null);
+const ROOM_NONE = 'none';
+const room = ref<string | null>(null);
+const mismatch = ref<string | null>(null);
+// Where the poste stands on its maintenance cycle.
+const maintenance = ref<string | null>(null);
+const maintenanceOptions = [
+  { label: 'Maintenance : tous', value: null },
+  { label: 'Maintenance en retard', value: 'overdue' },
+  { label: 'Maintenance à échéance', value: 'due_soon' },
+  { label: 'Maintenance à jour', value: 'ok' },
+  { label: 'Exclus de la maintenance', value: 'excluded' },
+];
+// A verification request is open on the poste.
+const checkOpen = ref<string | null>(null);
+const checkOptions = [
+  { label: 'Vérifications : toutes', value: null },
+  { label: 'Vérification demandée (ouverte)', value: 'true' },
+];
 const antivirus = ref<string | null>(null);
 const os = ref<string | null>(null);
 // One dropdown for two questions: "behind the reference" (the sentinel) or one
@@ -535,6 +743,9 @@ const SORT_FIELD_BY_COLUMN: Record<string, MachineSortField> = {
   hostname: 'hostname',
   domain: 'domain',
   location: 'location',
+  building: 'building',
+  room: 'room',
+  maintenance: 'maintenance_due_at',
   antivirus: 'av_product_name',
   windows_update: 'wu_pending_count',
   session: 'session_user_present',
@@ -570,7 +781,7 @@ const statusOptions = [
   { label: 'Antivirus : Tous statuts', value: null },
   { label: 'Antivirus à jour', value: 'up_to_date' },
   { label: 'Antivirus périmé', value: 'outdated' },
-  { label: 'À vérifier', value: 'needs_verification' },
+  { label: 'Identité à confirmer', value: 'needs_verification' },
   { label: 'Inactif', value: 'inactive' },
 ];
 
@@ -616,6 +827,94 @@ const modelOptions = ref<{ label: string; value: string | null }[]>([
   { label: 'Tous les modèles', value: null },
 ]);
 
+// From the rooms and buildings the console holds — loaded once with the page,
+// like the fleet lists. The room entries carry their building so two « B12 »
+// read apart.
+const buildingOptions = ref<{ label: string; value: string | null }[]>([
+  { label: 'Tous les bâtiments', value: null },
+]);
+const roomOptions = ref<{ label: string; value: string | null }[]>([
+  { label: 'Toutes les salles', value: null },
+]);
+const mismatchOptions = [
+  { label: 'Emplacement / salle : tous', value: null },
+  { label: 'Emplacement divergent de la salle', value: 'true' },
+];
+const rooms = ref<Room[]>([]);
+
+async function loadRooms() {
+  try {
+    manualMode.value = (await getRoomConfig()).manual;
+  } catch {
+    // Assumed manual: the worst case is a 409 the notification explains.
+  }
+  try {
+    rooms.value = await listRooms();
+    roomOptions.value = [
+      { label: 'Toutes les salles', value: null },
+      { label: 'Sans salle', value: ROOM_NONE },
+      ...rooms.value.map((r) => ({
+        label: `${roomLabel(r)} (${r.machine_count})`,
+        value: r.id,
+      })),
+    ];
+    const buildings = await listBuildings();
+    buildingOptions.value = [
+      { label: 'Tous les bâtiments', value: null },
+      ...buildings.map((b) => ({
+        label: `${b.name}${b.location ? ` — ${b.location}` : ''} (${b.machine_count})`,
+        value: b.id,
+      })),
+    ];
+  } catch {
+    // The list still works without the two dropdowns.
+  }
+}
+
+// Placing the selection. The « Sans salle » entry unassigns.
+const auth = useAuthStore();
+// Moving postes by hand: the permission, and a server not in a directory mode.
+const manualMode = ref(true);
+const canPlace = computed(() => auth.can('room', 'write') && manualMode.value);
+const placeOpen = ref(false);
+const placing = ref(false);
+const placeRoomId = ref<string | null>(null);
+const placeRoomOptions = computed(() => [
+  { label: 'Sans salle (retirer de la salle)', value: ROOM_NONE },
+  ...rooms.value.map((r) => ({ label: roomLabel(r), value: r.id })),
+]);
+
+// Asking for a verification on the selection.
+const askOpen = ref(false);
+async function askSelection(payload: CheckPayload) {
+  const ids = selected.value.map((m) => m.id);
+  if (!ids.length) return;
+  $q.notify(bulkCheckNotification(await createChecksBulk(ids, payload)));
+  selected.value = [];
+  await reload();
+}
+
+async function placeSelection() {
+  const ids = selected.value.map((m) => m.id);
+  if (!ids.length || !placeRoomId.value) return;
+  placing.value = true;
+  try {
+    const res =
+      placeRoomId.value === ROOM_NONE
+        ? await unassignMachines(ids)
+        : await placeMachines(placeRoomId.value, ids);
+    $q.notify(placementNotification(res));
+    placeOpen.value = false;
+    selected.value = [];
+    await reload();
+    void loadRooms();
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
+  } finally {
+    placing.value = false;
+  }
+}
+
 const manufacturerOptions = ref<{ label: string; value: string | null }[]>([
   { label: 'Tous les constructeurs', value: null },
 ]);
@@ -645,6 +944,11 @@ const diskOptions = [
 
 type FilterKey =
   | 'location'
+  | 'building'
+  | 'room'
+  | 'mismatch'
+  | 'check'
+  | 'maintenance'
   | 'antivirus'
   | 'status'
   | 'wu'
@@ -671,6 +975,14 @@ const filterChips = computed<{ key: FilterKey; label: string }[]>(() => {
   const chips: { key: FilterKey; label: string }[] = [];
   if (location.value)
     chips.push({ key: 'location', label: label(locationOptions.value, location.value) });
+  if (building.value)
+    chips.push({ key: 'building', label: label(buildingOptions.value, building.value) });
+  if (room.value) chips.push({ key: 'room', label: label(roomOptions.value, room.value) });
+  if (mismatch.value)
+    chips.push({ key: 'mismatch', label: label(mismatchOptions, mismatch.value) });
+  if (checkOpen.value) chips.push({ key: 'check', label: label(checkOptions, checkOpen.value) });
+  if (maintenance.value)
+    chips.push({ key: 'maintenance', label: label(maintenanceOptions, maintenance.value) });
   if (antivirus.value)
     chips.push({ key: 'antivirus', label: label(antivirusOptions.value, antivirus.value) });
   if (status.value) chips.push({ key: 'status', label: label(statusOptions, status.value) });
@@ -717,6 +1029,11 @@ function clearFilter(key: FilterKey) {
   } else {
     const refs = {
       location,
+      building,
+      room,
+      mismatch,
+      check: checkOpen,
+      maintenance,
       antivirus,
       status,
       wu,
@@ -737,8 +1054,12 @@ function clearFilter(key: FilterKey) {
 
 // bulkOnly: the two diagnostics stay on the detail page. Their value is reading
 // one machine's output; fired on a selection they queue a report per poste that
-// nobody will open.
-const actionGroups = commandActionGroups({ bulkOnly: true });
+// nobody will open. Filtered on the profile's permissions, so the menu never
+// offers what the backend would refuse — and disappears for an account that
+// may run nothing.
+const actionGroups = computed(() =>
+  commandActionGroups({ bulkOnly: true, permissions: auth.permissions }),
+);
 
 const columns: QTableColumn<Machine>[] = [
   { name: 'hostname', label: 'Nom', field: 'hostname', align: 'left', sortable: true },
@@ -752,6 +1073,25 @@ const columns: QTableColumn<Machine>[] = [
     align: 'left',
     sortable: true,
     format: (val: string | null) => val ?? '—',
+  },
+  // The console's placement, sortable so a parc reads one room at a time.
+  {
+    name: 'building',
+    label: 'Bâtiment',
+    field: 'building_name',
+    align: 'left',
+    sortable: true,
+    format: (val: string | null) => val ?? '—',
+  },
+  { name: 'room', label: 'Salle', field: 'room_name', align: 'left', sortable: true },
+  // Where the poste stands on its cycle, sortable by due date: the "what do
+  // I do this week" column.
+  {
+    name: 'maintenance',
+    label: 'Maintenance',
+    field: 'maintenance_state',
+    align: 'center',
+    sortable: true,
   },
   // Not sortable: a string sort would put 192.168.1.10 before 192.168.1.9, and
   // an octet-aware comparator is not worth it on a column people search, not sort.
@@ -849,6 +1189,12 @@ function applyQuery() {
   search.value = queryValue(q.search) ?? '';
   domain.value = queryValue(q.domain) ?? '';
   location.value = queryValue(q.location);
+  building.value = queryValue(q.building);
+  room.value = queryValue(q.room);
+  mismatch.value = queryValue(q.location_mismatch) === 'true' ? 'true' : null;
+  checkOpen.value = queryValue(q.check_open) === 'true' ? 'true' : null;
+  const ms = queryValue(q.maintenance_state);
+  maintenance.value = ms && maintenanceOptions.some((o) => o.value === ms) ? ms : null;
   antivirus.value = queryValue(q.antivirus);
   os.value = queryValue(q.os_version);
   agent.value =
@@ -911,6 +1257,11 @@ function buildQuery(): Record<string, string> {
   if (search.value) query.search = search.value;
   if (domain.value) query.domain = domain.value;
   if (location.value) query.location = location.value;
+  if (building.value) query.building = building.value;
+  if (room.value) query.room = room.value;
+  if (mismatch.value) query.location_mismatch = mismatch.value;
+  if (checkOpen.value) query.check_open = checkOpen.value;
+  if (maintenance.value) query.maintenance_state = maintenance.value;
   if (antivirus.value) query.antivirus = antivirus.value;
   if (os.value) query.os_version = os.value;
   if (agent.value === AGENT_OUTDATED) query.agent_outdated = 'true';
@@ -993,6 +1344,14 @@ const filterParams = computed<ListMachinesParams>(() => {
   if (search.value) params.search = search.value;
   if (domain.value) params.domain = domain.value;
   if (location.value) params.location = location.value;
+  if (building.value) params.building_id = building.value;
+  if (room.value === ROOM_NONE) params.without_room = true;
+  else if (room.value) params.room_id = room.value;
+  if (mismatch.value) params.location_mismatch = true;
+  if (checkOpen.value) params.check_open = true;
+  if (maintenance.value) {
+    params.maintenance_state = maintenance.value as 'excluded' | 'overdue' | 'due_soon' | 'ok';
+  }
   if (antivirus.value) params.antivirus = antivirus.value;
   if (os.value) params.os_version = os.value;
   if (agent.value === AGENT_OUTDATED) params.agent_outdated = true;
@@ -1220,6 +1579,7 @@ onMounted(() => {
   void loadOsOptions();
   void loadAgentOptions();
   void loadFleetOptions(locationOptions, listLocations);
+  void loadRooms();
   void loadFleetOptions(modelOptions, listModels);
   void loadFleetOptions(manufacturerOptions, listManufacturers);
   void loadFleetOptions(processorOptions, listProcessors);

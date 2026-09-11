@@ -129,9 +129,35 @@ def daily_at(hour: int) -> Callable[[datetime], datetime]:
     return _next
 
 
+def weekly_at(weekday: int, hour: int) -> Callable[[datetime], datetime]:
+    """The next occurrence of ``weekday`` (0 = Monday) at HH:00 UTC strictly
+    after ``now``."""
+
+    def _next(now: datetime) -> datetime:
+        candidate = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        days_ahead = (weekday - candidate.weekday()) % 7
+        candidate += timedelta(days=days_ahead)
+        if candidate <= now:
+            candidate += timedelta(days=7)
+        return candidate
+
+    return _next
+
+
+async def send_maintenance_reminders() -> int:
+    """Queue the weekly reminder for the owners with a maintenance due."""
+    from app.features.notification import tasks
+
+    async with AsyncSession(engine) as session:
+        return await tasks.send_maintenance_reminders(session)
+
+
 def build_jobs(now: datetime) -> list[Job]:
     """The worker's whole schedule, in one place."""
     digest_hour = daily_at(settings.DIGEST_HOUR_UTC)
+    reminder = weekly_at(
+        settings.MAINTENANCE_REMINDER_WEEKDAY, settings.DIGEST_HOUR_UTC
+    )
     housekeeping = daily_at(8)
     return [
         # Due immediately: a restart must resume mail delivery within one tick.
@@ -144,6 +170,12 @@ def build_jobs(now: datetime) -> list[Job]:
             housekeeping,
         ),
         Job("daily_digest", send_daily_digest, digest_hour(now), digest_hour),
+        Job(
+            "maintenance_reminders",
+            send_maintenance_reminders,
+            reminder(now),
+            reminder,
+        ),
         Job("purge_outbox", purge_outbox, housekeeping(now), housekeeping),
     ]
 

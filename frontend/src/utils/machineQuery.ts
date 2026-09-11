@@ -50,6 +50,9 @@ export const MACHINE_SORT_FIELDS: readonly string[] = [
   'hostname',
   'domain',
   'location',
+  'building',
+  'room',
+  'maintenance_due_at',
   'av_product_name',
   'wu_pending_count',
   'session_user_present',
@@ -101,6 +104,19 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   if (domain) params.domain = domain;
   const location = queryValue(q.location);
   if (location) params.location = location;
+  // The placement: a room id, the sentinel "none" for the unfiled, a building.
+  const room = queryValue(q.room);
+  if (room === 'none') params.without_room = true;
+  else if (room) params.room_id = room;
+  const building = queryValue(q.building);
+  if (building) params.building_id = building;
+  const mismatch = queryValue(q.location_mismatch);
+  if (mismatch === 'true') params.location_mismatch = true;
+  if (queryValue(q.check_open) === 'true') params.check_open = true;
+  const maintenance = queryValue(q.maintenance_state);
+  if (maintenance && ['excluded', 'overdue', 'due_soon', 'ok'].includes(maintenance)) {
+    params.maintenance_state = maintenance as 'excluded' | 'overdue' | 'due_soon' | 'ok';
+  }
   const antivirus = queryValue(q.antivirus);
   if (antivirus) params.antivirus = antivirus;
   const os = queryValue(q.os_version);

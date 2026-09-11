@@ -26,6 +26,8 @@ TEXT_MAX = 200
 PATH_MAX = 400
 # SHA-256, hex.
 HASH_MAX = 64
+# A distinguished name: a deep OU tree runs to a few hundred characters.
+DN_MAX = 500
 
 # Caps per list. Above these the report has stopped describing a workstation —
 # a broken agent, or a hostile one — and the excess is dropped rather than
@@ -301,6 +303,32 @@ class SoftwareReport(BaseModel):
         return _bounded(value, PATH_MAX)
 
 
+class DirectoryReport(BaseModel):
+    """What Active Directory says about the computer, read by the agent.
+
+    Bounded like everything else in the block: a DN is a few hundred
+    characters at most, and the strings are stored as keys and labels, never
+    parsed server-side beyond a trim.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    distinguished_name: str | None = None
+    ou: str | None = None
+    ou_dn: str | None = None
+    ad_location: str | None = None
+
+    @field_validator("distinguished_name", "ou_dn", mode="before")
+    @classmethod
+    def _bound_dn(cls, value: object) -> str | None:
+        return _bounded(value if isinstance(value, str) else None, DN_MAX)
+
+    @field_validator("ou", "ad_location", mode="before")
+    @classmethod
+    def _bound_label(cls, value: object) -> str | None:
+        return _bounded(value if isinstance(value, str) else None, TEXT_MAX)
+
+
 class InventoryReport(BaseModel):
     """Hardware and software inventory, reported on the agent's own daily cycle.
 
@@ -318,6 +346,12 @@ class InventoryReport(BaseModel):
     # hash lets the server skip seven set replacements for a machine it already
     # describes correctly.
     hash: str = ""
+
+    # What the domain says about the poste. Not hardware, but read on the same
+    # daily cycle and part of the same hash, so an OU move is reported the day
+    # it happens. None = not read (a workgroup poste, an older agent) and
+    # leaves the stored values alone.
+    directory: DirectoryReport | None = None
 
     # --- System, motherboard, BIOS: cardinality one, hence columns.
     hw_manufacturer: str | None = None

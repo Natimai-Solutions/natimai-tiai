@@ -21,25 +21,36 @@ async def _login(client, email: str, password: str):
     )
 
 
-async def _headers(client, db_session, email: str, role, password: str = STRONG):
+async def _headers(client, db_session, email: str, group, password: str = STRONG):
     from app.features.user import crud
 
-    await crud.create_user(db_session, email=email, password=password, role=role)
+    await crud.create_user(db_session, email=email, password=password, groups=[group])
     resp = await _login(client, email, password)
     assert resp.status_code == 200, resp.text
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
 
 async def _admin(client, db_session, email: str = "admin@test.local"):
-    from app.features.user.models import Role
+    """An administrator on a database carrying the three built-in groups, as
+    the migration and the seed script leave it."""
+    from app.features.user import crud
+    from app.features.user.permissions import BuiltinGroup
 
-    return await _headers(client, db_session, email, Role.ADMIN)
+    await crud.ensure_builtin_groups(db_session)
+    await db_session.commit()
+    return await _headers(client, db_session, email, BuiltinGroup.ADMIN)
 
 
 async def _readonly(client, db_session, email: str = "ro@test.local"):
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
-    return await _headers(client, db_session, email, Role.READONLY)
+    return await _headers(client, db_session, email, BuiltinGroup.READONLY)
+
+
+async def _group_id(client, headers, key: str) -> str:
+    """Id of a built-in group, as the console would learn it."""
+    groups = (await client.get("/api/v1/groups", headers=headers)).json()
+    return next(g["id"] for g in groups if g["builtin_key"] == key)
 
 
 def _code(resp) -> str:
@@ -66,6 +77,7 @@ async def test_anonymous_cannot_list_users(client, db_session):
 
 async def test_admin_creates_account_that_can_log_in(client, db_session):
     headers = await _admin(client, db_session)
+    readonly = await _group_id(client, headers, "readonly")
     resp = await client.post(
         "/api/v1/users",
         headers=headers,
@@ -73,13 +85,13 @@ async def test_admin_creates_account_that_can_log_in(client, db_session):
             "email": "marie@test.local",
             "password": STRONG,
             "full_name": "Marie Dupont",
-            "role": "readonly",
+            "group_ids": [readonly],
         },
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["email"] == "marie@test.local"
-    assert body["role"] == "readonly"
+    assert [g["name"] for g in body["groups"]] == ["Lecture seule"]
     assert body["is_active"] is True
     assert "password" not in body and "hashed_password" not in body
 
@@ -111,8 +123,9 @@ async def test_short_password_is_rejected(client, db_session):
 # --- Update ----------------------------------------------------------------
 
 
-async def test_admin_updates_name_role_and_activation(client, db_session):
+async def test_admin_updates_name_groups_and_activation(client, db_session):
     headers = await _admin(client, db_session)
+    admin_group = await _group_id(client, headers, "admin")
     created = (
         await client.post(
             "/api/v1/users",
@@ -120,16 +133,18 @@ async def test_admin_updates_name_role_and_activation(client, db_session):
             json={"email": "bob@test.local", "password": STRONG},
         )
     ).json()
+    # No groups asked for, none granted: the account exists and sees nothing.
+    assert created["groups"] == []
 
     resp = await client.patch(
         f"/api/v1/users/{created['id']}",
         headers=headers,
-        json={"full_name": "Bob", "role": "admin", "is_active": False},
+        json={"full_name": "Bob", "group_ids": [admin_group], "is_active": False},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["full_name"] == "Bob"
-    assert body["role"] == "admin"
+    assert [g["name"] for g in body["groups"]] == ["Administrateurs"]
     assert body["is_active"] is False
 
     # Deactivated accounts can no longer authenticate.
@@ -166,7 +181,7 @@ async def test_unknown_user_is_404(client, db_session):
 
 @pytest.mark.parametrize(
     "payload",
-    [{"is_active": False}, {"role": "readonly"}],
+    [{"is_active": False}, {"group_ids": []}],
     ids=["deactivate", "demote"],
 )
 async def test_admin_cannot_lock_themselves_out(client, db_session, payload):
@@ -284,9 +299,11 @@ async def test_reset_password_accepts_an_explicit_password(client, db_session):
 
 async def test_reset_password_ends_the_target_existing_sessions(client, db_session):
     """A reset is the answer to a compromised account: its live tokens must die."""
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
-    victim = await _headers(client, db_session, "victim@test.local", Role.READONLY)
+    victim = await _headers(
+        client, db_session, "victim@test.local", BuiltinGroup.READONLY
+    )
     assert (await client.get("/api/v1/auth/me", headers=victim)).status_code == 200
 
     # `iat` has one-second granularity, so let the clock tick past the second
@@ -307,9 +324,11 @@ async def test_reset_password_ends_the_target_existing_sessions(client, db_sessi
 
 
 async def test_user_changes_own_password(client, db_session):
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
-    headers = await _headers(client, db_session, "self@test.local", Role.READONLY)
+    headers = await _headers(
+        client, db_session, "self@test.local", BuiltinGroup.READONLY
+    )
     new = "my-new-passphrase"
 
     resp = await client.post(
@@ -323,9 +342,11 @@ async def test_user_changes_own_password(client, db_session):
 
 
 async def test_password_change_requires_the_current_password(client, db_session):
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
-    headers = await _headers(client, db_session, "wrong@test.local", Role.READONLY)
+    headers = await _headers(
+        client, db_session, "wrong@test.local", BuiltinGroup.READONLY
+    )
     resp = await client.post(
         "/api/v1/auth/password",
         headers=headers,
@@ -339,9 +360,11 @@ async def test_password_change_requires_the_current_password(client, db_session)
 
 
 async def test_password_change_rejects_a_short_new_password(client, db_session):
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
-    headers = await _headers(client, db_session, "shortnew@test.local", Role.READONLY)
+    headers = await _headers(
+        client, db_session, "shortnew@test.local", BuiltinGroup.READONLY
+    )
     resp = await client.post(
         "/api/v1/auth/password",
         headers=headers,
@@ -573,33 +596,37 @@ async def test_an_unknown_cadence_is_refused(client, db_session):
 
 
 async def test_self_service_cannot_reach_beyond_the_cadence(client, db_session):
-    """A read-only operator editing their own row must not gain a role.
+    """A read-only operator editing their own row must not gain a group.
 
     Extra fields are ignored rather than applied: ``ProfileUpdate`` declares one
-    field, so ``role`` never reaches the model.
+    field, so ``group_ids`` never reaches the model.
     """
     headers = await _readonly(client, db_session)
+    admin_group = "00000000-0000-0000-0000-000000000000"
 
     resp = await client.patch(
         "/api/v1/auth/me",
         headers=headers,
-        json={"email_preference": "none", "role": "admin", "is_active": False},
+        json={
+            "email_preference": "none",
+            "group_ids": [admin_group],
+            "is_active": False,
+        },
     )
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["email_preference"] == "none"
-    assert body["role"] == "readonly"
+    assert [g["name"] for g in body["groups"]] == ["Lecture seule"]
+    assert "user:write" not in body["permissions"]
 
 
 async def test_an_admin_sees_and_sets_another_account_cadence(client, db_session):
-    from app.features.user.models import Role
-
     headers = await _admin(client, db_session)
     created = await client.post(
         "/api/v1/users",
         headers=headers,
-        json={"email": "ops@test.local", "password": STRONG, "role": Role.READONLY},
+        json={"email": "ops@test.local", "password": STRONG},
     )
     user_id = created.json()["id"]
     assert created.json()["email_preference"] == "digest_daily"

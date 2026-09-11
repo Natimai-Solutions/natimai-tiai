@@ -15,7 +15,13 @@
       >
         <template #append><q-icon name="search" /></template>
       </q-input>
-      <q-btn color="primary" icon="person_add" label="Nouveau compte" @click="openCreate" />
+      <q-btn
+        v-if="auth.can('user', 'write')"
+        color="primary"
+        icon="person_add"
+        label="Nouveau compte"
+        @click="openCreate"
+      />
     </div>
 
     <q-table
@@ -27,11 +33,22 @@
       :rows-per-page-options="[25, 50, 100]"
       @request="onRequest"
     >
-      <template #body-cell-role="props">
+      <template #body-cell-groups="props">
         <q-td :props="props">
-          <q-badge :color="props.value === 'admin' ? 'primary' : 'grey-7'">
-            {{ roleLabel(props.value) }}
-          </q-badge>
+          <template v-if="props.row.groups.length">
+            <q-chip
+              v-for="group in props.row.groups"
+              :key="group.id"
+              dense
+              size="sm"
+              color="primary"
+              text-color="white"
+              class="q-ml-none"
+            >
+              {{ group.name }}
+            </q-chip>
+          </template>
+          <span v-else class="text-grey">Aucun</span>
         </q-td>
       </template>
 
@@ -57,7 +74,14 @@
 
       <template #body-cell-actions="props">
         <q-td :props="props" class="text-right">
-          <q-btn flat dense round icon="more_vert" :aria-label="`Actions pour ${props.row.email}`">
+          <q-btn
+            v-if="auth.can('user', 'write')"
+            flat
+            dense
+            round
+            icon="more_vert"
+            :aria-label="`Actions pour ${props.row.email}`"
+          >
             <q-menu>
               <q-list style="min-width: 220px">
                 <q-item v-close-popup clickable @click="openEdit(props.row)">
@@ -123,14 +147,26 @@
               :rules="[required]"
             />
             <q-input v-model="form.full_name" label="Nom complet" outlined dense />
+            <!-- Memberships, not a role: what the account may do is the union
+                 of its groups' grants (page « Groupes »). One's own groups are
+                 not editable — the backend refuses it — so the field is locked
+                 rather than shown failing. -->
             <q-select
-              v-model="form.role"
-              :options="roleOptions"
+              v-model="form.group_ids"
+              :options="groupOptions"
               emit-value
               map-options
-              label="Rôle"
+              multiple
+              use-chips
+              label="Groupes"
               outlined
               dense
+              :disable="editing !== null && isSelf(editing)"
+              :hint="
+                editing !== null && isSelf(editing)
+                  ? 'Vos propres groupes ne se modifient pas depuis votre compte'
+                  : 'Aucun groupe : le compte se connecte mais ne voit rien'
+              "
             />
             <!-- Only when editing: a new account starts on the default cadence
                  (résumé quotidien), and its holder changes it from « Mon
@@ -240,8 +276,8 @@ import {
   resetUserPassword,
   updateUser,
   type ConsoleUser,
-  type Role,
 } from 'src/services/users';
+import { listGroups } from 'src/services/groups';
 import { apiErrorMessage } from 'src/services/errors';
 import type { EmailPreference } from 'src/services/auth';
 import { useAuthStore } from 'src/stores/auth';
@@ -265,10 +301,20 @@ const editing = ref<ConsoleUser | null>(null);
 const form = reactive({
   email: '',
   full_name: '',
-  role: 'readonly' as Role,
+  group_ids: [] as string[],
   password: '',
   email_preference: 'digest_daily' as EmailPreference,
 });
+
+// Loaded once with the page: the list is short and changes on another page.
+const groupOptions = ref<{ label: string; value: string }[]>([]);
+async function loadGroups() {
+  try {
+    groupOptions.value = (await listGroups()).map((g) => ({ label: g.name, value: g.id }));
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Groupes indisponibles') });
+  }
+}
 
 // Label + value only: the explanatory sentences belong on « Mon compte », where
 // someone is choosing for themselves. Here an admin is reading a list.
@@ -283,11 +329,6 @@ const resetMode = ref<'generate' | 'manual'>('generate');
 const resetPassword = ref('');
 const resetResult = ref<string | null>(null);
 
-const roleOptions = [
-  { label: 'Administrateur', value: 'admin' },
-  { label: 'Lecture seule', value: 'readonly' },
-];
-
 const resetModes = [
   { label: 'Générer un mot de passe', value: 'generate' },
   { label: 'Saisir un mot de passe', value: 'manual' },
@@ -296,7 +337,7 @@ const resetModes = [
 const columns: QTableColumn<ConsoleUser>[] = [
   { name: 'email', label: 'E-mail', field: 'email', align: 'left' },
   { name: 'full_name', label: 'Nom', field: 'full_name', align: 'left' },
-  { name: 'role', label: 'Rôle', field: 'role', align: 'center' },
+  { name: 'groups', label: 'Groupes', field: 'groups', align: 'left' },
   { name: 'is_active', label: 'État', field: 'is_active', align: 'center' },
   // Not sortable, like the columns above: the rows are a server page now, and
   // a client-side sort would only reorder the page in view.
@@ -308,10 +349,6 @@ const columns: QTableColumn<ConsoleUser>[] = [
 const required = (v: string) => !!v || 'Requis';
 const longEnough = (v: string) =>
   v.length >= PASSWORD_MIN_LENGTH || `${PASSWORD_MIN_LENGTH} caractères minimum`;
-
-function roleLabel(role: Role) {
-  return role === 'admin' ? 'Administrateur' : 'Lecture seule';
-}
 
 function isSelf(user: ConsoleUser) {
   return user.id === auth.user?.id;
@@ -366,7 +403,7 @@ function openCreate() {
   Object.assign(form, {
     email: '',
     full_name: '',
-    role: 'readonly',
+    group_ids: [],
     password: '',
     email_preference: 'digest_daily',
   });
@@ -378,7 +415,7 @@ function openEdit(user: ConsoleUser) {
   Object.assign(form, {
     email: user.email,
     full_name: user.full_name ?? '',
-    role: user.role,
+    group_ids: user.groups.map((g) => g.id),
     password: '',
     email_preference: user.email_preference,
   });
@@ -392,7 +429,9 @@ async function submitForm() {
       await updateUser(editing.value.id, {
         email: form.email,
         full_name: form.full_name || null,
-        role: form.role,
+        // Left out on one's own account: the backend refuses it, and the
+        // field was locked for that reason.
+        ...(isSelf(editing.value) ? {} : { group_ids: form.group_ids }),
         email_preference: form.email_preference,
       });
       $q.notify({ type: 'positive', message: 'Compte mis à jour' });
@@ -401,7 +440,7 @@ async function submitForm() {
         email: form.email,
         password: form.password,
         full_name: form.full_name || null,
-        role: form.role,
+        group_ids: form.group_ids,
       });
       $q.notify({ type: 'positive', message: 'Compte créé' });
     }
@@ -478,5 +517,8 @@ function confirmDelete(user: ConsoleUser) {
   });
 }
 
-onMounted(reload);
+onMounted(() => {
+  void reload();
+  void loadGroups();
+});
 </script>

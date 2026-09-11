@@ -5,7 +5,9 @@ Importing this module guarantees every table is registered on
 """
 
 from app.features.audit.models import AuditEntry  # noqa: F401
+from app.features.check.models import MachineCheck  # noqa: F401
 from app.features.command.models import Command  # noqa: F401
+from app.features.intervention.models import Intervention  # noqa: F401
 from app.features.inventory.models import (  # noqa: F401
     Disk,
     Gpu,
@@ -16,9 +18,18 @@ from app.features.inventory.models import (  # noqa: F401
     Volume,
 )
 from app.features.machine.models import Machine  # noqa: F401
+from app.features.maintenance.models import Maintenance  # noqa: F401
 from app.features.notification.models import EmailOutbox  # noqa: F401
+from app.features.room.models import Building, Room  # noqa: F401
+from app.features.setting.models import AppSetting  # noqa: F401
 from app.features.threat.models import Threat  # noqa: F401
-from app.features.user.models import PasswordResetToken, User  # noqa: F401
+from app.features.user.models import (  # noqa: F401
+    Group,
+    GroupPermission,
+    PasswordResetToken,
+    User,
+    UserGroup,
+)
 from app.features.windows_update.models import WindowsUpdate  # noqa: F401
 
 __all__ = [
@@ -27,6 +38,9 @@ __all__ = [
     "Command",
     "User",
     "PasswordResetToken",
+    "Group",
+    "GroupPermission",
+    "UserGroup",
     "WindowsUpdate",
     "MemoryModule",
     "Disk",
@@ -37,4 +51,10 @@ __all__ = [
     "MachineSoftware",
     "EmailOutbox",
     "AuditEntry",
+    "Building",
+    "Room",
+    "Intervention",
+    "MachineCheck",
+    "Maintenance",
+    "AppSetting",
 ]

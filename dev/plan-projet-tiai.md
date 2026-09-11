@@ -375,6 +375,9 @@ Cadrée et livrée : cf. `plan-phase2-windows-update.md`. Réutilise l'agent et 
 - **Inventaire : 🟢 livré** — cf. `plan-inventaire.md`. Un bloc `inventory` optionnel sur le heartbeat, un type de commande (`inventory_scan`), sept tables et un catalogue logiciel à l'échelle du parc. Le `software.id` de ce catalogue est la prise à laquelle le déploiement se rattachera.
 - Déploiement : nouveau type de commande « installer un paquet » + dépôt de paquets (à concevoir : stockage, intégrité, versions).
 
+### Phase 4 — Exploitation du parc *(septembre 2026)* · 🟢 implémentée
+Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans la console (commandes à risque à part), bâtiments et salles (à la main ou depuis l'annuaire : OU ou attribut Emplacement, lus par l'agent), journal des interventions par poste, vérifications demandées et affectables, maintenance à cycle et responsable sur trois niveaux avec séances par salle, et les e-mails qui vont avec.
+
 ---
 
 ## Suivi d'avancement
@@ -698,3 +701,28 @@ croisés `windows/amd64`, `windows/arm64` et Linux ; **168 vitest**, `vue-tsc`,
 couche WMI et registre, qui ne peut pas l'être ailleurs — et en tête la
 comparaison ligne à ligne de la liste des logiciels avec « Applications et
 fonctionnalités », qui est le seul juge des quatre règles de filtrage.
+
+**Instantané — 2026-09-11** · **Exploitation du parc** livrée en huit jalons
+(cf. `plan-salles-maintenance-interventions.md`), une migration par jalon
+(`0016` à `0021`), tests verts à chaque étape (**465 backend**, **224 console**,
+agent Go vet/build Windows). Ce que la console gagne : des **groupes de droits**
+composés dans une grille ressources × actions à la place des deux rôles fixes,
+avec les commandes à risque (arrêt, redémarrage, installation de mises à jour…)
+comme droit distinct et une garde qui refuse toute modification laissant le
+parc sans gestionnaire de comptes ; des **bâtiments et des salles**, le bâtiment
+portant l'emplacement que l'agent déclare et le poste divergent étant signalé,
+jamais refusé ; le **classement depuis l'annuaire** (`ROOM_SOURCE`) : l'agent
+lit le DN de son objet ordinateur dans le cache des stratégies de groupe et
+l'attribut Emplacement via ADSI, le tout dans le bloc d'inventaire quotidien ;
+un **journal des interventions** par poste ; des **vérifications demandées**,
+affectables, une seule ouverte par poste, closes avec une note qui rejoint le
+journal ; une **maintenance** à cycle et responsable résolus poste › salle ›
+parc, avec séances par salle (note globale, case et note par poste) et une
+liste « à faire » par personne ; et les **e-mails** qui vont avec (affectation,
+bloc « vos tâches » en fin de résumé, rappel hebdomadaire).
+> Décisions à retenir : le bâtiment est une **table** (liste déroulante) mais
+pas un niveau d'héritage ; « transmettre » une maintenance est un simple
+changement de responsable, audité ; le bind ADSI reste **à valider sur un
+domaine réel** avant déploiement, la lecture de l'OU ne dépendant que du
+registre. Restreindre un groupe à des emplacements est noté pour plus tard
+(§12 du plan).

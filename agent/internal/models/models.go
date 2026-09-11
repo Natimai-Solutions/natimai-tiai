@@ -275,6 +275,32 @@ type InventoryState struct {
 	Nics          []Nic          `json:"nics"`
 	Gpus          []Gpu          `json:"gpus"`
 	Software      []Software     `json:"software"`
+
+	// Directory is what the domain says about this computer — not hardware,
+	// but read on the same daily cycle and shipped in the same block, because
+	// it changes as rarely and the server files the poste by it
+	// (ROOM_SOURCE). nil on a poste that is not domain-joined, or whose
+	// directory could not be read; the server then keeps what it had.
+	Directory *DirectoryState `json:"directory,omitempty"`
+}
+
+// DirectoryState is the computer object as Active Directory holds it, the two
+// readings a console can file a poste by: the OU it sits in, and the
+// free-text "location" an administrator typed on the object.
+type DirectoryState struct {
+	// The computer object's distinguished name, as Group Policy processing
+	// cached it: "CN=PC-B12-03,OU=Salle B12,OU=Postes,DC=lycee,DC=local".
+	DistinguishedName string `json:"distinguished_name,omitempty"`
+	// The name of the OU directly containing the computer — the second RDN
+	// above, "Salle B12" — and its DN, which is what the server keys a room
+	// by: an OU renamed is a new room, an OU moved is not.
+	OU   string `json:"ou,omitempty"`
+	OUDN string `json:"ou_dn,omitempty"`
+	// The object's "location" attribute (the Emplacement field of ADUC),
+	// read through ADSI. Empty when unset, or when the directory could not
+	// be reached — the two are not told apart, and the server treats empty
+	// as "no opinion".
+	ADLocation string `json:"ad_location,omitempty"`
 }
 
 // Threat mirrors the backend ThreatReport: one Defender detection. detection_id

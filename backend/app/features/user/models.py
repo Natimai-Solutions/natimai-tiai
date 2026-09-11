@@ -8,18 +8,6 @@ from sqlmodel import Field, SQLModel
 from app.features.base import utc_field, utcnow
 
 
-class Role(enum.StrEnum):
-    """Console roles (Phase 1).
-
-    Coarse-grained for now. Fine-grained per-resource grants (read/write by
-    table, per user) are layered on later in app.features.user.permissions
-    without changing route call sites.
-    """
-
-    ADMIN = "admin"  # read + write + execute remote commands
-    READONLY = "readonly"  # read only
-
-
 class EmailPreference(enum.StrEnum):
     """What this account wants to receive by e-mail.
 
@@ -45,7 +33,12 @@ class EmailPreference(enum.StrEnum):
 
 
 class User(SQLModel, table=True):
-    """A console operator authenticating with email + password (JWT)."""
+    """A console operator authenticating with email + password (JWT).
+
+    What the account may do is not on this row: it is the union of the
+    permissions of its groups (``user_groups`` → ``group_permissions``), see
+    ``app.features.user.permissions``.
+    """
 
     __tablename__ = "users"
 
@@ -53,11 +46,9 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True, max_length=255)
     hashed_password: str
     full_name: str | None = Field(default=None, max_length=255)
-    # Stored as a plain string; Role is a str enum used as a constant.
-    role: str = Field(default=Role.READONLY)
-    # Same treatment as ``role``: a plain string column, the enum being the
-    # vocabulary rather than a database type. A PostgreSQL ENUM would need a
-    # migration to add a fifth cadence.
+    # A plain string column, the enum being the vocabulary rather than a
+    # database type. A PostgreSQL ENUM would need a migration to add a fifth
+    # cadence.
     email_preference: str = Field(default=EmailPreference.DIGEST_DAILY)
     is_active: bool = Field(default=True)
     # Set on every password change. Access tokens issued before this instant are
@@ -66,6 +57,52 @@ class User(SQLModel, table=True):
     password_changed_at: datetime | None = utc_field(default=None, nullable=True)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
+
+
+class Group(SQLModel, table=True):
+    """A named set of permissions, composed in the console.
+
+    ``builtin_key`` marks the three groups every installation carries
+    (``permissions.BuiltinGroup``): they cannot be deleted, and the
+    administrators' one holds every permission implicitly. Everything else
+    about them — name, description, and for the other two the permissions —
+    is editable like any group's.
+    """
+
+    __tablename__ = "groups"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str = Field(unique=True, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    builtin_key: str | None = Field(default=None, unique=True)
+    created_at: datetime = utc_field(default_factory=utcnow)
+    updated_at: datetime = utc_field(default_factory=utcnow)
+
+
+class GroupPermission(SQLModel, table=True):
+    """One ``"resource:action"`` granted to a group (``permissions.permission_key``)."""
+
+    __tablename__ = "group_permissions"
+
+    group_id: uuid.UUID = Field(
+        sa_column=Column(ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
+    )
+    permission: str = Field(primary_key=True, max_length=100)
+
+
+class UserGroup(SQLModel, table=True):
+    """Membership. Deleting either side ends it; nothing else refers to it."""
+
+    __tablename__ = "user_groups"
+
+    user_id: uuid.UUID = Field(
+        sa_column=Column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    )
+    group_id: uuid.UUID = Field(
+        sa_column=Column(
+            ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True, index=True
+        )
+    )
 
 
 class PasswordResetToken(SQLModel, table=True):

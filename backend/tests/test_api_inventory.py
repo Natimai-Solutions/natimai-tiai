@@ -9,10 +9,13 @@ console list and detail payloads expose.
 
 async def _admin_headers(client, db_session) -> dict[str, str]:
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     await crud.create_user(
-        db_session, email="inv-admin@test.local", password="pw", role=Role.ADMIN
+        db_session,
+        email="inv-admin@test.local",
+        password="pw",
+        groups=[BuiltinGroup.ADMIN],
     )
     resp = await client.post(
         "/api/v1/auth/login",

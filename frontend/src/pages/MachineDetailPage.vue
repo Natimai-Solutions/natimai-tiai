@@ -69,7 +69,14 @@
       <q-btn flat dense round icon="refresh" :loading="loading" class="q-mr-sm" @click="load">
         <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
       </q-btn>
-      <q-btn-dropdown color="primary" dense label="Action" icon="bolt" :disable="!machine">
+      <q-btn-dropdown
+        v-if="actionGroups.length"
+        color="primary"
+        dense
+        label="Action"
+        icon="bolt"
+        :disable="!machine"
+      >
         <q-list>
           <template v-for="section in actionGroups" :key="section.group">
             <q-item-label header class="q-py-xs">{{ section.label }}</q-item-label>
@@ -86,12 +93,36 @@
           </template>
         </q-list>
       </q-btn-dropdown>
-      <!-- Admin only: the merge endpoint requires machine:write, so for a
-           read-only operator the button could only ever open a dialog and 403.
+      <!-- check:write: ask somebody to go and look. One open at a time, so
+           the button reads as the state. -->
+      <q-btn
+        v-if="auth.can('check', 'write') && machine && !machine.check_open"
+        flat
+        dense
+        color="primary"
+        icon="fact_check"
+        label="Demander une vérification"
+        class="q-ml-sm"
+        @click="askOpen = true"
+      />
+      <!-- room:write: where the console files the poste. -->
+      <q-btn
+        v-if="canPlace"
+        flat
+        dense
+        color="primary"
+        icon="meeting_room"
+        :label="machine?.room_name ? 'Changer de salle' : 'Affecter à une salle'"
+        class="q-ml-sm"
+        :disable="!machine"
+        @click="openPlace"
+      />
+      <!-- machine:write only: the merge endpoint requires it, so for anyone
+           else the button could only ever open a dialog and 403.
            The count rides in the label — "Fusionner" said nothing about whether
            there was anything to fuse, which is what made it look inert. -->
       <q-btn
-        v-if="auth.isAdmin"
+        v-if="canManage"
         flat
         dense
         color="primary"
@@ -107,7 +138,7 @@
            two halves of the same kill-switch, and showing both at once would
            read as a choice when only one ever applies. -->
       <q-btn
-        v-if="auth.isAdmin && machine?.token_revoked"
+        v-if="canManage && machine?.token_revoked"
         flat
         dense
         color="positive"
@@ -117,7 +148,7 @@
         @click="confirmAllowReenroll"
       />
       <q-btn
-        v-else-if="auth.isAdmin"
+        v-else-if="canManage"
         flat
         dense
         color="negative"
@@ -135,7 +166,7 @@
       secret du parc, tant que le ré-enrôlement n'est pas autorisé ici.
       <template #action>
         <q-btn
-          v-if="auth.isAdmin"
+          v-if="canManage"
           flat
           dense
           label="Autoriser le ré-enrôlement"
@@ -149,9 +180,76 @@
       Empreinte divergente : ce poste nécessite une vérification manuelle (clone, swap matériel ou
       ré-image).
       <template #action>
-        <q-btn v-if="auth.isAdmin" flat dense label="Fusionner un doublon" @click="openMerge" />
+        <q-btn v-if="canManage" flat dense label="Fusionner un doublon" @click="openMerge" />
       </template>
     </q-banner>
+
+    <q-banner v-if="machine?.open_check" class="bg-blue-1 q-mb-md" rounded>
+      <template #avatar><q-icon name="fact_check" color="primary" /></template>
+      <div>
+        <span class="text-weight-medium">Vérification demandée</span>
+        par {{ machine.open_check.requested_by }} {{ timeAgoLabel(machine.open_check.created_at) }},
+        <template v-if="machine.open_check.assigned_to_name">
+          affectée à {{ machine.open_check.assigned_to_name }}.
+        </template>
+        <template v-else>à prendre.</template>
+      </div>
+      <div v-if="machine.open_check.instructions" class="q-mt-xs" style="white-space: pre-line">
+        {{ machine.open_check.instructions }}
+      </div>
+      <template v-if="auth.can('check', 'write')" #action>
+        <q-btn flat dense label="Réaffecter / modifier" @click="editCheckOpen = true" />
+        <q-btn flat dense color="primary" label="Clore" @click="closeCheckOpen = true" />
+      </template>
+    </q-banner>
+
+    <CheckRequestDialog
+      v-model="askOpen"
+      :check="null"
+      :subtitle="machine?.hostname ?? undefined"
+      :save="askCheck"
+    />
+    <CheckRequestDialog
+      v-model="editCheckOpen"
+      :check="openCheckAsCheck"
+      :subtitle="machine?.hostname ?? undefined"
+      :save="editCheck"
+    />
+    <CheckCloseDialog
+      v-model="closeCheckOpen"
+      :check="machine?.open_check ?? null"
+      @closed="onCheckClosed"
+    />
+
+    <q-banner v-if="machine?.location_mismatch" class="bg-orange-1 q-mb-md" rounded>
+      <template #avatar><q-icon name="wrong_location" color="orange" /></template>
+      Emplacement divergent : l'agent déclare « {{ machine.location }} », mais la salle
+      {{ machine.room_name }} est à « {{ machine.room_location }} ». Une GPO mal ciblée, ou un poste
+      déplacé sans sa salle.
+    </q-banner>
+
+    <!-- Placing the poste: one room, or none. -->
+    <q-dialog v-model="placeOpen">
+      <q-card style="width: 420px; max-width: 90vw">
+        <q-card-section class="text-h6">Salle du poste</q-card-section>
+        <q-card-section>
+          <q-select
+            v-model="placeRoomId"
+            :options="placeRoomOptions"
+            emit-value
+            map-options
+            label="Salle"
+            outlined
+            dense
+            autofocus
+          />
+        </q-card-section>
+        <q-card-actions align="right" class="q-px-md q-pb-md">
+          <q-btn v-close-popup flat label="Annuler" />
+          <q-btn color="primary" label="Enregistrer" :loading="placing" @click="savePlace" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
 
     <!-- First the state and the findings, then the detail behind them by
          tab: the fiche used to open on eleven cards of facts and leave the
@@ -190,6 +288,11 @@
           </q-badge>
         </q-tab>
         <q-tab name="commands" icon="history" label="Commandes" />
+        <q-tab name="history" icon="handyman" label="Historique">
+          <q-badge v-if="interventionTotal" color="grey-7" floating>{{
+            interventionTotal
+          }}</q-badge>
+        </q-tab>
       </q-tabs>
       <q-separator />
 
@@ -234,6 +337,25 @@
           <MachineSoftwareCard :machine="machine" :loading="loading" />
         </q-tab-panel>
 
+        <q-tab-panel name="history" class="q-px-none">
+          <MachineMaintenanceCard
+            v-if="auth.can('maintenance', 'read')"
+            :machine-id="props.id"
+            :hostname="machine.hostname ?? machine.machine_uuid"
+            :can-write="auth.can('maintenance', 'write')"
+            @changed="onMaintenanceChanged"
+          />
+          <MachineHistoryCard
+            :machine-id="props.id"
+            :items="interventions"
+            :total="interventionTotal"
+            :loading="interventionsLoading"
+            :can-write="auth.can('intervention', 'write')"
+            @changed="loadInterventions(1)"
+            @more="loadInterventions(interventionPage + 1)"
+          />
+        </q-tab-panel>
+
         <q-tab-panel name="commands" class="q-px-none">
           <MachineCommandsCard
             v-model:pagination="commandPagination"
@@ -270,6 +392,11 @@ import MachineCommandsCard from 'src/components/machine/MachineCommandsCard.vue'
 import MachineDefenderCard from 'src/components/machine/MachineDefenderCard.vue';
 import MachineGpuCard from 'src/components/machine/MachineGpuCard.vue';
 import MachineHardwareCard from 'src/components/machine/MachineHardwareCard.vue';
+import MachineHistoryCard from 'src/components/machine/MachineHistoryCard.vue';
+import MachineMaintenanceCard from 'src/components/machine/MachineMaintenanceCard.vue';
+import CheckCloseDialog from 'src/components/check/CheckCloseDialog.vue';
+import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
+import { createCheck, updateCheck, type Check, type CheckPayload } from 'src/services/checks';
 import MachineIdentityCard from 'src/components/machine/MachineIdentityCard.vue';
 import MachineMemoryCard from 'src/components/machine/MachineMemoryCard.vue';
 import MachineMergeDialog from 'src/components/machine/MachineMergeDialog.vue';
@@ -308,6 +435,16 @@ import {
   type CommandAction,
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
+import { listInterventions, type Intervention } from 'src/services/interventions';
+import {
+  getRoomConfig,
+  listRooms,
+  placeMachines,
+  placementNotification,
+  roomLabel,
+  unassignMachines,
+  type Room,
+} from 'src/services/rooms';
 import { onlineColor, onlineIcon, onlineLabel, timeAgoLabel } from 'src/utils/format';
 
 const props = defineProps<{ id: string }>();
@@ -372,7 +509,133 @@ const commandPagination = ref<TablePagination>({
 
 // The whole catalogue here, diagnostics included: reading one machine's
 // gpresult or ipconfig is exactly what this page is for.
-const actionGroups = commandActionGroups();
+// What this profile may trigger: the menu never offers what the backend would
+// refuse, and goes away entirely for an account that may run nothing.
+const actionGroups = computed(() => commandActionGroups({ permissions: auth.permissions }));
+// Revoke, re-enroll, merge: the machine:write half of the fiche.
+const canManage = computed(() => auth.can('machine', 'write'));
+
+// --- Verification requests: ask, reassign, close. The fiche reloads after
+// each, since the banner and the journal both change.
+const askOpen = ref(false);
+const editCheckOpen = ref(false);
+const closeCheckOpen = ref(false);
+// The dialog edits a Check; the fiche carries a lighter shape of the open
+// one. Bridged here rather than by a second payload on the API.
+const openCheckAsCheck = computed<Check | null>(() => {
+  const c = machine.value?.open_check;
+  if (!c || !machine.value) return null;
+  return {
+    id: c.id,
+    machine_id: machine.value.id,
+    requested_by: c.requested_by,
+    assigned_to:
+      c.assigned_to_id && c.assigned_to_name
+        ? { id: c.assigned_to_id, name: c.assigned_to_name }
+        : null,
+    instructions: c.instructions,
+    created_at: c.created_at,
+    updated_at: c.created_at,
+    closed_at: null,
+    closed_by: null,
+    closing_note: null,
+    machine: null,
+  };
+});
+async function askCheck(payload: CheckPayload) {
+  await createCheck(props.id, payload);
+  $q.notify({ type: 'positive', message: 'Vérification demandée' });
+  await load();
+}
+async function editCheck(payload: CheckPayload) {
+  if (!machine.value?.open_check) return;
+  await updateCheck(machine.value.open_check.id, payload);
+  $q.notify({ type: 'positive', message: 'Demande mise à jour' });
+  await load();
+}
+async function onMaintenanceChanged() {
+  await load();
+  await loadInterventions(1);
+}
+
+async function onCheckClosed() {
+  await load();
+  await loadInterventions(1);
+}
+
+// --- The journal. Loaded with the fiche and paged by « Afficher plus »:
+// a poste's journal is a few dozen lines at most, read top to bottom.
+const interventions = ref<Intervention[]>([]);
+const interventionTotal = ref(0);
+const interventionPage = ref(1);
+const interventionsLoading = ref(false);
+const INTERVENTION_PAGE_SIZE = 25;
+
+async function loadInterventions(page: number) {
+  if (!auth.can('intervention', 'read')) return;
+  interventionsLoading.value = true;
+  try {
+    const id = props.id;
+    const res = await listInterventions(id, { page, page_size: INTERVENTION_PAGE_SIZE });
+    if (id !== props.id) return;
+    interventions.value = page === 1 ? res.items : [...interventions.value, ...res.items];
+    interventionTotal.value = res.total;
+    interventionPage.value = page;
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Historique indisponible') });
+  } finally {
+    interventionsLoading.value = false;
+  }
+}
+
+// --- Placement: the room the console files the poste in. By hand only
+// when the server is not in a directory mode.
+const manualMode = ref(true);
+const canPlace = computed(() => auth.can('room', 'write') && manualMode.value);
+void getRoomConfig()
+  .then((c) => {
+    manualMode.value = c.manual;
+  })
+  .catch(() => {
+    // Assumed manual: the worst case is a 409 the notification explains.
+  });
+const ROOM_NONE = 'none';
+const placeOpen = ref(false);
+const placing = ref(false);
+const placeRoomId = ref<string | null>(null);
+const rooms = ref<Room[]>([]);
+const placeRoomOptions = computed(() => [
+  { label: 'Sans salle', value: ROOM_NONE },
+  ...rooms.value.map((r) => ({ label: roomLabel(r), value: r.id })),
+]);
+
+async function openPlace() {
+  placeRoomId.value = machine.value?.room_id ?? ROOM_NONE;
+  placeOpen.value = true;
+  try {
+    rooms.value = await listRooms();
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Salles indisponibles') });
+  }
+}
+
+async function savePlace() {
+  if (!machine.value || !placeRoomId.value) return;
+  placing.value = true;
+  try {
+    const res =
+      placeRoomId.value === ROOM_NONE
+        ? await unassignMachines([machine.value.id])
+        : await placeMachines(placeRoomId.value, [machine.value.id]);
+    $q.notify(placementNotification(res));
+    placeOpen.value = false;
+    await load();
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
+  } finally {
+    placing.value = false;
+  }
+}
 
 const title = computed(() => machine.value?.hostname || machine.value?.machine_uuid || 'Poste');
 
@@ -558,10 +821,10 @@ const mergeHint = computed(() =>
     : 'Aucun doublon détecté — la recherche manuelle reste possible',
 );
 
-/** Candidates for the button's count, refreshed with the page. Admin-only: the
- * merge itself is, and a read-only console has no use for the list. */
+/** Candidates for the button's count, refreshed with the page. machine:write
+ * only: the merge itself is, and a read-only console has no use for the list. */
 async function fetchDuplicates() {
-  if (!auth.isAdmin) return;
+  if (!canManage.value) return;
   try {
     const id = props.id;
     const found = await getDuplicates(id);
@@ -590,6 +853,9 @@ watch(
   () => props.id,
   () => {
     machine.value = null;
+    interventions.value = [];
+    interventionTotal.value = 0;
+    void loadInterventions(1);
     threats.value = [];
     activeThreats.value = 0;
     commands.value = [];
@@ -601,17 +867,26 @@ watch(
 );
 
 // The profile is fetched by the layout without being awaited, so on a hard
-// reload of this page `isAdmin` is still false when the first load runs and the
-// admin-only candidate lookup is skipped. The buttons appear on their own once
-// it resolves; the count behind them would not, and a merge button reading
+// reload of this page `canManage` is still false when the first load runs and
+// the candidate lookup is skipped. The buttons appear on their own once it
+// resolves; the count behind them would not, and a merge button reading
 // "aucun doublon" on a poste that has one is the very thing this change set out
 // to fix.
+watch(canManage, (allowed) => {
+  if (allowed) void fetchDuplicates();
+});
+
+// Same reasoning as the duplicate lookup: on a hard reload the profile is
+// not there yet when the first load runs, and the journal would stay empty.
 watch(
-  () => auth.isAdmin,
-  (isAdmin) => {
-    if (isAdmin) void fetchDuplicates();
+  () => auth.can('intervention', 'read'),
+  (allowed) => {
+    if (allowed && !interventions.value.length) void loadInterventions(1);
   },
 );
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  void loadInterventions(1);
+});
 </script>

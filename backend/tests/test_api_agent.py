@@ -217,14 +217,18 @@ async def test_heartbeat_queues_a_mail_for_the_immediate_cadence(
     from app.core.config import settings
     from app.features.notification.models import EmailOutbox
     from app.features.user import crud
-    from app.features.user.models import EmailPreference, Role
+    from app.features.user.models import EmailPreference
+    from app.features.user.permissions import BuiltinGroup
 
     # queue_email refuses to queue while Mailgun is unconfigured.
     monkeypatch.setattr(settings, "MAILGUN_DOMAIN", "mg.test.local")
     monkeypatch.setattr(settings, "MAILGUN_API_KEY", "key-test")
 
     user = await crud.create_user(
-        db_session, email="oncall@test.local", password="pw", role=Role.ADMIN
+        db_session,
+        email="oncall@test.local",
+        password="pw",
+        groups=[BuiltinGroup.ADMIN],
     )
     user.email_preference = EmailPreference.IMMEDIATE
     db_session.add(user)

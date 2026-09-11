@@ -94,6 +94,7 @@ def test_build_jobs_registers_the_whole_schedule():
         "expire_stale_commands",
         "flag_inactive_machines",
         "daily_digest",
+        "maintenance_reminders",
         "purge_outbox",
     }
     # The outbox is due immediately: a restarted worker must resume mail
