@@ -44,6 +44,7 @@ défaut ou ce que la GPO a déjà posé dans le registre.
 | `REPORTSESSIONUSERNAME` | `ReportSessionUsername` | `1` ou `0` (pas `true`/`false`) |
 | `REPORTSOFTWARE` | `ReportSoftware` | `1` ou `0` (`0` = inventaire matériel seul) |
 | `INVENTORYCOLLECTINTERVALSECONDS` | `InventoryCollectIntervalSeconds` | entier > 0 |
+| `LOCATION` | `Location` | texte libre, ex. `"Lycée de Taravao"` — l'emplacement du poste, par lequel la console filtre le parc et le réveil relayé choisit un poste voisin |
 
 ```powershell
 # Installation silencieuse avec configuration

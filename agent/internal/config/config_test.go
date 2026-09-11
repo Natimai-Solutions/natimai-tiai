@@ -259,3 +259,33 @@ func TestLoadSurvivesACorruptToken(t *testing.T) {
 		t.Errorf("expected an empty token, got %q", cfg.AuthToken)
 	}
 }
+
+// The site is whatever the deployment wrote, and nothing when it wrote
+// nothing: the agent has no way to find it out by itself, and a made-up
+// default would file every poste under a location nobody chose.
+func TestLocationDefaultsToNoneAndRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := (&Config{APIBaseURL: "https://tiai.example.local"}).Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Location != "" {
+		t.Errorf("Location = %q, want none by default", cfg.Location)
+	}
+
+	body := "api_base_url: https://tiai.example.local\nlocation: Lycée de Taravao\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Location != "Lycée de Taravao" {
+		t.Errorf("Location = %q", cfg.Location)
+	}
+}

@@ -13,7 +13,7 @@ Windows.
 ```
 main.go                    commandes CLI (run / init-config / install / repair / uninstall / start / stop / status / version)
 internal/
-  config/    config ProgramData (config.yaml) + surcharge registre (HKLM\SOFTWARE\Tiai) ; token chiffré DPAPI (token.dat)
+  config/    config ProgramData (config.yaml) + surcharge registre (HKLM\SOFTWARE\Tiai) ; token chiffré DPAPI (token.dat) ; emplacement du poste
   dpapi/     wrapper DPAPI (CryptProtectData, scope machine) ; passthrough hors Windows
   identity/  résolution identité (SMBIOS UUID via WMI / repli UUID agent) + empreinte (MachineGuid registre, TPM EK best-effort)
   sysinfo/   hostname / domaine AD / version OS
@@ -25,6 +25,7 @@ internal/
              maintenance/diagnostic : catalogue fermé d'outils System32 (maintenance*.go)
              Windows Update : API COM WUA pilotée en PowerShell, sortie JSON (wu*.go)
              redémarrage : shutdown.exe /r /t 60 (system*.go)
+             relais Wake-on-LAN : paquet magique diffusé sur les sous-réseaux du poste (wol.go)
   queue/     file locale durable (résultats de commandes non remis) + back-off
   logging/   log fichier (agent.log, rotation simple) + niveau INFO/DEBUG
   service/   service Windows (golang.org/x/sys/windows/svc)
@@ -55,6 +56,14 @@ binaire de l'agent. Un serveur compromis ne peut donc déclencher que l'une de c
 onze actions, jamais du code arbitraire. Sont **exclus par principe**, et ne
 doivent pas être réintroduits au fil de l'eau : tout exécuteur de scripts libre,
 et toute modification du registre, des fichiers, du pare-feu ou des comptes.
+
+**Une seule exception, bornée** : le réveil relayé (`wake_on_lan`, voir « Relais
+Wake-on-LAN » plus bas) porte l'adresse MAC du poste à réveiller — un champ
+`target_mac` sur la commande. L'agent la lit comme une adresse EUI-48 et rien
+d'autre (six octets ou refus), ne prend **jamais** la destination au serveur
+(diffusion sur ses propres sous-réseaux, UDP/9) et ne fait d'elle qu'un paquet
+magique. Le pire qu'un serveur compromis obtienne est le réveil de machines du
+segment du relais, c'est-à-dire la fonction.
 
 | Type | Commande | Famille | Délai max | `running` |
 |---|---|---|---|---|
@@ -543,6 +552,48 @@ ce qui arrive, c'est une politesse et non un contrat. Comme pour l'IP, un champ
 absent laisse le serveur sur sa dernière valeur connue : un poste dont l'agent
 n'a pas su lire la carte ne doit pas perdre la seule information qui permette de
 le rallumer.
+
+### Relais Wake-on-LAN
+
+Le serveur émet lui-même le paquet magique quand il est sur le réseau des
+postes. Hébergé ailleurs, il ne le peut pas — et confie alors le réveil au parc
+(`WOL_RELAY_ENABLED` côté serveur) : le premier poste **allumé** du même
+emplacement que la cible (à défaut d'emplacement, du même domaine) à le
+contacter reçoit une commande `wake_on_lan` portant `target_mac`, et
+[`RelayWake`](internal/collector/wol.go) diffuse le paquet depuis ce poste.
+
+Ce que fait l'agent, et ce qu'il ne fait pas :
+
+- la MAC est parsée comme une adresse EUI-48 (deux-points, tirets, points ou
+  rien) ; l'adresse nulle et l'adresse de diffusion sont refusées comme le reste ;
+- la destination est **déduite localement** : l'adresse de diffusion dirigée de
+  chaque sous-réseau IPv4 des cartes actives (`net.Interfaces()`), loopback et
+  APIPA exclus, `/31` et `/32` sans diffusion écartés, doublons fusionnés. Le
+  serveur ne choisit pas où le paquet part ;
+- UDP/9, trois copies, une socket ; le noyau route chaque diffusion dirigée par
+  la carte du sous-réseau correspondant. Rien à ouvrir dans le pare-feu du relais
+  (trafic sortant) ;
+- le verdict, en français, nomme la MAC et chaque destination — c'est ce qu'un
+  administrateur lit sur la fiche du poste visé, préfixé côté serveur de
+  « Relayé par <poste> ». Une émission réussie ne prouve rien du réveil : le
+  protocole n'accuse rien.
+
+Le poste visé n'est jamais servi de sa propre commande : il est éteint, et s'il
+ne l'est pas, sa première remontée clôt le réveil comme réussi. Rien n'est
+requis côté agent pour activer le mode — c'est un réglage du serveur — mais un
+parc multi-sites doit remonter ses **emplacements** (`location`), sans quoi le
+serveur ne peut désigner que « un poste du domaine », souvent sur un autre site.
+
+## Emplacement
+
+`location` (YAML) ou `Location` (registre, `REG_SZ`) : où se trouve le poste,
+en texte libre — « Lycée de Taravao ». Vide par défaut, parce que l'agent n'a
+aucun moyen de le deviner. Remonté tel quel à l'enrôlement et **à chaque
+heartbeat**, valeur vide comprise : c'est ce qui permet d'*effacer* côté serveur
+l'emplacement d'un poste déplacé ou dont la GPO a retiré le réglage, là où un
+agent antérieur au champ laisse la valeur mémorisée intacte. Dans le registre,
+c'est la présence de la valeur qui compte : une `Location` vide l'emporte sur le
+YAML et retire l'emplacement.
 
 ## Identité & sécurité
 

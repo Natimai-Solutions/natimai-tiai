@@ -49,6 +49,7 @@ export const SCAN_AGE_DAYS: readonly number[] = [7, 30];
 export const MACHINE_SORT_FIELDS: readonly string[] = [
   'hostname',
   'domain',
+  'location',
   'av_product_name',
   'wu_pending_count',
   'session_user_present',
@@ -98,6 +99,8 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   if (search) params.search = search;
   const domain = queryValue(q.domain);
   if (domain) params.domain = domain;
+  const location = queryValue(q.location);
+  if (location) params.location = location;
   const antivirus = queryValue(q.antivirus);
   if (antivirus) params.antivirus = antivirus;
   const os = queryValue(q.os_version);

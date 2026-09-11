@@ -142,6 +142,12 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.identity = id
 	a.host = sysinfo.Collect()
 	log.Printf("agent: identity %s (hostname %s)", id.MachineUUID, a.host.Hostname)
+	if a.cfg.Location != "" {
+		// Traced once, like the two switches below: the site is a deployment
+		// setting, and the log is where a poste filed under the wrong one is
+		// diagnosed.
+		log.Printf("agent: location %q", a.cfg.Location)
+	}
 	if !a.cfg.ReportsUsername() {
 		// Traced once so the setting is auditable from the log. The name itself
 		// is never logged, at any level.
@@ -241,6 +247,7 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 		MachineUUID:  a.identity.MachineUUID,
 		Hostname:     a.host.Hostname,
 		Domain:       a.host.Domain,
+		Location:     a.cfg.Location,
 		OSVersion:    a.host.OSVersion,
 		AgentVersion: Version,
 		Fingerprint:  &fp,
@@ -327,6 +334,7 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	resp, err := a.client.Heartbeat(hbCtx, models.HeartbeatRequest{
 		Hostname:       a.host.Hostname,
 		Domain:         a.host.Domain,
+		Location:       a.cfg.Location,
 		IPAddress:      netInfo.IP,
 		MACAddress:     netInfo.MAC,
 		IPPrefixLength: netInfo.PrefixLength,
@@ -551,6 +559,15 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	case "shutdown":
 		run = func(ctx context.Context) (string, error) {
 			return a.runPowerAction(ctx, actionShutdown, collector.Shutdown)
+		}
+	case "wake_on_lan":
+		// Handed to *this* poste as a relay for another one that is off: the
+		// server is not on the target's segment, this poste is. The MAC rides
+		// in the command — the one argument the protocol carries — and the
+		// agent broadcasts on its own subnets only (collector.RelayWake).
+		target := cmd.TargetMAC
+		run = func(ctx context.Context) (string, error) {
+			return collector.RelayWake(ctx, target)
 		}
 	default:
 		// The maintenance catalogue is looked up rather than switched on: its

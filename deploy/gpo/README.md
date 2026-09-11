@@ -58,6 +58,12 @@ serveur, ajouter `-ReportSessionUsername false` aux paramètres ci-dessus : la
 console verra alors qu'une session est ouverte, sans savoir de qui. Le réglage
 est repris au démarrage suivant, sans réinstaller l'agent.
 
+Pour un parc **multi-sites**, lier une GPO par site (ou un filtre WMI) et ajouter
+`-Location "Lycée de Taravao"` : chaque poste remonte alors son emplacement, la
+console filtre le parc par site, et le réveil Wake-on-LAN relayé sait quel poste
+voisin solliciter (DEPLOYMENT.md, « Réveil des postes », point 4). Sans le
+paramètre, la valeur registre n'est pas touchée ; `-ClearLocation` la retire.
+
 Activer aussi **Computer Configuration → Policies → Administrative Templates →
 System → Logon → Always wait for the network at computer startup and logon**.
 Sans ça, le premier démarrage peut partir avant que le partage soit joignable
@@ -82,8 +88,8 @@ dans `token.dat`).
    change → c'est le mécanisme de mise à jour : on remplace le fichier sur le
    partage, les postes se mettent à jour au démarrage suivant) ;
 2. écrit `HKLM\SOFTWARE\Tiai` (`ApiBaseURL`, `EnrollmentSecret`, `LogLevel`,
-   intervalles, `ReportSessionUsername`) — **à chaque exécution**, donc un
-   changement de GPO est repris ;
+   intervalles, `ReportSessionUsername`, `Location`) — **à chaque exécution**,
+   donc un changement de GPO est repris ;
 3. restreint les ACL de `HKLM\SOFTWARE\Tiai` et de `C:\ProgramData\Tiai` à
    SYSTEM + Administrateurs : par défaut, tout utilisateur du poste pourrait y
    lire le secret d'enrôlement et le token chiffré ;

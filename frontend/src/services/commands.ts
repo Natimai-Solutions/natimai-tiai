@@ -185,6 +185,9 @@ export const commandActions: CommandAction[] = [
     // The one action the server performs itself: the poste is off, there is no
     // agent to ask. No confirmation — a wake costs three datagrams and wakes a
     // machine at worst, where the two above can cost somebody their work.
+    // Or, on a server hosted off-site, relayed: the server hands the wake to
+    // a poste of the same site, which emits it on its next contact. Same menu
+    // entry either way — the notification says which happened.
     type: 'wake_on_lan',
     label: 'Réveiller le poste (Wake-on-LAN)',
     icon: 'wifi_tethering',
@@ -340,6 +343,8 @@ export interface CreateCommandsPayload {
   machine_ids?: string[];
   target_all?: boolean;
   target_domain?: string;
+  /** Every poste of a site, as the agents report it (exact). */
+  target_location?: string;
   target_status?: string;
 }
 
@@ -363,6 +368,11 @@ export interface Command {
   machine_id: string;
   type: string;
   status: string;
+  /**
+   * The poste that emitted a relayed wake on behalf of `machine_id`; null on
+   * every other row. Optional: an older server does not send it.
+   */
+  relay_machine_id?: string | null;
   created_by: string | null;
   created_at: string;
   expires_at: string;

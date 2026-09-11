@@ -303,3 +303,43 @@ async def test_a_mixed_batch_reports_only_the_new_row(client, db_session):
     assert result.written == 2
     assert [d.detection_id for d in result.new_detections] == ["BRAND-NEW"]
     assert result.new_detections[0].threat_name == "Trojan:Win32/Wacatac"
+
+
+async def test_the_agent_reports_its_location_and_can_clear_it(client, db_session):
+    """ "" clears, absent leaves alone: the difference between an agent whose
+    configuration dropped the site and an agent too old to have one."""
+    from sqlmodel import select
+
+    from app.core.config import settings
+    from app.features.machine.models import Machine
+
+    enroll = await client.post(
+        "/api/v1/agent/enroll",
+        headers={"X-Enrollment-Secret": settings.ENROLLMENT_SECRET},
+        json={"machine_uuid": "machine-loc", "location": "  Lycée de Taravao "},
+    )
+    token = enroll.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async def stored() -> str | None:
+        db_session.expire_all()
+        rows = await db_session.exec(
+            select(Machine).where(Machine.machine_uuid == "machine-loc")
+        )
+        return rows.one().location
+
+    assert await stored() == "Lycée de Taravao"
+
+    # An older agent says nothing about it: the value stays.
+    await client.post("/api/v1/agent/heartbeat", headers=headers, json={})
+    assert await stored() == "Lycée de Taravao"
+
+    # A move.
+    await client.post(
+        "/api/v1/agent/heartbeat", headers=headers, json={"location": "Annexe"}
+    )
+    assert await stored() == "Annexe"
+
+    # The setting removed: the agent sends "", the site is cleared.
+    await client.post("/api/v1/agent/heartbeat", headers=headers, json={"location": ""})
+    assert await stored() is None

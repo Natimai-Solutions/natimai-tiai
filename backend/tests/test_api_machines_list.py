@@ -833,3 +833,65 @@ async def test_undated_detections_do_not_lead_the_history(client, db_session):
     resp = await client.get(f"/api/v1/threats?machine_id={machine_id}", headers=headers)
 
     assert [t["detection_id"] for t in resp.json()["items"]] == ["DATED", "UNDATED"]
+
+
+# --- location ---------------------------------------------------------------
+
+
+async def test_filter_by_location_is_exact(client, db_session):
+    """ "Lycée" must not gather every lycée: the dropdown feeds exact values."""
+    now = datetime.now(UTC)
+    await _machines(
+        db_session,
+        [
+            {"machine_uuid": "loc-1", "location": "Lycée de Taravao", "last_seen": now},
+            {"machine_uuid": "loc-2", "location": "Lycée de Taravao", "last_seen": now},
+            {"machine_uuid": "loc-3", "location": "Lycée du Diadème", "last_seen": now},
+            {"machine_uuid": "loc-4", "location": None, "last_seen": now},
+        ],
+    )
+    headers = await _admin_headers(client, db_session)
+
+    resp = await client.get(
+        "/api/v1/machines?location=Lyc%C3%A9e%20de%20Taravao", headers=headers
+    )
+    assert resp.status_code == 200
+    assert sorted(m["machine_uuid"] for m in resp.json()["items"]) == ["loc-1", "loc-2"]
+    assert all(m["location"] == "Lycée de Taravao" for m in resp.json()["items"])
+
+    listing = await client.get("/api/v1/machines/locations", headers=headers)
+    assert listing.json() == [
+        {"name": "Lycée de Taravao", "count": 2},
+        {"name": "Lycée du Diadème", "count": 1},
+    ]
+
+    resp = await client.get(
+        "/api/v1/machines?sort_by=location&sort_desc=false", headers=headers
+    )
+    ordered = [m["machine_uuid"] for m in resp.json()["items"]]
+    # The two Taravao rows tie on every key but the id, in any order.
+    assert sorted(ordered[:2]) == ["loc-1", "loc-2"]
+    assert ordered[2:] == ["loc-3", "loc-4"]  # never reported sorts last
+
+
+async def test_a_command_can_target_a_location(client, db_session):
+    now = datetime.now(UTC)
+    await _machines(
+        db_session,
+        [
+            {"machine_uuid": "tl-1", "location": "Lycée de Taravao", "last_seen": now},
+            {
+                "machine_uuid": "tl-2",
+                "location": "Collège de Papeete",
+                "last_seen": now,
+            },
+        ],
+    )
+    headers = await _admin_headers(client, db_session)
+    resp = await client.post(
+        "/api/v1/commands",
+        headers=headers,
+        json={"type": "quick_scan", "target_location": "Lycée de Taravao"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["count"] == 1

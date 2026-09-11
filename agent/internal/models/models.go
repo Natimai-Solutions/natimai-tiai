@@ -14,9 +14,15 @@ type Fingerprint struct {
 
 // EnrollRequest is the first-contact payload (auth: X-Enrollment-Secret header).
 type EnrollRequest struct {
-	MachineUUID  string       `json:"machine_uuid"`
-	Hostname     string       `json:"hostname,omitempty"`
-	Domain       string       `json:"domain,omitempty"`
+	MachineUUID string `json:"machine_uuid"`
+	Hostname    string `json:"hostname,omitempty"`
+	Domain      string `json:"domain,omitempty"`
+	// Location is the configured site name, "" when none is configured. Sent
+	// without omitempty, on enroll and on every heartbeat alike: an empty value
+	// is what *clears* a site the server stored earlier, and omitting it would
+	// pin a poste on the location its config no longer names. A server older
+	// than the field ignores it.
+	Location     string       `json:"location"`
 	OSVersion    string       `json:"os_version,omitempty"`
 	AgentVersion string       `json:"agent_version,omitempty"`
 	Fingerprint  *Fingerprint `json:"fingerprint,omitempty"`
@@ -297,8 +303,10 @@ type Threat struct {
 // is that subnet — reported rather than assumed server-side, because only the
 // poste knows whether it lives in a /16 or a /24.
 type HeartbeatRequest struct {
-	Hostname   string `json:"hostname,omitempty"`
-	Domain     string `json:"domain,omitempty"`
+	Hostname string `json:"hostname,omitempty"`
+	Domain   string `json:"domain,omitempty"`
+	// See EnrollRequest.Location: always sent, "" clears.
+	Location   string `json:"location"`
 	IPAddress  string `json:"ip_address,omitempty"`
 	MACAddress string `json:"mac_address,omitempty"`
 	// omitempty on an int omits zero, which is precisely "not reported": the
@@ -324,6 +332,13 @@ type HeartbeatRequest struct {
 type Command struct {
 	ID   string `json:"id"`
 	Type string `json:"type"` // one of the server's CommandType values
+	// TargetMAC is the one argument the protocol carries, and only for one
+	// type: a wake_on_lan handed to this poste as a *relay* names the hardware
+	// address of the poste to wake. Everything else in the catalogue still
+	// travels as a bare type name. The agent validates it as an EUI-48 and
+	// emits on its own subnets only — see collector.RelayWake for what that
+	// bounds.
+	TargetMAC string `json:"target_mac,omitempty"`
 }
 
 // HeartbeatResponse carries the pending commands for this machine.

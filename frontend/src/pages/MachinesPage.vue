@@ -111,7 +111,20 @@
           />
         </div>
         <div class="row items-center q-col-gutter-sm">
-          <div class="col-12 col-sm-auto text-caption text-grey filter-row-label">Matériel</div>
+          <div class="col-12 col-sm-auto text-caption text-grey filter-row-label">Poste</div>
+          <!-- First on the "what is it" row: on a multi-site parc "where" is the
+               facet everything else is asked within. -->
+          <q-select
+            v-model="location"
+            :options="locationOptions"
+            emit-value
+            map-options
+            dense
+            outlined
+            class="col-auto"
+            style="width: 220px"
+            @update:model-value="pushQuery"
+          />
           <q-select
             v-model="os"
             :options="osOptions"
@@ -404,6 +417,7 @@ import {
   listAgentVersions,
   listAntivirusProducts,
   listChassisTypes,
+  listLocations,
   listMachines,
   listManufacturers,
   listModels,
@@ -466,6 +480,8 @@ const selected = ref<Machine[]>([]);
 const loading = ref(false);
 const search = ref('');
 const domain = ref('');
+// The site, exact like the domain: the dropdown feeds it fleet values.
+const location = ref<string | null>(null);
 const antivirus = ref<string | null>(null);
 const os = ref<string | null>(null);
 // One dropdown for two questions: "behind the reference" (the sentinel) or one
@@ -518,6 +534,7 @@ const filtersOpen = ref(false);
 const SORT_FIELD_BY_COLUMN: Record<string, MachineSortField> = {
   hostname: 'hostname',
   domain: 'domain',
+  location: 'location',
   antivirus: 'av_product_name',
   windows_update: 'wu_pending_count',
   session: 'session_user_present',
@@ -589,6 +606,12 @@ const agentOptions = ref<{ label: string; value: string | null }[]>([
   { label: 'Agent : toutes versions', value: null },
 ]);
 
+// Filled from the fleet: the sites are whatever the deployments wrote in
+// their agents' configuration, and the counts are a head count per site.
+const locationOptions = ref<{ label: string; value: string | null }[]>([
+  { label: 'Tous les emplacements', value: null },
+]);
+
 const modelOptions = ref<{ label: string; value: string | null }[]>([
   { label: 'Tous les modèles', value: null },
 ]);
@@ -621,6 +644,7 @@ const diskOptions = [
 ];
 
 type FilterKey =
+  | 'location'
   | 'antivirus'
   | 'status'
   | 'wu'
@@ -645,6 +669,8 @@ const filterChips = computed<{ key: FilterKey; label: string }[]>(() => {
   const label = (opts: { label: string; value: string | null }[], v: string) =>
     opts.find((o) => o.value === v)?.label ?? v;
   const chips: { key: FilterKey; label: string }[] = [];
+  if (location.value)
+    chips.push({ key: 'location', label: label(locationOptions.value, location.value) });
   if (antivirus.value)
     chips.push({ key: 'antivirus', label: label(antivirusOptions.value, antivirus.value) });
   if (status.value) chips.push({ key: 'status', label: label(statusOptions, status.value) });
@@ -690,6 +716,7 @@ function clearFilter(key: FilterKey) {
     ramGb.value = null;
   } else {
     const refs = {
+      location,
       antivirus,
       status,
       wu,
@@ -716,6 +743,16 @@ const actionGroups = commandActionGroups({ bulkOnly: true });
 const columns: QTableColumn<Machine>[] = [
   { name: 'hostname', label: 'Nom', field: 'hostname', align: 'left', sortable: true },
   { name: 'domain', label: 'Domaine', field: 'domain', align: 'left', sortable: true },
+  // Sortable, and grouping is the point: a multi-site parc is read one site at
+  // a time. Empty on a parc whose agents name no site.
+  {
+    name: 'location',
+    label: 'Emplacement',
+    field: 'location',
+    align: 'left',
+    sortable: true,
+    format: (val: string | null) => val ?? '—',
+  },
   // Not sortable: a string sort would put 192.168.1.10 before 192.168.1.9, and
   // an octet-aware comparator is not worth it on a column people search, not sort.
   {
@@ -811,6 +848,7 @@ function applyQuery() {
   const q = route.query;
   search.value = queryValue(q.search) ?? '';
   domain.value = queryValue(q.domain) ?? '';
+  location.value = queryValue(q.location);
   antivirus.value = queryValue(q.antivirus);
   os.value = queryValue(q.os_version);
   agent.value =
@@ -872,6 +910,7 @@ function buildQuery(): Record<string, string> {
   const query: Record<string, string> = {};
   if (search.value) query.search = search.value;
   if (domain.value) query.domain = domain.value;
+  if (location.value) query.location = location.value;
   if (antivirus.value) query.antivirus = antivirus.value;
   if (os.value) query.os_version = os.value;
   if (agent.value === AGENT_OUTDATED) query.agent_outdated = 'true';
@@ -953,6 +992,7 @@ const filterParams = computed<ListMachinesParams>(() => {
   const params: ListMachinesParams = {};
   if (search.value) params.search = search.value;
   if (domain.value) params.domain = domain.value;
+  if (location.value) params.location = location.value;
   if (antivirus.value) params.antivirus = antivirus.value;
   if (os.value) params.os_version = os.value;
   if (agent.value === AGENT_OUTDATED) params.agent_outdated = true;
@@ -1179,6 +1219,7 @@ onMounted(() => {
   void loadAntivirusOptions();
   void loadOsOptions();
   void loadAgentOptions();
+  void loadFleetOptions(locationOptions, listLocations);
   void loadFleetOptions(modelOptions, listModels);
   void loadFleetOptions(manufacturerOptions, listManufacturers);
   void loadFleetOptions(processorOptions, listProcessors);

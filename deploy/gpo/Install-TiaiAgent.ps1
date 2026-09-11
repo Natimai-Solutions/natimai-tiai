@@ -43,6 +43,16 @@
     modifie -- falsifier le binaire ne suffit donc plus. A mettre a jour a
     chaque nouvelle release, en meme temps que le binaire depose.
 
+.PARAMETER Location
+    Emplacement du poste, en texte libre ("Lycee de Taravao"), ecrit dans
+    HKLM\SOFTWARE\Tiai\Location. Une GPO liee a l'OU d'un site le pose sur
+    tous ses postes. Laisse vide, la valeur registre n'est pas touchee.
+    Pour retirer un emplacement pose auparavant, passer -ClearLocation.
+
+.PARAMETER ClearLocation
+    Ecrit une Location vide, ce qui retire l'emplacement (y compris celui d'un
+    config.yaml : dans le registre, c'est la presence de la valeur qui compte).
+
 .PARAMETER ReportSessionUsername
     Remontee du NOM de l'utilisateur connecte ('true' / 'false'). La presence
     d'une session est remontee dans tous les cas ; seul le nom est concerne.
@@ -52,6 +62,10 @@
 
 .EXAMPLE
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\natimai.local\NETLOGON\Tiai\Install-TiaiAgent.ps1 -SourceExe \\natimai.local\NETLOGON\Tiai\tiai-agent.exe -ApiBaseUrl https://tiai.natimai.local
+
+.EXAMPLE
+    # GPO liee a l'OU d'un site : chaque poste remonte son emplacement.
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\natimai.local\NETLOGON\Tiai\Install-TiaiAgent.ps1 -SourceExe \\natimai.local\NETLOGON\Tiai\tiai-agent.exe -ApiBaseUrl https://tiai.natimai.local -Location "Lycee de Taravao"
 
 .EXAMPLE
     # Parc ou le nom de l'utilisateur ne doit pas remonter au serveur.
@@ -70,6 +84,8 @@ param(
     # ("ne pas remonter le nom"), donc l'idiome -gt 0 des intervalles ne
     # s'applique pas -- il faut pouvoir distinguer "false" de "non precise".
     [ValidateSet('', 'true', 'false')][string] $ReportSessionUsername = '',
+    [string] $Location = '',
+    [switch] $ClearLocation,
     [string] $InstallDir = "$env:ProgramFiles\Tiai",
     [int]    $ShareTimeoutSeconds = 120
 )
@@ -206,6 +222,15 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($ReportSessionUsername)) {
         $reportName = if ($ReportSessionUsername -eq 'true') { 1 } else { 0 }
         Set-ItemProperty -Path $RegPath -Name 'ReportSessionUsername' -Value $reportName -Type DWord
+    }
+    # L'emplacement : presence de la valeur = elle compte, vide = retire. D'ou
+    # le switch explicite pour l'effacer, plutot que d'ecrire une chaine vide
+    # chaque fois que le parametre n'est pas fourni.
+    if (-not [string]::IsNullOrWhiteSpace($Location)) {
+        Set-ItemProperty -Path $RegPath -Name 'Location' -Value $Location.Trim() -Type String
+    }
+    elseif ($ClearLocation) {
+        Set-ItemProperty -Path $RegPath -Name 'Location' -Value '' -Type String
     }
 
     # Pas de config.yaml a generer : l'agent tolere son absence et se configure

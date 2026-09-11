@@ -8,7 +8,7 @@ from ipaddress import ip_address
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func
-from sqlmodel import select
+from sqlmodel import col, select
 
 from app.api.deps import CurrentMachine, SessionDep, verify_enrollment_secret
 from app.core import ratelimit, security
@@ -22,6 +22,7 @@ from app.features.command.models import (
     TERMINAL_STATUSES,
     Command,
     CommandStatus,
+    CommandType,
 )
 from app.features.inventory.crud import apply_inventory
 from app.features.inventory.schemas import InventoryReport
@@ -33,6 +34,7 @@ from app.features.threat.crud import NewDetection, upsert_threats
 from app.features.threat.schemas import ThreatReport
 from app.features.windows_update.crud import replace_pending
 from app.features.windows_update.schemas import WUStateReport
+from app.features.wol import relay as wol_relay
 from app.features.wol.packet import normalize_mac
 
 security_log = logging.getLogger("app.security")
@@ -51,15 +53,46 @@ class Fingerprint(BaseModel):
     tpm_ek_hash: str | None = None
 
 
+# Bounds the site name that reaches the column, the filter dropdown and the
+# relay's equality test. A site is a few words; this leaves room for a long
+# one while keeping a value a configuration file controls from growing without
+# limit.
+LOCATION_MAX = 120
+
+
+def clean_location(value: str | None) -> str | None:
+    """Trim and bound the site name; "" becomes None — never 422.
+
+    Same trade-off as the other reported strings: this rides in the same
+    request as the Defender state and the command pickup, and a value we
+    dislike costs the location alone. The empty string maps to None on
+    purpose: it is what an agent sends when its configuration names no site,
+    and "no site" is NULL, not a blank the filter would list as a site.
+    """
+    if value is None:
+        return None
+    cleaned = value.strip()[:LOCATION_MAX]
+    return cleaned or None
+
+
 class EnrollRequest(BaseModel):
     """First-contact payload (authenticated by X-Enrollment-Secret header)."""
 
     machine_uuid: str
     hostname: str | None = None
     domain: str | None = None
+    # Absent from an agent older than the field; "" from one whose
+    # configuration names no site. Only the first leaves the stored value
+    # alone — see ``clean_location`` and the heartbeat.
+    location: str | None = None
     os_version: str | None = None
     agent_version: str | None = None
     fingerprint: Fingerprint | None = None
+
+    @field_validator("location")
+    @classmethod
+    def _clean_location(cls, value: str | None) -> str | None:
+        return clean_location(value)
 
 
 class EnrollResponse(BaseModel):
@@ -138,6 +171,10 @@ class HeartbeatRequest(BaseModel):
 
     hostname: str | None = None
     domain: str | None = None
+    # ``location_reported`` below tells "absent" from "sent empty": the
+    # validator folds "" into None, and an agent that *cleared* its site must
+    # still clear the stored one where an older agent must not.
+    location: str | None = None
     ip_address: str | None = None
     mac_address: str | None = None
     ip_prefix_length: int | None = None
@@ -158,6 +195,16 @@ class HeartbeatRequest(BaseModel):
     inventory: InventoryReport | None = None
     fingerprint: Fingerprint | None = None
     threats: list[ThreatReport] = []
+
+    @field_validator("location")
+    @classmethod
+    def _clean_location(cls, value: str | None) -> str | None:
+        return clean_location(value)
+
+    @property
+    def location_reported(self) -> bool:
+        """Whether the agent said anything about its site at all."""
+        return "location" in self.model_fields_set
 
     @field_validator("ip_address")
     @classmethod
@@ -213,10 +260,17 @@ class HeartbeatRequest(BaseModel):
 
 
 class CommandOut(BaseModel):
-    """A pending command handed to the agent."""
+    """A pending command handed to the agent.
+
+    ``target_mac`` is the one argument the protocol carries, and it travels on
+    one type only: a ``wake_on_lan`` handed to this agent as a *relay* names
+    the poste to wake. Absent on everything else, where a bare type name is
+    the whole security model (``CommandType``).
+    """
 
     id: uuid.UUID
     type: str
+    target_mac: str | None = None
 
 
 class HeartbeatResponse(BaseModel):
@@ -345,6 +399,11 @@ async def enroll(
 
     machine.hostname = payload.hostname
     machine.domain = payload.domain
+    if "location" in payload.model_fields_set:
+        # Straight assignment when the agent spoke: an enrollment is a fresh
+        # start, and "" (now None) means "no site". An agent too old to send
+        # the field leaves whatever an administrator may rely on.
+        machine.location = payload.location
     machine.os_version = payload.os_version
     machine.agent_version = payload.agent_version
     fingerprint.store_fingerprint(
@@ -385,6 +444,13 @@ async def heartbeat(
         machine.hostname = payload.hostname
     if payload.domain is not None:
         machine.domain = payload.domain
+    if payload.location_reported:
+        # On presence, not on value: the agent sends the field on every
+        # heartbeat, empty when its configuration names no site, and empty has
+        # to *clear* — a poste moved to another building, or whose GPO dropped
+        # the setting, must not stay filed under the old one. Only an agent
+        # that predates the field says nothing, and leaves it alone.
+        machine.location = payload.location
     if payload.ip_address is not None:
         # Conditional like the other attributes: an agent that could not read an
         # address omits the field, and the last known one is better than none —
@@ -508,20 +574,42 @@ async def heartbeat(
     # long-offline host doesn't run a scan requested weeks ago (plan §2.8).
     await command_crud.mark_expired(session, machine_id=machine.id)
 
+    now = utcnow()
     rows = await session.exec(
         select(Command)
         .where(Command.machine_id == machine.id)
         .where(Command.status == CommandStatus.PENDING)
-        .where(Command.expires_at > utcnow())
+        .where(Command.expires_at > now)
+        # Never a wake: the machine it targets is the one this agent runs on,
+        # and an agent cannot wake itself. A pending wake on *this* machine is
+        # one waiting for a relay — or, since this poste is evidently on, one
+        # that has just succeeded (below).
+        .where(col(Command.type) != CommandType.WAKE_ON_LAN.value)
     )
     pending = rows.all()
     for cmd in pending:
         cmd.status = CommandStatus.DELIVERED
-        cmd.delivered_at = utcnow()
+        cmd.delivered_at = now
 
     # Build the payload before commit: expire_on_commit would otherwise trigger
     # a sync refresh on attribute access — MissingGreenlet under asyncio.
     commands = [CommandOut(id=c.id, type=c.type) for c in pending]
+
+    if settings.WOL_RELAY_ENABLED:
+        # This poste is awake, whatever woke it: the wakes queued for it are
+        # done. Only in relay mode do such rows exist — the server-side path
+        # writes its rows closed — so the default path pays no extra query.
+        await wol_relay.close_wakes_for_awake_machine(session, machine, now)
+        # And it may be the poste another one has been waiting for: the first
+        # eligible agent to contact the server takes the wake, MAC included.
+        for claimed in await wol_relay.claim_wakes(session, machine, now):
+            commands.append(
+                CommandOut(
+                    id=claimed.command.id,
+                    type=claimed.command.type,
+                    target_mac=claimed.target_mac,
+                )
+            )
     if new_detections:
         # Queued in the outbox inside this same transaction: the alert commits
         # with the detections it names, or not at all. The worker sends it with
@@ -541,9 +629,21 @@ async def command_result(
     machine: CurrentMachine,
     session: SessionDep,
 ) -> dict[str, str]:
-    """Record the result — or the start — of a command executed by the agent."""
+    """Record the result — or the start — of a command executed by the agent.
+
+    The reporter is the command's own machine, or — for a relayed wake — the
+    poste that claimed it: the target is off and cannot answer for itself.
+    """
     cmd = await session.get(Command, command_id)
-    if cmd is None or cmd.machine_id != machine.id:
+    if cmd is None:
+        return {"status": "ignored"}
+    relayed = cmd.relay_machine_id is not None and cmd.relay_machine_id == machine.id
+    if cmd.machine_id != machine.id and not relayed:
+        return {"status": "ignored"}
+    if relayed and cmd.status in TERMINAL_STATUSES:
+        # The target came back on its own before the relay reported — its
+        # heartbeat closed the row with the one acknowledgement a wake can
+        # have, and "packet emitted" is not news next to "poste revenu".
         return {"status": "ignored"}
 
     if payload.status == CommandStatus.RUNNING:
@@ -562,6 +662,15 @@ async def command_result(
     cmd.status = payload.status
     cmd.result_output = payload.output
     cmd.error = payload.error
+    if relayed:
+        # Signed by the relay: the row sits on the target's history, where a
+        # verdict that does not say which poste emitted would read as if the
+        # sleeping machine had written it.
+        who = wol_relay.relay_label(machine)
+        if cmd.result_output:
+            cmd.result_output = f"Relayé par {who} — {cmd.result_output}"
+        if cmd.error:
+            cmd.error = f"Relayé par {who} — {cmd.error}"
     cmd.finished_at = utcnow()
     await session.commit()
     return {"status": "ok"}

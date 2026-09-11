@@ -311,6 +311,16 @@ describe('wakeNotification', () => {
     expect(note.type).toBe('negative');
     expect(note.message).toMatch(/5 poste/);
   });
+
+  it('does not claim a packet was emitted when the server only relayed', () => {
+    // A remote server hands the wake to a poste of the site; nothing has left
+    // any wire when it answers, and the sentence must not say otherwise.
+    const note = wakeNotification({ results: [], woken: 2, failed: 0, relayed: true });
+
+    expect(note.type).toBe('positive');
+    expect(note.message).toMatch(/confié aux postes voisins de 2 poste/);
+    expect(note.message).not.toMatch(/émis/);
+  });
 });
 
 describe('inventory fleet listings', () => {
