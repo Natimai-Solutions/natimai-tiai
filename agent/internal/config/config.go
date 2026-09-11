@@ -60,6 +60,17 @@ type Config struct {
 	QueueMaxItems            int    `yaml:"queue_max_items"`
 	LogLevel                 string `yaml:"log_level"` // INFO (default) or DEBUG (also logs quiet heartbeats)
 
+	// Location is where the poste physically is — a site name such as
+	// "Lycée de Taravao" — reported to the server as-is. Free text, and empty
+	// by default: the agent has no way to find this out by itself, so it is
+	// whatever the deployment wrote in the YAML or in the registry (Location).
+	//
+	// Two things read it on the server. The console, which filters the parc
+	// by it; and the Wake-on-LAN relay, which needs to know which postes are
+	// on the same wire as the one to wake — a question the domain cannot
+	// answer on a parc where one domain spans several sites.
+	Location string `yaml:"location,omitempty"`
+
 	// Windows Update runs on its own clock, away from the heartbeat: one search
 	// every WUCollectIntervalSeconds, and an install allowed to run for
 	// WUInstallTimeoutSeconds. Both are here rather than hard-coded because they

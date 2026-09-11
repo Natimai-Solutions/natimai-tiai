@@ -39,7 +39,14 @@ gère naturellement les postes éteints.
   rationnés par l'agent lui-même. Et le retour : un réveil **Wake-on-LAN** émis
   par le serveur — le poste est éteint, il n'a plus d'agent à qui parler — vers
   l'adresse de diffusion de son propre sous-réseau, sur un poste ou sur toute une
-  salle.
+  salle. Serveur hébergé loin des postes ? Le réveil est **relayé par un poste
+  voisin** : le premier poste allumé du même emplacement à contacter le serveur
+  émet le paquet magique à sa place.
+- **Emplacements** — chaque agent peut déclarer où se trouve son poste
+  (« Lycée de Taravao »), par sa configuration ou par le registre, donc par GPO.
+  La liste des postes se filtre et se trie par emplacement, une commande peut
+  viser tout un site, et c'est ce qui dit au relais Wake-on-LAN quel poste est
+  sur le bon fil.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.

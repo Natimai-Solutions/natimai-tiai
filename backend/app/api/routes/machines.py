@@ -50,6 +50,7 @@ from app.features.machine.status import (
 from app.features.threat.models import Threat
 from app.features.user.permissions import Action, Resource
 from app.features.windows_update.models import WindowsUpdate
+from app.features.wol import relay as wol_relay
 from app.features.wol.sender import wake as emit_wake
 
 router = APIRouter(
@@ -66,6 +67,10 @@ class MachineOut(BaseModel):
     machine_uuid: str
     hostname: str | None
     domain: str | None
+    # The site, as the agent's configuration names it. In the list because it
+    # is what the list is scanned by on a multi-site parc — "which postes are
+    # at Taravao" — and null for every poste whose deployment set none.
+    location: str | None
     ip_address: str | None
     os_version: str | None
     agent_version: str | None
@@ -337,6 +342,7 @@ class MachineList(BaseModel):
 MachineSortField = Literal[
     "hostname",
     "domain",
+    "location",
     "av_product_name",
     "wu_pending_count",
     "session_user_present",
@@ -351,7 +357,13 @@ MachineSortField = Literal[
 
 # Sorted case-folded: under a C collation "ZEUS" would otherwise come before
 # "alpha", which no reader of a hostname column expects.
-_CASEFOLD_SORT_FIELDS = {"hostname", "domain", "av_product_name", "hw_model"}
+_CASEFOLD_SORT_FIELDS = {
+    "hostname",
+    "domain",
+    "location",
+    "av_product_name",
+    "hw_model",
+}
 
 
 def _sort_key(field: MachineSortField) -> Any:
@@ -426,6 +438,9 @@ class MachineFilters:
 
     search: str | None = None
     domain: str | None = None
+    # Exact, like the domain: the dropdown feeds it values the fleet reported,
+    # and "Lycée" as a substring would gather every lycée of the académie.
+    location: str | None = None
     antivirus: str | None = None
     os_version: str | None = None
     status: MachineStatus | None = None
@@ -455,6 +470,7 @@ class MachineFilters:
 def machine_filters(
     search: str | None = None,
     domain: str | None = None,
+    location: str | None = None,
     antivirus: str | None = None,
     os_version: str | None = None,
     status: MachineStatus | None = None,
@@ -483,6 +499,7 @@ def machine_filters(
     return MachineFilters(
         search=search,
         domain=domain,
+        location=location,
         antivirus=antivirus,
         os_version=os_version,
         status=status,
@@ -528,6 +545,8 @@ def _filtered_machines(
         stmt = stmt.where(_search_clause(filters.search))
     if filters.domain:
         stmt = stmt.where(col(Machine.domain) == filters.domain)
+    if filters.location:
+        stmt = stmt.where(col(Machine.location) == filters.location)
     if filters.antivirus:
         # Substring rather than equality, unlike the domain filter: the dropdown
         # feeds it exact names from the fleet, but a hand-typed "eset" must find
@@ -606,8 +625,8 @@ async def list_machines(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> MachineList:
-    """List machines with optional search/domain/antivirus/OS/status filters,
-    plus the two facets the dashboard cards link to (Windows Update state and
+    """List machines with optional search/domain/location/antivirus/OS/status
+    filters, plus the two facets the dashboard cards link to (Windows Update state and
     the presence of an active threat), a scan-freshness facet — which postes no
     quick/full scan has visited within ``scan_older_than_days`` — and the
     inventory facets: model, manufacturer, processor, chassis kind, memory
@@ -815,6 +834,17 @@ async def list_chassis_types(session: SessionDep) -> list[FleetValue]:
     return await _distinct_values(session, Machine.hw_chassis_type)
 
 
+@router.get("/locations", response_model=list[FleetValue])
+async def list_locations(session: SessionDep) -> list[FleetValue]:
+    """Sites the agents report, most populated first.
+
+    Feeds the console's location filter, and the counts double as a head
+    count per site. Postes whose agent names no site are not a site: they are
+    left out here, and reached by clearing the filter.
+    """
+    return await _distinct_values(session, Machine.location)
+
+
 class ExportColumnOut(BaseModel):
     """One column the fleet export can produce, as the console's picker lists it."""
 
@@ -944,11 +974,16 @@ class WakeResponse(BaseModel):
     Per machine and not one status for the batch: waking thirty postes of which
     two have never reported a MAC is a *partial* success, and a single "OK"
     would hide exactly the two an administrator has to go and look at.
+
+    ``relayed`` says which mode the server is in: emitted from here, or handed
+    to a poste of the site to emit. The console words its notification on it —
+    "paquet émis" is a promise the relay mode cannot make yet.
     """
 
     results: list[WakeOut]
     woken: int
     failed: int
+    relayed: bool = False
 
 
 # Declared before ``/{machine_id}``, like the antivirus listing above: FastAPI
@@ -973,6 +1008,12 @@ async def wake_machines(
     can pick it up. That keeps "who woke this poste, and when" in the same table
     as "who restarted it", which is where an administrator looks.
 
+    With ``WOL_RELAY_ENABLED`` the server emits nothing itself — it is not on
+    the postes' network — and the row is queued instead, for the first poste of
+    the target's site to claim on its heartbeat and emit from there
+    (``features/wol/relay``). Same endpoint, same history, same per-poste
+    outcomes; only the sentence the console shows changes.
+
     Never fails as a whole. A poste without a known MAC, or without an address
     to derive a broadcast from, comes back as one failed entry among the
     others — the batch is not the unit of success here, the poste is.
@@ -995,6 +1036,22 @@ async def wake_machines(
                     hostname=None,
                     ok=False,
                     detail="Poste introuvable : il a été supprimé ou fusionné.",
+                )
+            )
+            continue
+
+        if settings.WOL_RELAY_ENABLED:
+            # Queued for a poste of the site, or refused on the spot; either
+            # way the relay module writes the history row itself.
+            outcome = await wol_relay.queue_relayed_wake(
+                session, machine, created_by=user.email
+            )
+            results.append(
+                WakeOut(
+                    machine_id=machine.id,
+                    hostname=machine.hostname,
+                    ok=outcome.ok,
+                    detail=outcome.detail,
                 )
             )
             continue
@@ -1038,7 +1095,12 @@ async def wake_machines(
 
     await session.commit()
     woken = sum(1 for r in results if r.ok)
-    return WakeResponse(results=results, woken=woken, failed=len(results) - woken)
+    return WakeResponse(
+        results=results,
+        woken=woken,
+        failed=len(results) - woken,
+        relayed=settings.WOL_RELAY_ENABLED,
+    )
 
 
 async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machine:

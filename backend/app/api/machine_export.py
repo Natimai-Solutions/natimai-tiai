@@ -120,6 +120,9 @@ COLUMNS: Sequence[ExportColumn] = (
     # --- Identité
     ExportColumn("hostname", "Nom", "identity", "text", _attr("hostname"), True),
     ExportColumn("domain", "Domaine", "identity", "text", _attr("domain"), True),
+    # On offer, not in the default set: a single-site parc would export an
+    # empty column, and the multi-site one adds it in two clicks.
+    ExportColumn("location", "Emplacement", "identity", "text", _attr("location")),
     ExportColumn(
         "ip_address", "Adresse IP", "identity", "text", _attr("ip_address"), True
     ),

@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func
 from sqlmodel import col, select
 
@@ -30,7 +30,7 @@ class CreateCommands(BaseModel):
     """Queue a command for an explicit machine list or a broadcast filter.
 
     Exactly one target must be given: ``machine_ids``, ``target_all``,
-    ``target_domain``, or ``target_status``.
+    ``target_domain``, ``target_location``, or ``target_status``.
     """
 
     type: CommandType
@@ -42,7 +42,24 @@ class CreateCommands(BaseModel):
     machine_ids: list[uuid.UUID] | None = None
     target_all: bool = False
     target_domain: str | None = None
+    # A site, as the agents report it: "every poste of Taravao". Exact, like
+    # the domain.
+    target_location: str | None = None
     target_status: MachineStatus | None = None
+
+    @field_validator("type")
+    @classmethod
+    def _not_a_wake(cls, value: CommandType) -> CommandType:
+        """A wake has its own endpoint, and could not go through this one.
+
+        Queued here it would sit on the target as a command its own agent
+        never picks up — the target is off, and the pickup skips the type —
+        with nothing to say who is meant to emit it. ``POST /machines/wake``
+        decides that, and records it.
+        """
+        if value == CommandType.WAKE_ON_LAN:
+            raise ValueError("wake_on_lan is not queued here: use POST /machines/wake")
+        return value
 
     @model_validator(mode="after")
     def _exactly_one_target(self) -> "CreateCommands":
@@ -50,12 +67,13 @@ class CreateCommands(BaseModel):
             bool(self.machine_ids),
             self.target_all,
             self.target_domain is not None,
+            self.target_location is not None,
             self.target_status is not None,
         ]
         if sum(provided) != 1:
             raise ValueError(
                 "provide exactly one target: machine_ids, target_all, "
-                "target_domain, or target_status"
+                "target_domain, target_location, or target_status"
             )
         return self
 
@@ -81,6 +99,9 @@ class CommandOut(BaseModel):
     machine_id: uuid.UUID
     type: str
     status: str
+    # The poste that emitted a relayed wake on behalf of ``machine_id``; null
+    # on every other row (``Command.relay_machine_id``).
+    relay_machine_id: uuid.UUID | None = None
     created_by: str | None
     created_at: datetime
     expires_at: datetime
@@ -112,6 +133,8 @@ async def _resolve_targets(
         stmt = stmt.where(col(Machine.id).in_(payload.machine_ids))
     elif payload.target_domain is not None:
         stmt = stmt.where(col(Machine.domain) == payload.target_domain)
+    elif payload.target_location is not None:
+        stmt = stmt.where(col(Machine.location) == payload.target_location)
     elif payload.target_status is not None:
         stmt = stmt.where(
             status_clause(payload.target_status, utcnow(), settings.INACTIVE_AFTER_DAYS)

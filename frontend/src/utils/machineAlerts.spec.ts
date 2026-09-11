@@ -15,6 +15,7 @@ function healthy(overrides: Partial<MachineDetail> = {}): MachineDetail {
     machine_uuid: 'uuid-1',
     hostname: 'PC-01',
     domain: 'CORP',
+    location: null,
     ip_address: '10.0.0.1',
     os_version: 'Windows 11',
     agent_version: '0.3.0',

@@ -82,6 +82,9 @@
          côté serveur est effacée au prochain cycle). -->
     <Property Id="REPORTSOFTWARE" Secure="yes" />
     <Property Id="INVENTORYCOLLECTINTERVALSECONDS" Secure="yes" />
+    <!-- Emplacement du poste, texte libre ("Lycée de Taravao") : ce par quoi la
+         console filtre le parc, et ce qui désigne un relais Wake-on-LAN. -->
+    <Property Id="LOCATION" Secure="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Tiai" />
@@ -206,6 +209,12 @@
                  Permanent="yes" Condition="INVENTORYCOLLECTINTERVALSECONDS">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="InventoryCollectIntervalSeconds"
                        Type="integer" Value="[INVENTORYCOLLECTINTERVALSECONDS]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegLocation" Guid="6F2D9B1C-4A7E-4C3B-9D5F-1E8A2B7C4D90"
+                 Permanent="yes" Condition="LOCATION">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="Location"
+                       Type="string" Value="[LOCATION]" KeyPath="yes" />
       </Component>
 
     </ComponentGroup>

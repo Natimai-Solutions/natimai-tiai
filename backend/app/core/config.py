@@ -225,6 +225,31 @@ class Settings(BaseSettings):
     # copies cost three datagrams and remove the single-loss case.
     WOL_PACKET_COUNT: int = 3
 
+    # --- Wake-on-LAN relayed by an agent ---
+    # For a server that is nowhere near the postes — hosted off-site, or in a
+    # cloud — and therefore cannot put a frame on their wire at all. Enabled,
+    # the server stops emitting and instead hands the wake to *another poste of
+    # the same site*: the first machine sharing the target's location (or, for
+    # a target with no location, its domain) to contact the server receives the
+    # target's MAC and broadcasts the magic packet on its own subnets. Off by
+    # default because it changes what the wake button does, and because the
+    # relay is the one command in the catalogue that carries an argument — the
+    # agent bounds it (an EUI-48, its own subnets only), but it is still a
+    # choice a deployment makes knowingly. Either mode, never both: a remote
+    # server emitting into the void would only report a success it cannot have.
+    WOL_RELAY_ENABLED: bool = False
+    # How long a relayed wake waits for a poste to claim it before expiring. Ten
+    # minutes and not the general command TTL: a wake nobody relayed within ten
+    # minutes is a site with nothing on, and a magic packet an hour late meets
+    # a poste somebody already switched on by hand.
+    WOL_RELAY_TTL_MINUTES: int = Field(default=10, ge=1, le=60 * 24)
+    # A poste on the *same subnet* as the target claims the wake at once; a
+    # poste merely on the same site waits this long first, leaving the better
+    # placed one — the one whose broadcast is certain to reach the target — a
+    # heartbeat's head start. Slightly above the agent's 60 s poll so that
+    # head start is a full cycle. Zero disables the preference.
+    WOL_RELAY_SUBNET_GRACE_SECONDS: int = Field(default=90, ge=0)
+
     @model_validator(mode="after")
     def _refuse_placeholder_secrets(self) -> Self:
         """Fail fast outside `local` when a secret is empty or a placeholder.
