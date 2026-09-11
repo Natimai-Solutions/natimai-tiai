@@ -204,6 +204,10 @@ class Settings(BaseSettings):
     MAINTENANCE_DEFAULT_CYCLE_DAYS: int = Field(default=90, ge=0, le=3650)
     # How many days before its due date a poste is reported "à échéance".
     MAINTENANCE_DUE_SOON_DAYS: int = Field(default=14, ge=0, le=365)
+    # The morning of the week each maintenance owner is reminded of what is
+    # due, 0 = Monday … 6 = Sunday, at DIGEST_HOUR_UTC. Behind each account's
+    # e-mail setting like the digest; an owner with nothing due gets nothing.
+    MAINTENANCE_REMINDER_WEEKDAY: int = Field(default=0, ge=0, le=6)
 
     # --- Rooms ---
     # How postes are filed into rooms. ``manual``: from the console, by hand.

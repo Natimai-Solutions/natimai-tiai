@@ -21,6 +21,7 @@ from app.features.check import crud
 from app.features.check.models import MachineCheck
 from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
+from app.features.notification import tasks as task_mail
 from app.features.room import crud as room_crud
 from app.features.user.models import User
 from app.features.user.permissions import Action, Resource
@@ -225,7 +226,7 @@ async def create_check(
             status_code=409,
             message="A verification is already open on this machine",
         )
-    await _require_assignee(session, payload.assigned_to_id)
+    assignee = await _require_assignee(session, payload.assigned_to_id)
     row = MachineCheck(
         machine_id=machine.id,
         requested_by=current.email,
@@ -233,6 +234,16 @@ async def create_check(
         instructions=_clean(payload.instructions),
     )
     session.add(row)
+    # In the same transaction as the request: no mail for a request that
+    # was rolled back, and none to oneself.
+    if assignee is not None and assignee.id != current.id:
+        task_mail.send_checks_assigned(
+            session,
+            assignee=assignee,
+            machines=[machine],
+            requested_by=current.email,
+            instructions=row.instructions,
+        )
     await session.commit()
     await session.refresh(row)
     return await _one(session, row)
@@ -285,11 +296,12 @@ async def create_checks_bulk(
     payload: CheckBulkCreate, session: SessionDep, current: CurrentUser
 ) -> CheckBulkOut:
     """One request per poste of a selection, skipping those already asked."""
-    await _require_assignee(session, payload.assigned_to_id)
-    found = await session.exec(
-        select(Machine.id).where(col(Machine.id).in_(payload.machine_ids))
+    assignee = await _require_assignee(session, payload.assigned_to_id)
+    found_machines = await session.exec(
+        select(Machine).where(col(Machine.id).in_(payload.machine_ids))
     )
-    machine_ids = list(found.all())
+    machines = {m.id: m for m in found_machines.all()}
+    machine_ids = list(machines)
     if len(machine_ids) != len(set(payload.machine_ids)):
         raise AppError(
             code=ErrorCode.MACHINE_NOT_FOUND,
@@ -303,7 +315,7 @@ async def create_checks_bulk(
         )
     )
     open_ids = set(already.all())
-    created = 0
+    created_machines: list[Machine] = []
     for machine_id in machine_ids:
         if machine_id in open_ids:
             continue
@@ -315,7 +327,17 @@ async def create_checks_bulk(
                 instructions=_clean(payload.instructions),
             )
         )
-        created += 1
+        created_machines.append(machines[machine_id])
+    created = len(created_machines)
+    # One mail for the whole request, not one per poste.
+    if assignee is not None and assignee.id != current.id and created_machines:
+        task_mail.send_checks_assigned(
+            session,
+            assignee=assignee,
+            machines=created_machines,
+            requested_by=current.email,
+            instructions=_clean(payload.instructions),
+        )
     await session.commit()
     return CheckBulkOut(created=created, skipped=len(machine_ids) - created)
 
@@ -380,13 +402,25 @@ async def update_check(
             code=ErrorCode.CHECK_CLOSED, status_code=409, message="This check is closed"
         )
     fields = payload.model_dump(exclude_unset=True)
+    new_assignee: User | None = None
     if "assigned_to_id" in fields:
-        await _require_assignee(session, fields["assigned_to_id"])
+        new_assignee = await _require_assignee(session, fields["assigned_to_id"])
+        if fields["assigned_to_id"] == row.assigned_to_id:
+            new_assignee = None  # unchanged: nothing new to tell them
         row.assigned_to_id = fields["assigned_to_id"]
     if "instructions" in fields:
         row.instructions = _clean(fields["instructions"])
     row.updated_at = utcnow()
     session.add(row)
+    if new_assignee is not None and new_assignee.id != current.id:
+        machine = await _require_machine(session, row.machine_id)
+        task_mail.send_checks_assigned(
+            session,
+            assignee=new_assignee,
+            machines=[machine],
+            requested_by=current.email,
+            instructions=row.instructions,
+        )
     audit.record(
         session,
         actor=current.email,

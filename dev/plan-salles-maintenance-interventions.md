@@ -3,8 +3,8 @@
 > **Statut : cadrage validé le 2026-09-10** (§2), §2.2 compris. **J1 à J6
 > livrés** (groupes de droits, commandes à risque, bâtiments et salles,
 > classement depuis l'annuaire, journal des interventions, vérifications
-> demandées, maintenance) — voir §11. Restent J7 (notifications) et J8
-> (documentation, captures).
+> demandées, maintenance, notifications) — voir §11. Reste J8
+> (documentation finale, captures).
 >
 > Branche de travail : `claude/postes-maintenance-features-85buig`, fondée sur
 > `claude/agent-location-wol-ughnse` (emplacement des postes + réveil relayé),
@@ -394,7 +394,7 @@ L'ordre place le **journal** avant la **maintenance**, parce que la seconde
 | **J4 — Journal des interventions** ✅ | Modèle, routes, ressource `intervention`, onglet Historique, formulaire d'ajout, prise en compte dans la fusion de postes. **→ PR 1** | 1 j |
 | **J5 — Vérifications** ✅ | Modèle, routes, ressource `check`, `GET /checks/assignable-users`, contrainte « une ouverte par poste », bandeau sur la fiche, action groupée, section dans Mes tâches, clôture → intervention. | 1,5 j |
 | **J6 — Maintenance** ✅ | Ressources `maintenance` et `settings`, table `app_settings` + page Paramètres, résolution cycle/responsable, `last_maintenance_at`, `/maintenance/due`, formulaire de séance (salle ou poste), transmission, section dans Mes tâches, cartes du tableau de bord, filtre « en retard ». | 2,5 j |
-| **J7 — Notifications** | E-mail à l'affectation d'une vérification ; ligne « vos maintenances en retard » dans le résumé quotidien ; rappel hebdomadaire par responsable. | 1 j |
+| **J7 — Notifications** ✅ | E-mail à l'affectation d'une vérification ; ligne « vos maintenances en retard » dans le résumé quotidien ; rappel hebdomadaire par responsable. | 1 j |
 | **J8 — Validation et documentation** | Couverture, `alembic check`, README (Fonctionnalités), DEPLOYMENT.md (variables, clés de registre), captures. **→ PR 2** | 1 j |
 
 Total indicatif : **14 à 15 jours**, J1 compris.
@@ -605,6 +605,23 @@ texte. Reste ouvert : le §2.2.
   (salles dépliables, séance depuis la liste), filtre et colonne dans la
   liste des postes, carte du tableau de bord, colonne dans la page Salles,
   page Paramètres.
+
+### J7 — écarts constatés à l'implémentation
+
+- **Trois messages, un module** (`notification/tasks.py`) : l'affectation
+  d'une vérification (une seule ligne pour une demande groupée, jamais à
+  soi-même, ni à une réaffectation à la même personne), le bloc « VOS
+  TÂCHES » en fin de résumé quotidien pour qui en reçoit un, et le rappel
+  hebdomadaire des maintenances aux responsables qui ont quelque chose de dû.
+- **Seul « aucun e-mail » les coupe** : ces messages sont adressés à la
+  personne, pas au parc, donc les cadences « immédiat » et « résumé les jours
+  d'événement » les reçoivent aussi. Le bloc personnel ne déclenche pas le
+  résumé « jours d'événement » : il complète celui qui part, il ne le
+  provoque pas.
+- **Jour du rappel** : `MAINTENANCE_REMINDER_WEEKDAY` (lundi par défaut), à
+  `DIGEST_HOUR_UTC`, par un job `weekly_at` du worker.
+- Le résumé quotidien est désormais rendu **par destinataire** (même corps
+  commun, bloc personnel en plus), toujours une adresse par message.
 
 ## 12. Plus tard — portée par emplacement
 

@@ -78,9 +78,12 @@ gère naturellement les postes éteints.
   rien, une alerte immédiate à chaque menace détectée, un résumé quotidien les
   jours où il y a à traiter, ou un résumé chaque matin — état du parc, antivirus
   périmés, correctifs critiques en attente. Un « rien à signaler » est aussi une
-  information : c'est le réglage par défaut. Chaque e-mail passe par une file en
-  base et est réessayé en cas d'incident d'envoi : un courrier décidé n'est
-  jamais perdu.
+  information : c'est le réglage par défaut. Le résumé se termine par ce qui
+  est *à vous* : les vérifications qu'on vous a affectées, les maintenances
+  dont vous êtes responsable. Une vérification affectée est annoncée sur le
+  moment, et chaque responsable reçoit un rappel hebdomadaire de ses
+  maintenances dues. Chaque e-mail passe par une file en base et est réessayé
+  en cas d'incident d'envoi : un courrier décidé n'est jamais perdu.
 - **Inventaire matériel et logiciel** — ce que chaque poste *est* : constructeur,
   modèle, châssis, carte mère, BIOS, processeur, barrettes et emplacements
   libres, disques (type, santé, chiffrement), volumes avec leur occupation,
