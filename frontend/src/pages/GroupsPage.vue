@@ -49,7 +49,9 @@
       </template>
 
       <template #body-cell-permissions="props">
-        <q-td :props="props">
+        <!-- Wrapping, unlike a table cell's default: a group carries a dozen
+             chips, and a single line would push the actions off the screen. -->
+        <q-td :props="props" style="white-space: normal; max-width: 720px">
           <span v-if="props.row.is_admin" class="text-weight-medium">Tous les droits</span>
           <span v-else-if="!props.row.permissions.length" class="text-grey">Aucun</span>
           <template v-else>

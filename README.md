@@ -20,6 +20,14 @@ gère naturellement les postes éteints.
 
 ![Liste des postes Tia'i](images/Postes.png)
 
+![Mes tâches : vérifications affectées et maintenances à faire](images/MesTaches.png)
+
+![Une salle : ses postes, son cycle et son responsable de maintenance](images/Salle.png)
+
+![Fiche d'un poste, onglet Historique : maintenance et journal des interventions](images/FichePosteHistorique.png)
+
+![Groupes de droits composés dans la console](images/Groupes.png)
+
 ## Fonctionnalités
 
 - **Microsoft Defender** — état des signatures et de la protection temps réel,
@@ -137,6 +145,11 @@ l'exécution est figée dans le binaire de l'agent.
 | Windows Update | 🟢 Livré |
 | Déploiement logiciel | ⚪ À venir |
 | Inventaire matériel / logiciel | 🟢 Livré |
+| Groupes de droits | 🟢 Livré |
+| Bâtiments, salles, classement depuis l'annuaire | 🟢 Livré |
+| Historique des interventions | 🟢 Livré |
+| Vérifications demandées | 🟢 Livré |
+| Maintenance (cycles, responsables, séances) | 🟢 Livré |
 
 ## Téléchargement
 
@@ -225,7 +238,10 @@ une issue publique.
 - Chaque composant a son propre README : [agent/](agent/README.md),
   [backend/](backend/README.md), [frontend/](frontend/README.md).
 - Le dossier [dev/](dev/) rassemble les documents de conception et de suivi du
-  projet, pour qui veut le détail des choix techniques.
+  projet, pour qui veut le détail des choix techniques — dont
+  [plan-salles-maintenance-interventions.md](dev/plan-salles-maintenance-interventions.md)
+  pour les groupes de droits, les salles, les vérifications, la maintenance et
+  l'historique des interventions.
 
 ## Licence
 

@@ -140,13 +140,17 @@ async def create_intervention(
     current: CurrentUser,
 ) -> InterventionOut:
     machine = await _require_machine(session, machine_id)
+    now = utcnow()
     row = Intervention(
         machine_id=machine.id,
         kind=payload.kind.value,
         title=_clean(payload.title),
         note=_clean(payload.note),
         performed_by=current.email,
-        performed_at=payload.performed_at or utcnow(),
+        performed_at=payload.performed_at or now,
+        # The same instant for both: "edited" is read off their difference.
+        created_at=now,
+        updated_at=now,
     )
     session.add(row)
     await session.commit()

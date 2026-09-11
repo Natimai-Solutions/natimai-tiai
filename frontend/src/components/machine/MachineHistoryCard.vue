@@ -34,7 +34,7 @@
           </q-item-label>
           <q-item-label caption>
             {{ formatDateTime(item.performed_at) }} · {{ item.performed_by }}
-            <span v-if="item.updated_at !== item.created_at"> · modifié</span>
+            <span v-if="wasEdited(item)"> · modifié</span>
           </q-item-label>
           <q-item-label v-if="item.note" class="q-mt-xs" style="white-space: pre-line">
             {{ item.note }}
@@ -149,6 +149,11 @@ const form = reactive({
 });
 
 const kindOptions = INTERVENTION_KINDS.map((k) => ({ label: k.label, value: k.value }));
+
+/** Edited after the fact — not the same instant written twice at creation. */
+function wasEdited(item: Intervention): boolean {
+  return new Date(item.updated_at).getTime() - new Date(item.created_at).getTime() > 1000;
+}
 
 /** An ISO instant as the datetime-local input wants it, in local time. */
 function toLocalInput(iso: string): string {

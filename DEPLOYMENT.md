@@ -665,6 +665,39 @@ lignes à chercher, dans l'ordre d'un cycle :
 
 ---
 
+## Organisation du parc : groupes, salles, tâches, maintenance
+
+Tout se règle depuis la console ; rien à déployer sur les postes. Les
+variables d'environnement concernées sont `ROOM_SOURCE`,
+`MAINTENANCE_DEFAULT_CYCLE_DAYS`, `MAINTENANCE_DUE_SOON_DAYS` et
+`MAINTENANCE_REMINDER_WEEKDAY` (section « Backend » ci-dessus).
+
+**Groupes de droits.** Un compte peut ce que ses groupes lui accordent. Trois
+groupes existent d'emblée : *Administrateurs* (tous les droits, implicites),
+*Lecture seule*, *Techniciens* (lecture + commandes, courantes et à risque +
+saisie des interventions, vérifications et maintenances). Page « Groupes » pour
+en composer d'autres — par exemple « exécute les commandes courantes mais pas
+les commandes à risque, et ne gère pas les postes ». Le premier compte est dans
+*Administrateurs* ; une base migrée depuis une version à deux rôles y range ses
+anciens `admin`, les autres dans *Lecture seule*.
+
+**Bâtiments et salles.** Un bâtiment porte l'emplacement, dans les mots que les
+agents remontent (réglage `location` de l'agent) ; une salle en hérite. La
+console range les postes à la main (`ROOM_SOURCE=manual`) ou depuis l'annuaire :
+`ad_ou` crée une salle par unité d'organisation contenant l'objet ordinateur,
+`ad_location` une par valeur de l'attribut *Emplacement* de l'objet. Les deux
+lectures viennent de l'agent, sans rien configurer (voir « Paramètres de l'agent
+Windows », paragraphe *Annuaire*). Après un changement de `ROOM_SOURCE`,
+« Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc.
+
+**Vérifications et maintenance.** « Mes tâches » réunit, pour chaque compte, les
+vérifications qu'on lui a affectées et les salles et postes dont il est
+responsable de la maintenance. Le cycle et le responsable se règlent au niveau
+du parc (page Paramètres), d'une salle ou d'un poste, le plus précis gagnant ;
+un cycle de 0 exclut. Une séance de maintenance se saisit pour toute une salle
+depuis sa fiche ou depuis « Mes tâches ». Les e-mails suivent le réglage de
+chaque compte (page « Mon compte »).
+
 ## Dépannage
 
 | Symptôme | Cause probable | Correctif |

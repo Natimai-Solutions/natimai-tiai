@@ -24,6 +24,13 @@ src/
   composables/              logique de page réutilisable (rafraîchissement auto)
   layouts/MainLayout.vue    coquille applicative
   pages/MachinesPage.vue    liste des postes
+  pages/MachineDetailPage   fiche d'un poste (onglets, dont Historique : maintenance + journal)
+  pages/RoomsPage.vue       salles et bâtiments ; RoomDetailPage : une salle et ses postes
+  pages/TasksPage.vue       « Mes tâches » : vérifications affectées, maintenances à faire
+  pages/GroupsPage.vue      groupes de droits (grille ressources × actions)
+  pages/SettingsPage.vue    défauts du parc (maintenance)
+  components/check|maintenance|room   dialogues des chantiers d'exploitation
+  utils/permissions.ts      catalogue des permissions, miroir du backend ; auth.can()
   router/                   routes
   services/machines.ts      appels API typés
   utils/format.ts           libellés et couleurs partagés

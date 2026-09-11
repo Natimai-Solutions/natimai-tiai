@@ -3,8 +3,9 @@
 > **Statut : cadrage validé le 2026-09-10** (§2), §2.2 compris. **J1 à J6
 > livrés** (groupes de droits, commandes à risque, bâtiments et salles,
 > classement depuis l'annuaire, journal des interventions, vérifications
-> demandées, maintenance, notifications) — voir §11. Reste J8
-> (documentation finale, captures).
+> demandées, maintenance, notifications, documentation) — voir §11. **Chantier
+> livré** ; reste la validation du bind ADSI sur un domaine réel (§11, J3) et,
+> plus tard, la portée par emplacement (§12).
 >
 > Branche de travail : `claude/postes-maintenance-features-85buig`, fondée sur
 > `claude/agent-location-wol-ughnse` (emplacement des postes + réveil relayé),
@@ -395,7 +396,7 @@ L'ordre place le **journal** avant la **maintenance**, parce que la seconde
 | **J5 — Vérifications** ✅ | Modèle, routes, ressource `check`, `GET /checks/assignable-users`, contrainte « une ouverte par poste », bandeau sur la fiche, action groupée, section dans Mes tâches, clôture → intervention. | 1,5 j |
 | **J6 — Maintenance** ✅ | Ressources `maintenance` et `settings`, table `app_settings` + page Paramètres, résolution cycle/responsable, `last_maintenance_at`, `/maintenance/due`, formulaire de séance (salle ou poste), transmission, section dans Mes tâches, cartes du tableau de bord, filtre « en retard ». | 2,5 j |
 | **J7 — Notifications** ✅ | E-mail à l'affectation d'une vérification ; ligne « vos maintenances en retard » dans le résumé quotidien ; rappel hebdomadaire par responsable. | 1 j |
-| **J8 — Validation et documentation** | Couverture, `alembic check`, README (Fonctionnalités), DEPLOYMENT.md (variables, clés de registre), captures. **→ PR 2** | 1 j |
+| **J8 — Validation et documentation** ✅ | Couverture, `alembic check`, README (Fonctionnalités, feuille de route, captures), DEPLOYMENT.md (variables, section « Organisation du parc »), READMEs backend et console, instantané dans `plan-projet-tiai.md`. | 1 j |
 
 Total indicatif : **14 à 15 jours**, J1 compris.
 
@@ -622,6 +623,23 @@ texte. Reste ouvert : le §2.2.
   `DIGEST_HOUR_UTC`, par un job `weekly_at` du worker.
 - Le résumé quotidien est désormais rendu **par destinataire** (même corps
   commun, bloc personnel en plus), toujours une adresse par message.
+
+### J8 — écarts constatés à l'implémentation
+
+- Les captures (`images/MesTaches.png`, `Salle.png`, `FichePosteHistorique.png`,
+  `Groupes.png`) ont été prises sur une console construite et servie en local,
+  peuplée par l'API (24 postes enrôlés avec inventaire et bloc annuaire, trois
+  bâtiments, cinq salles, deux techniciens, deux séances, quatre demandes).
+- Deux corrections trouvées en les prenant : « Mes tâches » et la fiche salle
+  chargeaient les maintenances avant que le profil soit connu sur un
+  rechargement complet (liste vide) — un `watch` sur le compte rejoue le
+  chargement, comme la fiche du poste le faisait déjà ; une intervention
+  fraîchement créée s'affichait « modifiée » parce que ses deux horodatages
+  étaient pris à des microsecondes d'écart — créés au même instant, et la
+  console tolère une seconde. Les puces de droits de la page Groupes passent
+  désormais à la ligne.
+- Une PR unique de J1 à J8 plutôt que les deux prévues : les jalons sont des
+  commits distincts sur la branche, relisibles un par un.
 
 ## 12. Plus tard — portée par emplacement
 

@@ -209,7 +209,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import CheckCloseDialog from 'src/components/check/CheckCloseDialog.vue';
@@ -353,6 +353,16 @@ async function takeOver(check: Check) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
   }
 }
+
+// The profile is fetched by the layout without being awaited: on a hard
+// reload the permission checks in `reload` run before it is there, and the
+// lists would stay empty. Re-read once it lands.
+watch(
+  () => auth.user?.id,
+  (id) => {
+    if (id) void reload();
+  },
+);
 
 onMounted(reload);
 </script>

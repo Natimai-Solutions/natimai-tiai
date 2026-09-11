@@ -13,6 +13,8 @@ app/
   core/        config, db, security (tokens), worker (outbox + tâches périodiques)
   api/         deps + routes (agent, machines, health)
   features/    machine/ threat/ command/ notification/ (modèles + logique)
+               user/ (comptes, groupes, permissions) room/ (bâtiments, salles, annuaire)
+               intervention/ check/ maintenance/ setting/ (exploitation du parc)
   alembic/     migrations
   scripts/     entrypoint.sh (api | worker | migrate)
 ```
@@ -109,6 +111,21 @@ jamais revenu reste `delivered` indéfiniment dans l'historique — c'est le
 comportement attendu, pas une ligne oubliée. Passé son délai, elle cesse
 simplement de verrouiller son type sur ce poste, et si l'agent finit par
 répondre, son résultat s'inscrit malgré tout sur la ligne d'origine.
+
+## Exploitation du parc : salles, vérifications, maintenance, journal
+
+Quatre chantiers livrés ensemble (cf. `dev/plan-salles-maintenance-interventions.md`),
+migrations `0016` à `0021`, chacun sa ressource de permission :
+
+| Objet | Tables | Ce qu'il porte |
+|---|---|---|
+| Bâtiments et salles (`room`) | `buildings`, `rooms`, `machines.room_id` | Un bâtiment porte l'emplacement (le site que l'agent déclare), une salle en hérite. Un poste dont l'agent nomme un autre site que sa salle est **signalé** (`location_mismatch`), jamais refusé. `ROOM_SOURCE` fait ranger les postes par l'annuaire (OU ou attribut Emplacement, lus par l'agent avec l'inventaire) au lieu de la console. |
+| Journal (`intervention`) | `interventions` | Toute intervention humaine sur un poste, une chronologie ; les vérifications closes et les séances de maintenance y écrivent leur ligne (`check_id`, `maintenance_id`). |
+| Vérifications (`check`) | `machine_checks` | « Va voir ce poste » : consignes, affectataire, une seule ouverte par poste (index partiel), close avec une note datée. |
+| Maintenance (`maintenance`, `settings`) | `maintenances`, `app_settings`, `*.maintenance_cycle_days`, `*.maintenance_owner_id`, `machines.last_maintenance_at` | Cycle et responsable résolus poste › salle › parc (`features/maintenance/policy.py`, en Python pour les réponses et en SQL pour les filtres et compteurs) ; une séance = une visite, une ligne de journal par poste fait, le cycle relancé. |
+
+Les trois groupes intégrés reçoivent les droits de ces ressources par les
+migrations qui les créent ; les administrateurs ont tout implicitement.
 
 ## Utilisateurs, groupes & permissions
 

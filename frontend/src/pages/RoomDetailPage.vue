@@ -505,6 +505,15 @@ watch(
   },
 );
 
+// Same reasoning as the fiche: the profile lands after the first load on a
+// hard reload, and the maintenance card is gated on it.
+watch(
+  () => auth.user?.id,
+  (id) => {
+    if (id && !maintenance.value) void loadMaintenance();
+  },
+);
+
 onMounted(() => {
   void load();
   void loadRefs();
