@@ -1,80 +1,101 @@
 <template>
   <q-page padding>
-    <div class="row items-center q-col-gutter-sm q-mb-sm">
+    <!-- Two lines rather than one: the first is about the page (which columns,
+         export, how fresh the list is), the second about what is in it (search
+         and filters). One row wearing all of it read as a strip of look-alike
+         icons stuck together, so each button now carries a label and a colour
+         of its own. -->
+    <div class="row items-center q-col-gutter-md q-mb-sm">
       <div class="text-h5 col-auto">Postes</div>
       <q-space />
-      <q-input
-        v-model="search"
-        dense
-        outlined
-        debounce="300"
-        placeholder="Nom, IP, MAC, antivirus ou UUID…"
-        class="col-auto"
-        style="min-width: 260px"
-        @update:model-value="pushQuery"
-      >
-        <template #append><q-icon name="search" /></template>
-      </q-input>
-      <!-- The two everyday facets stay on the bar: "on right now" and "carrying
-           an active threat" are asked on the way to an action, and a toggle
-           costs a glance where a dropdown costs a read. -->
-      <q-toggle
-        v-model="onlineOnly"
-        dense
-        label="Allumés"
-        class="col-auto"
-        @update:model-value="pushQuery"
-      >
-        <q-tooltip>Postes allumés — agent en contact ces dernières minutes</q-tooltip>
-      </q-toggle>
-      <q-toggle
-        v-model="threatsOnly"
-        dense
-        label="Menaces actives"
-        class="col-auto"
-        @update:model-value="pushQuery"
-      />
-      <q-btn
-        flat
-        dense
-        no-caps
-        icon="filter_list"
-        label="Filtres"
-        class="col-auto"
-        @click="filtersOpen = !filtersOpen"
-      >
-        <q-badge v-if="!filtersOpen && filterChips.length" color="primary" floating>
-          {{ filterChips.length }}
-        </q-badge>
-      </q-btn>
+      <div class="col-auto">
+        <q-btn
+          outline
+          no-caps
+          color="primary"
+          icon="view_column"
+          label="Colonnes"
+          @click="columnsOpen = true"
+        >
+          <q-tooltip>Colonnes affichées et leur ordre — enregistrés sur votre compte</q-tooltip>
+        </q-btn>
+      </div>
+      <div class="col-auto">
+        <q-btn
+          outline
+          no-caps
+          color="positive"
+          icon="download"
+          label="Exporter"
+          @click="exportOpen = true"
+        >
+          <q-tooltip>Exporter le parc filtré (Excel ou CSV, colonnes au choix)</q-tooltip>
+        </q-btn>
+      </div>
       <div v-if="lastRefreshedAt" class="text-caption text-grey col-auto">
         Actualisé à {{ lastRefreshLabel }}
       </div>
-      <q-btn
-        flat
-        dense
-        round
-        icon="view_column"
-        aria-label="Colonnes"
-        class="col-auto"
-        @click="columnsOpen = true"
-      >
-        <q-tooltip>Colonnes affichées et leur ordre — enregistrés sur votre compte</q-tooltip>
-      </q-btn>
-      <q-btn
-        flat
-        dense
-        round
-        icon="download"
-        aria-label="Exporter"
-        class="col-auto"
-        @click="exportOpen = true"
-      >
-        <q-tooltip>Exporter le parc filtré (Excel ou CSV, colonnes au choix)</q-tooltip>
-      </q-btn>
-      <q-btn flat round icon="refresh" :loading="loading" class="col-auto" @click="reload">
-        <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
-      </q-btn>
+      <div class="col-auto">
+        <q-btn
+          flat
+          round
+          color="primary"
+          icon="refresh"
+          aria-label="Actualiser"
+          :loading="loading"
+          @click="reload"
+        >
+          <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
+        </q-btn>
+      </div>
+    </div>
+
+    <div class="row items-center q-col-gutter-md q-mb-sm">
+      <div class="col-12 col-sm">
+        <q-input
+          v-model="search"
+          dense
+          outlined
+          clearable
+          debounce="300"
+          placeholder="Nom, IP, MAC, antivirus ou UUID…"
+          style="max-width: 480px"
+          @update:model-value="pushQuery"
+        >
+          <template #prepend><q-icon name="search" /></template>
+        </q-input>
+      </div>
+      <!-- The two everyday facets stay on the bar: "on right now" and "carrying
+           an active threat" are asked on the way to an action, and a toggle
+           costs a glance where a dropdown costs a read. -->
+      <div class="col-auto">
+        <q-toggle v-model="onlineOnly" dense label="Allumés" @update:model-value="pushQuery">
+          <q-tooltip>Postes allumés — agent en contact ces dernières minutes</q-tooltip>
+        </q-toggle>
+      </div>
+      <div class="col-auto">
+        <q-toggle
+          v-model="threatsOnly"
+          dense
+          label="Menaces actives"
+          @update:model-value="pushQuery"
+        />
+      </div>
+      <div class="col-auto">
+        <q-btn
+          :outline="!filtersOpen"
+          :unelevated="filtersOpen"
+          no-caps
+          color="secondary"
+          icon="filter_list"
+          label="Filtres"
+          @click="filtersOpen = !filtersOpen"
+        >
+          <q-badge v-if="!filtersOpen && filterChips.length" color="primary" floating>
+            {{ filterChips.length }}
+          </q-badge>
+        </q-btn>
+      </div>
     </div>
 
     <!-- The dropdowns, folded by default: each is reached for now and then, and

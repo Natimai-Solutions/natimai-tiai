@@ -22,6 +22,7 @@ from sqlmodel import col, select
 
 from app.api.csv_export import csv_response
 from app.api.deps import SessionDep, require_permission
+from app.api.xlsx_export import xlsx_response
 from app.features.inventory.models import MachineSoftware, Software
 from app.features.user.permissions import Action, Resource
 
@@ -152,19 +153,33 @@ async def list_software(
     return SoftwareList(items=items, total=total or 0, page=page, page_size=page_size)
 
 
-# Declared before nothing in particular here, but kept next to the listing it
-# mirrors: the export is the same query without the pagination, because an
-# export of the first fifty rows is not an export.
-@router.get("/export.csv")
-async def export_software(session: SessionDep, search: str | None = None) -> Response:
-    """The catalogue as a spreadsheet, honouring the same search."""
+EXPORT_HEADER = ["Nom", "Version", "Éditeur", "Postes", "Vu pour la première fois"]
+
+
+async def _export_rows(
+    session: SessionDep, search: str | None
+) -> list[tuple[Software, int]]:
+    """The catalogue, every row, most widespread first.
+
+    The same query as the listing without the pagination, because an export
+    of the first fifty rows is not an export.
+    """
     stmt = _catalogue_query(search).order_by(
         _installed_count().desc(), func.lower(col(Software.name)), col(Software.version)
     )
     rows = await session.exec(stmt)
+    return list(rows.all())
+
+
+# Kept next to the listing it mirrors: the two exports are the same rows, and
+# differ only in what lands in the cells — text for the CSV, a real date for
+# Excel, which is what makes the column sortable there.
+@router.get("/export.csv")
+async def export_software(session: SessionDep, search: str | None = None) -> Response:
+    """The catalogue as CSV, honouring the same search."""
     return csv_response(
         "logiciels.csv",
-        ["Nom", "Version", "Éditeur", "Postes", "Vu pour la première fois"],
+        EXPORT_HEADER,
         [
             (
                 entry.name,
@@ -173,6 +188,22 @@ async def export_software(session: SessionDep, search: str | None = None) -> Res
                 count,
                 entry.first_seen.date().isoformat(),
             )
-            for entry, count in rows.all()
+            for entry, count in await _export_rows(session, search)
         ],
+    )
+
+
+@router.get("/export.xlsx")
+async def export_software_xlsx(
+    session: SessionDep, search: str | None = None
+) -> Response:
+    """The catalogue as an Excel workbook, honouring the same search."""
+    return xlsx_response(
+        "logiciels.xlsx",
+        EXPORT_HEADER,
+        [
+            (entry.name, entry.version, entry.publisher, count, entry.first_seen.date())
+            for entry, count in await _export_rows(session, search)
+        ],
+        sheet_title="Logiciels",
     )

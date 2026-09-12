@@ -46,15 +46,21 @@ export async function listSoftware(params: ListSoftwareParams = {}): Promise<Sof
   return data;
 }
 
+export type SoftwareExportFormat = 'xlsx' | 'csv';
+
 /**
- * The catalogue as a spreadsheet, honouring the same search and without the
- * pagination — an export of the first fifty rows is not an export.
+ * The catalogue as a spreadsheet — Excel or CSV — honouring the same search
+ * and without the pagination: an export of the first fifty rows is not an
+ * export.
  *
  * Fetched as a blob rather than linked to: the API needs the Authorization
  * header, which a plain `<a href>` would not carry.
  */
-export async function exportSoftwareCsv(params: { search?: string } = {}): Promise<Blob> {
-  const { data } = await api.get<Blob>('/software/export.csv', {
+export async function exportSoftware(
+  format: SoftwareExportFormat,
+  params: { search?: string } = {},
+): Promise<Blob> {
+  const { data } = await api.get<Blob>(`/software/export.${format}`, {
     params,
     responseType: 'blob',
   });

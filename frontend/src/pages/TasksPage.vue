@@ -3,14 +3,20 @@
     <div class="row items-center q-col-gutter-sm q-mb-md">
       <div class="text-h5 col-auto">Mes tâches</div>
       <q-space />
-      <q-btn-toggle
-        v-model="scope"
-        dense
-        no-caps
-        toggle-color="primary"
-        :options="scopeOptions"
-        @update:model-value="reload"
-      />
+      <!-- Wrapped in its own column: the gutter pads every direct child of the
+           row, and on a toggle that padding showed as a white band inside the
+           frame, so the selected button never filled it. -->
+      <div class="col-auto">
+        <q-btn-toggle
+          v-model="scope"
+          dense
+          no-caps
+          unelevated
+          toggle-color="primary"
+          :options="scopeOptions"
+          @update:model-value="reload"
+        />
+      </div>
     </div>
 
     <div class="text-body2 text-grey-8 q-mb-md" style="max-width: 760px">
