@@ -46,9 +46,9 @@
     <q-tab-panels v-model="tab" animated>
       <q-tab-panel name="rooms" class="q-px-none">
         <div class="text-body2 text-grey-8 q-mb-sm" style="max-width: 760px">
-          Une salle est où les postes sont, telle que la console les range. Elle hérite
-          l'emplacement de son bâtiment ; un poste dont l'agent déclare un autre emplacement est
-          signalé, jamais refusé.
+          Une salle regroupe des postes qui se trouvent au même endroit — une classe, un bureau, un
+          local technique — tels que la console les a rangés. Elle hérite de l'emplacement de son
+          bâtiment ; un poste dont l'agent déclare un autre emplacement est signalé, jamais refusé.
         </div>
         <q-table
           :rows="rooms"

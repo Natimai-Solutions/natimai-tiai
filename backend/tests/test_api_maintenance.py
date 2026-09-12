@@ -302,6 +302,21 @@ async def test_settings_are_admin_material_and_reject_a_dead_owner(client, db_se
     assert got["maintenance_default_cycle_days"] == 90
     assert got["env_default_cycle_days"] == 90
     assert got["room_source"] == "manual"
+    # The environment overview rides along: grouped, keyed by variable name,
+    # and never a secret.
+    groups = {
+        g["label"]: {i["key"]: i["value"] for i in g["items"]}
+        for g in got["environment"]
+    }
+    assert groups["Salles"]["ROOM_SOURCE"].startswith("manual")
+    assert groups["Postes et seuils"]["SIGNATURE_MAX_AGE_DAYS"] == "3"
+    listed = {key for items in groups.values() for key in items}
+    assert not listed & {
+        "SECRET_KEY",
+        "POSTGRES_PASSWORD",
+        "MAILGUN_API_KEY",
+        "SMTP_PASSWORD",
+    }
     resp = await client.patch(
         "/api/v1/settings",
         headers=admin,

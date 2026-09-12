@@ -50,7 +50,26 @@
       <div v-if="lastRefreshedAt" class="text-caption text-grey col-auto">
         Actualisé à {{ lastRefreshLabel }}
       </div>
-      <q-btn flat dense round icon="download" class="col-auto" @click="exportOpen = true">
+      <q-btn
+        flat
+        dense
+        round
+        icon="view_column"
+        aria-label="Colonnes"
+        class="col-auto"
+        @click="columnsOpen = true"
+      >
+        <q-tooltip>Colonnes affichées et leur ordre — enregistrés sur votre compte</q-tooltip>
+      </q-btn>
+      <q-btn
+        flat
+        dense
+        round
+        icon="download"
+        aria-label="Exporter"
+        class="col-auto"
+        @click="exportOpen = true"
+      >
         <q-tooltip>Exporter le parc filtré (Excel ou CSV, colonnes au choix)</q-tooltip>
       </q-btn>
       <q-btn flat round icon="refresh" :loading="loading" class="col-auto" @click="reload">
@@ -59,236 +78,275 @@
     </div>
 
     <!-- The dropdowns, folded by default: each is reached for now and then, and
-         a bar wearing all of them at once buried the search. Two rows, because
-         the questions come in two kinds: "is it protected" and "what is it". -->
+         a bar wearing all of them at once buried the search. One row per kind
+         of question, named on the left, so a reader finds « Salle » under
+         Emplacement and « Modèle » under Matériel without scanning seventeen
+         boxes — and the rows read in the order the questions are asked: is it
+         protected, where is it, is it being looked after, what runs on it,
+         what is it made of. -->
     <q-slide-transition>
-      <div v-show="filtersOpen" class="q-mb-sm">
-        <div class="row items-center q-col-gutter-sm q-mb-xs">
-          <div class="col-12 col-sm-auto text-caption text-grey filter-row-label">Sécurité</div>
-          <q-select
-            v-model="antivirus"
-            :options="antivirusOptions"
-            emit-value
-            map-options
+      <div v-show="filtersOpen" class="q-mb-sm filter-panel">
+        <div class="row items-center q-mb-xs">
+          <div class="text-caption text-grey">
+            {{ filterChips.length ? `${filterChips.length} filtre(s) actif(s)` : 'Aucun filtre' }}
+          </div>
+          <q-btn
+            v-if="filterChips.length"
+            flat
             dense
-            outlined
-            class="col-auto"
-            style="width: 200px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="status"
-            :options="statusOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 190px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="wu"
-            :options="wuOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 210px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="scan"
-            :options="scanOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 200px"
-            @update:model-value="pushQuery"
+            no-caps
+            size="sm"
+            color="primary"
+            icon="filter_list_off"
+            label="Tout effacer"
+            class="q-ml-sm"
+            @click="clearAllFilters"
           />
         </div>
-        <div class="row items-center q-col-gutter-sm">
-          <div class="col-12 col-sm-auto text-caption text-grey filter-row-label">Poste</div>
-          <!-- First on the "what is it" row: on a multi-site parc "where" is the
-               facet everything else is asked within. -->
-          <q-select
-            v-model="location"
-            :options="locationOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 220px"
-            @update:model-value="pushQuery"
-          />
-          <!-- The console's placement, next to the site the agent reports:
-               a building, a room (« Sans salle » for the unfiled), and the
-               finding that ties the two — agent and room disagreeing. -->
-          <q-select
-            v-model="building"
-            :options="buildingOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 200px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="room"
-            :options="roomOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 220px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="maintenance"
-            :options="maintenanceOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 220px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="checkOpen"
-            :options="checkOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 220px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="mismatch"
-            :options="mismatchOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 230px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="os"
-            :options="osOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 200px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="agent"
-            :options="agentOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 220px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="manufacturer"
-            :options="manufacturerOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 190px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="model"
-            :options="modelOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 220px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="processor"
-            :options="processorOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 260px"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="chassis"
-            :options="chassisOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 170px"
-            @update:model-value="pushQuery"
-          />
-          <!-- Memory as a bound and a figure: "au moins 16 Gio" is how the
-               upgrade question is asked, and no closed list holds every parc's
-               sizes. The filter applies once both halves are set. -->
-          <q-select
-            v-model="ramOp"
-            :options="ramOpOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 180px"
-            @update:model-value="pushQuery"
-          />
-          <q-input
-            v-model="ramGb"
-            type="number"
-            min="1"
-            step="1"
-            dense
-            outlined
-            debounce="400"
-            suffix="Gio"
-            placeholder="16"
-            class="col-auto"
-            style="width: 100px"
-            :disable="!ramOp"
-            @update:model-value="pushQuery"
-          />
-          <q-select
-            v-model="diskFree"
-            :options="diskOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            class="col-auto"
-            style="width: 210px"
-            @update:model-value="pushQuery"
-          />
+        <div class="row no-wrap items-start q-mb-xs">
+          <div class="text-caption text-grey filter-row-label">Sécurité</div>
+          <div class="col row items-center q-col-gutter-sm">
+            <q-select
+              v-model="antivirus"
+              :options="antivirusOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 200px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="status"
+              :options="statusOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 190px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="wu"
+              :options="wuOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 210px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="scan"
+              :options="scanOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 200px"
+              @update:model-value="pushQuery"
+            />
+          </div>
+        </div>
+        <!-- « Where » first among the rest: on a multi-site parc it is the facet
+             everything else is asked within. The site the agent reports, then
+             the console's placement (building, room, « Sans salle ») and the
+             finding that ties the two — agent and room disagreeing. -->
+        <div class="row no-wrap items-start q-mb-xs">
+          <div class="text-caption text-grey filter-row-label">Emplacement</div>
+          <div class="col row items-center q-col-gutter-sm">
+            <q-select
+              v-model="location"
+              :options="locationOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 220px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="building"
+              :options="buildingOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 200px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="room"
+              :options="roomOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 220px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="mismatch"
+              :options="mismatchOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 230px"
+              @update:model-value="pushQuery"
+            />
+          </div>
+        </div>
+        <div class="row no-wrap items-start q-mb-xs">
+          <div class="text-caption text-grey filter-row-label">Suivi</div>
+          <div class="col row items-center q-col-gutter-sm">
+            <q-select
+              v-model="maintenance"
+              :options="maintenanceOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 220px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="checkOpen"
+              :options="checkOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 220px"
+              @update:model-value="pushQuery"
+            />
+          </div>
+        </div>
+        <div class="row no-wrap items-start q-mb-xs">
+          <div class="text-caption text-grey filter-row-label">Système</div>
+          <div class="col row items-center q-col-gutter-sm">
+            <q-select
+              v-model="os"
+              :options="osOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 200px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="agent"
+              :options="agentOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 220px"
+              @update:model-value="pushQuery"
+            />
+          </div>
+        </div>
+        <div class="row no-wrap items-start">
+          <div class="text-caption text-grey filter-row-label">Matériel</div>
+          <div class="col row items-center q-col-gutter-sm">
+            <q-select
+              v-model="manufacturer"
+              :options="manufacturerOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 190px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="model"
+              :options="modelOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 220px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="processor"
+              :options="processorOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 260px"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="chassis"
+              :options="chassisOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 170px"
+              @update:model-value="pushQuery"
+            />
+            <!-- Memory as a bound and a figure: "au moins 16 Gio" is how the
+                 upgrade question is asked, and no closed list holds every parc's
+                 sizes. The filter applies once both halves are set. -->
+            <q-select
+              v-model="ramOp"
+              :options="ramOpOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 180px"
+              @update:model-value="pushQuery"
+            />
+            <q-input
+              v-model="ramGb"
+              type="number"
+              min="1"
+              step="1"
+              dense
+              outlined
+              debounce="400"
+              suffix="Gio"
+              placeholder="16"
+              class="col-auto"
+              style="width: 100px"
+              :disable="!ramOp"
+              @update:model-value="pushQuery"
+            />
+            <q-select
+              v-model="diskFree"
+              :options="diskOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 210px"
+              @update:model-value="pushQuery"
+            />
+          </div>
         </div>
       </div>
     </q-slide-transition>
@@ -364,7 +422,7 @@
       v-model:selected="selected"
       v-model:pagination="pagination"
       :rows="rows"
-      :columns="columns"
+      :columns="visibleColumns"
       row-key="id"
       selection="multiple"
       :loading="loading"
@@ -577,6 +635,13 @@
       :params="filterParams"
       :count="pagination.rowsNumber"
     />
+
+    <MachineColumnsDialog
+      v-model:open="columnsOpen"
+      :columns="columnOrder"
+      :labels="columnLabels"
+      :save="saveColumns"
+    />
   </q-page>
 </template>
 
@@ -586,6 +651,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAutoRefresh';
 import MachineExportDialog from 'src/components/machine/MachineExportDialog.vue';
+import MachineColumnsDialog from 'src/components/machine/MachineColumnsDialog.vue';
 import {
   listAgentVersions,
   listAntivirusProducts,
@@ -657,6 +723,12 @@ import {
   wuPendingLabel,
 } from 'src/utils/format';
 import { isAgentOutdated } from 'src/utils/agentVersion';
+import {
+  PREF_MACHINE_COLUMNS,
+  isDefaultMachineColumns,
+  resolveMachineColumns,
+  type MachineColumnKey,
+} from 'src/utils/machineColumns';
 
 const $q = useQuasar();
 const router = useRouter();
@@ -752,6 +824,7 @@ const SORT_FIELD_BY_COLUMN: Record<string, MachineSortField> = {
   model: 'hw_model',
   disk: 'disk_free_percent',
   last_seen: 'last_seen',
+  agent: 'agent_version',
 };
 const COLUMN_BY_SORT_FIELD = Object.fromEntries(
   Object.entries(SORT_FIELD_BY_COLUMN).map(([column, field]) => [field, column]),
@@ -1022,6 +1095,40 @@ const filterChips = computed<{ key: FilterKey; label: string }[]>(() => {
   return chips;
 });
 
+/** Back to the whole parc: every folded filter off, the two toggles and the
+ * search too. The sort and page size are kept — they are not a question. */
+function clearAllFilters() {
+  search.value = '';
+  domain.value = '';
+  for (const r of [
+    location,
+    building,
+    room,
+    mismatch,
+    checkOpen,
+    maintenance,
+    antivirus,
+    os,
+    agent,
+    manufacturer,
+    model,
+    processor,
+    chassis,
+    ramOp,
+    ramGb,
+  ]) {
+    r.value = null;
+  }
+  status.value = null;
+  wu.value = null;
+  scan.value = null;
+  diskFree.value = null;
+  softwareId.value = null;
+  threatsOnly.value = false;
+  onlineOnly.value = false;
+  pushQuery();
+}
+
 function clearFilter(key: FilterKey) {
   if (key === 'ram') {
     ramOp.value = null;
@@ -1105,8 +1212,10 @@ const columns: QTableColumn<Machine>[] = [
   { name: 'os_version', label: 'OS', field: 'os_version', align: 'left' },
   // The agent's version, flagged when below the parc's reference. In the list
   // because the question it answers — "lesquels n'ont pas encore la nouvelle
-  // version" — is asked of the parc, not of one poste.
-  { name: 'agent', label: 'Agent', field: 'agent_version', align: 'left' },
+  // version" — is asked of the parc, not of one poste. Sortable as a version
+  // (server-side, "0.10.0" after "0.9.0"): ascending puts the stragglers on
+  // top, which is the morning-after-a-deployment reading.
+  { name: 'agent', label: 'Agent', field: 'agent_version', align: 'left', sortable: true },
   // name ≠ field like the session column below: the cell renders the product and
   // its state together, while `field` keeps a sensible sort key. Sortable because
   // grouping a mixed parc by product is exactly what this column is for.
@@ -1153,6 +1262,46 @@ const columns: QTableColumn<Machine>[] = [
   },
   { name: 'last_seen', label: 'Vu le', field: 'last_seen', align: 'left', sortable: true },
 ];
+
+// Which of those the reader shows, and in what order — kept on the account
+// (`preferences.machines_columns`), not in the URL: a search is shared by
+// pasting a link, a layout is personal. The profile may arrive after the page
+// (a reload restores it in the layout), hence the watch.
+const columnByName = new Map(columns.map((c) => [c.name, c]));
+const columnLabels = Object.fromEntries(columns.map((c) => [c.name, c.label]));
+const columnOrder = ref<MachineColumnKey[]>(
+  resolveMachineColumns(auth.user?.preferences?.[PREF_MACHINE_COLUMNS]),
+);
+watch(
+  () => auth.user?.preferences?.[PREF_MACHINE_COLUMNS],
+  (saved) => {
+    columnOrder.value = resolveMachineColumns(saved);
+  },
+);
+const visibleColumns = computed<QTableColumn<Machine>[]>(() =>
+  columnOrder.value.flatMap((name) => {
+    const column = columnByName.get(name);
+    return column ? [column] : [];
+  }),
+);
+const columnsOpen = ref(false);
+
+/** Persist a layout on the account. The default is stored as an absence, so
+ * a reader who comes back to it is not carrying a copy of the catalogue. */
+async function saveColumns(next: MachineColumnKey[]) {
+  try {
+    await auth.savePreferences({
+      [PREF_MACHINE_COLUMNS]: isDefaultMachineColumns(next) ? null : next,
+    });
+    columnOrder.value = next;
+  } catch (e) {
+    $q.notify({
+      type: 'negative',
+      message: apiErrorMessage(e, "Impossible d'enregistrer les colonnes"),
+    });
+    throw e;
+  }
+}
 
 /** Open a poste, carrying the whole list query plus the row's absolute rank in
  * it (`i`). The detail page uses the query to come back to this exact search,
@@ -1588,8 +1737,17 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* The row captions line up with the dropdowns without taking a column. */
+/* The row captions line up with the dropdowns without taking a column, and
+   sit on the first line of a row that wraps. */
 .filter-row-label {
-  min-width: 64px;
+  flex: 0 0 96px;
+  padding-top: 10px;
+}
+/* A quiet frame around the folded panel, so five rows of dropdowns read as
+   one thing that opens and closes rather than as part of the page. */
+.filter-panel {
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
 }
 </style>

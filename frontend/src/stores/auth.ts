@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 
-import { getMe, login as loginRequest, type User } from 'src/services/auth';
+import { getMe, login as loginRequest, updateMe, type User } from 'src/services/auth';
 import { permissionKey, type Action, type Resource } from 'src/utils/permissions';
 
 // Same key the axios boot reads to attach the Bearer header (kept in sync via
@@ -64,6 +64,14 @@ export const useAuthStore = defineStore('auth', {
     async fetchMe() {
       this.user = await getMe();
       localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(this.user.permissions));
+    },
+    /**
+     * Store console preferences on the account. Merged key by key server-side
+     * (a `null` removes a key), and the profile is refreshed from the answer
+     * so every page reads the same document.
+     */
+    async savePreferences(patch: Record<string, unknown | null>) {
+      this.user = await updateMe({ preferences: patch });
     },
     logout() {
       this.setToken(null);

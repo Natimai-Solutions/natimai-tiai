@@ -2,13 +2,14 @@
 password lifecycle — self-service change, and the "forgot password" flow.
 """
 
+import json
 import logging
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.deps import CurrentPermissions, CurrentUser, SessionDep
 from app.api.fields import Email, Password
@@ -53,6 +54,10 @@ class UserOut(BaseModel):
     email: str
     full_name: str | None
     email_preference: str
+    # The console's own per-account settings (the machine list's columns and
+    # their order, ...), handed back as stored. Keys and shapes are the
+    # console's vocabulary; the server only bounds their size.
+    preferences: dict[str, Any]
     groups: list[GroupRef]
     permissions: list[str]
 
@@ -66,6 +71,7 @@ async def _profile(
         email=user.email,
         full_name=user.full_name,
         email_preference=user.email_preference,
+        preferences=dict(user.preferences or {}),
         groups=[GroupRef.model_validate(g) for g in groups],
         permissions=sorted(permissions),
     )
@@ -105,10 +111,63 @@ async def me(
     return await _profile(session, user, permissions)
 
 
+# Bounds on the preference document, generous for what the console stores
+# (a few dozen column names) and tight enough that the endpoint cannot be used
+# as free storage: so many keys, so many bytes once serialised.
+PREFERENCES_MAX_KEYS = 50
+PREFERENCES_MAX_BYTES = 16 * 1024
+PREFERENCES_KEY_MAX_LENGTH = 64
+
+
 class ProfileUpdate(BaseModel):
     """Self-service profile update — only the supplied fields are changed."""
 
     email_preference: EmailPreference | None = None
+    # Merged into the stored document key by key: a key sent with ``null``
+    # is removed, a key not sent is left alone. So the page that remembers
+    # the machine list's columns never overwrites what another page stored.
+    preferences: dict[str, Any] | None = Field(
+        default=None, max_length=PREFERENCES_MAX_KEYS
+    )
+
+    @field_validator("preferences")
+    @classmethod
+    def _bounded_keys(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        for key in value:
+            if not key or len(key) > PREFERENCES_KEY_MAX_LENGTH:
+                raise ValueError(
+                    f"preference keys must be 1–{PREFERENCES_KEY_MAX_LENGTH} characters"
+                )
+        return value
+
+
+def merge_preferences(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    """The stored document after ``patch``: keys set, null keys removed.
+
+    Raises ``AppError`` (422) when the result exceeds the bounds — measured on
+    the merged document, since the caller's patch may be small and the
+    accumulated document large.
+    """
+    merged = {**current}
+    for key, value in patch.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    too_many = len(merged) > PREFERENCES_MAX_KEYS
+    too_big = len(json.dumps(merged, separators=(",", ":"))) > PREFERENCES_MAX_BYTES
+    if too_many or too_big:
+        raise AppError(
+            code=ErrorCode.REQUEST_VALIDATION_ERROR,
+            status_code=422,
+            message=(
+                f"Preferences are limited to {PREFERENCES_MAX_KEYS} keys and "
+                f"{PREFERENCES_MAX_BYTES} bytes"
+            ),
+        )
+    return merged
 
 
 @router.patch("/me", response_model=UserOut)
@@ -127,6 +186,12 @@ async def update_me(
     """
     if payload.email_preference is not None:
         user.email_preference = payload.email_preference
+    if payload.preferences is not None:
+        # A new dict and not an in-place update: SQLAlchemy only notices a
+        # JSONB column changing when the attribute is reassigned.
+        user.preferences = merge_preferences(
+            user.preferences or {}, payload.preferences
+        )
     user.updated_at = utcnow()
     session.add(user)
     await session.commit()

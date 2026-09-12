@@ -14,6 +14,7 @@ from app.core.config import settings as env
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.setting import crud
+from app.features.setting.environment import environment_overview
 from app.features.user.models import User
 from app.features.user.permissions import Action, Resource
 
@@ -30,6 +31,21 @@ class UserRef(BaseModel):
     name: str
 
 
+class EnvItemOut(BaseModel):
+    """One variable of the server's environment, as the page prints it."""
+
+    key: str
+    # None = not set (the page shows a dash); otherwise already rendered —
+    # booleans in words, lists joined — so every client prints the same thing.
+    value: str | None
+    description: str
+
+
+class EnvGroupOut(BaseModel):
+    label: str
+    items: list[EnvItemOut]
+
+
 class SettingsOut(BaseModel):
     maintenance_default_cycle_days: int
     maintenance_default_owner: UserRef | None
@@ -39,6 +55,10 @@ class SettingsOut(BaseModel):
     env_default_cycle_days: int
     env_due_soon_days: int
     room_source: str
+    # The rest of the environment an administrator may want to check without
+    # a shell on the server — thresholds, mail, wake-on-LAN — read-only and
+    # never a secret (``app.features.setting.environment``).
+    environment: list[EnvGroupOut]
     updated_at: datetime | None
 
 
@@ -72,6 +92,16 @@ async def _out(session: SessionDep) -> SettingsOut:
         env_default_cycle_days=env.MAINTENANCE_DEFAULT_CYCLE_DAYS,
         env_due_soon_days=env.MAINTENANCE_DUE_SOON_DAYS,
         room_source=env.ROOM_SOURCE,
+        environment=[
+            EnvGroupOut(
+                label=group.label,
+                items=[
+                    EnvItemOut(key=i.key, value=i.value, description=i.description)
+                    for i in group.items
+                ],
+            )
+            for group in environment_overview(env)
+        ],
         updated_at=updated,
     )
 

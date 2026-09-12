@@ -1,5 +1,18 @@
 import { api } from 'boot/axios';
 
+/** One variable of the server's environment, as the page prints it. */
+export interface EnvItem {
+  key: string;
+  /** Already rendered server-side; `null` = not set. */
+  value: string | null;
+  description: string;
+}
+
+export interface EnvGroup {
+  label: string;
+  items: EnvItem[];
+}
+
 /** The console's parc-wide settings (page Paramètres), editable without a restart. */
 export interface ConsoleSettings {
   maintenance_default_cycle_days: number;
@@ -9,6 +22,9 @@ export interface ConsoleSettings {
   env_default_cycle_days: number;
   env_due_soon_days: number;
   room_source: string;
+  /** The rest of the environment, read-only and never a secret: what an
+   * administrator checks without a shell on the server. */
+  environment: EnvGroup[];
   updated_at: string | null;
 }
 
