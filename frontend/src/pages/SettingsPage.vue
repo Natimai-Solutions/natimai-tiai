@@ -54,22 +54,50 @@
       </q-card-actions>
     </q-card>
 
-    <q-card v-if="settings" flat bordered style="max-width: 640px">
+    <!-- The server's environment, read-only. One card, one group per section
+         of ``.env``: the page is where an administrator comes to answer
+         « pourquoi ce poste est-il signalé ? » without opening a shell. -->
+    <q-card v-if="settings" flat bordered style="max-width: 960px">
       <q-card-section class="text-subtitle1">
-        Salles
+        Réglages du serveur
         <div class="text-caption text-grey">
-          Réglé par l'environnement du serveur, en lecture seule ici.
+          Variables d'environnement du serveur (<code>deploy/.env</code>), en lecture seule ici. Une
+          valeur se change dans ce fichier, puis en redémarrant le serveur.
         </div>
       </q-card-section>
       <q-separator />
-      <q-card-section>
-        <div class="row items-center">
-          <div class="col-5 text-grey-7">Classement des postes</div>
-          <div class="col">
-            <code>ROOM_SOURCE={{ settings.room_source }}</code>
-            <span class="q-ml-sm text-caption text-grey">{{ sourceLabel }}</span>
-          </div>
-        </div>
+      <q-card-section class="q-pt-sm">
+        <q-input
+          v-model="envFilter"
+          dense
+          outlined
+          clearable
+          placeholder="Rechercher un réglage…"
+          style="max-width: 360px"
+        >
+          <template #prepend><q-icon name="search" /></template>
+        </q-input>
+      </q-card-section>
+      <template v-for="group in environmentGroups" :key="group.label">
+        <q-separator />
+        <q-card-section class="q-pb-none text-subtitle2">{{ group.label }}</q-card-section>
+        <q-markup-table flat dense wrap-cells class="env-table">
+          <tbody>
+            <tr v-for="item in group.items" :key="item.key">
+              <td class="env-key">
+                <code>{{ item.key }}</code>
+              </td>
+              <td class="env-value">
+                <span v-if="item.value !== null">{{ item.value }}</span>
+                <span v-else class="text-grey">— non défini</span>
+              </td>
+              <td class="text-grey-8">{{ item.description }}</td>
+            </tr>
+          </tbody>
+        </q-markup-table>
+      </template>
+      <q-card-section v-if="!environmentGroups.length" class="text-grey">
+        Aucun réglage ne correspond.
       </q-card-section>
     </q-card>
   </q-page>
@@ -80,8 +108,13 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useQuasar } from 'quasar';
 import { listAssignableUsers } from 'src/services/checks';
 import { apiErrorMessage } from 'src/services/errors';
-import { ROOM_SOURCE_LABELS } from 'src/services/rooms';
-import { getSettings, updateSettings, type ConsoleSettings } from 'src/services/settings';
+import {
+  getSettings,
+  updateSettings,
+  type ConsoleSettings,
+  type EnvGroup,
+  type EnvItem,
+} from 'src/services/settings';
 import { useAuthStore } from 'src/stores/auth';
 
 const $q = useQuasar();
@@ -92,9 +125,23 @@ const saving = ref(false);
 const form = reactive({ cycle: 90, ownerId: null as string | null, dueSoon: 14 });
 const ownerOptions = ref<{ label: string; value: string }[]>([]);
 const canWrite = computed(() => auth.can('settings', 'write'));
-const sourceLabel = computed(() =>
-  settings.value ? (ROOM_SOURCE_LABELS[settings.value.room_source] ?? '') : '',
-);
+
+// The environment card, narrowed by the search box: on the variable's name,
+// its value and its description alike, since a reader may know any of the
+// three (« ROOM_SOURCE », « ad_ou », « salles »).
+const envFilter = ref('');
+const environmentGroups = computed<EnvGroup[]>(() => {
+  const groups = settings.value?.environment ?? [];
+  const needle = (envFilter.value ?? '').trim().toLocaleLowerCase('fr-FR');
+  if (!needle) return groups;
+  const matches = (item: EnvItem) =>
+    [item.key, item.value ?? '', item.description].some((text) =>
+      text.toLocaleLowerCase('fr-FR').includes(needle),
+    );
+  return groups
+    .map((g) => ({ label: g.label, items: g.items.filter(matches) }))
+    .filter((g) => g.items.length);
+});
 
 async function load() {
   try {
@@ -126,3 +173,17 @@ async function save() {
 
 onMounted(load);
 </script>
+
+<style scoped>
+.env-table td {
+  vertical-align: top;
+}
+.env-key {
+  width: 30%;
+  white-space: nowrap;
+}
+.env-value {
+  width: 20%;
+  font-weight: 500;
+}
+</style>

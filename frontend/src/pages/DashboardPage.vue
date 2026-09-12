@@ -11,9 +11,11 @@
       </q-btn>
     </div>
 
-    <!-- Two rows, two readings. The first is the size of the parc — what it
-         is — and the second is what needs doing about it: every card there is
-         a list an administrator opens and acts on. -->
+    <!-- Three rows, three readings. The first is the size of the parc — what
+         it is. The next two are what needs doing about it, most urgent first:
+         the four findings that put a poste at risk today take the whole width
+         and the large figure; the five that can wait for the week's round sit
+         below, smaller. Every card is a list an administrator opens and acts on. -->
     <div class="row q-col-gutter-md q-mb-md">
       <div v-for="kpi in inventoryKpis" :key="kpi.label" class="col-12 col-sm-6">
         <q-card
@@ -34,8 +36,30 @@
       </div>
     </div>
 
+    <div class="row q-col-gutter-md q-mb-md">
+      <div v-for="kpi in priorityKpis" :key="kpi.label" class="col-12 col-sm-6 col-md-3">
+        <q-card
+          v-ripple
+          flat
+          bordered
+          class="cursor-pointer relative-position full-height"
+          :class="kpi.value ? `priority-card priority-card--${kpi.color}` : ''"
+          @click="go(kpi.to)"
+        >
+          <q-card-section class="row items-center no-wrap">
+            <q-icon :name="kpi.icon" :color="kpi.color" size="40px" class="q-mr-md" />
+            <div>
+              <div class="text-h4">{{ kpi.value }}</div>
+              <div class="text-caption text-grey">{{ kpi.label }}</div>
+              <div v-if="kpi.caption" class="text-caption text-orange">{{ kpi.caption }}</div>
+            </div>
+          </q-card-section>
+        </q-card>
+      </div>
+    </div>
+
     <div class="row q-col-gutter-md q-mb-lg">
-      <div v-for="kpi in alertKpis" :key="kpi.label" class="col-6 col-sm-4 col-md-2">
+      <div v-for="kpi in alertKpis" :key="kpi.label" class="col-6 col-sm-4 col-md">
         <q-card
           v-ripple
           flat
@@ -175,12 +199,12 @@ const inventoryKpis = computed<Kpi[]>(() => {
 });
 
 /**
- * What needs doing. Each card is a list an administrator can open and act on,
- * which is the only reason a KPI earns a card here — the encryption and
- * hardware-age counts the API still serves have no such list behind them yet,
- * and a figure nobody can act on is noise on a wall screen.
+ * What puts a poste at risk today — the row that takes the whole width. Four
+ * findings, each a list to act on this morning: a signature base the antivirus
+ * cannot detect with, patches not applied, a threat on the poste, a disk about
+ * to stop Windows from patching at all.
  */
-const alertKpis = computed<Kpi[]>(() => {
+const priorityKpis = computed<Kpi[]>(() => {
   const s = stats.value;
   if (!s) return [];
   const reboot = s.machines_reboot_required;
@@ -210,6 +234,34 @@ const alertKpis = computed<Kpi[]>(() => {
       to: { name: 'machines', query: { with_active_threats: 'true' } },
     },
     {
+      // Beside the Windows Update card rather than among the inventory: below
+      // roughly ten percent free, Windows stops being able to stage a
+      // cumulative update, so a poste crosses this line and then quietly
+      // stops patching.
+      label: 'Disque presque plein',
+      value: s.machines_low_disk,
+      icon: 'storage',
+      color: 'negative',
+      to: {
+        name: 'machines',
+        query: { disk_free_below: String(s.low_disk_free_percent) },
+      },
+      caption: `moins de ${s.low_disk_free_percent} % libres`,
+    },
+  ];
+});
+
+/**
+ * What needs doing this week. Each card is a list an administrator can open
+ * and act on, which is the only reason a KPI earns a card here — the
+ * encryption and hardware-age counts the API still serves have no such list
+ * behind them yet, and a figure nobody can act on is noise on a wall screen.
+ */
+const alertKpis = computed<Kpi[]>(() => {
+  const s = stats.value;
+  if (!s) return [];
+  return [
+    {
       label: 'Identité à confirmer',
       value: s.needs_verification,
       icon: 'help',
@@ -226,6 +278,13 @@ const alertKpis = computed<Kpi[]>(() => {
       to: { name: 'machines', query: { check_open: 'true' } },
     },
     {
+      label: 'Inactifs',
+      value: s.inactive,
+      icon: 'power_off',
+      color: 'grey',
+      to: { name: 'machines', query: { status: 'inactive' } },
+    },
+    {
       label: 'Maintenance en retard',
       value: s.machines_maintenance_overdue,
       icon: 'build',
@@ -234,28 +293,6 @@ const alertKpis = computed<Kpi[]>(() => {
       ...(s.machines_maintenance_due_soon
         ? { caption: `${s.machines_maintenance_due_soon} à échéance` }
         : {}),
-    },
-    {
-      label: 'Inactifs',
-      value: s.inactive,
-      icon: 'power_off',
-      color: 'grey',
-      to: { name: 'machines', query: { status: 'inactive' } },
-    },
-    {
-      // The most actionable figure the inventory produces, and it belongs beside
-      // the Windows Update card rather than in a section of its own: below
-      // roughly ten percent free, Windows stops being able to stage a cumulative
-      // update, so a poste crosses this line and then quietly stops patching.
-      label: 'Disque presque plein',
-      value: s.machines_low_disk,
-      icon: 'storage',
-      color: 'negative',
-      to: {
-        name: 'machines',
-        query: { disk_free_below: String(s.low_disk_free_percent) },
-      },
-      caption: `moins de ${s.low_disk_free_percent} % libres`,
     },
     {
       // The deployment's progress bar: how many postes the new agent has not
@@ -326,3 +363,17 @@ const autoRefreshHint = `Actualiser — automatique toutes les ${Math.round(
 
 onMounted(reload);
 </script>
+
+<style scoped>
+/* A coloured edge on a priority card that has something in it: the row is
+   read from across the room, and a zero must stay quiet. */
+.priority-card {
+  border-left-width: 4px;
+}
+.priority-card--warning {
+  border-left-color: var(--q-warning);
+}
+.priority-card--negative {
+  border-left-color: var(--q-negative);
+}
+</style>

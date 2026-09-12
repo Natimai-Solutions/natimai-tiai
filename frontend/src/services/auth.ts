@@ -20,11 +20,20 @@ export interface GroupRef {
   name: string;
 }
 
+/**
+ * The console's own per-account settings, stored on the server so they follow
+ * the operator from one workstation to the next. Keys are the console's
+ * vocabulary (`utils/preferences` names them); the server only bounds the
+ * size of the document and merges writes key by key.
+ */
+export type Preferences = Record<string, unknown>;
+
 export interface User {
   id: string;
   email: string;
   full_name: string | null;
   email_preference: EmailPreference;
+  preferences: Preferences;
   groups: GroupRef[];
   /**
    * What the account may do — the union of its groups' grants, as
@@ -48,12 +57,22 @@ export async function getMe(): Promise<User> {
   return data;
 }
 
+export interface ProfileUpdate {
+  email_preference?: EmailPreference;
+  /**
+   * Merged into the stored document key by key: a key set to `null` is
+   * removed, a key not sent is left alone — so a page that remembers one
+   * thing never overwrites what another page stored.
+   */
+  preferences?: Record<string, unknown | null>;
+}
+
 /**
  * Update one's own profile. Self-service and deliberately narrow: an account
- * changes how much mail it receives, never its role or its activation — those
- * stay with an administrator.
+ * changes how much mail it receives and its console preferences, never its
+ * role or its activation — those stay with an administrator.
  */
-export async function updateMe(payload: { email_preference?: EmailPreference }): Promise<User> {
+export async function updateMe(payload: ProfileUpdate): Promise<User> {
   const { data } = await api.patch<User>('/auth/me', payload);
   return data;
 }

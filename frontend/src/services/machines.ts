@@ -336,7 +336,9 @@ export type MachineSortField =
   | 'ram_total_mb'
   /** Free space as a *percentage*: 40 Go left on a 4 To disk and on a 128 Go SSD
    * are not the same news. Derived server-side from two columns. */
-  | 'disk_free_percent';
+  | 'disk_free_percent'
+  /** Ordered as a version, not a string: "0.10.0" after "0.9.0". */
+  | 'agent_version';
 
 export interface ListMachinesParams {
   /** Free search: hostname, UUID, IP, antivirus name — and MAC in any notation. */

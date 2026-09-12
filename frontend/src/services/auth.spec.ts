@@ -121,4 +121,14 @@ describe('updateMe', () => {
     expect(api.patch).toHaveBeenCalledWith('/auth/me', { email_preference: 'immediate' });
     expect(result).toEqual(user);
   });
+
+  it('PATCHes a preference patch as is, nulls included', async () => {
+    vi.mocked(api.patch).mockResolvedValue({ data: { id: 'u-1', preferences: {} } });
+
+    await updateMe({ preferences: { machines_columns: ['hostname', 'room'], theme: null } });
+
+    expect(api.patch).toHaveBeenCalledWith('/auth/me', {
+      preferences: { machines_columns: ['hostname', 'room'], theme: null },
+    });
+  });
 });

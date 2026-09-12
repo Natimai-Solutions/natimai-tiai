@@ -32,7 +32,7 @@ from app.features.inventory.models import (
     Volume,
 )
 from app.features.machine import crud as machine_crud
-from app.features.machine.agent_version import fleet_versions
+from app.features.machine.agent_version import FleetVersions, fleet_versions
 from app.features.machine.fingerprint import trustworthy_smbios_uuid
 from app.features.machine.models import Machine
 from app.features.machine.status import (
@@ -476,6 +476,9 @@ MachineSortField = Literal[
     "hw_model",
     "ram_total_mb",
     "disk_free_percent",
+    # The agent's version, ordered the way a human reads one ("0.10.0" after
+    # "0.9.0"): the sort the morning after a deployment, stragglers first.
+    "agent_version",
 ]
 
 # Sorted case-folded: under a C collation "ZEUS" would otherwise come before
@@ -489,7 +492,29 @@ _CASEFOLD_SORT_FIELDS = {
 }
 
 
-def _sort_key(field: MachineSortField, policy: MaintenancePolicy | None = None) -> Any:
+def _agent_version_rank(versions: FleetVersions | None) -> Any:
+    """The agent version as a sortable rank.
+
+    A version compare has no honest translation into an ORDER BY — a string
+    sort puts "0.10.0" before "0.9.0" — but a parc only ever carries a handful
+    of distinct versions, so they are ranked in Python and handed to SQL as a
+    CASE: the lowest version gets 0, the reference the highest rank. A poste
+    with no version reported falls through to NULL, which the clause puts
+    last in both directions like every other absence.
+    """
+    names = [name for name, _ in versions.counts] if versions else []
+    if not names:
+        return col(Machine.agent_version)
+    # ``counts`` is newest first; the rank must grow with the version.
+    ranks = {name: rank for rank, name in enumerate(reversed(names))}
+    return case(ranks, value=col(Machine.agent_version), else_=None)
+
+
+def _sort_key(
+    field: MachineSortField,
+    policy: MaintenancePolicy | None = None,
+    versions: FleetVersions | None = None,
+) -> Any:
     """The expression a sort orders by.
 
     Expressions and not columns, since this one was extended: the free-space
@@ -498,6 +523,8 @@ def _sort_key(field: MachineSortField, policy: MaintenancePolicy | None = None) 
     """
     if field == "disk_free_percent":
         return disk_free_percent()
+    if field == "agent_version":
+        return _agent_version_rank(versions)
     if field == "maintenance_due_at" and policy is not None:
         return maintenance_policy.due_expr(policy)
     if field == "building":
@@ -509,14 +536,17 @@ def _sort_key(field: MachineSortField, policy: MaintenancePolicy | None = None) 
 
 
 def _sort_clause(
-    field: MachineSortField, descending: bool, policy: MaintenancePolicy | None = None
+    field: MachineSortField,
+    descending: bool,
+    policy: MaintenancePolicy | None = None,
+    versions: FleetVersions | None = None,
 ) -> UnaryExpression[Any]:
     """ORDER BY expression for one sortable column.
 
     NULLs last in both directions: "never reported" is an absence, not a value,
     and it must not lead the list whichever way the reader flips the arrow.
     """
-    key: Any = _sort_key(field, policy)
+    key: Any = _sort_key(field, policy, versions)
     ordered: UnaryExpression[Any] = key.desc() if descending else key.asc()
     return ordered.nulls_last()
 
@@ -852,7 +882,7 @@ async def list_machines(
         stmt = stmt.order_by(col(Machine.last_seen).desc(), col(Machine.id))
     else:
         stmt = stmt.order_by(
-            _sort_clause(sort_by, sort_desc, policy),
+            _sort_clause(sort_by, sort_desc, policy, versions),
             col(Machine.last_seen).desc(),
             col(Machine.id),
         )

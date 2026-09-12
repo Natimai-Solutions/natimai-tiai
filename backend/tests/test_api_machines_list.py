@@ -168,6 +168,78 @@ async def test_never_reported_sorts_last_in_both_directions(client, db_session):
         assert counts[-1] is None, counts
 
 
+async def test_agent_version_sorts_as_a_version_not_a_string(client, db_session):
+    """ "0.10.0" comes after "0.9.0", and a poste that never reported one is
+    last whichever way the arrow points."""
+    now = datetime.now(UTC)
+    await _machines(
+        db_session,
+        [
+            {
+                "machine_uuid": "v-1",
+                "hostname": "ten",
+                "agent_version": "0.10.0",
+                "last_seen": now,
+            },
+            {
+                "machine_uuid": "v-2",
+                "hostname": "nine",
+                "agent_version": "0.9.0",
+                "last_seen": now,
+            },
+            {
+                "machine_uuid": "v-3",
+                "hostname": "none",
+                "agent_version": None,
+                "last_seen": now,
+            },
+            {
+                "machine_uuid": "v-4",
+                "hostname": "two",
+                "agent_version": "0.2.1",
+                "last_seen": now,
+            },
+        ],
+    )
+    headers = await _admin_headers(client, db_session)
+
+    resp = await client.get(
+        "/api/v1/machines?sort_by=agent_version&sort_desc=false", headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert [m["hostname"] for m in resp.json()["items"]] == [
+        "two",
+        "nine",
+        "ten",
+        "none",
+    ]
+
+    resp = await client.get(
+        "/api/v1/machines?sort_by=agent_version&sort_desc=true", headers=headers
+    )
+    assert [m["hostname"] for m in resp.json()["items"]] == [
+        "ten",
+        "nine",
+        "two",
+        "none",
+    ]
+
+
+async def test_agent_version_sort_survives_a_parc_with_no_version(client, db_session):
+    now = datetime.now(UTC)
+    await _machines(
+        db_session,
+        [
+            {"machine_uuid": "nv-1", "hostname": "a", "last_seen": now},
+            {"machine_uuid": "nv-2", "hostname": "b", "last_seen": now},
+        ],
+    )
+    headers = await _admin_headers(client, db_session)
+    resp = await client.get("/api/v1/machines?sort_by=agent_version", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["total"] == 2
+
+
 async def test_an_unknown_sort_column_is_refused(client, db_session):
     """The sort is a whitelist, never an ORDER BY built from a request."""
     headers = await _admin_headers(client, db_session)

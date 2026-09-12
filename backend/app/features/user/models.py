@@ -1,8 +1,10 @@
 import enum
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import Column, ForeignKey
+from sqlalchemy import Column, ForeignKey, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
@@ -50,6 +52,15 @@ class User(SQLModel, table=True):
     # database type. A PostgreSQL ENUM would need a migration to add a fifth
     # cadence.
     email_preference: str = Field(default=EmailPreference.DIGEST_DAILY)
+    # The console's per-account preferences, as one JSON document: which
+    # columns the machine list shows and in what order, and whatever the next
+    # page wants remembered. Owned by the console (the keys are its
+    # vocabulary, see ``app.api.routes.auth``), merged key by key on write,
+    # and never read by the server for anything but handing it back.
+    preferences: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    )
     is_active: bool = Field(default=True)
     # Set on every password change. Access tokens issued before this instant are
     # rejected (app.api.deps), so resetting a password ends existing sessions —
