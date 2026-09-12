@@ -37,6 +37,7 @@ class _FakeAsyncClient:
 
 
 def _configure_mailgun(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "EMAIL_PROVIDER", "mailgun")
     monkeypatch.setattr(settings, "MAILGUN_DOMAIN", "mg.example.com")
     monkeypatch.setattr(settings, "MAILGUN_API_KEY", "key-123")
     monkeypatch.setattr(settings, "MAILGUN_FROM_EMAIL", "tiai@example.com")
@@ -73,6 +74,7 @@ async def test_send_email_posts_to_mailgun(monkeypatch):
     assert call["data"]["subject"] == "Subject"
     assert call["data"]["to"] == ["a@example.com"]
     assert call["auth"] == ("api", "key-123")
+    assert call["data"]["from"] == "Tia'i <tiai@example.com>"
     # No proxy configured → none handed to the client (httpx treats None as "direct").
     assert _FakeAsyncClient.last_init is not None
     assert _FakeAsyncClient.last_init["proxy"] is None

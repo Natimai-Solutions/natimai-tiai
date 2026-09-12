@@ -218,14 +218,27 @@ variables ci-dessous ne décrivent que la destination du paquet.
 
 ### Alertes e-mail et e-mails de compte
 
-Facultatif — désactivé si `MAILGUN_DOMAIN` ou `MAILGUN_API_KEY` est vide. Mailgun
-sert aux notifications de supervision et au lien de réinitialisation de mot de
-passe. Sans lui, le parcours « mot de passe oublié » reste sans effet : c'est
-alors à un administrateur de réinitialiser le mot de passe depuis la console.
+Facultatif. L'envoi d'e-mails sert aux notifications de supervision et au lien
+de réinitialisation de mot de passe. Sans fournisseur configuré, le parcours
+« mot de passe oublié » reste sans effet : c'est alors à un administrateur de
+réinitialiser le mot de passe depuis la console.
 
-Un compte Mailgun se crée facilement sur [mailgun.com](https://www.mailgun.com/) ;
-le domaine d'envoi et la clé API à reporter ci-dessous se trouvent ensuite dans
-son tableau de bord.
+Le courrier part par l'un de deux canaux, au choix de `EMAIL_PROVIDER` :
+
+- **`mailgun`** *(défaut)* — l'API HTTP de Mailgun. Un compte se crée facilement
+  sur [mailgun.com](https://www.mailgun.com/) ; le domaine d'envoi et la clé API
+  à reporter ci-dessous se trouvent ensuite dans son tableau de bord. Désactivé
+  tant que `MAILGUN_DOMAIN` ou `MAILGUN_API_KEY` est vide.
+- **`smtp`** — n'importe quel serveur SMTP : le relais de l'établissement, un
+  compte Microsoft 365 (`smtp.office365.com:587`, STARTTLS) ou Google Workspace
+  (`smtp.gmail.com:587`, STARTTLS, mot de passe d'application), un fournisseur
+  transactionnel qui expose un point d'entrée SMTP. Désactivé tant que
+  `SMTP_HOST` ou l'adresse d'expéditeur est vide.
+
+Seules les variables du fournisseur choisi sont lues ; celles de l'autre sont
+ignorées. L'expéditeur (`EMAIL_FROM_EMAIL` / `EMAIL_FROM_NAME`) est commun aux
+deux — les anciens noms `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` restent
+acceptés, un `.env` écrit avant l'arrivée de SMTP n'a rien à renommer.
 
 **Qui reçoit quoi se règle par compte**, page « Mon compte » de la console, et un
 administrateur voit et modifie le réglage des autres comptes depuis la page
@@ -241,7 +254,7 @@ Utilisateurs. Quatre cadences :
 Chaque e-mail est d'abord une ligne dans la table `email_outbox`, écrite dans la
 même transaction que ce qui le motive — détection, résumé, lien de
 réinitialisation — puis envoyée par le worker, avec de nouvelles tentatives
-espacées en cas d'échec. Une panne de Mailgun ou du proxy sortant retarde donc
+espacées en cas d'échec. Une panne du fournisseur ou du proxy sortant retarde donc
 un e-mail au lieu de le perdre, et ne fait jamais échouer la remontée d'un poste.
 
 Il n'y a **aucune liste de destinataires dans la configuration** : le courrier
@@ -252,11 +265,17 @@ adresse réelle et modifiable depuis la console.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
+| `EMAIL_PROVIDER` | `mailgun` | `mailgun` ou `smtp` : le canal par lequel le courrier part |
+| `EMAIL_FROM_EMAIL` / `EMAIL_FROM_NAME` | — / `Tia'i` | Expéditeur, commun aux deux canaux. Avec un compte SMTP authentifié, l'adresse doit en général être celle du compte ou un alias autorisé. `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` restent acceptés en repli |
 | `MAILGUN_API_BASE_URL` | `https://api.mailgun.net/v3` | |
-| `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` | — | Vides = aucun e-mail n'est envoyé |
-| `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` | — / `Tiai` | |
+| `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` | — | Vides = aucun e-mail n'est envoyé avec `EMAIL_PROVIDER=mailgun` |
 | `MAILGUN_TIMEOUT_SECONDS` | `10` | |
 | `MAILGUN_PROXY_URL` | — | Proxy HTTP sortant pour le seul client Mailgun (ex. `http://10.0.0.1:3128`), utile derrière le proxy d'un établissement. Volontairement distinct de `HTTP_PROXY`/`HTTPS_PROXY`, que tous les processus honoreraient — Caddy compris |
+| `SMTP_HOST` / `SMTP_PORT` | — / `587` | Serveur SMTP. Hôte vide = aucun e-mail n'est envoyé avec `EMAIL_PROVIDER=smtp` |
+| `SMTP_SECURITY` | `starttls` | `starttls` (connexion en clair puis chiffrée, port 587 — le cas général), `tls` (TLS implicite, port 465) ou `none` (en clair, pour un relais interne sur le port 25 qui authentifie par adresse source) |
+| `SMTP_USER` / `SMTP_PASSWORD` | — | Identifiants, si le serveur en demande. Vides = pas d'authentification |
+| `SMTP_VERIFY_TLS` | `true` | Vérification du certificat du serveur. À `false` seulement pour un relais interne dont le certificat n'est pas vérifiable depuis le conteneur (auto-signé, AC privée non montée) |
+| `SMTP_TIMEOUT_SECONDS` | `10` | |
 | `MAINTENANCE_REMINDER_WEEKDAY` | `0` | Jour du rappel hebdomadaire des maintenances à chaque responsable, à `DIGEST_HOUR_UTC` : `0` = lundi … `6` = dimanche. Un responsable sans rien de dû ne reçoit rien ; un compte sur « aucun e-mail » non plus |
 | `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place |
 | `THREAT_ALERT_MAX_AGE_HOURS` | `24` | Une détection plus ancienne ne déclenche pas d'alerte immédiate : un poste qui s'enrôle remonte tout l'historique Defender d'un coup |

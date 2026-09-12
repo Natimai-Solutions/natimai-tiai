@@ -105,10 +105,26 @@ class Settings(BaseSettings):
             )
         )
 
-    # --- Mailgun (outgoing e-mail) ---
+    # --- Outgoing e-mail ---
     # Who receives what is not configured here: it is a per-account setting read
     # from the ``users`` table (``EmailPreference``). These say how mail leaves,
     # never to whom.
+    #
+    # Two ways out, chosen by EMAIL_PROVIDER: the Mailgun HTTP API (the
+    # historical channel, and the default so existing deployments keep
+    # working untouched) or a plain SMTP server — an establishment's own relay,
+    # a Microsoft 365 / Google Workspace account, any provider with an SMTP
+    # endpoint. Whichever is chosen, mail is "enabled" only once that provider
+    # has what it needs (``alerts_enabled``); the other provider's variables
+    # are then simply ignored.
+    EMAIL_PROVIDER: Literal["mailgun", "smtp"] = "mailgun"
+    # Sender shared by both providers. The MAILGUN_FROM_* names below still
+    # work and take over when these are empty, so a deployment written before
+    # SMTP existed does not have to be renamed.
+    EMAIL_FROM_EMAIL: str | None = None
+    EMAIL_FROM_NAME: str | None = None
+
+    # --- Mailgun ---
     MAILGUN_API_BASE_URL: str = "https://api.mailgun.net/v3"
     MAILGUN_DOMAIN: str | None = None
     MAILGUN_API_KEY: str | None = None
@@ -123,17 +139,61 @@ class Settings(BaseSettings):
     # directly.
     MAILGUN_PROXY_URL: str | None = None
 
+    # --- SMTP ---
+    # Empty host = SMTP is not configured (and, with EMAIL_PROVIDER=smtp, no
+    # mail leaves the console). Port 587 + STARTTLS is what most providers
+    # expect today; "tls" is implicit TLS on 465; "none" is for a relay on the
+    # local network that speaks plain SMTP on 25 and authenticates by source
+    # address. Credentials are optional for the same reason.
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = Field(default=587, ge=1, le=65535)
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_SECURITY: Literal["starttls", "tls", "none"] = "starttls"
+    # Off only for an internal relay presenting a certificate the container
+    # cannot verify (self-signed, private CA not mounted). Credentials still
+    # travel encrypted; what is lost is the proof of who is at the other end.
+    SMTP_VERIFY_TLS: bool = True
+    SMTP_TIMEOUT_SECONDS: int = 10
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def email_from_email(self) -> str | None:
+        """Sender address, whichever provider is in use."""
+        return self.EMAIL_FROM_EMAIL or self.MAILGUN_FROM_EMAIL
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def email_from_name(self) -> str:
+        """Sender display name, whichever provider is in use."""
+        return self.EMAIL_FROM_NAME or self.MAILGUN_FROM_NAME or self.PROJECT_NAME
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def mailgun_configured(self) -> bool:
+        """Whether the Mailgun provider has what it needs to send."""
+        return bool(self.MAILGUN_DOMAIN and self.MAILGUN_API_KEY)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def smtp_configured(self) -> bool:
+        """Whether the SMTP provider has what it needs to send."""
+        return bool(self.SMTP_HOST and self.email_from_email)
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def alerts_enabled(self) -> bool:
-        """Whether Mailgun is configured."""
-        return bool(self.MAILGUN_DOMAIN and self.MAILGUN_API_KEY)
+        """Whether the selected e-mail provider is configured."""
+        if self.EMAIL_PROVIDER == "smtp":
+            return self.smtp_configured
+        return self.mailgun_configured
 
     # --- E-mail outbox ---
-    # Every mail is a row in ``email_outbox`` before it is a Mailgun request;
+    # Every mail is a row in ``email_outbox`` before it is a Mailgun request or
+    # an SMTP session;
     # the worker drains the table and retries failures with an exponential
     # backoff (1 min doubling to a 1 h ceiling). After this many attempts —
-    # roughly 14 hours, enough to ride out a night-long proxy or Mailgun
+    # roughly 14 hours, enough to ride out a night-long proxy or mail-provider
     # outage — the row is marked abandoned and kept with its last error.
     EMAIL_MAX_ATTEMPTS: int = 20
     # How long sent and abandoned rows stay in the table before the daily purge

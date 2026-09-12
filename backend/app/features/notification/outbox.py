@@ -6,7 +6,7 @@ business change that motivated it. ``send_pending`` and ``purge_settled`` are
 the worker's side of the table.
 
 Delivery is at-least-once: the drain commits after the batch, so a worker
-killed between a Mailgun accept and the commit re-sends that mail on restart.
+killed between a provider's accept and the commit re-sends that mail on restart.
 The reverse trade — marking rows sent before trying — would lose mail instead,
 and a rare duplicate alert is the better failure.
 """
@@ -20,14 +20,14 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.features.base import utcnow
-from app.features.notification.mailgun import send_email
+from app.features.notification.email import send_email
 from app.features.notification.models import EmailOutbox, EmailStatus
 
 logger = logging.getLogger(__name__)
 
 # Backoff between attempts: 1 min doubling to a 1 h ceiling. With the default
 # EMAIL_MAX_ATTEMPTS this spans roughly half a day — enough to ride out an
-# evening-long proxy or Mailgun outage without keeping rows alive forever.
+# evening-long proxy or mail-provider outage without keeping rows alive forever.
 RETRY_BASE_SECONDS = 60
 RETRY_MAX_SECONDS = 3600
 
@@ -37,7 +37,7 @@ def queue_email(session: AsyncSession, *, to: str, subject: str, text: str) -> b
 
     No commit here: the row must live or die with whatever the caller is about
     to commit (a reset token, a batch of detections). Returns False without
-    queueing when Mailgun is not configured — the deployment has said no mail
+    queueing when no e-mail provider is configured — the deployment has said no mail
     leaves this console, and a row nothing will ever send is not a mail, it is
     a backlog.
     """
@@ -75,10 +75,10 @@ async def send_pending(session: AsyncSession, *, batch_size: int = 50) -> int:
             ok = await send_email(
                 subject=row.subject, text=row.body, to=[row.to_address]
             )
-            # False means Mailgun is no longer configured — the guard in
+            # False means the provider is no longer configured — the guard in
             # queue_email was passed once, so treat it like any other failure
             # and let the backoff decide, rather than spinning on every tick.
-            error = None if ok else "Mailgun is not configured"
+            error = None if ok else "E-mail provider is not configured"
         except Exception as exc:
             ok = False
             error = f"{type(exc).__name__}: {exc}"[:500]

@@ -26,7 +26,7 @@ def send_password_reset(session: AsyncSession, email: str, token: str) -> bool:
     """Queue a reset link, in the caller's open transaction. False if it could not be.
 
     The row commits with the reset token itself, so a link only ever goes out
-    for a token that exists. A missing CONSOLE_BASE_URL or Mailgun configuration
+    for a token that exists. A missing CONSOLE_BASE_URL or e-mail provider configuration
     is logged loudly: the endpoint answers 204 either way so as not to reveal
     whether the account exists, which would otherwise make this failure silent.
     """
@@ -53,5 +53,5 @@ def send_password_reset(session: AsyncSession, email: str, token: str) -> bool:
         text=text,
     )
     if not queued:
-        logger.error("Password reset mail not queued: Mailgun is not configured")
+        logger.error("Password reset mail not queued: no e-mail provider is configured")
     return queued
