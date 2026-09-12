@@ -1,4 +1,4 @@
-"""Minimal Mailgun client — the one channel this console sends mail through."""
+"""Minimal Mailgun client — one of the two channels this console sends mail through."""
 
 import httpx
 
@@ -16,11 +16,10 @@ async def send_email(subject: str, text: str, to: list[str]) -> bool:
     this message — and a client that could fall back on an address from the
     environment is a client that can mail someone nobody chose.
     """
-    if not settings.alerts_enabled or not to:
+    if not settings.mailgun_configured or not to:
         return False
 
-    from_name = settings.MAILGUN_FROM_NAME or settings.PROJECT_NAME
-    sender = f"{from_name} <{settings.MAILGUN_FROM_EMAIL}>"
+    sender = f"{settings.email_from_name} <{settings.email_from_email}>"
     url = f"{settings.MAILGUN_API_BASE_URL}/{settings.MAILGUN_DOMAIN}/messages"
 
     async with httpx.AsyncClient(
