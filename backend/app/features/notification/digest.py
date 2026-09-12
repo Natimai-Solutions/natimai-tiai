@@ -31,7 +31,8 @@ from app.features.machine.status import (
 )
 from app.features.machine.status import WindowsUpdateFilter as WUFilter
 from app.features.notification.outbox import queue_email
-from app.features.notification.recipients import recipients_for
+from app.features.notification.recipients import users_for
+from app.features.notification.tasks import personal_block
 from app.features.threat.models import Threat
 from app.features.user.models import EmailPreference
 from app.features.windows_update.models import WindowsUpdate
@@ -241,7 +242,9 @@ def render_digest(digest: Digest) -> tuple[str, str]:
     elif digest.with_high_severity_updates:
         headline = f"{digest.with_high_severity_updates} poste(s) à mettre à jour"
     elif digest.needs_verification:
-        headline = f"{digest.needs_verification} poste(s) à vérifier"
+        headline = (
+            f"{digest.needs_verification} poste(s) dont l'identité est à confirmer"
+        )
     else:
         headline = "rien à signaler"
     subject = f"{settings.PROJECT_NAME} — parc du {date} : {headline}"
@@ -271,8 +274,8 @@ def render_digest(digest: Digest) -> tuple[str, str]:
             )
         if digest.needs_verification:
             body.append(
-                f"  {digest.needs_verification} poste(s) à vérifier (empreinte matérielle "
-                "divergente ou doublon)"
+                f"  {digest.needs_verification} poste(s) dont l'identité est à "
+                "confirmer (empreinte matérielle divergente ou doublon)"
             )
         body.append("")
     else:
@@ -324,13 +327,14 @@ async def send_daily_digest(session: AsyncSession) -> int:
     """
     digest = await build_digest(session)
 
-    wants_daily = await recipients_for(session, [EmailPreference.DIGEST_DAILY])
+    wants_daily = await users_for(session, [EmailPreference.DIGEST_DAILY])
     wants_events = (
-        await recipients_for(session, [EmailPreference.DIGEST_EVENTS])
+        await users_for(session, [EmailPreference.DIGEST_EVENTS])
         if digest.has_events
         else []
     )
-    recipients = list(dict.fromkeys([*wants_daily, *wants_events]))
+    recipients = list({u.id: u for u in [*wants_daily, *wants_events]}.values())
+    recipients.sort(key=lambda u: u.email)
     if not recipients:
         # Not a misconfiguration to work around: either nobody asked for a
         # digest, or nobody had anything to hear about today. Both are answers.
@@ -339,8 +343,12 @@ async def send_daily_digest(session: AsyncSession) -> int:
 
     subject, text = render_digest(digest)
     queued = 0
-    for address in recipients:
-        if queue_email(session, to=address, subject=subject, text=text):
+    for user in recipients:
+        # The same parc for everyone, then what is *theirs*: the verifications
+        # they were handed, the maintenances they own that are due.
+        personal = await personal_block(session, user, digest.generated_at)
+        body = text if not personal else text + "\n\n" + "\n".join(personal)
+        if queue_email(session, to=user.email, subject=subject, text=body):
             queued += 1
     await session.commit()
     logger.info("Daily digest queued for %d/%d recipient(s)", queued, len(recipients))

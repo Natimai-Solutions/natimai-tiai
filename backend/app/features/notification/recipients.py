@@ -19,6 +19,23 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.features.user.models import EmailPreference, User
 
 
+async def users_for(
+    session: AsyncSession, preferences: Iterable[EmailPreference]
+) -> list[User]:
+    """The accounts behind ``recipients_for``, for a message that ends with
+    something personal to each of them."""
+    wanted = [str(p) for p in preferences]
+    if not wanted:
+        return []
+    rows = await session.exec(
+        select(User)
+        .where(col(User.is_active).is_(True))
+        .where(col(User.email_preference).in_(wanted))
+        .order_by(col(User.email))
+    )
+    return list(rows.all())
+
+
 async def recipients_for(
     session: AsyncSession, preferences: Iterable[EmailPreference]
 ) -> list[str]:

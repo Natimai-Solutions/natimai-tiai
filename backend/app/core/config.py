@@ -196,6 +196,32 @@ class Settings(BaseSettings):
     # fleet reported as behind on the pilot's account.
     AGENT_EXPECTED_VERSION: str | None = None
 
+    # --- Maintenance ---
+    # The parc-wide cycle, in days, a poste is due for a maintenance visit
+    # after — unless its room or itself says otherwise, and unless the console
+    # has written another default (``app_settings``, page Paramètres), which
+    # then wins over this. Ninety days is a starting point, not a policy.
+    MAINTENANCE_DEFAULT_CYCLE_DAYS: int = Field(default=90, ge=0, le=3650)
+    # How many days before its due date a poste is reported "à échéance".
+    MAINTENANCE_DUE_SOON_DAYS: int = Field(default=14, ge=0, le=365)
+    # The morning of the week each maintenance owner is reminded of what is
+    # due, 0 = Monday … 6 = Sunday, at DIGEST_HOUR_UTC. Behind each account's
+    # e-mail setting like the digest; an owner with nothing due gets nothing.
+    MAINTENANCE_REMINDER_WEEKDAY: int = Field(default=0, ge=0, le=6)
+
+    # --- Rooms ---
+    # How postes are filed into rooms. ``manual``: from the console, by hand.
+    # ``ad_ou``: by the organisational unit the computer object sits in — the
+    # agent reads its own DN off the registry, no directory round trip — one
+    # room per OU, named after it. ``ad_location``: by the "location"
+    # attribute of the computer object (the Emplacement field of ADUC), which
+    # the agent reads through ADSI. In either directory mode the console can
+    # no longer move a poste by hand: the directory is the source of truth,
+    # and a placement it would overwrite on the next inventory is a placement
+    # nobody can rely on. Rooms created this way keep their name, building and
+    # settings editable — only the membership is the directory's.
+    ROOM_SOURCE: Literal["manual", "ad_ou", "ad_location"] = "manual"
+
     # --- Wake-on-LAN ---
     # The magic packet is emitted by the server, not by an agent: the machine it
     # targets is off, and the whole point is to reach it anyway. What it needs is

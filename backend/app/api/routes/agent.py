@@ -30,6 +30,7 @@ from app.features.machine import fingerprint
 from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
 from app.features.notification import threat_alert
+from app.features.room import crud as room_crud
 from app.features.threat.crud import NewDetection, upsert_threats
 from app.features.threat.schemas import ThreatReport
 from app.features.windows_update.crud import replace_pending
@@ -545,6 +546,18 @@ async def heartbeat(
             machine.inventory_last_seen = utcnow()
         else:
             await apply_inventory(session, machine, inv)
+        # The directory block rides the inventory but is not hardware: stored
+        # on its own columns, and — in a directory mode — what files the
+        # poste into a room. Applied even on an unchanged hash: it is cheap,
+        # and a ROOM_SOURCE switched since the last inventory must not wait
+        # a day for the poste to move.
+        if inv.directory is not None:
+            directory = inv.directory
+            machine.ad_distinguished_name = directory.distinguished_name
+            machine.ad_ou = directory.ou
+            machine.ad_ou_dn = directory.ou_dn
+            machine.ad_location = directory.ad_location
+            await room_crud.place_from_directory(session, machine, settings.ROOM_SOURCE)
 
     if payload.fingerprint is not None:
         fp = payload.fingerprint

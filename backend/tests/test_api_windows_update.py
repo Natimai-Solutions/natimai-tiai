@@ -9,10 +9,13 @@ import pytest
 
 async def _admin_headers(client, db_session) -> dict[str, str]:
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     await crud.create_user(
-        db_session, email="wu-admin@test.local", password="pw", role=Role.ADMIN
+        db_session,
+        email="wu-admin@test.local",
+        password="pw",
+        groups=[BuiltinGroup.ADMIN],
     )
     resp = await client.post(
         "/api/v1/auth/login",
@@ -478,10 +481,13 @@ async def test_wu_install_reports_running_then_its_verdict(client, db_session):
 async def test_wu_commands_forbidden_for_readonly(client, db_session):
     """The new types need command:execute like every other one."""
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     await crud.create_user(
-        db_session, email="wu-ro@test.local", password="pw", role=Role.READONLY
+        db_session,
+        email="wu-ro@test.local",
+        password="pw",
+        groups=[BuiltinGroup.READONLY],
     )
     login = await client.post(
         "/api/v1/auth/login",

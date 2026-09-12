@@ -20,6 +20,14 @@ gère naturellement les postes éteints.
 
 ![Liste des postes Tia'i](images/Postes.png)
 
+![Mes tâches : vérifications affectées et maintenances à faire](images/MesTaches.png)
+
+![Une salle : ses postes, son cycle et son responsable de maintenance](images/Salle.png)
+
+![Fiche d'un poste, onglet Historique : maintenance et journal des interventions](images/FichePosteHistorique.png)
+
+![Groupes de droits composés dans la console](images/Groupes.png)
+
 ## Fonctionnalités
 
 - **Microsoft Defender** — état des signatures et de la protection temps réel,
@@ -42,11 +50,32 @@ gère naturellement les postes éteints.
   salle. Serveur hébergé loin des postes ? Le réveil est **relayé par un poste
   voisin** : le premier poste allumé du même emplacement à contacter le serveur
   émet le paquet magique à sa place.
-- **Emplacements** — chaque agent peut déclarer où se trouve son poste
-  (« Lycée de Taravao »), par sa configuration ou par le registre, donc par GPO.
-  La liste des postes se filtre et se trie par emplacement, une commande peut
-  viser tout un site, et c'est ce qui dit au relais Wake-on-LAN quel poste est
-  sur le bon fil.
+- **Emplacements, bâtiments et salles** — chaque agent peut déclarer où se
+  trouve son poste (« Lycée de Taravao »), par sa configuration ou par le
+  registre, donc par GPO. La liste des postes se filtre et se trie par
+  emplacement, une commande peut viser tout un site, et c'est ce qui dit au
+  relais Wake-on-LAN quel poste est sur le bon fil. La console range ensuite
+  les postes par **bâtiment et salle** : un bâtiment porte l'emplacement, une
+  salle en hérite, et un poste dont l'agent déclare un autre emplacement que sa
+  salle est **signalé** — une GPO mal ciblée ou un poste déménagé sans sa
+  salle — jamais refusé. À la main, ou **depuis l'annuaire** : l'agent remonte
+  l'unité d'organisation de son objet ordinateur et son attribut Emplacement,
+  et le serveur en fait des salles (`ROOM_SOURCE`).
+- **Vérifications demandées** — « va voir ce poste » : une demande avec des
+  consignes, affectée à quelqu'un ou laissée à prendre, une seule ouverte par
+  poste, close avec une note datée qui reste sur la demande et s'inscrit dans
+  l'historique du poste. Chacun retrouve les siennes dans « Mes tâches ».
+- **Maintenance** — un cycle par défaut pour le parc, à surcharger par salle ou
+  par poste (ou à exclure), un responsable aux mêmes trois niveaux, et pour
+  chacun sa liste de salles et de postes à faire, en retard ou à échéance. Une
+  séance se saisit d'un coup pour toute une salle : une observation générale,
+  une case et une note par poste, et chaque poste repart pour un cycle avec sa
+  ligne dans son historique. Transmettre une maintenance, c'est changer son
+  responsable.
+- **Historique des interventions** — chaque poste porte son journal : panne,
+  installation logicielle, mise à niveau, maintenance, vérification, saisi
+  depuis sa fiche avec une date qui peut être antérieure à la console, lu de
+  haut en bas comme un cahier. Les suppressions sont tracées.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
@@ -57,9 +86,12 @@ gère naturellement les postes éteints.
   rien, une alerte immédiate à chaque menace détectée, un résumé quotidien les
   jours où il y a à traiter, ou un résumé chaque matin — état du parc, antivirus
   périmés, correctifs critiques en attente. Un « rien à signaler » est aussi une
-  information : c'est le réglage par défaut. Chaque e-mail passe par une file en
-  base et est réessayé en cas d'incident d'envoi : un courrier décidé n'est
-  jamais perdu.
+  information : c'est le réglage par défaut. Le résumé se termine par ce qui
+  est *à vous* : les vérifications qu'on vous a affectées, les maintenances
+  dont vous êtes responsable. Une vérification affectée est annoncée sur le
+  moment, et chaque responsable reçoit un rappel hebdomadaire de ses
+  maintenances dues. Chaque e-mail passe par une file en base et est réessayé
+  en cas d'incident d'envoi : un courrier décidé n'est jamais perdu.
 - **Inventaire matériel et logiciel** — ce que chaque poste *est* : constructeur,
   modèle, châssis, carte mère, BIOS, processeur, barrettes et emplacements
   libres, disques (type, santé, chiffrement), volumes avec leur occupation,
@@ -113,6 +145,11 @@ l'exécution est figée dans le binaire de l'agent.
 | Windows Update | 🟢 Livré |
 | Déploiement logiciel | ⚪ À venir |
 | Inventaire matériel / logiciel | 🟢 Livré |
+| Groupes de droits | 🟢 Livré |
+| Bâtiments, salles, classement depuis l'annuaire | 🟢 Livré |
+| Historique des interventions | 🟢 Livré |
+| Vérifications demandées | 🟢 Livré |
+| Maintenance (cycles, responsables, séances) | 🟢 Livré |
 
 ## Téléchargement
 
@@ -172,7 +209,10 @@ et un accès réseau au serveur.
 - **Auto-enrôlement contrôlé** : un secret partagé ne sert qu'à s'enregistrer,
   chaque poste reçoit ensuite un token qui lui est propre, révocable, chiffré sur
   le poste.
-- **Console authentifiée** (JWT), journal d'audit et limitation de débit.
+- **Console authentifiée** (JWT), **groupes de droits** composés dans la console
+  — lecture seule, techniciens, administrateurs, ou n'importe quel assemblage,
+  les commandes à risque (arrêt, redémarrage, installation de mises à jour)
+  étant un droit à part —, journal d'audit et limitation de débit.
 - **Catalogue de commandes fermé** : aucun exécuteur de scripts, aucune
   modification du registre, des fichiers, du pare-feu ou des comptes — un serveur
   compromis ne peut déclencher que les actions prévues.
@@ -198,7 +238,10 @@ une issue publique.
 - Chaque composant a son propre README : [agent/](agent/README.md),
   [backend/](backend/README.md), [frontend/](frontend/README.md).
 - Le dossier [dev/](dev/) rassemble les documents de conception et de suivi du
-  projet, pour qui veut le détail des choix techniques.
+  projet, pour qui veut le détail des choix techniques — dont
+  [plan-salles-maintenance-interventions.md](dev/plan-salles-maintenance-interventions.md)
+  pour les groupes de droits, les salles, les vérifications, la maintenance et
+  l'historique des interventions.
 
 ## Licence
 

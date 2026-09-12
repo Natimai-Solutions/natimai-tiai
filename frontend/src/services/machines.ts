@@ -26,6 +26,32 @@ export interface Machine {
    * parc filters by — and what the Wake-on-LAN relay picks a neighbour with.
    */
   location: string | null;
+  /**
+   * Where the console placed the poste (`services/rooms`): its room, the
+   * room's building, and the site those resolve to. All null for a poste
+   * nobody filed.
+   */
+  room_id: string | null;
+  room_name: string | null;
+  building_id: string | null;
+  building_name: string | null;
+  room_location: string | null;
+  /**
+   * The agent and the room disagree on the site. A finding, not an error: a
+   * GPO aimed at the wrong OU, or a poste moved without its room.
+   */
+  location_mismatch: boolean;
+  /** A verification somebody asked for is open on this poste, and for whom. */
+  check_open: boolean;
+  check_assigned_to: string | null;
+  /**
+   * Maintenance as it resolves for this poste (`services/maintenance`): when
+   * it is due, where it stands, who owns it. null due = excluded.
+   */
+  last_maintenance_at: string | null;
+  maintenance_due_at: string | null;
+  maintenance_state: string | null;
+  maintenance_owner: string | null;
   /** Primary address elected by the agent; null = never reported. */
   ip_address: string | null;
   os_version: string | null;
@@ -209,6 +235,24 @@ export interface MachineDetail extends Machine {
   wu_last_install: string | null;
   /** Sorted critical-first by the server; empty when nothing is pending. */
   pending_updates: PendingUpdate[];
+  /**
+   * What the domain says about the poste, as its agent last read it: the
+   * computer object's DN, the OU holding it, the object's location attribute.
+   * All null on a workgroup poste or an older agent.
+   */
+  ad_distinguished_name: string | null;
+  ad_ou: string | null;
+  ad_ou_dn: string | null;
+  ad_location: string | null;
+  /** The open verification request, if any: the banner of the fiche. */
+  open_check: {
+    id: string;
+    requested_by: string;
+    assigned_to_id: string | null;
+    assigned_to_name: string | null;
+    instructions: string | null;
+    created_at: string;
+  } | null;
   machine_guid: string | null;
   smbios_uuid: string | null;
   tpm_ek_hash: string | null;
@@ -279,6 +323,11 @@ export type MachineSortField =
   | 'hostname'
   | 'domain'
   | 'location'
+  /** The console's placement, off the joined tables. */
+  | 'building'
+  | 'room'
+  /** When the poste is next due for maintenance; excluded ones last. */
+  | 'maintenance_due_at'
   | 'av_product_name'
   | 'wu_pending_count'
   | 'session_user_present'
@@ -295,6 +344,16 @@ export interface ListMachinesParams {
   domain?: string;
   /** Site, matched exactly (the dropdown feeds fleet values). */
   location?: string;
+  /** The console's placement: one room, one building, or the postes nobody filed. */
+  room_id?: string;
+  building_id?: string;
+  without_room?: boolean;
+  /** true = agent and room disagree on the site; false = the rest. */
+  location_mismatch?: boolean;
+  /** true = a verification request is open; false = none. */
+  check_open?: boolean;
+  /** Where the poste stands on its maintenance cycle. */
+  maintenance_state?: 'excluded' | 'overdue' | 'due_soon' | 'ok';
   /** Antivirus name, matched as a substring server-side. */
   antivirus?: string;
   /** OS version, matched as a substring server-side ("Windows 10" = every build). */

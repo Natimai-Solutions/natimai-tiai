@@ -10,14 +10,14 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentPermissions, CurrentUser, SessionDep
 from app.api.fields import Email, Password
 from app.core import ratelimit, security
 from app.core.errors import AppError, ErrorCode
 from app.core.net import client_ip
 from app.features.base import utcnow
 from app.features.user import crud, emails
-from app.features.user.models import EmailPreference
+from app.features.user.models import EmailPreference, User
 
 # The security log: authentication events, one greppable line each. Without it
 # a brute-force attempt leaves no trace at all outside the rate limiter's 429s.
@@ -33,16 +33,42 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class GroupRef(BaseModel):
+    """A group as the profile names it: enough to display, not to edit."""
+
+    id: uuid.UUID
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
 class UserOut(BaseModel):
-    """Authenticated user info."""
+    """Authenticated user info, with what the account may do.
+
+    ``permissions`` is what the console reads to decide which buttons and
+    pages to show — cosmetic: the backend re-checks every call.
+    """
 
     id: uuid.UUID
     email: str
     full_name: str | None
-    role: str
     email_preference: str
+    groups: list[GroupRef]
+    permissions: list[str]
 
-    model_config = {"from_attributes": True}
+
+async def _profile(
+    session: SessionDep, user: User, permissions: frozenset[str]
+) -> UserOut:
+    groups = (await crud.groups_of_users(session, [user.id]))[user.id]
+    return UserOut(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        email_preference=user.email_preference,
+        groups=[GroupRef.model_validate(g) for g in groups],
+        permissions=sorted(permissions),
+    )
 
 
 @router.post(
@@ -72,9 +98,11 @@ async def login(
 
 
 @router.get("/me", response_model=UserOut)
-async def me(user: CurrentUser) -> UserOut:
+async def me(
+    session: SessionDep, user: CurrentUser, permissions: CurrentPermissions
+) -> UserOut:
     """Return the current authenticated user."""
-    return UserOut.model_validate(user)
+    return await _profile(session, user, permissions)
 
 
 class ProfileUpdate(BaseModel):
@@ -85,14 +113,17 @@ class ProfileUpdate(BaseModel):
 
 @router.patch("/me", response_model=UserOut)
 async def update_me(
-    payload: ProfileUpdate, user: CurrentUser, session: SessionDep
+    payload: ProfileUpdate,
+    user: CurrentUser,
+    session: SessionDep,
+    permissions: CurrentPermissions,
 ) -> UserOut:
     """Update one's own profile.
 
     Self-service, and deliberately narrow: what an account may change about
-    itself here is how much mail it receives. Its role, its address and whether
-    it is active stay with an administrator (``/users``) — a read-only operator
-    who could edit their own row would not be read-only for long.
+    itself here is how much mail it receives. Its groups, its address and
+    whether it is active stay with an administrator (``/users``) — a read-only
+    operator who could edit their own row would not be read-only for long.
     """
     if payload.email_preference is not None:
         user.email_preference = payload.email_preference
@@ -100,7 +131,7 @@ async def update_me(
     session.add(user)
     await session.commit()
     await session.refresh(user)
-    return UserOut.model_validate(user)
+    return await _profile(session, user, permissions)
 
 
 # --- Password lifecycle -----------------------------------------------------

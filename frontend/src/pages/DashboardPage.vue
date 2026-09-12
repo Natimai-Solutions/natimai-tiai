@@ -210,11 +210,30 @@ const alertKpis = computed<Kpi[]>(() => {
       to: { name: 'machines', query: { with_active_threats: 'true' } },
     },
     {
-      label: 'À vérifier',
+      label: 'Identité à confirmer',
       value: s.needs_verification,
       icon: 'help',
       color: 'orange',
       to: { name: 'machines', query: { status: 'needs_verification' } },
+    },
+    {
+      // The task the console hands out, beside the findings the parc raised
+      // itself: what somebody was asked to go and look at.
+      label: 'Vérifications demandées',
+      value: s.open_checks,
+      icon: 'fact_check',
+      color: 'primary',
+      to: { name: 'machines', query: { check_open: 'true' } },
+    },
+    {
+      label: 'Maintenance en retard',
+      value: s.machines_maintenance_overdue,
+      icon: 'build',
+      color: 'negative',
+      to: { name: 'machines', query: { maintenance_state: 'overdue' } },
+      ...(s.machines_maintenance_due_soon
+        ? { caption: `${s.machines_maintenance_due_soon} à échéance` }
+        : {}),
     },
     {
       label: 'Inactifs',

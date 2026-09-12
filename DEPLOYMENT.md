@@ -195,6 +195,9 @@ Il n'est jamais committé.
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif » |
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
 | `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence |
+| `MAINTENANCE_DEFAULT_CYCLE_DAYS` | `90` | Cycle de maintenance par défaut du parc, en jours, **valeur initiale seulement** : la page Paramètres de la console peut en écrire une autre, qui prend alors le dessus. Une salle ou un poste peuvent surcharger le cycle (0 = exclu de la maintenance) et le responsable ; le plus précis gagne |
+| `MAINTENANCE_DUE_SOON_DAYS` | `14` | Fenêtre « à échéance » : un poste est signalé ce nombre de jours avant sa date. Même règle : valeur initiale, modifiable dans Paramètres |
+| `ROOM_SOURCE` | `manual` | Comment les postes sont rangés en salles. `manual` : depuis la console, à la main. `ad_ou` : par l'**unité d'organisation** qui contient l'objet ordinateur — l'agent lit son propre DN dans le registre, sans interroger l'annuaire — une salle par OU, nommée comme elle. `ad_location` : par l'attribut **Emplacement** de l'objet ordinateur (onglet Emplacement d'ADUC), que l'agent lit via ADSI. Dans les deux modes annuaire, le rattachement manuel est verrouillé ; les salles créées gardent nom, bâtiment et notes modifiables. Après un changement de ce réglage, « Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc d'un coup |
 | `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard |
 
 ### Réveil des postes (Wake-on-LAN)
@@ -254,6 +257,7 @@ adresse réelle et modifiable depuis la console.
 | `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` | — / `Tiai` | |
 | `MAILGUN_TIMEOUT_SECONDS` | `10` | |
 | `MAILGUN_PROXY_URL` | — | Proxy HTTP sortant pour le seul client Mailgun (ex. `http://10.0.0.1:3128`), utile derrière le proxy d'un établissement. Volontairement distinct de `HTTP_PROXY`/`HTTPS_PROXY`, que tous les processus honoreraient — Caddy compris |
+| `MAINTENANCE_REMINDER_WEEKDAY` | `0` | Jour du rappel hebdomadaire des maintenances à chaque responsable, à `DIGEST_HOUR_UTC` : `0` = lundi … `6` = dimanche. Un responsable sans rien de dû ne reçoit rien ; un compte sur « aucun e-mail » non plus |
 | `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place |
 | `THREAT_ALERT_MAX_AGE_HOURS` | `24` | Une détection plus ancienne ne déclenche pas d'alerte immédiate : un poste qui s'enrôle remonte tout l'historique Defender d'un coup |
 | `NOTIFICATION_MAX_ITEMS` | `10` | Postes détaillés dans un e-mail avant « … et N autres » |
@@ -542,6 +546,18 @@ un poste voisin (section « Réveil des postes », point 4). Une valeur vide
 **efface** l'emplacement mémorisé côté serveur : un poste déplacé, ou dont la GPO
 a retiré le réglage, ne reste pas classé sous l'ancien.
 
+**Annuaire.** Sans aucun réglage, l'agent d'un poste joint à un domaine remonte
+aussi, avec l'inventaire quotidien, ce que l'annuaire dit de lui : le DN de
+l'objet ordinateur (lu dans le cache des stratégies de groupe, sous
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\State\Machine`),
+l'unité d'organisation qui le contient, et l'attribut *Emplacement* de l'objet,
+lu via ADSI avec le compte machine. Ces trois valeurs s'affichent sur la fiche
+du poste et, selon `ROOM_SOURCE` côté serveur, rangent le poste dans une salle.
+Un poste hors domaine, ou dont le contrôleur est injoignable, remonte ce qu'il
+peut : l'OU sans l'attribut, ou rien — jamais une erreur. Le bloc n'est envoyé
+que lorsqu'il change, comme le reste de l'inventaire ; « Rafraîchir
+l'inventaire » depuis la console force une relecture.
+
 Toute valeur absente ou non positive retombe sur son défaut : un YAML partiel
 reste utilisable, et **le fichier lui-même est facultatif** — c'est le mode
 nominal d'un déploiement par GPO, qui n'a alors rien à déposer ni à mettre à jour
@@ -648,6 +664,39 @@ lignes à chercher, dans l'ordre d'un cycle :
 | `agent: inventory: ...` | La lecture elle-même a échoué (WMI) |
 
 ---
+
+## Organisation du parc : groupes, salles, tâches, maintenance
+
+Tout se règle depuis la console ; rien à déployer sur les postes. Les
+variables d'environnement concernées sont `ROOM_SOURCE`,
+`MAINTENANCE_DEFAULT_CYCLE_DAYS`, `MAINTENANCE_DUE_SOON_DAYS` et
+`MAINTENANCE_REMINDER_WEEKDAY` (section « Backend » ci-dessus).
+
+**Groupes de droits.** Un compte peut ce que ses groupes lui accordent. Trois
+groupes existent d'emblée : *Administrateurs* (tous les droits, implicites),
+*Lecture seule*, *Techniciens* (lecture + commandes, courantes et à risque +
+saisie des interventions, vérifications et maintenances). Page « Groupes » pour
+en composer d'autres — par exemple « exécute les commandes courantes mais pas
+les commandes à risque, et ne gère pas les postes ». Le premier compte est dans
+*Administrateurs* ; une base migrée depuis une version à deux rôles y range ses
+anciens `admin`, les autres dans *Lecture seule*.
+
+**Bâtiments et salles.** Un bâtiment porte l'emplacement, dans les mots que les
+agents remontent (réglage `location` de l'agent) ; une salle en hérite. La
+console range les postes à la main (`ROOM_SOURCE=manual`) ou depuis l'annuaire :
+`ad_ou` crée une salle par unité d'organisation contenant l'objet ordinateur,
+`ad_location` une par valeur de l'attribut *Emplacement* de l'objet. Les deux
+lectures viennent de l'agent, sans rien configurer (voir « Paramètres de l'agent
+Windows », paragraphe *Annuaire*). Après un changement de `ROOM_SOURCE`,
+« Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc.
+
+**Vérifications et maintenance.** « Mes tâches » réunit, pour chaque compte, les
+vérifications qu'on lui a affectées et les salles et postes dont il est
+responsable de la maintenance. Le cycle et le responsable se règlent au niveau
+du parc (page Paramètres), d'une salle ou d'un poste, le plus précis gagnant ;
+un cycle de 0 exclut. Une séance de maintenance se saisit pour toute une salle
+depuis sa fiche ou depuis « Mes tâches ». Les e-mails suivent le réglage de
+chaque compte (page « Mon compte »).
 
 ## Dépannage
 

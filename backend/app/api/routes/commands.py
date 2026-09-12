@@ -14,14 +14,25 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func
 from sqlmodel import col, select
 
-from app.api.deps import CurrentUser, SessionDep, require_permission
+from app.api.deps import (
+    CurrentPermissions,
+    CurrentUser,
+    SessionDep,
+    require_permission,
+)
 from app.core.config import settings
+from app.core.errors import AppError, ErrorCode
 from app.features.base import utcnow
 from app.features.command import crud as command_crud
-from app.features.command.models import Command, CommandStatus, CommandType
+from app.features.command.models import (
+    RISKY_COMMAND_TYPES,
+    Command,
+    CommandStatus,
+    CommandType,
+)
 from app.features.machine.models import Machine
 from app.features.machine.status import MachineStatus, status_clause
-from app.features.user.permissions import Action, Resource
+from app.features.user.permissions import Action, Resource, has_permission
 
 router = APIRouter(prefix="/commands", tags=["commands"])
 
@@ -150,13 +161,30 @@ async def _resolve_targets(
     dependencies=[Depends(require_permission(Resource.COMMAND, Action.EXECUTE))],
 )
 async def create_commands(
-    payload: CreateCommands, session: SessionDep, user: CurrentUser
+    payload: CreateCommands,
+    session: SessionDep,
+    user: CurrentUser,
+    permissions: CurrentPermissions,
 ) -> CreateCommandsResponse:
-    """Queue one command per resolved target machine (admin only).
+    """Queue one command per resolved target machine.
 
-    A machine that already has an unfinished command of the same type is
-    skipped, not queued twice: see ``command_crud.create_for_machines``.
+    ``command:execute`` opens this route; the types in ``RISKY_COMMAND_TYPES``
+    ask for ``risky_command:execute`` on top, checked here because the type is
+    in the body. A machine that already has an unfinished command of the same
+    type is skipped, not queued twice: see ``command_crud.create_for_machines``.
     """
+    if payload.type in RISKY_COMMAND_TYPES and not has_permission(
+        permissions, Resource.RISKY_COMMAND, Action.EXECUTE
+    ):
+        raise AppError(
+            code=ErrorCode.AUTH_PERMISSION_DENIED,
+            status_code=403,
+            message=f"Missing permission: {Resource.RISKY_COMMAND}:{Action.EXECUTE}",
+            details={
+                "resource": Resource.RISKY_COMMAND.value,
+                "action": Action.EXECUTE.value,
+            },
+        )
     machine_ids = await _resolve_targets(session, payload)
     # Same sweep the tracking endpoint runs: a command left pending past its TTL
     # must not block the one an administrator is queueing now, on a poste that

@@ -40,10 +40,13 @@ async def _recipients(db_session) -> list[str]:
 
 async def _user(db_session, email: str, preference: str, *, is_active: bool = True):
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     user = await crud.create_user(
-        db_session, email=email, password="pw-not-used-here", role=Role.READONLY
+        db_session,
+        email=email,
+        password="pw-not-used-here",
+        groups=[BuiltinGroup.READONLY],
     )
     user.email_preference = preference
     user.is_active = is_active

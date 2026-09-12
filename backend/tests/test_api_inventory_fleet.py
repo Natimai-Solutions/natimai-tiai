@@ -13,10 +13,13 @@ from tests.test_api_inventory import (  # noqa: F401  (fixtures come from confte
 
 async def _admin_headers(client, db_session) -> dict[str, str]:
     from app.features.user import crud
-    from app.features.user.models import Role
+    from app.features.user.permissions import BuiltinGroup
 
     await crud.create_user(
-        db_session, email="fleet-admin@test.local", password="pw", role=Role.ADMIN
+        db_session,
+        email="fleet-admin@test.local",
+        password="pw",
+        groups=[BuiltinGroup.ADMIN],
     )
     resp = await client.post(
         "/api/v1/auth/login",

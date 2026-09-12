@@ -7,9 +7,10 @@ import {
 } from 'vue-router';
 import routes from './routes';
 
+import { readCachedPermissions } from 'src/stores/auth';
+
 // Source of truth for "logged in" in the guard (kept in sync by the auth store).
 const TOKEN_KEY = 'tiai_token';
-const ROLE_KEY = 'tiai_role';
 
 export default defineRouter(() => {
   const createHistory = process.env.SERVER
@@ -32,9 +33,11 @@ export default defineRouter(() => {
     if (to.name === 'login' && isAuthed) {
       return { name: 'dashboard' };
     }
-    // Admin-only pages. The guard only decides what to render — the backend
-    // authorizes every call independently, so this cannot be bypassed for real.
-    if (to.meta.requiresAdmin && localStorage.getItem(ROLE_KEY) !== 'admin') {
+    // Pages behind a permission. The guard only decides what to render — the
+    // backend authorizes every call independently, so this cannot be bypassed
+    // for real. The cached set is what the last profile fetch wrote.
+    const required = to.meta.requiresPermission;
+    if (typeof required === 'string' && !readCachedPermissions().includes(required)) {
       return { name: 'dashboard' };
     }
     return true;
