@@ -15,13 +15,12 @@
       >
         <template #append><q-icon name="search" /></template>
       </q-input>
-      <q-btn
-        v-if="auth.can('user', 'write')"
-        color="primary"
-        icon="person_add"
-        label="Nouveau compte"
-        @click="openCreate"
-      />
+      <!-- In its own column: the gutter pads every direct child of the row,
+           and on a bare button that padding landed inside the button, which
+           sat a few pixels low and flush against the search box. -->
+      <div v-if="auth.can('user', 'write')" class="col-auto">
+        <q-btn color="primary" icon="person_add" label="Nouveau compte" @click="openCreate" />
+      </div>
     </div>
 
     <q-table
