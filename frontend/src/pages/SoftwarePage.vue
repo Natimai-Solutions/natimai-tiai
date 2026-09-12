@@ -1,20 +1,43 @@
 <template>
   <q-page padding>
-    <div class="row items-center q-mb-md">
-      <div class="text-h5">Logiciels du parc</div>
+    <div class="row items-center q-col-gutter-md q-mb-md">
+      <div class="text-h5 col-auto">Logiciels du parc</div>
       <q-space />
-      <q-btn
-        flat
-        dense
-        icon="download"
-        label="Exporter"
-        :loading="exporting"
-        class="q-mr-sm"
-        @click="exportCsv"
-      >
-        <q-tooltip>Télécharger le catalogue filtré au format CSV</q-tooltip>
-      </q-btn>
-      <q-btn flat dense round icon="refresh" :loading="loading" @click="load" />
+      <div class="col-auto">
+        <!-- Excel or CSV, as the fleet export offers: the same catalogue, and
+             a real date in the last column when Excel is the destination. -->
+        <q-btn-dropdown
+          outline
+          no-caps
+          color="positive"
+          icon="download"
+          label="Exporter"
+          :loading="exporting"
+        >
+          <q-list>
+            <q-item v-close-popup clickable @click="doExport('xlsx')">
+              <q-item-section avatar><q-icon name="table_chart" /></q-item-section>
+              <q-item-section>Excel (.xlsx)</q-item-section>
+            </q-item>
+            <q-item v-close-popup clickable @click="doExport('csv')">
+              <q-item-section avatar><q-icon name="description" /></q-item-section>
+              <q-item-section>CSV</q-item-section>
+            </q-item>
+          </q-list>
+          <q-tooltip>Télécharger le catalogue filtré (Excel ou CSV)</q-tooltip>
+        </q-btn-dropdown>
+      </div>
+      <div class="col-auto">
+        <q-btn
+          flat
+          round
+          color="primary"
+          icon="refresh"
+          aria-label="Actualiser"
+          :loading="loading"
+          @click="load"
+        />
+      </div>
     </div>
 
     <q-card flat bordered>
@@ -70,9 +93,10 @@
 import { onMounted, ref } from 'vue';
 import { useQuasar, type QTableColumn } from 'quasar';
 import {
-  exportSoftwareCsv,
+  exportSoftware,
   listSoftware,
   type SoftwareEntry,
+  type SoftwareExportFormat,
   type SoftwareSortField,
 } from 'src/services/software';
 import { apiErrorMessage } from 'src/services/errors';
@@ -155,11 +179,11 @@ function onRequest(evt: {
   void load();
 }
 
-async function exportCsv() {
+async function doExport(format: SoftwareExportFormat) {
   exporting.value = true;
   try {
-    const blob = await exportSoftwareCsv(search.value ? { search: search.value } : {});
-    downloadBlob(blob, 'logiciels.csv');
+    const blob = await exportSoftware(format, search.value ? { search: search.value } : {});
+    downloadBlob(blob, `logiciels.${format}`);
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'export") });
   } finally {

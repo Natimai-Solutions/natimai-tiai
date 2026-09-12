@@ -6,7 +6,7 @@ vi.mock('boot/axios', () => ({
 }));
 
 import { api } from 'boot/axios';
-import { exportSoftwareCsv, listSoftware } from './software';
+import { exportSoftware, listSoftware } from './software';
 
 describe('listSoftware', () => {
   beforeEach(() => {
@@ -46,23 +46,34 @@ describe('listSoftware', () => {
   });
 });
 
-describe('exportSoftwareCsv', () => {
+describe('exportSoftware', () => {
   beforeEach(() => {
     vi.mocked(api.get).mockReset();
   });
 
   // A blob and not text: the export is fetched rather than linked to, because
   // the API needs the Authorization header a plain <a href> would not carry.
-  it('asks for a blob and forwards the search', async () => {
+  it('asks for a CSV blob and forwards the search', async () => {
     const blob = new Blob(['x']);
     vi.mocked(api.get).mockResolvedValue({ data: blob });
 
-    const result = await exportSoftwareCsv({ search: 'java' });
+    const result = await exportSoftware('csv', { search: 'java' });
 
     expect(api.get).toHaveBeenCalledWith('/software/export.csv', {
       params: { search: 'java' },
       responseType: 'blob',
     });
     expect(result).toBe(blob);
+  });
+
+  it('asks the Excel route for the xlsx format', async () => {
+    vi.mocked(api.get).mockResolvedValue({ data: new Blob(['x']) });
+
+    await exportSoftware('xlsx');
+
+    expect(api.get).toHaveBeenCalledWith('/software/export.xlsx', {
+      params: {},
+      responseType: 'blob',
+    });
   });
 });

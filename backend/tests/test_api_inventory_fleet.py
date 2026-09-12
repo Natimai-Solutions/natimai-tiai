@@ -4,6 +4,11 @@ Covers the inventory J2: the software catalogue, the machine list's inventory
 facets, the distinct-value listings, the two CSV exports and the dashboard KPIs.
 """
 
+import io
+from datetime import date, datetime
+
+from openpyxl import load_workbook
+
 from tests.test_api_inventory import (  # noqa: F401  (fixtures come from conftest)
     _enroll,
     _heartbeat,
@@ -131,6 +136,36 @@ async def test_catalogue_export_is_a_spreadsheet(client, db_session):
     assert "Café Tool;1.0;Acme;1" in text
 
 
+async def test_catalogue_export_as_excel(client, db_session):
+    """Same rows as the CSV, with a real date in the last column."""
+    headers = await _admin_headers(client, db_session)
+    await _poste(client, "fleet-xlsx", software=[_software("Café Tool", "1.0")])
+
+    resp = await client.get("/api/v1/software/export.xlsx?search=café", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert "spreadsheetml" in resp.headers["content-type"]
+    assert "logiciels.xlsx" in resp.headers["content-disposition"]
+
+    sheet = load_workbook(io.BytesIO(resp.content))["Logiciels"]
+    assert [c.value for c in sheet[1]] == [
+        "Nom",
+        "Version",
+        "Éditeur",
+        "Postes",
+        "Vu pour la première fois",
+    ]
+    row = [c.value for c in sheet[2]]
+    assert row[:4] == ["Café Tool", "1.0", "Acme", 1]
+    assert isinstance(row[4], (date, datetime))
+    assert sheet.freeze_panes == "A2"
+
+    # The search bounds the export exactly as it bounds the list.
+    none = await client.get(
+        "/api/v1/software/export.xlsx?search=nothing", headers=headers
+    )
+    assert load_workbook(io.BytesIO(none.content))["Logiciels"].max_row == 1
+
+
 # --- The machine list's inventory facets -------------------------------------
 
 
@@ -254,7 +289,11 @@ async def test_fleet_export_honours_the_filters(client, db_session):
 
 async def test_export_is_forbidden_for_the_unauthenticated(client, db_session):
     """Both exports sit behind the same read permission as the list."""
-    for path in ("/api/v1/machines/export.csv", "/api/v1/software/export.csv"):
+    for path in (
+        "/api/v1/machines/export.csv",
+        "/api/v1/software/export.csv",
+        "/api/v1/software/export.xlsx",
+    ):
         resp = await client.get(path)
         assert resp.status_code == 401, path
 
