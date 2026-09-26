@@ -23,7 +23,7 @@ func TestConfiguredTimeoutStillBoundsARequest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "token", 100*time.Millisecond)
+	c := New(srv.URL, "token", 100*time.Millisecond, nil)
 	start := time.Now()
 	_, err := c.Heartbeat(context.Background(), models.HeartbeatRequest{})
 	if err == nil {
@@ -50,7 +50,7 @@ func TestACallersDeadlineWinsOverTheConfiguredTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "token", 50*time.Millisecond)
+	c := New(srv.URL, "token", 50*time.Millisecond, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -70,7 +70,7 @@ func TestStatusErrorSurvivesTheTimeoutWrapping(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "stale", time.Second)
+	c := New(srv.URL, "stale", time.Second, nil)
 	_, err := c.Heartbeat(context.Background(), models.HeartbeatRequest{})
 	var se *StatusError
 	if !errors.As(err, &se) || se.StatusCode != http.StatusUnauthorized {

@@ -13,7 +13,7 @@ Windows.
 ```
 main.go                    commandes CLI (run / init-config / install / repair / uninstall / start / stop / status / version)
 internal/
-  config/    config ProgramData (config.yaml) + surcharge registre (HKLM\SOFTWARE\Tiai) ; token chiffré DPAPI (token.dat) ; emplacement du poste
+  config/    config ProgramData (config.yaml) + surcharge registre (HKLM\SOFTWARE\Tiai) ; token chiffré DPAPI (token.dat) ; emplacement du poste ; proxy
   dpapi/     wrapper DPAPI (CryptProtectData, scope machine) ; passthrough hors Windows
   identity/  résolution identité (SMBIOS UUID via WMI / repli UUID agent) + empreinte (MachineGuid registre, TPM EK best-effort)
   sysinfo/   hostname / domaine AD / version OS
@@ -594,6 +594,21 @@ l'emplacement d'un poste déplacé ou dont la GPO a retiré le réglage, là où
 agent antérieur au champ laisse la valeur mémorisée intacte. Dans le registre,
 c'est la présence de la valeur qui compte : une `Location` vide l'emporte sur le
 YAML et retire l'emplacement.
+
+## Proxy
+
+`proxy_url` (YAML) ou `ProxyURL` (registre, `REG_SZ`) : comment l'agent joint
+le serveur. **Direct par défaut**, à rebours du défaut de Go, dont le client HTTP
+ne lit que `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` — jamais les paramètres
+proxy de Windows ni leur liste d'exceptions. Un parc qui pousse `HTTPS_PROXY` en
+variable système envoyait chaque heartbeat au proxy de l'établissement, qui
+répondait 407 à un agent sans identifiants à lui donner. Le serveur est sur le
+réseau local : la connexion directe est ce que tous les déploiements voulaient.
+`environment` rétablit l'ancien comportement, une URL (`http://proxy:3128`,
+`http://user:mdp@proxy:3128`, `socks5://…`) impose ce proxy. Le choix est tracé
+une fois au démarrage, mot de passe caviardé ; une valeur invalide est
+journalisée et l'agent se connecte en direct plutôt que de refuser de démarrer
+(`api.ParseProxy`).
 
 ## Identité & sécurité
 

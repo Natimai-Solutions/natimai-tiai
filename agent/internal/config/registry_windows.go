@@ -32,6 +32,11 @@ func applyRegistryOverrides(cfg *Config) {
 	if v, _, err := k.GetStringValue("LogLevel"); err == nil && v != "" {
 		cfg.LogLevel = v
 	}
+	// Non-empty wins, like the strings above: a GPO that wants to *cancel* a
+	// proxy a YAML names writes the keyword "direct", not an empty value.
+	if v, _, err := k.GetStringValue("ProxyURL"); err == nil && strings.TrimSpace(v) != "" {
+		cfg.ProxyURL = strings.TrimSpace(v)
+	}
 	// Presence wins, like the two flags below and unlike the strings above: an
 	// empty Location pushed by a GPO is the way to *remove* a site name a YAML
 	// still carries, and it has to be able to.

@@ -124,10 +124,23 @@ const pollStallAfter = 10 * time.Minute
 // New creates an agent from config.
 func New(cfg *config.Config, cfgPath string) *Agent {
 	timeout := time.Duration(cfg.RequestTimeoutSeconds) * time.Second
+	proxy, err := api.ParseProxy(cfg.ProxyURL)
+	if err != nil {
+		// Logged and worked around rather than fatal: a poste whose service
+		// refuses to start over a typo in a GPO is unreachable from the console,
+		// and the direct connection is what the setting defaults to anyway.
+		log.Printf("agent: %v; connecting directly", err)
+		proxy = nil
+	}
+	if proxy != nil {
+		// Traced once, like the location: the proxy is a deployment setting, and
+		// a 407 in the log is diagnosed by knowing which proxy answered it.
+		log.Printf("agent: proxy %s", api.DescribeProxy(cfg.ProxyURL))
+	}
 	return &Agent{
 		cfg:     cfg,
 		cfgPath: cfgPath,
-		client:  api.New(cfg.APIBaseURL, cfg.AuthToken, timeout),
+		client:  api.New(cfg.APIBaseURL, cfg.AuthToken, timeout, proxy),
 	}
 }
 

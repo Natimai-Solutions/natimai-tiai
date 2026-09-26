@@ -38,7 +38,8 @@ type Client struct {
 	http    *http.Client
 }
 
-// New builds a client with the given per-request timeout.
+// New builds a client with the given per-request timeout, reaching the server
+// through proxy — nil for a direct connection (see ParseProxy).
 //
 // The budget lives on the *request* (a context deadline in do) and not on the
 // http.Client, and that is deliberate: http.Client.Timeout caps every request
@@ -48,12 +49,18 @@ type Client struct {
 // empty one. Applied per request, a caller can hand in a context that already
 // carries a wider deadline for that one case (see the agent's poll loop) and
 // everything else keeps the configured timeout.
-func New(baseURL, token string, timeout time.Duration) *Client {
+func New(baseURL, token string, timeout time.Duration, proxy Proxy) *Client {
+	// A clone of the default transport rather than a bare one: it keeps the
+	// dial and TLS handshake timeouts, the connection pool and the system
+	// certificate store the agent has always relied on. Only the proxy choice
+	// changes, and it is ours rather than the environment's.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = proxy
 	return &Client{
 		baseURL: baseURL,
 		token:   token,
 		timeout: timeout,
-		http:    &http.Client{},
+		http:    &http.Client{Transport: transport},
 	}
 }
 

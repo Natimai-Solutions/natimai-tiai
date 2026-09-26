@@ -289,3 +289,39 @@ func TestLocationDefaultsToNoneAndRoundTrips(t *testing.T) {
 		t.Errorf("Location = %q", cfg.Location)
 	}
 }
+
+// proxy_url: absent means direct — the empty string ParseProxy reads as such —
+// and a value round-trips through Save, so init-config followed by a hand edit
+// keeps it.
+func TestProxyURLDefaultsToDirectAndRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := (&Config{APIBaseURL: "https://tiai.example.local"}).Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "proxy_url") {
+		t.Errorf("an unset proxy_url must not be written: %s", data)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ProxyURL != "" {
+		t.Errorf("ProxyURL = %q, want empty (direct)", cfg.ProxyURL)
+	}
+
+	body := "api_base_url: https://tiai.example.local\nproxy_url: http://proxy.lycee.local:3128\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ProxyURL != "http://proxy.lycee.local:3128" {
+		t.Errorf("ProxyURL = %q", cfg.ProxyURL)
+	}
+}

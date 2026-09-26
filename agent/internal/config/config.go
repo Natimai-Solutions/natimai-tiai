@@ -60,6 +60,17 @@ type Config struct {
 	QueueMaxItems            int    `yaml:"queue_max_items"`
 	LogLevel                 string `yaml:"log_level"` // INFO (default) or DEBUG (also logs quiet heartbeats)
 
+	// ProxyURL is how the agent reaches the server: empty or "direct" for a
+	// direct connection (the default), "environment" to honour HTTP_PROXY /
+	// HTTPS_PROXY / NO_PROXY, or the URL of a proxy to use for every request.
+	//
+	// Direct by default, against Go's own default, because the server is on
+	// the establishment's network and Go reads only those variables — never the
+	// Windows proxy settings and their exclusion list. A parc pushing
+	// HTTPS_PROXY as a system variable had every heartbeat answered with a 407
+	// by a proxy the agent was never meant to cross (api.ParseProxy).
+	ProxyURL string `yaml:"proxy_url,omitempty"`
+
 	// Location is where the poste physically is — a site name such as
 	// "Lycée de Taravao" — reported to the server as-is. Free text, and empty
 	// by default: the agent has no way to find this out by itself, so it is
