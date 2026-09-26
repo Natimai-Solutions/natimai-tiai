@@ -553,6 +553,7 @@ wu_collect_interval_seconds: 21600        # cycle Windows Update (6 h) — jamai
 wu_install_timeout_seconds: 7200          # budget d'une installation de MAJ (2 h)
 inventory_collect_interval_seconds: 86400 # cycle inventaire matériel/logiciel (24 h)
 log_level: INFO                           # DEBUG logge aussi les heartbeats silencieux
+proxy_url: direct                         # direct (défaut) | environment | http://proxy:3128
 report_session_username: true             # false = remonter la présence sans le nom
 report_software: true                     # false = inventaire matériel seul, sans les logiciels
 location: ""                              # emplacement du poste ("Lycée de Taravao") ; vide = aucun
@@ -564,6 +565,27 @@ trie le parc par emplacement, et le relais Wake-on-LAN s'en sert pour désigner
 un poste voisin (section « Réveil des postes », point 4). Une valeur vide
 **efface** l'emplacement mémorisé côté serveur : un poste déplacé, ou dont la GPO
 a retiré le réglage, ne reste pas classé sous l'ancien.
+
+**Proxy.** L'agent joint le serveur **en direct** par défaut, quoi que dise
+l'environnement du poste. Ce n'est pas le comportement natif de Go, et c'est
+voulu : le client HTTP de Go ne lit que les variables `HTTP_PROXY`,
+`HTTPS_PROXY` et `NO_PROXY`, jamais les paramètres proxy de Windows (Options
+Internet, `netsh winhttp`) ni leur liste d'exceptions — la case « Ne pas utiliser
+de serveur proxy pour les adresses locales » n'a aucun effet sur lui. Un
+établissement qui pousse `HTTPS_PROXY` en variable **système** (celle qu'hérite
+un service `LocalSystem`) voyait donc chaque heartbeat partir vers son proxy, qui
+répondait `407 Proxy Authentication Required` : `tick failed ... Proxy
+Authentication Required` dans `agent.log`, et aucun poste enrôlé. Trois valeurs :
+
+| `proxy_url` | Effet |
+|---|---|
+| vide ou `direct` | Connexion directe, l'environnement est ignoré (défaut) |
+| `environment` | Honore `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` du service, comme les agents antérieurs |
+| `http://proxy:3128` | Passe par ce proxy pour toutes les requêtes ; `http://user:mdp@proxy:3128` pour un proxy authentifié (le mot de passe n'apparaît jamais dans le journal) ; `socks5://` accepté |
+
+Une valeur invalide est journalisée au démarrage et l'agent se connecte en
+direct : un service qui refuserait de démarrer sur une faute de frappe de GPO
+serait injoignable depuis la console.
 
 **Annuaire.** Sans aucun réglage, l'agent d'un poste joint à un domaine remonte
 aussi, avec l'inventaire quotidien, ce que l'annuaire dit de lui : le DN de
@@ -596,6 +618,7 @@ le secret d'enrôlement, plutôt qu'en clair dans le YAML.
 | `EnrollmentSecret` | `REG_SZ` | `enrollment_secret` |
 | `MachineUUID` | `REG_SZ` | `machine_uuid` |
 | `LogLevel` | `REG_SZ` | `log_level` |
+| `ProxyURL` | `REG_SZ` | `proxy_url` |
 | `HeartbeatIntervalSeconds` | `REG_DWORD` | `heartbeat_interval_seconds` |
 | `WUCollectIntervalSeconds` | `REG_DWORD` | `wu_collect_interval_seconds` |
 | `WUInstallTimeoutSeconds` | `REG_DWORD` | `wu_install_timeout_seconds` |
@@ -604,7 +627,9 @@ le secret d'enrôlement, plutôt qu'en clair dans le YAML.
 | `ReportSoftware` | `REG_DWORD` | `report_software` |
 | `Location` | `REG_SZ` | `location` |
 
-Pour les intervalles, `0` est ignoré et signifie « laisser le défaut ». Pour
+Pour les intervalles, `0` est ignoré et signifie « laisser le défaut ». Une
+`ProxyURL` vide est ignorée de même : pour annuler par GPO un proxy qu'un YAML
+nomme, écrire le mot-clé `direct`. Pour
 `ReportSessionUsername` et `ReportSoftware`, c'est la **présence de la clé** qui
 l'emporte : `0` coupe la remontée, `1` la rétablit. Même règle pour `Location` :
 une valeur présente et vide retire l'emplacement, y compris celui du YAML — c'est
@@ -731,6 +756,7 @@ chaque compte (page « Mon compte »).
 | `401 auth.enrollment_secret.invalid` à l'enrôlement | Secret agent ≠ `ENROLLMENT_SECRET` serveur | Aligner YAML/registre sur le `.env` du serveur |
 | `agent.log` montre `panic: reflect: call of reflect.Value.Uint on int32 Value` environ 4 min après le démarrage, puis le service repart (ou reste arrêté sur un agent antérieur) | La première collecte d'inventaire faisait planter la bibliothèque WMI sur `Win32_SystemEnclosure.ChassisTypes` (tableau livré en int32, lu en uint16). Cause racine des deux symptômes d'origine : aucun inventaire ne remontait, et le service mourait sur tout le parc | Corrigé (v0.0.9) ; tout panic de la bibliothèque est en outre rattrapé et rendu comme une erreur de la classe concernée |
 | Le service `TiaiAgent` est arrêté, sans message, démarrage pourtant *Automatique* | Le processus s'est arrêté (configuration illisible, WMI pas encore prêt au démarrage…) et les anciennes actions de récupération — « relance, relance, rien » — étaient épuisées | `tiai-agent repair` (ou le script GPO au démarrage suivant) ; à partir de cette version le service réessaie de lui-même et le SCM le relance indéfiniment. Cause : `agent.log` |
+| `agent.log` répète `tick failed ... Proxy Authentication Required` (ou `407`), aucun poste ne s'enrôle | Le poste pousse `HTTPS_PROXY` en variable système et l'agent, antérieur à `proxy_url`, la suivait ; les exclusions des paramètres proxy Windows ne le concernent pas | Mettre à jour l'agent : il se connecte désormais en direct par défaut. Sur un agent antérieur, poser `NO_PROXY=<hôte du serveur>` en variable système et redémarrer le service |
 | Une fiche poste reste sans matériel ni logiciels | L'inventaire est lu mais le heartbeat qui le porte n'aboutit pas | Chercher `the heartbeat carrying the inventory failed` dans `agent.log` : le budget de ce heartbeat est passé à 2 min, un échec restant vient du serveur (ou d'un proxy) |
 | Un poste affiché éteint alors qu'il est allumé, `agent.log` s'arrête après `identity`, service encore *En cours* | Une requête WMI qui ne revient jamais tenait le verrou global de la bibliothèque : tous les heartbeats bloquaient derrière, sans erreur ni ligne de journal | Corrigé : lecture WMI bornée à 90 s, puis sautée tant qu'elle n'est pas revenue ; le poste reste joignable et redémarrable depuis la console. Le journal nomme la classe fautive |
 | Un poste apparaît deux fois, l'un des deux muet | UUID SMBIOS illisible au démarrage (WMI pas encore prêt) : l'agent était reparti sur une identité de repli | Supprimer la fiche fantôme ; la lecture est désormais retentée avant tout repli, et le repli est journalisé |
