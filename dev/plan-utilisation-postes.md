@@ -14,7 +14,7 @@
 | Alternatives écartées | **`last_boot_time` de l'inventaire** : collecté une fois par jour, et un poste mis en veille garde sa date de démarrage — on compterait la veille comme de l'usage, c'est-à-dire l'inverse de la question posée. **Uptime remonté par l'agent** (`GetTickCount64`) : plus précis aux bornes, mais impose une version d'agent déployée par GPO avant que la statistique existe, et `GetTickCount64` inclut la veille sur une partie des SKU. Gardé comme raffinement possible (§7), pas comme fondation. |
 | Unité de stockage | **Secondes allumées par poste et par heure UTC** (`machine_uptime_hourly`). Pas par jour : Tahiti est à UTC−10, un jour UTC bascule à 14 h locales, en pleine journée de travail ; l'heure est le grain qui rend n'importe quelle fenêtre glissante exacte et n'impose aucun fuseau. Et il ouvre gratuitement, plus tard, le « profil horaire » d'un poste (§7). |
 | Fenêtre | **Glissante, N × 24 h avant maintenant** (défaut 7 jours), pas la semaine calendaire : c'est ce qu'on lit en cliquant un lundi comme un vendredi, et ça évite la question du fuseau. La semaine calendaire est un raffinement (§7). |
-| Seuils | Deux réglages serveur : `USAGE_LOW_HOURS = 10` et `USAGE_HIGH_HOURS = 30`, sur `USAGE_WINDOW_DAYS = 7`. **Servis** dans `/stats/overview` comme `low_disk_free_percent` l'est déjà : une carte qui dit « moins de 10 h » pendant que le serveur compte à 12 serait un mensonge invisible. Le filtre de la liste, lui, accepte des bornes libres (`usage_hours_below`, `usage_hours_above`) : la carte est une question fréquente, la liste est l'outil de recherche. |
+| Seuils | Trois **réglages de la console** (`app_settings`, modifiables sans redémarrage depuis la page Réglages, comme le cycle de maintenance) : `usage.low_hours` (10), `usage.high_hours` (30) et `usage.window_days` (7). Les valeurs initiales viennent de l'environnement (`USAGE_LOW_HOURS`, `USAGE_HIGH_HOURS`, `USAGE_WINDOW_DAYS`), et une ligne écrite par la console l'emporte — exactement le mécanisme de `maintenance_policy()`. 10 et 30 ne sont que des exemples : chaque parc a sa journée type. **Servis** dans `/stats/overview` comme `low_disk_free_percent` l'est déjà : une carte qui dit « moins de 10 h » pendant que le serveur compte à 12 serait un mensonge invisible. Le filtre de la liste, lui, accepte des bornes libres (`usage_hours_below`, `usage_hours_above`) : la carte est une question fréquente, la liste est l'outil de recherche. |
 | Postes sans donnée | Un poste sans ligne dans la fenêtre vaut **0 h**, pas « inconnu » : un poste jamais vu allumé de la semaine est bien un poste inutilisé. Une seule exception, visible : un poste **enrôlé pendant la fenêtre** (`first_seen > cutoff`) est **exclu** du filtre « moins de X h » et sa cellule porte « depuis N j » — un poste arrivé avant-hier n'a pas manqué d'être utilisé. |
 | Précision | Sous-estimation de l'ordre d'une minute par cycle d'allumage (le temps entre le démarrage et le premier heartbeat, et entre le dernier heartbeat et l'arrêt). Une panne du serveur ou du réseau plus longue que `OFFLINE_AFTER_SECONDS` est perdue pour tout le parc. Deux limites acceptées et documentées : la question porte sur des dizaines d'heures. |
 | Rétention | `USAGE_RETENTION_DAYS = 400` : une année pleine, purgée par la tâche d'entretien du worker. Volume à 300 postes : 7 200 lignes/jour, ~2,6 M/an, 24 octets utiles la ligne. |
@@ -90,7 +90,7 @@ Même `now` pour les deux : un `utcnow()` par ligne créerait un écart d'une mi
 
 | Paramètre | Type | Sens |
 |---|---|---|
-| `usage_days` | `int`, `ge=1, le=90`, défaut `USAGE_WINDOW_DAYS` | largeur de la fenêtre glissante |
+| `usage_days` | `int | None`, `ge=1, le=90` ; absent = `usage.window_days` du réglage | largeur de la fenêtre glissante |
 | `usage_hours_below` | `float | None`, `ge=0` | strictement moins de X h allumé dans la fenêtre — **exclut** les postes enrôlés dans la fenêtre |
 | `usage_hours_above` | `float | None`, `ge=0` | strictement plus de X h |
 
@@ -103,15 +103,15 @@ Tri : `MachineSortField.USAGE_HOURS` (`usage_hours`) dans `_sort_key`, `COALESCE
 ### Tableau de bord — `GET /stats/overview`
 
 ```
-machines_usage_low: int        # < USAGE_LOW_HOURS sur USAGE_WINDOW_DAYS, enrôlés avant la fenêtre
-machines_usage_high: int       # > USAGE_HIGH_HOURS
-usage_low_hours: int           # les seuils, servis (cf. low_disk_free_percent)
+machines_usage_low: int        # < usage.low_hours sur usage.window_days, enrôlés avant la fenêtre
+machines_usage_high: int       # > usage.high_hours
+usage_low_hours: int           # les seuils tels que résolus (app_settings, sinon l'environnement)
 usage_high_hours: int
 usage_window_days: int
 usage_since: datetime | None   # première heure comptée ; None tant que la table est vide
 ```
 
-`usage_since` est ce qui rend les cartes honnêtes la première semaine : tant que `now − usage_since < USAGE_WINDOW_DAYS`, la console affiche « comptage depuis le 12/10 » sous la carte au lieu de laisser croire que tout le parc est sous-utilisé.
+`usage_since` est ce qui rend les cartes honnêtes la première semaine : tant que `now − usage_since < usage.window_days`, la console affiche « comptage depuis le 12/10 » sous la carte au lieu de laisser croire que tout le parc est sous-utilisé.
 
 ### Fiche d'un poste — `GET /machines/{id}/usage?days=28`
 
@@ -148,9 +148,24 @@ Caption orange « comptage depuis le JJ/MM » tant que la fenêtre n'est pas ple
 
 Nouvelle `MachineUsageCard.vue` dans l'onglet où vit `MachineStatusCard` : le total sur 28 jours et **un histogramme de barres, un jour par barre**, construit sur `GET /machines/{id}/usage` avec le fuseau du navigateur. Inline SVG ou `q-linear-progress` empilés : pas de bibliothèque de graphiques pour vingt-huit barres, le projet n'en embarque aucune. La carte se rafraîchit avec `useAutoRefresh` comme les autres.
 
-### Réglages
+### Réglages ([SettingsPage.vue](frontend/src/pages/SettingsPage.vue))
 
-Les trois seuils sont des variables d'environnement, documentées dans `deploy/.env.example`, **pas** des `app_settings` : ils n'ont pas de raison de changer sans redémarrage et ne nomment aucun compte (le critère qui a fait entrer le cycle de maintenance dans la table). Ils apparaissent dans la page Réglages via le groupe `EnvGroupOut` existant, en lecture.
+Une carte **« Utilisation des postes »** sous la carte Maintenance, sur le même modèle : trois `q-input` numériques (« Fenêtre d'observation (jours) », « Poste peu utilisé en dessous de (heures) », « Poste très utilisé au-dessus de (heures) »), chacun avec le `hint` « variable d'environnement : N » qui dit d'où vient la valeur avant que la console en ait écrit une. Validation côté formulaire et côté serveur : `low_hours < high_hours`, et `high_hours ≤ 24 × window_days` — un seuil qu'aucun poste ne peut atteindre n'est pas un réglage. [services/settings.ts](frontend/src/services/settings.ts) : `usage_window_days`, `usage_low_hours`, `usage_high_hours` et leurs `env_*` sur `ConsoleSettings`, les trois sur `SettingsPayload`.
+
+Le tableau de bord et le filtre lisent les seuils par `/stats/overview`, pas par `/settings` : la page Réglages demande `SETTINGS.READ`, la liste des postes seulement `MACHINE.READ`, et un opérateur sans droit sur les réglages doit voir des cartes justes.
+
+Côté serveur, le modèle est celui de la maintenance, pièce pour pièce :
+
+| Pièce | Maintenance (existant) | Utilisation (à ajouter) |
+|---|---|---|
+| Clés [setting/crud.py](backend/app/features/setting/crud.py) | `maintenance.default_cycle_days`, `maintenance.due_soon_days` | `usage.window_days`, `usage.low_hours`, `usage.high_hours` |
+| Vue typée | `MaintenancePolicy` + `maintenance_policy(session)` | `UsagePolicy(window_days, low_hours, high_hours)` + `usage_policy(session)` — la ligne si c'est un `int`, l'environnement sinon |
+| Valeur initiale [config.py](backend/app/core/config.py) | `MAINTENANCE_DEFAULT_CYCLE_DAYS`, `MAINTENANCE_DUE_SOON_DAYS` | `USAGE_WINDOW_DAYS = 7` (`ge=1, le=90`), `USAGE_LOW_HOURS = 10`, `USAGE_HIGH_HOURS = 30` (`ge=0`) |
+| Route [settings_routes.py](backend/app/api/routes/settings_routes.py) | `SettingsOut.maintenance_*`, `env_*` ; `SettingsUpdate` partiel ; `PATCH` derrière `SETTINGS.WRITE` | mêmes trois champs + `env_usage_*` ; la cohérence `low < high` vérifiée sur les valeurs *résolues* après fusion du patch, pas seulement sur les champs envoyés |
+| Page Réglages, groupe environnement ([setting/environment.py](backend/app/features/setting/environment.py)) | les variables `MAINTENANCE_*` listées en lecture | les trois `USAGE_*` et `USAGE_RETENTION_DAYS` dans le groupe des seuils |
+| Audit | `set_value(..., actor=current.email)` | idem — la ligne porte qui a changé le seuil et quand |
+
+`USAGE_RETENTION_DAYS` reste une variable d'environnement seule : c'est une politique de stockage, pas une question d'usage, et la purge tourne dans le worker qui lit sa configuration au démarrage.
 
 ---
 
@@ -160,28 +175,29 @@ Les trois seuils sont des variables d'environnement, documentées dans `deploy/.
 
 - Migration `0023_machine_uptime` (`down_revision = "0022_user_preferences"`, nommage manuel, `downgrade()` implémenté) : la table, sa PK, son index sur `hour`, le CHECK.
 - `features/usage/{__init__,models,accounting,crud}.py` ; `MachineUptime` importé dans [features/models.py](backend/app/features/models.py) (sinon `create_all` des tests ne la crée pas).
-- Trois réglages + `USAGE_RETENTION_DAYS` dans [config.py](backend/app/core/config.py), avec le commentaire de politique qui accompagne chaque seuil de ce fichier.
+- Les quatre variables dans [config.py](backend/app/core/config.py), avec le commentaire de politique qui accompagne chaque seuil de ce fichier ; `UsagePolicy` / `usage_policy()` et les trois clés dans [setting/crud.py](backend/app/features/setting/crud.py).
 - Crédit dans le heartbeat ; réattribution dans `merge_into` ; `purge_usage` accroché à `housekeeping` dans [worker.py `build_jobs`](backend/app/core/worker.py).
 - Tests : `test_usage_accounting.py` (fonction pure, sans base) ; dans `test_api_agent.py`, deux heartbeats rapprochés créditent l'écart, un heartbeat après un trou ≥ `OFFLINE_AFTER_SECONDS` ne crédite rien, un écart à cheval sur une heure écrit deux lignes ; `test_api_machines_list.py`, fusion conserve la somme ; `test_worker.py`, la purge respecte la rétention. Les tests manipulent l'horloge en écrivant `machine.last_seen` directement en base (helper `_heartbeat` + `db_session` de [test_api_console.py](backend/tests/test_api_console.py)), jamais avec un `sleep`.
 
 ### J2 — Backend : lecture *(~1 j)*
 
-- Sous-requête, filtre, `usage_hours` dans `MachineOut`, tri, export, `/stats/overview`, `/machines/{id}/usage`.
-- Tests : filtre bas exclut le poste enrôlé dans la fenêtre et inclut le poste sans ligne ; bornes combinées ; tri place les `0` ensemble ; export produit un nombre ; `usage_since` vaut `None` sur table vide ; `/usage` découpe par jour dans le fuseau demandé, sur un cas qui change de jour : un bucket à 09 h UTC compte pour la *veille* à `Pacific/Tahiti` (23 h locales).
+- Sous-requête, filtre, `usage_hours` dans `MachineOut`, tri, export, `/stats/overview`, `/machines/{id}/usage` — la fenêtre par défaut et les seuils lus par `usage_policy()` à chaque requête, comme `maintenance_policy()` l'est déjà dans `/stats/overview` et la liste.
+- `GET/PATCH /settings` : les trois champs, leurs `env_*`, la validation croisée ; les variables dans `environment_overview`.
+- Tests : filtre bas exclut le poste enrôlé dans la fenêtre et inclut le poste sans ligne ; bornes combinées ; tri place les `0` ensemble ; export produit un nombre ; `usage_since` vaut `None` sur table vide ; un `PATCH /settings` sur `usage_low_hours` change le compte de `machines_usage_low` au `GET /stats/overview` suivant, sans redémarrage ; `low ≥ high` est refusé en 422 ; un lecteur sans `SETTINGS.WRITE` est refusé (dans `test_api_maintenance.py`, à côté du test des réglages de maintenance) ; `/usage` découpe par jour dans le fuseau demandé, sur un cas qui change de jour : un bucket à 09 h UTC compte pour la *veille* à `Pacific/Tahiti` (23 h locales).
 - Vérifier que le `LEFT JOIN` ne fausse pas le `COUNT` de pagination : la sous-requête est agrégée par `machine_id`, donc une ligne au plus par poste — le même raisonnement que pour l'`EXISTS` du logiciel, écrit en commentaire.
 
-### J3 — Console *(~1,5 j)*
+### J3 — Console *(~2 j)*
 
-- Services, `machineQuery.ts` (+ spec : round-trip des trois clés, valeur hors borne ignorée), colonne (+ spec `machineColumns`), filtre, cartes, `MachineUsageCard.vue`.
+- Services, `machineQuery.ts` (+ spec : round-trip des trois clés, valeur hors borne ignorée), colonne (+ spec `machineColumns`), filtre, cartes, `MachineUsageCard.vue`, la carte « Utilisation des postes » de la page Réglages.
 - `npm run typecheck`, `format:check`, `test:coverage` verts.
 
 ### J4 — Documentation *(~0,25 j)*
 
 - README « Fonctionnalités » : un paragraphe **Utilisation** après « Vue du parc », avec la limite (une minute par allumage, panne serveur non comptée).
-- `deploy/.env.example` : les quatre variables. `backend/README.md` : le module `usage`.
+- `deploy/.env.example` : les quatre variables, en précisant que les trois seuils ne sont que des valeurs initiales, surchargées par la page Réglages. `backend/README.md` : le module `usage`.
 - Ce plan : bannière « livré le … » et écarts constatés en §8, comme les autres plans.
 
-Total ≈ 4 jours. J1 seul est déjà utile à déployer tôt : **le comptage commence à la mise en production du backend**, et chaque jour d'avance est un jour de données quand la lecture arrive.
+Total ≈ 4,5 jours. J1 seul est déjà utile à déployer tôt : **le comptage commence à la mise en production du backend**, et chaque jour d'avance est un jour de données quand la lecture arrive.
 
 ---
 
