@@ -73,6 +73,28 @@ func TestMegabytesRoundsUpAndNeverShowsZero(t *testing.T) {
 	}
 }
 
+func TestFreeMegabytesReportsAFullDiskAsZero(t *testing.T) {
+	const gib = 1024 * 1024 * 1024
+	// The bug that shipped: a C: that filled up completely reported its free
+	// space as "unknown", and the console showed "— libres sur 223 Gio" with
+	// no alert, on the one poste that needed one.
+	if got := freeMegabytes(223*gib, 0); got == nil || *got != 0 {
+		t.Errorf("zero bytes free on a known volume must be 0 Mio, got %v", got)
+	}
+	// A volume WMI could not read at all — RAW, or BitLocker-locked — reports
+	// zero for both, and that one really is unknown.
+	if got := freeMegabytes(0, 0); got != nil {
+		t.Errorf("an unread volume must stay unknown, got %v", got)
+	}
+	// A few bytes left still rounds up, never down to a misleading zero.
+	if got := freeMegabytes(223*gib, 4096); got == nil || *got != 1 {
+		t.Errorf("a few kilobytes free must round up to 1 Mio, got %v", got)
+	}
+	if got := freeMegabytes(223*gib, 40*gib); got == nil || *got != 40*1024 {
+		t.Errorf("40 GiB free must be 40960 Mio, got %v", got)
+	}
+}
+
 func TestParseCIMDateTime(t *testing.T) {
 	// The offset is in *minutes*, a unit no Go layout expresses — which is why
 	// this parser is hand-written.
@@ -194,6 +216,13 @@ func TestBuildVolumesFlagsTheSystemDrive(t *testing.T) {
 	)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 volumes, got %d", len(got))
+	}
+	if got[0].FreeMB == nil || *got[0].FreeMB != 40*1024 {
+		t.Errorf("free space must be carried in Mio, got %v", got[0].FreeMB)
+	}
+	// D: has a size and no free space at all: a full disk, not an unknown one.
+	if got[1].FreeMB == nil || *got[1].FreeMB != 0 {
+		t.Errorf("a full volume must report 0 Mio free, got %v", got[1].FreeMB)
 	}
 	if !got[0].IsSystem || got[1].IsSystem {
 		t.Error("only the drive Windows booted from is the system one")
