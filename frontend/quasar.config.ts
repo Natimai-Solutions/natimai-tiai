@@ -23,8 +23,11 @@ export default defineConfig(() => {
       target: { browser: ['es2022'], node: 'node22' },
       typescript: { strict: true, vueShim: true },
       vueRouterMode: 'history',
-      // API base URL injected at build time (overridable via env).
-      env: {
+      // API base URL injected at build time (overridable via env), read as
+      // `import.meta.env.API_BASE_URL`. `defineEnv` and not `env`: since
+      // app-vite 3, `build.env` only configures the prefixes of .env files,
+      // and nothing replaces `process.env.*` in client code any more.
+      defineEnv: {
         API_BASE_URL: process.env.API_BASE_URL || '/api/v1',
       },
     },

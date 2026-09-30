@@ -197,6 +197,10 @@ Il n'est jamais committé.
 | `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence |
 | `MAINTENANCE_DEFAULT_CYCLE_DAYS` | `90` | Cycle de maintenance par défaut du parc, en jours, **valeur initiale seulement** : la page Paramètres de la console peut en écrire une autre, qui prend alors le dessus. Une salle ou un poste peuvent surcharger le cycle (0 = exclu de la maintenance) et le responsable ; le plus précis gagne |
 | `MAINTENANCE_DUE_SOON_DAYS` | `14` | Fenêtre « à échéance » : un poste est signalé ce nombre de jours avant sa date. Même règle : valeur initiale, modifiable dans Paramètres |
+| `USAGE_WINDOW_DAYS` | `7` | Fenêtre glissante, en jours (1 à 90), sur laquelle sont comptées les heures allumées des postes. **Valeur initiale seulement**, modifiable dans Paramètres |
+| `USAGE_LOW_HOURS` | `10` | En dessous de ce nombre d'heures sur la fenêtre, un poste est « peu utilisé ». Un poste enrôlé pendant la fenêtre ne l'est jamais. Valeur initiale, modifiable dans Paramètres |
+| `USAGE_HIGH_HOURS` | `30` | Au-dessus, un poste est « toujours allumé ». Valeur initiale, modifiable dans Paramètres |
+| `USAGE_RETENTION_DAYS` | `400` | Conservation des compteurs horaires d'utilisation, purgés chaque jour par le worker. Environ 7 200 lignes par jour pour 300 postes |
 | `ROOM_SOURCE` | `manual` | Comment les postes sont rangés en salles. `manual` : depuis la console, à la main. `ad_ou` : par l'**unité d'organisation** qui contient l'objet ordinateur — l'agent lit son propre DN dans le registre, sans interroger l'annuaire — une salle par OU, nommée comme elle. `ad_location` : par l'attribut **Emplacement** de l'objet ordinateur (onglet Emplacement d'ADUC), que l'agent lit via ADSI. Dans les deux modes annuaire, le rattachement manuel est verrouillé ; les salles créées gardent nom, bâtiment et notes modifiables. Après un changement de ce réglage, « Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc d'un coup |
 | `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard |
 
@@ -715,6 +719,15 @@ Tout se règle depuis la console ; rien à déployer sur les postes. Les
 variables d'environnement concernées sont `ROOM_SOURCE`,
 `MAINTENANCE_DEFAULT_CYCLE_DAYS`, `MAINTENANCE_DUE_SOON_DAYS` et
 `MAINTENANCE_REMINDER_WEEKDAY` (section « Backend » ci-dessus).
+
+**Utilisation des postes.** Le serveur compte les heures où chaque poste est
+allumé, à partir des battements de l'agent : un écart entre deux battements
+plus court que `OFFLINE_AFTER_SECONDS` est compté comme allumé, un écart plus
+long comme éteint. Le comptage commence à la mise à jour du serveur, sans rien
+déployer sur les postes ; tant que la fenêtre n'est pas pleine, les cartes du
+tableau de bord le signalent (« comptage depuis le … »). La fenêtre et les
+seuils se règlent dans Paramètres, carte « Utilisation des postes » ; les
+variables `USAGE_*` n'en donnent que les valeurs initiales.
 
 **Groupes de droits.** Un compte peut ce que ses groupes lui accordent. Trois
 groupes existent d'emblée : *Administrateurs* (tous les droits, implicites),

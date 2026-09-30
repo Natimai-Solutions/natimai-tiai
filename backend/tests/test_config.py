@@ -66,3 +66,14 @@ def test_unset_first_admin_password_is_allowed():
     """FIRST_ADMIN_PASSWORD is optional — None must not trip the guard."""
     settings = make_settings(FIRST_ADMIN_PASSWORD=None)
     assert settings.FIRST_ADMIN_PASSWORD is None
+
+
+def test_usage_thresholds_must_hold_together():
+    """The environment is checked like a PATCH on /settings would be."""
+    make_settings(USAGE_WINDOW_DAYS=7, USAGE_LOW_HOURS=0, USAGE_HIGH_HOURS=168)
+    with pytest.raises(ValidationError, match="below USAGE_HIGH_HOURS"):
+        make_settings(USAGE_LOW_HOURS=30, USAGE_HIGH_HOURS=30)
+    with pytest.raises(ValidationError, match="exceeds"):
+        make_settings(USAGE_WINDOW_DAYS=7, USAGE_HIGH_HOURS=200)
+    with pytest.raises(ValidationError):
+        make_settings(USAGE_HIGH_HOURS=0)

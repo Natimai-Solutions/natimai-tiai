@@ -54,6 +54,14 @@ class SettingsOut(BaseModel):
     # from before the console ever wrote one.
     env_default_cycle_days: int
     env_due_soon_days: int
+    # Usage statistics: the window and the two thresholds, as resolved, and
+    # what the environment says for each.
+    usage_window_days: int
+    usage_low_hours: int
+    usage_high_hours: int
+    env_usage_window_days: int
+    env_usage_low_hours: int
+    env_usage_high_hours: int
     room_source: str
     # The rest of the environment an administrator may want to check without
     # a shell on the server — thresholds, mail, wake-on-LAN — read-only and
@@ -69,10 +77,17 @@ class SettingsUpdate(BaseModel):
     maintenance_default_cycle_days: int | None = Field(default=None, ge=0, le=3650)
     maintenance_default_owner_id: uuid.UUID | None = None
     maintenance_due_soon_days: int | None = Field(default=None, ge=0, le=365)
+    # The usage window, and the two thresholds in hours. Bounded each on its
+    # own here; how they relate (low below high, high reachable within the
+    # window) is checked on the values once merged with what is stored.
+    usage_window_days: int | None = Field(default=None, ge=1, le=90)
+    usage_low_hours: int | None = Field(default=None, ge=0, le=24 * 90)
+    usage_high_hours: int | None = Field(default=None, ge=1, le=24 * 90)
 
 
 async def _out(session: SessionDep) -> SettingsOut:
     policy = await crud.maintenance_policy(session)
+    usage = await crud.usage_policy(session)
     owner = await session.get(User, policy.owner_id) if policy.owner_id else None
     values = await crud.get_all(session)
     updated: datetime | None = None
@@ -91,6 +106,12 @@ async def _out(session: SessionDep) -> SettingsOut:
         maintenance_due_soon_days=policy.due_soon_days,
         env_default_cycle_days=env.MAINTENANCE_DEFAULT_CYCLE_DAYS,
         env_due_soon_days=env.MAINTENANCE_DUE_SOON_DAYS,
+        usage_window_days=usage.window_days,
+        usage_low_hours=usage.low_hours,
+        usage_high_hours=usage.high_hours,
+        env_usage_window_days=env.USAGE_WINDOW_DAYS,
+        env_usage_low_hours=env.USAGE_LOW_HOURS,
+        env_usage_high_hours=env.USAGE_HIGH_HOURS,
         room_source=env.ROOM_SOURCE,
         environment=[
             EnvGroupOut(
@@ -106,6 +127,62 @@ async def _out(session: SessionDep) -> SettingsOut:
     )
 
 
+_USAGE_KEYS = {
+    "usage_window_days": crud.KEY_USAGE_WINDOW,
+    "usage_low_hours": crud.KEY_USAGE_LOW,
+    "usage_high_hours": crud.KEY_USAGE_HIGH,
+}
+
+
+async def _write_usage(
+    session: SessionDep, payload: SettingsUpdate, *, actor: str
+) -> None:
+    """Write the usage settings a patch carries, once they hold together.
+
+    Like the maintenance fields, an explicit null clears the stored value and
+    hands the setting back to the environment. The check runs on the values
+    as they will stand — the patch merged over what is stored, the
+    environment behind both — since a patch may carry one threshold and leave
+    the other: raising « peu utilisé » to 40 h against a stored 30 h for
+    « toujours allumé » must be refused as surely as sending both. Refused
+    before anything is written, so a bad patch changes nothing.
+    """
+    sent = payload.model_fields_set & _USAGE_KEYS.keys()
+    if not sent:
+        return
+    current = await crud.usage_policy(session)
+
+    def resolved(field: str, stored: int, default: int) -> int:
+        if field not in sent:
+            return stored
+        value: int | None = getattr(payload, field)
+        return default if value is None else value
+
+    window = resolved("usage_window_days", current.window_days, env.USAGE_WINDOW_DAYS)
+    low = resolved("usage_low_hours", current.low_hours, env.USAGE_LOW_HOURS)
+    high = resolved("usage_high_hours", current.high_hours, env.USAGE_HIGH_HOURS)
+    if low >= high:
+        raise AppError(
+            code=ErrorCode.REQUEST_VALIDATION_ERROR,
+            status_code=422,
+            message="usage_low_hours must be below usage_high_hours",
+            details={"usage_low_hours": low, "usage_high_hours": high},
+        )
+    if high > 24 * window:
+        # A threshold no poste can reach is not a setting: 200 h in a week
+        # of 168 would leave the « toujours allumé » card empty forever.
+        raise AppError(
+            code=ErrorCode.REQUEST_VALIDATION_ERROR,
+            status_code=422,
+            message="usage_high_hours exceeds the hours in the window",
+            details={"usage_high_hours": high, "usage_window_days": window},
+        )
+    for field in sorted(sent):
+        await crud.set_value(
+            session, _USAGE_KEYS[field], getattr(payload, field), actor=actor
+        )
+
+
 @router.get("", response_model=SettingsOut)
 async def get_settings(session: SessionDep) -> SettingsOut:
     return await _out(session)
@@ -116,6 +193,7 @@ async def update_settings(
     payload: SettingsUpdate, session: SessionDep, current: CurrentUser
 ) -> SettingsOut:
     fields = payload.model_dump(exclude_unset=True)
+    await _write_usage(session, payload, actor=current.email)
     if "maintenance_default_cycle_days" in fields:
         await crud.set_value(
             session,

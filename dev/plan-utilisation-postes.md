@@ -1,6 +1,6 @@
 # Utilisation des postes (heures allumées) : plan de travail
 
-> **🚧 J1 livré le 2026-09-30** (comptage, migration `0023_machine_uptime`, purge, fusion). J2 à J4 restent à faire. Écarts en §8.
+> **✅ Livré le 2026-09-30.** Ce document reste la référence de conception : il explique *pourquoi* chaque choix a été fait. Les écarts constatés à l'implémentation sont notés en §8, jalon par jalon.
 
 > Objectif : répondre à « **combien de postes, et lesquels, ont été allumés moins de 10 h — ou plus de 30 h — cette semaine** », pour connaître l'utilisation réelle du parc : postes qui ne servent à rien (candidats à la mutualisation ou au retrait), postes qui ne s'éteignent jamais (consommation, mises à jour qui n'atterrissent jamais).
 >
@@ -233,3 +233,48 @@ Total ≈ 4,5 jours. J1 seul est déjà utile à déployer tôt : **le comptage 
 - **Plafond aussi à la fusion** : `move_to` réutilise l'upsert plafonné à 3 600 s. Deux enregistrements d'un même poste qui se chevauchent dans une heure ne font donc pas échouer la fusion sur la contrainte CHECK.
 - **Lecture non livrée** : `seconds_by_machine`, `usage_clause` et `usage_since` sont décrites en §2 mais relèvent de J2, avec les routes qui les appellent. `usage_policy()` est livrée dès J1 et testée, sans appelant pour l'instant.
 - **Variables d'environnement** : présentes dans `config.py`, pas encore dans `deploy/.env.example` ni dans la page Réglages. C'est J2 (`environment_overview`) et J4, comme prévu.
+
+### J2
+
+- **Bornes de la fenêtre** : une fenêtre de N jours couvre les N × 24 heures pleines avant l'heure courante, plus l'heure courante entamée (`usage.crud.window_start`). Les compteurs sont horaires, et couper au milieu d'un bucket le compterait entier ou pas du tout. La liste, le filtre, le tri, l'export et le tableau de bord partagent cette même borne, calculée une fois par requête.
+- **Jointure systématique** : l'agrégat par poste est joint à chaque requête de la liste, même sans filtre ni tri d'utilisation, pour que chaque ligne porte `usage_hours`. Il est groupé par poste, donc le `COUNT` de pagination reste un nombre de postes ; un test le vérifie.
+- **Tri** : un poste enrôlé dans la fenêtre trie en dernier dans les deux sens, comme toute absence de la liste. Les postes sans aucune heure trient ensemble à zéro.
+- **Fiche** : `MachineDetailOut` porte aussi `usage_days`, puisque la fiche n'a pas de paramètre de fenêtre et suit le réglage.
+- **Route par jour** : la réponse porte en plus `tz` (le fuseau réellement utilisé, UTC si le nom est absent ou inconnu), `first_seen` et `usage_since`, pour que la carte grise les jours antérieurs au comptage. Le total couvre des jours calendaires entiers : ce n'est pas le chiffre de la liste. Dans un fuseau décalé d'une demi-heure, un bucket qui chevauche minuit est rangé au jour où son heure commence.
+- **Export** : l'en-tête de la colonne nomme sa fenêtre, « Heures allumées (7 j) », puisque le fichier survit à l'écran d'où il a été tiré.
+- **Réglages** : un `null` rend le réglage à l'environnement, comme pour la maintenance. La validation porte sur les valeurs fusionnées avec ce qui est stocké, donc elle refuse aussi une fenêtre réduite sous un seuil haut déjà enregistré. Le refus réutilise le code `request.validation_error` en 422 : aucun code nouveau, donc rien à ajouter à la table des erreurs de la console.
+- **Tests** : dans un fichier dédié, [test_api_usage_read.py](backend/tests/test_api_usage_read.py), plutôt qu'à côté du test des réglages de maintenance.
+
+### J3
+
+- **Seuils servis par la liste** : `GET /machines` renvoie aussi `usage_low_hours` et `usage_high_hours`. Le filtre de la liste n'appelle donc pas `/stats/overview`, qui calcule tous les indicateurs du tableau de bord. Les deux lisent le même `usage_policy()`.
+- **Filtre** : un menu « Utilisation » dans sa propre ligne du panneau, avec les trois questions du tableau de bord et « Personnalisé… », qui ouvre deux champs « plus de » et « moins de ». L'URL ne porte que les bornes ; la fenêtre (`usage_days`) n'y passe que par un lien. La traduction entre menu et bornes vit dans [usageFilter.ts](frontend/src/utils/usageFilter.ts), testée.
+- **Colonne** : un poste enrôlé dans la fenêtre affiche « récent » avec une infobulle, et non « depuis N j » : les lignes de la liste ne portent pas `first_seen`. L'en-tête dit « Allumé (7 j) » d'après la fenêtre renvoyée par le serveur.
+- **Tableau de bord** : la première rangée passe à quatre cartes. Chaque carte d'utilisation porte son seuil en légende grise, et « comptage depuis le JJ/MM » en orange tant que la fenêtre n'est pas pleine.
+- **Fiche** : la carte est dans l'onglet Identité, ouvert par défaut. L'histogramme est fait de colonnes HTML, pas de SVG : chaque colonne entière porte son infobulle, les week-ends sont grisés, les jours antérieurs au comptage sont hachurés et lus « non mesuré ». Un bouton bascule vers une vue tableau. La carte suit le rafraîchissement de la fiche (elle relit ses données quand l'objet `machine` change) plutôt que de lancer une seconde minuterie.
+- **Réglages** : la carte a son propre bouton « Enregistrer », pour qu'un seuil refusé ne bloque pas la maintenance. La validation du formulaire reprend celle du serveur et désactive le bouton avec le message.
+- **Vérifié à l'écran** : tableau de bord, liste filtrée, colonne triée, fiche en graphique et en tableau, réglages invalides, sur un build de production avec des données de démonstration. Aucune erreur dans la console du navigateur.
+
+Deux problèmes antérieurs, repérés pendant J3 et corrigés avec J4 (voir ci-dessous).
+
+### J4
+
+- **Documentation** : un paragraphe « Utilisation des postes » dans les fonctionnalités du [README](README.md), les quatre variables dans [deploy/.env.example](deploy/.env.example) et dans la table du [guide de déploiement](DEPLOYMENT.md), avec un paragraphe d'exploitation, et une section « Utilisation des postes » dans le [README du backend](backend/README.md) (module, table, routes).
+
+Deux problèmes antérieurs à ce chantier, corrigés dans le même commit :
+
+- **Mode du routeur et `process.env`** : depuis la montée d'app-vite 2 → 3 (2026-08-28), plus rien ne remplace `process.env.*` dans le code client. En développement, `quasar dev` plantait au chargement de `src/boot/axios.ts`. En production, le routeur lisait `process.env.VUE_ROUTER_MODE`, ne trouvait rien et retombait en mode hash (`/#/machines`) au lieu du mode historique configuré. Tous les liens que le serveur envoie par e-mail (`/reset-password?token=…`, `/machines/<id>`, les tâches) ouvraient donc la connexion ou le tableau de bord au lieu de leur page. Le routeur lit désormais `import.meta.env.QUASAR_VUE_ROUTER_MODE` et `QUASAR_VUE_ROUTER_BASE`, l'URL de l'API passe par `build.defineEnv`, et `tsconfig.json` inclut les déclarations générées dans `.quasar/`. Les liens en `/#/…` enregistrés entre-temps sont réécrits au démarrage vers leur forme normale ([legacyUrl.ts](frontend/src/utils/legacyUrl.ts)).
+- **Tri par version d'agent** : `agent_version` manquait à `MACHINE_SORT_FIELDS`. Une fiche ouverte depuis la liste triée par version d'agent perdait ce tri pour ses boutons précédent et suivant.
+
+### Relecture après livraison
+
+Une relecture adversariale de l'ensemble (J1 à J4) a remonté huit points, tous corrigés :
+
+- **Filtre « Utilisation : toutes »** : il effaçait les bornes mais pas la fenêtre venue d'un lien (`usage_days`), que rien d'autre sur la page ne pouvait remettre. Il rend maintenant tout.
+- **Préréglages avant la première réponse** : choisir « Peu utilisés » avant que la liste ait servi les seuils écrivait un filtre vide sans rien dire. Les trois préréglages sont désactivés tant que les seuils ne sont pas connus.
+- **Liste des tris de l'URL** : `MACHINE_SORT_FIELDS` était une copie à la main de l'union `MachineSortField`, ce qui avait déjà fait oublier `agent_version`. Le compilateur vérifie désormais que la liste est complète (`SortFieldsAreComplete`).
+- **Cohérence des seuils dans l'environnement** : les règles du `PATCH /settings` ne s'appliquaient pas aux variables `USAGE_*`, et `USAGE_HIGH_HOURS` acceptait 0. Un `model_validator` de `Settings` refuse au démarrage un seuil bas au-dessus du haut, ou un seuil haut inatteignable dans la fenêtre.
+- **Fuseau de l'histogramme** : le début du comptage était découpé dans le fuseau du navigateur alors que le serveur peut retomber sur UTC pour un nom inconnu. Les deux côtés utilisent le fuseau que le serveur renvoie (`tz`).
+- **`total_hours` inutilisé** : la carte affichait sa propre somme, qui pouvait diverger de celle du serveur après une fusion. Elle affiche le total du serveur et ne calcule plus que le nombre de jours mesurés.
+- **Deux lectures de `app_settings` par requête** : la liste, les exports, la fiche et le tableau de bord lisaient la table une fois pour la maintenance et une fois pour l'utilisation. `setting_crud.policies()` résout les deux d'une seule lecture.
+- **Deux comptages sur le tableau de bord** : l'agrégat d'utilisation était joint deux fois, une par seuil. Une seule requête avec deux `COUNT … FILTER`.

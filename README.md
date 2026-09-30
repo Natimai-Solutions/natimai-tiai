@@ -79,6 +79,15 @@ gère naturellement les postes éteints.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
+- **Utilisation des postes** — combien d'heures chaque poste a été allumé sur
+  une fenêtre glissante, sept jours par défaut. Le tableau de bord compte les
+  postes **peu utilisés** et ceux **toujours allumés**, la liste se filtre et
+  se trie sur ces heures, et la fiche d'un poste montre un histogramme jour par
+  jour, dans le fuseau du lecteur. La fenêtre et les deux seuils se règlent
+  dans les Paramètres. Rien à déployer sur les postes : le serveur déduit
+  l'allumage des battements de l'agent. Deux limites connues : environ une
+  minute perdue par démarrage, et une panne du serveur de plus de trois minutes
+  n'est comptée pour aucun poste.
 - **Supervision** — tableau de bord, recherche et filtres, nettoyage automatique
   des postes disparus. Le tableau de bord, la liste et la fiche d'un poste se
   rafraîchissent seuls, au rythme des remontées des agents.

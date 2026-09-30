@@ -4,6 +4,7 @@ import {
   PAGE_SIZE_OPTIONS,
   machineListParamsFromQuery,
   queryValue,
+  type SortFieldsAreComplete,
 } from './machineQuery';
 
 describe('queryValue', () => {
@@ -170,7 +171,59 @@ describe('machineListParamsFromQuery — agent facet', () => {
     });
   });
 
+  it('keeps the agent-version sort, so a fiche walks the same order', () => {
+    expect(machineListParamsFromQuery({ sort_by: 'agent_version', sort_desc: 'false' })).toEqual({
+      sort_by: 'agent_version',
+      sort_desc: false,
+    });
+  });
+
   it('drops anything but "true" for the flag', () => {
     expect(machineListParamsFromQuery({ agent_outdated: 'yes' })).toEqual({});
+  });
+});
+
+describe('machineListParamsFromQuery — usage facet', () => {
+  it('carries the window and both bounds', () => {
+    expect(
+      machineListParamsFromQuery({
+        usage_days: '14',
+        usage_hours_below: '30',
+        usage_hours_above: '7.5',
+        sort_by: 'usage_hours',
+        sort_desc: 'false',
+      }),
+    ).toEqual({
+      usage_days: 14,
+      usage_hours_below: 30,
+      usage_hours_above: 7.5,
+      sort_by: 'usage_hours',
+      sort_desc: false,
+    });
+  });
+
+  it('keeps a zero bound, which is a question too', () => {
+    expect(machineListParamsFromQuery({ usage_hours_above: '0' })).toEqual({
+      usage_hours_above: 0,
+    });
+  });
+
+  it('drops what the server would refuse rather than forwarding a 422', () => {
+    expect(
+      machineListParamsFromQuery({
+        usage_days: '91',
+        usage_hours_below: '-1',
+        usage_hours_above: 'beaucoup',
+      }),
+    ).toEqual({});
+    expect(machineListParamsFromQuery({ usage_days: '0' })).toEqual({});
+    expect(machineListParamsFromQuery({ usage_days: '2.5' })).toEqual({});
+  });
+});
+
+describe('MACHINE_SORT_FIELDS', () => {
+  it('lists every sort the API offers (checked by the compiler)', () => {
+    const complete: SortFieldsAreComplete = true;
+    expect(complete).toBe(true);
   });
 });

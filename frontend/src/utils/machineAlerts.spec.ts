@@ -53,6 +53,8 @@ function healthy(overrides: Partial<MachineDetail> = {}): MachineDetail {
     system_volume_free_mb: 250_000,
     last_seen: daysAgo(0),
     is_online: true,
+    usage_hours: 12,
+    usage_days: 7,
     mac_address: null,
     ip_prefix_length: 24,
     rtp_enabled: true,

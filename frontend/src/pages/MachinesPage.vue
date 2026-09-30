@@ -280,6 +280,56 @@
             />
           </div>
         </div>
+        <!-- Hours on over the usage window. The dropdown asks the dashboard's
+             own questions, drawn from the console's thresholds; « Personnalisé »
+             opens the two bounds for any other. The URL only ever carries the
+             bounds, so a card's link and a hand-picked entry read the same. -->
+        <div class="row no-wrap items-start q-mb-xs">
+          <div class="text-caption text-grey filter-row-label">Utilisation</div>
+          <div class="col row items-center q-col-gutter-sm">
+            <q-select
+              v-model="usageMode"
+              :options="usageOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-auto"
+              style="width: 250px"
+            />
+            <template v-if="usageMode === 'custom'">
+              <q-input
+                v-model="usageAbove"
+                type="number"
+                min="0"
+                step="0.5"
+                dense
+                outlined
+                debounce="400"
+                prefix="plus de"
+                suffix="h"
+                class="col-auto"
+                style="width: 150px"
+                @update:model-value="pushQuery"
+              />
+              <q-input
+                v-model="usageBelow"
+                type="number"
+                min="0"
+                step="0.5"
+                dense
+                outlined
+                debounce="400"
+                prefix="moins de"
+                suffix="h"
+                class="col-auto"
+                style="width: 160px"
+                @update:model-value="pushQuery"
+              />
+            </template>
+            <div class="col-auto text-caption text-grey">sur {{ usageWindowDays }} jours</div>
+          </div>
+        </div>
         <div class="row no-wrap items-start">
           <div class="text-caption text-grey filter-row-label">Matériel</div>
           <div class="col row items-center q-col-gutter-sm">
@@ -612,6 +662,21 @@
           <q-tooltip>Au dernier contact : {{ formatDateTime(props.row.last_seen) }}</q-tooltip>
         </q-td>
       </template>
+      <template #body-cell-usage="props">
+        <q-td :props="props">
+          <span v-if="props.row.usage_hours === null" class="text-grey">récent</span>
+          <span v-else :class="{ 'text-grey': props.row.usage_hours === 0 }">
+            {{ hoursLabel(props.row.usage_hours) }}
+          </span>
+          <q-tooltip>
+            {{
+              props.row.usage_hours === null
+                ? `Enrôlé il y a moins de ${usageWindowDays} jours : pas encore de fenêtre complète`
+                : `Allumé ${hoursLabel(props.row.usage_hours)} sur les ${usageWindowDays} derniers jours`
+            }}
+          </q-tooltip>
+        </q-td>
+      </template>
       <template #body-cell-last_seen="props">
         <q-td :props="props">{{ formatDateTime(props.value) }}</q-td>
       </template>
@@ -721,10 +786,21 @@ import {
   PAGE_SIZE_OPTIONS,
   SCAN_AGE_DAYS,
   SCAN_FILTERS,
+  USAGE_MAX_DAYS,
   WU_FILTERS,
+  queryFloat,
   queryInt,
   queryValue,
 } from 'src/utils/machineQuery';
+import {
+  hoursLabel,
+  parseHours,
+  usageFilterLabel,
+  usagePresetBounds,
+  usagePresetOf,
+  type UsagePreset,
+  type UsageThresholds,
+} from 'src/utils/usageFilter';
 import {
   antivirusLabel,
   antivirusStatusLabel,
@@ -821,6 +897,22 @@ const ramGbValue = computed<number | null>(() => {
 // A *percentage* of free space and not a size: 40 Go left on a 4 To disk and on
 // a 128 Go SSD are not the same news.
 const diskFree = ref<number | null>(null);
+// Usage over a window: two bounds in hours, typed or set by a preset — the
+// boxes hand back strings, `parseHours` reads both. The window itself only
+// travels through the URL (a link may widen it); the page shows the one the
+// server answered with, and the thresholds the presets are drawn from.
+const usageBelow = ref<number | string | null>(null);
+const usageAbove = ref<number | string | null>(null);
+const usageDays = ref<number | null>(null);
+const usageThresholds = ref<UsageThresholds | null>(null);
+const usageWindowDays = ref(7);
+// « Personnalisé » picked with no bound typed yet: the bounds alone would read
+// as no filter at all and fold the boxes away before anything is typed.
+const usageCustom = ref(false);
+const usageBounds = computed(() => ({
+  below: parseHours(usageBelow.value),
+  above: parseHours(usageAbove.value),
+}));
 // Set by a link from the software catalogue or from a fiche; never by a widget
 // here, since nobody types a catalogue id. Carried through the URL so the back
 // arrow from a fiche comes back to the same filtered list.
@@ -846,6 +938,7 @@ const SORT_FIELD_BY_COLUMN: Record<string, MachineSortField> = {
   disk: 'disk_free_percent',
   last_seen: 'last_seen',
   agent: 'agent_version',
+  usage: 'usage_hours',
 };
 const COLUMN_BY_SORT_FIELD = Object.fromEntries(
   Object.entries(SORT_FIELD_BY_COLUMN).map(([column, field]) => [field, column]),
@@ -1036,6 +1129,56 @@ const diskOptions = [
   { label: 'Moins de 20 % libres', value: 20 },
 ];
 
+/** The dropdown's entries, worded with the thresholds once the list served them. */
+const usageOptions = computed<{ label: string; value: UsagePreset | null; disable?: boolean }[]>(
+  () => {
+    const t = usageThresholds.value;
+    // The presets are drawn from the thresholds, which the first list response
+    // brings: until then they are shown but not pickable, rather than picked
+    // and silently dropped.
+    return [
+      { label: 'Utilisation : toutes', value: null },
+      {
+        label: t ? `Peu utilisés (moins de ${t.low} h)` : 'Peu utilisés',
+        value: 'low',
+        disable: !t,
+      },
+      {
+        label: t ? `Entre ${t.low} et ${t.high} h` : 'Utilisation moyenne',
+        value: 'mid',
+        disable: !t,
+      },
+      {
+        label: t ? `Toujours allumés (plus de ${t.high} h)` : 'Toujours allumés',
+        value: 'high',
+        disable: !t,
+      },
+      { label: 'Personnalisé…', value: 'custom' },
+    ];
+  },
+);
+
+/** Which entry the bounds stand for; setting it writes the bounds. */
+const usageMode = computed<UsagePreset | null>({
+  get: () =>
+    usageCustom.value ? 'custom' : usagePresetOf(usageBounds.value, usageThresholds.value),
+  set: (mode) => {
+    usageCustom.value = mode === 'custom';
+    if (mode === 'custom') return; // the bounds stay, to be edited
+    const t = usageThresholds.value;
+    if (mode === null || !t) {
+      // « toutes »: the window goes with the bounds — a link may have widened
+      // it, and nothing else on the page could put it back.
+      clearUsage();
+    } else {
+      const bounds = usagePresetBounds(mode, t);
+      usageBelow.value = bounds.below;
+      usageAbove.value = bounds.above;
+    }
+    pushQuery();
+  },
+});
+
 type FilterKey =
   | 'location'
   | 'building'
@@ -1054,6 +1197,7 @@ type FilterKey =
   | 'chassis'
   | 'ram'
   | 'disk'
+  | 'usage'
   | 'software'
   | 'agent';
 
@@ -1108,6 +1252,10 @@ const filterChips = computed<{ key: FilterKey; label: string }[]>(() => {
       label: diskOptions.find((o) => o.value === diskFree.value)?.label ?? 'Espace disque',
     });
   }
+  const bounds = usageBounds.value;
+  if (bounds.below !== null || bounds.above !== null) {
+    chips.push({ key: 'usage', label: usageFilterLabel(bounds, usageWindowDays.value) });
+  }
   // No option list behind this one: it comes from a link, so the chip is what
   // tells the reader why the list is short — and the only way back out of it.
   if (softwareId.value != null) {
@@ -1144,16 +1292,27 @@ function clearAllFilters() {
   wu.value = null;
   scan.value = null;
   diskFree.value = null;
+  clearUsage();
   softwareId.value = null;
   threatsOnly.value = false;
   onlineOnly.value = false;
   pushQuery();
 }
 
+/** The usage filter off, window included: a widened window is part of it. */
+function clearUsage() {
+  usageBelow.value = null;
+  usageAbove.value = null;
+  usageDays.value = null;
+  usageCustom.value = false;
+}
+
 function clearFilter(key: FilterKey) {
   if (key === 'ram') {
     ramOp.value = null;
     ramGb.value = null;
+  } else if (key === 'usage') {
+    clearUsage();
   } else {
     const refs = {
       location,
@@ -1268,6 +1427,16 @@ const columns: QTableColumn<Machine>[] = [
     align: 'center',
     sortable: true,
   },
+  // Hours on over the usage window, off the default layout (a campaign column).
+  // Sortable: « les moins utilisés d'abord » is the reading it exists for. The
+  // header names the window the server answered with (`visibleColumns`).
+  {
+    name: 'usage',
+    label: 'Heures allumées',
+    field: 'usage_hours',
+    align: 'right',
+    sortable: true,
+  },
   // The two inventory columns the list is scanned for. The rest of the twenty-five
   // is one machine's business and stays on the fiche.
   { name: 'model', label: 'Modèle', field: 'hw_model', align: 'left', sortable: true },
@@ -1302,7 +1471,11 @@ watch(
 const visibleColumns = computed<QTableColumn<Machine>[]>(() =>
   columnOrder.value.flatMap((name) => {
     const column = columnByName.get(name);
-    return column ? [column] : [];
+    if (!column) return [];
+    // The usage header says which window: « 12 h » means nothing without it.
+    return name === 'usage'
+      ? [{ ...column, label: `Allumé (${usageWindowDays.value} j)` }]
+      : [column];
   }),
 );
 const columnsOpen = ref(false);
@@ -1402,6 +1575,12 @@ function applyQuery() {
   }
   const below = Number(queryValue(q.disk_free_below));
   diskFree.value = diskOptions.some((o) => o.value === below) ? below : null;
+  // The usage bounds; `usageCustom` is left alone, so « Personnalisé » stays
+  // open while its first bound is being typed.
+  usageBelow.value = queryFloat(q.usage_hours_below);
+  usageAbove.value = queryFloat(q.usage_hours_above);
+  const days = queryInt(q.usage_days);
+  usageDays.value = days !== null && days <= USAGE_MAX_DAYS ? days : null;
   const software = Number(queryValue(q.software_id));
   softwareId.value = Number.isInteger(software) && software > 0 ? software : null;
 
@@ -1453,6 +1632,9 @@ function buildQuery(): Record<string, string> {
     query[ramOp.value === 'min' ? 'ram_min_gb' : 'ram_max_gb'] = String(ramGbValue.value);
   }
   if (diskFree.value != null) query.disk_free_below = String(diskFree.value);
+  if (usageBounds.value.below !== null) query.usage_hours_below = String(usageBounds.value.below);
+  if (usageBounds.value.above !== null) query.usage_hours_above = String(usageBounds.value.above);
+  if (usageDays.value !== null) query.usage_days = String(usageDays.value);
   if (softwareId.value != null) query.software_id = String(softwareId.value);
   const p = pagination.value;
   const field = p.sortBy ? SORT_FIELD_BY_COLUMN[p.sortBy] : undefined;
@@ -1544,6 +1726,9 @@ const filterParams = computed<ListMachinesParams>(() => {
     else params.ram_max_gb = ramGbValue.value;
   }
   if (diskFree.value != null) params.disk_free_below = diskFree.value;
+  if (usageBounds.value.below !== null) params.usage_hours_below = usageBounds.value.below;
+  if (usageBounds.value.above !== null) params.usage_hours_above = usageBounds.value.above;
+  if (usageDays.value !== null) params.usage_days = usageDays.value;
   if (softwareId.value != null) params.software_id = softwareId.value;
   return params;
 });
@@ -1579,6 +1764,8 @@ async function fetchMachines() {
   }
   rows.value = data.items;
   agentLatest.value = data.agent_latest_version;
+  usageWindowDays.value = data.usage_days;
+  usageThresholds.value = { low: data.usage_low_hours, high: data.usage_high_hours };
   // Merged into the *current* pagination, never the snapshot taken above: the
   // user may have turned the page while this request was in the air, and
   // writing the snapshot back would silently undo it.

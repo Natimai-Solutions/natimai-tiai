@@ -11,7 +11,7 @@ declare module 'vue' {
 const TOKEN_KEY = 'tiai_token';
 
 const api = axios.create({
-  baseURL: process.env.API_BASE_URL || '/api/v1',
+  baseURL: import.meta.env.API_BASE_URL || '/api/v1',
 });
 
 // Attach the per-session JWT (if any) to every request.

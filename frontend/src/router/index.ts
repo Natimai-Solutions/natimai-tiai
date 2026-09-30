@@ -8,21 +8,33 @@ import {
 import routes from './routes';
 
 import { readCachedPermissions } from 'src/stores/auth';
+import { hashUrlToHistory } from 'src/utils/legacyUrl';
 
 // Source of truth for "logged in" in the guard (kept in sync by the auth store).
 const TOKEN_KEY = 'tiai_token';
 
 export default defineRouter(() => {
-  const createHistory = process.env.SERVER
+  // Read from `import.meta.env`, where app-vite 3 defines them. The former
+  // `process.env.*` reads were no longer replaced: the dev server threw on
+  // them, and the build quietly fell back to hash mode — which broke every
+  // console link the server mails (/reset-password, /machines/<id>, /tasks).
+  const history = import.meta.env.QUASAR_VUE_ROUTER_MODE === 'history';
+  const base = import.meta.env.QUASAR_VUE_ROUTER_BASE;
+  const createHistory = import.meta.env.QUASAR_SERVER
     ? createMemoryHistory
-    : process.env.VUE_ROUTER_MODE === 'history'
+    : history
       ? createWebHistory
       : createWebHashHistory;
+
+  if (history && typeof window !== 'undefined') {
+    const rewritten = hashUrlToHistory(window.location.hash, base ?? '/');
+    if (rewritten) window.history.replaceState(null, '', rewritten);
+  }
 
   const router = createRouter({
     scrollBehavior: () => ({ left: 0, top: 0 }),
     routes,
-    history: createHistory(process.env.VUE_ROUTER_BASE),
+    history: createHistory(base),
   });
 
   router.beforeEach((to) => {

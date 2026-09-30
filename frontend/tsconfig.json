@@ -1,4 +1,4 @@
 {
   "extends": "./.quasar/tsconfig.json",
-  "include": ["src/**/*.ts", "src/**/*.vue"]
+  "include": ["src/**/*.ts", "src/**/*.vue", ".quasar/*.d.ts"]
 }
