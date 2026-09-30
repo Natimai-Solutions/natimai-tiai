@@ -449,6 +449,10 @@ describe('inventory formatting', () => {
     expect(freePercent(null, 100)).toBeNull();
     expect(freePercent(0, 0)).toBeNull();
     expect(freePercent(100, null)).toBeNull();
+    // A full disk is 0 %, not "unknown": the agent reports 0 Mio free on a
+    // volume that filled up, and that poste is the one the console must flag.
+    expect(freePercent(100000, 0)).toBe(0);
+    expect(sizeLabel(0)).toBe('0 Mio');
   });
 
   // The lower threshold is not decorative: below roughly ten percent Windows

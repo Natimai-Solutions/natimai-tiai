@@ -219,6 +219,28 @@ func megabytes(b uint64) *int {
 	return &mb
 }
 
+// freeMegabytes converts a volume's free space to mebibytes, given the volume's
+// size in bytes.
+//
+// Not megabytes(free): there, zero means "unknown", and for free space that
+// reading is wrong in the one case that matters most. A volume whose size WMI
+// knows and whose free space is zero is a full disk — the poste that has
+// stopped taking Windows updates — and reporting it as "unknown" had the
+// console show "— libres sur 223 Gio", drop the alert and leave the machine
+// out of the "plus de place" filter at the very moment it filled up. So the
+// size decides whether the volume was read at all (a RAW or locked volume
+// reports zero for both), and once it was, zero free is zero free.
+func freeMegabytes(size, free uint64) *int {
+	if size == 0 {
+		return nil
+	}
+	if free == 0 {
+		zero := 0
+		return &zero
+	}
+	return megabytes(free)
+}
+
 // intPtr returns a pointer to n, or nil when n is zero.
 //
 // Zero is "not reported" for every count in this inventory — cores, slots,
@@ -424,7 +446,7 @@ func buildVolumes(rows []rawLogicalDisk, systemDrive string, encryption map[stri
 			Label:            strings.TrimSpace(r.VolumeName),
 			Filesystem:       strings.TrimSpace(r.FileSystem),
 			TotalMB:          megabytes(r.Size),
-			FreeMB:           megabytes(r.FreeSpace),
+			FreeMB:           freeMegabytes(r.Size, r.FreeSpace),
 			IsSystem:         letter == system,
 			EncryptionStatus: encryption[letter],
 		})
