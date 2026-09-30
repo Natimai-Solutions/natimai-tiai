@@ -92,6 +92,12 @@ export interface Machine {
   system_volume_free_mb: number | null;
   last_seen: string;
   /**
+   * Hours the poste was on over the usage window (`usage_days` of the list,
+   * the console's setting on the fiche), to the tenth. null = enrolled inside
+   * the window, so it has not had one to be used in; 0 = never seen on in it.
+   */
+  usage_hours: number | null;
+  /**
    * Powered on with its agent reaching the server, i.e. `last_seen` is younger
    * than the server's online window (a few agent poll intervals). Computed
    * server-side on each read — a snapshot, like every other field here, that
@@ -208,6 +214,8 @@ export interface InstalledSoftware {
 }
 
 export interface MachineDetail extends Machine {
+  /** The window `usage_hours` covers on the fiche: the console's setting. */
+  usage_days: number;
   /**
    * Hardware address of the adapter holding `ip_address`, canonicalised
    * server-side. null = never reported, and a poste without one cannot be woken:
@@ -316,6 +324,11 @@ export interface MachineList {
   page_size: number;
   /** Same reference as on the fiche, once per page: the list flags the rows below it. */
   agent_latest_version: string | null;
+  /** The window `usage_hours` was counted over, in days: the URL's, else the setting. */
+  usage_days: number;
+  /** The console's usage thresholds, for the list's own « Utilisation » filter. */
+  usage_low_hours: number;
+  usage_high_hours: number;
 }
 
 /** Sortable columns of the machine list, named after the API's own fields. */
@@ -338,7 +351,9 @@ export type MachineSortField =
    * are not the same news. Derived server-side from two columns. */
   | 'disk_free_percent'
   /** Ordered as a version, not a string: "0.10.0" after "0.9.0". */
-  | 'agent_version';
+  | 'agent_version'
+  /** Hours on over the usage window; postes enrolled inside it last. */
+  | 'usage_hours';
 
 export interface ListMachinesParams {
   /** Free search: hostname, UUID, IP, antivirus name — and MAC in any notation. */
@@ -391,6 +406,15 @@ export interface ListMachinesParams {
   agent_version?: string;
   /** true = only postes whose agent is below the reference — the ones a deployment missed. */
   agent_outdated?: boolean;
+  /** The usage window in days (1–90); the console's setting when absent. */
+  usage_days?: number;
+  /**
+   * Strictly fewer / strictly more hours on than this over the window. Both
+   * combine (« entre 10 et 30 h »); the lower bound leaves out the postes
+   * enrolled inside the window.
+   */
+  usage_hours_below?: number;
+  usage_hours_above?: number;
   /** Server-side sort; omitted = freshest contact first. */
   sort_by?: MachineSortField;
   sort_desc?: boolean;
@@ -559,6 +583,38 @@ export async function exportMachines(
 
 export async function getMachine(id: string): Promise<MachineDetail> {
   const { data } = await api.get<MachineDetail>(`/machines/${id}`);
+  return data;
+}
+
+/** Hours on during one calendar day, in the reader's zone. */
+export interface UsageDay {
+  /** `YYYY-MM-DD`, a local calendar day. */
+  date: string;
+  hours: number;
+}
+
+/** One poste's hours on, day by day — the fiche's histogram. */
+export interface MachineUsage {
+  days: number;
+  /** The zone the days were cut in: the one asked for, or UTC if it was unknown. */
+  tz: string;
+  total_hours: number;
+  /** Oldest first, today last, one entry per day (zeros included). */
+  daily: UsageDay[];
+  first_seen: string;
+  /** The first hour the server ever counted, parc-wide; null before any. */
+  usage_since: string | null;
+}
+
+/**
+ * Hours on per day over the last `days` days, cut in the browser's own zone —
+ * the server keeps hourly counters precisely so a day can be the reader's.
+ */
+export async function getMachineUsage(id: string, days = 28): Promise<MachineUsage> {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const { data } = await api.get<MachineUsage>(`/machines/${id}/usage`, {
+    params: { days, tz },
+  });
   return data;
 }
 

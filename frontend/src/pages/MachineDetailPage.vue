@@ -301,6 +301,7 @@
           <div class="row q-col-gutter-md">
             <MachineIdentityCard :machine="machine" />
             <MachineNetworkCard :machine="machine" />
+            <MachineUsageCard :machine="machine" />
           </div>
         </q-tab-panel>
 
@@ -401,6 +402,7 @@ import MachineIdentityCard from 'src/components/machine/MachineIdentityCard.vue'
 import MachineMemoryCard from 'src/components/machine/MachineMemoryCard.vue';
 import MachineMergeDialog from 'src/components/machine/MachineMergeDialog.vue';
 import MachineNetworkCard from 'src/components/machine/MachineNetworkCard.vue';
+import MachineUsageCard from 'src/components/machine/MachineUsageCard.vue';
 import MachinePendingUpdatesCard from 'src/components/machine/MachinePendingUpdatesCard.vue';
 import MachineSoftwareCard from 'src/components/machine/MachineSoftwareCard.vue';
 import MachineStatusCard from 'src/components/machine/MachineStatusCard.vue';

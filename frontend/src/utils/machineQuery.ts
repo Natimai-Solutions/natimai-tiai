@@ -60,6 +60,7 @@ export const MACHINE_SORT_FIELDS: readonly string[] = [
   'hw_model',
   'ram_total_mb',
   'disk_free_percent',
+  'usage_hours',
 ];
 
 /**
@@ -81,6 +82,20 @@ export function queryInt(v: unknown): number | null {
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : null;
 }
+
+/**
+ * A non-negative number from a route-query value, or null. Decimals allowed:
+ * a usage bound of 7.5 h is a question someone may ask.
+ */
+export function queryFloat(v: unknown): number | null {
+  const raw = queryValue(v);
+  if (raw === null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** The widest usage window the server accepts, in days. */
+export const USAGE_MAX_DAYS = 90;
 
 /** First scalar of a route-query value, or null (drops arrays' extra values). */
 export function queryValue(v: unknown): string | null {
@@ -160,6 +175,14 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   const agentVersion = queryValue(q.agent_version);
   if (agentVersion) params.agent_version = agentVersion;
   if (queryValue(q.agent_outdated) === 'true') params.agent_outdated = true;
+  // Usage: a window and two bounds in hours, each dropped when it does not
+  // parse or falls outside what the server takes.
+  const usageDays = queryInt(q.usage_days);
+  if (usageDays !== null && usageDays <= USAGE_MAX_DAYS) params.usage_days = usageDays;
+  const usageBelow = queryFloat(q.usage_hours_below);
+  if (usageBelow !== null) params.usage_hours_below = usageBelow;
+  const usageAbove = queryFloat(q.usage_hours_above);
+  if (usageAbove !== null) params.usage_hours_above = usageAbove;
   const sort = queryValue(q.sort_by);
   if (sort && MACHINE_SORT_FIELDS.includes(sort)) {
     params.sort_by = sort as MachineSortField;

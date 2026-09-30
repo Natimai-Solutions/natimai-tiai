@@ -21,6 +21,14 @@ export interface ConsoleSettings {
   /** What the environment says, for the page to show where a value came from. */
   env_default_cycle_days: number;
   env_due_soon_days: number;
+  /** Usage statistics: the window and the two thresholds, as resolved. */
+  usage_window_days: number;
+  usage_low_hours: number;
+  usage_high_hours: number;
+  /** What the environment says for each — the value before the console wrote one. */
+  env_usage_window_days: number;
+  env_usage_low_hours: number;
+  env_usage_high_hours: number;
   room_source: string;
   /** The rest of the environment, read-only and never a secret: what an
    * administrator checks without a shell on the server. */
@@ -32,6 +40,9 @@ export interface SettingsPayload {
   maintenance_default_cycle_days?: number;
   maintenance_default_owner_id?: string | null;
   maintenance_due_soon_days?: number;
+  usage_window_days?: number;
+  usage_low_hours?: number;
+  usage_high_hours?: number;
 }
 
 export async function getSettings(): Promise<ConsoleSettings> {

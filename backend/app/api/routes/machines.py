@@ -463,6 +463,11 @@ class MachineList(BaseModel):
     # asked for, else the console's setting. Served so the column header says
     # « Allumé (7 j) » without the console guessing the setting.
     usage_days: int
+    # The console's two usage thresholds, so the list's « Utilisation »
+    # filter offers the dashboard's own questions without a second request
+    # for the whole dashboard.
+    usage_low_hours: int
+    usage_high_hours: int
 
 
 # The list's sortable columns, keyed by their API field names. A dict lookup
@@ -535,15 +540,23 @@ class UsageWindow:
     days: int
     start: datetime
     seconds: Subquery
+    # The console's thresholds, whatever window the request chose.
+    low_hours: int
+    high_hours: int
 
 
 async def _usage_window(session: SessionDep, days: int | None) -> UsageWindow:
     """The requested window, or the console's (``usage.window_days``)."""
+    policy = await setting_crud.usage_policy(session)
     if days is None:
-        days = (await setting_crud.usage_policy(session)).window_days
+        days = policy.window_days
     start = usage_crud.window_start(utcnow(), days)
     return UsageWindow(
-        days=days, start=start, seconds=usage_crud.seconds_by_machine(start)
+        days=days,
+        start=start,
+        seconds=usage_crud.seconds_by_machine(start),
+        low_hours=policy.low_hours,
+        high_hours=policy.high_hours,
     )
 
 
@@ -972,6 +985,8 @@ async def list_machines(
         page_size=page_size,
         agent_latest_version=versions.latest,
         usage_days=usage.days,
+        usage_low_hours=usage.low_hours,
+        usage_high_hours=usage.high_hours,
     )
 
 

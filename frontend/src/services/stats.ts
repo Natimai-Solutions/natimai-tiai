@@ -36,6 +36,19 @@ export interface StatsOverview {
   machines_maintenance_due_soon: number;
   /** The reference itself, for the card's caption. null on an empty parc. */
   agent_latest_version: string | null;
+  /**
+   * Usage over the console's window: postes on for fewer than `usage_low_hours`
+   * (those enrolled inside the window left out), and for more than
+   * `usage_high_hours`. The same counts as the list filters each card opens.
+   */
+  machines_usage_low: number;
+  machines_usage_high: number;
+  usage_low_hours: number;
+  usage_high_hours: number;
+  usage_window_days: number;
+  /** The first hour ever counted; null before any. Until it is a window old,
+   * the cards say the count is recent rather than calling the parc idle. */
+  usage_since: string | null;
 }
 
 export async function getOverview(): Promise<StatsOverview> {

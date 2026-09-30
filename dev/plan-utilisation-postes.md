@@ -1,6 +1,6 @@
 # Utilisation des postes (heures allumées) : plan de travail
 
-> **🚧 J1 livré le 2026-09-30** (comptage, migration `0023_machine_uptime`, purge, fusion). **J2 livré le 2026-09-30** (lecture : liste, filtre, tri, export, tableau de bord, fiche, réglages). J3 et J4 restent à faire. Écarts en §8.
+> **🚧 J1 livré le 2026-09-30** (comptage, migration `0023_machine_uptime`, purge, fusion). **J2 livré le 2026-09-30** (lecture : liste, filtre, tri, export, tableau de bord, fiche, réglages). **J3 livré le 2026-09-30** (console). J4 reste à faire. Écarts en §8.
 
 > Objectif : répondre à « **combien de postes, et lesquels, ont été allumés moins de 10 h — ou plus de 30 h — cette semaine** », pour connaître l'utilisation réelle du parc : postes qui ne servent à rien (candidats à la mutualisation ou au retrait), postes qui ne s'éteignent jamais (consommation, mises à jour qui n'atterrissent jamais).
 >
@@ -244,3 +244,18 @@ Total ≈ 4,5 jours. J1 seul est déjà utile à déployer tôt : **le comptage 
 - **Export** : l'en-tête de la colonne nomme sa fenêtre, « Heures allumées (7 j) », puisque le fichier survit à l'écran d'où il a été tiré.
 - **Réglages** : un `null` rend le réglage à l'environnement, comme pour la maintenance. La validation porte sur les valeurs fusionnées avec ce qui est stocké, donc elle refuse aussi une fenêtre réduite sous un seuil haut déjà enregistré. Le refus réutilise le code `request.validation_error` en 422 : aucun code nouveau, donc rien à ajouter à la table des erreurs de la console.
 - **Tests** : dans un fichier dédié, [test_api_usage_read.py](backend/tests/test_api_usage_read.py), plutôt qu'à côté du test des réglages de maintenance.
+
+### J3
+
+- **Seuils servis par la liste** : `GET /machines` renvoie aussi `usage_low_hours` et `usage_high_hours`. Le filtre de la liste n'appelle donc pas `/stats/overview`, qui calcule tous les indicateurs du tableau de bord. Les deux lisent le même `usage_policy()`.
+- **Filtre** : un menu « Utilisation » dans sa propre ligne du panneau, avec les trois questions du tableau de bord et « Personnalisé… », qui ouvre deux champs « plus de » et « moins de ». L'URL ne porte que les bornes ; la fenêtre (`usage_days`) n'y passe que par un lien. La traduction entre menu et bornes vit dans [usageFilter.ts](frontend/src/utils/usageFilter.ts), testée.
+- **Colonne** : un poste enrôlé dans la fenêtre affiche « récent » avec une infobulle, et non « depuis N j » : les lignes de la liste ne portent pas `first_seen`. L'en-tête dit « Allumé (7 j) » d'après la fenêtre renvoyée par le serveur.
+- **Tableau de bord** : la première rangée passe à quatre cartes. Chaque carte d'utilisation porte son seuil en légende grise, et « comptage depuis le JJ/MM » en orange tant que la fenêtre n'est pas pleine.
+- **Fiche** : la carte est dans l'onglet Identité, ouvert par défaut. L'histogramme est fait de colonnes HTML, pas de SVG : chaque colonne entière porte son infobulle, les week-ends sont grisés, les jours antérieurs au comptage sont hachurés et lus « non mesuré ». Un bouton bascule vers une vue tableau. La carte suit le rafraîchissement de la fiche (elle relit ses données quand l'objet `machine` change) plutôt que de lancer une seconde minuterie.
+- **Réglages** : la carte a son propre bouton « Enregistrer », pour qu'un seuil refusé ne bloque pas la maintenance. La validation du formulaire reprend celle du serveur et désactive le bouton avec le message.
+- **Vérifié à l'écran** : tableau de bord, liste filtrée, colonne triée, fiche en graphique et en tableau, réglages invalides, sur un build de production avec des données de démonstration. Aucune erreur dans la console du navigateur.
+
+Deux problèmes antérieurs, hors du périmètre de ce chantier et laissés en l'état :
+
+- `quasar dev` lève `process is not defined` au chargement de `src/boot/axios.ts` : `process.env.API_BASE_URL` n'est pas remplacé en mode développement avec la version actuelle d'app-vite. Le build de production est correct.
+- `MACHINE_SORT_FIELDS` ([machineQuery.ts](frontend/src/utils/machineQuery.ts)) ne contient pas `agent_version` : une fiche ouverte depuis la liste triée par version d'agent perd ce tri pour les boutons précédent et suivant.

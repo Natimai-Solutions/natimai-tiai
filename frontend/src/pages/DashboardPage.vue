@@ -11,13 +11,13 @@
       </q-btn>
     </div>
 
-    <!-- Three rows, three readings. The first is the size of the parc — what
-         it is. The next two are what needs doing about it, most urgent first:
+    <!-- Three rows, three readings. The first is the parc itself — its size,
+         and how much its postes are used. The next two are what needs doing about it, most urgent first:
          the four findings that put a poste at risk today take the whole width
          and the large figure; the five that can wait for the week's round sit
          below, smaller. Every card is a list an administrator opens and acts on. -->
     <div class="row q-col-gutter-md q-mb-md">
-      <div v-for="kpi in inventoryKpis" :key="kpi.label" class="col-12 col-sm-6">
+      <div v-for="kpi in inventoryKpis" :key="kpi.label" class="col-12 col-sm-6 col-md-3">
         <q-card
           v-ripple
           flat
@@ -30,6 +30,8 @@
             <div>
               <div class="text-h4">{{ kpi.value }}</div>
               <div class="text-caption text-grey">{{ kpi.label }}</div>
+              <div v-if="kpi.detail" class="text-caption text-grey">{{ kpi.detail }}</div>
+              <div v-if="kpi.caption" class="text-caption text-orange">{{ kpi.caption }}</div>
             </div>
           </q-card-section>
         </q-card>
@@ -174,12 +176,33 @@ interface Kpi {
   /** Every card answers a click with the machine list already filtered on it. */
   to: RouteLocationRaw;
   caption?: string;
+  /** A second, quiet line: what the figure was counted against. */
+  detail?: string;
 }
 
-/** The parc itself: how many postes, how many distinct programs on them. */
+/**
+ * « comptage depuis le 12/10 » while the usage counters are younger than the
+ * window they are read over — until then a parc reading « peu utilisé » is a
+ * parc being counted since Tuesday, not a parc nobody uses. Undefined once the
+ * window is full.
+ */
+function usageCountingCaption(s: StatsOverview): string | undefined {
+  if (!s.usage_since) return 'comptage pas encore commencé';
+  const since = new Date(s.usage_since);
+  const full = since.getTime() + s.usage_window_days * 24 * 3600 * 1000;
+  if (Date.now() >= full) return undefined;
+  return `comptage depuis le ${since.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}`;
+}
+
+/**
+ * The parc itself: how many postes, how many distinct programs on them — and
+ * how much the postes are used, the two ends of it. Each usage card opens the
+ * list on the very bounds it counted, so the card and the list agree.
+ */
 const inventoryKpis = computed<Kpi[]>(() => {
   const s = stats.value;
   if (!s) return [];
+  const counting = usageCountingCaption(s);
   return [
     {
       label: 'Postes',
@@ -194,6 +217,24 @@ const inventoryKpis = computed<Kpi[]>(() => {
       icon: 'inventory_2',
       color: 'primary',
       to: { name: 'software' },
+    },
+    {
+      label: 'Peu utilisés',
+      value: s.machines_usage_low,
+      icon: 'bedtime',
+      color: 'blue-grey',
+      to: { name: 'machines', query: { usage_hours_below: String(s.usage_low_hours) } },
+      detail: `moins de ${s.usage_low_hours} h sur ${s.usage_window_days} j`,
+      ...(counting ? { caption: counting } : {}),
+    },
+    {
+      label: 'Toujours allumés',
+      value: s.machines_usage_high,
+      icon: 'bolt',
+      color: 'amber-8',
+      to: { name: 'machines', query: { usage_hours_above: String(s.usage_high_hours) } },
+      detail: `plus de ${s.usage_high_hours} h sur ${s.usage_window_days} j`,
+      ...(counting ? { caption: counting } : {}),
     },
   ];
 });

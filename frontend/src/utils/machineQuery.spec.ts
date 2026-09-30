@@ -174,3 +174,41 @@ describe('machineListParamsFromQuery — agent facet', () => {
     expect(machineListParamsFromQuery({ agent_outdated: 'yes' })).toEqual({});
   });
 });
+
+describe('machineListParamsFromQuery — usage facet', () => {
+  it('carries the window and both bounds', () => {
+    expect(
+      machineListParamsFromQuery({
+        usage_days: '14',
+        usage_hours_below: '30',
+        usage_hours_above: '7.5',
+        sort_by: 'usage_hours',
+        sort_desc: 'false',
+      }),
+    ).toEqual({
+      usage_days: 14,
+      usage_hours_below: 30,
+      usage_hours_above: 7.5,
+      sort_by: 'usage_hours',
+      sort_desc: false,
+    });
+  });
+
+  it('keeps a zero bound, which is a question too', () => {
+    expect(machineListParamsFromQuery({ usage_hours_above: '0' })).toEqual({
+      usage_hours_above: 0,
+    });
+  });
+
+  it('drops what the server would refuse rather than forwarding a 422', () => {
+    expect(
+      machineListParamsFromQuery({
+        usage_days: '91',
+        usage_hours_below: '-1',
+        usage_hours_above: 'beaucoup',
+      }),
+    ).toEqual({});
+    expect(machineListParamsFromQuery({ usage_days: '0' })).toEqual({});
+    expect(machineListParamsFromQuery({ usage_days: '2.5' })).toEqual({});
+  });
+});

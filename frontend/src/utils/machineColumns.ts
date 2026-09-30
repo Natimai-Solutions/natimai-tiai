@@ -22,6 +22,7 @@ export const MACHINE_COLUMN_KEYS = [
   'antivirus',
   'windows_update',
   'session',
+  'usage',
   'model',
   'disk',
   'last_seen',
@@ -35,8 +36,18 @@ export type MachineColumnKey = (typeof MACHINE_COLUMN_KEYS)[number];
  */
 export const MANDATORY_MACHINE_COLUMN: MachineColumnKey = 'hostname';
 
-/** The default layout, the columns in catalogue order. */
-export const DEFAULT_MACHINE_COLUMNS: MachineColumnKey[] = [...MACHINE_COLUMN_KEYS];
+/**
+ * Columns on offer but left out of the default layout: added from « Colonnes »
+ * for a campaign and kept on the account, not shown to every reader of the
+ * list. Hours on over a week is a question asked for a renewal or an energy
+ * review, not every morning.
+ */
+export const OPTIONAL_MACHINE_COLUMNS: readonly MachineColumnKey[] = ['usage'];
+
+/** The default layout: the catalogue in its order, the optional columns aside. */
+export const DEFAULT_MACHINE_COLUMNS: MachineColumnKey[] = MACHINE_COLUMN_KEYS.filter(
+  (key) => !OPTIONAL_MACHINE_COLUMNS.includes(key),
+);
 
 function isColumnKey(value: unknown): value is MachineColumnKey {
   return typeof value === 'string' && (MACHINE_COLUMN_KEYS as readonly string[]).includes(value);

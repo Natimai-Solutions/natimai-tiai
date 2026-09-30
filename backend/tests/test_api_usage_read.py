@@ -100,6 +100,8 @@ async def test_rows_carry_their_hours_and_the_window(client, db_session):
 
     body = await _list(client, admin)
     assert body["usage_days"] == 7
+    # The thresholds ride along, for the list's own filter.
+    assert (body["usage_low_hours"], body["usage_high_hours"]) == (10, 30)
     assert _by_host(body) == {
         "IDLE": 0.0,
         "LIGHT": 4.5,
