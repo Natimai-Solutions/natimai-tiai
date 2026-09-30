@@ -60,6 +60,9 @@ export const MACHINE_SORT_FIELDS: readonly string[] = [
   'hw_model',
   'ram_total_mb',
   'disk_free_percent',
+  // Must list every sort the list page offers: a fiche walks the results in
+  // this order, and a field missing here silently falls back to the default.
+  'agent_version',
   'usage_hours',
 ];
 

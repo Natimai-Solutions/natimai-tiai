@@ -170,6 +170,13 @@ describe('machineListParamsFromQuery — agent facet', () => {
     });
   });
 
+  it('keeps the agent-version sort, so a fiche walks the same order', () => {
+    expect(machineListParamsFromQuery({ sort_by: 'agent_version', sort_desc: 'false' })).toEqual({
+      sort_by: 'agent_version',
+      sort_desc: false,
+    });
+  });
+
   it('drops anything but "true" for the flag', () => {
     expect(machineListParamsFromQuery({ agent_outdated: 'yes' })).toEqual({});
   });

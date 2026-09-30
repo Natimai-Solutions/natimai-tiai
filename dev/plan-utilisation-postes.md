@@ -1,6 +1,6 @@
 # Utilisation des postes (heures allumées) : plan de travail
 
-> **🚧 J1 livré le 2026-09-30** (comptage, migration `0023_machine_uptime`, purge, fusion). **J2 livré le 2026-09-30** (lecture : liste, filtre, tri, export, tableau de bord, fiche, réglages). **J3 livré le 2026-09-30** (console). J4 reste à faire. Écarts en §8.
+> **✅ Livré le 2026-09-30.** Ce document reste la référence de conception : il explique *pourquoi* chaque choix a été fait. Les écarts constatés à l'implémentation sont notés en §8, jalon par jalon.
 
 > Objectif : répondre à « **combien de postes, et lesquels, ont été allumés moins de 10 h — ou plus de 30 h — cette semaine** », pour connaître l'utilisation réelle du parc : postes qui ne servent à rien (candidats à la mutualisation ou au retrait), postes qui ne s'éteignent jamais (consommation, mises à jour qui n'atterrissent jamais).
 >
@@ -255,7 +255,13 @@ Total ≈ 4,5 jours. J1 seul est déjà utile à déployer tôt : **le comptage 
 - **Réglages** : la carte a son propre bouton « Enregistrer », pour qu'un seuil refusé ne bloque pas la maintenance. La validation du formulaire reprend celle du serveur et désactive le bouton avec le message.
 - **Vérifié à l'écran** : tableau de bord, liste filtrée, colonne triée, fiche en graphique et en tableau, réglages invalides, sur un build de production avec des données de démonstration. Aucune erreur dans la console du navigateur.
 
-Deux problèmes antérieurs, hors du périmètre de ce chantier et laissés en l'état :
+Deux problèmes antérieurs, repérés pendant J3 et corrigés avec J4 (voir ci-dessous).
 
-- `quasar dev` lève `process is not defined` au chargement de `src/boot/axios.ts` : `process.env.API_BASE_URL` n'est pas remplacé en mode développement avec la version actuelle d'app-vite. Le build de production est correct.
-- `MACHINE_SORT_FIELDS` ([machineQuery.ts](frontend/src/utils/machineQuery.ts)) ne contient pas `agent_version` : une fiche ouverte depuis la liste triée par version d'agent perd ce tri pour les boutons précédent et suivant.
+### J4
+
+- **Documentation** : un paragraphe « Utilisation des postes » dans les fonctionnalités du [README](README.md), les quatre variables dans [deploy/.env.example](deploy/.env.example) et dans la table du [guide de déploiement](DEPLOYMENT.md), avec un paragraphe d'exploitation, et une section « Utilisation des postes » dans le [README du backend](backend/README.md) (module, table, routes).
+
+Deux problèmes antérieurs à ce chantier, corrigés dans le même commit :
+
+- **Mode du routeur et `process.env`** : depuis la montée d'app-vite 2 → 3 (2026-08-28), plus rien ne remplace `process.env.*` dans le code client. En développement, `quasar dev` plantait au chargement de `src/boot/axios.ts`. En production, le routeur lisait `process.env.VUE_ROUTER_MODE`, ne trouvait rien et retombait en mode hash (`/#/machines`) au lieu du mode historique configuré. Tous les liens que le serveur envoie par e-mail (`/reset-password?token=…`, `/machines/<id>`, les tâches) ouvraient donc la connexion ou le tableau de bord au lieu de leur page. Le routeur lit désormais `import.meta.env.QUASAR_VUE_ROUTER_MODE` et `QUASAR_VUE_ROUTER_BASE`, l'URL de l'API passe par `build.defineEnv`, et `tsconfig.json` inclut les déclarations générées dans `.quasar/`. Les liens en `/#/…` enregistrés entre-temps sont réécrits au démarrage vers leur forme normale ([legacyUrl.ts](frontend/src/utils/legacyUrl.ts)).
+- **Tri par version d'agent** : `agent_version` manquait à `MACHINE_SORT_FIELDS`. Une fiche ouverte depuis la liste triée par version d'agent perdait ce tri pour ses boutons précédent et suivant.
