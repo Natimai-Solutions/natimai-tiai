@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field, computed_field
-from sqlalchemy import case, exists, func, or_
+from sqlalchemy import Subquery, case, exists, func, or_
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 from sqlmodel import col, select
 
@@ -56,6 +56,8 @@ from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
 from app.features.setting.crud import MaintenancePolicy
 from app.features.threat.models import Threat
+from app.features.usage import crud as usage_crud
+from app.features.usage.models import SECONDS_PER_HOUR
 from app.features.user.models import User
 from app.features.user.permissions import Action, Resource
 from app.features.windows_update.models import WindowsUpdate
@@ -135,6 +137,11 @@ class MachineOut(BaseModel):
     system_volume_total_mb: int | None
     system_volume_free_mb: int | None
     last_seen: datetime
+    # Hours on over the usage window (``usage_days`` on the list, the fiche's
+    # own on the detail), to the tenth. None = the poste was enrolled inside
+    # the window and has not had one to be used in; a poste never seen on in
+    # it reads 0. Filled from the joined aggregate, never stored.
+    usage_hours: float | None = None
 
     model_config = {"from_attributes": True}
 
@@ -194,7 +201,7 @@ def _owner_ids(rows: list[Any], policy: MaintenancePolicy) -> set[uuid.UUID]:
     ids: set[uuid.UUID] = set()
     if policy.owner_id:
         ids.add(policy.owner_id)
-    for m, room, _b, check in rows:
+    for m, room, _b, check, _seconds in rows:
         if m.maintenance_owner_id:
             ids.add(m.maintenance_owner_id)
         if room is not None and room.maintenance_owner_id:
@@ -350,6 +357,8 @@ class OpenCheckOut(BaseModel):
 class MachineDetailOut(MachineOut):
     """Full machine detail (Defender state, session type, fingerprint, times)."""
 
+    # The window ``usage_hours`` covers on the fiche: the console's setting.
+    usage_days: int | None = None
     rtp_enabled: bool | None
     av_enabled: bool | None
     signature_last_updated: datetime | None
@@ -450,6 +459,10 @@ class MachineList(BaseModel):
     # list flags the postes below it, and a thousand rows carrying the same
     # string would be a thousand copies of one fact.
     agent_latest_version: str | None = None
+    # The window ``usage_hours`` was counted over, in days: the one the request
+    # asked for, else the console's setting. Served so the column header says
+    # « Allumé (7 j) » without the console guessing the setting.
+    usage_days: int
 
 
 # The list's sortable columns, keyed by their API field names. A dict lookup
@@ -479,6 +492,9 @@ MachineSortField = Literal[
     # The agent's version, ordered the way a human reads one ("0.10.0" after
     # "0.9.0"): the sort the morning after a deployment, stragglers first.
     "agent_version",
+    # Hours on over the usage window: « les moins utilisés d'abord ». Needs
+    # the window, so ``_sort_key`` takes it.
+    "usage_hours",
 ]
 
 # Sorted case-folded: under a C collation "ZEUS" would otherwise come before
@@ -510,10 +526,32 @@ def _agent_version_rank(versions: FleetVersions | None) -> Any:
     return case(ranks, value=col(Machine.agent_version), else_=None)
 
 
+@dataclass(frozen=True)
+class UsageWindow:
+    """The usage window a request reads: its width, where it starts, and the
+    per-poste aggregate over it — built once, shared by the join, the filter,
+    the sort and the rows, so the four cannot disagree on a boundary."""
+
+    days: int
+    start: datetime
+    seconds: Subquery
+
+
+async def _usage_window(session: SessionDep, days: int | None) -> UsageWindow:
+    """The requested window, or the console's (``usage.window_days``)."""
+    if days is None:
+        days = (await setting_crud.usage_policy(session)).window_days
+    start = usage_crud.window_start(utcnow(), days)
+    return UsageWindow(
+        days=days, start=start, seconds=usage_crud.seconds_by_machine(start)
+    )
+
+
 def _sort_key(
     field: MachineSortField,
     policy: MaintenancePolicy | None = None,
     versions: FleetVersions | None = None,
+    usage: UsageWindow | None = None,
 ) -> Any:
     """The expression a sort orders by.
 
@@ -525,6 +563,8 @@ def _sort_key(
         return disk_free_percent()
     if field == "agent_version":
         return _agent_version_rank(versions)
+    if field == "usage_hours" and usage is not None:
+        return usage_crud.usage_hours_expr(usage.seconds, usage.start)
     if field == "maintenance_due_at" and policy is not None:
         return maintenance_policy.due_expr(policy)
     if field == "building":
@@ -540,13 +580,14 @@ def _sort_clause(
     descending: bool,
     policy: MaintenancePolicy | None = None,
     versions: FleetVersions | None = None,
+    usage: UsageWindow | None = None,
 ) -> UnaryExpression[Any]:
     """ORDER BY expression for one sortable column.
 
     NULLs last in both directions: "never reported" is an absence, not a value,
     and it must not lead the list whichever way the reader flips the arrow.
     """
-    key: Any = _sort_key(field, policy, versions)
+    key: Any = _sort_key(field, policy, versions, usage)
     ordered: UnaryExpression[Any] = key.desc() if descending else key.asc()
     return ordered.nulls_last()
 
@@ -638,6 +679,13 @@ class MachineFilters:
     # deployment, and the one that names the postes it has not reached.
     agent_version: str | None = None
     agent_outdated: bool | None = None
+    # Usage over a sliding window: strictly fewer / strictly more hours on
+    # than these, over ``usage_days`` (the console's setting when absent).
+    # Bounds rather than a closed set of buckets: the dashboard's cards ask
+    # the setting's two questions, the list is where any other one is asked.
+    usage_days: int | None = None
+    usage_hours_below: float | None = None
+    usage_hours_above: float | None = None
 
 
 def machine_filters(
@@ -668,6 +716,9 @@ def machine_filters(
     software_id: int | None = None,
     agent_version: str | None = None,
     agent_outdated: bool | None = None,
+    usage_days: int | None = Query(None, ge=1, le=90),
+    usage_hours_below: float | None = Query(None, ge=0),
+    usage_hours_above: float | None = Query(None, ge=0),
 ) -> MachineFilters:
     """The list's facets as query parameters, shared by the list and the exports.
 
@@ -703,6 +754,9 @@ def machine_filters(
         software_id=software_id,
         agent_version=agent_version,
         agent_outdated=agent_outdated,
+        usage_days=usage_days,
+        usage_hours_below=usage_hours_below,
+        usage_hours_above=usage_hours_above,
     )
 
 
@@ -726,16 +780,19 @@ def _mismatch_clause() -> Any:
 
 def _filtered_machines(
     filters: MachineFilters,
+    usage: UsageWindow,
     outdated: list[str] | None = None,
     policy: MaintenancePolicy | None = None,
 ) -> Any:
     """The machine SELECT with every requested facet applied.
 
-    Returns ``(Machine, Room | None, Building | None, MachineCheck | None)``
-    rows: the placement and the open verification request are joined in
-    rather than fetched per row, because they are also what facets filter
-    on and columns sort by. At most one open request per poste (partial
-    unique index), so the join never multiplies rows.
+    Returns ``(Machine, Room | None, Building | None, MachineCheck | None,
+    seconds | None)`` rows: the placement, the open verification request and
+    the seconds on over the usage window are joined in rather than fetched
+    per row, because they are also what facets filter on and columns sort
+    by. None of the joins multiplies rows: at most one open request per poste
+    (partial unique index), and the usage aggregate is grouped by poste — so
+    the pagination's COUNT over this statement is still a count of postes.
 
     ``outdated`` is the list of agent versions ranking below the reference,
     from ``fleet_versions`` — read by the caller, because this builds a
@@ -743,6 +800,8 @@ def _filtered_machines(
     """
     stmt = (
         select(Machine, Room, Building, MachineCheck)
+        # A fifth column, past what ``select()`` types positionally.
+        .add_columns(usage.seconds.c.seconds)
         .outerjoin(Room, col(Room.id) == col(Machine.room_id))
         .outerjoin(Building, col(Building.id) == col(Room.building_id))
         .outerjoin(
@@ -750,7 +809,17 @@ def _filtered_machines(
             (col(MachineCheck.machine_id) == col(Machine.id))
             & (col(MachineCheck.closed_at).is_(None)),
         )
+        .outerjoin(usage.seconds, usage_crud.join_condition(usage.seconds))
     )
+    if filters.usage_hours_below is not None or filters.usage_hours_above is not None:
+        stmt = stmt.where(
+            usage_crud.usage_clause(
+                usage.seconds,
+                usage.start,
+                hours_below=filters.usage_hours_below,
+                hours_above=filters.usage_hours_above,
+            )
+        )
     if filters.check_open is not None:
         stmt = stmt.where(
             col(MachineCheck.id).is_not(None)
@@ -873,7 +942,8 @@ async def list_machines(
     """
     versions = await fleet_versions(session)
     policy = await setting_crud.maintenance_policy(session)
-    stmt = _filtered_machines(filters, versions.outdated, policy)
+    usage = await _usage_window(session, filters.usage_days)
+    stmt = _filtered_machines(filters, usage, versions.outdated, policy)
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     # last_seen then id behind the requested column: ties must land on the same
     # page from one request to the next, or rows duplicate and vanish across
@@ -882,7 +952,7 @@ async def list_machines(
         stmt = stmt.order_by(col(Machine.last_seen).desc(), col(Machine.id))
     else:
         stmt = stmt.order_by(
-            _sort_clause(sort_by, sort_desc, policy, versions),
+            _sort_clause(sort_by, sort_desc, policy, versions, usage),
             col(Machine.last_seen).desc(),
             col(Machine.id),
         )
@@ -890,16 +960,18 @@ async def list_machines(
     page_rows = rows.all()
     names = await setting_crud.user_names(session, _owner_ids(page_rows, policy))
     now = utcnow()
-    items = [
-        _machine_out(m, room, building, check, names, policy, now)
-        for m, room, building, check in page_rows
-    ]
+    items = []
+    for m, room, building, check, seconds in page_rows:
+        out = _machine_out(m, room, building, check, names, policy, now)
+        out.usage_hours = usage_crud.usage_hours(seconds, m.first_seen, usage.start)
+        items.append(out)
     return MachineList(
         items=items,
         total=total or 0,
         page=page,
         page_size=page_size,
         agent_latest_version=versions.latest,
+        usage_days=usage.days,
     )
 
 
@@ -1122,7 +1194,7 @@ async def list_export_columns() -> list[ExportColumnOut]:
 
 
 async def _export_rows(
-    session: SessionDep, filters: MachineFilters
+    session: SessionDep, filters: MachineFilters, usage: UsageWindow
 ) -> list[machine_export.ExportRow]:
     """The filtered fleet, every row, hostname order.
 
@@ -1132,7 +1204,7 @@ async def _export_rows(
     """
     versions = await fleet_versions(session)
     policy = await setting_crud.maintenance_policy(session)
-    stmt = _filtered_machines(filters, versions.outdated, policy).order_by(
+    stmt = _filtered_machines(filters, usage, versions.outdated, policy).order_by(
         func.lower(col(Machine.hostname)).nulls_last(), col(Machine.id)
     )
     rows = await session.exec(stmt)
@@ -1156,8 +1228,9 @@ async def _export_rows(
                 if (res := maintenance_policy.resolve(m, room, policy, now)).owner_id
                 else None
             ),
+            usage_hours=usage_crud.usage_hours(seconds, m.first_seen, usage.start),
         )
-        for m, room, building, check in all_rows
+        for m, room, building, check, seconds in all_rows
     ]
 
 
@@ -1181,10 +1254,11 @@ async def export_machines_csv(
     """
     chosen = machine_export.resolve_columns(columns)
     zone = machine_export.resolve_timezone(tz)
-    machines = await _export_rows(session, filters)
+    usage = await _usage_window(session, filters.usage_days)
+    machines = await _export_rows(session, filters, usage)
     return csv_response(
         "parc.csv",
-        [c.label for c in chosen],
+        machine_export.headers(chosen, usage_days=usage.days),
         [
             [machine_export.csv_value(c, c.read(m), zone) for c in chosen]
             for m in machines
@@ -1207,10 +1281,11 @@ async def export_machines_xlsx(
     """
     chosen = machine_export.resolve_columns(columns)
     zone = machine_export.resolve_timezone(tz)
-    machines = await _export_rows(session, filters)
+    usage = await _usage_window(session, filters.usage_days)
+    machines = await _export_rows(session, filters, usage)
     return xlsx_response(
         "parc.xlsx",
-        [c.label for c in chosen],
+        machine_export.headers(chosen, usage_days=usage.days),
         [
             [machine_export.xlsx_value(c, c.read(m), zone) for c in chosen]
             for m in machines
@@ -1409,6 +1484,14 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
     )
     detail = MachineDetailOut.model_validate(machine)
     _place(detail, machine, await room_crud.placement(session, machine.room_id))
+    # The same figure as the machine's list row, over the console's window.
+    usage = await _usage_window(session, None)
+    detail.usage_days = usage.days
+    detail.usage_hours = usage_crud.usage_hours(
+        await usage_crud.machine_seconds(session, machine.id, usage.start),
+        machine.first_seen,
+        usage.start,
+    )
     policy = await setting_crud.maintenance_policy(session)
     placement = await room_crud.placement(session, machine.room_id)
     res = maintenance_policy.resolve(machine, placement.room, policy, utcnow())
@@ -1525,6 +1608,60 @@ async def get_machine(machine_id: uuid.UUID, session: SessionDep) -> MachineDeta
     """Fetch a single machine by id (full Defender state + fingerprint)."""
     machine = await _require_machine(session, machine_id)
     return await _machine_detail(session, machine)
+
+
+class UsageDayOut(BaseModel):
+    """Hours on during one calendar day, in the reader's zone."""
+
+    date: date
+    hours: float
+
+
+class MachineUsageOut(BaseModel):
+    """One poste's hours on, day by day, for the fiche's histogram."""
+
+    days: int
+    # The zone the days were cut in, as resolved: the requested one, or UTC
+    # when the name was absent or unknown — so the card can say which.
+    tz: str
+    total_hours: float
+    daily: list[UsageDayOut]
+    # When the server first saw this poste, and when it first counted any
+    # hour at all: days before either are empty for want of a count, not for
+    # want of use, and the card greys them out.
+    first_seen: datetime
+    usage_since: datetime | None
+
+
+@router.get("/{machine_id}/usage", response_model=MachineUsageOut)
+async def get_machine_usage(
+    machine_id: uuid.UUID,
+    session: SessionDep,
+    days: int = Query(28, ge=1, le=90),
+    tz: str | None = None,
+) -> MachineUsageOut:
+    """Hours on per calendar day over the last ``days`` days, today included.
+
+    Days are cut in ``tz`` (an IANA name — the browser's; UTC when absent or
+    unknown), at read time: the counters are hourly precisely so that a day
+    can be the reader's day. The total is summed from the seconds rather than
+    from the rounded days. It covers whole calendar days, so it is not the
+    list's figure, which counts a sliding window anchored on the hour.
+    """
+    machine = await _require_machine(session, machine_id)
+    zone = machine_export.resolve_timezone(tz)
+    daily = await usage_crud.daily_seconds(session, machine.id, utcnow(), days, zone)
+    return MachineUsageOut(
+        days=days,
+        tz=str(zone),
+        total_hours=round(sum(seconds for _, seconds in daily) / SECONDS_PER_HOUR, 1),
+        daily=[
+            UsageDayOut(date=day, hours=round(seconds / SECONDS_PER_HOUR, 1))
+            for day, seconds in daily
+        ],
+        first_seen=machine.first_seen,
+        usage_since=await usage_crud.usage_since(session),
+    )
 
 
 MatchReason = Literal["smbios_uuid", "tpm_ek_hash", "hostname"]

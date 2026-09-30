@@ -1,6 +1,6 @@
 # Utilisation des postes (heures allumées) : plan de travail
 
-> **🚧 J1 livré le 2026-09-30** (comptage, migration `0023_machine_uptime`, purge, fusion). J2 à J4 restent à faire. Écarts en §8.
+> **🚧 J1 livré le 2026-09-30** (comptage, migration `0023_machine_uptime`, purge, fusion). **J2 livré le 2026-09-30** (lecture : liste, filtre, tri, export, tableau de bord, fiche, réglages). J3 et J4 restent à faire. Écarts en §8.
 
 > Objectif : répondre à « **combien de postes, et lesquels, ont été allumés moins de 10 h — ou plus de 30 h — cette semaine** », pour connaître l'utilisation réelle du parc : postes qui ne servent à rien (candidats à la mutualisation ou au retrait), postes qui ne s'éteignent jamais (consommation, mises à jour qui n'atterrissent jamais).
 >
@@ -233,3 +233,14 @@ Total ≈ 4,5 jours. J1 seul est déjà utile à déployer tôt : **le comptage 
 - **Plafond aussi à la fusion** : `move_to` réutilise l'upsert plafonné à 3 600 s. Deux enregistrements d'un même poste qui se chevauchent dans une heure ne font donc pas échouer la fusion sur la contrainte CHECK.
 - **Lecture non livrée** : `seconds_by_machine`, `usage_clause` et `usage_since` sont décrites en §2 mais relèvent de J2, avec les routes qui les appellent. `usage_policy()` est livrée dès J1 et testée, sans appelant pour l'instant.
 - **Variables d'environnement** : présentes dans `config.py`, pas encore dans `deploy/.env.example` ni dans la page Réglages. C'est J2 (`environment_overview`) et J4, comme prévu.
+
+### J2
+
+- **Bornes de la fenêtre** : une fenêtre de N jours couvre les N × 24 heures pleines avant l'heure courante, plus l'heure courante entamée (`usage.crud.window_start`). Les compteurs sont horaires, et couper au milieu d'un bucket le compterait entier ou pas du tout. La liste, le filtre, le tri, l'export et le tableau de bord partagent cette même borne, calculée une fois par requête.
+- **Jointure systématique** : l'agrégat par poste est joint à chaque requête de la liste, même sans filtre ni tri d'utilisation, pour que chaque ligne porte `usage_hours`. Il est groupé par poste, donc le `COUNT` de pagination reste un nombre de postes ; un test le vérifie.
+- **Tri** : un poste enrôlé dans la fenêtre trie en dernier dans les deux sens, comme toute absence de la liste. Les postes sans aucune heure trient ensemble à zéro.
+- **Fiche** : `MachineDetailOut` porte aussi `usage_days`, puisque la fiche n'a pas de paramètre de fenêtre et suit le réglage.
+- **Route par jour** : la réponse porte en plus `tz` (le fuseau réellement utilisé, UTC si le nom est absent ou inconnu), `first_seen` et `usage_since`, pour que la carte grise les jours antérieurs au comptage. Le total couvre des jours calendaires entiers : ce n'est pas le chiffre de la liste. Dans un fuseau décalé d'une demi-heure, un bucket qui chevauche minuit est rangé au jour où son heure commence.
+- **Export** : l'en-tête de la colonne nomme sa fenêtre, « Heures allumées (7 j) », puisque le fichier survit à l'écran d'où il a été tiré.
+- **Réglages** : un `null` rend le réglage à l'environnement, comme pour la maintenance. La validation porte sur les valeurs fusionnées avec ce qui est stocké, donc elle refuse aussi une fenêtre réduite sous un seuil haut déjà enregistré. Le refus réutilise le code `request.validation_error` en 422 : aucun code nouveau, donc rien à ajouter à la table des erreurs de la console.
+- **Tests** : dans un fichier dédié, [test_api_usage_read.py](backend/tests/test_api_usage_read.py), plutôt qu'à côté du test des réglages de maintenance.

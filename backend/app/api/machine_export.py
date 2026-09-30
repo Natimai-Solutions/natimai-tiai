@@ -49,6 +49,9 @@ class ExportRow:
     # Where the poste stands on its maintenance cycle, and who owns it.
     maintenance: Resolved | None = None
     maintenance_owner: str | None = None
+    # Hours on over the export's usage window; None for a poste enrolled
+    # inside it (``usage.crud.usage_hours``).
+    usage_hours: float | None = None
 
     @property
     def room_location(self) -> str | None:
@@ -188,6 +191,10 @@ def _session(r: ExportRow) -> object:
     return m.session_username or "Utilisateur connecté"
 
 
+def _usage_hours(r: ExportRow) -> object:
+    return r.usage_hours
+
+
 def _antivirus(r: ExportRow) -> object:
     """The Security Center product; "" is a finding and reads as such."""
     m = r.machine
@@ -283,6 +290,10 @@ COLUMNS: Sequence[ExportColumn] = (
     ),
     ExportColumn("session", "Session", "identity", "text", _session),
     ExportColumn("is_online", "Allumé", "identity", "bool", _online),
+    # Hours on over the export's window — which the header names, since the
+    # sheet outlives the screen it was taken from (``headers``). On offer,
+    # not by default: a column for a usage campaign, not for every export.
+    ExportColumn("usage_hours", "Heures allumées", "identity", "float", _usage_hours),
     ExportColumn(
         "needs_verification",
         "À vérifier",
@@ -504,6 +515,20 @@ COLUMNS: Sequence[ExportColumn] = (
 _BY_KEY: dict[str, ExportColumn] = {c.key: c for c in COLUMNS}
 
 DEFAULT_KEYS: tuple[str, ...] = tuple(c.key for c in COLUMNS if c.default)
+
+
+# Columns whose value depends on a window the request chose, and whose header
+# therefore says which: « Heures allumées (7 j) », not a bare number of hours a
+# reader of the file a month later could not place.
+_WINDOWED = frozenset({"usage_hours"})
+
+
+def headers(columns: Sequence[ExportColumn], *, usage_days: int) -> list[str]:
+    """The first row of the file: each column's label, windowed ones dated."""
+    return [
+        f"{c.label} ({usage_days} j)" if c.key in _WINDOWED else c.label
+        for c in columns
+    ]
 
 
 def resolve_columns(keys: str | None) -> list[ExportColumn]:

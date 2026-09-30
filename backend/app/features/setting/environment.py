@@ -236,6 +236,35 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
             ],
         ),
         EnvGroup(
+            label="Utilisation des postes",
+            items=[
+                _item(
+                    env,
+                    "USAGE_WINDOW_DAYS",
+                    "Fenêtre d'observation, en jours — valeur initiale : le réglage "
+                    "enregistré ci-dessus prend le dessus",
+                ),
+                _item(
+                    env,
+                    "USAGE_LOW_HOURS",
+                    "Heures allumées en dessous desquelles un poste est « peu utilisé » "
+                    "— même règle",
+                ),
+                _item(
+                    env,
+                    "USAGE_HIGH_HOURS",
+                    "Heures allumées au-dessus desquelles un poste est « toujours "
+                    "allumé » — même règle",
+                ),
+                _item(
+                    env,
+                    "USAGE_RETENTION_DAYS",
+                    "Durée de conservation, en jours, des compteurs horaires "
+                    "d'utilisation",
+                ),
+            ],
+        ),
+        EnvGroup(
             label="Salles",
             items=[
                 _item(

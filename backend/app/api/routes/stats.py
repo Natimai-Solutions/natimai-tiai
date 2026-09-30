@@ -27,6 +27,7 @@ from app.features.maintenance.policy import MaintenanceState
 from app.features.room.models import Room
 from app.features.setting import crud as setting_crud
 from app.features.threat.models import Threat
+from app.features.usage import crud as usage_crud
 from app.features.user.permissions import Action, Resource
 
 # What ``Win32_EncryptableVolume`` reports for a volume BitLocker has finished
@@ -79,6 +80,21 @@ class StatsOverview(BaseModel):
     machines_maintenance_overdue: int
     machines_maintenance_due_soon: int
     agent_latest_version: str | None
+    # Usage over the console's window: the postes nobody seems to use, and the
+    # ones that are never switched off. Same aggregate, same boundary and same
+    # thresholds as the list filter each card opens.
+    machines_usage_low: int
+    machines_usage_high: int
+    # The thresholds and window those two were counted with, as resolved
+    # (``app_settings``, else the environment) — for the cards' captions, and
+    # for the list links they build.
+    usage_low_hours: int
+    usage_high_hours: int
+    usage_window_days: int
+    # The first hour ever counted. Until it is a window old, a parc reading
+    # « peu utilisé » everywhere is a parc counted since Tuesday: the console
+    # says « comptage depuis le … » under the cards. None = nothing yet.
+    usage_since: datetime | None
 
 
 async def _count(session: SessionDep, clause: ColumnElement[bool] | None = None) -> int:
@@ -189,6 +205,29 @@ async def overview(session: SessionDep) -> StatsOverview:
         )
     )
 
+    usage = await setting_crud.usage_policy(session)
+    usage_start = usage_crud.window_start(now, usage.window_days)
+    usage_seconds = usage_crud.seconds_by_machine(usage_start)
+    with_usage = (
+        select(func.count())
+        .select_from(Machine)
+        .outerjoin(usage_seconds, usage_crud.join_condition(usage_seconds))
+    )
+    usage_low = await session.scalar(
+        with_usage.where(
+            usage_crud.usage_clause(
+                usage_seconds, usage_start, hours_below=usage.low_hours
+            )
+        )
+    )
+    usage_high = await session.scalar(
+        with_usage.where(
+            usage_crud.usage_clause(
+                usage_seconds, usage_start, hours_above=usage.high_hours
+            )
+        )
+    )
+
     return StatsOverview(
         total=total,
         up_to_date=up_to_date,
@@ -209,4 +248,10 @@ async def overview(session: SessionDep) -> StatsOverview:
         machines_maintenance_overdue=overdue_result.one() or 0,
         machines_maintenance_due_soon=due_soon_result.one() or 0,
         agent_latest_version=fleet.latest,
+        machines_usage_low=usage_low or 0,
+        machines_usage_high=usage_high or 0,
+        usage_low_hours=usage.low_hours,
+        usage_high_hours=usage.high_hours,
+        usage_window_days=usage.window_days,
+        usage_since=await usage_crud.usage_since(session),
     )
