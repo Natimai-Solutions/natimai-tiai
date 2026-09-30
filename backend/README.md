@@ -15,6 +15,7 @@ app/
   features/    machine/ threat/ command/ notification/ (modèles + logique)
                user/ (comptes, groupes, permissions) room/ (bâtiments, salles, annuaire)
                intervention/ check/ maintenance/ setting/ (exploitation du parc)
+               usage/ (heures allumées par poste, comptées depuis les battements)
   alembic/     migrations
   scripts/     entrypoint.sh (api | worker | migrate)
 ```
@@ -54,11 +55,12 @@ Ajouter une dépendance : `uv add <pkg>` (ou `uv add --dev <pkg>` pour le groupe
 - `GET  /api/v1/auth/me` — utilisateur courant, ses groupes et ses permissions.
 - `GET/POST/PATCH/DELETE /api/v1/groups` — groupes et leurs droits (permission `user:read` / `user:write`) ; `GET /api/v1/groups/permissions` liste le catalogue.
 - `GET /api/v1/maintenance/due?owner=me|none|<id>`, `POST /api/v1/maintenance`, `GET /api/v1/maintenance[/{id}]`, `GET/PATCH /api/v1/rooms/{id}/maintenance`, `GET/PATCH /api/v1/machines/{id}/maintenance` — maintenance : ce qui est dû par salle et par responsable, enregistrement d'une séance (note globale + note par poste, une ligne « maintenance » dans le journal de chacun, cycle relancé), cycle et responsable par salle et par poste (permission `maintenance:read` / `maintenance:write`). La résolution est à trois niveaux, poste › salle › parc (`features/maintenance/policy.py`), en Python pour les réponses et en SQL pour le filtre `maintenance_state`, le tri `maintenance_due_at` et les compteurs du tableau de bord.
-- `GET/PATCH /api/v1/settings` — les défauts du parc (cycle, responsable, fenêtre « à échéance »), table `app_settings`, permission `settings:read` / `settings:write` (administrateurs seuls par défaut).
+- `GET/PATCH /api/v1/settings` — les défauts du parc (cycle, responsable, fenêtre « à échéance » ; fenêtre et seuils d'utilisation), table `app_settings`, permission `settings:read` / `settings:write` (administrateurs seuls par défaut).
 - `POST /api/v1/machines/{id}/check`, `GET /api/v1/checks?open&assigned_to=me|none|<id>`, `PATCH /api/v1/checks/{id}`, `POST /api/v1/checks/{id}/close`, `POST /api/v1/checks/bulk`, `GET /api/v1/checks/assignable-users` — vérifications demandées sur un poste, affectables à un compte, une seule ouverte par poste, closes avec une note qui s'inscrit dans le journal (permission `check:read` / `check:write`). La liste des postes se filtre par `check_open`.
 - `GET/POST /api/v1/machines/{id}/interventions`, `PATCH/DELETE /api/v1/interventions/{id}` — le journal d'un poste : panne, installation logicielle, mise à niveau, maintenance, vérification, autre (permission `intervention:read` / `intervention:write`). Antidatable ; les suppressions et les modifications par un autre que l'auteur sont tracées dans l'audit ; une fusion de doublons déplace le journal sur le poste conservé.
 - `GET/POST/PATCH/DELETE /api/v1/buildings` et `/api/v1/rooms` — bâtiments et salles (permission `room:read` / `room:write`) ; `POST /api/v1/rooms/{id}/machines` et `POST /api/v1/rooms/unassign` déplacent des postes. La liste des postes se filtre par `room_id`, `building_id`, `without_room`, `location_mismatch` et se trie par `building` / `room`. Avec `ROOM_SOURCE=ad_ou` ou `ad_location`, le bloc `directory` de l'inventaire range les postes tout seul (`features/room/crud.py`, `place_from_directory`), le rattachement manuel répond `room.placement.locked`, et `POST /api/v1/rooms/sync-directory` reclasse le parc depuis les lectures mémorisées ; `GET /api/v1/rooms/config` dit le mode.
-- `GET  /api/v1/machines` / `GET /api/v1/machines/{id}` — lecture (permission `machine:read`).
+- `GET  /api/v1/machines` / `GET /api/v1/machines/{id}` — lecture (permission `machine:read`). La liste porte les heures allumées de chaque poste (`usage_hours`), se filtre par `usage_hours_below` / `usage_hours_above` sur `usage_days` jours et se trie par `usage_hours`.
+- `GET /api/v1/machines/{id}/usage?days=28&tz=<IANA>` — heures allumées d'un poste, jour par jour dans le fuseau demandé (permission `machine:read`).
 - `POST /api/v1/commands` — file une commande par poste (permission `command:execute`, plus `risky_command:execute` pour les types à risque).
   Champ optionnel `ttl_minutes` (borné à 1 min → 30 j) ; omis, le déploiement
   décide via `COMMAND_DEFAULT_TTL_MINUTES` (**60** par défaut). Au-delà, une
@@ -126,6 +128,19 @@ migrations `0016` à `0021`, chacun sa ressource de permission :
 
 Les trois groupes intégrés reçoivent les droits de ces ressources par les
 migrations qui les créent ; les administrateurs ont tout implicitement.
+
+## Utilisation des postes
+
+Livrée selon `dev/plan-utilisation-postes.md`, migration `0023`. Aucune
+modification de l'agent : chaque battement crédite l'écart depuis le
+précédent quand il est plus court que `OFFLINE_AFTER_SECONDS`, la même règle
+que la pastille « allumé » (`features/usage/accounting.py`).
+
+| Pièce | Où | Ce qu'elle fait |
+|---|---|---|
+| Compteurs | `machine_uptime_hourly` | Secondes allumées par poste et par heure UTC, plafonnées à 3 600 ; ajoutées par un upsert à chaque battement, fusionnées avec les doublons, purgées au-delà de `USAGE_RETENTION_DAYS`. |
+| Lecture | `features/usage/crud.py` | Une fenêtre de N jours couvre les N × 24 heures pleines avant l'heure courante, plus celle-ci. La même borne sert la liste, son filtre et son tri, l'export et le tableau de bord ; un poste enrôlé pendant la fenêtre n'est jamais « peu utilisé ». |
+| Réglages | `app_settings` (`usage.*`) | Fenêtre et seuils, avec les variables `USAGE_*` pour valeurs initiales (`setting/crud.py`, `usage_policy`). |
 
 ## Utilisateurs, groupes & permissions
 
