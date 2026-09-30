@@ -11,6 +11,7 @@ from app.features.command.models import Command
 from app.features.intervention import crud as intervention_crud
 from app.features.machine.models import Machine
 from app.features.threat.models import Threat
+from app.features.usage import crud as usage_crud
 
 
 async def merge_into(
@@ -27,6 +28,9 @@ async def merge_into(
     set, and the target's ``wu_pending_count`` would then disagree with the rows.
     Deleting the source drops them by FK cascade, and the target's next Windows
     Update cycle re-establishes the truth.
+
+    Its *usage counters* are reattached, hour by hour, and added to the
+    target's where both have the same hour (``usage.crud.move_to``).
     """
     # Commands carry no uniqueness constraint — reassign them wholesale.
     await session.exec(
@@ -60,6 +64,9 @@ async def merge_into(
     # The journal follows: what was done to the duplicate was done to the poste.
     await intervention_crud.move_to(session, source_id=source.id, target_id=target.id)
     await check_crud.move_to(session, source_id=source.id, target_id=target.id)
+    # So do the hours it was on: usage is history, and the statistics must not
+    # lose a week because an administrator reconciled two records.
+    await usage_crud.move_to(session, source_id=source.id, target_id=target.id)
 
     # Keep the freshest last-seen; the merge resolves the verification. The
     # room follows too, when the kept record has none: a duplicate was often

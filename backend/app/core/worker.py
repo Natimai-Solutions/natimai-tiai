@@ -32,6 +32,7 @@ from app.features.base import utcnow
 from app.features.command.models import Command, CommandStatus
 from app.features.machine.models import Machine
 from app.features.notification import digest, outbox
+from app.features.usage import crud as usage_crud
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,13 @@ async def purge_outbox() -> int:
     """Drop sent/abandoned outbox rows older than the retention window."""
     async with AsyncSession(engine) as session:
         return await outbox.purge_settled(session)
+
+
+async def purge_usage() -> int:
+    """Drop the hourly usage counters past ``USAGE_RETENTION_DAYS``."""
+    cutoff = utcnow() - timedelta(days=settings.USAGE_RETENTION_DAYS)
+    async with AsyncSession(engine) as session:
+        return await usage_crud.purge_before(session, cutoff)
 
 
 # --- Scheduling -------------------------------------------------------------
@@ -177,6 +185,7 @@ def build_jobs(now: datetime) -> list[Job]:
             reminder,
         ),
         Job("purge_outbox", purge_outbox, housekeeping(now), housekeeping),
+        Job("purge_usage", purge_usage, housekeeping(now), housekeeping),
     ]
 
 
