@@ -44,14 +44,12 @@
             </div>
           </div>
           <div>
-            <div class="text-h5">{{ hoursLabel(summary.hours) }}</div>
+            <div class="text-h5">{{ hoursLabel(usage.total_hours) }}</div>
             <div class="text-caption text-grey">
-              sur {{ summary.days }} jour{{ summary.days > 1 ? 's' : '' }} mesuré{{
-                summary.days > 1 ? 's' : ''
-              }}
+              sur {{ DAYS }} jours, dont {{ measured }} mesuré{{ measured > 1 ? 's' : '' }}
             </div>
           </div>
-          <div v-if="summary.days">
+          <div v-if="measured">
             <div class="text-h5">{{ hoursLabel(average) }}</div>
             <div class="text-caption text-grey">par jour mesuré, en moyenne</div>
           </div>
@@ -135,7 +133,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { getMachineUsage, type MachineDetail, type MachineUsage } from 'src/services/machines';
-import { measuredSummary, usageBars } from 'src/utils/usageChart';
+import { measuredDays, usageBars } from 'src/utils/usageChart';
 import { hoursLabel } from 'src/utils/usageFilter';
 
 const props = defineProps<{ machine: MachineDetail }>();
@@ -150,14 +148,18 @@ const failed = ref(false);
 const showTable = ref(false);
 
 const bars = computed(() => (usage.value ? usageBars(usage.value) : []));
-const summary = computed(() => measuredSummary(bars.value));
+const measured = computed(() => measuredDays(bars.value));
+// The server's total over the whole span — the same figure whatever the
+// zone — divided by the days that were measured, not by the span.
 const average = computed(() =>
-  summary.value.days ? Math.round((summary.value.hours / summary.value.days) * 10) / 10 : 0,
+  usage.value && measured.value
+    ? Math.round((usage.value.total_hours / measured.value) * 10) / 10
+    : 0,
 );
 const ariaLabel = computed(
   () =>
-    `Heures allumées par jour sur ${DAYS} jours : ${hoursLabel(summary.value.hours)} ` +
-    `sur ${summary.value.days} jours mesurés. Le bouton Tableau donne chaque jour.`,
+    `Heures allumées par jour sur ${DAYS} jours : ${hoursLabel(usage.value?.total_hours ?? 0)}, ` +
+    `${measured.value} jours mesurés. Le bouton Tableau donne chaque jour.`,
 );
 
 function axisLabel(date: string): string {

@@ -188,7 +188,8 @@ async def overview(session: SessionDep) -> StatsOverview:
     )
     open_checks = open_checks_result.one() or 0
 
-    policy = await setting_crud.maintenance_policy(session)
+    policies = await setting_crud.policies(session)
+    policy = policies.maintenance
     joined = (
         select(func.count())
         .select_from(Machine)
@@ -205,28 +206,28 @@ async def overview(session: SessionDep) -> StatsOverview:
         )
     )
 
-    usage = await setting_crud.usage_policy(session)
+    # Both usage counts off one join: the aggregate over the window is the
+    # expensive part, and two filtered COUNTs read it once.
+    usage = policies.usage
     usage_start = usage_crud.window_start(now, usage.window_days)
     usage_seconds = usage_crud.seconds_by_machine(usage_start)
-    with_usage = (
-        select(func.count())
+    usage_counts = await session.exec(
+        select(
+            func.count().filter(
+                usage_crud.usage_clause(
+                    usage_seconds, usage_start, hours_below=usage.low_hours
+                )
+            ),
+            func.count().filter(
+                usage_crud.usage_clause(
+                    usage_seconds, usage_start, hours_above=usage.high_hours
+                )
+            ),
+        )
         .select_from(Machine)
         .outerjoin(usage_seconds, usage_crud.join_condition(usage_seconds))
     )
-    usage_low = await session.scalar(
-        with_usage.where(
-            usage_crud.usage_clause(
-                usage_seconds, usage_start, hours_below=usage.low_hours
-            )
-        )
-    )
-    usage_high = await session.scalar(
-        with_usage.where(
-            usage_crud.usage_clause(
-                usage_seconds, usage_start, hours_above=usage.high_hours
-            )
-        )
-    )
+    usage_low, usage_high = usage_counts.one()
 
     return StatsOverview(
         total=total,

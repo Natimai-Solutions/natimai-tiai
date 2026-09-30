@@ -265,3 +265,16 @@ Deux problèmes antérieurs à ce chantier, corrigés dans le même commit :
 
 - **Mode du routeur et `process.env`** : depuis la montée d'app-vite 2 → 3 (2026-08-28), plus rien ne remplace `process.env.*` dans le code client. En développement, `quasar dev` plantait au chargement de `src/boot/axios.ts`. En production, le routeur lisait `process.env.VUE_ROUTER_MODE`, ne trouvait rien et retombait en mode hash (`/#/machines`) au lieu du mode historique configuré. Tous les liens que le serveur envoie par e-mail (`/reset-password?token=…`, `/machines/<id>`, les tâches) ouvraient donc la connexion ou le tableau de bord au lieu de leur page. Le routeur lit désormais `import.meta.env.QUASAR_VUE_ROUTER_MODE` et `QUASAR_VUE_ROUTER_BASE`, l'URL de l'API passe par `build.defineEnv`, et `tsconfig.json` inclut les déclarations générées dans `.quasar/`. Les liens en `/#/…` enregistrés entre-temps sont réécrits au démarrage vers leur forme normale ([legacyUrl.ts](frontend/src/utils/legacyUrl.ts)).
 - **Tri par version d'agent** : `agent_version` manquait à `MACHINE_SORT_FIELDS`. Une fiche ouverte depuis la liste triée par version d'agent perdait ce tri pour ses boutons précédent et suivant.
+
+### Relecture après livraison
+
+Une relecture adversariale de l'ensemble (J1 à J4) a remonté huit points, tous corrigés :
+
+- **Filtre « Utilisation : toutes »** : il effaçait les bornes mais pas la fenêtre venue d'un lien (`usage_days`), que rien d'autre sur la page ne pouvait remettre. Il rend maintenant tout.
+- **Préréglages avant la première réponse** : choisir « Peu utilisés » avant que la liste ait servi les seuils écrivait un filtre vide sans rien dire. Les trois préréglages sont désactivés tant que les seuils ne sont pas connus.
+- **Liste des tris de l'URL** : `MACHINE_SORT_FIELDS` était une copie à la main de l'union `MachineSortField`, ce qui avait déjà fait oublier `agent_version`. Le compilateur vérifie désormais que la liste est complète (`SortFieldsAreComplete`).
+- **Cohérence des seuils dans l'environnement** : les règles du `PATCH /settings` ne s'appliquaient pas aux variables `USAGE_*`, et `USAGE_HIGH_HOURS` acceptait 0. Un `model_validator` de `Settings` refuse au démarrage un seuil bas au-dessus du haut, ou un seuil haut inatteignable dans la fenêtre.
+- **Fuseau de l'histogramme** : le début du comptage était découpé dans le fuseau du navigateur alors que le serveur peut retomber sur UTC pour un nom inconnu. Les deux côtés utilisent le fuseau que le serveur renvoie (`tz`).
+- **`total_hours` inutilisé** : la carte affichait sa propre somme, qui pouvait diverger de celle du serveur après une fusion. Elle affiche le total du serveur et ne calcule plus que le nombre de jours mesurés.
+- **Deux lectures de `app_settings` par requête** : la liste, les exports, la fiche et le tableau de bord lisaient la table une fois pour la maintenance et une fois pour l'utilisation. `setting_crud.policies()` résout les deux d'une seule lecture.
+- **Deux comptages sur le tableau de bord** : l'agrégat d'utilisation était joint deux fois, une par seuil. Une seule requête avec deux `COUNT … FILTER`.

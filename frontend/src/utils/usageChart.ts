@@ -26,20 +26,29 @@ export interface UsageBar {
   weekend: boolean;
 }
 
-/** `YYYY-MM-DD` of an instant, in the browser's own zone — the one the days were cut in. */
-export function localDate(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/**
+ * `YYYY-MM-DD` of an instant in `tz` — the zone the server cut the days in,
+ * which it reports back (`MachineUsage.tz`). Not the browser's own: the two
+ * agree in practice, but the server falls back to UTC on a zone name it does
+ * not know, and the boundary day would then be filed on the wrong side.
+ */
+export function localDate(iso: string, tz: string): string {
+  // en-CA writes dates as YYYY-MM-DD, the one locale that does.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(iso));
 }
 
 /** The first local day that was measured: the later of enrolment and the parc's first count. */
 export function countedFrom(
-  usage: Pick<MachineUsage, 'first_seen' | 'usage_since'>,
+  usage: Pick<MachineUsage, 'first_seen' | 'usage_since' | 'tz'>,
 ): string | null {
   if (!usage.usage_since) return null;
-  const a = localDate(usage.first_seen);
-  const b = localDate(usage.usage_since);
+  const a = localDate(usage.first_seen, usage.tz);
+  const b = localDate(usage.usage_since, usage.tz);
   return a > b ? a : b;
 }
 
@@ -68,9 +77,7 @@ export function usageBars(usage: MachineUsage): UsageBar[] {
   });
 }
 
-/** Hours on over the days that were measured, and how many there were. */
-export function measuredSummary(bars: UsageBar[]): { hours: number; days: number } {
-  const measured = bars.filter((b) => b.counted);
-  const hours = measured.reduce((sum, b) => sum + b.hours, 0);
-  return { hours: Math.round(hours * 10) / 10, days: measured.length };
+/** How many of the days were measured — the divisor of a daily average. */
+export function measuredDays(bars: UsageBar[]): number {
+  return bars.filter((b) => b.counted).length;
 }

@@ -54,7 +54,7 @@ from app.features.maintenance.policy import MaintenanceState
 from app.features.room import crud as room_crud
 from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
-from app.features.setting.crud import MaintenancePolicy
+from app.features.setting.crud import MaintenancePolicy, UsagePolicy
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 from app.features.usage.models import SECONDS_PER_HOUR
@@ -545,9 +545,8 @@ class UsageWindow:
     high_hours: int
 
 
-async def _usage_window(session: SessionDep, days: int | None) -> UsageWindow:
+def _usage_window(policy: UsagePolicy, days: int | None) -> UsageWindow:
     """The requested window, or the console's (``usage.window_days``)."""
-    policy = await setting_crud.usage_policy(session)
     if days is None:
         days = policy.window_days
     start = usage_crud.window_start(utcnow(), days)
@@ -954,8 +953,9 @@ async def list_machines(
     default order is freshest contact first.
     """
     versions = await fleet_versions(session)
-    policy = await setting_crud.maintenance_policy(session)
-    usage = await _usage_window(session, filters.usage_days)
+    policies = await setting_crud.policies(session)
+    policy = policies.maintenance
+    usage = _usage_window(policies.usage, filters.usage_days)
     stmt = _filtered_machines(filters, usage, versions.outdated, policy)
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     # last_seen then id behind the requested column: ties must land on the same
@@ -1209,8 +1209,8 @@ async def list_export_columns() -> list[ExportColumnOut]:
 
 
 async def _export_rows(
-    session: SessionDep, filters: MachineFilters, usage: UsageWindow
-) -> list[machine_export.ExportRow]:
+    session: SessionDep, filters: MachineFilters
+) -> tuple[list[machine_export.ExportRow], UsageWindow]:
     """The filtered fleet, every row, hostname order.
 
     Unpaginated on purpose: an export of the first fifty rows is not an export.
@@ -1218,7 +1218,9 @@ async def _export_rows(
     parc is thousands of rows, not millions.
     """
     versions = await fleet_versions(session)
-    policy = await setting_crud.maintenance_policy(session)
+    policies = await setting_crud.policies(session)
+    policy = policies.maintenance
+    usage = _usage_window(policies.usage, filters.usage_days)
     stmt = _filtered_machines(filters, usage, versions.outdated, policy).order_by(
         func.lower(col(Machine.hostname)).nulls_last(), col(Machine.id)
     )
@@ -1246,7 +1248,7 @@ async def _export_rows(
             usage_hours=usage_crud.usage_hours(seconds, m.first_seen, usage.start),
         )
         for m, room, building, check, seconds in all_rows
-    ]
+    ], usage
 
 
 # The fleet export, and deliberately not a per-machine one. A fiche is read on
@@ -1269,8 +1271,7 @@ async def export_machines_csv(
     """
     chosen = machine_export.resolve_columns(columns)
     zone = machine_export.resolve_timezone(tz)
-    usage = await _usage_window(session, filters.usage_days)
-    machines = await _export_rows(session, filters, usage)
+    machines, usage = await _export_rows(session, filters)
     return csv_response(
         "parc.csv",
         machine_export.headers(chosen, usage_days=usage.days),
@@ -1296,8 +1297,7 @@ async def export_machines_xlsx(
     """
     chosen = machine_export.resolve_columns(columns)
     zone = machine_export.resolve_timezone(tz)
-    usage = await _usage_window(session, filters.usage_days)
-    machines = await _export_rows(session, filters, usage)
+    machines, usage = await _export_rows(session, filters)
     return xlsx_response(
         "parc.xlsx",
         machine_export.headers(chosen, usage_days=usage.days),
@@ -1499,15 +1499,16 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
     )
     detail = MachineDetailOut.model_validate(machine)
     _place(detail, machine, await room_crud.placement(session, machine.room_id))
+    policies = await setting_crud.policies(session)
     # The same figure as the machine's list row, over the console's window.
-    usage = await _usage_window(session, None)
+    usage = _usage_window(policies.usage, None)
     detail.usage_days = usage.days
     detail.usage_hours = usage_crud.usage_hours(
         await usage_crud.machine_seconds(session, machine.id, usage.start),
         machine.first_seen,
         usage.start,
     )
-    policy = await setting_crud.maintenance_policy(session)
+    policy = policies.maintenance
     placement = await room_crud.placement(session, machine.room_id)
     res = maintenance_policy.resolve(machine, placement.room, policy, utcnow())
     detail.last_maintenance_at = machine.last_maintenance_at

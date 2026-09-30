@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MachineUsage } from 'src/services/machines';
-import { countedFrom, localDate, measuredSummary, usageBars } from './usageChart';
+import { countedFrom, localDate, measuredDays, usageBars } from './usageChart';
 
 function usage(overrides: Partial<MachineUsage> = {}): MachineUsage {
   return {
@@ -52,14 +52,23 @@ describe('usageBars', () => {
   });
 });
 
-describe('measuredSummary', () => {
-  it('sums the measured days only', () => {
-    expect(measuredSummary(usageBars(usage()))).toEqual({ hours: 30, days: 3 });
+describe('measuredDays', () => {
+  it('counts the measured days only', () => {
+    expect(measuredDays(usageBars(usage()))).toBe(3);
   });
 });
 
 describe('localDate', () => {
-  it('formats a day as YYYY-MM-DD', () => {
-    expect(localDate('2026-09-28T12:00:00Z')).toBe('2026-09-28');
+  it('cuts the day in the zone the server used, not the browser’s', () => {
+    expect(localDate('2026-09-28T12:00:00Z', 'UTC')).toBe('2026-09-28');
+    // 09:00 UTC is 23:00 the evening before in Tahiti.
+    expect(localDate('2026-09-28T09:00:00Z', 'Pacific/Tahiti')).toBe('2026-09-27');
+    expect(localDate('2026-09-28T09:00:00Z', 'UTC')).toBe('2026-09-28');
+  });
+
+  it('moves the first measured day with the zone', () => {
+    const since = { first_seen: '2026-01-01T12:00:00Z', usage_since: '2026-09-28T09:00:00Z' };
+    expect(countedFrom({ ...since, tz: 'UTC' })).toBe('2026-09-28');
+    expect(countedFrom({ ...since, tz: 'Pacific/Tahiti' })).toBe('2026-09-27');
   });
 });

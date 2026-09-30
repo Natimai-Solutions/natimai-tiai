@@ -44,10 +44,14 @@ class MaintenancePolicy:
     due_soon_days: int
 
 
-async def maintenance_policy(session: AsyncSession) -> MaintenancePolicy:
+async def maintenance_policy(
+    session: AsyncSession, values: dict[str, Any] | None = None
+) -> MaintenancePolicy:
     """The global defaults: the console's rows where they exist, the
-    environment's values otherwise."""
-    values = await get_all(session)
+    environment's values otherwise. ``values`` is the table already read,
+    for a caller that resolves several policies from one round trip."""
+    if values is None:
+        values = await get_all(session)
     cycle = values.get(KEY_CYCLE)
     due_soon = values.get(KEY_DUE_SOON)
     owner = values.get(KEY_OWNER)
@@ -82,14 +86,36 @@ def _int_or(value: Any, default: int) -> int:
     return default
 
 
-async def usage_policy(session: AsyncSession) -> UsagePolicy:
+async def usage_policy(
+    session: AsyncSession, values: dict[str, Any] | None = None
+) -> UsagePolicy:
     """The console's rows where they exist, the environment's values
     otherwise — the same precedence as ``maintenance_policy``."""
-    values = await get_all(session)
+    if values is None:
+        values = await get_all(session)
     return UsagePolicy(
         window_days=_int_or(values.get(KEY_USAGE_WINDOW), env.USAGE_WINDOW_DAYS),
         low_hours=_int_or(values.get(KEY_USAGE_LOW), env.USAGE_LOW_HOURS),
         high_hours=_int_or(values.get(KEY_USAGE_HIGH), env.USAGE_HIGH_HOURS),
+    )
+
+
+@dataclass(frozen=True)
+class Policies:
+    """Every parc-wide policy a request may need, resolved from one read."""
+
+    maintenance: MaintenancePolicy
+    usage: UsagePolicy
+
+
+async def policies(session: AsyncSession) -> Policies:
+    """Both policies off a single SELECT of ``app_settings``: the machine
+    list, the exports, the fiche and the dashboard need the two at once, and
+    the table is small enough that reading it twice would be the only cost."""
+    values = await get_all(session)
+    return Policies(
+        maintenance=await maintenance_policy(session, values),
+        usage=await usage_policy(session, values),
     )
 
 

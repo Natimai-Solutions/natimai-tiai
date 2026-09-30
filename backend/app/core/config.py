@@ -280,7 +280,7 @@ class Settings(BaseSettings):
     # Below this many hours on over the window, a poste counts as little used.
     USAGE_LOW_HOURS: int = Field(default=10, ge=0)
     # Above this many hours, a poste counts as always on.
-    USAGE_HIGH_HOURS: int = Field(default=30, ge=0)
+    USAGE_HIGH_HOURS: int = Field(default=30, ge=1)
     # How long the hourly counters are kept. A storage policy rather than a
     # question about usage, hence environment only: a full year plus a margin,
     # so "the same week last year" stays answerable. 300 postes write ~7 200
@@ -353,6 +353,25 @@ class Settings(BaseSettings):
     # heartbeat's head start. Slightly above the agent's 60 s poll so that
     # head start is a full cycle. Zero disables the preference.
     WOL_RELAY_SUBNET_GRACE_SECONDS: int = Field(default=90, ge=0)
+
+    @model_validator(mode="after")
+    def _usage_thresholds_hold_together(self) -> Self:
+        """The same rules the console's PATCH /settings enforces, on the
+        values the environment seeds: a low threshold at or above the high
+        one, or a high one no poste can reach within the window, would make
+        the dashboard wrong from the first boot — and refuse every later
+        patch that leaves the bad field alone."""
+        if self.USAGE_LOW_HOURS >= self.USAGE_HIGH_HOURS:
+            raise ValueError(
+                "USAGE_LOW_HOURS must be below USAGE_HIGH_HOURS "
+                f"({self.USAGE_LOW_HOURS} >= {self.USAGE_HIGH_HOURS})"
+            )
+        if self.USAGE_HIGH_HOURS > 24 * self.USAGE_WINDOW_DAYS:
+            raise ValueError(
+                f"USAGE_HIGH_HOURS ({self.USAGE_HIGH_HOURS}) exceeds the "
+                f"{24 * self.USAGE_WINDOW_DAYS} hours of USAGE_WINDOW_DAYS"
+            )
+        return self
 
     @model_validator(mode="after")
     def _refuse_placeholder_secrets(self) -> Self:

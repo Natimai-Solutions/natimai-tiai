@@ -4,6 +4,7 @@ import {
   PAGE_SIZE_OPTIONS,
   machineListParamsFromQuery,
   queryValue,
+  type SortFieldsAreComplete,
 } from './machineQuery';
 
 describe('queryValue', () => {
@@ -217,5 +218,12 @@ describe('machineListParamsFromQuery — usage facet', () => {
     ).toEqual({});
     expect(machineListParamsFromQuery({ usage_days: '0' })).toEqual({});
     expect(machineListParamsFromQuery({ usage_days: '2.5' })).toEqual({});
+  });
+});
+
+describe('MACHINE_SORT_FIELDS', () => {
+  it('lists every sort the API offers (checked by the compiler)', () => {
+    const complete: SortFieldsAreComplete = true;
+    expect(complete).toBe(true);
   });
 });

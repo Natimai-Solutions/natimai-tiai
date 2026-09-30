@@ -1130,16 +1130,33 @@ const diskOptions = [
 ];
 
 /** The dropdown's entries, worded with the thresholds once the list served them. */
-const usageOptions = computed<{ label: string; value: UsagePreset | null }[]>(() => {
-  const t = usageThresholds.value;
-  return [
-    { label: 'Utilisation : toutes', value: null },
-    { label: t ? `Peu utilisés (moins de ${t.low} h)` : 'Peu utilisés', value: 'low' },
-    { label: t ? `Entre ${t.low} et ${t.high} h` : 'Utilisation moyenne', value: 'mid' },
-    { label: t ? `Toujours allumés (plus de ${t.high} h)` : 'Toujours allumés', value: 'high' },
-    { label: 'Personnalisé…', value: 'custom' },
-  ];
-});
+const usageOptions = computed<{ label: string; value: UsagePreset | null; disable?: boolean }[]>(
+  () => {
+    const t = usageThresholds.value;
+    // The presets are drawn from the thresholds, which the first list response
+    // brings: until then they are shown but not pickable, rather than picked
+    // and silently dropped.
+    return [
+      { label: 'Utilisation : toutes', value: null },
+      {
+        label: t ? `Peu utilisés (moins de ${t.low} h)` : 'Peu utilisés',
+        value: 'low',
+        disable: !t,
+      },
+      {
+        label: t ? `Entre ${t.low} et ${t.high} h` : 'Utilisation moyenne',
+        value: 'mid',
+        disable: !t,
+      },
+      {
+        label: t ? `Toujours allumés (plus de ${t.high} h)` : 'Toujours allumés',
+        value: 'high',
+        disable: !t,
+      },
+      { label: 'Personnalisé…', value: 'custom' },
+    ];
+  },
+);
 
 /** Which entry the bounds stand for; setting it writes the bounds. */
 const usageMode = computed<UsagePreset | null>({
@@ -1149,9 +1166,15 @@ const usageMode = computed<UsagePreset | null>({
     usageCustom.value = mode === 'custom';
     if (mode === 'custom') return; // the bounds stay, to be edited
     const t = usageThresholds.value;
-    const bounds = mode && t ? usagePresetBounds(mode, t) : { below: null, above: null };
-    usageBelow.value = bounds.below;
-    usageAbove.value = bounds.above;
+    if (mode === null || !t) {
+      // « toutes »: the window goes with the bounds — a link may have widened
+      // it, and nothing else on the page could put it back.
+      clearUsage();
+    } else {
+      const bounds = usagePresetBounds(mode, t);
+      usageBelow.value = bounds.below;
+      usageAbove.value = bounds.above;
+    }
     pushQuery();
   },
 });

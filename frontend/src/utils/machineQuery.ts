@@ -46,7 +46,7 @@ export const SCAN_FILTERS: readonly string[] = ['quick', 'full', 'both'];
  */
 export const SCAN_AGE_DAYS: readonly number[] = [7, 30];
 
-export const MACHINE_SORT_FIELDS: readonly string[] = [
+export const MACHINE_SORT_FIELDS = [
   'hostname',
   'domain',
   'location',
@@ -60,11 +60,23 @@ export const MACHINE_SORT_FIELDS: readonly string[] = [
   'hw_model',
   'ram_total_mb',
   'disk_free_percent',
-  // Must list every sort the list page offers: a fiche walks the results in
-  // this order, and a field missing here silently falls back to the default.
   'agent_version',
   'usage_hours',
-];
+] as const satisfies readonly MachineSortField[];
+
+/**
+ * Every sort the API offers must be listed above: a fiche walks the results
+ * in the URL's order, and a field missing here would silently fall back to
+ * the default. Checked by the compiler — this type is `never`-guarded, so
+ * a `MachineSortField` left out of the array fails `vue-tsc`.
+ */
+type MissingSortField = Exclude<MachineSortField, (typeof MACHINE_SORT_FIELDS)[number]>;
+export type SortFieldsAreComplete = [MissingSortField] extends [never] ? true : never;
+
+/** Whether a URL value names a sortable field. */
+export function isSortField(value: string): value is MachineSortField {
+  return (MACHINE_SORT_FIELDS as readonly string[]).includes(value);
+}
 
 /**
  * Chassis kinds the agent normalises to, with the words the console uses for
@@ -187,8 +199,8 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   const usageAbove = queryFloat(q.usage_hours_above);
   if (usageAbove !== null) params.usage_hours_above = usageAbove;
   const sort = queryValue(q.sort_by);
-  if (sort && MACHINE_SORT_FIELDS.includes(sort)) {
-    params.sort_by = sort as MachineSortField;
+  if (sort && isSortField(sort)) {
+    params.sort_by = sort;
     params.sort_desc = queryValue(q.sort_desc) !== 'false';
   }
   return params;
