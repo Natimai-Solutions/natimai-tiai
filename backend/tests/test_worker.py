@@ -58,6 +58,45 @@ async def test_flag_inactive_machines_counts_stale(engine, db_session, monkeypat
     assert await worker.flag_inactive_machines() == 1
 
 
+async def test_purge_usage_keeps_the_retention_window(engine, db_session, monkeypatch):
+    from sqlmodel import select
+
+    from app.core import worker
+    from app.core.config import settings
+    from app.features.machine.models import Machine
+    from app.features.usage.models import MachineUptime
+
+    monkeypatch.setattr(worker, "engine", engine)
+
+    machine = Machine(machine_uuid="w-usage")
+    db_session.add(machine)
+    await db_session.commit()
+    await db_session.refresh(machine)
+    machine_id = machine.id
+
+    now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    retention = timedelta(days=settings.USAGE_RETENTION_DAYS)
+    kept_hour = now - retention + timedelta(hours=1)
+    db_session.add_all(
+        [
+            MachineUptime(
+                machine_id=machine_id,
+                hour=now - retention - timedelta(hours=1),
+                seconds_on=60,
+            ),
+            MachineUptime(machine_id=machine_id, hour=kept_hour, seconds_on=60),
+            MachineUptime(machine_id=machine_id, hour=now, seconds_on=60),
+        ]
+    )
+    await db_session.commit()
+
+    assert await worker.purge_usage() == 1
+    hours = (
+        await db_session.exec(select(MachineUptime.hour).order_by(MachineUptime.hour))
+    ).all()
+    assert list(hours) == [kept_hour, now]
+
+
 # --- scheduling -------------------------------------------------------------
 
 
@@ -96,6 +135,7 @@ def test_build_jobs_registers_the_whole_schedule():
         "daily_digest",
         "maintenance_reminders",
         "purge_outbox",
+        "purge_usage",
     }
     # The outbox is due immediately: a restarted worker must resume mail
     # delivery on its first tick, not after an arbitrary wait.

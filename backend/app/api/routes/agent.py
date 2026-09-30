@@ -33,6 +33,8 @@ from app.features.notification import threat_alert
 from app.features.room import crud as room_crud
 from app.features.threat.crud import NewDetection, upsert_threats
 from app.features.threat.schemas import ThreatReport
+from app.features.usage import crud as usage_crud
+from app.features.usage.accounting import credit_for_gap
 from app.features.windows_update.crud import replace_pending
 from app.features.windows_update.schemas import WUStateReport
 from app.features.wol import relay as wol_relay
@@ -572,8 +574,18 @@ async def heartbeat(
             tpm_ek_hash=fp.tpm_ek_hash,
         )
 
-    machine.last_seen = utcnow()
-    machine.updated_at = utcnow()
+    # Usage: the time since the previous heartbeat, if it was short enough to
+    # say the poste stayed on. Read off the *previous* last_seen, so before it
+    # is overwritten, and with the same instant that overwrites it — two
+    # utcnow() calls would credit a span that is not the one stored.
+    seen_at = utcnow()
+    await usage_crud.record(
+        session,
+        machine.id,
+        credit_for_gap(machine.last_seen, seen_at, settings.OFFLINE_AFTER_SECONDS),
+    )
+    machine.last_seen = seen_at
+    machine.updated_at = seen_at
 
     # Detections nobody had seen before, for the immediate-alert cadence. Taken
     # here and mailed after the response: the agent is waiting on this request,

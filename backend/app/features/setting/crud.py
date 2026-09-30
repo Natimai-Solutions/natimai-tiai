@@ -14,6 +14,9 @@ from app.features.setting.models import AppSetting
 KEY_CYCLE = "maintenance.default_cycle_days"
 KEY_OWNER = "maintenance.default_owner_id"
 KEY_DUE_SOON = "maintenance.due_soon_days"
+KEY_USAGE_WINDOW = "usage.window_days"
+KEY_USAGE_LOW = "usage.low_hours"
+KEY_USAGE_HIGH = "usage.high_hours"
 
 
 async def get_all(session: AsyncSession) -> dict[str, Any]:
@@ -58,6 +61,35 @@ async def maintenance_policy(session: AsyncSession) -> MaintenancePolicy:
             if isinstance(due_soon, int)
             else env.MAINTENANCE_DUE_SOON_DAYS
         ),
+    )
+
+
+@dataclass(frozen=True)
+class UsagePolicy:
+    """How the usage statistics read the hourly counters, as resolved now:
+    the window they look back over and the two thresholds that make a poste
+    « peu utilisé » or « toujours allumé »."""
+
+    window_days: int
+    low_hours: int
+    high_hours: int
+
+
+def _int_or(value: Any, default: int) -> int:
+    # ``bool`` is an ``int`` to Python; a stored true is not a threshold.
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return default
+
+
+async def usage_policy(session: AsyncSession) -> UsagePolicy:
+    """The console's rows where they exist, the environment's values
+    otherwise — the same precedence as ``maintenance_policy``."""
+    values = await get_all(session)
+    return UsagePolicy(
+        window_days=_int_or(values.get(KEY_USAGE_WINDOW), env.USAGE_WINDOW_DAYS),
+        low_hours=_int_or(values.get(KEY_USAGE_LOW), env.USAGE_LOW_HOURS),
+        high_hours=_int_or(values.get(KEY_USAGE_HIGH), env.USAGE_HIGH_HOURS),
     )
 
 

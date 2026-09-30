@@ -269,6 +269,24 @@ class Settings(BaseSettings):
     # e-mail setting like the digest; an owner with nothing due gets nothing.
     MAINTENANCE_REMINDER_WEEKDAY: int = Field(default=0, ge=0, le=6)
 
+    # --- Usage (heures allumées) ---
+    # How long a poste has been on over a sliding window, counted from the
+    # heartbeats themselves (``app.features.usage``). The three below are only
+    # the *initial* values: the console writes its own (``app_settings``, page
+    # Paramètres), which then win — every parc has its own working week, and
+    # 10 h / 30 h are examples, not a policy.
+    # The window the statistics look back over, in days.
+    USAGE_WINDOW_DAYS: int = Field(default=7, ge=1, le=90)
+    # Below this many hours on over the window, a poste counts as little used.
+    USAGE_LOW_HOURS: int = Field(default=10, ge=0)
+    # Above this many hours, a poste counts as always on.
+    USAGE_HIGH_HOURS: int = Field(default=30, ge=0)
+    # How long the hourly counters are kept. A storage policy rather than a
+    # question about usage, hence environment only: a full year plus a margin,
+    # so "the same week last year" stays answerable. 300 postes write ~7 200
+    # rows a day.
+    USAGE_RETENTION_DAYS: int = Field(default=400, ge=1)
+
     # --- Rooms ---
     # How postes are filed into rooms. ``manual``: from the console, by hand.
     # ``ad_ou``: by the organisational unit the computer object sits in — the

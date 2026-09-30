@@ -1,5 +1,7 @@
 # Utilisation des postes (heures allumées) : plan de travail
 
+> **🚧 J1 livré le 2026-09-30** (comptage, migration `0023_machine_uptime`, purge, fusion). J2 à J4 restent à faire. Écarts en §8.
+
 > Objectif : répondre à « **combien de postes, et lesquels, ont été allumés moins de 10 h — ou plus de 30 h — cette semaine** », pour connaître l'utilisation réelle du parc : postes qui ne servent à rien (candidats à la mutualisation ou au retrait), postes qui ne s'éteignent jamais (consommation, mises à jour qui n'atterrissent jamais).
 >
 > Chantier indépendant des précédents. **Aucune modification de l'agent** dans l'itération de base : tout se déduit du heartbeat existant. Il n'ajoute aucun type de commande ni permission ; il ajoute une table, une colonne dérivée dans la liste des postes, un filtre, une carte au tableau de bord et une carte dans la fiche.
@@ -223,4 +225,11 @@ Total ≈ 4,5 jours. J1 seul est déjà utile à déployer tôt : **le comptage 
 
 ## 8. Écarts constatés à l'implémentation
 
-*(à remplir à la livraison)*
+### J1
+
+- **Tests regroupés** : les tests du heartbeat, de la fusion et de `usage_policy()` sont dans un fichier dédié, [test_api_usage.py](backend/tests/test_api_usage.py), plutôt que répartis dans `test_api_agent.py` et `test_api_machines_list.py`. La règle pure est dans [test_usage_accounting.py](backend/tests/test_usage_accounting.py), la purge dans `test_worker.py`, comme prévu.
+- **Horloge des tests** : en plus d'écrire `last_seen` en base, les tests figent le `utcnow` du module du heartbeat. C'est ce qui rend les crédits exacts à la seconde, y compris l'écart à cheval sur une heure pleine.
+- **Secondes entières** : chaque morceau vaut `floor(fin) − floor(début)` en secondes epoch, plutôt qu'un arrondi par écart. Les crédits d'une suite de heartbeats s'additionnent ainsi exactement à la durée couverte, sans la dérive d'une demi-seconde par battement qu'aurait l'arrondi.
+- **Plafond aussi à la fusion** : `move_to` réutilise l'upsert plafonné à 3 600 s. Deux enregistrements d'un même poste qui se chevauchent dans une heure ne font donc pas échouer la fusion sur la contrainte CHECK.
+- **Lecture non livrée** : `seconds_by_machine`, `usage_clause` et `usage_since` sont décrites en §2 mais relèvent de J2, avec les routes qui les appellent. `usage_policy()` est livrée dès J1 et testée, sans appelant pour l'instant.
+- **Variables d'environnement** : présentes dans `config.py`, pas encore dans `deploy/.env.example` ni dans la page Réglages. C'est J2 (`environment_overview`) et J4, comme prévu.
