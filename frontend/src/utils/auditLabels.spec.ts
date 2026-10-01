@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// The summary names a command type through the commands service, which pulls
+// in the HTTP client; nothing here makes a request.
+vi.mock('boot/axios', () => ({ api: {} }));
 
 import {
   AUDIT_ACTION_LABELS,
@@ -9,6 +13,7 @@ import {
   auditDetailsSummary,
   auditResourceLink,
   auditResourceTypeLabel,
+  formatTtlMinutes,
   isUuid,
 } from './auditLabels';
 
@@ -35,6 +40,7 @@ describe('auditActionLabel', () => {
       'building.update',
       'building.delete',
       'check.update',
+      'command.bulk',
       'group.create',
       'group.update',
       'group.delete',
@@ -43,6 +49,7 @@ describe('auditActionLabel', () => {
       'machine.allow_reenroll',
       'machine.revoke_token',
       'machine.merge',
+      'machine.wake_bulk',
       'maintenance.machine_settings',
       'maintenance.room_settings',
       'room.create',
@@ -64,6 +71,7 @@ describe('auditActionLabel', () => {
 describe('auditResourceTypeLabel', () => {
   it('labels known resource types', () => {
     expect(auditResourceTypeLabel('machine')).toBe('Poste');
+    expect(auditResourceTypeLabel('command')).toBe('Commande');
     expect(auditResourceTypeLabel('user')).toBe('Compte');
     expect(auditResourceTypeLabel('settings')).toBe('Paramètres');
   });
@@ -196,8 +204,79 @@ describe('auditDetailsSummary', () => {
     ).toBe('CDI · champs : cycle_days');
   });
 
+  it('sums up a fleet-wide command', () => {
+    expect(
+      auditDetailsSummary('command.bulk', {
+        command_type: 'quick_scan',
+        target: 'all',
+        created: 42,
+        skipped: 0,
+        ttl_minutes: 60,
+      }),
+    ).toBe('Scan rapide · tout le parc · 42 créée(s) · valable 1 h');
+  });
+
+  it('describes each bulk target and counts what was skipped', () => {
+    const base = { command_type: 'quick_scan', created: 3, skipped: 2, ttl_minutes: 90 };
+    const tail = '3 créée(s) · 2 ignorée(s), déjà en cours · valable 90 min';
+    expect(
+      auditDetailsSummary('command.bulk', { ...base, target: 'domain', domain: 'LYCEE' }),
+    ).toBe(`Scan rapide · domaine « LYCEE » · ${tail}`);
+    expect(auditDetailsSummary('command.bulk', { ...base, target: 'domain', domain: '' })).toBe(
+      `Scan rapide · postes hors domaine · ${tail}`,
+    );
+    expect(
+      auditDetailsSummary('command.bulk', { ...base, target: 'location', location: 'Taravao' }),
+    ).toBe(`Scan rapide · emplacement « Taravao » · ${tail}`);
+    expect(
+      auditDetailsSummary('command.bulk', { ...base, target: 'status', status: 'outdated' }),
+    ).toBe(`Scan rapide · postes non à jour · ${tail}`);
+    expect(auditDetailsSummary('command.bulk', { ...base, target: 'machines', requested: 5 })).toBe(
+      `Scan rapide · 5 poste(s) listé(s) · ${tail}`,
+    );
+  });
+
+  it('keeps an unknown command type, status or target readable', () => {
+    expect(
+      auditDetailsSummary('command.bulk', {
+        command_type: 'teleport',
+        target: 'status',
+        status: 'quantum',
+        created: 1,
+      }),
+    ).toBe('teleport · postes quantum · 1 créée(s)');
+    expect(auditDetailsSummary('command.bulk', { target: 'galaxy', created: 0 })).toBe(
+      '0 créée(s)',
+    );
+    // A target whose value is missing is left out rather than half-said.
+    for (const target of ['domain', 'location', 'status', 'machines']) {
+      expect(auditDetailsSummary('command.bulk', { target })).toBe('—');
+    }
+  });
+
+  it('sums up a bulk wake, in the words of its mode', () => {
+    const ids = { machine_ids: ['a', 'b', 'c'], woken: 2, failed: 1 };
+    expect(auditDetailsSummary('machine.wake_bulk', { ...ids, relayed: false })).toBe(
+      '3 poste(s) · 2 émis · 1 en échec',
+    );
+    expect(auditDetailsSummary('machine.wake_bulk', { ...ids, failed: 0, relayed: true })).toBe(
+      '3 poste(s) · 2 confié(s) à un relais',
+    );
+  });
+
   it('answers a dash when there is nothing to say', () => {
     expect(auditDetailsSummary('settings.update', {})).toBe('—');
     expect(auditDetailsSummary('robot.unknown', { whatever: 1 })).toBe('—');
+  });
+});
+
+describe('formatTtlMinutes', () => {
+  it('uses the largest whole unit', () => {
+    expect(formatTtlMinutes(45)).toBe('45 min');
+    expect(formatTtlMinutes(60)).toBe('1 h');
+    expect(formatTtlMinutes(90)).toBe('90 min');
+    expect(formatTtlMinutes(1440)).toBe('1 j');
+    expect(formatTtlMinutes(43200)).toBe('30 j');
+    expect(formatTtlMinutes(1500)).toBe('25 h');
   });
 });

@@ -5,12 +5,15 @@
  * action added server-side must show up readable enough, never as a blank.
  */
 
+import { commandTypeLabel } from 'src/services/commands';
+
 /** Action slug → label. Mirrors the `audit.record(action=…)` calls of the backend. */
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'building.create': "Création d'un bâtiment",
   'building.update': "Modification d'un bâtiment",
   'building.delete': "Suppression d'un bâtiment",
   'check.update': "Mise à jour d'une vérification",
+  'command.bulk': 'Commande envoyée à plusieurs postes',
   'group.create': "Création d'un groupe",
   'group.update': "Modification d'un groupe",
   'group.delete': "Suppression d'un groupe",
@@ -19,6 +22,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'machine.allow_reenroll': 'Ré-enrôlement autorisé',
   'machine.revoke_token': "Révocation du token d'un poste",
   'machine.merge': 'Fusion de deux fiches poste',
+  'machine.wake_bulk': 'Réveil groupé de postes',
   'maintenance.machine_settings': "Réglage de maintenance d'un poste",
   'maintenance.room_settings': "Réglage de maintenance d'une salle",
   'room.create': "Création d'une salle",
@@ -37,6 +41,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
 /** Resource type → label, in the order the filter offers them. */
 export const AUDIT_RESOURCE_TYPE_LABELS: Record<string, string> = {
   machine: 'Poste',
+  command: 'Commande',
   room: 'Salle',
   building: 'Bâtiment',
   intervention: 'Intervention',
@@ -72,6 +77,17 @@ export const AUDIT_DETAIL_KEY_LABELS: Record<string, string> = {
   placed: 'Postes placés',
   unplaced: 'Postes non placés',
   rooms_created: 'Salles créées',
+  command_type: 'Commande',
+  target: 'Cible',
+  domain: 'Domaine',
+  status: 'Statut visé',
+  requested: 'Postes demandés',
+  created: 'Commandes créées',
+  skipped: 'Postes ignorés (commande déjà en cours)',
+  ttl_minutes: 'Durée de vie (minutes)',
+  woken: 'Réveils émis ou confiés',
+  failed: 'Échecs',
+  relayed: 'Confié à un poste relais',
 };
 
 /** A readable label for an action slug; the slug itself when unknown. */
@@ -144,6 +160,49 @@ function count(details: Record<string, unknown>, key: string): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+/** The console's words for a status filter, as a bulk command's target. */
+const TARGET_STATUS_LABELS: Record<string, string> = {
+  up_to_date: 'à jour',
+  outdated: 'non à jour',
+  needs_verification: 'à vérifier',
+  inactive: 'inactifs',
+};
+
+/** What a bulk command was aimed at, in a few words; null when unreadable. */
+function bulkTarget(details: Record<string, unknown>): string | null {
+  switch (details.target) {
+    case 'all':
+      return 'tout le parc';
+    case 'domain': {
+      // "" is a real target: the postes that are in no domain.
+      const domain = details.domain;
+      if (typeof domain !== 'string') return null;
+      return domain ? `domaine « ${domain} »` : 'postes hors domaine';
+    }
+    case 'location': {
+      const location = text(details, 'location');
+      return location ? `emplacement « ${location} »` : null;
+    }
+    case 'status': {
+      const status = text(details, 'status');
+      return status ? `postes ${TARGET_STATUS_LABELS[status] ?? status}` : null;
+    }
+    case 'machines': {
+      const requested = count(details, 'requested');
+      return requested === null ? null : `${requested} poste(s) listé(s)`;
+    }
+    default:
+      return null;
+  }
+}
+
+/** A lifetime in minutes, in the largest whole unit: 60 → 1 h, 2880 → 2 j. */
+export function formatTtlMinutes(minutes: number): string {
+  if (minutes >= 1440 && minutes % 1440 === 0) return `${minutes / 1440} j`;
+  if (minutes >= 60 && minutes % 60 === 0) return `${minutes / 60} h`;
+  return `${minutes} min`;
+}
+
 /** Keys the summary already spells out, or that only matter in the full view. */
 const SUMMARY_SUBJECT_KEYS = ['hostname', 'email', 'name', 'title'];
 
@@ -158,6 +217,10 @@ export function auditDetailsSummary(action: string, details: Record<string, unkn
   const subject = SUMMARY_SUBJECT_KEYS.map((k) => text(details, k)).find((v) => v !== null);
   if (subject) parts.push(subject);
 
+  // Right after the subject: how many postes, before what happened to them.
+  const machineIds = details.machine_ids;
+  if (Array.isArray(machineIds)) parts.push(`${machineIds.length} poste(s)`);
+
   if (action === 'machine.merge') {
     const source =
       text(details, 'source_hostname') ??
@@ -170,6 +233,31 @@ export function auditDetailsSummary(action: string, details: Record<string, unkn
     parts.push(details.generated ? 'mot de passe généré' : 'mot de passe saisi');
   }
 
+  if (action === 'command.bulk') {
+    const type = text(details, 'command_type');
+    if (type) parts.push(commandTypeLabel(type));
+    const target = bulkTarget(details);
+    if (target) parts.push(target);
+    const created = count(details, 'created');
+    const skipped = count(details, 'skipped');
+    const ttl = count(details, 'ttl_minutes');
+    if (created !== null) parts.push(`${created} créée(s)`);
+    // Only when some were: "0 ignorée(s)" on every line would be noise.
+    if (skipped) parts.push(`${skipped} ignorée(s), déjà en cours`);
+    if (ttl !== null) parts.push(`valable ${formatTtlMinutes(ttl)}`);
+  }
+
+  if (action === 'machine.wake_bulk') {
+    const woken = count(details, 'woken');
+    const failed = count(details, 'failed');
+    // In relay mode an "ok" is a wake handed to a poste of the site, not a
+    // packet the server sent: the line must not promise more than that.
+    if (woken !== null) {
+      parts.push(details.relayed === true ? `${woken} confié(s) à un relais` : `${woken} émis`);
+    }
+    if (failed) parts.push(`${failed} en échec`);
+  }
+
   if (action === 'room.sync_directory') {
     const placed = count(details, 'placed');
     const unplaced = count(details, 'unplaced');
@@ -178,9 +266,6 @@ export function auditDetailsSummary(action: string, details: Record<string, unkn
     if (unplaced !== null) parts.push(`${unplaced} non placé(s)`);
     if (created !== null) parts.push(`${created} salle(s) créée(s)`);
   }
-
-  const machineIds = details.machine_ids;
-  if (Array.isArray(machineIds)) parts.push(`${machineIds.length} poste(s)`);
 
   const fields = details.fields;
   if (Array.isArray(fields) && fields.length) {

@@ -1452,8 +1452,28 @@ async def wake_machines(
             )
         )
 
-    await session.commit()
     woken = sum(1 for r in results if r.ok)
+    requested = list(dict.fromkeys(payload.machine_ids))
+    if len(requested) > 1:
+        # A room or a selection woken in one go. Each poste already has its
+        # wake_on_lan row; the entry adds what no row can say — that it was
+        # one request, and how much of it failed (an unknown id leaves no row
+        # at all). One poste alone is traced by its row, like any command.
+        audit.record(
+            session,
+            actor=user.email,
+            action="machine.wake_bulk",
+            resource_type="machine",
+            # No single machine to name: the ids are in the details.
+            resource_id="",
+            details={
+                "machine_ids": [str(m) for m in requested],
+                "woken": woken,
+                "failed": len(results) - woken,
+                "relayed": settings.WOL_RELAY_ENABLED,
+            },
+        )
+    await session.commit()
     return WakeResponse(
         results=results,
         woken=woken,
