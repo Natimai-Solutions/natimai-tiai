@@ -21,7 +21,13 @@
       </q-card-section>
       <q-card-actions align="right" class="q-px-md q-pb-md">
         <q-btn v-close-popup flat label="Annuler" />
-        <q-btn color="primary" label="Affecter" :loading="placing" @click="submit" />
+        <q-btn
+          color="primary"
+          label="Affecter"
+          :loading="placing"
+          :disable="!roomId"
+          @click="submit"
+        />
       </q-card-actions>
     </q-card>
   </q-dialog>
@@ -57,6 +63,8 @@ const roomOptions = computed(() => [
 ]);
 
 async function submit() {
+  // Nothing picked yet: nothing to do, and no spinner for it either.
+  if (!roomId.value) return;
   placing.value = true;
   try {
     await props.save(roomId.value);

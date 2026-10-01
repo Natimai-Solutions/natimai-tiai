@@ -51,4 +51,18 @@ describe('MachinePlaceDialog', () => {
     await vi.waitFor(() => expect(affecter(wrapper).props('loading')).toBe(false));
     wrapper.unmount();
   });
+
+  it('keeps « Affecter » disabled until a room is picked', async () => {
+    const save = vi.fn(() => Promise.resolve());
+    const wrapper = await mountDialog(save);
+
+    expect(affecter(wrapper).props('disable')).toBe(true);
+    await affecter(wrapper).trigger('click');
+    expect(save).not.toHaveBeenCalled();
+    expect(affecter(wrapper).props('loading')).toBe(false);
+
+    await wrapper.findComponent(QSelect).setValue('r-1');
+    expect(affecter(wrapper).props('disable')).toBe(false);
+    wrapper.unmount();
+  });
 });
