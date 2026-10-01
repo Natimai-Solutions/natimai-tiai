@@ -4,7 +4,8 @@ What used to need ARQ and Redis is a single loop over Postgres: every
 ``POLL_SECONDS`` it drains the outbox (mails queued by the API and by the
 digest, sent with retries), and runs whichever periodic jobs have come due —
 command expiry every five minutes, the daily digest and housekeeping once a
-day. One worker process per deployment, which is what the compose runs; the
+day — the retention purges of the outbox, the usage counters, the audit log,
+the command history and the spent password-reset tokens. One worker process per deployment, which is what the compose runs; the
 drain assumes no concurrent drainer.
 
 A job that comes due while the worker is down runs at the next matching time,
@@ -30,7 +31,10 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.core.db import engine
+from app.features import password_reset_retention
+from app.features.audit import crud as audit_crud
 from app.features.base import utcnow
+from app.features.command import crud as command_crud
 from app.features.command.models import Command, CommandStatus
 from app.features.notification import digest, outbox
 from app.features.usage import crud as usage_crud
@@ -93,6 +97,36 @@ async def purge_usage() -> int:
     cutoff = utcnow() - timedelta(days=settings.USAGE_RETENTION_DAYS)
     async with AsyncSession(engine) as session:
         return await usage_crud.purge_before(session, cutoff)
+
+
+async def purge_audit() -> int:
+    """Drop audit entries past ``AUDIT_RETENTION_DAYS`` (0 keeps them all)."""
+    if settings.AUDIT_RETENTION_DAYS == 0:
+        return 0
+    cutoff = utcnow() - timedelta(days=settings.AUDIT_RETENTION_DAYS)
+    async with AsyncSession(engine) as session:
+        return await audit_crud.purge_before(session, cutoff)
+
+
+async def purge_commands() -> int:
+    """Drop finished commands past ``COMMAND_RETENTION_DAYS`` (0 keeps them).
+
+    Pending and running rows are never touched — see
+    ``command_crud.PURGEABLE_STATUSES``.
+    """
+    if settings.COMMAND_RETENTION_DAYS == 0:
+        return 0
+    cutoff = utcnow() - timedelta(days=settings.COMMAND_RETENTION_DAYS)
+    async with AsyncSession(engine) as session:
+        return await command_crud.purge_before(session, cutoff)
+
+
+async def purge_reset_tokens() -> int:
+    """Drop the password-reset tokens expired or used for more than a day."""
+    async with AsyncSession(engine) as session:
+        return await password_reset_retention.purge_spent_reset_tokens(
+            session, utcnow()
+        )
 
 
 # --- Scheduling -------------------------------------------------------------
@@ -178,6 +212,14 @@ def build_jobs(now: datetime) -> list[Job]:
         ),
         Job("purge_outbox", purge_outbox, housekeeping(now), housekeeping),
         Job("purge_usage", purge_usage, housekeeping(now), housekeeping),
+        Job("purge_audit", purge_audit, housekeeping(now), housekeeping),
+        Job("purge_commands", purge_commands, housekeeping(now), housekeeping),
+        Job(
+            "purge_reset_tokens",
+            purge_reset_tokens,
+            housekeeping(now),
+            housekeeping,
+        ),
     ]
 
 

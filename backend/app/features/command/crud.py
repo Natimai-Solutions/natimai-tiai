@@ -1,9 +1,10 @@
-"""Command queue operations: bulk creation, de-duplication and expiry sweep."""
+"""Command queue operations: bulk creation, de-duplication, expiry sweep and
+retention purge."""
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import update
+from sqlalchemy import delete, func, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -117,4 +118,32 @@ async def mark_expired(
     if machine_id is not None:
         stmt = stmt.where(col(Command.machine_id) == machine_id)
     result = await session.exec(stmt)
+    return result.rowcount or 0
+
+
+# What the retention purge may delete. Every terminal status, plus DELIVERED:
+# a command handed to an agent that never answered stays DELIVERED for good
+# (only PENDING is ever swept to EXPIRED), and past the retention window the
+# verdict it was kept for is not coming. PENDING and RUNNING are not here: a
+# command still owed, or one an agent said it was executing, is not history.
+PURGEABLE_STATUSES = frozenset({*TERMINAL_STATUSES, CommandStatus.DELIVERED})
+
+
+async def purge_before(session: AsyncSession, cutoff: datetime) -> int:
+    """Drop the finished commands whose last event predates ``cutoff``.
+
+    "Last event" is the verdict when there is one, else the delivery, else
+    the creation: a command delivered to a poste that was then off for a
+    month and answered on its return is aged from that answer, not from the
+    day it was queued. Commits; returns the number of rows gone.
+    """
+    last_event = func.coalesce(
+        col(Command.finished_at), col(Command.delivered_at), col(Command.created_at)
+    )
+    result = await session.exec(
+        delete(Command)
+        .where(col(Command.status).in_([s.value for s in PURGEABLE_STATUSES]))
+        .where(last_event < cutoff)
+    )
+    await session.commit()
     return result.rowcount or 0
