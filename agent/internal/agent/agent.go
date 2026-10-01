@@ -373,6 +373,8 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		Inventory:      inv,
 		Fingerprint:    &fp,
 		Threats:        threats,
+		// This agent stores a token handed back below (rotateToken).
+		SupportsTokenRotation: true,
 	})
 	if err != nil {
 		// Named explicitly, because this is the failure nobody could diagnose
@@ -385,6 +387,11 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 				"it will ride the next one: %v", err)
 		}
 		return err
+	}
+	if resp.NewToken != "" {
+		// Before the commands: the worker may post a result the moment one is
+		// accepted, and it should carry the token the server now expects.
+		a.rotateToken(resp.NewToken)
 	}
 	if !a.firstOK.Swap(true) {
 		// Once per process: at INFO a quiet heartbeat leaves no trace, and

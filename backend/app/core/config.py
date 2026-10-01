@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     # --- Agent enrollment ---
     # Shared secret deployed by GPO; only authorizes POST /agent/enroll.
     ENROLLMENT_SECRET: str = "changeme-enrollment-secret"
+    # Age, in days, past which a poste's token is renewed on its next
+    # heartbeat — only for an agent that announces it can store a new one
+    # (``supports_token_rotation``); an older agent keeps its token for life.
+    # A token copied off a poste (a disk image, a backup of ProgramData) then
+    # stops working within this many days without anyone revoking it. 0 turns
+    # rotation off. See ``features/machine/token_rotation.py``.
+    AGENT_TOKEN_ROTATE_DAYS: int = Field(default=30, ge=0, le=3650)
 
     # --- Remote commands ---
     # How long a queued command stays valid when the request does not carry its

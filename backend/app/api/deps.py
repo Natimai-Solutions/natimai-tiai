@@ -7,13 +7,14 @@ from typing import Annotated
 from fastapi import Depends, Header
 from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import InvalidTokenError
-from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core import security
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.errors import AppError, ErrorCode
+from app.features.base import utcnow
+from app.features.machine import token_rotation
 from app.features.machine.models import Machine
 from app.features.user import crud as user_crud
 from app.features.user.models import User
@@ -45,7 +46,11 @@ async def get_current_machine(
     session: SessionDep,
     authorization: Annotated[str | None, Header()] = None,
 ) -> Machine:
-    """Resolve the calling machine from its Bearer token (per-machine auth)."""
+    """Resolve the calling machine from its Bearer token (per-machine auth).
+
+    The current token or, during a rotation, the one offered on a heartbeat —
+    whose first use promotes it (``features/machine/token_rotation.py``).
+    """
     if not authorization or not authorization.startswith("Bearer "):
         raise AppError(
             code=ErrorCode.AUTH_TOKEN_MISSING,
@@ -53,10 +58,8 @@ async def get_current_machine(
             message="Missing bearer token",
         )
     token = authorization.removeprefix("Bearer ").strip()
-    token_hash = security.hash_token(token)
 
-    result = await session.exec(select(Machine).where(Machine.token_hash == token_hash))
-    machine = result.one_or_none()
+    machine = await token_rotation.machine_for_token(session, token, utcnow())
     if machine is None:
         raise AppError(
             code=ErrorCode.AUTH_TOKEN_INVALID, status_code=401, message="Invalid token"

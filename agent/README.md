@@ -693,6 +693,29 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
   **abandonné sur le premier 401** : l'agent retente alors l'enrôlement avec le
   secret du parc. Tant que la révocation tient, le serveur répond 403 et l'agent
   attend ; dès qu'un admin « autorise le ré-enrôlement », le poste revient seul.
+- **Rotation du token.** Un token copié hors du poste (image disque, sauvegarde
+  de `%ProgramData%`) ne doit pas fonctionner pour toujours : le serveur le
+  renouvelle tous les `AGENT_TOKEN_ROTATE_DAYS` jours (30 par défaut). L'agent
+  annonce qu'il sait le faire (`supports_token_rotation: true` dans chaque
+  heartbeat) ; une version antérieure ne l'annonce pas et n'est jamais
+  sollicitée. Quand le token a l'âge, la réponse au heartbeat porte
+  `new_token`, et l'agent ([`internal/agent/token.go`](internal/agent/token.go)) :
+  1. l'**écrit d'abord** dans `token.dat`, par le même chemin que l'enrôlement
+     (`config.SaveToken` : DPAPI scope machine + entropie par poste), de façon
+     atomique — fichier temporaire vidé sur disque (`fsync`) puis renommé sur
+     l'ancien, fichier temporaire supprimé en cas d'échec ;
+  2. ne **bascule** qu'ensuite : la requête suivante, heartbeat ou résultat de
+     commande, porte le nouveau token, et c'est elle qui fait retirer l'ancien
+     côté serveur.
+
+  Si l'écriture échoue, l'agent **garde l'ancien token** et le journalise :
+  le serveur l'honore toujours tant que le nouveau n'a pas servi, et en
+  repropose un autre au heartbeat suivant. Une réponse perdue en route a le
+  même effet. Dans l'ordre inverse — basculer puis écrire — un échec
+  d'écriture laisserait au prochain redémarrage un `token.dat` contenant un
+  token mort, donc un ré-enrôlement. Le token lui-même n'est journalisé à
+  aucun niveau ; le client HTTP le protège par un verrou, la boucle de polling
+  le changeant pendant que le worker de commandes poste ses résultats.
 
 ## Robustesse (plan §2.9)
 
@@ -742,7 +765,8 @@ relances : un poste tombé plusieurs fois dans la journée revient tout seul au
 lieu d'attendre une main humaine.
 
 L'agent s'auto-enrôle au 1er démarrage (en-tête `X-Enrollment-Secret`), stocke
-le token reçu (DPAPI), puis n'utilise plus que `Authorization: Bearer <token>`.
+le token reçu (DPAPI), puis n'utilise plus que `Authorization: Bearer <token>` —
+un token que le serveur renouvelle de lui-même (cf. « Rotation du token »).
 
 ## Publier un .exe sur GitHub
 

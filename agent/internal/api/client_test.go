@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -75,5 +77,45 @@ func TestStatusErrorSurvivesTheTimeoutWrapping(t *testing.T) {
 	var se *StatusError
 	if !errors.As(err, &se) || se.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected a typed 401, got %v", err)
+	}
+}
+
+// The token changes under a running agent — a rotation, from the polling loop —
+// while the command worker posts results from its own goroutine. Run under
+// -race, this is what proves the swap is safe; and every request must carry
+// one of the two tokens whole, never a mix.
+func TestTokenSwapUnderConcurrentRequests(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		mu.Unlock()
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "old-token", time.Second, nil)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 5; j++ {
+				_ = c.PostResult(context.Background(), "cmd", models.CommandResult{Status: "succeeded"})
+			}
+		}()
+	}
+	c.SetToken("new-token")
+	wg.Wait()
+
+	if got := c.Token(); got != "new-token" {
+		t.Errorf("Token() = %q after SetToken, want new-token", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, tok := range seen {
+		if tok != "old-token" && tok != "new-token" {
+			t.Fatalf("a request carried %q", tok)
+		}
 	}
 }

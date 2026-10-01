@@ -232,6 +232,14 @@ class Machine(SQLModel, table=True):
     # Per-machine auth: only the token hash is stored.
     token_hash: str | None = None
     token_revoked: bool = Field(default=False)
+    # When ``token_hash`` was issued — at enrollment, or when a rotated token
+    # was first used. What AGENT_TOKEN_ROTATE_DAYS is measured against.
+    token_issued_at: datetime = utc_field(default_factory=utcnow)
+    # The token offered on a heartbeat and not yet used by the agent. Valid
+    # alongside ``token_hash`` until then: the response carrying it may never
+    # have arrived, and the agent must not be locked out by a lost packet.
+    # Its first use promotes it (``features/machine/token_rotation.py``).
+    pending_token_hash: str | None = None
 
     first_seen: datetime = utc_field(default_factory=utcnow)
     last_seen: datetime = utc_field(default_factory=utcnow)

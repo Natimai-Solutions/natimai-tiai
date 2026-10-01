@@ -32,6 +32,7 @@ from app.features.inventory.models import (
     Volume,
 )
 from app.features.machine import crud as machine_crud
+from app.features.machine import token_rotation
 from app.features.machine.agent_version import FleetVersions, fleet_versions
 from app.features.machine.fingerprint import trustworthy_smbios_uuid
 from app.features.machine.models import Machine
@@ -1844,6 +1845,8 @@ async def revoke_token(
     """
     machine = await _require_machine(session, machine_id)
     machine.token_revoked = True
+    # A token offered for rotation and not yet used is a credential too.
+    token_rotation.reset_rotation(machine)
     machine.updated_at = utcnow()
     audit.record(
         session,
@@ -1874,6 +1877,7 @@ async def allow_reenroll(
     machine = await _require_machine(session, machine_id)
     machine.token_revoked = False
     machine.token_hash = None
+    token_rotation.reset_rotation(machine)
     machine.updated_at = utcnow()
     audit.record(
         session,
