@@ -57,6 +57,10 @@
           <q-item-section avatar><q-icon name="settings" /></q-item-section>
           <q-item-section>Paramètres</q-item-section>
         </q-item>
+        <q-item v-if="auth.can('audit', 'read')" v-ripple clickable :to="{ name: 'audit' }">
+          <q-item-section avatar><q-icon name="history_edu" /></q-item-section>
+          <q-item-section>Journal d'audit</q-item-section>
+        </q-item>
       </q-list>
     </q-drawer>
 

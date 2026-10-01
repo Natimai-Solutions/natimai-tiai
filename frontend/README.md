@@ -29,11 +29,15 @@ src/
   pages/TasksPage.vue       « Mes tâches » : vérifications affectées, maintenances à faire
   pages/GroupsPage.vue      groupes de droits (grille ressources × actions)
   pages/SettingsPage.vue    défauts du parc (maintenance)
+  pages/AuditPage.vue       journal d'audit (permission audit:read) : filtres et page dans l'URL
   components/check|maintenance|room   dialogues des chantiers d'exploitation
+  components/audit/         filtres et détail d'une entrée du journal d'audit
   utils/permissions.ts      catalogue des permissions, miroir du backend ; auth.can()
   router/                   routes
   services/machines.ts      appels API typés
   utils/format.ts           libellés et couleurs partagés
+  utils/auditLabels.ts      libellés des actions / ressources d'audit, résumé des détails
+  utils/auditQuery.ts       état URL du journal ; période (jours locaux → since/until)
 ```
 
 ## Rafraîchissement automatique
@@ -54,6 +58,10 @@ Trois garde-fous, chacun étant un bug qu'on aurait sinon livré :
 - **les échecs sont avalés** — une notification toutes les 90 s sur un lien
   instable est pire qu'une donnée d'un cycle de retard. Le 401 fait exception et
   est traité là où il doit l'être, dans l'intercepteur axios.
+
+Le **journal d'audit** ne se rafraîchit pas seul : il se lit comme une archive,
+et des lignes qui glisseraient sous un lecteur en train d'en comparer deux
+seraient pires qu'une vue d'un clic de retard. Seul « Actualiser » le recharge.
 
 Les rafraîchissements automatiques n'allument **pas** le spinner : seul le
 bouton « Actualiser » le fait. La fiche détail se met en pause tant qu'une

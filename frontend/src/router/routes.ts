@@ -69,6 +69,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('pages/GroupsPage.vue'),
         meta: { requiresPermission: 'user:read' },
       },
+      {
+        path: 'audit',
+        name: 'audit',
+        component: () => import('pages/AuditPage.vue'),
+        meta: { requiresPermission: 'audit:read' },
+      },
       { path: 'account', name: 'account', component: () => import('pages/AccountPage.vue') },
     ],
   },
