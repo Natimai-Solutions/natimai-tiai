@@ -281,9 +281,12 @@ commands               -- file de commandes (une ligne par poste, même en broad
 
 | Méthode | Endpoint | Rôle |
 |---|---|---|
-| `POST` | `/api/v1/auth/login` | Email + mot de passe (OAuth2 password) → JWT. |
+| `POST` | `/api/v1/auth/login` | Email (insensible à la casse) + mot de passe (OAuth2 password) → jeton d'accès (JWT court, `sid`) + jeton de session en cookie `HttpOnly`. |
+| `POST` | `/api/v1/auth/refresh` | Cookie de session → nouveau jeton d'accès, jeton de session renouvelé (réutilisation d'un ancien = session révoquée). |
+| `POST` | `/api/v1/auth/logout` | Révoque la session courante, efface le cookie. |
+| `GET` / `DELETE` | `/api/v1/auth/sessions[/{id}]` | Sessions ouvertes du compte ; fermeture de l'une d'elles. |
 | `GET` | `/api/v1/auth/me` | Utilisateur courant. |
-| `POST` | `/api/v1/auth/password` | Changement de son propre mot de passe (preuve : mot de passe actuel). Ferme les autres sessions. |
+| `POST` | `/api/v1/auth/password` | Changement de son propre mot de passe (preuve : mot de passe actuel). Ferme toutes les sessions du compte. |
 | `POST` | `/api/v1/auth/password-reset/request` | **Public.** Envoie un lien de réinitialisation par e-mail (Mailgun). Répond 204 quoi qu'il arrive (anti-énumération). |
 | `POST` | `/api/v1/auth/password-reset/confirm` | **Public.** Consomme le jeton (usage unique, expirant) et définit le nouveau mot de passe. |
 | `GET` | `/api/v1/machines?search=&domain=&antivirus=&status=&page=` | Liste filtrable/paginée (`search` couvre hostname / UUID / IP / nom d'antivirus ; `antivirus` filtre par sous-chaîne). |
@@ -573,6 +576,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] Journal d'audit (2026-08-28) : migration `0013_audit_log`, `audit.record` dans la transaction de l'appelant, lecture console `GET /audit` (admin, filtres, paginé) ; tracées : révocation de token, ré-autorisation d'enrôlement — les commandes portent `created_by` depuis M3
 - [x] Couverture d'audit élargie (2026-10-01) : fusion de postes (`machine.merge`, identité de la fiche supprimée dans les détails) et réinitialisation de mot de passe par un administrateur (`user.reset_password`, jamais le mot de passe) ; les comptes l'étaient déjà. Lecture filtrable par auteur, type de ressource et période (`since` inclus, `until` exclu, fuseau obligatoire), `GET /audit/actions`
 - [x] Page console « Journal d'audit » (2026-10-01) : `/audit`, permission `audit:read`, filtres et page dans l'URL, détail par entrée
+- [x] **Sécurité des comptes console** (2026-10-01) : (1) **pas d'escalade** — un compte non administrateur n'accorde que ce qu'il détient (groupes composés, placement d'un compte, et aucune prise sur un compte ou un groupe plus puissant, groupe Administrateurs compris), erreur `auth.permission.escalation` ; (2) **sessions serveur** — table `auth_sessions` (migration `0024`), jeton d'accès de 15 min portant `sid` et vérifié contre sa session à chaque requête, jeton de session tournant en cookie `HttpOnly; SameSite=Strict; Secure`, réutilisation = vol présumé et révocation, `POST /auth/refresh`, `POST /auth/logout`, « Sessions ouvertes » dans « Mon compte » (audit `auth.session_revoked`), révocation de toutes les sessions au changement/réinitialisation de mot de passe et à la désactivation ; console : jeton en mémoire, un seul rafraîchissement partagé sur 401, rafraîchissement silencieux au rechargement ; (3) connexion à **temps constant** (bcrypt contre un hash factice) et e-mails **insensibles à la casse** (index unique sur `lower(email)`, migration refusant les doublons de casse)
 - [ ] Audit des actions de masse — les commandes portent déjà `created_by`, reste la trace d'une commande groupée en tant que telle
 - [ ] Rotation automatique des tokens agents
 
@@ -599,7 +603,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 | Étape | Mesure |
 |---|---|
 | MVP (M0–M1) | **TLS dès le départ** (Caddy + AC interne) ; **auto-enrôlement** : secret d'enrôlement partagé → **token unique par poste** (DPAPI) ; identité = `machine_uuid` ; **auth console JWT** avec rôles `admin` / `readonly`. |
-| Durcissement (M5) | Garde-fou de ré-enrôlement + révocation de token ; journal d'audit ; moindre privilège + limitation de débit sur l'API. |
+| Durcissement (M5) | Garde-fou de ré-enrôlement + révocation de token ; journal d'audit ; moindre privilège + limitation de débit sur l'API. ✅ côté console : sessions serveur révocables (jeton d'accès court + jeton de session tournant en cookie `HttpOnly`), pas d'escalade de privilèges par la gestion des comptes, connexion à temps constant. |
 | Plus tard | Rotation automatique des tokens ; mTLS ; attestation d'identité AD à l'enrôlement ; **permissions fines par ressource/table** (lecture/écriture) au-delà des deux rôles. |
 
 Points permanents : binaire agent **signé**, validation stricte des entrées API, limitation de débit côté agent pour éviter l'effet « troupeau ».

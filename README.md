@@ -229,6 +229,19 @@ et un accès réseau au serveur.
   — lecture seule, techniciens, administrateurs, ou n'importe quel assemblage,
   les commandes à risque (arrêt, redémarrage, installation de mises à jour)
   étant un droit à part —, journal d'audit et limitation de débit.
+- **Sessions révocables** : une connexion est une session tenue par le serveur.
+  Le jeton d'accès vit un quart d'heure, en mémoire de la page ; le jeton de
+  session, dans un cookie que la page ne peut pas lire, change à chaque usage, et
+  sa réutilisation ferme la session. Déconnexion, fermeture d'une session depuis
+  « Mon compte », changement ou réinitialisation du mot de passe, désactivation :
+  l'accès est coupé à la requête suivante, pas à l'expiration d'un jeton.
+- **Pas d'escalade de privilèges** : un compte n'accorde que les droits qu'il
+  détient lui-même. Gérer les comptes ne permet ni de se fabriquer un
+  administrateur, ni de toucher — modifier, désactiver, réinitialiser — un compte
+  plus puissant que soi ; seuls les administrateurs ont la main sur tout.
+- **Connexion sans fuite d'information** : même réponse et même temps de calcul
+  pour une adresse inconnue, un compte désactivé ou un mauvais mot de passe ;
+  adresses e-mail insensibles à la casse.
 - **Catalogue de commandes fermé** : aucun exécuteur de scripts, aucune
   modification du registre, des fichiers, du pare-feu ou des comptes — un serveur
   compromis ne peut déclencher que les actions prévues.
