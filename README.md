@@ -102,7 +102,9 @@ gère naturellement les postes éteints.
   dont vous êtes responsable. Une vérification affectée est annoncée sur le
   moment, et chaque responsable reçoit un rappel hebdomadaire de ses
   maintenances dues. Chaque e-mail passe par une file en base et est réessayé
-  en cas d'incident d'envoi : un courrier décidé n'est jamais perdu.
+  en cas d'incident d'envoi : un courrier décidé n'est jamais perdu. L'envoi
+  (Mailgun ou n'importe quel serveur SMTP) se règle depuis la page Paramètres,
+  identifiants chiffrés en base, avec un bouton d'e-mail de test.
 - **Inventaire matériel et logiciel** — ce que chaque poste *est* : constructeur,
   modèle, châssis, carte mère, BIOS, processeur, barrettes et emplacements
   libres, disques (type, santé, chiffrement), volumes avec leur occupation,
