@@ -13,6 +13,89 @@ export interface EnvGroup {
   items: EnvItem[];
 }
 
+export type EmailProvider = 'mailgun' | 'smtp';
+export type SmtpSecurity = 'starttls' | 'tls' | 'none';
+
+/** What the server's environment says for each mail field: the value a field
+ * left empty in the console falls back to. Never a secret, nor the SMTP
+ * account name — only whether one is set. */
+export interface EmailEnv {
+  provider: EmailProvider;
+  from_email: string | null;
+  from_name: string;
+  smtp_host: string | null;
+  smtp_port: number;
+  smtp_security: SmtpSecurity;
+  smtp_user_set: boolean;
+  smtp_password_set: boolean;
+  smtp_verify_tls: boolean;
+  smtp_timeout_seconds: number;
+  mailgun_domain: string | null;
+  mailgun_api_key_set: boolean;
+  mailgun_base_url: string;
+  /** Whether the environment alone would send mail. */
+  configured: boolean;
+}
+
+/** The card « Envoi des e-mails ». Each field is what the console stored;
+ * `null` = nothing stored, the environment's value applies. */
+export interface EmailSettings {
+  provider: EmailProvider | null;
+  from_email: string | null;
+  from_name: string | null;
+  smtp_host: string | null;
+  smtp_port: number | null;
+  smtp_security: SmtpSecurity | null;
+  smtp_user: string | null;
+  smtp_verify_tls: boolean | null;
+  smtp_timeout_seconds: number | null;
+  mailgun_domain: string | null;
+  mailgun_base_url: string | null;
+  /** The secrets are never sent back: only whether one is stored, and
+   * whether it is stored but sealed under a key the server no longer has. */
+  smtp_password_set: boolean;
+  smtp_password_unreadable: boolean;
+  mailgun_api_key_set: boolean;
+  mailgun_api_key_unreadable: boolean;
+  /** The policy as it resolves now. */
+  effective_provider: EmailProvider;
+  configured: boolean;
+  /** What the chosen provider still lacks, in words. */
+  missing: string[];
+  env: EmailEnv;
+}
+
+/** Absent = unchanged; `null` = forget the console's value (the
+ * environment's applies again); a secret is replaced by any non-empty string. */
+export interface EmailSettingsPayload {
+  provider?: EmailProvider | null;
+  from_email?: string | null;
+  from_name?: string | null;
+  smtp_host?: string | null;
+  smtp_port?: number | null;
+  smtp_security?: SmtpSecurity | null;
+  smtp_user?: string | null;
+  smtp_password?: string | null;
+  smtp_verify_tls?: boolean | null;
+  smtp_timeout_seconds?: number | null;
+  mailgun_domain?: string | null;
+  mailgun_api_key?: string | null;
+  mailgun_base_url?: string | null;
+}
+
+export interface EmailTestRequest {
+  /** Defaults, server-side, to the caller's own address. */
+  to?: string;
+  /** The card's unsaved values, tried without being saved. */
+  email?: EmailSettingsPayload;
+}
+
+export interface EmailTestResult {
+  ok: boolean;
+  /** Readable as is: what went out, or what to fix. */
+  message: string;
+}
+
 /** The console's parc-wide settings (page Paramètres), editable without a restart. */
 export interface ConsoleSettings {
   maintenance_default_cycle_days: number;
@@ -30,6 +113,8 @@ export interface ConsoleSettings {
   env_usage_low_hours: number;
   env_usage_high_hours: number;
   room_source: string;
+  /** How mail leaves the console. */
+  email: EmailSettings;
   /** The rest of the environment, read-only and never a secret: what an
    * administrator checks without a shell on the server. */
   environment: EnvGroup[];
@@ -43,6 +128,7 @@ export interface SettingsPayload {
   usage_window_days?: number;
   usage_low_hours?: number;
   usage_high_hours?: number;
+  email?: EmailSettingsPayload;
 }
 
 export async function getSettings(): Promise<ConsoleSettings> {
@@ -52,5 +138,12 @@ export async function getSettings(): Promise<ConsoleSettings> {
 
 export async function updateSettings(payload: SettingsPayload): Promise<ConsoleSettings> {
   const { data } = await api.patch<ConsoleSettings>('/settings', payload);
+  return data;
+}
+
+/** Send one test mail now, outside the outbox. A failed send is still a
+ * resolved promise, with `ok: false` and the reason in `message`. */
+export async function sendTestEmail(request: EmailTestRequest): Promise<EmailTestResult> {
+  const { data } = await api.post<EmailTestResult>('/settings/email/test', request);
   return data;
 }
