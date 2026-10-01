@@ -571,7 +571,9 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] **Outbox e-mail + retrait d'ARQ/Redis** (2026-08-20, cf. §2.11) : tout e-mail (alerte, digest, réinitialisation) est écrit dans `email_outbox` **dans la transaction de l'appelant** — l'alerte de menace part désormais de la transaction du heartbeat même, plus d'une tâche de fond — puis envoyé par le worker avec reprises (backoff 1 min → 1 h, `EMAIL_MAX_ATTEMPTS`, statut `abandoned` conservé avec la dernière erreur, purge après `EMAIL_OUTBOX_RETENTION_DAYS`). Motivé par un envoi perdu sur erreur de proxy sortant. Le worker ARQ est remplacé par une boucle asyncio (`app/core/worker.py`) portant les trois tâches périodiques existantes ; services `redis` et dépendances `arq`/`redis` supprimés. Migration `0012_email_outbox` ; 319 tests verts sur Postgres, chaîne Alembic vérifiée up/down/up
 - [x] Rate-limiting (2026-08-28) : fenêtre glissante en mémoire process (`app/core/ratelimit.py`) sur login (10 / 5 min), demande de réinitialisation (5 / 15 min) et enrôlement agent (30 / 5 min, limiteur avant la validation du secret) ; `reset_all()` en fixture autouse des tests
 - [x] Journal d'audit (2026-08-28) : migration `0013_audit_log`, `audit.record` dans la transaction de l'appelant, lecture console `GET /audit` (admin, filtres, paginé) ; tracées : révocation de token, ré-autorisation d'enrôlement — les commandes portent `created_by` depuis M3
-- [ ] Élargir la couverture d'audit (comptes, fusion de postes, actions de masse) + page console du journal
+- [x] Couverture d'audit élargie (2026-10-01) : fusion de postes (`machine.merge`, identité de la fiche supprimée dans les détails) et réinitialisation de mot de passe par un administrateur (`user.reset_password`, jamais le mot de passe) ; les comptes l'étaient déjà. Lecture filtrable par auteur, type de ressource et période (`since` inclus, `until` exclu, fuseau obligatoire), `GET /audit/actions`
+- [x] Page console « Journal d'audit » (2026-10-01) : `/audit`, permission `audit:read`, filtres et page dans l'URL, détail par entrée
+- [ ] Audit des actions de masse — les commandes portent déjà `created_by`, reste la trace d'une commande groupée en tant que telle
 - [ ] Rotation automatique des tokens agents
 
 **M6 — Packaging & GPO** · 🟡 packaging et vecteurs de déploiement livrés ; reste la signature et le pilote
@@ -579,7 +581,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] Installateur MSI (`deploy/msi/Package.wxs` + `build.ps1`) : service TiaiAgent (démarrage auto, relance sur échec), désinstallation standard, README
 - [x] Script de démarrage GPO (`deploy/gpo/Install-TiaiAgent.ps1`) : idempotent (SHA-256), mise à jour du binaire et réapplication des réglages à chaque boot, README (partage, GPO, registre)
 - [x] Documentation d'exploitation : DEPLOYMENT.md (modes TLS, secrets, variables serveur, sauvegardes/restauration, Wake-on-LAN, paramètres agent, dépannage)
-- [ ] **Signature du binaire et du MSI** (certificat de l'AC interne, `signtool` dans la chaîne de release) + distribution du certificat en *Éditeurs approuvés* par GPO — les binaires publiés aujourd'hui sont non signés
+- [x] **Signature du binaire et du MSI** dans la chaîne de release (2026-10-01) : `signtool` sur le runner Windows, `.exe` signés avant d'être embarqués dans le `.msi`, puis `.msi` signés, horodatage RFC 3161 ; certificat fourni par les secrets du dépôt (`SIGNING_CERT_PFX_BASE64`), `REQUIRE_SIGNING=true` pour rendre la signature obligatoire. Reste : déposer le certificat de l'AC interne dans les secrets, et le distribuer en *Éditeurs approuvés* par GPO (DEPLOYMENT.md § « Signature de l'agent »)
 - [ ] **DoD** : agent signé déployé et reconnu de confiance sur un OU pilote
 
 **Transverse**

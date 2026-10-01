@@ -88,8 +88,10 @@ gère naturellement les postes éteints.
   l'allumage des battements de l'agent. Deux limites connues : environ une
   minute perdue par démarrage, et une panne du serveur de plus de trois minutes
   n'est comptée pour aucun poste.
-- **Supervision** — tableau de bord, recherche et filtres, nettoyage automatique
-  des postes disparus. Le tableau de bord, la liste et la fiche d'un poste se
+- **Supervision** — tableau de bord, recherche et filtres, repérage des postes
+  disparus : sans contact depuis 30 jours (réglable), un poste passe
+  « inactif », filtrable, compté au tableau de bord et dans le résumé
+  quotidien. Le tableau de bord, la liste et la fiche d'un poste se
   rafraîchissent seuls, au rythme des remontées des agents.
 - **E-mails, au rythme de chacun** — chaque compte choisit ce qu'il reçoit :
   rien, une alerte immédiate à chaque menace détectée, un résumé quotidien les
@@ -198,9 +200,14 @@ commande, sans rien d'autre à installer sur la machine.
 
 ```bash
 cd deploy
-cp .env.example .env        # renseigner les secrets, placer le certificat dans deploy/certs/
+cp .env.example .env        # renseigner les secrets et TIAI_VERSION, placer le certificat dans deploy/certs/
 docker compose up -d        # db + backend + worker + console + caddy
 ```
+
+Les images du serveur sont publiées à chaque release sur ghcr.io
+(`tiai-backend`, `tiai-frontend`), sous le même numéro de version que l'agent ;
+`TIAI_VERSION` choisit laquelle tourner. Mise à jour et retour arrière :
+[DEPLOYMENT.md](DEPLOYMENT.md#mettre-à-jour-le-serveur).
 
 Une variante dev/tests lève la même stack sans certificat. L'agent, lui, se
 déploie par GPO sur les postes et s'enrôle tout seul au premier démarrage.
@@ -234,7 +241,15 @@ et un accès réseau au serveur.
   heure — délai réglable — et n'est plus jamais remise à un agent. Un poste
   rallumé après trois semaines ne rejoue pas ce qu'on lui avait demandé
   entre-temps ([cycle de vie](backend/README.md#cycle-de-vie-dune-commande)).
-- **Binaire agent signé** par le certificat de l'AC interne.
+- **Binaire agent et installateur signés** (Authenticode, horodatés) par la
+  chaîne de release, avec le certificat de signature de code fourni au dépôt —
+  celui de l'AC interne pour un parc en domaine
+  ([DEPLOYMENT.md](DEPLOYMENT.md#signature-de-lagent-authenticode)).
+- **Charges utiles bornées** : chaque requête est plafonnée à 8 Mo par le
+  reverse-proxy, et le serveur borne chaque liste et chaque chaîne qu'un agent
+  remonte — un agent défaillant ou hostile ne peut pas remplir la base.
+- **Journal d'audit consultable** dans la console : comptes, droits, salles,
+  fusions de postes, réinitialisations de mot de passe — qui, quand, sur quoi.
 
 Pour signaler une vulnérabilité, contactez
 [Natimai Solutions](https://www.natimai.solutions/contact) plutôt que d'ouvrir

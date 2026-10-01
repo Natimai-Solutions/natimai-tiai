@@ -28,6 +28,14 @@
 
 	# API backend
 	handle /api/* {
+		# Plafond de taille d'une requête, refusée en 413 avant d'atteindre le
+		# backend. Le plus gros envoi légitime est le heartbeat qui porte
+		# l'inventaire complet d'un poste (quelques centaines de Kio) ; 8 Mo
+		# laissent une marge d'un ordre de grandeur sans laisser un agent
+		# défaillant ou hostile pousser des centaines de Mo dans l'API.
+		request_body {
+			max_size 8MB
+		}
 		reverse_proxy backend:8000
 	}
 

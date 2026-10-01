@@ -137,8 +137,11 @@ conséquence, l'enrôlement étant idempotent côté serveur.
   seconde GPO avec un filtre WMI
   (`SELECT * FROM Win32_Processor WHERE Architecture = 12`) pointant sur le
   binaire `windows-arm64`.
-- **Binaire non signé** : sans impact ici (le service est lancé par le SCM, pas
-  par un double-clic), mais SmartScreen avertit lors des essais manuels. En
-  attendant une signature de code, `-ExpectedHash` est le contrôle qui tient le
-  rôle : l'intégrité du binaire est vérifiée sur chaque poste contre une valeur
-  que seule la GPO porte.
+- **Signature** : les releases sont signées (Authenticode) quand le dépôt porte
+  le certificat de signature de code, cf. [DEPLOYMENT.md](../../DEPLOYMENT.md)
+  § « Signature de l'agent ». Sans lui, le binaire part non signé : sans impact
+  ici (le service est lancé par le SCM, pas par un double-clic), mais
+  SmartScreen avertit lors des essais manuels. Signé ou non, `-ExpectedHash`
+  reste le contrôle qui compte ici : l'intégrité du binaire est vérifiée sur
+  chaque poste contre une valeur que seule la GPO porte — la signature dit qui
+  l'a produit, l'empreinte que c'est exactement celui que la GPO a choisi.
