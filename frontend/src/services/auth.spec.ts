@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('boot/axios', () => ({
-  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }));
 
 import { api } from 'boot/axios';
 import {
   changePassword,
+  closeSession,
   confirmPasswordReset,
   getMe,
+  listSessions,
   login,
+  logout,
   requestPasswordReset,
   updateMe,
 } from './auth';
@@ -32,6 +35,61 @@ describe('login', () => {
     expect(body).toBeInstanceOf(URLSearchParams);
     expect((body as URLSearchParams).get('username')).toBe('admin@test.local');
     expect((body as URLSearchParams).get('password')).toBe('secret');
+  });
+
+  it('lets the browser store the refresh cookie the server sets', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: { access_token: 'jwt', token_type: 'bearer' } });
+
+    await login('admin@test.local', 'secret');
+
+    expect(vi.mocked(api.post).mock.calls[0]![2]).toEqual({ withCredentials: true });
+  });
+});
+
+describe('logout', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset();
+  });
+
+  it('asks the server to end the session, with the refresh cookie', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: undefined });
+
+    await logout();
+
+    expect(api.post).toHaveBeenCalledWith('/auth/logout', undefined, { withCredentials: true });
+  });
+});
+
+describe('sessions', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset();
+    vi.mocked(api.delete).mockReset();
+  });
+
+  it('lists the account open sessions', async () => {
+    const sessions = [
+      {
+        id: 's-1',
+        created_at: '2026-10-01T08:00:00Z',
+        last_used_at: '2026-10-01T09:00:00Z',
+        expires_at: '2026-10-08T09:00:00Z',
+        user_agent: 'Firefox',
+        ip: '10.0.0.5',
+        current: true,
+      },
+    ];
+    vi.mocked(api.get).mockResolvedValue({ data: sessions });
+
+    await expect(listSessions()).resolves.toEqual(sessions);
+    expect(api.get).toHaveBeenCalledWith('/auth/sessions');
+  });
+
+  it('closes one session by id', async () => {
+    vi.mocked(api.delete).mockResolvedValue({ data: undefined });
+
+    await closeSession('a/b');
+
+    expect(api.delete).toHaveBeenCalledWith('/auth/sessions/a%2Fb', { withCredentials: true });
   });
 });
 

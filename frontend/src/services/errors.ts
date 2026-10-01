@@ -18,6 +18,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'auth.credentials.invalid': 'Identifiants invalides',
   'auth.required': 'Authentification requise',
   'auth.permission.denied': "Vous n'avez pas la permission requise",
+  'auth.permission.escalation':
+    'Refusé : vous ne pouvez accorder que les droits que vous détenez vous-même, et ne pouvez pas modifier un compte ou un groupe qui en détient davantage (ni les administrateurs)',
+  'auth.session.invalid': 'Votre session a pris fin : reconnectez-vous',
+  'auth.session.not_found': 'Session introuvable ou déjà fermée',
   'auth.token.missing': 'Jeton manquant',
   'auth.token.invalid': 'Jeton invalide',
   'auth.token.revoked': 'Jeton révoqué',
@@ -48,6 +52,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'room.placement.locked':
     "Les postes sont rangés par l'annuaire (ROOM_SOURCE) : le rattachement manuel est désactivé",
   'request.validation_error': 'Requête invalide',
+  'request.rate_limited': 'Trop de tentatives : réessayez dans quelques minutes',
   'http.not_found': 'Ressource introuvable',
   'http.error': 'Erreur',
   'internal.server_error': 'Erreur interne du serveur',

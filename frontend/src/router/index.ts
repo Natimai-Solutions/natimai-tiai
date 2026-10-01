@@ -1,5 +1,6 @@
 import { defineRouter } from '#q-app';
 import {
+  START_LOCATION,
   createMemoryHistory,
   createRouter,
   createWebHashHistory,
@@ -7,11 +8,10 @@ import {
 } from 'vue-router';
 import routes from './routes';
 
+import { refreshSession } from 'boot/axios';
+import { ensureSession, getAccessToken } from 'src/services/session';
 import { readCachedPermissions } from 'src/stores/auth';
 import { hashUrlToHistory } from 'src/utils/legacyUrl';
-
-// Source of truth for "logged in" in the guard (kept in sync by the auth store).
-const TOKEN_KEY = 'tiai_token';
 
 export default defineRouter(() => {
   // Read from `import.meta.env`, where app-vite 3 defines them. The former
@@ -37,13 +37,20 @@ export default defineRouter(() => {
     history: createHistory(base),
   });
 
-  router.beforeEach((to) => {
-    const isAuthed = !!localStorage.getItem(TOKEN_KEY);
-    if (to.meta.requiresAuth && !isAuthed) {
+  router.beforeEach(async (to, from) => {
+    // The access token lives in memory: after a reload, or in a new tab, there
+    // is none yet while the session may well be alive behind its cookie. Ask
+    // for a silent refresh before sending anyone to the login page.
+    if (to.meta.requiresAuth && !(await ensureSession(refreshSession))) {
       return { name: 'login', query: { redirect: to.fullPath } };
     }
-    if (to.name === 'login' && isAuthed) {
-      return { name: 'dashboard' };
+    // Opening /login directly with a live session lands on the dashboard; the
+    // refresh is only tried on that first navigation — once the console runs,
+    // reaching /login means the session has just ended.
+    if (to.name === 'login') {
+      const live =
+        from === START_LOCATION ? await ensureSession(refreshSession) : getAccessToken() !== null;
+      if (live) return { name: 'dashboard' };
     }
     // Pages behind a permission. The guard only decides what to render — the
     // backend authorizes every call independently, so this cannot be bypassed

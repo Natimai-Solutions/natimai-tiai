@@ -20,7 +20,10 @@ npm run build        # génère dist/spa, servi par nginx (cf. Dockerfile)
 
 ```
 src/
-  boot/axios.ts             instance axios (baseURL = API_BASE_URL, défaut /api/v1)
+  boot/axios.ts             instance axios (baseURL = API_BASE_URL, défaut /api/v1) ; sur 401,
+                            un seul POST /auth/refresh partagé puis la requête rejouée
+  services/session.ts       jeton d'accès en mémoire, logique du 401 et rafraîchissement
+                            silencieux au démarrage (testés à part de l'instance axios)
   composables/              logique de page réutilisable (rafraîchissement auto)
   layouts/MainLayout.vue    coquille applicative
   pages/MachinesPage.vue    liste des postes
