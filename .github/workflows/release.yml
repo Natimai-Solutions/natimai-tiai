@@ -1,5 +1,6 @@
 # Publie les binaires Windows de l'agent (.exe et installateur .msi) sur la
-# page Releases du dépôt.
+# page Releases du dépôt, et les images Docker du serveur (backend, console)
+# sur ghcr.io.
 #
 # Déclenchement :
 #   - tag `v*` poussé sur le dépôt  → crée la release et y attache .exe + .msi ;
@@ -15,10 +16,21 @@
 # `tiai-agent.exe version` et le champ `agent_version` des heartbeats la
 # reflètent — pas besoin de modifier le code source pour publier.
 #
-# Trois jobs : les .exe se cross-compilent sur Linux, mais le .msi est
-# construit sur un runner Windows (WiX y est pleinement supporté), et la
-# publication attend les deux pour attacher un jeu complet — binaires,
-# installateurs et empreintes — ou rien.
+# Quatre jobs : les .exe se cross-compilent sur Linux ; le runner Windows les
+# signe, construit les .msi autour des .exe signés et signe ces .msi à leur
+# tour (WiX et signtool y sont chez eux) ; les images Docker se construisent en
+# parallèle ; la publication attend le tout pour attacher un jeu complet —
+# binaires, installateurs et empreintes — ou rien.
+#
+# Signature Authenticode : par le certificat fourni dans les secrets du dépôt
+# (SIGNING_CERT_PFX_BASE64, SIGNING_CERT_PASSWORD), cf. DEPLOYMENT.md
+# § « Signature de l'agent ». Sans ces secrets, les binaires partent non signés
+# avec un avertissement ; la variable REQUIRE_SIGNING=true en fait une erreur.
+#
+# Images : ghcr.io/natimai-solutions/tiai-backend:<version> et
+# tiai-frontend:<version>, plus `latest` pour une version sans suffixe
+# (v1.2.0, pas v1.2.0-rc.1). Poussées seulement sur un tag ; un lancement
+# manuel les construit sans les publier.
 #
 # Chaque release porte exactement cinq fichiers, toujours nommés pareil :
 #   tiai-agent-windows-amd64.exe   tiai-agent-windows-arm64.exe
@@ -48,6 +60,7 @@ concurrency:
 
 permissions:
   contents: write # créer la release et téléverser les binaires
+  packages: write # pousser les images Docker sur ghcr.io
 
 jobs:
   agent:
@@ -118,8 +131,8 @@ jobs:
           if-no-files-found: error
 
   msi:
-    name: Installateur Windows (.msi)
-    runs-on: windows-latest # WiX construit les MSI de façon fiable sous Windows
+    name: Signature et installateur Windows (.msi)
+    runs-on: windows-latest # WiX et signtool sont chez eux sous Windows
     needs: agent
 
     env:
@@ -137,6 +150,17 @@ jobs:
         with:
           name: tiai-agent-exe-${{ needs.agent.outputs.version }}
           path: dist
+
+      # Avant le MSI : le .exe que le MSI embarque, et donc le service
+      # installé sur chaque poste, est ainsi le binaire signé.
+      - name: Signer les .exe
+        shell: pwsh
+        env:
+          SIGNING_CERT_PFX_BASE64: ${{ secrets.SIGNING_CERT_PFX_BASE64 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+          SIGNING_TIMESTAMP_URL: ${{ vars.SIGNING_TIMESTAMP_URL }}
+          REQUIRE_SIGNING: ${{ vars.REQUIRE_SIGNING }}
+        run: ./.github/scripts/Sign-Authenticode.ps1 -Path (Get-ChildItem dist/*.exe).FullName
 
       # `update` plutôt que `install` : idempotent si l'image du runner
       # embarque déjà l'outil.
@@ -182,29 +206,97 @@ jobs:
               -o "dist/tiai-agent-windows-${arch}.msi"
           done
 
+      - name: Signer les .msi
+        shell: pwsh
+        env:
+          SIGNING_CERT_PFX_BASE64: ${{ secrets.SIGNING_CERT_PFX_BASE64 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+          SIGNING_TIMESTAMP_URL: ${{ vars.SIGNING_TIMESTAMP_URL }}
+          REQUIRE_SIGNING: ${{ vars.REQUIRE_SIGNING }}
+        run: ./.github/scripts/Sign-Authenticode.ps1 -Path (Get-ChildItem dist/*.msi).FullName
+
+      # Le jeu publiable : les .exe tels que signés ici, et les .msi qui les
+      # embarquent. Les .exe non signés du job `agent` ne sont jamais publiés.
       - name: Artefact de build
         uses: actions/upload-artifact@v7
         with:
-          name: tiai-agent-msi-${{ needs.agent.outputs.version }}
-          path: dist/*.msi
+          name: tiai-agent-windows-${{ needs.agent.outputs.version }}
+          path: |
+            dist/*.exe
+            dist/*.msi
           if-no-files-found: error
+
+  images:
+    name: Image Docker (${{ matrix.component }})
+    runs-on: ubuntu-latest
+    needs: agent
+    strategy:
+      matrix:
+        component: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Connexion à ghcr.io
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Le nom d'image doit être en minuscules ; le propriétaire du dépôt ne
+      # l'est pas (Natimai-Solutions). `latest` ne suit que les versions
+      # stables : une release candidate ne doit pas s'installer par défaut.
+      - name: Étiquettes
+        id: tags
+        env:
+          VERSION: ${{ needs.agent.outputs.version }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/tiai-${COMPONENT}"
+          tags="${image}:${VERSION}"
+          case "${VERSION}" in
+            *-*) ;;
+            *) tags="${tags},${image}:latest" ;;
+          esac
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "Étiquettes : ${tags}"
+
+      - name: Construire et publier
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.component }}
+          push: ${{ github.ref_type == 'tag' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=tiai-${{ matrix.component }}
+            org.opencontainers.image.version=${{ needs.agent.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.licenses=Apache-2.0
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
   publish:
     name: Publier la release
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
-    needs: [agent, msi]
+    needs: [agent, msi, images]
 
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # --generate-notes a besoin de l'historique des tags
 
+      # Seulement l'artefact du job Windows : il porte les .exe signés.
+      # Celui du job `agent` contient les mêmes .exe avant signature.
       - name: Rassembler les binaires
         uses: actions/download-artifact@v8
         with:
-          pattern: tiai-agent-*-${{ needs.agent.outputs.version }}
-          merge-multiple: true
+          name: tiai-agent-windows-${{ needs.agent.outputs.version }}
           path: dist
 
       # Recalculées ici pour couvrir exe et msi dans un seul fichier.

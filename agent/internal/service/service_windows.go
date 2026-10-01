@@ -3,7 +3,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 
+	"tiai/agent/internal/acl"
 	"tiai/agent/internal/agent"
 	"tiai/agent/internal/config"
 	"tiai/agent/internal/logging"
@@ -182,7 +185,9 @@ func Run(cfgPath string) error {
 	return svc.Run(ServiceName, &tiaiService{cfgPath: cfgPath})
 }
 
-// Install registers the service to auto-start and run `run --config <path>`.
+// Install registers the service to auto-start and run `run --config <path>`,
+// and restricts the registry key and the data directory the way the MSI and the
+// GPO script do (see restrictLocations).
 func Install(cfgPath string) error {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -221,7 +226,61 @@ func Install(cfgPath string) error {
 		fmt.Printf("warning: could not set recovery actions: %v\n", err)
 	}
 	fmt.Printf("Service %s installed.\n", ServiceName)
+	restrictLocations(cfgPath)
 	return nil
+}
+
+// restrictLocations gives HKLM\SOFTWARE\Tiai and the data directory the DACL
+// the MSI and the GPO script give them — SYSTEM + Administrators, protected
+// from inheritance (acl.RegistryKeySDDL, acl.DataDirSDDL).
+//
+// Without it a poste installed by hand kept the ACLs it inherited: the key
+// readable by every authenticated user (HKLM\SOFTWARE is), with the enrollment
+// secret and the TokenEntropy in it, and token.dat readable under
+// %ProgramData% — the two halves of the token, side by side. Installing by
+// `tiai-agent install` instead of the MSI must not be a way to get a weaker
+// poste.
+//
+// Warnings, never a failed install, and that is the GPO script's rule too: an
+// agent whose secrets are readable is a problem to fix, an agent not installed
+// at all is a poste nobody watches. On stdout, like the recovery-actions
+// warning above, and not on stderr: the GPO script runs this command with
+// `2>&1` under $ErrorActionPreference = 'Stop', where Windows PowerShell 5.1
+// turns any stderr line into a terminating error — a warning would fail the
+// very deployment it is meant to inform.
+func restrictLocations(cfgPath string) {
+	if changed, err := acl.HardenRegistryKey(); err != nil {
+		fmt.Printf("warning: could not restrict HKLM\\%s to SYSTEM + Administrators: %v\n",
+			acl.RegistryKeyPath, err)
+	} else if changed {
+		fmt.Printf("Registry key HKLM\\%s restricted to SYSTEM + Administrators.\n", acl.RegistryKeyPath)
+	}
+
+	dir := filepath.Dir(cfgPath)
+	_, statErr := os.Stat(dir)
+	// Anything but a clean "does not exist" counts as existing: the
+	// conservative answer when the directory cannot even be looked at.
+	existed := !errors.Is(statErr, fs.ErrNotExist)
+	if !mayHardenDataDir(dir, config.DefaultConfigDir(), existed) {
+		if ok, err := acl.DataDirRestricted(dir); err == nil && ok {
+			return
+		}
+		fmt.Printf("warning: %s already existed and is not the default data directory; "+
+			"its ACL is left as it is. Restrict it to SYSTEM + Administrators yourself: "+
+			"token.dat will be stored there.\n", dir)
+		return
+	}
+	// Created here rather than at first enrollment, and restricted before the
+	// service ever writes into it: everything it then holds inherits the DACL.
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		fmt.Printf("warning: could not create %s: %v\n", dir, err)
+		return
+	}
+	if changed, err := acl.HardenDataDir(dir); err != nil {
+		fmt.Printf("warning: could not restrict %s to SYSTEM + Administrators: %v\n", dir, err)
+	} else if changed {
+		fmt.Printf("Data directory %s restricted to SYSTEM + Administrators.\n", dir)
+	}
 }
 
 // setRecoveryActions makes the SCM bring the service back after a crash.
@@ -243,13 +302,18 @@ func setRecoveryActions(s *mgr.Service) error {
 }
 
 // Repair re-applies to an already-installed service the settings a fresh
-// install would give it: automatic start and the recovery actions above.
+// install would give it: automatic start, the recovery actions above, and the
+// restricted ACLs on the registry key and the data directory.
 //
 // It exists for the postes installed by an earlier version, which carry the old
 // "restart, restart, nothing" and would otherwise keep it for the life of the
 // machine — an upgrade replaces the binary, never the SCM's idea of what to do
-// when it dies.
-func Repair() error {
+// when it dies. The same goes for the ACLs of a poste installed by hand before
+// install restricted them. cfgPath locates the data directory, as for Install.
+func Repair(cfgPath string) error {
+	if abs, err := filepath.Abs(cfgPath); err == nil {
+		cfgPath = abs
+	}
 	return withService(func(s *mgr.Service) error {
 		cfg, err := s.Config()
 		if err != nil {
@@ -265,6 +329,7 @@ func Repair() error {
 			return fmt.Errorf("set recovery actions: %w", err)
 		}
 		fmt.Printf("Service %s: automatic start and restart-on-failure re-applied.\n", ServiceName)
+		restrictLocations(cfgPath)
 		return nil
 	})
 }

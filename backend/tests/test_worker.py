@@ -40,24 +40,6 @@ async def test_expire_stale_commands_marks_pending(engine, db_session, monkeypat
     assert status == CommandStatus.EXPIRED
 
 
-async def test_flag_inactive_machines_counts_stale(engine, db_session, monkeypatch):
-    from app.core import worker
-    from app.features.machine.models import Machine
-
-    monkeypatch.setattr(worker, "engine", engine)
-
-    db_session.add(
-        Machine(
-            machine_uuid="w-old",
-            last_seen=datetime.now(UTC) - timedelta(days=999),
-        )
-    )
-    db_session.add(Machine(machine_uuid="w-recent"))  # last_seen defaults to now
-    await db_session.commit()
-
-    assert await worker.flag_inactive_machines() == 1
-
-
 async def test_purge_usage_keeps_the_retention_window(engine, db_session, monkeypatch):
     from sqlmodel import select
 
@@ -131,7 +113,6 @@ def test_build_jobs_registers_the_whole_schedule():
     assert set(jobs) == {
         "outbox",
         "expire_stale_commands",
-        "flag_inactive_machines",
         "daily_digest",
         "maintenance_reminders",
         "purge_outbox",
@@ -168,3 +149,38 @@ async def test_a_failing_job_neither_stops_the_loop_nor_spins():
     # Not due yet: nothing runs on the next pass.
     await run_due_jobs([job], now + timedelta(seconds=30))
     assert calls == [1]
+
+
+def test_mark_alive_touches_the_liveness_file(tmp_path, monkeypatch):
+    from app.core import worker
+
+    alive = tmp_path / "alive"
+    monkeypatch.setattr(worker, "ALIVE_FILE", alive)
+    worker.mark_alive()
+    assert alive.exists()
+
+
+def test_mark_alive_never_raises(tmp_path, monkeypatch):
+    from app.core import worker
+
+    # A directory that does not exist: the touch fails, the loop must not.
+    monkeypatch.setattr(worker, "ALIVE_FILE", tmp_path / "missing" / "alive")
+    worker.mark_alive()
+
+
+async def test_main_marks_alive_after_a_tick(tmp_path, monkeypatch):
+    import asyncio
+
+    from app.core import worker
+
+    alive = tmp_path / "alive"
+    monkeypatch.setattr(worker, "ALIVE_FILE", alive)
+    monkeypatch.setattr(worker, "build_jobs", lambda now: [])
+    stop = asyncio.Event()
+
+    async def stop_after_first_tick() -> None:
+        await asyncio.sleep(0)  # let main() run its first tick
+        stop.set()
+
+    await asyncio.gather(worker.main(stop), stop_after_first_tick())
+    assert alive.exists()

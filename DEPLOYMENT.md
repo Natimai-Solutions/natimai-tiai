@@ -172,6 +172,7 @@ Il n'est jamais committé.
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `TIAI_SERVER_NAME` | `tiai.natimai.local` | Nom du site Caddy ; doit correspondre au CN/SAN du certificat en mode C |
+| `TIAI_VERSION` | `latest` | Version des images `tiai-backend` et `tiai-frontend` tirées de ghcr.io — à épingler en production (cf. § « Mettre à jour le serveur ») |
 | `TIAI_DEV_BACKEND_PORT` | `8800` | Port hôte du backend en HTTP direct (override de dev uniquement) |
 | `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/` (cf. § « Sauvegardes et restauration ») |
 
@@ -304,8 +305,8 @@ chaque e-mail le lien vers la fiche du poste concerné.
 Toute la mémoire de Tia'i — postes, historique des menaces, commandes (qui a
 redémarré quoi), comptes de la console, file d'e-mails — vit dans un seul
 volume PostgreSQL. Le service `db-backup` du compose la sauvegarde **sans rien
-configurer** : un dump au démarrage de la stack (donc juste avant chaque montée
-de version), puis un par 24 h, au format custom de `pg_dump` (`-Fc`,
+configurer** : un dump à chaque démarrage du service (premier lancement,
+redémarrage du serveur), puis un par 24 h, au format custom de `pg_dump` (`-Fc`,
 compressé), dans `deploy/backups/` sur l'hôte. La rétention est de
 `BACKUP_KEEP_DAYS` jours (défaut 14) et la purge n'a lieu qu'après un dump
 réussi : une base en panne ne fait jamais disparaître les sauvegardes
@@ -358,6 +359,129 @@ docker compose exec db-backup sh -c \
 > n'existe pas : sur la stack de dev (`docker-compose.dev.yml`), restaurer un
 > dump et vérifier que la console retrouve ses postes prend dix minutes, et
 > c'est le seul moyen de savoir que la chaîne complète fonctionne.
+
+---
+
+## Mettre à jour le serveur
+
+Chaque release publie, en plus des binaires de l'agent, les deux images du
+serveur sur le registre GitHub, sous le numéro de la release :
+
+```
+ghcr.io/natimai-solutions/tiai-backend:<version>    # API et worker
+ghcr.io/natimai-solutions/tiai-frontend:<version>   # console
+```
+
+`latest` désigne la dernière version stable (jamais une `-rc`). La version que
+la stack démarre est `TIAI_VERSION` dans `deploy/.env` : **l'épingler** en
+production (`TIAI_VERSION=1.1.0`), pour qu'une mise à jour soit une décision et
+pas l'effet de bord du prochain `docker compose pull`.
+
+```bash
+cd deploy
+# 1. Un dump juste avant : `up -d` ne recrée que les services dont l'image
+#    change, donc db-backup ne refait pas le sien à cette occasion.
+docker compose exec db-backup sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" \
+   -d "$POSTGRES_DB" -Fc -f /backups/tiai-avant-mise-a-jour.dump'
+# 2. Changer TIAI_VERSION dans .env, puis :
+docker compose pull                 # télécharge les images de cette version
+docker compose up -d                # recrée backend, worker et console
+docker compose ps                   # tous les services « healthy » en 2 min
+```
+
+Le backend rejoue les migrations Alembic à son démarrage.
+
+**Revenir en arrière** : remettre l'ancienne valeur de `TIAI_VERSION` et
+relancer `docker compose up -d` — tant que la version quittée n'a pas migré la
+base. Si elle l'a fait, restaurer le dump pris avant la montée (§ « Restaurer »)
+*puis* redémarrer sur l'ancienne version : un schéma plus récent que le code
+n'est pas supporté.
+
+**Construire depuis les sources** plutôt que tirer les images (dépôt modifié,
+serveur sans accès à ghcr.io) : `docker compose up -d --build`. Compose
+construit alors les images localement et les nomme comme les images publiées.
+Sans accès au registre, il les construit aussi de lui-même au premier
+démarrage.
+
+> Les paquets d'un dépôt public sont privés à leur première publication sur
+> ghcr.io : rendre `tiai-backend` et `tiai-frontend` publics une fois, dans les
+> réglages de chaque paquet (*Package settings → Change visibility*), pour
+> qu'un serveur puisse les tirer sans identifiants.
+
+### État de santé et journaux
+
+Chaque service a un contrôle de santé, lu par `docker compose ps` (colonne
+*STATUS* : `healthy` / `unhealthy`) :
+
+| Service | Sain quand |
+|---|---|
+| `db` | `pg_isready` répond |
+| `backend` | `/health` répond **et** signale la base joignable (`"database": true`) |
+| `worker` | sa boucle a terminé un tour il y a moins de 5 min (fichier témoin touché toutes les 30 s) |
+| `frontend` | nginx sert la console |
+| `caddy` | son API d'administration répond |
+
+Docker ne redémarre pas un conteneur `unhealthy` de lui-même (seulement un
+conteneur arrêté, via `restart: unless-stopped`) : l'état sert au diagnostic et
+à une supervision externe (`docker inspect --format '{{.State.Health.Status}}'
+deploy-backend-1`).
+
+Les journaux de chaque conteneur tournent à 5 fichiers de 10 Mio
+(`docker compose logs <service>`), au lieu de grossir jusqu'à remplir le disque.
+
+---
+
+## Signature de l'agent (Authenticode)
+
+La chaîne de release signe les `.exe` **avant** de construire les `.msi` autour
+d'eux (le service installé sur chaque poste est donc le binaire signé), puis les
+`.msi` eux-mêmes, avec horodatage RFC 3161 : la signature reste valide après
+l'expiration du certificat. Le certificat est fourni par les **secrets du
+dépôt** (*Settings → Secrets and variables → Actions*) :
+
+| Nom | Type | Contenu |
+|---|---|---|
+| `SIGNING_CERT_PFX_BASE64` | secret | Le certificat de signature de code **avec sa clé privée**, export PFX, encodé en base64 |
+| `SIGNING_CERT_PASSWORD` | secret | Mot de passe du PFX |
+| `SIGNING_TIMESTAMP_URL` | variable | Horodateur RFC 3161 (défaut : `http://timestamp.digicert.com`) |
+| `REQUIRE_SIGNING` | variable | `true` : une release taguée sans certificat échoue au lieu de partir non signée |
+
+Sans ces secrets, la release se construit comme avant, non signée, avec un
+avertissement dans le résumé du workflow.
+
+**Certificat de l'AC interne** (le cas prévu) : demander à l'AD CS un
+certificat sur le modèle *Signature de code* (*Code Signing*), l'exporter avec
+sa clé privée en `.pfx`, puis l'encoder :
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('tiai-signing.pfx')) | Set-Clipboard
+```
+
+Le coller dans le secret `SIGNING_CERT_PFX_BASE64`, puis supprimer le `.pfx` du
+poste qui l'a exporté. Pour que Windows reconnaisse l'éditeur, déployer le
+certificat (sans la clé, en `.cer`) dans le magasin **Éditeurs approuvés** des
+postes par GPO (*Configuration ordinateur → Stratégies → Paramètres Windows →
+Paramètres de sécurité → Stratégies de clé publique*). La racine de l'AC est
+déjà approuvée sur les postes du domaine.
+
+**Certificat public** (OV/EV d'une autorité commerciale, utile hors domaine) :
+depuis 2023 leur clé privée doit rester dans un module matériel et ne s'exporte
+plus en PFX. Il faut alors signer par le service de l'autorité ou par Azure
+Trusted Signing, ce que ce script ne fait pas : remplacer l'étape « Signer » du
+workflow par l'action de l'éditeur.
+
+**Essayer sans publier** : *Actions → Release → Run workflow* construit et signe
+les binaires en artefacts de build, sans créer de release. Sur un poste,
+vérifier un binaire téléchargé :
+
+```powershell
+Get-AuthenticodeSignature .\tiai-agent-windows-amd64.exe | Format-List Status, SignerCertificate, TimeStamperCertificate
+```
+
+`Status` vaut `Valid` sur un poste qui approuve l'AC. Une signature ne remplace
+pas `-ExpectedHash` du script GPO : la première dit qui a produit le binaire, le
+second qu'il s'agit exactement de celui que la GPO a choisi.
 
 ---
 
@@ -555,6 +679,7 @@ backoff_max_seconds: 300
 queue_max_items: 1000
 wu_collect_interval_seconds: 21600        # cycle Windows Update (6 h) — jamais dans le heartbeat
 wu_install_timeout_seconds: 7200          # budget d'une installation de MAJ (2 h)
+defender_full_scan_timeout_seconds: 28800 # budget d'une analyse complète Defender (8 h)
 inventory_collect_interval_seconds: 86400 # cycle inventaire matériel/logiciel (24 h)
 log_level: INFO                           # DEBUG logge aussi les heartbeats silencieux
 proxy_url: direct                         # direct (défaut) | environment | http://proxy:3128
@@ -562,6 +687,15 @@ report_session_username: true             # false = remonter la présence sans l
 report_software: true                     # false = inventaire matériel seul, sans les logiciels
 location: ""                              # emplacement du poste ("Lycée de Taravao") ; vide = aucun
 ```
+
+`defender_full_scan_timeout_seconds` borne une analyse complète Defender : le
+worker de commandes de l'agent est séquentiel, et un scan qui ne rendait jamais
+la main bloquait toutes les commandes suivantes du poste, redémarrage compris.
+Huit heures couvrent un gros disque mécanique ; à relever sur un parc dont les
+analyses complètes sont légitimement plus longues (le message d'échec le dit).
+L'analyse rapide (1 h) et la mise à jour des signatures (30 min) ont des délais
+fixes : ce sont des détecteurs de blocage, pas des estimations. Au délai, la
+commande échoue mais le scan peut se poursuivre dans le service Defender.
 
 `location` est un texte libre choisi par le déploiement — rien sur un poste ne
 dit dans quel bâtiment il se trouve — et vide par défaut. La console filtre et
@@ -626,6 +760,7 @@ le secret d'enrôlement, plutôt qu'en clair dans le YAML.
 | `HeartbeatIntervalSeconds` | `REG_DWORD` | `heartbeat_interval_seconds` |
 | `WUCollectIntervalSeconds` | `REG_DWORD` | `wu_collect_interval_seconds` |
 | `WUInstallTimeoutSeconds` | `REG_DWORD` | `wu_install_timeout_seconds` |
+| `DefenderFullScanTimeoutSeconds` | `REG_DWORD` | `defender_full_scan_timeout_seconds` |
 | `InventoryCollectIntervalSeconds` | `REG_DWORD` | `inventory_collect_interval_seconds` |
 | `ReportSessionUsername` | `REG_DWORD` | `report_session_username` |
 | `ReportSoftware` | `REG_DWORD` | `report_software` |
@@ -660,8 +795,8 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'EnrollmentSecret' -Value '<s
 ```powershell
 .\tiai-agent.exe init-config --api-url <url> [--machine-uuid <uuid>] [--config <chemin>]
 .\tiai-agent.exe run [--config <chemin>]   # premier plan (Ctrl+C), ou sous le SCM
-.\tiai-agent.exe install [--config <chemin>]
-.\tiai-agent.exe repair                    # réapplique démarrage auto + relance sur échec
+.\tiai-agent.exe install [--config <chemin>]  # + DACL SYSTEM/Administrateurs sur la clé et le dossier
+.\tiai-agent.exe repair [--config <chemin>]   # réapplique démarrage auto + relance sur échec + DACL
 .\tiai-agent.exe start | stop | status | uninstall | version
 ```
 
@@ -672,6 +807,18 @@ journée restait donc arrêté jusqu'à une relance manuelle, type de démarrage
 toujours affiché en *Automatique*. La commande remet les trois relances (15 s,
 30 s, 2 min) et le démarrage automatique, sans toucher au binaire ni à
 l'enrôlement. Le script GPO l'appelle à chaque démarrage.
+
+`install` et `repair` restreignent aussi `HKLM\SOFTWARE\Tiai` et le dossier de
+données (`C:\ProgramData\Tiai`) à SYSTEM + Administrateurs, avec les mêmes
+DACL protégées que le MSI et le script GPO
+(`D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)` pour la clé,
+`D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)` pour le dossier) : un poste installé à la
+main ne laisse plus le secret d'enrôlement, l'entropie du token ni `token.dat`
+lisibles par les utilisateurs. Un emplacement déjà restreint n'est pas réécrit ;
+un échec est signalé par un avertissement sans faire échouer la commande. Un
+dossier `--config` personnalisé qui existait déjà n'est pas modifié (il est
+signalé) : seul le dossier par défaut, ou un dossier que la commande vient de
+créer, est restreint.
 
 L'agent s'auto-enrôle au premier démarrage, stocke le token reçu, puis n'utilise
 plus que celui-ci. `uninstall` ne retire que l'enregistrement du service : le
@@ -764,6 +911,8 @@ chaque compte (page « Mon compte »).
 | `https://<ip>` ne répond pas / mauvais certificat | Le site Caddy est lié à un nom d'hôte | Ajouter `TIAI_SERVER_NAME` au DNS ou au fichier `hosts` |
 | Le navigateur force HTTPS et refuse le HTTP | Cache HSTS d'un accès antérieur au Caddyfile de prod | Purger le HSTS pour ce nom d'hôte, ou utiliser un autre nom en test |
 | Erreur CORS dans la console | Origine absente de `BACKEND_CORS_ORIGINS` | Ajouter l'origine dans `.env`, ou passer par Caddy |
+| `413` sur une requête de l'agent ou de la console | Corps de requête au-delà de 8 Mo, refusé par Caddy (`request_body` du Caddyfile) | Aucun envoi légitime n'en approche : chercher l'agent défaillant dans les journaux de Caddy |
+| `docker compose ps` montre `unhealthy` | Voir § « État de santé et journaux » | `docker compose logs <service>` ; pour le backend, vérifier que `db` est sain |
 | Le backend refuse de démarrer, message « `changeme` placeholder » | `ENVIRONMENT` ≠ `local` avec des secrets d'exemple | Renseigner les vrais secrets, ou utiliser l'override de dev |
 | Caddy ne démarre pas en mode C | `deploy/certs/tiai.crt` ou `.key` absent | Déposer le certificat, ou passer la ligne `tls` à `tls internal` |
 | `401 auth.enrollment_secret.invalid` à l'enrôlement | Secret agent ≠ `ENROLLMENT_SECRET` serveur | Aligner YAML/registre sur le `.env` du serveur |

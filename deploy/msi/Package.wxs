@@ -74,6 +74,7 @@
     <Property Id="HEARTBEATINTERVALSECONDS" Secure="yes" />
     <Property Id="WUCOLLECTINTERVALSECONDS" Secure="yes" />
     <Property Id="WUINSTALLTIMEOUTSECONDS" Secure="yes" />
+    <Property Id="DEFENDERFULLSCANTIMEOUTSECONDS" Secure="yes" />
     <!-- 1 ou 0 (DWORD), pas true/false : voir ReportSessionUsername dans le
          README de l'agent — 0 = remonter la présence d'une session, pas le nom. -->
     <Property Id="REPORTSESSIONUSERNAME" Secure="yes" />
@@ -191,6 +192,12 @@
                  Permanent="yes" Condition="WUINSTALLTIMEOUTSECONDS">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="WUInstallTimeoutSeconds"
                        Type="integer" Value="[WUINSTALLTIMEOUTSECONDS]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegDefenderFullScanTimeout" Guid="B2A7609B-CBB6-4ED1-8EE6-2A554AE2A0DA"
+                 Permanent="yes" Condition="DEFENDERFULLSCANTIMEOUTSECONDS">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="DefenderFullScanTimeoutSeconds"
+                       Type="integer" Value="[DEFENDERFULLSCANTIMEOUTSECONDS]" KeyPath="yes" />
       </Component>
 
       <Component Id="RegReportSessionUsername" Guid="E5824CAE-D846-44F9-8E9E-8CB45BB6E7C9"

@@ -13,6 +13,8 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
+
+	"tiai/agent/internal/winpath"
 )
 
 // RunMaintenance executes one catalogue command and returns what the console
@@ -91,29 +93,14 @@ func runSystem32(ctx context.Context, exe string, args ...string) ([]byte, int, 
 //
 // Absolute on purpose, never a PATH lookup: the agent runs as LocalSystem, so a
 // directory that appears before System32 in PATH and is writable by a normal
-// user would turn every one of these commands into SYSTEM code execution.
-func system32Path(exe string) string {
-	return filepath.Join(systemRoot(), "System32", exe)
-}
+// user would turn every one of these commands into SYSTEM code execution. The
+// resolution itself lives in winpath, shared with the PowerShell launches.
+func system32Path(exe string) string { return winpath.System32(exe) }
 
-// systemRoot is the Windows directory — "C:\Windows" on all but the unusual
-// machine, which is exactly why it is read rather than assumed.
-func systemRoot() string {
-	if root := os.Getenv("SystemRoot"); root != "" {
-		return root
-	}
-	return `C:\Windows`
-}
-
-// systemDrive is the volume Windows is installed on — "C:\" on all but the
-// unusual machine, which is exactly why it is read rather than assumed.
-func systemDrive() string {
-	drive := os.Getenv("SystemDrive")
-	if drive == "" {
-		drive = "C:"
-	}
-	return drive + `\`
-}
+// systemRoot and systemDrive are the Windows directory and volume, read rather
+// than assumed (see winpath).
+func systemRoot() string  { return winpath.SystemRoot() }
+func systemDrive() string { return winpath.SystemDrive() }
 
 // Code pages for MultiByteToWideChar. CP_OEMCP (850 on a French Windows, 437 on
 // a US one) and CP_ACP (1252 in Western Europe) are the "whatever this system is

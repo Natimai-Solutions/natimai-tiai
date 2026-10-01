@@ -41,6 +41,7 @@ défaut ou ce que la GPO a déjà posé dans le registre.
 | `HEARTBEATINTERVALSECONDS` | `HeartbeatIntervalSeconds` | entier > 0 |
 | `WUCOLLECTINTERVALSECONDS` | `WUCollectIntervalSeconds` | entier > 0 |
 | `WUINSTALLTIMEOUTSECONDS` | `WUInstallTimeoutSeconds` | entier > 0 |
+| `DEFENDERFULLSCANTIMEOUTSECONDS` | `DefenderFullScanTimeoutSeconds` | entier > 0 (défaut 28800 = 8 h) |
 | `REPORTSESSIONUSERNAME` | `ReportSessionUsername` | `1` ou `0` (pas `true`/`false`) |
 | `REPORTSOFTWARE` | `ReportSoftware` | `1` ou `0` (`0` = inventaire matériel seul) |
 | `INVENTORYCOLLECTINTERVALSECONDS` | `InventoryCollectIntervalSeconds` | entier > 0 |

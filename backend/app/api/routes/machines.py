@@ -1879,11 +1879,18 @@ class MergeRequest(BaseModel):
     dependencies=[Depends(require_permission(Resource.MACHINE, Action.WRITE))],
 )
 async def merge_machine(
-    machine_id: uuid.UUID, payload: MergeRequest, session: SessionDep
+    machine_id: uuid.UUID,
+    payload: MergeRequest,
+    session: SessionDep,
+    user: CurrentUser,
 ) -> MachineDetailOut:
     """Merge a duplicate record into this one (plan §8): the source's threats
     and commands are reattached here, the verification flag is cleared, and the
     source is deleted. This machine (the path id) is the one kept.
+
+    Audited under the kept machine's id, with the source's identity in the
+    details: the source row is deleted, so the trace is the only place left
+    that says which record went where.
     """
     if machine_id == payload.source_id:
         raise AppError(
@@ -1893,6 +1900,20 @@ async def merge_machine(
         )
     target = await _require_machine(session, machine_id)
     source = await _require_machine(session, payload.source_id)
+    audit.record(
+        session,
+        actor=user.email,
+        action="machine.merge",
+        resource_type="machine",
+        resource_id=str(target.id),
+        details={
+            "hostname": target.hostname,
+            "machine_uuid": target.machine_uuid,
+            "source_id": str(source.id),
+            "source_hostname": source.hostname,
+            "source_machine_uuid": source.machine_uuid,
+        },
+    )
     await machine_crud.merge_into(session, target=target, source=source)
     await session.commit()
     await session.refresh(target)

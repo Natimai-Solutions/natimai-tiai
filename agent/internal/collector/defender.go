@@ -14,6 +14,7 @@ package collector
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -137,4 +138,107 @@ func signatureAgeDays(lastUpdated *time.Time, now time.Time) *int {
 		d = 0
 	}
 	return &d
+}
+
+// --- Actions: budgets and failure messages ----------------------------------
+
+// Budgets for the Defender actions. Like the maintenance timeout classes, they
+// exist because the command worker is sequential: a scan that never returns —
+// a Defender engine wedged on a broken definition update, a PowerShell host
+// stuck on a WMI provider — would otherwise pin the worker for the life of the
+// service, and every command queued behind it, a reboot included, would wait
+// forever with "transmise" on the console.
+//
+// They are hang detectors, not estimates. The full scan's budget is not here:
+// it is the one an administrator legitimately needs to raise, so it is a
+// setting (config.DefaultDefenderFullScanTimeout), passed to RunFullScan the
+// same way the Windows Update install budget is passed to RunWUInstall.
+const (
+	// quickScanTimeout: a quick scan covers memory, startup locations and the
+	// system folders, and finishes in minutes even on a tired machine. An hour
+	// is an order of magnitude above that — beyond it the scan is stuck, not
+	// slow.
+	quickScanTimeout = 1 * time.Hour
+	// signatureUpdateTimeout: a definition update is a download of at most a
+	// few hundred megabytes (a full package when the delta chain is broken),
+	// from WSUS, Windows Update or a share. Same budget as a Windows Update
+	// search, for the same kind of work over the same kind of link.
+	signatureUpdateTimeout = 30 * time.Minute
+)
+
+// powerShellWaitDelay bounds how long a killed PowerShell may keep its output
+// pipes open. Without it, a budget is only as good as the last process holding
+// a copy of those handles: exec kills powershell.exe at the deadline, but Wait
+// still blocks until every inheritor of stdout has exited — and a child that
+// never does would pin the worker exactly as if there had been no budget.
+const powerShellWaitDelay = 10 * time.Second
+
+// defenderAction is one of the three Defender commands: the script PowerShell
+// runs, and how to talk about it when it does not finish.
+type defenderAction struct {
+	script string
+	// label names the action inside a French sentence ("l'analyse rapide
+	// Defender"), so every message about it reads the same.
+	label string
+	// advice is what an administrator should do after a timeout — the part
+	// that makes the message actionable rather than a bare "délai dépassé".
+	advice string
+}
+
+var (
+	defenderQuickScan = defenderAction{
+		script: "Start-MpScan -ScanType QuickScan",
+		label:  "l'analyse rapide Defender",
+		advice: "L'analyse peut se poursuivre sur le poste : vérifier la date de " +
+			"dernière analyse rapide avant de la relancer. Un dépassement répété " +
+			"signale un moteur Defender bloqué (redémarrer le poste).",
+	}
+	defenderFullScan = defenderAction{
+		script: "Start-MpScan -ScanType FullScan",
+		label:  "l'analyse complète Defender",
+		advice: "L'analyse peut se poursuivre sur le poste : vérifier la date de " +
+			"dernière analyse complète avant de la relancer. Si les analyses " +
+			"complètes de ce parc sont légitimement plus longues (gros disques " +
+			"mécaniques), augmenter defender_full_scan_timeout_seconds " +
+			"(registre : DefenderFullScanTimeoutSeconds).",
+	}
+	defenderSignatureUpdate = defenderAction{
+		script: "Update-MpSignature",
+		label:  "la mise à jour des signatures Defender",
+		advice: "Vérifier que le poste joint sa source de signatures (WSUS, " +
+			"Windows Update ou partage de définitions configuré par stratégie).",
+	}
+)
+
+// timeoutError is the verdict for an action that outlived its budget. The
+// budget is named in the message: "délai dépassé" alone does not say whether
+// the scan was given ten minutes or ten hours, and that is the first thing to
+// know before raising it.
+func (a defenderAction) timeoutError(budget time.Duration) error {
+	return fmt.Errorf("délai dépassé : %s ne s'est pas terminée en %s. %s",
+		a.label, frDuration(budget), a.advice)
+}
+
+// interruptedError is the verdict for an action cut short by the service
+// stopping — not a Defender problem, and nothing for anyone to fix.
+func (a defenderAction) interruptedError() error {
+	return fmt.Errorf("%s a été interrompue (arrêt de l'agent) : à relancer", a.label)
+}
+
+// frDuration renders a budget for a French console message: "8 h", "1 h 30 min",
+// "30 min". Not time.Duration.String(), whose "8h0m0s" reads as a log line in
+// the middle of a sentence.
+func frDuration(d time.Duration) string {
+	h := int(d / time.Hour)
+	m := int(d % time.Hour / time.Minute)
+	switch {
+	case h > 0 && m > 0:
+		return fmt.Sprintf("%d h %d min", h, m)
+	case h > 0:
+		return fmt.Sprintf("%d h", h)
+	case m > 0:
+		return fmt.Sprintf("%d min", m)
+	default:
+		return fmt.Sprintf("%d s", int(d/time.Second))
+	}
 }

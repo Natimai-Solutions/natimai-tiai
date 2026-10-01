@@ -47,6 +47,51 @@ func TestLoadYAMLAppliesDefaults(t *testing.T) {
 	if cfg.WUInstallTimeoutSeconds != DefaultWUInstallTimeout {
 		t.Errorf("expected default WU install timeout, got %d", cfg.WUInstallTimeoutSeconds)
 	}
+	// Too short and a full scan of a large disk is reported as failed while
+	// Defender is still running it; absent and a wedged scan holds the
+	// sequential command worker forever.
+	if cfg.DefenderFullScanTimeoutSeconds != DefaultDefenderFullScanTimeout {
+		t.Errorf("expected default full scan timeout, got %d", cfg.DefenderFullScanTimeoutSeconds)
+	}
+}
+
+// The full-scan budget sits between "a scan that is merely slow" and "a worker
+// held for good": hours, not minutes, and still bounded within the day.
+func TestDefaultFullScanTimeoutIsHoursNotForever(t *testing.T) {
+	if DefaultDefenderFullScanTimeout < 4*3600 {
+		t.Errorf("default full scan budget %ds would time out legitimate scans of large disks",
+			DefaultDefenderFullScanTimeout)
+	}
+	if DefaultDefenderFullScanTimeout > 24*3600 {
+		t.Errorf("default full scan budget %ds no longer bounds a stuck scan",
+			DefaultDefenderFullScanTimeout)
+	}
+	if DefaultConfig().DefenderFullScanTimeoutSeconds != DefaultDefenderFullScanTimeout {
+		t.Error("DefaultConfig must carry the default full scan budget")
+	}
+}
+
+// The budget is a setting so that a parc with slow disks can raise it — a
+// value from the YAML must win, and a zeroed one must not disable the bound.
+func TestFullScanTimeoutIsConfigurable(t *testing.T) {
+	for body, want := range map[string]int{
+		"defender_full_scan_timeout_seconds: 43200\n": 43200,
+		"defender_full_scan_timeout_seconds: 0\n":     DefaultDefenderFullScanTimeout,
+		"defender_full_scan_timeout_seconds: -5\n":    DefaultDefenderFullScanTimeout,
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte("api_base_url: https://tiai.example.local\n"+body), 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.DefenderFullScanTimeoutSeconds != want {
+			t.Errorf("%q: full scan timeout = %d, want %d",
+				strings.TrimSpace(body), cfg.DefenderFullScanTimeoutSeconds, want)
+		}
+	}
 }
 
 // A hand-edited YAML that zeroes an interval must fall back to the default

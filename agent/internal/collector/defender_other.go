@@ -5,6 +5,7 @@ package collector
 import (
 	"context"
 	"errors"
+	"time"
 
 	"tiai/agent/internal/models"
 )
@@ -20,6 +21,8 @@ func ReadThreats(ctx context.Context) ([]models.Threat, error) { return nil, nil
 
 func RunQuickScan(ctx context.Context) (string, error) { return "", errUnsupported }
 
-func RunFullScan(ctx context.Context) (string, error) { return "", errUnsupported }
+func RunFullScan(ctx context.Context, timeout time.Duration) (string, error) {
+	return "", errUnsupported
+}
 
 func UpdateSignatures(ctx context.Context) (string, error) { return "", errUnsupported }

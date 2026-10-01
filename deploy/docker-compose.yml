@@ -3,11 +3,27 @@
 #
 # Démarrage : cp .env.example .env && docker compose up -d
 # TLS terminé par Caddy (certificat de l'AC interne, cf. deploy/certs/).
+#
+# Images : backend et console sont publiées à chaque release sous
+# ghcr.io/natimai-solutions/tiai-{backend,frontend}:<version>. La version suit
+# TIAI_VERSION (.env) ; Compose tire l'image publiée et ne reconstruit depuis
+# les sources (`build:`) que si elle est introuvable — ou sur demande :
+# `docker compose up -d --build`. Mise à jour : cf. DEPLOYMENT.md
+# § « Mettre à jour le serveur ».
+
+# Rotation des journaux Docker : sans elle, le pilote json-file grossit sans
+# limite et finit par remplir le disque du serveur. 5 × 10 Mio par conteneur.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
 
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -26,6 +42,7 @@ services:
   db-backup:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -40,37 +57,78 @@ services:
         condition: service_healthy
 
   backend:
+    image: ghcr.io/natimai-solutions/tiai-backend:${TIAI_VERSION:-latest}
     build:
       context: ../backend
     restart: unless-stopped
+    logging: *logging
     env_file: .env
     environment:
       POSTGRES_SERVER: db
     command: ["api"]
+    # Sain quand l'API répond ET joint la base : /health renvoie 200 dans les
+    # deux cas, c'est le champ `database` qui tranche — lu en JSON par le
+    # Python de l'image, sans dépendre d'un outil de plus. start_period couvre
+    # les migrations Alembic rejouées au démarrage.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,sys,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=4); sys.exit(0 if json.load(r).get('database') is True else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
     depends_on:
       db:
         condition: service_healthy
 
   worker:
+    image: ghcr.io/natimai-solutions/tiai-backend:${TIAI_VERSION:-latest}
     build:
       context: ../backend
     restart: unless-stopped
+    logging: *logging
     env_file: .env
     environment:
       POSTGRES_SERVER: db
     command: ["worker"]
+    # Le worker n'expose aucun port : il touche un fichier témoin à la fin de
+    # chaque tour de boucle (30 s), et il est déclaré malade quand ce fichier
+    # a plus de 5 min — une boucle bloquée, pas un résumé un peu long.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,sys,tempfile,time; p=os.path.join(tempfile.gettempdir(),'tiai-worker.alive'); sys.exit(0 if time.time()-os.path.getmtime(p)<300 else 1)"
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     depends_on:
       db:
         condition: service_healthy
 
   frontend:
+    image: ghcr.io/natimai-solutions/tiai-frontend:${TIAI_VERSION:-latest}
     build:
       context: ../frontend
     restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   caddy:
-    image: caddy:2-alpine
+    # Version mineure épinglée : une montée de Caddy est une décision, pas un
+    # effet de bord d'un `docker compose pull`.
+    image: caddy:2.10-alpine
     restart: unless-stopped
+    logging: *logging
     # Seule variable dont le Caddyfile a besoin — pas d'`env_file: .env` ici,
     # qui exposerait inutilement les secrets du backend au conteneur Caddy.
     environment:
@@ -83,6 +141,13 @@ services:
       - ./certs:/etc/caddy/certs:ro
       - caddy_data:/data
       - caddy_config:/config
+    # L'API d'administration de Caddy (localhost:2019) répond tant que le
+    # processus tourne et que sa configuration est chargée.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
       - backend
       - frontend

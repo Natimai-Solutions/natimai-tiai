@@ -28,7 +28,9 @@ internal/
              relais Wake-on-LAN : paquet magique diffusé sur les sous-réseaux du poste (wol.go)
   queue/     file locale durable (résultats de commandes non remis) + back-off
   logging/   log fichier (agent.log, rotation simple) + niveau INFO/DEBUG
-  service/   service Windows (golang.org/x/sys/windows/svc)
+  service/   service Windows (golang.org/x/sys/windows/svc) ; install/repair restreignent aussi les ACL (via acl/)
+  acl/       DACL SYSTEM + Administrateurs sur HKLM\SOFTWARE\Tiai et %ProgramData%\Tiai (mêmes SDDL que MSI/GPO)
+  winpath/   chemins absolus des binaires système (System32, powershell.exe) — jamais le PATH
   agent/     boucle de polling + exécution des commandes
   models/    types de la couche transport
 ```
@@ -37,11 +39,42 @@ internal/
 
 - **Lecture** (état, menaces) via **WMI** — pas de spawn de process par cycle :
   `MSFT_MpComputerStatus`, `MSFT_MpThreatDetection` + `MSFT_MpThreat` (jointure par `ThreatID`).
-- **Actions** (scans, MAJ signatures) via **PowerShell** : `Start-MpScan`, `Update-MpSignature`.
+- **Actions** (scans, MAJ signatures) via **PowerShell** : `Start-MpScan`, `Update-MpSignature` —
+  `powershell.exe` lancé par son chemin absolu
+  (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`), jamais par le `PATH`.
 - `AMRunningMode` est remonté avec l'état : c'est lui qui distingue « Defender
   éteint » de « Defender **passif** parce qu'un antivirus tiers a pris le relais »
   (`Normal` / `Passive` / `SxS Passive Mode` / `EDR Block Mode` ; vide avant
   Windows 10 1903, où la propriété n'existe pas).
+
+### Délais des commandes Defender
+
+Le worker de commandes est **séquentiel** : un scan qui ne rend jamais la main
+(moteur Defender bloqué sur une mise à jour de définitions ratée, hôte
+PowerShell coincé sur un fournisseur WMI) gelait toutes les commandes suivantes
+du poste — un `reboot` compris — pour la vie du service. Chaque commande
+Defender a donc un délai maximal, comme le catalogue de maintenance :
+
+| Type | Délai max | `running` | Pourquoi |
+|---|---|---|---|
+| `quick_scan` | 1 h | — | quelques minutes en temps normal : au-delà, le scan est bloqué, pas lent |
+| `full_scan` | `defender_full_scan_timeout_seconds`, **8 h** par défaut | oui | lit tous les fichiers de tous les disques fixes, bridé par Defender pour laisser le poste utilisable : minutes sur un petit SSD, heures sur un gros disque mécanique. Une journée de travail couvre le bas de cette fourchette tout en libérant le worker le jour même |
+| `update_signatures` | 30 min | — | un téléchargement de définitions (paquet complet au pire), même budget qu'une recherche WU |
+
+Comme pour `wu_install_timeout_seconds`, seul le budget qui dépend du parc —
+taille et type des disques — est réglable (YAML ou valeur registre
+`DefenderFullScanTimeoutSeconds`) ; les deux autres sont des détecteurs de
+blocage. `full_scan` poste désormais le statut intermédiaire `running` : la
+console affichait « transmise » pendant toute la durée du scan.
+
+Au délai, PowerShell est tué et la commande échoue avec un message qui nomme le
+budget et la marche à suivre (« délai dépassé : l'analyse complète Defender ne
+s'est pas terminée en 8 h. … augmenter defender_full_scan_timeout_seconds … »).
+Tuer le client **libère le worker sans forcément arrêter le scan**, qui tourne
+dans le service Defender et peut aller à son terme : le message invite à
+vérifier la date de dernière analyse avant de relancer, un scan lancé par-dessus
+un scan en cours n'obtenant que « une analyse est déjà en cours ». Un arrêt du
+service, lui, est remonté comme une interruption et non comme un dépassement.
 
 ## Commandes de maintenance à distance
 
@@ -183,7 +216,11 @@ qui marche sur certains postes et pas sur d'autres.
 **Chemins absolus, jamais le `PATH`.** Chaque exécutable est résolu en
 `%SystemRoot%\System32\<exe>`. L'agent tourne en `LocalSystem` : un répertoire
 inscriptible placé avant System32 dans le `PATH` transformerait sinon chacune de
-ces commandes en exécution de code SYSTEM.
+ces commandes en exécution de code SYSTEM. La règle vaut pour **tout** ce que
+l'agent lance, PowerShell compris (scans Defender, Windows Update, lecture du
+TPM) : la résolution est centralisée dans
+[`internal/winpath`](internal/winpath/winpath.go), et aucun appel ne doit
+redonner un nom nu comme `"powershell"` à `exec`.
 
 **Encodage : il n'y en a pas un, il y en a quatre.** C'est le piège de ce
 chantier, et il est mesuré et non supposé (Windows 11 français, sortie capturée
@@ -621,11 +658,37 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
 - Le scope machine seul laisserait **n'importe quelle session locale** déchiffrer
   `token.dat` : l'agent mêle donc au chiffrement une **entropie par poste**
   (32 octets aléatoires, générés au premier enrôlement), stockée dans
-  `HKLM\SOFTWARE\Tiai\TokenEntropy` — une clé que les installateurs (script GPO,
-  MSI) restreignent à SYSTEM + Administrateurs. Il faut les deux morceaux pour
+  `HKLM\SOFTWARE\Tiai\TokenEntropy` — une clé restreinte à SYSTEM +
+  Administrateurs. Il faut les deux morceaux pour
   déchiffrer. Un token écrit avant l'entropie est re-chiffré avec au premier
   chargement ; une entropie perdue (clé supprimée, poste ré-imagé) coûte un
   ré-enrôlement, jamais un service qui refuse de démarrer.
+- **ACL des deux emplacements sensibles.** `HKLM\SOFTWARE\Tiai` (secret
+  d'enrôlement, `TokenEntropy`) hérite sinon de `HKLM\SOFTWARE`, lisible par
+  tout utilisateur authentifié, et `%ProgramData%\Tiai` (`token.dat`) des droits
+  de lecture de `%ProgramData%`. Les trois voies d'installation posent la
+  **même** DACL protégée (sans héritage), SIDs universels et non noms de groupes
+  localisés :
+
+  | Emplacement | SDDL |
+  |---|---|
+  | `HKLM\SOFTWARE\Tiai` | `D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)` |
+  | `%ProgramData%\Tiai` | `D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)` |
+
+  Le MSI (`PermissionEx`) et le script GPO (`Set-Acl`) le faisaient déjà ;
+  `tiai-agent install` et `repair` le font désormais aussi, nativement
+  (`SetSecurityInfo` / `SetNamedSecurityInfo`, [`internal/acl`](internal/acl/acl.go)),
+  et l'agent restreint la clé lui-même **avant** d'y écrire une entropie neuve
+  — le cas d'une clé créée autrement (préférence GPO, lancement manuel). Un test
+  relit `Package.wxs` et `Install-TiaiAgent.ps1` pour que les SDDL ne divergent
+  pas. Un emplacement déjà restreint n'est pas réécrit (comparaison sur les
+  principaux et leurs droits, pas sur la chaîne SDDL que Windows réordonne).
+  Un échec est un **avertissement**, jamais une installation ratée — règle du
+  script GPO : un agent aux secrets lisibles est à corriger, un poste sans agent
+  n'est plus surveillé. Le dossier n'est touché que s'il est le dossier par
+  défaut ou si la commande vient de le créer : `--config C:\config.yaml`
+  ferait sinon restreindre `C:\` tout entier ; un dossier personnalisé
+  préexistant est signalé et laissé tel quel.
 - Un token que le serveur n'honore plus (révocation depuis la console) est
   **abandonné sur le premier 401** : l'agent retente alors l'enrôlement avec le
   secret du parc. Tant que la révocation tient, le serveur répond 403 et l'agent
@@ -633,7 +696,16 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
 
 ## Robustesse (plan §2.9)
 
-- Back-off exponentiel (plafonné) si le serveur est injoignable.
+- Back-off exponentiel (plafonné à `backoff_max_seconds`) si le serveur est
+  injoignable, **avec jitter** : le délai réel est tiré uniformément entre la
+  moitié du pas et le pas (*equal jitter*). Sans lui, une panne serveur
+  synchronise le parc — chaque agent échoue dans la même minute, double au même
+  rythme jusqu'au même plafond, et tout le parc revient dans la même minute avec
+  ses résultats en file et ses blocs WU/inventaire. Ni *full jitter* (un retry
+  quelques secondes après l'échec martèlerait un serveur tombé), ni ±20 %
+  (dépasserait le plafond documenté). Le premier heartbeat après démarrage n'est
+  pas retardé : c'est le signal de présence du poste, et un démarrage est déjà
+  sa propre dispersion.
 - File locale durable pour les **résultats de commandes** : un scan terminé alors
   que le serveur était down est rejoué au prochain contact — y compris le
   résultat d'un `reboot`, si le poste tombe avant que le POST n'aboutisse.
@@ -655,8 +727,8 @@ go build -o tiai-agent.exe .
 Déploiement en service :
 
 ```bash
-./tiai-agent.exe install        # enregistre le service (auto-start + recovery)
-./tiai-agent.exe repair         # réapplique ces deux réglages à un service déjà posé
+./tiai-agent.exe install        # enregistre le service (auto-start + recovery) et restreint les ACL
+./tiai-agent.exe repair         # réapplique ces réglages (et les ACL) à un service déjà posé
 ./tiai-agent.exe start
 ./tiai-agent.exe status
 ```

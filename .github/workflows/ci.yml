@@ -38,6 +38,9 @@ jobs:
 
     env:
       TIAI_TEST_DATABASE_URL: postgresql+psycopg://tiai:tiai@localhost:5432/tiai_test
+      # Sans base, les tests d'API seraient sautés et la CI resterait verte :
+      # ici, une variable manquante est une erreur (tests/conftest.py).
+      TIAI_REQUIRE_TEST_DB: "1"
       # Optional PAT (scope `gist`) to publish the coverage badge. Absent → badge step skipped.
       GIST_SECRET: ${{ secrets.GIST_SECRET }}
 
@@ -129,6 +132,32 @@ jobs:
           GOOS: windows
           GOARCH: amd64
 
+  agent-windows:
+    name: Agent (tests Windows)
+    # Les *_windows_test.go (scripts PowerShell parsés par PowerShell lui-même,
+    # encodage des sorties System32, DPAPI, DACL) ne compilent que sous
+    # Windows : le job Linux ci-dessus ne les a jamais exécutés. Aucun ne
+    # suppose Defender, un domaine ni le Security Center ; les tests de DACL
+    # visent une clé HKCU et un dossier temporaires, jamais HKLM.
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: agent
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      # Sans -race : sous Windows il exige cgo et une toolchain C ; les courses
+      # sont déjà traquées par le job Linux, sur le même code partagé.
+      - name: Tests
+        run: go test -count=1 ./...
+
   frontend:
     name: Frontend (format · tests · coverage)
     runs-on: ubuntu-latest
@@ -161,6 +190,11 @@ jobs:
       - name: Tests (+ coverage)
         run: npm run test:coverage
 
+      # Le typecheck ne compile pas la SPA : une erreur de bundling (import
+      # dynamique, asset, config Quasar) ne se voit qu'ici.
+      - name: Build
+        run: npm run build
+
       - name: Coverage comment (PR)
         # Skipped on fork PRs: GITHUB_TOKEN is read-only there and can't post comments.
         if: >-
@@ -189,3 +223,25 @@ jobs:
           valColorRange: ${{ steps.cov.outputs.pct }}
           minColorRange: 30
           maxColorRange: 90
+
+  images:
+    name: Images Docker (build)
+    runs-on: ubuntu-latest
+    # Ne publie rien : vérifie que les deux Dockerfiles construisent encore,
+    # pour qu'une release ne découvre pas la casse au moment de pousser.
+    strategy:
+      matrix:
+        component: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.component }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.component }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
