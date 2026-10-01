@@ -44,9 +44,7 @@
         :loading="loading"
         flat
         :rows-per-page-options="[...AUDIT_PAGE_SIZE_OPTIONS]"
-        rows-per-page-label="Lignes par page"
         :pagination-label="paginationLabel"
-        loading-label="Chargement…"
         :no-data-label="noDataLabel"
         class="audit-table"
         @request="onRequest"
@@ -181,6 +179,9 @@ const noDataLabel = computed(() =>
       : "Aucune action administrative enregistrée pour l'instant.",
 );
 
+// Le pack de langue français écrit « 1-50 sur N » avec un trait d'union ; le
+// journal garde le tiret demi-cadratin, qui est le signe d'un intervalle. Les
+// autres libellés du tableau (lignes par page, chargement) viennent du pack.
 function paginationLabel(first: number, end: number, total: number): string {
   return `${first}–${end} sur ${total}`;
 }
