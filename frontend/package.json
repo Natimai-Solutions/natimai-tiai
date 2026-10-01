@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
     "format": "prettier --write \"**/*.{ts,js,vue,json,scss,css,html,md}\"",
     "format:check": "prettier --check \"**/*.{ts,js,vue,json,scss,css,html,md}\"",
     "postinstall": "quasar prepare"
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
     "@quasar/app-vite": "^3.10.0",
     "@quasar/vite-plugin": "^2.0.2",
     "@types/node": "^22.20.4",

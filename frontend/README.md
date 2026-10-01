@@ -121,3 +121,31 @@ seraient pires qu'une vue d'un clic de retard. Seul « Actualiser » le recharge
 Les rafraîchissements automatiques n'allument **pas** le spinner : seul le
 bouton « Actualiser » le fait. La fiche détail se met en pause tant qu'une
 boîte de dialogue est ouverte au-dessus de ses tableaux.
+
+## Tests de bout en bout (Playwright)
+
+`e2e/` pilote la console dans un vrai navigateur contre la vraie stack —
+Caddy, API, worker, PostgreSQL —, là où les tests unitaires et de composants
+s'arrêtent : connexion et cookie de session, rechargement qui survit grâce à
+la session seule, déconnexion qui ferme vraiment la session, commande lancée
+d'un bouton et relue sur la fiche, journal d'audit, réglage relu après
+rechargement. La CI les joue à chaque PR (job « Console (bout en bout) »).
+
+En local, lever la stack de dev puis lancer les tests :
+
+```bash
+cd deploy
+cp .env.example .env    # TIAI_SERVER_NAME=localhost, ENVIRONMENT=local
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait
+cd ../frontend
+npx playwright install chromium   # une fois
+npm run test:e2e
+```
+
+Variables utiles : `E2E_BASE_URL` (défaut `https://localhost`),
+`E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` et `E2E_ENROLLMENT_SECRET` (défauts :
+les valeurs de `deploy/.env.example`), `E2E_CHROMIUM_PATH` pour un Chromium
+déjà installé. Les tests écrivent dans la base de la stack (postes enrôlés,
+seuil modifié) : une base de dev, jamais celle d'un parc. La connexion est
+limitée à 10 essais par 5 minutes : au-delà, redémarrer le service `backend`
+remet le limiteur à zéro.
