@@ -77,7 +77,7 @@ export const useAuthStore = defineStore('auth', {
      * (a `null` removes a key), and the profile is refreshed from the answer
      * so every page reads the same document.
      */
-    async savePreferences(patch: Record<string, unknown | null>) {
+    async savePreferences(patch: Record<string, unknown>) {
       this.user = await updateMe({ preferences: patch });
     },
     /**

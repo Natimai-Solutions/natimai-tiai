@@ -148,22 +148,22 @@
       bordered
       @row-click="(_evt, row) => goMachine(row)"
     >
-      <template #body-cell-hostname="props">
-        <q-td :props="props">
+      <template #body-cell-hostname="cell">
+        <q-td :props="cell">
           <q-icon
-            :name="onlineIcon(props.row.is_online)"
-            :color="onlineColor(props.row.is_online)"
+            :name="onlineIcon(cell.row.is_online)"
+            :color="onlineColor(cell.row.is_online)"
             size="16px"
             class="q-mr-xs"
           />
-          {{ props.value || props.row.machine_uuid }}
+          {{ cell.value || cell.row.machine_uuid }}
         </q-td>
       </template>
-      <template #body-cell-location="props">
-        <q-td :props="props">
-          {{ props.value ?? '—' }}
+      <template #body-cell-location="cell">
+        <q-td :props="cell">
+          {{ cell.value ?? '—' }}
           <q-icon
-            v-if="props.row.location_mismatch"
+            v-if="cell.row.location_mismatch"
             name="wrong_location"
             color="orange"
             size="16px"
@@ -173,28 +173,28 @@
           </q-icon>
         </q-td>
       </template>
-      <template #body-cell-maintenance="props">
-        <q-td :props="props">
+      <template #body-cell-maintenance="cell">
+        <q-td :props="cell">
           <q-badge
-            v-if="props.row.maintenance_state"
-            :color="maintenanceStateColor(props.row.maintenance_state)"
-            :label="maintenanceStateLabel(props.row.maintenance_state)"
+            v-if="cell.row.maintenance_state"
+            :color="maintenanceStateColor(cell.row.maintenance_state)"
+            :label="maintenanceStateLabel(cell.row.maintenance_state)"
           />
         </q-td>
       </template>
-      <template #body-cell-last_seen="props">
-        <q-td :props="props">{{ timeAgoLabel(props.value) }}</q-td>
+      <template #body-cell-last_seen="cell">
+        <q-td :props="cell">{{ timeAgoLabel(cell.value) }}</q-td>
       </template>
-      <template #body-cell-actions="props">
-        <q-td :props="props" class="text-right" @click.stop>
+      <template #body-cell-actions="cell">
+        <q-td :props="cell" class="text-right" @click.stop>
           <q-btn
             v-if="canPlace"
             flat
             dense
             round
             icon="remove_circle_outline"
-            :aria-label="`Retirer ${props.row.hostname ?? ''} de la salle`"
-            @click="remove(props.row)"
+            :aria-label="`Retirer ${cell.row.hostname ?? ''} de la salle`"
+            @click="remove(cell.row)"
           >
             <q-tooltip>Retirer de la salle</q-tooltip>
           </q-btn>

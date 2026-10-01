@@ -634,9 +634,9 @@ const canWrite = computed(() => auth.can('settings', 'write'));
 // The usage card's own form. `number | string`: an emptied box hands back ''.
 const savingUsage = ref(false);
 const usageForm = reactive({
-  windowDays: 7 as number | string,
-  lowHours: 10 as number | string,
-  highHours: 30 as number | string,
+  windowDays: 7,
+  lowHours: 10,
+  highHours: 30,
 });
 const usageError = computed(() =>
   usageSettingsError(usageForm.windowDays, usageForm.lowHours, usageForm.highHours),
@@ -651,12 +651,12 @@ function fillUsageForm(s: ConsoleSettings) {
 // The parc thresholds card. The agent version is a string: '' = automatic.
 const savingFleet = ref(false);
 const fleetForm = reactive({
-  signatureMaxAgeDays: 3 as number | string,
-  inactiveAfterDays: 30 as number | string,
-  lowDiskFreePercent: 10 as number | string,
-  hardwareAgingYears: 5 as number | string,
-  agentExpectedVersion: '' as string | null,
-  commandDefaultTtlMinutes: 60 as number | string,
+  signatureMaxAgeDays: 3,
+  inactiveAfterDays: 30,
+  lowDiskFreePercent: 10,
+  hardwareAgingYears: 5,
+  agentExpectedVersion: '',
+  commandDefaultTtlMinutes: 60,
 });
 const agentVersionValid = computed(() => isAgentVersion(fleetForm.agentExpectedVersion ?? ''));
 

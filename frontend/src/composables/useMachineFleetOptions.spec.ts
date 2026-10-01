@@ -39,12 +39,8 @@ function room(id: string, name: string, building: string | null, count: number) 
 
 describe('useMachineFleetOptions', () => {
   beforeEach(() => {
-    vi.mocked(machines.listAntivirusProducts).mockResolvedValue([
-      { name: 'ESET', count: 12 } as machines.AntivirusProduct,
-    ]);
-    vi.mocked(machines.listOsVersions).mockResolvedValue([
-      { name: 'Windows 11', count: 30 } as machines.OsVersion,
-    ]);
+    vi.mocked(machines.listAntivirusProducts).mockResolvedValue([{ name: 'ESET', count: 12 }]);
+    vi.mocked(machines.listOsVersions).mockResolvedValue([{ name: 'Windows 11', count: 30 }]);
     vi.mocked(machines.listAgentVersions).mockResolvedValue({
       latest: '1.4.0',
       versions: [

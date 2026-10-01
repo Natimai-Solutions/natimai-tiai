@@ -115,7 +115,7 @@ export interface PendingUpdate {
   title: string;
   /** MSRC rating, lowercased server-side: critical / important / moderate / low. */
   severity: string | null;
-  type: 'software' | 'driver' | string;
+  type: 'software' | 'driver' | (string & {});
   categories: string | null;
   is_downloaded: boolean;
   size_mb: number | null;

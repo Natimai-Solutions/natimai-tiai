@@ -103,7 +103,7 @@ export interface ProfileUpdate {
    * removed, a key not sent is left alone — so a page that remembers one
    * thing never overwrites what another page stored.
    */
-  preferences?: Record<string, unknown | null>;
+  preferences?: Record<string, unknown>;
 }
 
 /**

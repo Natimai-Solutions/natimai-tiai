@@ -153,7 +153,7 @@ describe('useMachineBulkActions', () => {
 
   describe('placeSelection', () => {
     it('places the selection in a room, closes, reloads and recounts the rooms', async () => {
-      vi.mocked(placeMachines).mockResolvedValue({ moved: 2, mismatched: [] } as never);
+      vi.mocked(placeMachines).mockResolvedValue({ moved: 2, mismatched: [] });
       const { selected, reload, onPlaced, placeOpen, placeSelection } = setup();
       placeOpen.value = true;
 
@@ -168,7 +168,7 @@ describe('useMachineBulkActions', () => {
     });
 
     it('unassigns on « Sans salle »', async () => {
-      vi.mocked(unassignMachines).mockResolvedValue({ moved: 2, mismatched: [] } as never);
+      vi.mocked(unassignMachines).mockResolvedValue({ moved: 2, mismatched: [] });
       const { placeSelection } = setup();
       await placeSelection('none');
       expect(unassignMachines).toHaveBeenCalledWith(['m-1', 'm-2']);

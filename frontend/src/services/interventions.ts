@@ -12,7 +12,7 @@ export type InterventionKind =
 export interface Intervention {
   id: string;
   machine_id: string;
-  kind: InterventionKind | string;
+  kind: InterventionKind | (string & {});
   title: string | null;
   note: string | null;
   /** The acting account's e-mail, kept as text: the entry outlives the account. */

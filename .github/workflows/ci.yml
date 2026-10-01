@@ -187,6 +187,12 @@ jobs:
       - name: Typecheck (vue-tsc)
         run: npm run typecheck
 
+      # Correctness rules Prettier and vue-tsc do not cover (a mutated prop, a
+      # floating promise, a variable never used). Warnings fail the step too:
+      # a warning nobody has to fix is a warning nobody reads.
+      - name: Lint (ESLint)
+        run: npm run lint
+
       - name: Tests (+ coverage)
         run: npm run test:coverage
 
