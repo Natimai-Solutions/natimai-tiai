@@ -204,6 +204,27 @@ async def test_deleting_a_group_drops_what_it_granted(client, db_session):
 # --- Lock-out guard ---------------------------------------------------------
 
 
+async def _edit_in_db(db_session, email, *, groups=None, is_active=None):
+    """Change an account behind the API's back.
+
+    The lock-out scenarios start from a parc whose administrator is gone. No
+    API path leads there any more — a non-administrator cannot touch an
+    administrator (the escalation guard), and an administrator cannot demote
+    themselves — but a database edited by hand, or migrated from a version
+    without the guard, can be in that state, and the lock-out guard must hold
+    there too.
+    """
+    from app.features.user import crud
+
+    user = await crud.get_by_email(db_session, email)
+    if groups is not None:
+        await crud.set_user_groups(db_session, user, groups)
+    if is_active is not None:
+        user.is_active = is_active
+        db_session.add(user)
+    await db_session.commit()
+
+
 async def test_cannot_strip_the_last_account_manager_through_its_group(
     client, db_session
 ):
@@ -216,12 +237,7 @@ async def test_cannot_strip_the_last_account_manager_through_its_group(
     manager = await _user(
         client, db_session, "manager@test.local", [uuid.UUID(managers["id"])]
     )
-    # The manager demotes the admin: fine, the manager still manages.
-    me_admin = (await client.get("/api/v1/auth/me", headers=admin)).json()
-    resp = await client.patch(
-        f"/api/v1/users/{me_admin['id']}", headers=manager, json={"group_ids": []}
-    )
-    assert resp.status_code == 200, resp.text
+    await _edit_in_db(db_session, "admin@test.local", groups=[])
 
     # Now the manager is the last one: their group may not lose user:write…
     resp = await client.patch(
@@ -266,11 +282,7 @@ async def test_deactivated_accounts_do_not_count_as_managers(client, db_session)
     manager = await _user(
         client, db_session, "manager@test.local", [uuid.UUID(managers["id"])]
     )
-    me_admin = (await client.get("/api/v1/auth/me", headers=admin)).json()
-    resp = await client.patch(
-        f"/api/v1/users/{me_admin['id']}", headers=manager, json={"is_active": False}
-    )
-    assert resp.status_code == 200, resp.text
+    await _edit_in_db(db_session, "admin@test.local", is_active=False)
     resp = await client.delete(f"/api/v1/groups/{managers['id']}", headers=manager)
     assert resp.status_code == 409
     assert _code(resp) == "user.lockout"

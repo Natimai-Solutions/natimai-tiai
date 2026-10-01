@@ -82,3 +82,25 @@ async def test_unexpected_handler_prod_masks_details(monkeypatch):
     body = _body(resp)
     assert body["error"]["message"] == "Internal server error"
     assert "secret-detail" not in json.dumps(body)
+
+
+def test_every_code_has_a_message_in_the_console():
+    """The catalog is mirrored by the console (``services/errors.ts``): a code
+    added here without its French message reaches the operator as the
+    backend's English text. Skipped where the frontend is not checked out."""
+    import pathlib
+
+    import pytest
+
+    table = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "src"
+        / "services"
+        / "errors.ts"
+    )
+    if not table.exists():
+        pytest.skip("frontend sources not available")
+    source = table.read_text(encoding="utf-8")
+    missing = [c.value for c in errors.ErrorCode if f"'{c.value}'" not in source]
+    assert missing == []

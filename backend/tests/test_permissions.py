@@ -3,8 +3,10 @@ from app.features.user.permissions import (
     BUILTIN_GROUP_DEFAULTS,
     PERMISSION_CATALOGUE,
     Action,
+    Authority,
     BuiltinGroup,
     Resource,
+    escalation,
     has_permission,
     permission_key,
 )
@@ -60,3 +62,51 @@ def test_risky_command_types_are_a_subset_of_the_catalogue():
     assert RISKY_COMMAND_TYPES <= set(CommandType)
     assert CommandType.REBOOT in RISKY_COMMAND_TYPES
     assert CommandType.QUICK_SCAN not in RISKY_COMMAND_TYPES
+
+
+# --- No escalation ------------------------------------------------------------
+
+_TECH = frozenset({"machine:read", "user:read", "user:write", "command:execute"})
+
+
+def _authority(*permissions: str, admin: bool = False) -> Authority:
+    return Authority(is_admin=admin, permissions=frozenset(permissions))
+
+
+def test_an_administrator_reaches_everything():
+    admin = _authority(admin=True)
+    assert escalation(admin, _authority(*ALL_PERMISSIONS, admin=True)) is None
+
+
+def test_a_subset_of_ones_own_rights_is_within_reach():
+    actor = _authority(*_TECH)
+    assert escalation(actor, _authority("machine:read", "user:read")) is None
+    assert escalation(actor, _authority(*_TECH)) is None
+    assert escalation(actor, _authority()) is None
+
+
+def test_a_permission_one_lacks_is_out_of_reach_and_named():
+    found = escalation(
+        _authority(*_TECH), _authority("machine:read", "risky_command:execute")
+    )
+    assert found is not None
+    assert found.missing == {"risky_command:execute"}
+    assert not found.admin
+
+
+def test_the_administrators_group_is_out_of_reach_even_with_every_permission():
+    """A composed group may grant the whole catalogue; only the administrators'
+    group grants tomorrow's permissions too — and makes administrators."""
+    found = escalation(_authority(*ALL_PERMISSIONS), _authority(admin=True))
+    assert found is not None
+    assert found.admin
+    assert found.missing == frozenset()
+
+
+def test_authority_union_adds_permissions_and_admin_status():
+    union = Authority.union(
+        [_authority("machine:read"), _authority("user:read", admin=True)]
+    )
+    assert union.is_admin
+    assert union.permissions == {"machine:read", "user:read"}
+    assert Authority.union([]) == _authority()

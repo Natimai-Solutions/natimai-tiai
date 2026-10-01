@@ -16,7 +16,15 @@
           aria-label="Mon compte"
           :to="{ name: 'account' }"
         />
-        <q-btn flat dense round icon="logout" aria-label="Déconnexion" @click="onLogout" />
+        <q-btn
+          flat
+          dense
+          round
+          icon="logout"
+          aria-label="Déconnexion"
+          :loading="loggingOut"
+          @click="onLogout"
+        />
       </q-toolbar>
     </q-header>
 
@@ -94,7 +102,8 @@ async function countMyTasks() {
 }
 
 onMounted(() => {
-  // Restore the user profile after a page reload if a token is present.
+  // Restore the user profile after a page reload: the router's silent refresh
+  // has put an access token back, the profile is still to fetch.
   if (auth.isAuthenticated && !auth.user) {
     void auth.fetchMe();
   }
@@ -109,8 +118,16 @@ watch(
   () => void countMyTasks(),
 );
 
-function onLogout() {
-  auth.logout();
-  void router.push({ name: 'login' });
+// Logging out is a server call — the session is revoked there, not just
+// forgotten here — so the button waits for it rather than racing the router.
+const loggingOut = ref(false);
+async function onLogout() {
+  loggingOut.value = true;
+  try {
+    await auth.logout();
+  } finally {
+    loggingOut.value = false;
+  }
+  await router.push({ name: 'login' });
 }
 </script>

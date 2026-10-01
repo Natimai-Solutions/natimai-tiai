@@ -27,7 +27,22 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "changeme"
 
     # --- Console auth (admin users) ---
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8
+    # A console login is a server-side session (``auth_sessions``) seen through
+    # two tokens. The access token is a short JWT the console keeps in memory
+    # and sends on every call: short, because it is the one a script injected
+    # into the page could read, and because a stateless token cannot be taken
+    # back — the session check in ``app.api.deps`` makes revocation immediate,
+    # the lifetime only bounds what a stolen copy is worth.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15, ge=1, le=24 * 60)
+    # The refresh token lives in an HttpOnly cookie, out of the page's reach,
+    # and buys a new access token. Each use pushes the session's end this far
+    # ahead (sliding): an operator who opens the console every working day is
+    # never asked to log in again by it.
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1, le=365)
+    # ... except here: an absolute ceiling counted from the login, sliding or
+    # not, so a session kept alive by a forgotten tab still ends one day and a
+    # stolen refresh token cannot be milked forever.
+    SESSION_MAX_DAYS: int = Field(default=30, ge=1, le=365)
     # First admin, seeded at startup if it does not exist yet.
     FIRST_ADMIN_EMAIL: str | None = None
     FIRST_ADMIN_PASSWORD: str | None = None
@@ -111,6 +126,18 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: Annotated[
         list[AnyUrl] | str, BeforeValidator(parse_list)
     ] = []
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def refresh_cookie_secure(self) -> bool:
+        """Whether the refresh cookie carries ``Secure``.
+
+        Everywhere but ``local``: outside it the console is only ever served
+        through Caddy over HTTPS, and a refresh token must never cross the
+        network in clear. ``local`` is the Quasar dev server on plain HTTP,
+        where a ``Secure`` cookie would simply never be stored.
+        """
+        return self.ENVIRONMENT != "local"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

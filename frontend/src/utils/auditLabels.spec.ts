@@ -60,6 +60,7 @@ describe('auditActionLabel', () => {
       'room.unassign_machines',
       'settings.update',
       'settings.email_test',
+      'auth.session_revoked',
       'user.create',
       'user.update',
       'user.delete',

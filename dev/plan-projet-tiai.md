@@ -281,9 +281,12 @@ commands               -- file de commandes (une ligne par poste, même en broad
 
 | Méthode | Endpoint | Rôle |
 |---|---|---|
-| `POST` | `/api/v1/auth/login` | Email + mot de passe (OAuth2 password) → JWT. |
+| `POST` | `/api/v1/auth/login` | Email (insensible à la casse) + mot de passe (OAuth2 password) → jeton d'accès (JWT court, `sid`) + jeton de session en cookie `HttpOnly`. |
+| `POST` | `/api/v1/auth/refresh` | Cookie de session → nouveau jeton d'accès, jeton de session renouvelé (réutilisation d'un ancien = session révoquée). |
+| `POST` | `/api/v1/auth/logout` | Révoque la session courante, efface le cookie. |
+| `GET` / `DELETE` | `/api/v1/auth/sessions[/{id}]` | Sessions ouvertes du compte ; fermeture de l'une d'elles. |
 | `GET` | `/api/v1/auth/me` | Utilisateur courant. |
-| `POST` | `/api/v1/auth/password` | Changement de son propre mot de passe (preuve : mot de passe actuel). Ferme les autres sessions. |
+| `POST` | `/api/v1/auth/password` | Changement de son propre mot de passe (preuve : mot de passe actuel). Ferme toutes les sessions du compte. |
 | `POST` | `/api/v1/auth/password-reset/request` | **Public.** Envoie un lien de réinitialisation par e-mail (Mailgun). Répond 204 quoi qu'il arrive (anti-énumération). |
 | `POST` | `/api/v1/auth/password-reset/confirm` | **Public.** Consomme le jeton (usage unique, expirant) et définit le nouveau mot de passe. |
 | `GET` | `/api/v1/machines?search=&domain=&antivirus=&status=&page=` | Liste filtrable/paginée (`search` couvre hostname / UUID / IP / nom d'antivirus ; `antivirus` filtre par sous-chaîne). |
@@ -576,6 +579,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] Audit des actions de masse (2026-10-01) : `command.bulk` pour toute commande visant un ensemble (parc, domaine, emplacement, statut, plusieurs postes listés — type, cible demandée, créées, ignorées, durée de vie) et `machine.wake_bulk` pour un réveil de plusieurs postes ; un poste seul reste tracé par `created_by`
 - [x] Rotation automatique des tokens agents (2026-10-01) : `AGENT_TOKEN_ROTATE_DAYS` (30), proposée au heartbeat aux seuls agents qui l'annoncent, ancien token valide jusqu'au premier usage du nouveau (`pending_token_hash`), stockage DPAPI atomique côté agent, migration `0025`
 - [x] Rétention (2026-10-01) : purges quotidiennes du journal d'audit (`AUDIT_RETENTION_DAYS`, 730), de l'historique des commandes terminées (`COMMAND_RETENTION_DAYS`, 365) et des jetons de réinitialisation consommés
+- [x] **Sécurité des comptes console** (2026-10-01) : (1) **pas d'escalade** — un compte non administrateur n'accorde que ce qu'il détient (groupes composés, placement d'un compte, et aucune prise sur un compte ou un groupe plus puissant, groupe Administrateurs compris), erreur `auth.permission.escalation` ; (2) **sessions serveur** — table `auth_sessions` (migration `0024`), jeton d'accès de 15 min portant `sid` et vérifié contre sa session à chaque requête, jeton de session tournant en cookie `HttpOnly; SameSite=Strict; Secure`, réutilisation = vol présumé et révocation, `POST /auth/refresh`, `POST /auth/logout`, « Sessions ouvertes » dans « Mon compte » (audit `auth.session_revoked`), révocation de toutes les sessions au changement/réinitialisation de mot de passe et à la désactivation ; console : jeton en mémoire, un seul rafraîchissement partagé sur 401, rafraîchissement silencieux au rechargement ; (3) connexion à **temps constant** (bcrypt contre un hash factice) et e-mails **insensibles à la casse** (index unique sur `lower(email)`, migration refusant les doublons de casse)
 
 **M6 — Packaging & GPO** · 🟡 packaging et vecteurs de déploiement livrés ; reste la signature et le pilote
 - [x] Workflow de release (`.github/workflows/release.yml`) : tag `v*` → `.exe` windows/amd64 + arm64 cross-compilés, `.msi` WiX construits sur runner Windows, `SHA256SUMS.txt`, noms versionnés et fixes attachés à la release
@@ -600,7 +604,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 | Étape | Mesure |
 |---|---|
 | MVP (M0–M1) | **TLS dès le départ** (Caddy + AC interne) ; **auto-enrôlement** : secret d'enrôlement partagé → **token unique par poste** (DPAPI) ; identité = `machine_uuid` ; **auth console JWT** avec rôles `admin` / `readonly`. |
-| Durcissement (M5) | Garde-fou de ré-enrôlement + révocation de token ; journal d'audit ; moindre privilège + limitation de débit sur l'API. |
+| Durcissement (M5) | Garde-fou de ré-enrôlement + révocation de token ; journal d'audit ; moindre privilège + limitation de débit sur l'API. ✅ côté console : sessions serveur révocables (jeton d'accès court + jeton de session tournant en cookie `HttpOnly`), pas d'escalade de privilèges par la gestion des comptes, connexion à temps constant. |
 | Durcissement (exploitation) | **Rotation automatique des tokens agents** (livrée) ; rétention du journal d'audit et de l'historique des commandes. |
 | Plus tard | mTLS ; attestation d'identité AD à l'enrôlement ; **permissions fines par ressource/table** (lecture/écriture) au-delà des deux rôles. |
 

@@ -117,6 +117,7 @@ def test_build_jobs_registers_the_whole_schedule():
         "maintenance_reminders",
         "purge_outbox",
         "purge_usage",
+        "purge_sessions",
         "purge_audit",
         "purge_commands",
         "purge_reset_tokens",

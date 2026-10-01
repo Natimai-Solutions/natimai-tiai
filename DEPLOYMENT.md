@@ -11,9 +11,12 @@ installé, il télécharge et démarre tous les composants — base de données,
 backend, console, reverse-proxy — avec les commandes données telles quelles
 ci-dessous, sans rien d'autre à installer sur la machine.
 
-Le TLS n'est pas une dépendance dure : l'authentification passe par des en-têtes
-HTTP, jamais par un cookie `Secure` ou une redirection. On peut donc démarrer les
-tests en HTTP pur et ajouter le certificat plus tard, sans toucher au code.
+Le TLS n'est pas une dépendance dure pour les agents : ils s'authentifient par
+des en-têtes HTTP, jamais par un cookie `Secure` ou une redirection. On peut donc
+démarrer les tests en HTTP pur et ajouter le certificat plus tard, sans toucher
+au code. La console, elle, garde sa session dans un cookie `Secure` dès que
+`ENVIRONMENT` n'est pas `local` : elle n'est de toute façon servie qu'en HTTPS,
+par Caddy (cf. § « [Sessions de la console](#sessions-de-la-console) »).
 
 ## Les trois modes
 
@@ -212,8 +215,11 @@ done
   tard à la rotation suivante, sans révocation. Les jetons de réinitialisation
   de mot de passe expirés ou utilisés depuis plus d'un jour sont purgés chaque
   matin, sans réglage.
-- Changer `SECRET_KEY` invalide tous les JWT console : les opérateurs devront se
-  reconnecter.
+- Changer `SECRET_KEY` invalide les jetons d'accès console en cours (15 min de
+  vie) ; la console en obtient aussitôt de nouveaux par sa session, sans
+  reconnexion. Pour déconnecter tout le monde — fuite de la clé, poste
+  compromis —, fermer aussi les sessions : cf. § « [Sessions de la
+  console](#sessions-de-la-console) ».
 - `FIRST_ADMIN_PASSWORD` ne doit pas dépasser 72 octets (limite bcrypt) et n'est
   utilisé qu'au démarrage, pour créer le compte s'il n'existe pas.
 - `POSTGRES_PASSWORD` n'est appliqué qu'à la **première** initialisation du
@@ -245,7 +251,9 @@ Il n'est jamais committé.
 |---|---|---|
 | `ENVIRONMENT` | `local` | `local` / `staging` / `production`. Hors `local` : garde anti-placeholder + masquage des erreurs 500 |
 | `SECRET_KEY` | `changeme` | Signature des JWT console, et dérivation de la clé qui chiffre les identifiants e-mail enregistrés dans la console. **La changer oblige à ressaisir ces identifiants** (voir « Alertes e-mail ») |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `480` | Durée de vie du JWT console |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Durée de vie du jeton d'accès console (1 à 1 440). Court à dessein : c'est lui que la page garde en mémoire et envoie à chaque appel, et la console le renouvelle seule par sa session. Ancien défaut : 480 — une valeur `480` restée dans un `.env` reste acceptée mais n'a plus de raison d'être |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Une session console non utilisée pendant ce nombre de jours se ferme. **Glissante** : chaque renouvellement repousse l'échéance, un opérateur qui ouvre la console chaque semaine ne se reconnecte pas |
+| `SESSION_MAX_DAYS` | `30` | Durée **absolue** d'une session, comptée depuis la connexion, glissement compris : au-delà, reconnexion obligatoire. Borne ce que vaut un jeton de session volé |
 | `FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` | — | Compte admin créé au démarrage s'il n'existe pas |
 | `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée à tout mot de passe |
 | `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié » |
@@ -272,6 +280,45 @@ Il n'est jamais committé.
 | `USAGE_RETENTION_DAYS` | `400` | Conservation des compteurs horaires d'utilisation, purgés chaque jour par le worker. Environ 7 200 lignes par jour pour 300 postes |
 | `ROOM_SOURCE` | `manual` | Comment les postes sont rangés en salles. `manual` : depuis la console, à la main. `ad_ou` : par l'**unité d'organisation** qui contient l'objet ordinateur — l'agent lit son propre DN dans le registre, sans interroger l'annuaire — une salle par OU, nommée comme elle. `ad_location` : par l'attribut **Emplacement** de l'objet ordinateur (onglet Emplacement d'ADUC), que l'agent lit via ADSI. Dans les deux modes annuaire, le rattachement manuel est verrouillé ; les salles créées gardent nom, bâtiment et notes modifiables. Après un changement de ce réglage, « Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc d'un coup |
 | `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+
+### Sessions de la console
+
+Une connexion à la console ouvre une **session côté serveur** (table
+`auth_sessions`), vue à travers deux jetons :
+
+- un **jeton d'accès** (JWT, `ACCESS_TOKEN_EXPIRE_MINUTES`, 15 min), que la page
+  garde en mémoire — jamais dans le stockage du navigateur — et envoie à chaque
+  appel. Le serveur vérifie à chaque requête que sa session est encore ouverte :
+  une déconnexion ou une révocation prend effet **à la requête suivante** ;
+- un **jeton de session**, dans un cookie `HttpOnly; SameSite=Strict;
+  Path=/api/v1/auth`, et `Secure` hors `ENVIRONMENT=local`. Aucun script de la
+  page ne peut le lire ; il ne sert qu'à obtenir un nouveau jeton d'accès, et
+  **change à chaque usage**. Un jeton de session déjà échangé qui se représente
+  signifie qu'une copie circule : la session est fermée pour tout le monde et
+  l'évènement journalisé (`app.security`, « presumed theft »).
+
+Ferment toutes les sessions d'un compte : le changement de son mot de passe, sa
+réinitialisation (par lien ou par un administrateur), sa désactivation, sa
+suppression. Chacun voit et ferme ses propres sessions depuis « Mon compte » —
+fermeture tracée dans le journal d'audit (`auth.session_revoked`).
+
+**À la mise à jour vers cette version**, les jetons émis auparavant ne portent
+pas de session et sont refusés : chaque opérateur se reconnecte une fois. La même
+migration (`0024`) rend les adresses e-mail **insensibles à la casse** — elles
+sont passées en minuscules — et **s'interrompt sans rien modifier** si deux
+comptes ne diffèrent que par la casse de leur adresse, en les nommant : renommer
+ou supprimer l'un des deux (page Utilisateurs de la version précédente, ou en
+base), puis relancer.
+
+Pour **déconnecter tout le monde** d'un coup (clé `SECRET_KEY` divulguée, poste
+compromis), changer `SECRET_KEY` puis fermer toutes les sessions :
+
+```bash
+cd deploy
+docker compose exec db-backup sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+   -c "UPDATE auth_sessions SET revoked_at = now() WHERE revoked_at IS NULL"'
+```
 
 ### Réveil des postes (Wake-on-LAN)
 

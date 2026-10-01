@@ -33,6 +33,7 @@ from app.core.config import settings
 from app.core.db import engine
 from app.features import password_reset_retention
 from app.features.audit import crud as audit_crud
+from app.features.auth_session import crud as auth_session_crud
 from app.features.base import utcnow
 from app.features.command import crud as command_crud
 from app.features.command.models import Command, CommandStatus
@@ -100,6 +101,13 @@ async def purge_usage() -> int:
     cutoff = utcnow() - timedelta(days=settings.USAGE_RETENTION_DAYS)
     async with AsyncSession(engine) as session:
         return await usage_crud.purge_before(session, cutoff)
+
+
+async def purge_sessions() -> int:
+    """Drop console sessions that have expired or been revoked: they can no
+    longer be used, and a row per login for ever would only grow."""
+    async with AsyncSession(engine) as session:
+        return await auth_session_crud.purge_expired_sessions(session)
 
 
 async def purge_audit() -> int:
@@ -251,6 +259,7 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
         ),
         Job("purge_outbox", purge_outbox, housekeeping(now), housekeeping),
         Job("purge_usage", purge_usage, housekeeping(now), housekeeping),
+        Job("purge_sessions", purge_sessions, housekeeping(now), housekeeping),
         Job("purge_audit", purge_audit, housekeeping(now), housekeeping),
         Job("purge_commands", purge_commands, housekeeping(now), housekeeping),
         Job(

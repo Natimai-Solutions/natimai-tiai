@@ -379,7 +379,18 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 _item(
                     env,
                     "ACCESS_TOKEN_EXPIRE_MINUTES",
-                    "Durée de vie d'une session console, en minutes",
+                    "Durée de vie, en minutes, du jeton d'accès console (renouvelé seul "
+                    "par la session)",
+                ),
+                _item(
+                    env,
+                    "REFRESH_TOKEN_EXPIRE_DAYS",
+                    "Jours sans usage avant qu'une session console se ferme (glissant)",
+                ),
+                _item(
+                    env,
+                    "SESSION_MAX_DAYS",
+                    "Durée maximale d'une session console depuis la connexion, en jours",
                 ),
                 _item(
                     env,

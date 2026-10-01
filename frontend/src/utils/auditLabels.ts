@@ -33,6 +33,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'room.unassign_machines': 'Retrait de postes de leur salle',
   'settings.update': 'Modification des paramètres',
   'settings.email_test': "Envoi d'un e-mail de test",
+  'auth.session_revoked': "Fermeture d'une session console",
   'user.create': "Création d'un compte",
   'user.update': "Modification d'un compte",
   'user.delete': "Suppression d'un compte",
@@ -55,6 +56,10 @@ export const AUDIT_RESOURCE_TYPE_LABELS: Record<string, string> = {
 /** Detail key → label, for the full view of an entry. */
 export const AUDIT_DETAIL_KEY_LABELS: Record<string, string> = {
   to: 'Destinataire',
+  current: 'Session en cours',
+  user_agent: 'Appareil',
+  ip: 'Adresse IP',
+  created_at: 'Ouverte le',
   provider: 'Fournisseur',
   ok: 'Réussi',
   unsaved: 'Valeurs essayées sans être enregistrées',
