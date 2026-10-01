@@ -30,6 +30,7 @@ from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.notification.outbox import queue_email
 from app.features.notification.recipients import recipients_for
+from app.features.setting.email_policy import email_policy
 from app.features.threat.crud import NewDetection
 from app.features.user.models import EmailPreference
 
@@ -145,6 +146,10 @@ async def queue_threat_alert(
         return 0
     recipients = await recipients_for(session, [EmailPreference.IMMEDIATE])
     if not recipients:
+        return 0
+    # Only now, once there is someone to tell: one read of the mail settings
+    # per heartbeat that brings a fresh detection, never per heartbeat.
+    if not (await email_policy(session)).enabled:
         return 0
 
     subject, text = render_alert(machine, fresh)

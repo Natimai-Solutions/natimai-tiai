@@ -26,7 +26,9 @@ class _Mailgun:
         self.sent: list[dict] = []
         self.failing: set[str] = set()
 
-    async def __call__(self, subject: str, text: str, to: list[str] | None = None):
+    async def __call__(
+        self, subject: str, text: str, to: list[str] | None = None, *, policy=None
+    ):
         if to and to[0] in self.failing:
             raise RuntimeError("mailgun said no")
         self.sent.append({"subject": subject, "text": text, "to": to})

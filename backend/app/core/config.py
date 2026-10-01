@@ -117,6 +117,12 @@ class Settings(BaseSettings):
     # endpoint. Whichever is chosen, mail is "enabled" only once that provider
     # has what it needs (``alerts_enabled``); the other provider's variables
     # are then simply ignored.
+    #
+    # All of these but the Mailgun proxy and timeout are *initial* values: the
+    # page Paramètres can store its own, field by field, and a stored value
+    # wins (``app.features.setting.email_policy``). Every sender reads that
+    # resolved policy, never these fields directly — ``alerts_enabled`` and its
+    # siblings below describe the environment alone.
     EMAIL_PROVIDER: Literal["mailgun", "smtp"] = "mailgun"
     # Sender shared by both providers. The MAILGUN_FROM_* names below still
     # work and take over when these are empty, so a deployment written before
@@ -183,7 +189,7 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def alerts_enabled(self) -> bool:
-        """Whether the selected e-mail provider is configured."""
+        """Whether the environment alone configures the selected provider."""
         if self.EMAIL_PROVIDER == "smtp":
             return self.smtp_configured
         return self.mailgun_configured
