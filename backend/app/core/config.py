@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     # --- Agent enrollment ---
     # Shared secret deployed by GPO; only authorizes POST /agent/enroll.
     ENROLLMENT_SECRET: str = "changeme-enrollment-secret"
+    # Age, in days, past which a poste's token is renewed on its next
+    # heartbeat — only for an agent that announces it can store a new one
+    # (``supports_token_rotation``); an older agent keeps its token for life.
+    # A token copied off a poste (a disk image, a backup of ProgramData) then
+    # stops working within this many days without anyone revoking it. 0 turns
+    # rotation off. See ``features/machine/token_rotation.py``.
+    AGENT_TOKEN_ROTATE_DAYS: int = Field(default=30, ge=0, le=3650)
 
     # --- Remote commands ---
     # How long a queued command stays valid when the request does not carry its
@@ -80,6 +87,19 @@ class Settings(BaseSettings):
     # route so that a mistyped `.env` refuses to boot instead of failing every
     # queueing call.
     COMMAND_DEFAULT_TTL_MINUTES: int = Field(default=60, ge=1, le=60 * 24 * 30)
+    # How long the command history is kept, in days, before the daily purge
+    # drops it. Only rows that are over: succeeded, failed, expired — and
+    # delivered ones that never got a result, whose agent has had the whole
+    # window to answer. Pending and running rows are never purged, whatever
+    # their age. 0 keeps the history forever.
+    COMMAND_RETENTION_DAYS: int = Field(default=365, ge=0, le=3650)
+
+    # --- Audit log ---
+    # How long audit entries are kept, in days. Two years by default: long
+    # enough to answer "who revoked this poste last school year", short enough
+    # that the table does not grow for the life of the deployment. 0 keeps
+    # every entry forever — for a deployment whose policy requires it.
+    AUDIT_RETENTION_DAYS: int = Field(default=730, ge=0, le=3650)
 
     # --- Rate limiting ---
     # Escape hatch, not a tuning knob: the per-endpoint budgets live with the

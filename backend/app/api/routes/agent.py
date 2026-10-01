@@ -26,7 +26,7 @@ from app.features.command.models import (
 )
 from app.features.inventory.crud import apply_inventory
 from app.features.inventory.schemas import InventoryReport
-from app.features.machine import fingerprint
+from app.features.machine import fingerprint, token_rotation
 from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
 from app.features.notification import threat_alert
@@ -256,6 +256,11 @@ class HeartbeatRequest(BaseModel):
     inventory: InventoryReport | None = None
     fingerprint: Fingerprint | None = None
     threats: list[ThreatReport] = []
+    # Sent by an agent able to store a token handed back on a heartbeat. False
+    # — the default, and what every older agent says by saying nothing — means
+    # never offering one: it would be ignored, and the agent kept on the old
+    # token anyway (``features/machine/token_rotation.py``).
+    supports_token_rotation: bool = False
 
     @field_validator("location")
     @classmethod
@@ -363,9 +368,15 @@ class CommandOut(BaseModel):
 
 
 class HeartbeatResponse(BaseModel):
-    """Heartbeat ack carrying the machine's pending commands."""
+    """Heartbeat ack carrying the machine's pending commands.
+
+    ``new_token`` is set when the token this heartbeat used is due for
+    renewal: the agent stores it and authenticates with it from the next
+    request on, which retires the old one. Null on every other heartbeat.
+    """
 
     commands: list[CommandOut]
+    new_token: str | None = None
 
 
 # Bounds what one command result can write to the database and pour into the
@@ -504,6 +515,10 @@ async def enroll(
     if suspicious:
         machine.needs_verification = True
     machine.token_hash = security.hash_token(token)
+    machine.token_issued_at = utcnow()
+    # A rotation the previous agent left half-done must not leave a second
+    # token valid next to the one minted here.
+    token_rotation.reset_rotation(machine)
     machine.updated_at = utcnow()
 
     # Every enrollment is a security event: a token was minted. The log line is
@@ -729,8 +744,23 @@ async def heartbeat(
         await threat_alert.queue_threat_alert(
             session, threat_alert.MachineContext.of(machine), new_detections
         )
+
+    # Last, so that a heartbeat failing on anything above never mints a token
+    # it would not return. Committed with the rest: the pending hash exists
+    # exactly when the response carrying its token was produced.
+    new_token: str | None = None
+    if payload.supports_token_rotation and token_rotation.rotation_due(
+        machine, seen_at, settings.AGENT_TOKEN_ROTATE_DAYS
+    ):
+        reoffer = machine.pending_token_hash is not None
+        new_token = token_rotation.offer_new_token(machine)
+        security_log.info(
+            "token rotation %s to machine %s",
+            "re-offered" if reoffer else "offered",
+            machine.machine_uuid,
+        )
     await session.commit()
-    return HeartbeatResponse(commands=commands)
+    return HeartbeatResponse(commands=commands, new_token=new_token)
 
 
 @router.post("/commands/{command_id}/result")

@@ -352,13 +352,45 @@ func ClearToken(dir string) error {
 	return nil
 }
 
+// atomicWrite replaces path with data, never leaving a half-written file in
+// its place: the bytes go to a temporary file next to it, are flushed to disk,
+// and only then renamed over the original.
+//
+// The flush matters most for token.dat since tokens rotate: the agent switches
+// to a new token once this returns, and the server retires the old one on the
+// first request carrying the new — a power cut that left token.dat renamed but
+// empty would cost the poste a re-enrollment it did nothing to deserve. On any
+// failure the temporary file is removed and the original is left untouched,
+// which is what lets a caller keep using the value it already had.
 func atomicWrite(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create dir: %w", err)
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
+	if err := writeSynced(tmp, data, perm); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write: %w", err)
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("replace: %w", err)
+	}
+	return nil
+}
+
+// writeSynced is os.WriteFile plus an fsync before the close.
+func writeSynced(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }

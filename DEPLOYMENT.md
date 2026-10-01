@@ -206,6 +206,12 @@ done
   serveur et la configuration de chaque agent. Le faire tourner ne casse pas les
   agents déjà enrôlés — ils n'utilisent plus que leur token par poste — ce qui en
   fait une rotation peu coûteuse.
+- Les **tokens par poste** se renouvellent d'eux-mêmes tous les
+  `AGENT_TOKEN_ROTATE_DAYS` jours (cf. « Rotation des tokens agents »). Rien à
+  faire côté serveur ; un token volé sur un poste cesse de fonctionner au plus
+  tard à la rotation suivante, sans révocation. Les jetons de réinitialisation
+  de mot de passe expirés ou utilisés depuis plus d'un jour sont purgés chaque
+  matin, sans réglage.
 - Changer `SECRET_KEY` invalide tous les JWT console : les opérateurs devront se
   reconnecter.
 - `FIRST_ADMIN_PASSWORD` ne doit pas dépasser 72 octets (limite bcrypt) et n'est
@@ -245,6 +251,7 @@ Il n'est jamais committé.
 | `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié » |
 | `CONSOLE_BASE_URL` | `https://<TIAI_SERVER_NAME>` | URL publique de la console, dans les liens des e-mails (réinitialisation, fiche d'un poste). À renseigner seulement si la console est jointe sous une autre URL (autre port, proxy devant Caddy). Si ni elle ni `TIAI_SERVER_NAME` n'est connue, aucun e-mail de réinitialisation n'est envoyé |
 | `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste |
+| `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | |
@@ -255,6 +262,8 @@ Il n'est jamais committé.
 | `HARDWARE_AGING_YEARS` | `5` | Âge du poste (date du BIOS), en années, à partir duquel il est compté à renouveler. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
 | `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+| `COMMAND_RETENTION_DAYS` | `365` | Conservation de l'historique des commandes, en jours (0 à 3650). Chaque matin, le worker supprime les commandes **terminées** (réussies, échouées, périmées) et les commandes délivrées restées sans réponse dont le dernier événement est plus ancien. Jamais une commande en attente ou en cours. `0` = conserver indéfiniment |
+| `AUDIT_RETENTION_DAYS` | `730` | Conservation du journal d'audit, en jours (0 à 3650), purgé chaque matin par le worker. `0` = conserver indéfiniment, si la politique de l'établissement l'exige |
 | `MAINTENANCE_DEFAULT_CYCLE_DAYS` | `90` | Cycle de maintenance par défaut du parc, en jours, **valeur initiale seulement** : la page Paramètres de la console peut en écrire une autre, qui prend alors le dessus. Une salle ou un poste peuvent surcharger le cycle (0 = exclu de la maintenance) et le responsable ; le plus précis gagne |
 | `MAINTENANCE_DUE_SOON_DAYS` | `14` | Fenêtre « à échéance » : un poste est signalé ce nombre de jours avant sa date. Même règle : valeur initiale, modifiable dans Paramètres |
 | `USAGE_WINDOW_DAYS` | `7` | Fenêtre glissante, en jours (1 à 90), sur laquelle sont comptées les heures allumées des postes. **Valeur initiale seulement**, modifiable dans Paramètres |
@@ -882,6 +891,34 @@ créer, est restreint.
 L'agent s'auto-enrôle au premier démarrage, stocke le token reçu, puis n'utilise
 plus que celui-ci. `uninstall` ne retire que l'enregistrement du service : le
 binaire, `C:\ProgramData\Tiai` et `HKLM\SOFTWARE\Tiai` restent en place.
+
+### Rotation des tokens agents
+
+Le token d'un poste n'est plus émis une fois pour toutes : passé
+`AGENT_TOKEN_ROTATE_DAYS` jours (30 par défaut), le serveur en propose un
+nouveau dans la réponse au heartbeat. L'agent l'écrit dans `token.dat` (DPAPI,
+écriture atomique), puis s'en sert dès la requête suivante — c'est ce premier
+usage qui fait refuser l'ancien par le serveur. Jusque-là l'ancien reste
+valide : une réponse perdue ou un `token.dat` impossible à écrire (disque
+plein, antivirus) ne coupent pas le poste ; l'agent garde son token, le
+journalise (`agent.log`), et le serveur en repropose un autre au heartbeat
+suivant.
+
+- Seuls les agents qui l'annoncent (`supports_token_rotation`) sont concernés :
+  un parc en cours de mise à jour mélange sans risque anciens et nouveaux
+  agents, les anciens gardant leur token.
+- À la mise à jour du serveur, la migration date tous les tokens existants du
+  jour de son passage : les premières rotations ont lieu 30 jours plus tard,
+  au fil des heartbeats, pas toutes le même matin.
+- Une révocation, « autoriser le ré-enrôlement » et un ré-enrôlement annulent
+  une rotation en cours : le token proposé meurt avec l'ancien.
+- Les rotations sont tracées dans le journal applicatif du backend
+  (`app.security` : « token rotation offered », « token rotated »), pas dans le
+  journal d'audit de la console, réservé aux actions des opérateurs.
+- **Restauration d'une sauvegarde** : un poste dont le token a tourné depuis
+  le dump présente un token que la base restaurée ne connaît pas. Il reçoit un
+  401, abandonne son token et se ré-enrôle de lui-même avec le secret du parc —
+  le même chemin qu'après une restauration plus ancienne que son enrôlement.
 
 **Mettre à jour un poste** ne passe pas par `uninstall` / `install` — le service
 pointe sur un chemin, pas sur une version. Arrêter, remplacer le binaire,

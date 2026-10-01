@@ -370,3 +370,60 @@ func TestProxyURLDefaultsToDirectAndRoundTrips(t *testing.T) {
 		t.Errorf("ProxyURL = %q", cfg.ProxyURL)
 	}
 }
+
+// A rotated token that cannot be written must leave the previous one readable:
+// the agent keeps using it, and the next start must load it rather than find
+// a half-written file. Here the temporary file cannot even be created.
+func TestFailedTokenWriteLeavesThePreviousTokenIntact(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveToken(dir, "current-token"); err != nil {
+		t.Fatalf("SaveToken: %v", err)
+	}
+	// A directory where the temporary file should go.
+	if err := os.Mkdir(tokenPath(dir)+".tmp", 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveToken(dir, "rotated-token"); err == nil {
+		t.Fatal("SaveToken succeeded although its temporary file could not be written")
+	}
+	got, err := LoadToken(dir)
+	if err != nil || got != "current-token" {
+		t.Errorf("after a failed write, LoadToken = %q (err %v), want the previous token", got, err)
+	}
+}
+
+// A write that fails at the rename leaves no temporary file behind: it holds a
+// token, and a stray copy of one is exactly what the ACL on the folder and the
+// DPAPI entropy exist to avoid multiplying.
+func TestFailedTokenRenameRemovesTheTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	// token.dat is a non-empty directory: nothing can be renamed over it.
+	if err := os.MkdirAll(filepath.Join(tokenPath(dir), "blocker"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveToken(dir, "rotated-token"); err == nil {
+		t.Fatal("SaveToken succeeded although token.dat could not be replaced")
+	}
+	if _, err := os.Stat(tokenPath(dir) + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("temporary token file left behind (stat err: %v)", err)
+	}
+}
+
+// A successful rotation replaces the stored token, the temporary file gone.
+func TestSaveTokenReplacesThePreviousOne(t *testing.T) {
+	dir := t.TempDir()
+	for _, tok := range []string{"enrolled-token", "rotated-token"} {
+		if err := SaveToken(dir, tok); err != nil {
+			t.Fatalf("SaveToken(%q): %v", tok, err)
+		}
+	}
+	got, err := LoadToken(dir)
+	if err != nil || got != "rotated-token" {
+		t.Errorf("LoadToken = %q (err %v), want the rotated token", got, err)
+	}
+	if _, err := os.Stat(tokenPath(dir) + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("temporary token file left behind (stat err: %v)", err)
+	}
+}

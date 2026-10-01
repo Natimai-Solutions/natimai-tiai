@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"tiai/agent/internal/models"
@@ -33,9 +34,16 @@ func (e *StatusError) Error() string {
 // Client talks to the Tiai API.
 type Client struct {
 	baseURL string
-	token   string
 	timeout time.Duration
 	http    *http.Client
+
+	// The bearer token changes under a running agent — at enrollment, and on
+	// every rotation — from the polling loop, while the command worker posts
+	// results from its own goroutine. Each request reads it once, under the
+	// lock, so it carries either the old token or the new one, never a torn
+	// value.
+	mu    sync.RWMutex
+	token string
 }
 
 // New builds a client with the given per-request timeout, reaching the server
@@ -64,8 +72,20 @@ func New(baseURL, token string, timeout time.Duration, proxy Proxy) *Client {
 	}
 }
 
-// SetToken updates the bearer token (after enrollment).
-func (c *Client) SetToken(token string) { c.token = token }
+// SetToken updates the bearer token (after enrollment or a rotation). Requests
+// already in flight keep the token they were built with.
+func (c *Client) SetToken(token string) {
+	c.mu.Lock()
+	c.token = token
+	c.mu.Unlock()
+}
+
+// Token is the bearer token the next request will carry.
+func (c *Client) Token() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.token
+}
 
 // Enroll registers the machine and returns its per-machine token.
 func (c *Client) Enroll(ctx context.Context, secret string, req models.EnrollRequest) (*models.EnrollResponse, error) {
@@ -94,7 +114,7 @@ func (c *Client) PostResult(ctx context.Context, commandID string, res models.Co
 }
 
 func (c *Client) authHeader() map[string]string {
-	return map[string]string{"Authorization": "Bearer " + c.token}
+	return map[string]string{"Authorization": "Bearer " + c.Token()}
 }
 
 func (c *Client) do(ctx context.Context, method, path string, headers map[string]string, body, out any) error {

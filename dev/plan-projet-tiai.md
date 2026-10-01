@@ -573,8 +573,9 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] Journal d'audit (2026-08-28) : migration `0013_audit_log`, `audit.record` dans la transaction de l'appelant, lecture console `GET /audit` (admin, filtres, paginé) ; tracées : révocation de token, ré-autorisation d'enrôlement — les commandes portent `created_by` depuis M3
 - [x] Couverture d'audit élargie (2026-10-01) : fusion de postes (`machine.merge`, identité de la fiche supprimée dans les détails) et réinitialisation de mot de passe par un administrateur (`user.reset_password`, jamais le mot de passe) ; les comptes l'étaient déjà. Lecture filtrable par auteur, type de ressource et période (`since` inclus, `until` exclu, fuseau obligatoire), `GET /audit/actions`
 - [x] Page console « Journal d'audit » (2026-10-01) : `/audit`, permission `audit:read`, filtres et page dans l'URL, détail par entrée
-- [ ] Audit des actions de masse — les commandes portent déjà `created_by`, reste la trace d'une commande groupée en tant que telle
-- [ ] Rotation automatique des tokens agents
+- [x] Audit des actions de masse (2026-10-01) : `command.bulk` pour toute commande visant un ensemble (parc, domaine, emplacement, statut, plusieurs postes listés — type, cible demandée, créées, ignorées, durée de vie) et `machine.wake_bulk` pour un réveil de plusieurs postes ; un poste seul reste tracé par `created_by`
+- [x] Rotation automatique des tokens agents (2026-10-01) : `AGENT_TOKEN_ROTATE_DAYS` (30), proposée au heartbeat aux seuls agents qui l'annoncent, ancien token valide jusqu'au premier usage du nouveau (`pending_token_hash`), stockage DPAPI atomique côté agent, migration `0025`
+- [x] Rétention (2026-10-01) : purges quotidiennes du journal d'audit (`AUDIT_RETENTION_DAYS`, 730), de l'historique des commandes terminées (`COMMAND_RETENTION_DAYS`, 365) et des jetons de réinitialisation consommés
 
 **M6 — Packaging & GPO** · 🟡 packaging et vecteurs de déploiement livrés ; reste la signature et le pilote
 - [x] Workflow de release (`.github/workflows/release.yml`) : tag `v*` → `.exe` windows/amd64 + arm64 cross-compilés, `.msi` WiX construits sur runner Windows, `SHA256SUMS.txt`, noms versionnés et fixes attachés à la release
@@ -600,7 +601,8 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 |---|---|
 | MVP (M0–M1) | **TLS dès le départ** (Caddy + AC interne) ; **auto-enrôlement** : secret d'enrôlement partagé → **token unique par poste** (DPAPI) ; identité = `machine_uuid` ; **auth console JWT** avec rôles `admin` / `readonly`. |
 | Durcissement (M5) | Garde-fou de ré-enrôlement + révocation de token ; journal d'audit ; moindre privilège + limitation de débit sur l'API. |
-| Plus tard | Rotation automatique des tokens ; mTLS ; attestation d'identité AD à l'enrôlement ; **permissions fines par ressource/table** (lecture/écriture) au-delà des deux rôles. |
+| Durcissement (exploitation) | **Rotation automatique des tokens agents** (livrée) ; rétention du journal d'audit et de l'historique des commandes. |
+| Plus tard | mTLS ; attestation d'identité AD à l'enrôlement ; **permissions fines par ressource/table** (lecture/écriture) au-delà des deux rôles. |
 
 Points permanents : binaire agent **signé**, validation stricte des entrées API, limitation de débit côté agent pour éviter l'effet « troupeau ».
 

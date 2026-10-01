@@ -32,6 +32,7 @@ from app.features.inventory.models import (
     Volume,
 )
 from app.features.machine import crud as machine_crud
+from app.features.machine import token_rotation
 from app.features.machine.agent_version import FleetVersions, fleet_versions
 from app.features.machine.fingerprint import trustworthy_smbios_uuid
 from app.features.machine.models import Machine
@@ -1456,8 +1457,28 @@ async def wake_machines(
             )
         )
 
-    await session.commit()
     woken = sum(1 for r in results if r.ok)
+    requested = list(dict.fromkeys(payload.machine_ids))
+    if len(requested) > 1:
+        # A room or a selection woken in one go. Each poste already has its
+        # wake_on_lan row; the entry adds what no row can say — that it was
+        # one request, and how much of it failed (an unknown id leaves no row
+        # at all). One poste alone is traced by its row, like any command.
+        audit.record(
+            session,
+            actor=user.email,
+            action="machine.wake_bulk",
+            resource_type="machine",
+            # No single machine to name: the ids are in the details.
+            resource_id="",
+            details={
+                "machine_ids": [str(m) for m in requested],
+                "woken": woken,
+                "failed": len(results) - woken,
+                "relayed": settings.WOL_RELAY_ENABLED,
+            },
+        )
+    await session.commit()
     return WakeResponse(
         results=results,
         woken=woken,
@@ -1828,6 +1849,8 @@ async def revoke_token(
     """
     machine = await _require_machine(session, machine_id)
     machine.token_revoked = True
+    # A token offered for rotation and not yet used is a credential too.
+    token_rotation.reset_rotation(machine)
     machine.updated_at = utcnow()
     audit.record(
         session,
@@ -1858,6 +1881,7 @@ async def allow_reenroll(
     machine = await _require_machine(session, machine_id)
     machine.token_revoked = False
     machine.token_hash = None
+    token_rotation.reset_rotation(machine)
     machine.updated_at = utcnow()
     audit.record(
         session,

@@ -213,6 +213,23 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "Durée de vie, en minutes, d'une commande encore en attente avant "
                     "qu'elle soit périmée — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
+                _item(
+                    env,
+                    "COMMAND_RETENTION_DAYS",
+                    "Jours de conservation de l'historique des commandes terminées "
+                    "(0 = indéfiniment)",
+                ),
+                _item(
+                    env,
+                    "AGENT_TOKEN_ROTATE_DAYS",
+                    "Âge, en jours, au-delà duquel le token d'un poste est renouvelé "
+                    "(0 = jamais)",
+                ),
+                _item(
+                    env,
+                    "AUDIT_RETENTION_DAYS",
+                    "Jours de conservation du journal d'audit (0 = indéfiniment)",
+                ),
             ],
         ),
         EnvGroup(
