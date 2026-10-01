@@ -84,44 +84,70 @@ def _item(env: Settings, key: str, description: str, value: Any = ...) -> EnvIte
     return EnvItem(key=key, value=_fmt(raw), description=description)
 
 
+# Appended to every mail variable the card « Envoi des e-mails » can override:
+# the value read here is where the console starts from, not necessarily what
+# it sends with.
+_MAIL_INITIAL = " — valeur initiale : la carte « Envoi des e-mails » prend le dessus"
+
+
 def _email_group(env: Settings) -> EnvGroup:
-    """The mail channel: the provider chosen, whether it is complete, and the
-    variables of that provider alone — the other's are ignored by the server
-    and would only confuse here."""
-    configured = env.alerts_enabled
+    """The mail channel as the environment describes it: the provider chosen,
+    whether the environment alone is complete, and the variables of that
+    provider — the other's are ignored by the server and would only confuse
+    here. Every one of them is an initial value the console's card may
+    override; the credentials are not listed at all (``_NEVER_SHOWN``)."""
     state = (
-        "configuré, les e-mails partent"
-        if configured
-        else "incomplet, aucun e-mail ne part"
+        "configuré dans l'environnement"
+        if env.alerts_enabled
+        else "incomplet dans l'environnement : aucun e-mail ne part sans "
+        "réglage dans la console"
     )
     items = [
         _item(
             env,
             "EMAIL_PROVIDER",
-            "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP",
+            "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP"
+            + _MAIL_INITIAL,
             f"{env.EMAIL_PROVIDER} ({state})",
         ),
         _item(
             env,
             "EMAIL_FROM_EMAIL",
-            "Adresse d'expéditeur (ou MAILGUN_FROM_EMAIL pour un .env plus ancien)",
+            "Adresse d'expéditeur (ou MAILGUN_FROM_EMAIL pour un .env plus ancien)"
+            + _MAIL_INITIAL,
             env.email_from_email,
         ),
-        _item(env, "EMAIL_FROM_NAME", "Nom d'expéditeur affiché", env.email_from_name),
+        _item(
+            env,
+            "EMAIL_FROM_NAME",
+            "Nom d'expéditeur affiché" + _MAIL_INITIAL,
+            env.email_from_name,
+        ),
     ]
     if env.EMAIL_PROVIDER == "smtp":
         items += [
-            _item(env, "SMTP_HOST", "Serveur SMTP ; vide = SMTP non configuré"),
-            _item(env, "SMTP_PORT", "Port du serveur SMTP"),
+            _item(
+                env,
+                "SMTP_HOST",
+                "Serveur SMTP ; vide = SMTP non configuré" + _MAIL_INITIAL,
+            ),
+            _item(env, "SMTP_PORT", "Port du serveur SMTP" + _MAIL_INITIAL),
             _item(
                 env,
                 "SMTP_SECURITY",
-                "starttls (587), tls (465) ou none (relais interne sur 25)",
+                "starttls (587), tls (465) ou none (relais interne sur 25)"
+                + _MAIL_INITIAL,
             ),
             _item(
                 env,
                 "SMTP_VERIFY_TLS",
-                "Vérification du certificat du serveur ; non = relais à certificat privé",
+                "Vérification du certificat du serveur ; non = relais à certificat privé"
+                + _MAIL_INITIAL,
+            ),
+            _item(
+                env,
+                "SMTP_TIMEOUT_SECONDS",
+                "Délai d'attente du serveur SMTP, en secondes" + _MAIL_INITIAL,
             ),
         ]
     else:
@@ -129,12 +155,13 @@ def _email_group(env: Settings) -> EnvGroup:
             _item(
                 env,
                 "MAILGUN_DOMAIN",
-                "Domaine d'envoi Mailgun ; vide = Mailgun non configuré",
+                "Domaine d'envoi Mailgun ; vide = Mailgun non configuré"
+                + _MAIL_INITIAL,
             ),
             _item(
                 env,
                 "MAILGUN_API_BASE_URL",
-                "Point d'entrée de l'API Mailgun (EU ou US)",
+                "Point d'entrée de l'API Mailgun (EU ou US)" + _MAIL_INITIAL,
             ),
         ]
     items += [
