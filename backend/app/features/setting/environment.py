@@ -324,8 +324,10 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 _item(
                     env,
                     "CONSOLE_BASE_URL",
-                    "URL publique de la console, pour le lien « mot de passe oublié » ; "
-                    "vide = aucun e-mail de réinitialisation",
+                    "URL publique de la console, dans les liens des e-mails ; "
+                    "déduite de TIAI_SERVER_NAME quand elle n'est pas renseignée. "
+                    "Vide = aucun e-mail de réinitialisation",
+                    env.console_base_url,
                 ),
                 _item(
                     env,

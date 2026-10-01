@@ -303,8 +303,8 @@ def render_digest(digest: Digest) -> tuple[str, str]:
         "ANTIVIRUS À REPRENDRE", digest.outdated_lines, digest.outdated_antivirus
     )
 
-    if settings.CONSOLE_BASE_URL:
-        body.append(f"Ouvrir la console : {settings.CONSOLE_BASE_URL.rstrip('/')}")
+    if settings.console_base_url:
+        body.append(f"Ouvrir la console : {settings.console_base_url}")
     body.append("")
     body.append(
         "Vous recevez ce message parce que votre compte est réglé sur un résumé "

@@ -36,9 +36,9 @@ logger = logging.getLogger(__name__)
 
 
 def _console_link(path: str) -> str | None:
-    if not settings.CONSOLE_BASE_URL:
+    if not settings.console_base_url:
         return None
-    return f"{settings.CONSOLE_BASE_URL.rstrip('/')}/#{path}"
+    return f"{settings.console_base_url}/#{path}"
 
 
 def _wants_mail(user: User) -> bool:

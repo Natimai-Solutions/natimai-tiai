@@ -119,8 +119,8 @@ def render_alert(
         f"Session ouverte : {machine.session_username or '—'}",
         "",
     ]
-    if settings.CONSOLE_BASE_URL:
-        base = settings.CONSOLE_BASE_URL.rstrip("/")
+    if settings.console_base_url:
+        base = settings.console_base_url
         lines.append(f"Ouvrir la fiche du poste : {base}/machines/{machine.id}")
         lines.append("")
     lines.append(

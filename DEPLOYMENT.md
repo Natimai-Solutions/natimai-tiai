@@ -76,6 +76,16 @@ matchera pas le site. Ajouter le nom au DNS ou au fichier `hosts` :
 Le navigateur signalera un certificat non approuvé : accepter l'avertissement une
 fois, ou importer l'AC locale de Caddy.
 
+**Le nom court aussi.** Taper `tiai` dans la barre d'adresse envoie
+`http://tiai/`, un hôte qui n'est pas le site : Caddy redirige tout ce qui
+arrive en HTTP sous un autre nom (nom court, adresse IP) vers
+`https://<TIAI_SERVER_NAME>/`, même chemin. Pour que `https://tiai` réponde
+aussi (lien enregistré, HSTS), déclarer l'alias dans `TIAI_SERVER_ALIASES` :
+Caddy le sert, et le renvoie vers le nom canonique — la console garde la
+session dans le stockage du navigateur, propre à chaque origine, et deux noms
+feraient deux sessions. Le nom court doit se résoudre côté client (suffixe DNS
+du domaine, ou fichier `hosts`).
+
 **L'auto-signé ne suffit pas pour l'agent**, dont le client HTTP n'offre aucune
 option pour ignorer un certificat non approuvé. Deux choix : laisser les agents
 en HTTP sur 8800 (mode A), ou importer la racine locale dans le magasin machine :
@@ -102,7 +112,10 @@ docker compose up -d
 ```
 
 - Le **CN/SAN du certificat doit correspondre à `TIAI_SERVER_NAME`**, sinon
-  l'agent refuse la connexion.
+  l'agent refuse la connexion. Un alias de `TIAI_SERVER_ALIASES` joint en
+  HTTPS (`https://tiai`) doit figurer lui aussi dans les SAN — en HTTP, la
+  redirection vers le nom canonique part en clair et n'a pas besoin de
+  certificat.
 - `deploy/certs/` est monté en lecture seule et ignoré par git, comme
   `deploy/.env`.
 - Hors `ENVIRONMENT=local`, le backend **refuse de démarrer** si `SECRET_KEY`,
@@ -113,6 +126,49 @@ docker compose up -d
 
 Repli sans certificat sur cette même stack : remplacer la ligne `tls ...` du
 [Caddyfile](deploy/Caddyfile) par `tls internal`.
+
+---
+
+## Hôte Docker derrière un proxy
+
+Le cas courant d'un établissement : le serveur ne sort sur Internet qu'à
+travers un proxy. Docker se configure dans `~/.docker/config.json` (celui de
+l'utilisateur qui lance `docker compose`) :
+
+```json
+{
+  "proxies": {
+    "default": {
+      "httpProxy": "http://proxy.lycee.local:3128",
+      "httpsProxy": "http://proxy.lycee.local:3128"
+    }
+  }
+}
+```
+
+Cette configuration sert au **build** (téléchargement des dépendances), mais
+Compose l'injecte aussi, en `HTTP_PROXY`/`HTTPS_PROXY` et leurs minuscules,
+dans **tous les conteneurs** qu'il démarre. La stack est faite pour que ce
+soit sans effet sur ses échanges internes, et le fichier peut rester en place
+en production :
+
+- **Caddy** joint `backend` et `frontend` sans proxy (`network_proxy none` sur
+  chaque upstream du Caddyfile). Sans cela, il envoyait « `GET
+  http://backend:8000/…` » au proxy de l'établissement, qui répondait par son
+  portail : la console tournait en boucle de redirections (*too many
+  redirects*), et le remède était de retirer `config.json` avant de lancer la
+  stack.
+- Les **contrôles de santé** sondent `127.0.0.1` sans proxy, et chaque service
+  reçoit `NO_PROXY=localhost,127.0.0.1,backend,frontend,db,caddy` (les deux
+  casses — une variable posée par Compose l'emporte sur `config.json` casse par
+  casse).
+- Le **backend** et le **worker** gardent `HTTPS_PROXY` : c'est ce qui permet à
+  Mailgun de sortir par le proxy de l'établissement sans rien configurer
+  d'autre. `MAILGUN_PROXY_URL` reste le réglage explicite si le proxy du build
+  n'est pas celui du trafic sortant. SMTP ne passe pas par un proxy HTTP.
+
+Un `noProxy` dans `config.json` n'atteint pas les services de la stack, dont
+`NO_PROXY` est fixé par le compose.
 
 ---
 
@@ -171,7 +227,8 @@ Il n'est jamais committé.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `TIAI_SERVER_NAME` | `tiai.natimai.local` | Nom du site Caddy ; doit correspondre au CN/SAN du certificat en mode C |
+| `TIAI_SERVER_NAME` | `tiai.natimai.local` | Le nom du serveur : site Caddy, CN/SAN du certificat en mode C, et origine de `CONSOLE_BASE_URL` quand elle n'est pas renseignée |
+| `TIAI_SERVER_ALIASES` | *(vide)* | Autres noms sous lesquels la console est tapée (nom court, IP), séparés par des espaces ; chacun est redirigé vers `TIAI_SERVER_NAME`. En HTTPS, l'alias doit être dans les SAN du certificat |
 | `TIAI_VERSION` | `latest` | Version des images `tiai-backend` et `tiai-frontend` tirées de ghcr.io — à épingler en production (cf. § « Mettre à jour le serveur ») |
 | `TIAI_DEV_BACKEND_PORT` | `8800` | Port hôte du backend en HTTP direct (override de dev uniquement) |
 | `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/` (cf. § « Sauvegardes et restauration ») |
@@ -186,9 +243,9 @@ Il n'est jamais committé.
 | `FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` | — | Compte admin créé au démarrage s'il n'existe pas |
 | `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée à tout mot de passe |
 | `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié » |
-| `CONSOLE_BASE_URL` | — | URL publique de la console, pour le lien de réinitialisation. **Sans elle, aucun e-mail de réinitialisation n'est envoyé** |
+| `CONSOLE_BASE_URL` | `https://<TIAI_SERVER_NAME>` | URL publique de la console, dans les liens des e-mails (réinitialisation, fiche d'un poste). À renseigner seulement si la console est jointe sous une autre URL (autre port, proxy devant Caddy). Si ni elle ni `TIAI_SERVER_NAME` n'est connue, aucun e-mail de réinitialisation n'est envoyé |
 | `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste |
-| `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile si la console passe par Caddy |
+| `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | |
 | `POSTGRES_POOL_SIZE` / `POSTGRES_MAX_OVERFLOW` / `POSTGRES_POOL_TIMEOUT` | `20` / `10` / `30` | Pool async partagé backend + worker |
@@ -288,8 +345,8 @@ adresse réelle et modifiable depuis la console.
 | `EMAIL_MAX_ATTEMPTS` | `20` | Tentatives d'envoi avant abandon d'un e-mail (délai doublé de 1 min à 1 h entre chacune, soit ≈ 14 h — de quoi traverser une nuit de panne du proxy) |
 | `EMAIL_OUTBOX_RETENTION_DAYS` | `30` | Durée de conservation des lignes réglées (envoyées ou abandonnées) de `email_outbox`, pour consultation |
 
-`CONSOLE_BASE_URL` mérite d'être renseignée ici aussi : c'est ce qui met dans
-chaque e-mail le lien vers la fiche du poste concerné.
+Les liens des e-mails (fiche d'un poste, vos tâches) pointent sur
+`CONSOLE_BASE_URL`, donc par défaut sur `https://<TIAI_SERVER_NAME>`.
 
 ### Hors Docker
 
@@ -908,7 +965,9 @@ chaque compte (page « Mon compte »).
 |---|---|---|
 | `curl` HTTPS renvoie un code `000` | Certificat auto-signé non approuvé | `curl -k`, ou importer la racine Caddy |
 | L'agent journalise une erreur TLS x509 | Auto-signé, que le client de l'agent refuse | Basculer sur `http://...:8800`, ou importer la racine Caddy |
-| `https://<ip>` ne répond pas / mauvais certificat | Le site Caddy est lié à un nom d'hôte | Ajouter `TIAI_SERVER_NAME` au DNS ou au fichier `hosts` |
+| `https://<ip>` ne répond pas / mauvais certificat | Le site Caddy est lié à un nom d'hôte ; `http://<ip>` redirige, `https://<ip>` n'a pas de certificat | Taper le nom (`TIAI_SERVER_NAME`, ou un alias déclaré), résolu par le DNS ou le fichier `hosts` |
+| Le nom court (`http://tiai`) donne une page blanche ou une erreur, le nom complet marche | Stack antérieure à la redirection des autres hôtes, ou nom court non résolu | Mettre à jour la stack ; vérifier `nslookup tiai` depuis un poste ; pour `https://tiai`, déclarer l'alias dans `TIAI_SERVER_ALIASES` et le mettre dans les SAN du certificat |
+| La console boucle en redirections (*too many redirects*) sur un hôte Docker derrière un proxy | Compose injecte le proxy de `~/.docker/config.json` dans les conteneurs, et une version antérieure de Caddy l'empruntait pour joindre backend et frontend | Mettre à jour la stack (cf. § « Hôte Docker derrière un proxy ») ; `config.json` peut rester en place |
 | Le navigateur force HTTPS et refuse le HTTP | Cache HSTS d'un accès antérieur au Caddyfile de prod | Purger le HSTS pour ce nom d'hôte, ou utiliser un autre nom en test |
 | Erreur CORS dans la console | Origine absente de `BACKEND_CORS_ORIGINS` | Ajouter l'origine dans `.env`, ou passer par Caddy |
 | `413` sur une requête de l'agent ou de la console | Corps de requête au-delà de 8 Mo, refusé par Caddy (`request_body` du Caddyfile) | Aucun envoi légitime n'en approche : chercher l'agent défaillant dans les journaux de Caddy |

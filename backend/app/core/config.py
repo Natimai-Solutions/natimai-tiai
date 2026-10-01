@@ -36,9 +36,31 @@ class Settings(BaseSettings):
     PASSWORD_MIN_LENGTH: int = 12
     # Lifetime of a "forgot password" link.
     PASSWORD_RESET_EXPIRE_MINUTES: int = 60
-    # Public console URL, used to build the reset link mailed to the user
-    # (e.g. https://tiai.natimai.local). Without it, no reset mail can be sent.
+    # The name the server is reached under — the Caddy site name, and the
+    # certificate's CN/SAN. Shared with Caddy through deploy/.env; the backend
+    # reads it only to derive the console URL below.
+    TIAI_SERVER_NAME: str | None = None
+    # Public console URL, used to build the links mailed to users (password
+    # reset, a poste's fiche). Explicit when the console is reached under
+    # something other than https://<TIAI_SERVER_NAME> — another port, a proxy
+    # in front of Caddy; otherwise derived, see ``console_base_url``.
     CONSOLE_BASE_URL: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def console_base_url(self) -> str | None:
+        """The console's public URL, without a trailing slash, or None.
+
+        ``CONSOLE_BASE_URL`` when set; else ``https://<TIAI_SERVER_NAME>``,
+        which is where the Compose stack serves the console. None only when
+        neither is known — a bare backend outside the stack — and then no
+        mail can carry a link.
+        """
+        if self.CONSOLE_BASE_URL:
+            return self.CONSOLE_BASE_URL.rstrip("/")
+        if self.TIAI_SERVER_NAME:
+            return f"https://{self.TIAI_SERVER_NAME.strip().rstrip('/')}"
+        return None
 
     # --- Agent enrollment ---
     # Shared secret deployed by GPO; only authorizes POST /agent/enroll.
