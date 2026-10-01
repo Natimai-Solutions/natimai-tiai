@@ -47,7 +47,7 @@ Ajouter une dépendance : `uv add <pkg>` (ou `uv add --dev <pkg>` pour le groupe
 
 **Agent** (auth : secret d'enrôlement puis token par poste)
 - `POST /api/v1/agent/enroll` — en-tête `X-Enrollment-Secret`, renvoie le token du poste.
-- `POST /api/v1/agent/heartbeat` — `Authorization: Bearer <token>`, renvoie les commandes en attente.
+- `POST /api/v1/agent/heartbeat` — `Authorization: Bearer <token>`, renvoie les commandes en attente, et `new_token` quand le token est à renouveler (voir *Rotation des tokens agents*).
 - `POST /api/v1/agent/commands/{id}/result` — résultat d'exécution.
 
 **Console** (auth : JWT utilisateur)
@@ -109,10 +109,68 @@ porte pas. Il joue à trois endroits :
 
 **Seules les `pending` sont périmées.** Une fois délivrée, la commande appartient
 à l'agent et son verdict fait foi : une commande confiée à un agent qui n'est
-jamais revenu reste `delivered` indéfiniment dans l'historique — c'est le
-comportement attendu, pas une ligne oubliée. Passé son délai, elle cesse
-simplement de verrouiller son type sur ce poste, et si l'agent finit par
-répondre, son résultat s'inscrit malgré tout sur la ligne d'origine.
+jamais revenu reste `delivered` dans l'historique — c'est le comportement
+attendu, pas une ligne oubliée. La passer en `expired` dirait « jamais
+distribuée », ce qui est faux, et si l'agent finit par répondre — un poste
+rallumé après des semaines rejoue sa file locale de résultats — son verdict
+s'inscrit sur la ligne d'origine. Passé son délai, elle cesse simplement de
+verrouiller son type sur ce poste. Elle n'est plus gardée *indéfiniment* pour
+autant : voir *Rétention* ci-dessous.
+
+### Rétention
+
+L'historique ne grandit pas sans fin : le worker purge chaque matin (08:00 UTC,
+[worker.py](app/core/worker.py)) les commandes **terminées** — `succeeded`,
+`failed`, `expired` — et les `delivered` restées sans résultat, dont le dernier
+événement (verdict, à défaut remise, à défaut création) date de plus de
+`COMMAND_RETENTION_DAYS` (**365** par défaut, `0` = conserver). Une `delivered`
+orpheline n'est donc gardée que le temps de la rétention : au-delà, le verdict
+qu'on lui réservait ne viendra plus. Une `pending` ou une `running` n'est
+**jamais** purgée, quel que soit son âge : la première est encore due (le
+balayage la périmera), la seconde est une commande qu'un agent a dit exécuter.
+
+Le même créneau purge le journal d'audit au-delà de `AUDIT_RETENTION_DAYS`
+(**730**, `0` = conserver) et les jetons de réinitialisation de mot de passe
+expirés ou utilisés depuis plus d'un jour
+([password_reset_retention.py](app/features/password_reset_retention.py)).
+Comme les purges de l'outbox et des compteurs d'utilisation, chacune supprime
+par âge, jamais par contenu.
+
+## Audit des actions de masse
+
+Une commande sur un seul poste est tracée par sa ligne (`created_by`). Une
+commande visant un **ensemble** — tout le parc, un domaine, un emplacement, un
+statut, ou plusieurs postes listés — écrit en plus une entrée `command.bulk`
+dans le journal d'audit, dans la même transaction : type, cible telle que
+demandée, nombre créé, nombre ignoré (déjà en cours), durée de vie appliquée.
+C'est la seule trace d'un filtre qui n'a touché personne et des postes ignorés,
+qui n'ont pas de ligne. Le réveil Wake-on-LAN de plusieurs postes écrit de même
+`machine.wake_bulk` (postes visés, réveils émis ou confiés, échecs, mode relais).
+
+## Rotation des tokens agents
+
+Le token d'un poste est renouvelé tous les `AGENT_TOKEN_ROTATE_DAYS` jours
+(**30**, `0` = jamais), sans jamais couper l'agent
+([token_rotation.py](app/features/machine/token_rotation.py)) :
+
+1. un heartbeat authentifié par le token courant, d'un agent qui annonce
+   `supports_token_rotation`, reçoit `new_token` une fois l'âge atteint ; le
+   serveur n'en garde que le hash, dans `pending_token_hash`. Le token courant
+   reste valide ;
+2. tant que l'agent revient avec le token courant (réponse perdue, écriture
+   impossible sur le poste), chaque heartbeat lui en propose un **nouveau**,
+   qui remplace le précédent : un token que personne n'a reçu ne reste pas
+   valide ;
+3. la première requête — quel que soit l'endpoint agent — portant le token
+   proposé le promeut : il devient le token courant, l'ancien est refusé dès
+   lors, `token_issued_at` repart. Promotion journalisée (`app.security`), pas
+   auditée : c'est du trafic machine, une fois par mois et par poste.
+
+Un agent qui n'annonce pas la capacité (version antérieure) ne se voit jamais
+rien proposer. Révocation, « autoriser le ré-enrôlement » et ré-enrôlement
+effacent un token proposé en attente. La migration `0025` date tous les tokens
+existants de son passage, pour que le parc ne tourne pas en entier le même
+matin.
 
 ## Exploitation du parc : salles, vérifications, maintenance, journal
 
