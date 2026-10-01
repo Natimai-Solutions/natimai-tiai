@@ -1,5 +1,6 @@
 """Writing and reading audit entries."""
 
+from datetime import datetime
 from typing import Any
 
 from sqlmodel import col, desc, func, select
@@ -39,16 +40,33 @@ async def list_entries(
     session: AsyncSession,
     *,
     action: str | None = None,
+    actor: str | None = None,
+    resource_type: str | None = None,
     resource_id: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> tuple[list[AuditEntry], int]:
-    """Newest-first page of the log, optionally filtered."""
+    """Newest-first page of the log, optionally filtered.
+
+    ``actor`` is a case-insensitive substring — the console types part of an
+    e-mail, not the whole address. ``since`` is inclusive and ``until``
+    exclusive, so consecutive periods never count an entry twice.
+    """
     filters = []
     if action:
         filters.append(col(AuditEntry.action) == action)
+    if actor:
+        filters.append(col(AuditEntry.actor).ilike(f"%{_escape_like(actor)}%"))
+    if resource_type:
+        filters.append(col(AuditEntry.resource_type) == resource_type)
     if resource_id:
         filters.append(col(AuditEntry.resource_id) == resource_id)
+    if since is not None:
+        filters.append(col(AuditEntry.at) >= since)
+    if until is not None:
+        filters.append(col(AuditEntry.at) < until)
 
     total_result = await session.exec(
         select(func.count()).select_from(AuditEntry).where(*filters)
@@ -63,3 +81,20 @@ async def list_entries(
         .limit(page_size)
     )
     return list(result.all()), total
+
+
+async def list_actions(session: AsyncSession) -> list[str]:
+    """The action slugs present in the log, sorted — the console's filter.
+
+    Read from the table rather than from a list in code: a slug added by a
+    later release, or one no longer written, must stay filterable.
+    """
+    result = await session.exec(
+        select(AuditEntry.action).distinct().order_by(col(AuditEntry.action))
+    )
+    return list(result.all())
+
+
+def _escape_like(value: str) -> str:
+    """Make ``%`` and ``_`` typed by the user match themselves."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

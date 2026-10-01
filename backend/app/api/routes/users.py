@@ -320,16 +320,31 @@ async def delete_user(
     "/{user_id}/reset-password", response_model=PasswordResetOut, dependencies=[_WRITE]
 )
 async def reset_password(
-    user_id: uuid.UUID, payload: PasswordReset, session: SessionDep
+    user_id: uuid.UUID,
+    payload: PasswordReset,
+    session: SessionDep,
+    current: CurrentUser,
 ) -> PasswordResetOut:
     """Set a new password for an account and return it once.
 
     Resetting logs the account out everywhere: tokens issued before now stop
     being accepted, and any pending "forgot password" link is dropped.
+
+    Audited — whoever holds ``user:write`` can take over any account this way,
+    so the trace says who did it and to whom. Never the password itself: only
+    whether it was generated or typed by the administrator.
     """
     user = await _require_user(session, user_id)
     password = payload.password or security.generate_password()
     await crud.set_password(session, user, password)
     await crud.purge_reset_tokens(session, user.id)
+    audit.record(
+        session,
+        actor=current.email,
+        action="user.reset_password",
+        resource_type="user",
+        resource_id=str(user.id),
+        details={"email": user.email, "generated": payload.password is None},
+    )
     await session.commit()
     return PasswordResetOut(password=password)

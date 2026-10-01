@@ -4,7 +4,12 @@ Unit tests (security, permissions, fingerprint) need no database.
 
 API tests use a real Postgres test database — set ``TIAI_TEST_DATABASE_URL``
 (e.g. postgresql+psycopg://tiai:tiai@localhost:5432/tiai_test). Without it the
-DB fixtures skip, so ``pytest`` stays green locally and runs the full suite in CI.
+DB fixtures skip, so ``pytest`` stays green locally without a database.
+
+A skip is the wrong answer where the database is *supposed* to be there: a CI
+whose variable went missing would report two thirds of the suite as skipped and
+the run as green. ``TIAI_REQUIRE_TEST_DB=1`` (set by the CI workflow) turns the
+missing variable into an error before the first test runs.
 """
 
 import asyncio
@@ -23,6 +28,18 @@ if sys.platform == "win32":
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production-0123456789")
 
 TEST_DATABASE_URL = os.getenv("TIAI_TEST_DATABASE_URL")
+REQUIRE_TEST_DB = os.getenv("TIAI_REQUIRE_TEST_DB", "").lower() in {"1", "true", "yes"}
+
+
+def pytest_configure(config) -> None:
+    """Refuse to run a suite that would silently skip its database tests."""
+    import pytest
+
+    if REQUIRE_TEST_DB and not TEST_DATABASE_URL:
+        raise pytest.UsageError(
+            "TIAI_REQUIRE_TEST_DB is set but TIAI_TEST_DATABASE_URL is not: "
+            "the DB-backed tests would be skipped, not run."
+        )
 
 
 @pytest_asyncio.fixture

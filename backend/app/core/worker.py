@@ -18,19 +18,20 @@ Run with: python -m app.core.worker
 import asyncio
 import logging
 import signal
+import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy import update
-from sqlmodel import col, select
+from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.core.db import engine
 from app.features.base import utcnow
 from app.features.command.models import Command, CommandStatus
-from app.features.machine.models import Machine
 from app.features.notification import digest, outbox
 from app.features.usage import crud as usage_crud
 
@@ -39,6 +40,13 @@ logger = logging.getLogger(__name__)
 # The loop's tick — also the worst-case lag between a mail coming due in the
 # outbox and its send attempt.
 POLL_SECONDS = 30
+
+# Touched at the end of every tick, so the container's healthcheck can tell a
+# worker that is looping from one that is stuck — the worker serves no port to
+# probe. A tick normally ends within POLL_SECONDS; the compose healthcheck
+# allows several of them before calling the worker unhealthy, because a digest
+# or a long outbox drain legitimately stretches one.
+ALIVE_FILE = Path(tempfile.gettempdir()) / "tiai-worker.alive"
 
 
 # --- Jobs -------------------------------------------------------------------
@@ -62,16 +70,6 @@ async def expire_stale_commands() -> int:
         )
         await session.commit()
         return result.rowcount or 0
-
-
-async def flag_inactive_machines() -> int:
-    """Count machines that have not checked in recently (alert candidates)."""
-    cutoff = utcnow() - timedelta(days=settings.INACTIVE_AFTER_DAYS)
-    async with AsyncSession(engine) as session:
-        rows = await session.exec(
-            select(Machine).where(col(Machine.last_seen) < cutoff)
-        )
-        return len(rows.all())
 
 
 async def send_daily_digest() -> int:
@@ -171,12 +169,6 @@ def build_jobs(now: datetime) -> list[Job]:
         # Due immediately: a restart must resume mail delivery within one tick.
         Job("outbox", process_outbox, now, every(POLL_SECONDS)),
         Job("expire_stale_commands", expire_stale_commands, now, every(300)),
-        Job(
-            "flag_inactive_machines",
-            flag_inactive_machines,
-            housekeeping(now),
-            housekeeping,
-        ),
         Job("daily_digest", send_daily_digest, digest_hour(now), digest_hour),
         Job(
             "maintenance_reminders",
@@ -206,11 +198,21 @@ async def run_due_jobs(jobs: list[Job], now: datetime) -> None:
                 logger.info("Job %s: %d", job.name, result)
 
 
+def mark_alive() -> None:
+    """Record that a tick completed. Never fatal: a liveness probe that could
+    stop the loop it reports on would be worse than none."""
+    try:
+        ALIVE_FILE.touch()
+    except OSError:
+        logger.warning("Could not touch %s", ALIVE_FILE, exc_info=True)
+
+
 async def main(stop: asyncio.Event) -> None:
     jobs = build_jobs(utcnow())
     logger.info("Worker started: %d jobs, tick %ds", len(jobs), POLL_SECONDS)
     while not stop.is_set():
         await run_due_jobs(jobs, utcnow())
+        mark_alive()
         try:
             await asyncio.wait_for(stop.wait(), timeout=POLL_SECONDS)
         except TimeoutError:

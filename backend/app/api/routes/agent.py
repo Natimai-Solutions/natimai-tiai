@@ -6,7 +6,7 @@ from datetime import datetime
 from ipaddress import ip_address
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 from sqlmodel import col, select
 
@@ -48,12 +48,49 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 # --- Schemas ---------------------------------------------------------------
 
 
+# Bounds on the strings every heartbeat and enrollment carries. These columns
+# are unbounded TEXT, so nothing below the API stops a broken or hostile agent
+# from writing megabytes into the machine row — and from there into the list,
+# the export and the digest. Each limit leaves an order of magnitude over what
+# Windows reports. Truncated, never 422: the same trade-off as the location
+# and the antivirus name — one oversized field must not cost the Defender
+# state and the command pickup riding in the same request.
+NAME_MAX = 255  # hostname, domain: a DNS name stops at 253
+TEXT_MAX = 200  # versions, fingerprint components, Defender and session strings
+# The one string that is *rejected* rather than truncated: it is the machine's
+# identity, and two long identifiers cut to the same prefix would merge two
+# postes into one row. Real ones are a 36-character UUID.
+MACHINE_UUID_MAX = 200
+# Defender keeps its detection history for weeks; a poste reporting more than
+# this is not describing an infection, it is flooding. The cap also keeps the
+# upsert's single INSERT well under PostgreSQL's 65 535 bind parameters (nine
+# per row), past which the whole heartbeat would fail.
+MAX_THREATS = 1000
+
+
+def bound_text(value: str | None, limit: int = TEXT_MAX) -> str | None:
+    """Cap a reported string at ``limit`` characters — never 422.
+
+    Deliberately no strip: these values are compared as reported (hostname
+    against the stored one, fingerprint components against each other), and a
+    cut must not change a value that already fits.
+    """
+    if value is None:
+        return None
+    return value[:limit]
+
+
 class Fingerprint(BaseModel):
     """Identity fingerprint components reported by the agent."""
 
     machine_guid: str | None = None
     smbios_uuid: str | None = None
     tpm_ek_hash: str | None = None
+
+    @field_validator("machine_guid", "smbios_uuid", "tpm_ek_hash")
+    @classmethod
+    def _bound(cls, value: str | None) -> str | None:
+        return bound_text(value)
 
 
 # Bounds the site name that reaches the column, the filter dropdown and the
@@ -81,7 +118,7 @@ def clean_location(value: str | None) -> str | None:
 class EnrollRequest(BaseModel):
     """First-contact payload (authenticated by X-Enrollment-Secret header)."""
 
-    machine_uuid: str
+    machine_uuid: str = Field(max_length=MACHINE_UUID_MAX)
     hostname: str | None = None
     domain: str | None = None
     # Absent from an agent older than the field; "" from one whose
@@ -96,6 +133,16 @@ class EnrollRequest(BaseModel):
     @classmethod
     def _clean_location(cls, value: str | None) -> str | None:
         return clean_location(value)
+
+    @field_validator("hostname", "domain")
+    @classmethod
+    def _bound_name(cls, value: str | None) -> str | None:
+        return bound_text(value, NAME_MAX)
+
+    @field_validator("os_version", "agent_version")
+    @classmethod
+    def _bound_text(cls, value: str | None) -> str | None:
+        return bound_text(value)
 
 
 class EnrollResponse(BaseModel):
@@ -124,6 +171,11 @@ class DefenderState(BaseModel):
     last_full_scan: datetime | None = None
     # Normal / Passive / SxS Passive Mode / EDR Block Mode (AMRunningMode).
     running_mode: str | None = None
+
+    @field_validator("signature_version", "running_mode")
+    @classmethod
+    def _bound_text(cls, value: str | None) -> str | None:
+        return bound_text(value)
 
 
 class AVProduct(BaseModel):
@@ -168,6 +220,11 @@ class SessionState(BaseModel):
     state: str | None = None  # active / disconnected
     is_remote: bool = False
 
+    @field_validator("username", "state")
+    @classmethod
+    def _bound_text(cls, value: str | None) -> str | None:
+        return bound_text(value, NAME_MAX)
+
 
 class HeartbeatRequest(BaseModel):
     """State report; threats reported separately as a list of raw dicts."""
@@ -203,6 +260,34 @@ class HeartbeatRequest(BaseModel):
     @classmethod
     def _clean_location(cls, value: str | None) -> str | None:
         return clean_location(value)
+
+    @field_validator("hostname", "domain")
+    @classmethod
+    def _bound_name(cls, value: str | None) -> str | None:
+        return bound_text(value, NAME_MAX)
+
+    @field_validator("os_version", "agent_version")
+    @classmethod
+    def _bound_text(cls, value: str | None) -> str | None:
+        return bound_text(value)
+
+    @field_validator("threats", mode="before")
+    @classmethod
+    def _cap_threats(cls, value: object) -> object:
+        """Drop the excess *before* validating it.
+
+        Before rather than after, unlike the inventory caps: a flood is cut
+        without paying to parse each of its entries first. Anything that is
+        not a list is left to the normal validation to reject.
+        """
+        if isinstance(value, list) and len(value) > MAX_THREATS:
+            security_log.warning(
+                "heartbeat: %d threats reported, keeping the first %d",
+                len(value),
+                MAX_THREATS,
+            )
+            return value[:MAX_THREATS]
+        return value
 
     @property
     def location_reported(self) -> bool:

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import AwareDatetime, BaseModel
 
 from app.api.deps import SessionDep, require_permission
 from app.features.audit import crud
@@ -45,19 +45,31 @@ class AuditList(BaseModel):
 async def list_audit(
     session: SessionDep,
     action: str | None = None,
+    actor: str | None = Query(None, max_length=320),
+    resource_type: str | None = None,
     resource_id: str | None = None,
+    since: AwareDatetime | None = None,
+    until: AwareDatetime | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> AuditList:
     """The administrative actions log, newest first.
 
     ``action`` filters on the exact slug ("machine.revoke_token", …);
-    ``resource_id`` answers "what happened to this machine/account".
+    ``actor`` on part of the acting account's e-mail; ``resource_id`` answers
+    "what happened to this machine/account". ``since`` (inclusive) and
+    ``until`` (exclusive) bound the period and must carry a time zone: the
+    console sends the reader's local midnight, and a naive datetime would be
+    silently read as UTC.
     """
     entries, total = await crud.list_entries(
         session,
         action=action,
+        actor=actor,
+        resource_type=resource_type,
         resource_id=resource_id,
+        since=since,
+        until=until,
         page=page,
         page_size=page_size,
     )
@@ -67,3 +79,9 @@ async def list_audit(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/actions", response_model=list[str])
+async def list_audit_actions(session: SessionDep) -> list[str]:
+    """The action slugs present in the log, for the console's filter."""
+    return await crud.list_actions(session)

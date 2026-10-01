@@ -347,3 +347,114 @@ async def test_the_agent_reports_its_location_and_can_clear_it(client, db_sessio
     # The setting removed: the agent sends "", the site is cleared.
     await client.post("/api/v1/agent/heartbeat", headers=headers, json={"location": ""})
     assert await stored() is None
+
+
+# --- Payload bounds -----------------------------------------------------------
+
+
+async def _enrolled(client, machine_uuid: str) -> dict[str, str]:
+    from app.core.config import settings
+
+    enroll = await client.post(
+        "/api/v1/agent/enroll",
+        headers={"X-Enrollment-Secret": settings.ENROLLMENT_SECRET},
+        json={"machine_uuid": machine_uuid},
+    )
+    assert enroll.status_code == 200, enroll.text
+    return {"Authorization": f"Bearer {enroll.json()['token']}"}
+
+
+async def test_heartbeat_caps_the_threat_list(client, db_session, monkeypatch):
+    """A flood of detections is cut to the cap; the heartbeat still succeeds."""
+    from sqlmodel import func, select
+
+    from app.api.routes import agent
+    from app.features.threat.models import Threat
+
+    monkeypatch.setattr(agent, "MAX_THREATS", 5)
+    headers = await _enrolled(client, "machine-flood")
+    threats = [{"detection_id": f"D{i}", "threat_name": "X"} for i in range(50)]
+
+    hb = await client.post(
+        "/api/v1/agent/heartbeat", headers=headers, json={"threats": threats}
+    )
+    assert hb.status_code == 200, hb.text
+    count = (await db_session.exec(select(func.count()).select_from(Threat))).one()
+    assert count == 5
+
+
+async def test_heartbeat_truncates_oversized_strings(client, db_session):
+    """Oversized identity and state strings are cut, never 422."""
+    from sqlmodel import select
+
+    from app.api.routes.agent import NAME_MAX, TEXT_MAX
+    from app.features.machine.models import Machine
+    from app.features.threat.models import Threat
+    from app.features.threat.schemas import DETECTION_TEXT_MAX
+
+    headers = await _enrolled(client, "machine-long")
+    hb = await client.post(
+        "/api/v1/agent/heartbeat",
+        headers=headers,
+        json={
+            "hostname": "h" * 10_000,
+            "os_version": "o" * 10_000,
+            "defender": {"signature_version": "s" * 10_000},
+            "session": {"user_present": True, "username": "u" * 10_000},
+            "threats": [{"detection_id": "DET-LONG", "threat_name": "t" * 10_000}],
+        },
+    )
+    assert hb.status_code == 200, hb.text
+
+    machine = (
+        await db_session.exec(
+            select(Machine).where(Machine.machine_uuid == "machine-long")
+        )
+    ).one()
+    assert machine.hostname == "h" * NAME_MAX
+    assert machine.os_version == "o" * TEXT_MAX
+    assert machine.signature_version == "s" * TEXT_MAX
+    assert machine.session_username == "u" * NAME_MAX
+    threat = (
+        await db_session.exec(select(Threat).where(Threat.detection_id == "DET-LONG"))
+    ).one()
+    assert threat.threat_name == "t" * DETECTION_TEXT_MAX
+
+
+async def test_heartbeat_drops_oversized_unknown_threat_fields(client, db_session):
+    """Unknown fields are kept in ``raw`` — unless they are a flood."""
+    from sqlmodel import select
+
+    from app.features.threat.models import Threat
+
+    headers = await _enrolled(client, "machine-extra")
+    hb = await client.post(
+        "/api/v1/agent/heartbeat",
+        headers=headers,
+        json={
+            "threats": [
+                {"detection_id": "SMALL", "engine": "1.1.25080.4"},
+                {"detection_id": "BIG", "blob": "x" * 100_000},
+            ]
+        },
+    )
+    assert hb.status_code == 200, hb.text
+
+    rows = {
+        t.detection_id: t.raw for t in (await db_session.exec(select(Threat))).all()
+    }
+    assert rows["SMALL"]["engine"] == "1.1.25080.4"
+    assert "blob" not in rows["BIG"]
+    assert rows["BIG"]["detection_id"] == "BIG"
+
+
+async def test_enroll_rejects_an_oversized_machine_uuid(client):
+    """The identity is refused rather than cut: two long ids must not merge."""
+    from app.core.config import settings
+
+    resp = await client.post(
+        "/api/v1/agent/enroll",
+        headers={"X-Enrollment-Secret": settings.ENROLLMENT_SECRET},
+        json={"machine_uuid": "m" * 201},
+    )
+    assert resp.status_code == 422
