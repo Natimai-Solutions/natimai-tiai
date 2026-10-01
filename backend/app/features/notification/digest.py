@@ -34,6 +34,7 @@ from app.features.notification.outbox import queue_email
 from app.features.notification.recipients import users_for
 from app.features.notification.tasks import personal_block
 from app.features.setting import crud as setting_crud
+from app.features.setting.email_policy import email_policy
 from app.features.threat.models import Threat
 from app.features.user.models import EmailPreference
 from app.features.windows_update.models import WindowsUpdate
@@ -344,6 +345,13 @@ async def send_daily_digest(session: AsyncSession) -> int:
         # Not a misconfiguration to work around: either nobody asked for a
         # digest, or nobody had anything to hear about today. Both are answers.
         logger.info("Daily digest: no recipient today, nothing sent")
+        return 0
+
+    # Read the mail settings now, not as the API last saw them: the worker
+    # may run for weeks, and a provider set up in the console this afternoon
+    # must carry this morning's digest.
+    if not (await email_policy(session)).enabled:
+        logger.info("Daily digest: no e-mail provider is configured, nothing queued")
         return 0
 
     subject, text = render_digest(digest)

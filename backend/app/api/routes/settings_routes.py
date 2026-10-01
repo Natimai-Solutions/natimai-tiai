@@ -1,20 +1,26 @@
 """Console settings: the parc-wide maintenance defaults, the usage thresholds,
-the parc thresholds and the mail schedule — editable without a restart. ``settings:read`` to see them, ``settings:write`` to change them —
+the parc thresholds, the mail schedule and how mail leaves — editable without
+a restart. ``settings:read`` to see them, ``settings:write`` to change them —
 the administrators hold both implicitly; nobody else does by default.
 """
 
 import uuid
 from datetime import datetime
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.deps import CurrentUser, SessionDep, require_permission
+from app.api.fields import Email
+from app.core import ratelimit
 from app.core.config import settings as env
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.machine import crud as machine_crud
+from app.features.notification import probe
 from app.features.setting import crud
+from app.features.setting import email_policy as mail
 from app.features.setting.environment import environment_overview
 from app.features.user.models import User
 from app.features.user.permissions import Action, Resource
@@ -45,6 +51,62 @@ class EnvItemOut(BaseModel):
 class EnvGroupOut(BaseModel):
     label: str
     items: list[EnvItemOut]
+
+
+class EmailEnvOut(BaseModel):
+    """What the environment says for each e-mail field, for the page to show
+    as « valeur du serveur ». Never a secret, nor the SMTP account name (the
+    environment overview hides it too): only whether one is set."""
+
+    provider: str
+    from_email: str | None
+    from_name: str
+    smtp_host: str | None
+    smtp_port: int
+    smtp_security: str
+    smtp_user_set: bool
+    smtp_password_set: bool
+    smtp_verify_tls: bool
+    smtp_timeout_seconds: int
+    mailgun_domain: str | None
+    mailgun_api_key_set: bool
+    mailgun_base_url: str
+    # Whether the environment alone would send mail.
+    configured: bool
+
+
+class EmailSettingsOut(BaseModel):
+    """The card « Envoi des e-mails ».
+
+    Each field is what the *console* stored — null where it stored nothing
+    and the environment's value applies (``env``). The account name is shown
+    back: the administrator typed it on this page and needs to see what is
+    there to correct it. The two secrets never are: only whether one is
+    stored, and whether it is stored but unreadable — encrypted under a
+    ``SECRET_KEY`` that has changed since, to be typed again.
+    """
+
+    provider: Literal["mailgun", "smtp"] | None
+    from_email: str | None
+    from_name: str | None
+    smtp_host: str | None
+    smtp_port: int | None
+    smtp_security: Literal["starttls", "tls", "none"] | None
+    smtp_user: str | None
+    smtp_verify_tls: bool | None
+    smtp_timeout_seconds: int | None
+    mailgun_domain: str | None
+    mailgun_base_url: str | None
+    smtp_password_set: bool
+    smtp_password_unreadable: bool
+    mailgun_api_key_set: bool
+    mailgun_api_key_unreadable: bool
+    # The policy as it resolves now: the provider in use, whether mail
+    # leaves at all, and if not what is missing (in the page's words).
+    effective_provider: Literal["mailgun", "smtp"]
+    configured: bool
+    missing: list[str]
+    env: EmailEnvOut
 
 
 class SettingsOut(BaseModel):
@@ -83,6 +145,8 @@ class SettingsOut(BaseModel):
     env_digest_hour_utc: int
     env_maintenance_reminder_weekday: int
     room_source: str
+    # How mail leaves the console: the console's values, the environment's.
+    email: EmailSettingsOut
     # The rest of the environment an administrator may want to check without
     # a shell on the server — thresholds, mail, wake-on-LAN — read-only and
     # never a secret (``app.features.setting.environment``).
@@ -94,6 +158,60 @@ class SettingsOut(BaseModel):
 # "1.1.0-rc.1"), or "" for automatic. Strict on purpose: a reference that no
 # agent can ever report would flag the whole parc as behind.
 AGENT_VERSION_PATTERN = r"^(|v?\d+(\.\d+){0,3}([-+][0-9A-Za-z.\-]+)?)$"
+
+
+# A host name or address, as typed: no scheme, no path, no space.
+_HOST = r"^[A-Za-z0-9.\-\[\]:]+$"
+
+
+class EmailSettingsIn(BaseModel):
+    """The e-mail fields of a patch, or the unsaved form of a test send.
+
+    Absent = unchanged. Null = forget the console's value, the environment's
+    applies again. A text field sent empty counts as null — the form's way of
+    saying « reprendre la valeur du serveur ». A secret is replaced by any
+    other string and is never stored in clear (``email_policy.write``); an
+    empty secret is refused rather than read as « effacer », so a form that
+    sends an untouched password box cannot wipe the stored one by accident.
+    """
+
+    provider: Literal["mailgun", "smtp"] | None = None
+    from_email: Email | None = None
+    from_name: str | None = Field(default=None, max_length=100)
+    smtp_host: str | None = Field(default=None, max_length=255, pattern=_HOST)
+    smtp_port: int | None = Field(default=None, ge=mail.PORT_MIN, le=mail.PORT_MAX)
+    smtp_security: Literal["starttls", "tls", "none"] | None = None
+    smtp_user: str | None = Field(default=None, max_length=255)
+    smtp_password: str | None = Field(default=None, min_length=1, max_length=1024)
+    smtp_verify_tls: bool | None = None
+    smtp_timeout_seconds: int | None = Field(
+        default=None, ge=mail.TIMEOUT_MIN, le=mail.TIMEOUT_MAX
+    )
+    mailgun_domain: str | None = Field(default=None, max_length=255, pattern=_HOST)
+    mailgun_api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    mailgun_base_url: str | None = Field(
+        default=None, max_length=255, pattern=r"^https?://[^\s/]+(/\S*)?$"
+    )
+
+    @field_validator(
+        "from_email",
+        "from_name",
+        "smtp_host",
+        "smtp_user",
+        "mailgun_domain",
+        "mailgun_base_url",
+        mode="before",
+    )
+    @classmethod
+    def _blank_is_null(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    def changes(self) -> dict[str, Any]:
+        """The fields the client sent, with the value it sent."""
+        return {name: getattr(self, name) for name in self.model_fields_set}
 
 
 class SettingsUpdate(BaseModel):
@@ -126,22 +244,68 @@ class SettingsUpdate(BaseModel):
     digest_hour_utc: int | None = Field(default=None, ge=0, le=23)
     maintenance_reminder_weekday: int | None = Field(default=None, ge=0, le=6)
 
+    # How mail leaves: saved by its own card, so its fields arrive together.
+    email: EmailSettingsIn | None = None
+
+
+def _email_out(stored: mail.StoredEmailSettings) -> EmailSettingsOut:
+    policy = mail.resolve(stored)
+    from_env = mail.resolve(mail.StoredEmailSettings())
+    v = stored.values
+    return EmailSettingsOut(
+        provider=v.get("provider"),
+        from_email=v.get("from_email"),
+        from_name=v.get("from_name"),
+        smtp_host=v.get("smtp_host"),
+        smtp_port=v.get("smtp_port"),
+        smtp_security=v.get("smtp_security"),
+        smtp_user=v.get("smtp_user"),
+        smtp_verify_tls=v.get("smtp_verify_tls"),
+        smtp_timeout_seconds=v.get("smtp_timeout_seconds"),
+        mailgun_domain=v.get("mailgun_domain"),
+        mailgun_base_url=v.get("mailgun_base_url"),
+        smtp_password_set="smtp_password" in stored.secrets,
+        smtp_password_unreadable="smtp_password" in stored.unreadable,
+        mailgun_api_key_set="mailgun_api_key" in stored.secrets,
+        mailgun_api_key_unreadable="mailgun_api_key" in stored.unreadable,
+        effective_provider=policy.provider,
+        configured=policy.enabled,
+        missing=policy.missing(),
+        env=EmailEnvOut(
+            provider=from_env.provider,
+            from_email=from_env.from_email,
+            from_name=from_env.from_name,
+            smtp_host=from_env.smtp_host,
+            smtp_port=from_env.smtp_port,
+            smtp_security=from_env.smtp_security,
+            smtp_user_set=bool(from_env.smtp_user),
+            smtp_password_set=bool(from_env.smtp_password),
+            smtp_verify_tls=from_env.smtp_verify_tls,
+            smtp_timeout_seconds=from_env.smtp_timeout_seconds,
+            mailgun_domain=from_env.mailgun_domain,
+            mailgun_api_key_set=bool(from_env.mailgun_api_key),
+            mailgun_base_url=from_env.mailgun_base_url,
+            configured=from_env.enabled,
+        ),
+    )
+
 
 async def _out(session: SessionDep) -> SettingsOut:
-    policy = await crud.maintenance_policy(session)
-    usage = await crud.usage_policy(session)
-    fleet = await crud.fleet_policy(session)
-    schedule = await crud.schedule_policy(session)
-    owner = await session.get(User, policy.owner_id) if policy.owner_id else None
-    values = await crud.get_all(session)
-    updated: datetime | None = None
     from sqlmodel import col, func, select
 
     from app.features.setting.models import AppSetting
 
+    values = await crud.get_all(session)
+    policy = await crud.maintenance_policy(session, values)
+    usage = await crud.usage_policy(session, values)
+    fleet = await crud.fleet_policy(session, values)
+    schedule = await crud.schedule_policy(session, values)
+    # Also refreshes what this process's ``queue_email`` reads: after a
+    # patch, the new mail settings apply to the very next queued mail.
+    stored = await mail.load_stored(session, values)
+    owner = await session.get(User, policy.owner_id) if policy.owner_id else None
     latest = await session.exec(select(func.max(col(AppSetting.updated_at))))
-    updated = latest.one()
-    del values
+    updated: datetime | None = latest.one()
     return SettingsOut(
         maintenance_default_cycle_days=policy.cycle_days,
         maintenance_default_owner=(
@@ -173,6 +337,7 @@ async def _out(session: SessionDep) -> SettingsOut:
         env_digest_hour_utc=env.DIGEST_HOUR_UTC,
         env_maintenance_reminder_weekday=env.MAINTENANCE_REMINDER_WEEKDAY,
         room_source=env.ROOM_SOURCE,
+        email=_email_out(stored),
         environment=[
             EnvGroupOut(
                 label=group.label,
@@ -294,7 +459,7 @@ async def get_settings(session: SessionDep) -> SettingsOut:
 async def update_settings(
     payload: SettingsUpdate, session: SessionDep, current: CurrentUser
 ) -> SettingsOut:
-    fields = payload.model_dump(exclude_unset=True)
+    fields = payload.model_dump(exclude_unset=True, exclude={"email"})
     await _write_usage(session, payload, actor=current.email)
     await _write_simple(session, payload, actor=current.email)
     if "maintenance_default_cycle_days" in fields:
@@ -327,13 +492,87 @@ async def update_settings(
             str(owner_id) if owner_id else None,
             actor=current.email,
         )
+    details: dict[str, str | None] = {
+        k: (str(v) if v is not None else None) for k, v in fields.items()
+    }
+    if payload.email is not None:
+        # The audit line names each e-mail field changed, and for a secret
+        # only that it was — never the value, which would otherwise sit in
+        # clear in a table every auditor can read.
+        details |= await mail.write(
+            session, payload.email.changes(), actor=current.email
+        )
     audit.record(
         session,
         actor=current.email,
         action="settings.update",
         resource_type="settings",
         resource_id="",
-        details={k: (str(v) if v is not None else None) for k, v in fields.items()},
+        details=details,
     )
     await session.commit()
     return await _out(session)
+
+
+# --- Test send ----------------------------------------------------------------
+
+
+class EmailTestIn(BaseModel):
+    """A test send. ``to`` defaults to the caller's own address. ``email``
+    carries the card's unsaved values, applied over what is stored exactly as
+    a patch would apply them — so a server can be tried before it is saved,
+    and a stored password need not be typed again to try a new port."""
+
+    to: Email | None = None
+    email: EmailSettingsIn | None = None
+
+
+class EmailTestOut(BaseModel):
+    ok: bool
+    # Readable as is: what went out, or what to fix.
+    message: str
+
+
+# Each accepted call sends a real mail, to an address the caller chooses:
+# the budget of a person trying settings, not of a script.
+email_test_limiter = ratelimit.RateLimiter(max_attempts=10, window_seconds=300)
+
+
+@router.post(
+    "/email/test",
+    response_model=EmailTestOut,
+    dependencies=[
+        _WRITE,
+        Depends(ratelimit.rate_limit(email_test_limiter, "settings.email_test")),
+    ],
+)
+async def send_test_email(
+    payload: EmailTestIn, session: SessionDep, current: CurrentUser
+) -> EmailTestOut:
+    """Send one mail now, outside the outbox, and say how it went.
+
+    A failed send is a 200 with ``ok: false``: the request itself went
+    fine, and the page shows the message under the button.
+    """
+    stored = await mail.load_stored(session)
+    unsaved = payload.email.changes() if payload.email is not None else {}
+    policy = mail.resolve(stored.merged(unsaved))
+    to = payload.to or current.email
+    result = await probe.send_test(policy, to)
+    audit.record(
+        session,
+        actor=current.email,
+        action="settings.email_test",
+        resource_type="settings",
+        resource_id="",
+        details={
+            "to": to,
+            "provider": policy.provider,
+            "ok": "oui" if result.ok else "non",
+            # Which fields were tried unsaved — names only, never values.
+            "unsaved": ", ".join(sorted(unsaved)) or None,
+            "message": result.message,
+        },
+    )
+    await session.commit()
+    return EmailTestOut(ok=result.ok, message=result.message)

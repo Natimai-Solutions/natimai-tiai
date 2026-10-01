@@ -97,6 +97,21 @@ def _fresh_rate_limits():
     yield
 
 
+@pytest_asyncio.fixture(autouse=True)
+def _fresh_email_settings():
+    """Forget the mail settings the last test left in this process.
+
+    ``queue_email`` reads the process's last resolution of the e-mail policy;
+    each test starts from an empty ``app_settings``, so a resolution kept
+    from the previous one would decide whether this one's mail is queued.
+    """
+    from app.features.setting import email_policy
+
+    email_policy.forget()
+    yield
+    email_policy.forget()
+
+
 @pytest_asyncio.fixture
 async def db_session(engine):
     """Direct session on the test database (for asserting persisted state)."""

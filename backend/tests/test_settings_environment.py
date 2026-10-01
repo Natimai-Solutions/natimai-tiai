@@ -78,3 +78,23 @@ def test_values_are_rendered_for_a_reader():
     assert by_key["WOL_BROADCAST_ADDRESSES"] == "10.0.0.255, 10.0.1.255"
     assert by_key["MAINTENANCE_REMINDER_WEEKDAY"] == "4 (vendredi)"
     assert by_key["AGENT_EXPECTED_VERSION"] is None
+
+
+@pytest.mark.parametrize("provider", ["mailgun", "smtp"])
+def test_mail_variables_say_the_console_overrides_them(provider):
+    """Like the thresholds: the page must not present a value the console
+    may have replaced as the one mail leaves with."""
+    env = Settings(EMAIL_PROVIDER=provider)
+    mail_keys = {
+        i.key: i.description
+        for group in environment_overview(env)
+        if group.label == "E-mails"
+        for i in group.items
+        if i.key.startswith(("EMAIL_", "SMTP_", "MAILGUN_"))
+        # The outbox's retention is the server's housekeeping, not the
+        # mail account: the console does not override it.
+        and i.key != "EMAIL_OUTBOX_RETENTION_DAYS"
+    }
+    assert "EMAIL_PROVIDER" in mail_keys and len(mail_keys) >= 5
+    for key, description in mail_keys.items():
+        assert "valeur initiale" in description, key

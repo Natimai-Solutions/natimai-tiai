@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.features.base import utcnow
 from app.features.notification.email import send_email
 from app.features.notification.models import EmailOutbox, EmailStatus
+from app.features.setting.email_policy import current_policy, email_policy
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,13 @@ def queue_email(session: AsyncSession, *, to: str, subject: str, text: str) -> b
     queueing when no e-mail provider is configured — the deployment has said no mail
     leaves this console, and a row nothing will ever send is not a mail, it is
     a backlog.
+
+    Synchronous — its callers queue mid-transaction, some of them from code
+    that cannot await — so « configured » is read off this process's last
+    resolution of the policy (``current_policy``), not the database; see
+    ``app.features.setting.email_policy`` for why that is current.
     """
-    if not settings.alerts_enabled or not to:
+    if not current_policy().enabled or not to:
         return False
     session.add(EmailOutbox(to_address=to, subject=subject, body=text))
     return True
@@ -60,7 +66,12 @@ async def send_pending(session: AsyncSession, *, batch_size: int = 50) -> int:
     would expire the remaining instances mid-iteration (sync refresh under
     asyncio — MissingGreenlet). A failure never raises past its own row, so one
     dead address cannot cost the rest of the batch their turn.
+
+    The policy is resolved once per drain, from the database: a provider, a
+    server or a password changed in the console applies from the next tick,
+    without restarting the worker.
     """
+    policy = await email_policy(session)
     now = utcnow()
     rows = await session.exec(
         select(EmailOutbox)
@@ -73,7 +84,7 @@ async def send_pending(session: AsyncSession, *, batch_size: int = 50) -> int:
     for row in rows.all():
         try:
             ok = await send_email(
-                subject=row.subject, text=row.body, to=[row.to_address]
+                subject=row.subject, text=row.body, to=[row.to_address], policy=policy
             )
             # False means the provider is no longer configured — the guard in
             # queue_email was passed once, so treat it like any other failure

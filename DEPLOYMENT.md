@@ -179,7 +179,7 @@ Quatre valeurs du `.env` doivent être générées aléatoirement — format rec
 
 | Variable | Usage | Conséquence d'une valeur faible |
 |---|---|---|
-| `SECRET_KEY` | Signature des JWT console | Tout JWT devient forgeable → accès admin |
+| `SECRET_KEY` | Signature des JWT console ; clé dont est dérivée celle qui chiffre les identifiants e-mail enregistrés dans la console | Tout JWT devient forgeable → accès admin |
 | `ENROLLMENT_SECRET` | En-tête d'enrôlement des agents | N'importe qui peut enrôler une machine |
 | `POSTGRES_PASSWORD` | Compte PostgreSQL | Accès direct à la base |
 | `FIRST_ADMIN_PASSWORD` | Premier compte console | Accès admin à la console |
@@ -244,7 +244,7 @@ Il n'est jamais committé.
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `ENVIRONMENT` | `local` | `local` / `staging` / `production`. Hors `local` : garde anti-placeholder + masquage des erreurs 500 |
-| `SECRET_KEY` | `changeme` | Signature des JWT console |
+| `SECRET_KEY` | `changeme` | Signature des JWT console, et dérivation de la clé qui chiffre les identifiants e-mail enregistrés dans la console. **La changer oblige à ressaisir ces identifiants** (voir « Alertes e-mail ») |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `480` | Durée de vie du JWT console |
 | `FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` | — | Compte admin créé au démarrage s'il n'existe pas |
 | `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée à tout mot de passe |
@@ -313,6 +313,38 @@ ignorées. L'expéditeur (`EMAIL_FROM_EMAIL` / `EMAIL_FROM_NAME`) est commun aux
 deux — les anciens noms `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` restent
 acceptés, un `.env` écrit avant l'arrivée de SMTP n'a rien à renommer.
 
+**Tout cela se règle aussi depuis la console**, carte « Envoi des e-mails » de la
+page Paramètres (permission `settings:write`) : fournisseur, expéditeur, serveur
+SMTP, port, sécurité, identifiants, vérification du certificat, délai, domaine,
+clé et adresse de l'API Mailgun. Comme pour les seuils, les variables du `.env`
+ne sont plus que des **valeurs initiales** : un champ enregistré dans la console
+prend le dessus, champ par champ, et un champ laissé vide reprend la valeur du
+serveur. Le changement s'applique au prochain envoi, sans redémarrage — le
+worker relit la configuration à chaque passage sur la file. Seuls
+`MAILGUN_PROXY_URL` et `MAILGUN_TIMEOUT_SECONDS`, qui décrivent le réseau du
+serveur et non le compte d'envoi, restent dans le `.env`.
+
+Le bouton **« Envoyer un e-mail de test »** envoie aussitôt un message — sans
+passer par la file — à votre adresse ou à celle indiquée, avec les valeurs du
+formulaire, *même pas encore enregistrées* : on vérifie un serveur et un mot de
+passe avant de les adopter. La réponse dit en clair ce qui coince
+(identifiants refusés, port ou mode de sécurité incohérents, certificat non
+vérifiable, domaine Mailgun inconnu…). Chaque test est inscrit au journal
+d'audit (`settings.email_test`), comme chaque modification (`settings.update`)
+— où un mot de passe ou une clé n'apparaît jamais, seulement « modifié » ou
+« effacé ».
+
+> **Sécurité — identifiants enregistrés dans la console.** Le mot de passe SMTP
+> et la clé API Mailgun saisis dans la console sont **chiffrés** en base
+> (Fernet, clé dérivée de `SECRET_KEY` par HKDF, distincte de celle qui signe
+> les sessions) et ne sont jamais réaffichés : la page indique seulement
+> « enregistré ». Une sauvegarde de la base ne suffit donc pas à les lire, mais
+> **changer `SECRET_KEY` les rend illisibles** : ils sont alors ignorés (la
+> valeur du `.env` s'applique, s'il y en a une) et la page les signale « à
+> ressaisir ». Après une rotation de `SECRET_KEY`, ressaisissez-les dans la
+> carte « Envoi des e-mails ». Une restauration de la base sur un autre serveur
+> demande la même `SECRET_KEY` pour les conserver.
+
 **Qui reçoit quoi se règle par compte**, page « Mon compte » de la console, et un
 administrateur voit et modifie le réglage des autres comptes depuis la page
 Utilisateurs. Quatre cadences :
@@ -338,7 +370,7 @@ adresse réelle et modifiable depuis la console.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `EMAIL_PROVIDER` | `mailgun` | `mailgun` ou `smtp` : le canal par lequel le courrier part |
+| `EMAIL_PROVIDER` | `mailgun` | `mailgun` ou `smtp` : le canal par lequel le courrier part. **Valeur initiale** de cette variable et des suivantes, jusqu'à `SMTP_TIMEOUT_SECONDS` (sauf `MAILGUN_TIMEOUT_SECONDS` et `MAILGUN_PROXY_URL`) : la console peut les remplacer |
 | `EMAIL_FROM_EMAIL` / `EMAIL_FROM_NAME` | — / `Tia'i` | Expéditeur, commun aux deux canaux. Avec un compte SMTP authentifié, l'adresse doit en général être celle du compte ou un alias autorisé. `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` restent acceptés en repli |
 | `MAILGUN_API_BASE_URL` | `https://api.mailgun.net/v3` | |
 | `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` | — | Vides = aucun e-mail n'est envoyé avec `EMAIL_PROVIDER=mailgun` |

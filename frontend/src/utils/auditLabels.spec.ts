@@ -59,6 +59,7 @@ describe('auditActionLabel', () => {
       'room.sync_directory',
       'room.unassign_machines',
       'settings.update',
+      'settings.email_test',
       'user.create',
       'user.update',
       'user.delete',
@@ -278,5 +279,19 @@ describe('formatTtlMinutes', () => {
     expect(formatTtlMinutes(1440)).toBe('1 j');
     expect(formatTtlMinutes(43200)).toBe('30 j');
     expect(formatTtlMinutes(1500)).toBe('25 h');
+  });
+
+  it('summarises a test e-mail by its recipient and outcome', () => {
+    expect(
+      auditDetailsSummary('settings.email_test', {
+        to: 'it@lycee.pf',
+        provider: 'smtp',
+        ok: 'non',
+        message: 'Authentification refusée',
+      }),
+    ).toBe('à it@lycee.pf · échec');
+    expect(auditDetailsSummary('settings.email_test', { to: 'it@lycee.pf', ok: 'oui' })).toBe(
+      'à it@lycee.pf · envoyé',
+    );
   });
 });

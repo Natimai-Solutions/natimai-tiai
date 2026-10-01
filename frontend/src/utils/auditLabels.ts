@@ -32,6 +32,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'room.sync_directory': "Synchronisation des salles avec l'annuaire",
   'room.unassign_machines': 'Retrait de postes de leur salle',
   'settings.update': 'Modification des paramètres',
+  'settings.email_test': "Envoi d'un e-mail de test",
   'user.create': "Création d'un compte",
   'user.update': "Modification d'un compte",
   'user.delete': "Suppression d'un compte",
@@ -53,6 +54,11 @@ export const AUDIT_RESOURCE_TYPE_LABELS: Record<string, string> = {
 
 /** Detail key → label, for the full view of an entry. */
 export const AUDIT_DETAIL_KEY_LABELS: Record<string, string> = {
+  to: 'Destinataire',
+  provider: 'Fournisseur',
+  ok: 'Réussi',
+  unsaved: 'Valeurs essayées sans être enregistrées',
+  message: 'Résultat',
   hostname: 'Nom du poste',
   machine_uuid: 'UUID du poste',
   machine_id: 'Poste',
@@ -265,6 +271,14 @@ export function auditDetailsSummary(action: string, details: Record<string, unkn
     if (placed !== null) parts.push(`${placed} poste(s) placé(s)`);
     if (unplaced !== null) parts.push(`${unplaced} non placé(s)`);
     if (created !== null) parts.push(`${created} salle(s) créée(s)`);
+  }
+
+  if (action === 'settings.email_test') {
+    // Who received it and whether it left: the two things an auditor asks.
+    const to = details.to;
+    if (typeof to === 'string' && to) parts.push(`à ${to}`);
+    if (details.ok === 'oui') parts.push('envoyé');
+    else if (details.ok === 'non') parts.push('échec');
   }
 
   const fields = details.fields;
