@@ -1,8 +1,8 @@
 // Command tiai-agent is the Windows endpoint agent: a polling service that
 // reports Microsoft Defender state to the Tiai server and runs its commands.
 //
-// Commands: run / init-config / install / uninstall / start / stop / status /
-// version. When started by the Windows Service Control Manager, `run` hands off
+// Commands: run / init-config / install / repair / uninstall / start / stop /
+// status / version. When started by the Windows Service Control Manager, `run` hands off
 // to the service harness; otherwise it runs in the foreground.
 package main
 
@@ -36,7 +36,7 @@ func main() {
 	case "install":
 		doInstall(os.Args[2:])
 	case "repair":
-		fatalIf(service.Repair())
+		doRepair(os.Args[2:])
 	case "uninstall":
 		fatalIf(service.Uninstall())
 	case "start":
@@ -63,7 +63,7 @@ func printUsage() {
 	fmt.Println("  run            Run the polling loop (foreground, or under the SCM)")
 	fmt.Println("  init-config    Generate a default config file (optional: registry alone is enough)")
 	fmt.Println("  install        Install and register the Windows service")
-	fmt.Println("  repair         Re-apply automatic start and restart-on-failure to an installed service")
+	fmt.Println("  repair         Re-apply automatic start, restart-on-failure and restricted ACLs to an installed service")
 	fmt.Println("  uninstall      Remove the Windows service")
 	fmt.Println("  start          Start the installed service")
 	fmt.Println("  stop           Stop the service")
@@ -149,6 +149,15 @@ func doInstall(args []string) {
 	cfgPath := fs.String("config", config.DefaultConfigPath(), "config file path")
 	_ = fs.Parse(args)
 	fatalIf(service.Install(*cfgPath))
+}
+
+// doRepair takes the same --config as install: it is how the data directory to
+// restrict is found (the directory of the config file).
+func doRepair(args []string) {
+	fs := flag.NewFlagSet("repair", flag.ExitOnError)
+	cfgPath := fs.String("config", config.DefaultConfigPath(), "config file path")
+	_ = fs.Parse(args)
+	fatalIf(service.Repair(*cfgPath))
 }
 
 func fatalIf(err error) {

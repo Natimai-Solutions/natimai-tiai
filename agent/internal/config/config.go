@@ -46,6 +46,19 @@ const (
 	// Windows carries on installing.
 	DefaultWUInstallTimeout = 7200 // seconds
 
+	// DefaultDefenderFullScanTimeout is eight hours — a working day.
+	//
+	// A full scan reads every file on every fixed disk, throttled by Defender
+	// itself to leave the machine usable, so its legitimate duration is set by
+	// the disk: minutes on a small SSD, hours on a large spinning disk full of
+	// small files. The budget has to sit above the slow end of that range, since
+	// blowing it reports a scan as failed while Defender may still be running
+	// it; and below "never", because the command worker is sequential and a
+	// scan that does not return holds back every command queued after it — a
+	// reboot included. Eight hours covers the slow end of a school or office
+	// parc and still frees the worker the same day.
+	DefaultDefenderFullScanTimeout = 28800 // seconds
+
 	tokenFileName = "token.dat"
 )
 
@@ -94,6 +107,13 @@ type Config struct {
 	InventoryCollectIntervalSeconds int `yaml:"inventory_collect_interval_seconds"`
 	WUInstallTimeoutSeconds         int `yaml:"wu_install_timeout_seconds"`
 
+	// How long a Defender full scan may run before the agent gives up waiting
+	// for it. A setting for the same reason as the WU install budget: it is
+	// the one Defender duration that depends on the parc (disk sizes, disk
+	// types). The quick scan and the signature update keep fixed budgets in
+	// the collector — they are hang detectors, not estimates.
+	DefenderFullScanTimeoutSeconds int `yaml:"defender_full_scan_timeout_seconds"`
+
 	// ReportSessionUsername controls whether the *name* of the logged-on user is
 	// sent to the server; the presence always is. Personal data, so it is
 	// switchable fleet-wide from a GPO (registry value ReportSessionUsername).
@@ -131,6 +151,7 @@ func DefaultConfig() *Config {
 		WUCollectIntervalSeconds:        DefaultWUCollectInterval,
 		InventoryCollectIntervalSeconds: DefaultInventoryCollectInterval,
 		WUInstallTimeoutSeconds:         DefaultWUInstallTimeout,
+		DefenderFullScanTimeoutSeconds:  DefaultDefenderFullScanTimeout,
 		LogLevel:                        "INFO",
 	}
 }
@@ -158,6 +179,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.WUInstallTimeoutSeconds <= 0 {
 		c.WUInstallTimeoutSeconds = DefaultWUInstallTimeout
+	}
+	if c.DefenderFullScanTimeoutSeconds <= 0 {
+		c.DefenderFullScanTimeoutSeconds = DefaultDefenderFullScanTimeout
 	}
 	if c.LogLevel == "" {
 		c.LogLevel = "INFO"

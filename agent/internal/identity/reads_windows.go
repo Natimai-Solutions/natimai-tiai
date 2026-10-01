@@ -9,6 +9,8 @@ import (
 
 	"github.com/yusufpapurcu/wmi"
 	"golang.org/x/sys/windows/registry"
+
+	"tiai/agent/internal/winpath"
 )
 
 // tpmReadTimeout bounds the PowerShell call below. Generous — launching
@@ -88,7 +90,8 @@ func readTPMEKHash() string {
 	ctx, cancel := context.WithTimeout(context.Background(), tpmReadTimeout)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
+	// By absolute path, never through PATH: this runs as LocalSystem (winpath).
+	out, err := exec.CommandContext(ctx, winpath.PowerShell(), "-NoProfile", "-NonInteractive", "-Command",
 		"(Get-TpmEndorsementKeyInfo -ErrorAction SilentlyContinue).PublicKeyHash",
 	).Output()
 	if err != nil {

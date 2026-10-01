@@ -16,7 +16,7 @@ func Run(string) error { return errUnsupported }
 
 func Install(string) error { return errUnsupported }
 
-func Repair() error { return errUnsupported }
+func Repair(string) error { return errUnsupported }
 
 func Uninstall() error { return errUnsupported }
 

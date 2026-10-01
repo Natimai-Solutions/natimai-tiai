@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/winpath"
 )
 
 // ReadWUState searches Windows Update and returns what the machine is missing.
@@ -83,7 +84,9 @@ func runPowerShellJSON(ctx context.Context, script string) ([]byte, error) {
 		"$stderr.Write($msg, 0, $msg.Length); $stderr.Flush(); " +
 		"exit 1 }"
 
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", wrapped)
+	// By absolute path, like every program the agent starts (see winpath).
+	cmd := exec.CommandContext(ctx, winpath.PowerShell(), "-NoProfile", "-NonInteractive", "-Command", wrapped)
+	cmd.WaitDelay = powerShellWaitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

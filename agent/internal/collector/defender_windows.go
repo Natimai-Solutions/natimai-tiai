@@ -16,6 +16,7 @@ import (
 
 	"tiai/agent/internal/logging"
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/winpath"
 )
 
 const defenderNamespace = `root\Microsoft\Windows\Defender`
@@ -223,19 +224,55 @@ func detectionID(d mpThreatDetection) string {
 
 // --- Actions (PowerShell) --------------------------------------------------
 
-// RunQuickScan triggers a Defender quick scan (blocks until it completes).
+// RunQuickScan triggers a Defender quick scan and blocks until it completes,
+// for at most quickScanTimeout.
 func RunQuickScan(ctx context.Context) (string, error) {
-	return runPowerShell(ctx, "Start-MpScan -ScanType QuickScan")
+	return runDefenderAction(ctx, defenderQuickScan, quickScanTimeout)
 }
 
-// RunFullScan triggers a Defender full scan (blocks until it completes).
-func RunFullScan(ctx context.Context) (string, error) {
-	return runPowerShell(ctx, "Start-MpScan -ScanType FullScan")
+// RunFullScan triggers a Defender full scan and blocks until it completes, for
+// at most timeout.
+//
+// The budget is a parameter rather than a constant, like RunWUInstall's: a full
+// scan reads every file on every fixed disk, and how long that legitimately
+// takes depends on the parc — which is the administrator's to know, not ours.
+func RunFullScan(ctx context.Context, timeout time.Duration) (string, error) {
+	return runDefenderAction(ctx, defenderFullScan, timeout)
 }
 
-// UpdateSignatures triggers a Defender signature update.
+// UpdateSignatures triggers a Defender signature update, for at most
+// signatureUpdateTimeout.
 func UpdateSignatures(ctx context.Context) (string, error) {
-	return runPowerShell(ctx, "Update-MpSignature")
+	return runDefenderAction(ctx, defenderSignatureUpdate, signatureUpdateTimeout)
+}
+
+// runDefenderAction runs one Defender action under its budget, and turns the
+// two ways a context can end it into messages the console can show.
+//
+// Killing PowerShell at the deadline frees the command worker; it does not
+// necessarily stop the scan, which runs inside the Defender service and may
+// carry on to completion. The timeout message says so, because a scan
+// relaunched on top of a running one only gets "a scan is already in progress".
+func runDefenderAction(ctx context.Context, action defenderAction, timeout time.Duration) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	out, err := runPowerShell(ctx, action.script)
+	if err != nil {
+		// Ours (the budget) versus the service being stopped — two very
+		// different things to report, as in runSystem32.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", action.timeoutError(timeout)
+		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return "", action.interruptedError()
+		}
+		return "", err
+	}
+	return out, nil
 }
 
 // runPowerShell executes a script and returns its combined output. Windows
@@ -252,7 +289,9 @@ func runPowerShell(ctx context.Context, script string) (string, error) {
 		"$b = [Text.Encoding]::UTF8.GetBytes($out); " +
 		"$s = [Console]::OpenStandardOutput(); $s.Write($b, 0, $b.Length); $s.Flush(); " +
 		"if ($Error.Count) { exit 1 }"
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", wrapped)
+	// By absolute path, never through PATH: this runs as LocalSystem (winpath).
+	cmd := exec.CommandContext(ctx, winpath.PowerShell(), "-NoProfile", "-NonInteractive", "-Command", wrapped)
+	cmd.WaitDelay = powerShellWaitDelay
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("powershell: %w (output: %s)", err, strings.TrimSpace(string(out)))

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"tiai/agent/internal/winpath"
 )
 
 // Real runs against the real Windows of whoever runs the suite, in the same
@@ -92,7 +94,8 @@ func TestWUScriptsAreValidPowerShell(t *testing.T) {
 				"if ($errors.Count) { $errors | ForEach-Object { $_.ToString() }; exit 1 }"
 
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			out, err := exec.CommandContext(ctx, "powershell", "-NoProfile",
+			// The same binary the agent runs, resolved the same way.
+			out, err := exec.CommandContext(ctx, winpath.PowerShell(), "-NoProfile",
 				"-NonInteractive", "-Command", check).CombinedOutput()
 			cancel()
 			if err != nil {

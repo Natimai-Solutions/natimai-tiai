@@ -67,4 +67,7 @@ func applyRegistryOverrides(cfg *Config) {
 	if v, _, err := k.GetIntegerValue("WUInstallTimeoutSeconds"); err == nil && v > 0 {
 		cfg.WUInstallTimeoutSeconds = int(v)
 	}
+	if v, _, err := k.GetIntegerValue("DefenderFullScanTimeoutSeconds"); err == nil && v > 0 {
+		cfg.DefenderFullScanTimeoutSeconds = int(v)
+	}
 }

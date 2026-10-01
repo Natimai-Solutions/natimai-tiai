@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"net/http"
 	"path/filepath"
 	"sync"
@@ -195,12 +196,24 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	base := time.Duration(a.cfg.HeartbeatIntervalSeconds) * time.Second
 	maxBackoff := time.Duration(a.cfg.BackoffMaxSeconds) * time.Second
+	// wait is the back-off *step* — doubled on each failure, deterministic —
+	// and sleep is what is actually slept: the step with jitter on a failure,
+	// the plain interval on a success.
+	//
+	// The first tick runs at once, without jitter, and that is deliberate: it
+	// is the poste's presence signal, a boot is already its own spread (no two
+	// machines finish starting at the same second), and the heaviest payload a
+	// start produces, the first inventory, is spread on its own
+	// (inventoryFirstCollectSpread). The herd worth breaking is the one a
+	// server outage builds — see jitterBackoff.
 	wait := base
 
 	for {
+		sleep := base
 		if err := a.tick(ctx); err != nil {
 			wait = nextBackoff(wait, maxBackoff)
-			log.Printf("agent: tick failed, retrying in %s: %v", wait, err)
+			sleep = jitterBackoff(wait)
+			log.Printf("agent: tick failed, retrying in %s: %v", sleep.Round(time.Second), err)
 		} else {
 			wait = base
 		}
@@ -208,7 +221,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(wait):
+		case <-time.After(sleep):
 		}
 	}
 }
@@ -534,68 +547,17 @@ func (a *Agent) worker(ctx context.Context) {
 	}
 }
 
+// runFullScan is the Defender full scan, behind a variable so a test can
+// observe the budget the agent hands it without starting a scan.
+var runFullScan = collector.RunFullScan
+
 // execute runs a command and reports its result, queuing the result locally if
 // it can't be delivered right now.
 func (a *Agent) execute(ctx context.Context, cmd models.Command) {
-	var run func(context.Context) (string, error)
-	long := false
-	switch cmd.Type {
-	case "quick_scan":
-		run = collector.RunQuickScan
-	case "full_scan":
-		run = collector.RunFullScan
-	case "update_signatures":
-		run = collector.UpdateSignatures
-	case "wu_scan":
-		run = a.runWUScan
-	case "wu_install":
-		long = true
-		run = func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, false) }
-	case "wu_install_full":
-		long = true
-		run = func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, true) }
-	case "inventory_scan":
-		// Not long: a dozen WMI queries and two registry walks are seconds, not
-		// minutes, and a `running` nobody has time to read is noise.
-		run = a.runInventoryScan
-	case "wu_reset":
-		// Long not because it usually is — the nominal run takes seconds — but
-		// because the case worth watching is the one where a service refuses to
-		// stop, and "transmise" for four minutes is exactly what the
-		// intermediate `running` exists to replace.
-		long = true
-		run = a.runWUReset
-	case "reboot":
-		run = func(ctx context.Context) (string, error) {
-			return a.runPowerAction(ctx, actionReboot, collector.Reboot)
-		}
-	case "shutdown":
-		run = func(ctx context.Context) (string, error) {
-			return a.runPowerAction(ctx, actionShutdown, collector.Shutdown)
-		}
-	case "wake_on_lan":
-		// Handed to *this* poste as a relay for another one that is off: the
-		// server is not on the target's segment, this poste is. The MAC rides
-		// in the command — the one argument the protocol carries — and the
-		// agent broadcasts on its own subnets only (collector.RelayWake).
-		target := cmd.TargetMAC
-		run = func(ctx context.Context) (string, error) {
-			return collector.RelayWake(ctx, target)
-		}
-	default:
-		// The maintenance catalogue is looked up rather than switched on: its
-		// entries differ only by data, so a new command is one table row in the
-		// collector and nothing here (plan-commandes-distantes.md §4).
-		info, ok := collector.LookupMaintenance(cmd.Type)
-		if !ok {
-			log.Printf("agent: unknown command type %q (id %s), ignoring", cmd.Type, cmd.ID)
-			return
-		}
-		long = info.Long
-		cmdType := cmd.Type
-		run = func(ctx context.Context) (string, error) {
-			return collector.RunMaintenance(ctx, cmdType)
-		}
+	run, long, ok := a.resolve(cmd)
+	if !ok {
+		log.Printf("agent: unknown command type %q (id %s), ignoring", cmd.Type, cmd.ID)
+		return
 	}
 
 	// Checked here rather than per command: a machine going down in sixty
@@ -631,6 +593,86 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 			log.Printf("agent: queue result %s: %v", cmd.ID, qerr)
 		}
 	}
+}
+
+// resolve maps a command to what runs it, and to whether it is long enough to
+// announce with an intermediate `running`. ok is false for a type this agent
+// does not know — a newer server talking to an older agent.
+//
+// Every entry must be bounded — by its collector or here: the worker is
+// sequential, so one command that never returns would hold back every command
+// queued after it on this poste, a reboot included.
+func (a *Agent) resolve(cmd models.Command) (run func(context.Context) (string, error), long, ok bool) {
+	switch cmd.Type {
+	case "quick_scan":
+		// Not long: minutes, like a wu_scan. Bounded by the collector.
+		return collector.RunQuickScan, false, true
+	case "full_scan":
+		// Long: tens of minutes on a small disk, hours on a large one —
+		// exactly what the intermediate `running` exists for. The budget is
+		// a setting (defender_full_scan_timeout_seconds), read per run like
+		// the WU install budget.
+		return func(ctx context.Context) (string, error) {
+			return runFullScan(ctx, a.fullScanTimeout())
+		}, true, true
+	case "update_signatures":
+		return collector.UpdateSignatures, false, true
+	case "wu_scan":
+		return a.runWUScan, false, true
+	case "wu_install":
+		return func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, false) }, true, true
+	case "wu_install_full":
+		return func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, true) }, true, true
+	case "inventory_scan":
+		// Not long: a dozen WMI queries and two registry walks are seconds, not
+		// minutes, and a `running` nobody has time to read is noise.
+		return a.runInventoryScan, false, true
+	case "wu_reset":
+		// Long not because it usually is — the nominal run takes seconds — but
+		// because the case worth watching is the one where a service refuses to
+		// stop, and "transmise" for four minutes is exactly what the
+		// intermediate `running` exists to replace.
+		return a.runWUReset, true, true
+	case "reboot":
+		return func(ctx context.Context) (string, error) {
+			return a.runPowerAction(ctx, actionReboot, collector.Reboot)
+		}, false, true
+	case "shutdown":
+		return func(ctx context.Context) (string, error) {
+			return a.runPowerAction(ctx, actionShutdown, collector.Shutdown)
+		}, false, true
+	case "wake_on_lan":
+		// Handed to *this* poste as a relay for another one that is off: the
+		// server is not on the target's segment, this poste is. The MAC rides
+		// in the command — the one argument the protocol carries — and the
+		// agent broadcasts on its own subnets only (collector.RelayWake).
+		target := cmd.TargetMAC
+		return func(ctx context.Context) (string, error) {
+			return collector.RelayWake(ctx, target)
+		}, false, true
+	}
+
+	// The maintenance catalogue is looked up rather than switched on: its
+	// entries differ only by data, so a new command is one table row in the
+	// collector and nothing here (plan-commandes-distantes.md §4).
+	info, found := collector.LookupMaintenance(cmd.Type)
+	if !found {
+		return nil, false, false
+	}
+	cmdType := cmd.Type
+	return func(ctx context.Context) (string, error) {
+		return collector.RunMaintenance(ctx, cmdType)
+	}, info.Long, true
+}
+
+// fullScanTimeout is the configured budget for a Defender full scan. The
+// fallback only matters for a Config built by hand (Load always fills it):
+// a zero budget would fail every scan the instant it started.
+func (a *Agent) fullScanTimeout() time.Duration {
+	if a.cfg.DefenderFullScanTimeoutSeconds <= 0 {
+		return config.DefaultDefenderFullScanTimeout * time.Second
+	}
+	return time.Duration(a.cfg.DefenderFullScanTimeoutSeconds) * time.Second
 }
 
 // runPowerAction schedules a restart or a shutdown, unless this machine has had
@@ -719,4 +761,32 @@ func nextBackoff(cur, max time.Duration) time.Duration {
 		return max
 	}
 	return n
+}
+
+// jitterBackoff draws the actual retry delay for a back-off step: uniformly
+// between half the step and the step itself ("equal jitter").
+//
+// Without it, a server outage synchronises the parc. Every agent fails within
+// one heartbeat interval of the others, then retries on the same doubling
+// schedule up to the same cap — so when the server comes back, the whole fleet
+// arrives inside that one interval, each with its replayed results and its
+// pending Windows Update and inventory blocks, against a server that has just
+// restarted. Randomising each retry spreads that wave over half the step (two
+// and a half minutes at the default five-minute cap) and keeps it spread, since
+// each agent draws again on every retry.
+//
+// Equal jitter rather than the alternatives, for two reasons tied to this
+// agent. "Full jitter" (anywhere between zero and the step) spreads wider but
+// lets a retry land seconds after a failure — a fleet hammering a server that
+// is down is what back-off exists to prevent. ±20 % around the step would
+// overshoot the configured cap, which the documentation promises as a ceiling
+// (backoff_max_seconds). Half-to-full never retries sooner than half the step
+// and never later than the cap.
+func jitterBackoff(step time.Duration) time.Duration {
+	if step <= 1 {
+		return step
+	}
+	half := step / 2
+	// rand.N(n) is in [0, n): +1 makes the step itself reachable.
+	return step - half + rand.N(half+1)
 }
