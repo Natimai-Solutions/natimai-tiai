@@ -33,6 +33,8 @@ from app.core.db import engine
 from app.features.base import utcnow
 from app.features.command.models import Command, CommandStatus
 from app.features.notification import digest, outbox
+from app.features.setting import crud as setting_crud
+from app.features.setting.crud import SchedulePolicy
 from app.features.usage import crud as usage_crud
 
 logger = logging.getLogger(__name__)
@@ -75,7 +77,8 @@ async def expire_stale_commands() -> int:
 async def send_daily_digest() -> int:
     """Queue the daily fleet digest for the accounts that asked for one.
 
-    Runs once a day at ``DIGEST_HOUR_UTC``. Which accounts hear from it, and on
+    Runs once a day at the digest hour (page Paramètres, else
+    ``DIGEST_HOUR_UTC``). Which accounts hear from it, and on
     which days, is decided per account — see ``features/notification/digest``.
     """
     async with AsyncSession(engine) as session:
@@ -107,6 +110,12 @@ class Job:
     next_run: datetime
     # Given the instant a run happened, returns the next due instant.
     schedule: Callable[[datetime], datetime]
+    # The settings the schedule was built from, for the two jobs whose hour
+    # the console can change (``apply_schedule``); None for the others.
+    params: tuple[int, ...] | None = None
+    # When the job last ran in this process — what keeps a schedule change
+    # from sending the same day's mail twice.
+    last_run: datetime | None = None
 
 
 def every(seconds: int) -> Callable[[datetime], datetime]:
@@ -158,27 +167,108 @@ async def send_maintenance_reminders() -> int:
         return await tasks.send_maintenance_reminders(session)
 
 
-def build_jobs(now: datetime) -> list[Job]:
-    """The worker's whole schedule, in one place."""
-    digest_hour = daily_at(settings.DIGEST_HOUR_UTC)
-    reminder = weekly_at(
-        settings.MAINTENANCE_REMINDER_WEEKDAY, settings.DIGEST_HOUR_UTC
-    )
+def _digest_params(policy: SchedulePolicy) -> tuple[int, ...]:
+    return (policy.digest_hour_utc,)
+
+
+def _reminder_params(policy: SchedulePolicy) -> tuple[int, ...]:
+    return (policy.reminder_weekday, policy.digest_hour_utc)
+
+
+def _same_period(job_name: str, a: datetime, b: datetime) -> bool:
+    """Whether two instants fall in the same period of a mail job: the same
+    UTC day for the digest, the same ISO week for the weekly reminder."""
+    if job_name == "maintenance_reminders":
+        return a.isocalendar()[:2] == b.isocalendar()[:2]
+    return a.date() == b.date()
+
+
+def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]:
+    """The worker's whole schedule, in one place.
+
+    ``policy`` is the console's schedule (page Paramètres) as read at
+    start-up; the environment's values when the database could not be read.
+    """
+    if policy is None:
+        policy = SchedulePolicy(
+            digest_hour_utc=settings.DIGEST_HOUR_UTC,
+            reminder_weekday=settings.MAINTENANCE_REMINDER_WEEKDAY,
+        )
+    digest_hour = daily_at(policy.digest_hour_utc)
+    reminder = weekly_at(policy.reminder_weekday, policy.digest_hour_utc)
     housekeeping = daily_at(8)
     return [
         # Due immediately: a restart must resume mail delivery within one tick.
         Job("outbox", process_outbox, now, every(POLL_SECONDS)),
         Job("expire_stale_commands", expire_stale_commands, now, every(300)),
-        Job("daily_digest", send_daily_digest, digest_hour(now), digest_hour),
+        Job(
+            "daily_digest",
+            send_daily_digest,
+            digest_hour(now),
+            digest_hour,
+            params=_digest_params(policy),
+        ),
         Job(
             "maintenance_reminders",
             send_maintenance_reminders,
             reminder(now),
             reminder,
+            params=_reminder_params(policy),
         ),
         Job("purge_outbox", purge_outbox, housekeeping(now), housekeeping),
         Job("purge_usage", purge_usage, housekeeping(now), housekeeping),
     ]
+
+
+def apply_schedule(jobs: list[Job], policy: SchedulePolicy, now: datetime) -> None:
+    """Re-aim the two mail jobs when the console changed their hour or day.
+
+    Read on every tick, so a new digest hour applies within thirty seconds,
+    without restarting the worker. A job whose settings did not move is left
+    alone — its next run stays where it was.
+
+    One guard: moving the hour must not send a period's mail twice. The digest
+    sent at 18:00 and an hour then moved to 20:00 aims for 20:00 *tomorrow*,
+    not tonight; likewise a reminder already sent this week waits for the
+    next. Known only for runs in this process — the restart semantics the
+    schedule already has.
+    """
+    wanted = {
+        "daily_digest": (
+            _digest_params(policy),
+            daily_at(policy.digest_hour_utc),
+        ),
+        "maintenance_reminders": (
+            _reminder_params(policy),
+            weekly_at(policy.reminder_weekday, policy.digest_hour_utc),
+        ),
+    }
+    for job in jobs:
+        if job.name not in wanted:
+            continue
+        params, schedule = wanted[job.name]
+        if job.params == params:
+            continue
+        next_run = schedule(now)
+        if job.last_run is not None and _same_period(job.name, job.last_run, next_run):
+            next_run = schedule(next_run)
+        logger.info(
+            "Job %s rescheduled for %s (settings changed)",
+            job.name,
+            next_run.isoformat(),
+        )
+        job.params, job.schedule, job.next_run = params, schedule, next_run
+
+
+async def load_schedule() -> SchedulePolicy | None:
+    """The console's schedule, or None when the database cannot be read —
+    the worker then keeps the schedule it has rather than stopping."""
+    try:
+        async with AsyncSession(engine) as session:
+            return await setting_crud.schedule_policy(session)
+    except Exception:
+        logger.warning("Could not read the mail schedule settings", exc_info=True)
+        return None
 
 
 async def run_due_jobs(jobs: list[Job], now: datetime) -> None:
@@ -189,6 +279,7 @@ async def run_due_jobs(jobs: list[Job], now: datetime) -> None:
         # Rescheduled before running, so a job that raises still moves on
         # rather than being retried on every tick against the same failure.
         job.next_run = job.schedule(now)
+        job.last_run = now
         try:
             result = await job.run()
         except Exception:
@@ -208,9 +299,12 @@ def mark_alive() -> None:
 
 
 async def main(stop: asyncio.Event) -> None:
-    jobs = build_jobs(utcnow())
+    jobs = build_jobs(utcnow(), await load_schedule())
     logger.info("Worker started: %d jobs, tick %ds", len(jobs), POLL_SECONDS)
     while not stop.is_set():
+        policy = await load_schedule()
+        if policy is not None:
+            apply_schedule(jobs, policy, utcnow())
         await run_due_jobs(jobs, utcnow())
         mark_alive()
         try:

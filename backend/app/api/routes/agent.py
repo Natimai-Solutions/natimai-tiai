@@ -31,6 +31,7 @@ from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
 from app.features.notification import threat_alert
 from app.features.room import crud as room_crud
+from app.features.setting import crud as setting_crud
 from app.features.threat.crud import NewDetection, upsert_threats
 from app.features.threat.schemas import ThreatReport
 from app.features.usage import crud as usage_crud
@@ -590,7 +591,7 @@ async def heartbeat(
             av_enabled=machine.av_enabled,
             rtp_enabled=machine.rtp_enabled,
             signature_age_days=machine.signature_age_days,
-            max_age_days=settings.SIGNATURE_MAX_AGE_DAYS,
+            max_age_days=await setting_crud.signature_max_age_days(session),
             av_product_enabled=machine.av_product_enabled,
             av_product_signatures_up_to_date=machine.av_product_signatures_up_to_date,
             av_product_is_defender=machine.av_product_is_defender,

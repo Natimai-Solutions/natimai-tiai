@@ -249,10 +249,12 @@ Il n'est jamais committé.
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | |
 | `POSTGRES_POOL_SIZE` / `POSTGRES_MAX_OVERFLOW` / `POSTGRES_POOL_TIMEOUT` | `20` / `10` / `30` | Pool async partagé backend + worker |
-| `SIGNATURE_MAX_AGE_DAYS` | `3` | Seuil « signatures à jour » |
-| `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif » |
+| `SIGNATURE_MAX_AGE_DAYS` | `3` | Seuil « signatures à jour », en jours. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage ; un changement est appliqué aussitôt à tout le parc, postes éteints compris |
+| `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif », en jours sans contact. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+| `LOW_DISK_FREE_PERCENT` | `10` | Seuil « disque presque plein » : pourcentage d'espace libre sur le volume système. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+| `HARDWARE_AGING_YEARS` | `5` | Âge du poste (date du BIOS), en années, à partir duquel il est compté à renouveler. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
-| `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence |
+| `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `MAINTENANCE_DEFAULT_CYCLE_DAYS` | `90` | Cycle de maintenance par défaut du parc, en jours, **valeur initiale seulement** : la page Paramètres de la console peut en écrire une autre, qui prend alors le dessus. Une salle ou un poste peuvent surcharger le cycle (0 = exclu de la maintenance) et le responsable ; le plus précis gagne |
 | `MAINTENANCE_DUE_SOON_DAYS` | `14` | Fenêtre « à échéance » : un poste est signalé ce nombre de jours avant sa date. Même règle : valeur initiale, modifiable dans Paramètres |
 | `USAGE_WINDOW_DAYS` | `7` | Fenêtre glissante, en jours (1 à 90), sur laquelle sont comptées les heures allumées des postes. **Valeur initiale seulement**, modifiable dans Paramètres |
@@ -260,7 +262,7 @@ Il n'est jamais committé.
 | `USAGE_HIGH_HOURS` | `30` | Au-dessus, un poste est « toujours allumé ». Valeur initiale, modifiable dans Paramètres |
 | `USAGE_RETENTION_DAYS` | `400` | Conservation des compteurs horaires d'utilisation, purgés chaque jour par le worker. Environ 7 200 lignes par jour pour 300 postes |
 | `ROOM_SOURCE` | `manual` | Comment les postes sont rangés en salles. `manual` : depuis la console, à la main. `ad_ou` : par l'**unité d'organisation** qui contient l'objet ordinateur — l'agent lit son propre DN dans le registre, sans interroger l'annuaire — une salle par OU, nommée comme elle. `ad_location` : par l'attribut **Emplacement** de l'objet ordinateur (onglet Emplacement d'ADUC), que l'agent lit via ADSI. Dans les deux modes annuaire, le rattachement manuel est verrouillé ; les salles créées gardent nom, bâtiment et notes modifiables. Après un changement de ce réglage, « Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc d'un coup |
-| `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard |
+| `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 
 ### Réveil des postes (Wake-on-LAN)
 
@@ -338,8 +340,8 @@ adresse réelle et modifiable depuis la console.
 | `SMTP_USER` / `SMTP_PASSWORD` | — | Identifiants, si le serveur en demande. Vides = pas d'authentification |
 | `SMTP_VERIFY_TLS` | `true` | Vérification du certificat du serveur. À `false` seulement pour un relais interne dont le certificat n'est pas vérifiable depuis le conteneur (auto-signé, AC privée non montée) |
 | `SMTP_TIMEOUT_SECONDS` | `10` | |
-| `MAINTENANCE_REMINDER_WEEKDAY` | `0` | Jour du rappel hebdomadaire des maintenances à chaque responsable, à `DIGEST_HOUR_UTC` : `0` = lundi … `6` = dimanche. Un responsable sans rien de dû ne reçoit rien ; un compte sur « aucun e-mail » non plus |
-| `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place |
+| `MAINTENANCE_REMINDER_WEEKDAY` | `0` | Jour du rappel hebdomadaire des maintenances à chaque responsable, à `DIGEST_HOUR_UTC` : `0` = lundi … `6` = dimanche. Un responsable sans rien de dû ne reçoit rien ; un compte sur « aucun e-mail » non plus. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+| `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `THREAT_ALERT_MAX_AGE_HOURS` | `24` | Une détection plus ancienne ne déclenche pas d'alerte immédiate : un poste qui s'enrôle remonte tout l'historique Defender d'un coup |
 | `NOTIFICATION_MAX_ITEMS` | `10` | Postes détaillés dans un e-mail avant « … et N autres » |
 | `EMAIL_MAX_ATTEMPTS` | `20` | Tentatives d'envoi avant abandon d'un e-mail (délai doublé de 1 min à 1 h entre chacune, soit ≈ 14 h — de quoi traverser une nuit de panne du proxy) |
@@ -919,10 +921,21 @@ lignes à chercher, dans l'ordre d'un cycle :
 
 ## Organisation du parc : groupes, salles, tâches, maintenance
 
-Tout se règle depuis la console ; rien à déployer sur les postes. Les
-variables d'environnement concernées sont `ROOM_SOURCE`,
-`MAINTENANCE_DEFAULT_CYCLE_DAYS`, `MAINTENANCE_DUE_SOON_DAYS` et
-`MAINTENANCE_REMINDER_WEEKDAY` (section « Backend » ci-dessus).
+Tout se règle depuis la console ; rien à déployer sur les postes. La seule
+variable d'environnement qui reste à choisir à l'installation est
+`ROOM_SOURCE` ; le cycle, la fenêtre « à échéance » et le jour du rappel ont
+une valeur initiale dans l'environnement, puis se changent dans la page
+Paramètres (section « Backend » ci-dessus).
+
+**Ce qui se règle dans la console, sans redémarrage** (page Paramètres) : les
+défauts de maintenance, les seuils d'utilisation, les seuils de supervision
+(signatures périmées, poste inactif, disque presque plein, poste à
+renouveler, version d'agent de référence, durée de vie d'une commande) et
+l'heure des e-mails programmés. L'environnement n'en donne que la valeur de
+départ ; une valeur enregistrée dans la console prend le dessus, et chaque
+changement est inscrit au journal d'audit. Le worker relit l'heure du résumé
+à chaque tour (30 s) et ne renvoie jamais deux fois le résumé du jour, ni le
+rappel de la semaine, quand on déplace leur heure.
 
 **Utilisation des postes.** Le serveur compte les heures où chaque poste est
 allumé, à partir des battements de l'agent : un écart entre deux battements

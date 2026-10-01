@@ -141,7 +141,8 @@ def _email_group(env: Settings) -> EnvGroup:
         _item(
             env,
             "DIGEST_HOUR_UTC",
-            "Heure UTC d'envoi du résumé quotidien et du rappel de maintenance",
+            "Heure UTC d'envoi du résumé quotidien et du rappel de maintenance "
+            "— valeur initiale : le réglage enregistré prend le dessus",
         ),
         _item(
             env,
@@ -174,12 +175,13 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "SIGNATURE_MAX_AGE_DAYS",
                     "Âge maximal des signatures antivirus, en jours, avant qu'un poste "
-                    "soit « base antivirus périmée »",
+                    "soit « base antivirus périmée » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(
                     env,
                     "INACTIVE_AFTER_DAYS",
-                    "Jours sans contact de l'agent avant qu'un poste soit « inactif »",
+                    "Jours sans contact de l'agent avant qu'un poste soit « inactif »"
+                    " — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(
                     env,
@@ -191,24 +193,25 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "LOW_DISK_FREE_PERCENT",
                     "Seuil « disque presque plein » : pourcentage libre sur le volume "
-                    "système en dessous duquel un poste est signalé",
+                    "système en dessous duquel un poste est signalé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(
                     env,
                     "HARDWARE_AGING_YEARS",
-                    "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler",
+                    "Âge du poste (date du BIOS) à partir duquel il est compté à "
+                    "renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(
                     env,
                     "AGENT_EXPECTED_VERSION",
                     "Version d'agent de référence pour « agent obsolète » ; vide = la plus "
-                    "haute version remontée par le parc",
+                    "haute version remontée par le parc — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(
                     env,
                     "COMMAND_DEFAULT_TTL_MINUTES",
                     "Durée de vie, en minutes, d'une commande encore en attente avant "
-                    "qu'elle soit périmée",
+                    "qu'elle soit périmée — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
             ],
         ),
@@ -230,7 +233,7 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "MAINTENANCE_REMINDER_WEEKDAY",
                     "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … "
-                    "6 = dimanche), à l'heure du résumé",
+                    "6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                     f"{weekday} ({_WEEKDAYS[weekday]})",
                 ),
             ],

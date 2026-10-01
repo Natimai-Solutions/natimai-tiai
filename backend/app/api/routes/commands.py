@@ -20,7 +20,6 @@ from app.api.deps import (
     SessionDep,
     require_permission,
 )
-from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.base import utcnow
 from app.features.command import crud as command_crud
@@ -32,6 +31,7 @@ from app.features.command.models import (
 )
 from app.features.machine.models import Machine
 from app.features.machine.status import MachineStatus, status_clause
+from app.features.setting import crud as setting_crud
 from app.features.user.permissions import Action, Resource, has_permission
 
 router = APIRouter(prefix="/commands", tags=["commands"])
@@ -147,8 +147,9 @@ async def _resolve_targets(
     elif payload.target_location is not None:
         stmt = stmt.where(col(Machine.location) == payload.target_location)
     elif payload.target_status is not None:
+        fleet = await setting_crud.fleet_policy(session)
         stmt = stmt.where(
-            status_clause(payload.target_status, utcnow(), settings.INACTIVE_AFTER_DAYS)
+            status_clause(payload.target_status, utcnow(), fleet.inactive_after_days)
         )
     # target_all → no predicate.
     rows = await session.exec(stmt)
@@ -192,7 +193,9 @@ async def create_commands(
     await command_crud.mark_expired(session)
     ttl_minutes = payload.ttl_minutes
     if ttl_minutes is None:
-        ttl_minutes = settings.COMMAND_DEFAULT_TTL_MINUTES
+        ttl_minutes = (
+            await setting_crud.fleet_policy(session)
+        ).command_default_ttl_minutes
     expires_at = utcnow() + timedelta(minutes=ttl_minutes)
     created, skipped = await command_crud.create_for_machines(
         session,

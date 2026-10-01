@@ -114,6 +114,149 @@
       </q-card-actions>
     </q-card>
 
+    <!-- Parc thresholds: what makes the console call a poste « périmé »,
+         « inactif », short of disk, due for renewal or behind on its agent,
+         and how long a queued command waits for it. The environment gives the
+         initial value; the value saved here wins, without a restart. -->
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md">
+      <q-card-section class="text-subtitle1">
+        Supervision du parc
+        <div class="text-caption text-grey">
+          Les seuils qui décident de ce que la console signale sur un poste. Appliqués aussitôt,
+          sans redémarrer le serveur.
+        </div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings" class="q-gutter-md">
+        <q-input
+          v-model.number="fleetForm.signatureMaxAgeDays"
+          type="number"
+          min="0"
+          max="365"
+          suffix="jours"
+          label="Base antivirus périmée au-delà de"
+          outlined
+          dense
+          :hint="`Âge des signatures ; recalculé aussitôt pour tout le parc, postes éteints compris · variable d'environnement : ${settings.env_signature_max_age_days} jours`"
+          :disable="!canWrite"
+        />
+        <q-input
+          v-model.number="fleetForm.inactiveAfterDays"
+          type="number"
+          min="1"
+          max="3650"
+          suffix="jours"
+          label="Poste inactif après"
+          outlined
+          dense
+          :hint="`Jours sans contact de l'agent · variable d'environnement : ${settings.env_inactive_after_days} jours`"
+          :disable="!canWrite"
+        />
+        <q-input
+          v-model.number="fleetForm.lowDiskFreePercent"
+          type="number"
+          min="1"
+          max="99"
+          suffix="% libres"
+          label="Disque presque plein en dessous de"
+          outlined
+          dense
+          :hint="`Sur le volume système · variable d'environnement : ${settings.env_low_disk_free_percent} %`"
+          :disable="!canWrite"
+        />
+        <q-input
+          v-model.number="fleetForm.hardwareAgingYears"
+          type="number"
+          min="1"
+          max="30"
+          suffix="ans"
+          label="Poste à renouveler à partir de"
+          outlined
+          dense
+          :hint="`Âge lu sur la date du BIOS · variable d'environnement : ${settings.env_hardware_aging_years} ans`"
+          :disable="!canWrite"
+        />
+        <q-input
+          v-model="fleetForm.agentExpectedVersion"
+          label="Version d'agent de référence"
+          placeholder="Automatique"
+          outlined
+          dense
+          clearable
+          :error="!agentVersionValid"
+          error-message="Une version comme 1.2.0 ou v1.2.0-rc.1, ou vide pour automatique"
+          :hint="`Vide = automatique, la plus haute version remontée par le parc · variable d'environnement : ${settings.env_agent_expected_version ?? 'automatique'}`"
+          :disable="!canWrite"
+        />
+        <q-input
+          v-model.number="fleetForm.commandDefaultTtlMinutes"
+          type="number"
+          min="1"
+          :max="60 * 24 * 30"
+          suffix="minutes"
+          label="Durée de vie d'une commande en attente"
+          outlined
+          dense
+          :hint="`Au-delà, une commande jamais remise à son poste est périmée · variable d'environnement : ${settings.env_command_default_ttl_minutes} minutes`"
+          :disable="!canWrite"
+        />
+      </q-card-section>
+      <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
+        <q-btn
+          color="primary"
+          label="Enregistrer"
+          :loading="savingFleet"
+          :disable="!agentVersionValid"
+          @click="saveFleet"
+        />
+      </q-card-actions>
+    </q-card>
+
+    <!-- The worker's mails. The server counts in UTC; the hints say when the
+         mail lands on the reader's own clock, weekday shift included. -->
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md">
+      <q-card-section class="text-subtitle1">
+        E-mails programmés
+        <div class="text-caption text-grey">
+          L'heure du résumé quotidien et le jour du rappel hebdomadaire des maintenances. Pris en
+          compte en moins d'une minute, sans redémarrer le serveur.
+        </div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings" class="q-gutter-md">
+        <q-select
+          v-model="scheduleForm.digestHourUtc"
+          :options="hourOptions"
+          emit-value
+          map-options
+          label="Heure du résumé quotidien (UTC)"
+          outlined
+          dense
+          :hint="`Arrive ${digestHint} · variable d'environnement : ${settings.env_digest_hour_utc} h UTC`"
+          :disable="!canWrite"
+        />
+        <q-select
+          v-model="scheduleForm.reminderWeekday"
+          :options="weekdayOptions"
+          emit-value
+          map-options
+          label="Jour du rappel des maintenances (UTC)"
+          outlined
+          dense
+          :hint="`À l'heure du résumé : arrive ${reminderHint} · variable d'environnement : ${WEEKDAYS_FR[settings.env_maintenance_reminder_weekday]}`"
+          :disable="!canWrite"
+        />
+      </q-card-section>
+      <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
+        <q-btn
+          color="primary"
+          label="Enregistrer"
+          :loading="savingSchedule"
+          @click="saveSchedule"
+        />
+      </q-card-actions>
+    </q-card>
+
     <!-- The server's environment, read-only. One card, one group per section
          of ``.env``: the page is where an administrator comes to answer
          « pourquoi ce poste est-il signalé ? » without opening a shell. -->
@@ -122,7 +265,8 @@
         Réglages du serveur
         <div class="text-caption text-grey">
           Variables d'environnement du serveur (<code>deploy/.env</code>), en lecture seule ici. Une
-          valeur se change dans ce fichier, puis en redémarrant le serveur.
+          valeur se change dans ce fichier, puis en redémarrant le serveur — sauf celles marquées «
+          valeur initiale », que les réglages ci-dessus remplacent dès qu'ils sont enregistrés.
         </div>
       </q-card-section>
       <q-separator />
@@ -177,6 +321,13 @@ import {
 } from 'src/services/settings';
 import { useAuthStore } from 'src/stores/auth';
 import { usageSettingsError } from 'src/utils/usageFilter';
+import {
+  WEEKDAYS_FR,
+  digestSummary,
+  isAgentVersion,
+  readerTimeZone,
+  reminderSummary,
+} from 'src/utils/settingsSchedule';
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -204,6 +355,49 @@ function fillUsageForm(s: ConsoleSettings) {
   usageForm.highHours = s.usage_high_hours;
 }
 
+// The parc thresholds card. The agent version is a string: '' = automatic.
+const savingFleet = ref(false);
+const fleetForm = reactive({
+  signatureMaxAgeDays: 3 as number | string,
+  inactiveAfterDays: 30 as number | string,
+  lowDiskFreePercent: 10 as number | string,
+  hardwareAgingYears: 5 as number | string,
+  agentExpectedVersion: '' as string | null,
+  commandDefaultTtlMinutes: 60 as number | string,
+});
+const agentVersionValid = computed(() => isAgentVersion(fleetForm.agentExpectedVersion ?? ''));
+
+function fillFleetForm(s: ConsoleSettings) {
+  fleetForm.signatureMaxAgeDays = s.signature_max_age_days;
+  fleetForm.inactiveAfterDays = s.inactive_after_days;
+  fleetForm.lowDiskFreePercent = s.low_disk_free_percent;
+  fleetForm.hardwareAgingYears = s.hardware_aging_years;
+  fleetForm.agentExpectedVersion = s.agent_expected_version ?? '';
+  fleetForm.commandDefaultTtlMinutes = s.command_default_ttl_minutes;
+}
+
+// The mail schedule card, and when each mail lands for the reader.
+const savingSchedule = ref(false);
+const scheduleForm = reactive({ digestHourUtc: 18, reminderWeekday: 0 });
+const timeZone = readerTimeZone();
+const hourOptions = Array.from({ length: 24 }, (_, h) => ({
+  label: `${h} h UTC`,
+  value: h,
+}));
+const weekdayOptions = WEEKDAYS_FR.map((day, i) => ({
+  label: day.charAt(0).toUpperCase() + day.slice(1),
+  value: i,
+}));
+const digestHint = computed(() => digestSummary(scheduleForm.digestHourUtc, timeZone));
+const reminderHint = computed(() =>
+  reminderSummary(scheduleForm.reminderWeekday, scheduleForm.digestHourUtc, timeZone),
+);
+
+function fillScheduleForm(s: ConsoleSettings) {
+  scheduleForm.digestHourUtc = s.digest_hour_utc;
+  scheduleForm.reminderWeekday = s.maintenance_reminder_weekday;
+}
+
 // The environment card, narrowed by the search box: on the variable's name,
 // its value and its description alike, since a reader may know any of the
 // three (« ROOM_SOURCE », « ad_ou », « salles »).
@@ -228,6 +422,8 @@ async function load() {
     form.ownerId = settings.value.maintenance_default_owner?.id ?? null;
     form.dueSoon = settings.value.maintenance_due_soon_days;
     fillUsageForm(settings.value);
+    fillFleetForm(settings.value);
+    fillScheduleForm(settings.value);
     ownerOptions.value = (await listAssignableUsers()).map((u) => ({ label: u.name, value: u.id }));
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
@@ -265,6 +461,45 @@ async function saveUsage() {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
   } finally {
     savingUsage.value = false;
+  }
+}
+
+async function saveFleet() {
+  if (!agentVersionValid.value) return;
+  savingFleet.value = true;
+  try {
+    settings.value = await updateSettings({
+      signature_max_age_days: Number(fleetForm.signatureMaxAgeDays),
+      inactive_after_days: Number(fleetForm.inactiveAfterDays),
+      low_disk_free_percent: Number(fleetForm.lowDiskFreePercent),
+      hardware_aging_years: Number(fleetForm.hardwareAgingYears),
+      // '' and not null: « automatique » is a choice the console makes, and
+      // must win over a version pinned in the environment.
+      agent_expected_version: (fleetForm.agentExpectedVersion ?? '').trim(),
+      command_default_ttl_minutes: Number(fleetForm.commandDefaultTtlMinutes),
+    });
+    fillFleetForm(settings.value);
+    $q.notify({ type: 'positive', message: 'Paramètres enregistrés' });
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+  } finally {
+    savingFleet.value = false;
+  }
+}
+
+async function saveSchedule() {
+  savingSchedule.value = true;
+  try {
+    settings.value = await updateSettings({
+      digest_hour_utc: scheduleForm.digestHourUtc,
+      maintenance_reminder_weekday: scheduleForm.reminderWeekday,
+    });
+    fillScheduleForm(settings.value);
+    $q.notify({ type: 'positive', message: 'Paramètres enregistrés' });
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+  } finally {
+    savingSchedule.value = false;
   }
 }
 

@@ -9,7 +9,6 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 
 from app.api.deps import SessionDep, require_permission
-from app.core.config import settings
 from app.features.base import utcnow
 from app.features.check.models import MachineCheck
 from app.features.inventory.models import MachineSoftware, Volume
@@ -108,7 +107,9 @@ async def _count(session: SessionDep, clause: ColumnElement[bool] | None = None)
 async def overview(session: SessionDep) -> StatsOverview:
     """Aggregate fleet status (total, freshness, verification, inactivity, threats)."""
     now: datetime = utcnow()
-    days = settings.INACTIVE_AFTER_DAYS
+    policies = await setting_crud.policies(session)
+    fleet_policy = policies.fleet
+    days = fleet_policy.inactive_after_days
 
     total = await _count(session)
     up_to_date = await _count(
@@ -125,10 +126,10 @@ async def overview(session: SessionDep) -> StatsOverview:
     )
 
     machines_low_disk = await _count(
-        session, low_disk_clause(settings.LOW_DISK_FREE_PERCENT)
+        session, low_disk_clause(fleet_policy.low_disk_free_percent)
     )
     machines_aging = await _count(
-        session, aging_hardware_clause(now, settings.HARDWARE_AGING_YEARS)
+        session, aging_hardware_clause(now, fleet_policy.hardware_aging_years)
     )
     # Machines whose *system* volume is not fully encrypted. Read off the volume
     # rows and not off a machine column, unlike the disk figure above: this is
@@ -188,7 +189,6 @@ async def overview(session: SessionDep) -> StatsOverview:
     )
     open_checks = open_checks_result.one() or 0
 
-    policies = await setting_crud.policies(session)
     policy = policies.maintenance
     joined = (
         select(func.count())
@@ -242,8 +242,8 @@ async def overview(session: SessionDep) -> StatsOverview:
         machines_unencrypted=machines_unencrypted,
         machines_aging=machines_aging,
         software_count=software_count,
-        low_disk_free_percent=settings.LOW_DISK_FREE_PERCENT,
-        hardware_aging_years=settings.HARDWARE_AGING_YEARS,
+        low_disk_free_percent=fleet_policy.low_disk_free_percent,
+        hardware_aging_years=fleet_policy.hardware_aging_years,
         machines_agent_outdated=machines_agent_outdated,
         open_checks=open_checks,
         machines_maintenance_overdue=overdue_result.one() or 0,

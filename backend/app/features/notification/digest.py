@@ -33,6 +33,7 @@ from app.features.machine.status import WindowsUpdateFilter as WUFilter
 from app.features.notification.outbox import queue_email
 from app.features.notification.recipients import users_for
 from app.features.notification.tasks import personal_block
+from app.features.setting import crud as setting_crud
 from app.features.threat.models import Threat
 from app.features.user.models import EmailPreference
 from app.features.windows_update.models import WindowsUpdate
@@ -71,6 +72,9 @@ class Digest:
     wu_pending: int
     reboot_required: int
     inactive: int
+    # The threshold ``inactive`` was counted with, printed beside it: the page
+    # Paramètres can change it, so the mail must say which one it used.
+    inactive_after_days: int = 30
     # --- named examples, capped at NOTIFICATION_MAX_ITEMS ---
     threat_lines: list[MachineLine] = field(default_factory=list)
     update_lines: list[MachineLine] = field(default_factory=list)
@@ -111,7 +115,7 @@ def _name(machine_hostname: str | None, machine_uuid: str) -> str:
 async def build_digest(session: AsyncSession) -> Digest:
     """Read the current state of the fleet."""
     now = utcnow()
-    days = settings.INACTIVE_AFTER_DAYS
+    days = (await setting_crud.fleet_policy(session)).inactive_after_days
     cap = settings.NOTIFICATION_MAX_ITEMS
 
     total = await _count(session, None)
@@ -211,6 +215,7 @@ async def build_digest(session: AsyncSession) -> Digest:
         wu_pending=wu_pending,
         reboot_required=reboot_required,
         inactive=inactive,
+        inactive_after_days=days,
         threat_lines=threat_lines,
         update_lines=update_lines,
         outdated_lines=outdated_lines,
@@ -286,7 +291,7 @@ def render_digest(digest: Digest) -> tuple[str, str]:
         f"  Antivirus périmé ou inactif : {digest.outdated_antivirus} poste(s)",
         f"  Mises à jour Windows en attente : {digest.wu_pending} poste(s)",
         f"  Redémarrage requis : {digest.reboot_required} poste(s)",
-        f"  Sans contact depuis plus de {settings.INACTIVE_AFTER_DAYS} j : "
+        f"  Sans contact depuis plus de {digest.inactive_after_days} j : "
         f"{digest.inactive} poste(s)",
         "",
     ]

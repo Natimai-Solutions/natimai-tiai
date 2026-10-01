@@ -1,5 +1,5 @@
-"""Console settings: the parc-wide maintenance defaults, editable without a
-restart. ``settings:read`` to see them, ``settings:write`` to change them —
+"""Console settings: the parc-wide maintenance defaults, the usage thresholds,
+the parc thresholds and the mail schedule — editable without a restart. ``settings:read`` to see them, ``settings:write`` to change them —
 the administrators hold both implicitly; nobody else does by default.
 """
 
@@ -13,6 +13,7 @@ from app.api.deps import CurrentUser, SessionDep, require_permission
 from app.core.config import settings as env
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
+from app.features.machine import crud as machine_crud
 from app.features.setting import crud
 from app.features.setting.environment import environment_overview
 from app.features.user.models import User
@@ -62,12 +63,37 @@ class SettingsOut(BaseModel):
     env_usage_window_days: int
     env_usage_low_hours: int
     env_usage_high_hours: int
+    # Parc thresholds, as resolved, and the environment's value for each.
+    signature_max_age_days: int
+    inactive_after_days: int
+    low_disk_free_percent: int
+    hardware_aging_years: int
+    # None = automatic: the highest version the parc reports.
+    agent_expected_version: str | None
+    command_default_ttl_minutes: int
+    env_signature_max_age_days: int
+    env_inactive_after_days: int
+    env_low_disk_free_percent: int
+    env_hardware_aging_years: int
+    env_agent_expected_version: str | None
+    env_command_default_ttl_minutes: int
+    # When the worker's mails go out, and the environment's values.
+    digest_hour_utc: int
+    maintenance_reminder_weekday: int
+    env_digest_hour_utc: int
+    env_maintenance_reminder_weekday: int
     room_source: str
     # The rest of the environment an administrator may want to check without
     # a shell on the server — thresholds, mail, wake-on-LAN — read-only and
     # never a secret (``app.features.setting.environment``).
     environment: list[EnvGroupOut]
     updated_at: datetime | None
+
+
+# An agent version as the release workflow stamps it ("1.0.2", "v1.0.2",
+# "1.1.0-rc.1"), or "" for automatic. Strict on purpose: a reference that no
+# agent can ever report would flag the whole parc as behind.
+AGENT_VERSION_PATTERN = r"^(|v?\d+(\.\d+){0,3}([-+][0-9A-Za-z.\-]+)?)$"
 
 
 class SettingsUpdate(BaseModel):
@@ -83,11 +109,29 @@ class SettingsUpdate(BaseModel):
     usage_window_days: int | None = Field(default=None, ge=1, le=90)
     usage_low_hours: int | None = Field(default=None, ge=0, le=24 * 90)
     usage_high_hours: int | None = Field(default=None, ge=1, le=24 * 90)
+    # Parc thresholds. Same bounds as the environment variables they replace,
+    # where those have one; the others are bounded here so a typo cannot make
+    # every poste « périmé » or none ever « inactif ».
+    signature_max_age_days: int | None = Field(default=None, ge=0, le=365)
+    inactive_after_days: int | None = Field(default=None, ge=1, le=3650)
+    low_disk_free_percent: int | None = Field(default=None, ge=1, le=99)
+    hardware_aging_years: int | None = Field(default=None, ge=1, le=30)
+    # "" = automatic (the highest version on the parc), which a version pinned
+    # in the environment does not override; null = back to the environment.
+    agent_expected_version: str | None = Field(
+        default=None, max_length=64, pattern=AGENT_VERSION_PATTERN
+    )
+    command_default_ttl_minutes: int | None = Field(default=None, ge=1, le=60 * 24 * 30)
+    # The mail schedule, read by the worker on every tick.
+    digest_hour_utc: int | None = Field(default=None, ge=0, le=23)
+    maintenance_reminder_weekday: int | None = Field(default=None, ge=0, le=6)
 
 
 async def _out(session: SessionDep) -> SettingsOut:
     policy = await crud.maintenance_policy(session)
     usage = await crud.usage_policy(session)
+    fleet = await crud.fleet_policy(session)
+    schedule = await crud.schedule_policy(session)
     owner = await session.get(User, policy.owner_id) if policy.owner_id else None
     values = await crud.get_all(session)
     updated: datetime | None = None
@@ -112,6 +156,22 @@ async def _out(session: SessionDep) -> SettingsOut:
         env_usage_window_days=env.USAGE_WINDOW_DAYS,
         env_usage_low_hours=env.USAGE_LOW_HOURS,
         env_usage_high_hours=env.USAGE_HIGH_HOURS,
+        signature_max_age_days=fleet.signature_max_age_days,
+        inactive_after_days=fleet.inactive_after_days,
+        low_disk_free_percent=fleet.low_disk_free_percent,
+        hardware_aging_years=fleet.hardware_aging_years,
+        agent_expected_version=fleet.agent_expected_version,
+        command_default_ttl_minutes=fleet.command_default_ttl_minutes,
+        env_signature_max_age_days=env.SIGNATURE_MAX_AGE_DAYS,
+        env_inactive_after_days=env.INACTIVE_AFTER_DAYS,
+        env_low_disk_free_percent=env.LOW_DISK_FREE_PERCENT,
+        env_hardware_aging_years=env.HARDWARE_AGING_YEARS,
+        env_agent_expected_version=env.AGENT_EXPECTED_VERSION or None,
+        env_command_default_ttl_minutes=env.COMMAND_DEFAULT_TTL_MINUTES,
+        digest_hour_utc=schedule.digest_hour_utc,
+        maintenance_reminder_weekday=schedule.reminder_weekday,
+        env_digest_hour_utc=env.DIGEST_HOUR_UTC,
+        env_maintenance_reminder_weekday=env.MAINTENANCE_REMINDER_WEEKDAY,
         room_source=env.ROOM_SOURCE,
         environment=[
             EnvGroupOut(
@@ -183,6 +243,48 @@ async def _write_usage(
         )
 
 
+# Fields written as they come: each one is bounded on its own (above), and
+# none depends on another. An explicit null clears the row and hands the
+# setting back to the environment, like the maintenance fields.
+_SIMPLE_KEYS = {
+    "signature_max_age_days": crud.KEY_SIGNATURE_MAX_AGE,
+    "inactive_after_days": crud.KEY_INACTIVE_AFTER,
+    "low_disk_free_percent": crud.KEY_LOW_DISK,
+    "hardware_aging_years": crud.KEY_HARDWARE_AGING,
+    "agent_expected_version": crud.KEY_AGENT_VERSION,
+    "command_default_ttl_minutes": crud.KEY_COMMAND_TTL,
+    "digest_hour_utc": crud.KEY_DIGEST_HOUR,
+    "maintenance_reminder_weekday": crud.KEY_REMINDER_WEEKDAY,
+}
+
+
+async def _write_simple(
+    session: SessionDep, payload: SettingsUpdate, *, actor: str
+) -> None:
+    """Write the independent settings a patch carries.
+
+    A new signature age threshold is applied to the whole parc in the same
+    transaction (``recompute_up_to_date``): the « à jour » flag is stored per
+    machine, and a poste that is off would otherwise keep the old verdict
+    until it next reports — the list, the dashboard and the digest disagreeing
+    for as long.
+    """
+    sent = payload.model_fields_set & _SIMPLE_KEYS.keys()
+    if not sent:
+        return
+    before = (await crud.fleet_policy(session)).signature_max_age_days
+    for field in sorted(sent):
+        value = getattr(payload, field)
+        if field == "agent_expected_version" and value is not None:
+            value = value.strip()
+        await crud.set_value(session, _SIMPLE_KEYS[field], value, actor=actor)
+    if "signature_max_age_days" in sent:
+        await session.flush()
+        after = (await crud.fleet_policy(session)).signature_max_age_days
+        if after != before:
+            await machine_crud.recompute_up_to_date(session, max_age_days=after)
+
+
 @router.get("", response_model=SettingsOut)
 async def get_settings(session: SessionDep) -> SettingsOut:
     return await _out(session)
@@ -194,6 +296,7 @@ async def update_settings(
 ) -> SettingsOut:
     fields = payload.model_dump(exclude_unset=True)
     await _write_usage(session, payload, actor=current.email)
+    await _write_simple(session, payload, actor=current.email)
     if "maintenance_default_cycle_days" in fields:
         await crud.set_value(
             session,

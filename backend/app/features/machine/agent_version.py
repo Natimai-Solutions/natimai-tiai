@@ -22,8 +22,8 @@ from sqlalchemy import func
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.config import settings
 from app.features.machine.models import Machine
+from app.features.setting import crud as setting_crud
 
 # A version as the release workflow stamps it: "0.4.2", "v0.4.2", "0.4.2-dev.abc1234".
 _NUMERIC = re.compile(r"\d+")
@@ -102,7 +102,7 @@ async def fleet_versions(session: AsyncSession) -> FleetVersions:
     )
     counts = [(name, count) for name, count in rows.all() if name]
     names = [name for name, _ in counts]
-    pinned = settings.AGENT_EXPECTED_VERSION
+    pinned = (await setting_crud.fleet_policy(session)).agent_expected_version
     latest = pinned or latest_version(names)
     return FleetVersions(
         latest=latest,

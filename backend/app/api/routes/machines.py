@@ -54,7 +54,7 @@ from app.features.maintenance.policy import MaintenanceState
 from app.features.room import crud as room_crud
 from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
-from app.features.setting.crud import MaintenancePolicy, UsagePolicy
+from app.features.setting.crud import FleetPolicy, MaintenancePolicy, UsagePolicy
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 from app.features.usage.models import SECONDS_PER_HOUR
@@ -795,6 +795,8 @@ def _filtered_machines(
     usage: UsageWindow,
     outdated: list[str] | None = None,
     policy: MaintenancePolicy | None = None,
+    *,
+    fleet: FleetPolicy,
 ) -> Any:
     """The machine SELECT with every requested facet applied.
 
@@ -909,7 +911,7 @@ def _filtered_machines(
         )
     if filters.status is not None:
         stmt = stmt.where(
-            status_clause(filters.status, utcnow(), settings.INACTIVE_AFTER_DAYS)
+            status_clause(filters.status, utcnow(), fleet.inactive_after_days)
         )
     if filters.online is not None:
         # Its own axis, not a MachineStatus value: "allumé maintenant" must stay
@@ -956,7 +958,9 @@ async def list_machines(
     policies = await setting_crud.policies(session)
     policy = policies.maintenance
     usage = _usage_window(policies.usage, filters.usage_days)
-    stmt = _filtered_machines(filters, usage, versions.outdated, policy)
+    stmt = _filtered_machines(
+        filters, usage, versions.outdated, policy, fleet=policies.fleet
+    )
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     # last_seen then id behind the requested column: ties must land on the same
     # page from one request to the next, or rows duplicate and vanish across
@@ -1221,9 +1225,9 @@ async def _export_rows(
     policies = await setting_crud.policies(session)
     policy = policies.maintenance
     usage = _usage_window(policies.usage, filters.usage_days)
-    stmt = _filtered_machines(filters, usage, versions.outdated, policy).order_by(
-        func.lower(col(Machine.hostname)).nulls_last(), col(Machine.id)
-    )
+    stmt = _filtered_machines(
+        filters, usage, versions.outdated, policy, fleet=policies.fleet
+    ).order_by(func.lower(col(Machine.hostname)).nulls_last(), col(Machine.id))
     rows = await session.exec(stmt)
     all_rows = rows.all()
     names = await setting_crud.user_names(session, _owner_ids(all_rows, policy))
