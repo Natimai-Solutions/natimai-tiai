@@ -1,21 +1,41 @@
-"""Console authentication: login (OAuth2 password flow), current user, and the
-password lifecycle — self-service change, and the "forgot password" flow.
+"""Console authentication: login (OAuth2 password flow), sessions, current
+user, and the password lifecycle — self-service change, and the "forgot
+password" flow.
+
+A login opens a server-side session (``app.features.auth_session``) seen
+through two tokens. The access token — a JWT of ``ACCESS_TOKEN_EXPIRE_MINUTES``
+— is returned in the body; the console keeps it in memory and sends it as a
+bearer. The refresh token travels in an HttpOnly cookie scoped to this router
+(``/api/v1/auth``), out of reach of the page's scripts and never sent to any
+other route; ``POST /auth/refresh`` trades it for a new access token, and a
+new refresh token with it. ``POST /auth/logout`` ends the session for good.
 """
 
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Cookie, Depends, Header, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
+from jwt.exceptions import InvalidTokenError
 from pydantic import BaseModel, Field, field_validator
 
-from app.api.deps import CurrentPermissions, CurrentUser, SessionDep
+from app.api.deps import (
+    CurrentAuthSession,
+    CurrentPermissions,
+    CurrentUser,
+    SessionDep,
+)
 from app.api.fields import Email, Password
 from app.core import ratelimit, security
+from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.net import client_ip
+from app.features.audit import crud as audit
+from app.features.auth_session import crud as auth_sessions
+from app.features.auth_session.models import AuthSession
 from app.features.base import utcnow
 from app.features.user import crud, emails
 from app.features.user.models import EmailPreference, User
@@ -28,10 +48,70 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class Token(BaseModel):
-    """JWT access token response."""
+    """JWT access token response. The refresh token is never in a body: it
+    only ever travels in the HttpOnly cookie."""
 
     access_token: str
     token_type: str = "bearer"
+
+
+# --- The refresh cookie -------------------------------------------------------
+
+REFRESH_COOKIE = "tiai_refresh"
+# Sent back on the auth routes only — login, refresh, logout, sessions — and
+# never alongside the hundreds of calls the rest of the console makes.
+REFRESH_COOKIE_PATH = f"{settings.API_V1_STR}/auth"
+
+
+def _set_refresh_cookie(response: Response, token: str, expires_at: datetime) -> None:
+    """Hand the browser its refresh token.
+
+    ``HttpOnly``: no script reads it, an injected one included. ``SameSite=
+    Strict``: no other site can make the browser send it, which is what makes
+    a cookie safe to authenticate a POST with. ``Secure`` everywhere but
+    ``local`` (``Settings.refresh_cookie_secure``). Its lifetime follows the
+    session's, so the browser drops it when the server would refuse it.
+    """
+    response.set_cookie(
+        REFRESH_COOKIE,
+        token,
+        max_age=max(0, round((expires_at - utcnow()).total_seconds())),
+        path=REFRESH_COOKIE_PATH,
+        secure=settings.refresh_cookie_secure,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(
+        REFRESH_COOKIE,
+        path=REFRESH_COOKIE_PATH,
+        secure=settings.refresh_cookie_secure,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _session_ended() -> AppError:
+    """The refusal of a refresh, which also tells the browser to drop a cookie
+    that will never open anything again.
+
+    The header is built on a scratch response: an ``AppError`` is rendered by
+    its own handler, and the route's response — where the cookie would
+    otherwise be cleared — is thrown away with it.
+    """
+    scratch = Response()
+    _clear_refresh_cookie(scratch)
+    return AppError(
+        code=ErrorCode.AUTH_SESSION_INVALID,
+        status_code=401,
+        message="No valid session: log in again",
+        headers={"set-cookie": scratch.headers["set-cookie"]},
+    )
+
+
+RefreshCookie = Annotated[str | None, Cookie(alias=REFRESH_COOKIE)]
 
 
 class GroupRef(BaseModel):
@@ -84,10 +164,14 @@ async def _profile(
 )
 async def login(
     request: Request,
+    response: Response,
     session: SessionDep,
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
-    """Authenticate with email (username) + password, return a JWT."""
+    """Authenticate with email (username) + password and open a session.
+
+    Returns the access token; sets the refresh token as a cookie.
+    """
     user = await crud.authenticate(session, form.username, form.password)
     if user is None:
         security_log.warning(
@@ -99,8 +183,189 @@ async def login(
             message="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    security_log.info("login ok for %s from %s", user.email, client_ip(request))
-    return Token(access_token=security.create_access_token(user.id))
+    ip = client_ip(request)
+    security_log.info("login ok for %s from %s", user.email, ip)
+    row, refresh_token = await auth_sessions.open_session(
+        session, user.id, user_agent=request.headers.get("user-agent"), ip=ip
+    )
+    access_token = security.create_access_token(user.id, session_id=row.id)
+    _set_refresh_cookie(response, refresh_token, row.expires_at)
+    await session.commit()
+    return Token(access_token=access_token)
+
+
+@router.post("/refresh", response_model=Token)
+async def refresh(
+    request: Request,
+    response: Response,
+    session: SessionDep,
+    refresh_token: RefreshCookie = None,
+) -> Token:
+    """Trade the refresh cookie for a new access token — and a new cookie.
+
+    Refresh tokens are single-use. Presenting one that was already traded
+    (outside the few seconds two tabs may race for it) means a copy is in
+    other hands: the session is revoked for both holders, and logged.
+    """
+    if not refresh_token:
+        raise _session_ended()
+    result = await auth_sessions.refresh(session, refresh_token)
+    row = result.session
+    if result.outcome is auth_sessions.RefreshOutcome.REUSED and row is not None:
+        security_log.warning(
+            "refresh token reused for session %s of user %s from %s: "
+            "presumed theft, session revoked",
+            row.id,
+            row.user_id,
+            client_ip(request),
+        )
+        await session.commit()
+        raise _session_ended()
+    if row is None:
+        raise _session_ended()
+
+    user = await session.get(User, row.user_id)
+    if user is None or not user.is_active:
+        # Deactivation revokes every session already; this is the backstop
+        # for a row that escaped it.
+        auth_sessions.revoke(session, row)
+        await session.commit()
+        raise _session_ended()
+
+    access_token = security.create_access_token(user.id, session_id=row.id)
+    if result.refresh_token is not None:
+        _set_refresh_cookie(response, result.refresh_token, row.expires_at)
+    await session.commit()
+    return Token(access_token=access_token)
+
+
+def _bearer_session_id(authorization: str | None) -> uuid.UUID | None:
+    """The session a bearer access token names, if it is a genuine one."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    try:
+        payload = security.decode_access_token(
+            authorization.removeprefix("Bearer ").strip()
+        )
+    except InvalidTokenError:
+        return None
+    if payload.get("type") != security.ACCESS_TOKEN_TYPE:
+        return None
+    try:
+        return uuid.UUID(str(payload.get("sid")))
+    except ValueError:
+        return None
+
+
+@router.post("/logout", status_code=204)
+async def logout(
+    response: Response,
+    session: SessionDep,
+    refresh_token: RefreshCookie = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> None:
+    """End the current session and clear the cookie.
+
+    Needs no valid access token: logging out must work with one that has just
+    expired. Either credential identifies the session — the refresh cookie
+    (current or just-rotated token), or a genuine access token — and either is
+    proof enough to end it. Always 204: there is nothing useful to tell a
+    client whose session was already over.
+    """
+    rows: list[AuthSession] = []
+    if refresh_token:
+        row = await auth_sessions.find_by_refresh_token(session, refresh_token)
+        if row is not None:
+            rows.append(row)
+    bearer_sid = _bearer_session_id(authorization)
+    if bearer_sid is not None:
+        row = await session.get(AuthSession, bearer_sid)
+        if row is not None:
+            rows.append(row)
+    for row in rows:
+        auth_sessions.revoke(session, row)
+    if rows:
+        security_log.info("logout of session %s", rows[0].id)
+    await session.commit()
+    _clear_refresh_cookie(response)
+
+
+class SessionOut(BaseModel):
+    """One open session, as « Mon compte » lists it."""
+
+    id: uuid.UUID
+    created_at: datetime
+    last_used_at: datetime
+    expires_at: datetime
+    user_agent: str | None
+    ip: str | None
+    # The session this very request belongs to: closing it is logging out.
+    current: bool
+
+
+@router.get("/sessions", response_model=list[SessionOut])
+async def list_sessions(
+    session: SessionDep, user: CurrentUser, current: CurrentAuthSession
+) -> list[SessionOut]:
+    """The caller's open sessions, most recently active first."""
+    rows = await auth_sessions.list_live(session, user.id)
+    return [
+        SessionOut(
+            id=r.id,
+            created_at=r.created_at,
+            last_used_at=r.last_used_at,
+            expires_at=r.expires_at,
+            user_agent=r.user_agent,
+            ip=r.ip,
+            current=r.id == current.id,
+        )
+        for r in rows
+    ]
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def close_session(
+    session_id: uuid.UUID,
+    response: Response,
+    session: SessionDep,
+    user: CurrentUser,
+    current: CurrentAuthSession,
+) -> None:
+    """Close one of the caller's sessions — a workstation left logged in.
+
+    Only one's own: another account's session, like one already over, is
+    « not found » rather than « forbidden », so the endpoint says nothing about
+    sessions that are not the caller's. Audited: the trace of « I closed the
+    session on the reception PC » is the trace of a suspected compromise.
+    """
+    row = await session.get(AuthSession, session_id)
+    if row is None or row.user_id != user.id or not auth_sessions.is_live(row):
+        raise AppError(
+            code=ErrorCode.AUTH_SESSION_NOT_FOUND,
+            status_code=404,
+            message="Session not found",
+        )
+    is_current = row.id == current.id
+    auth_sessions.revoke(session, row)
+    # The account is the resource, not the session: a session id authorizes
+    # a refresh attempt on its own, and has no business in a log that others
+    # read. What lets a reader recognise the session is kept instead.
+    audit.record(
+        session,
+        actor=user.email,
+        action="auth.session_revoked",
+        resource_type="user",
+        resource_id=str(user.id),
+        details={
+            "current": is_current,
+            "user_agent": row.user_agent,
+            "ip": row.ip,
+            "created_at": row.created_at.isoformat(),
+        },
+    )
+    await session.commit()
+    if is_current:
+        _clear_refresh_cookie(response)
 
 
 @router.get("/me", response_model=UserOut)
@@ -215,9 +480,8 @@ async def change_password(
 ) -> None:
     """Change one's own password.
 
-    The caller's other sessions are cut off (tokens issued before now stop
-    being accepted), so the token used for *this* request is invalidated too —
-    the console re-authenticates right after.
+    Every session of the account is revoked — the one this request came
+    through included — so the console re-authenticates right after.
     """
     if not security.verify_password(payload.current_password, user.hashed_password):
         raise AppError(

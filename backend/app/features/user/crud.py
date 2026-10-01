@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core import security
 from app.core.config import settings
+from app.features.auth_session import crud as auth_sessions
 from app.features.base import utcnow
 from app.features.user.models import (
     Group,
@@ -15,17 +16,25 @@ from app.features.user.models import (
     PasswordResetToken,
     User,
     UserGroup,
+    normalize_email,
 )
 from app.features.user.permissions import (
     ALL_PERMISSIONS,
     BUILTIN_GROUP_DEFAULTS,
+    Authority,
     BuiltinGroup,
 )
 
 
 async def get_by_email(session: AsyncSession, email: str) -> User | None:
-    """Fetch a user by email (case-sensitive)."""
-    result = await session.exec(select(User).where(User.email == email))
+    """Fetch a user by email, whatever its capitalisation.
+
+    Compared on ``lower(email)``, the expression the unique index is built on,
+    so the lookup is an index scan and agrees with what the index refuses.
+    """
+    result = await session.exec(
+        select(User).where(func.lower(User.email) == normalize_email(email))
+    )
     return result.one_or_none()
 
 
@@ -44,7 +53,7 @@ async def create_user(
     migration that seeds the three, and the first admin is seeded the same way.
     """
     user = User(
-        email=email,
+        email=normalize_email(email),
         hashed_password=security.get_password_hash(password),
         full_name=full_name,
     )
@@ -63,9 +72,15 @@ async def create_user(
 
 
 async def authenticate(session: AsyncSession, email: str, password: str) -> User | None:
-    """Return the user if credentials are valid and the account is active."""
+    """Return the user if credentials are valid and the account is active.
+
+    Every path costs one bcrypt check, the refusals included: an unknown or
+    deactivated account is checked against a dummy hash, so how long the answer
+    takes says nothing about which addresses have an account.
+    """
     user = await get_by_email(session, email)
     if user is None or not user.is_active:
+        security.burn_password_check(password)
         return None
     if not security.verify_password(password, user.hashed_password):
         return None
@@ -105,14 +120,18 @@ async def list_users(
 
 
 async def set_password(session: AsyncSession, user: User, password: str) -> None:
-    """Hash and store a new password, cutting off sessions opened before now.
+    """Hash and store a new password, ending every session of the account.
 
-    Does not commit — the caller decides the transaction boundary.
+    Whoever changes a password — the user, a reset link, an administrator —
+    does it because the old one may be known to someone else, who may well be
+    logged in with it: all of the account's sessions are revoked, the caller's
+    own included. Does not commit — the caller decides the transaction boundary.
     """
     user.hashed_password = security.get_password_hash(password)
     user.password_changed_at = utcnow()
     user.updated_at = utcnow()
     session.add(user)
+    await auth_sessions.revoke_all(session, user.id)
 
 
 async def delete_user(session: AsyncSession, user: User) -> None:
@@ -343,9 +362,13 @@ async def set_user_groups(
     await session.flush()
 
 
-async def user_permissions(session: AsyncSession, user_id: uuid.UUID) -> frozenset[str]:
-    """The union of the user's groups' permissions — what ``require_permission``
-    decides on. Membership of the administrators' group is the whole catalogue."""
+async def is_admin(session: AsyncSession, user_id: uuid.UUID) -> bool:
+    """Whether the user belongs to the administrators' group.
+
+    Not the same as holding every permission: a composed group may grant the
+    whole catalogue, but only the administrators' group grants what the
+    catalogue will hold tomorrow — and only an administrator may make another.
+    """
     admin = await session.exec(
         select(func.count())
         .select_from(UserGroup)
@@ -355,7 +378,13 @@ async def user_permissions(session: AsyncSession, user_id: uuid.UUID) -> frozens
             Group.builtin_key == BuiltinGroup.ADMIN.value,
         )
     )
-    if (admin.one() or 0) > 0:
+    return (admin.one() or 0) > 0
+
+
+async def user_permissions(session: AsyncSession, user_id: uuid.UUID) -> frozenset[str]:
+    """The union of the user's groups' permissions — what ``require_permission``
+    decides on. Membership of the administrators' group is the whole catalogue."""
+    if await is_admin(session, user_id):
         return ALL_PERMISSIONS
     result = await session.exec(
         select(GroupPermission.permission)
@@ -364,6 +393,36 @@ async def user_permissions(session: AsyncSession, user_id: uuid.UUID) -> frozens
         .distinct()
     )
     return frozenset(result.all())
+
+
+async def user_authority(session: AsyncSession, user_id: uuid.UUID) -> Authority:
+    """What an existing account holds — what editing it would lay hands on."""
+    return Authority(
+        is_admin=await is_admin(session, user_id),
+        permissions=await user_permissions(session, user_id),
+    )
+
+
+async def groups_authority(
+    session: AsyncSession, group_ids: Iterable[uuid.UUID]
+) -> Authority:
+    """What membership of ``group_ids`` together grants. Unknown ids grant
+    nothing (the routes refuse them before asking)."""
+    ids = list(set(group_ids))
+    if not ids:
+        return Authority(is_admin=False, permissions=frozenset())
+    admins = await session.exec(
+        select(func.count())
+        .select_from(Group)
+        .where(col(Group.id).in_(ids), Group.builtin_key == BuiltinGroup.ADMIN.value)
+    )
+    permissions = await permissions_of_groups(session, ids)
+    return Authority.union(
+        [
+            Authority(is_admin=(admins.one() or 0) > 0, permissions=frozenset()),
+            *(Authority(is_admin=False, permissions=p) for p in permissions.values()),
+        ]
+    )
 
 
 async def users_holding(session: AsyncSession, permission: str) -> int:

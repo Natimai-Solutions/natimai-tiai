@@ -58,9 +58,43 @@ def test_verify_password_rejects_a_non_bcrypt_hash():
 
 
 def test_jwt_roundtrip():
-    """A created access token decodes back to its subject."""
+    """A created access token decodes back to its subject and its session."""
     user_id = uuid.uuid4()
-    token = security.create_access_token(user_id)
+    session_id = uuid.uuid4()
+    token = security.create_access_token(user_id, session_id=session_id)
     payload = security.decode_access_token(token)
     assert payload["sub"] == str(user_id)
+    assert payload["sid"] == str(session_id)
     assert payload["type"] == "access"
+
+
+def test_access_token_lives_access_token_expire_minutes(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 15)
+    payload = security.decode_access_token(
+        security.create_access_token(uuid.uuid4(), session_id=uuid.uuid4())
+    )
+    assert payload["exp"] - payload["iat"] == 15 * 60
+
+
+def test_dummy_hash_costs_what_a_real_hash_costs():
+    """The unknown-account path must take as long as a real check: same
+    algorithm, same cost factor as the hashes the console writes."""
+    real = security.get_password_hash("whatever-password")
+    assert security.DUMMY_PASSWORD_HASH[:7] == real[:7]  # "$2b$12$"
+    assert not security.verify_password("", security.DUMMY_PASSWORD_HASH)
+
+
+def test_refresh_token_names_its_session():
+    session_id = uuid.uuid4()
+    token = security.generate_refresh_token(session_id)
+    assert security.refresh_token_session_id(token) == str(session_id)
+    # 256 bits of secret behind the id, and a new one every time.
+    assert len(token.split(".", 1)[1]) >= 43
+    assert security.generate_refresh_token(session_id) != token
+
+
+def test_a_malformed_refresh_token_names_no_session():
+    for token in ("", "no-separator", ".secret-only", "id-only."):
+        assert security.refresh_token_session_id(token) is None

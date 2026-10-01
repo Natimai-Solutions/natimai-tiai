@@ -29,6 +29,14 @@ class ErrorCode(enum.StrEnum):
     AUTH_CREDENTIALS_INVALID = "auth.credentials.invalid"
     AUTH_REQUIRED = "auth.required"
     AUTH_PERMISSION_DENIED = "auth.permission.denied"
+    # Refused because it would hand out, or reach, more than the caller holds:
+    # a permission they lack, the administrators' group, or an account that is
+    # more powerful than they are.
+    AUTH_PERMISSION_ESCALATION = "auth.permission.escalation"
+    # The console session is over (logged out, revoked, expired) or the refresh
+    # token presented does not open one: log in again.
+    AUTH_SESSION_INVALID = "auth.session.invalid"
+    AUTH_SESSION_NOT_FOUND = "auth.session.not_found"
     AUTH_TOKEN_MISSING = "auth.token.missing"
     AUTH_TOKEN_INVALID = "auth.token.invalid"
     AUTH_TOKEN_REVOKED = "auth.token.revoked"

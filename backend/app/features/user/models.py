@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Column, ForeignKey, text
+from sqlalchemy import Column, ForeignKey, Index, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -34,6 +34,17 @@ class EmailPreference(enum.StrEnum):
     DIGEST_DAILY = "digest_daily"
 
 
+def normalize_email(email: str) -> str:
+    """The stored form of an address: trimmed, lower-case.
+
+    An address is one mailbox whatever its capitalisation in practice, and
+    ``Admin@…`` and ``admin@…`` must not be two accounts — nor must the login
+    form refuse an operator for a capital the directory put there. Every
+    write goes through this, and every lookup compares on ``lower(email)``.
+    """
+    return email.strip().lower()
+
+
 class User(SQLModel, table=True):
     """A console operator authenticating with email + password (JWT).
 
@@ -45,7 +56,11 @@ class User(SQLModel, table=True):
     __tablename__ = "users"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    email: str = Field(unique=True, index=True, max_length=255)
+    # Unique *case-insensitively*: the index is on ``lower(email)`` (declared
+    # below the class), which is also what lookups go through. Stored values
+    # are normalised anyway (``normalize_email``); the index is what makes the
+    # rule hold for a row written by any other path.
+    email: str = Field(max_length=255)
     hashed_password: str
     full_name: str | None = Field(default=None, max_length=255)
     # A plain string column, the enum being the vocabulary rather than a
@@ -62,12 +77,17 @@ class User(SQLModel, table=True):
         sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
     )
     is_active: bool = Field(default=True)
-    # Set on every password change. Access tokens issued before this instant are
-    # rejected (app.api.deps), so resetting a password ends existing sessions —
-    # otherwise a compromised account would stay reachable until token expiry.
+    # Set on every password change. What ends the sessions is their revocation
+    # (``auth_session.crud.revoke_all``, in the same transaction); this stays as
+    # a second, stateless line: an access token issued before the instant is
+    # refused even if its session row were somehow still live (app.api.deps).
     password_changed_at: datetime | None = utc_field(default=None, nullable=True)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
+
+
+# Declared outside the class because it is on an expression, not a column.
+Index("ix_users_email_lower", func.lower(User.email), unique=True)
 
 
 class Group(SQLModel, table=True):

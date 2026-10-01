@@ -7,17 +7,24 @@ from typing import Annotated
 from fastapi import Depends, Header
 from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import InvalidTokenError
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core import security
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.errors import AppError, ErrorCode
+from app.features.auth_session import crud as auth_sessions
+from app.features.auth_session.models import AuthSession
 from app.features.machine.models import Machine
 from app.features.user import crud as user_crud
 from app.features.user.models import User
-from app.features.user.permissions import Action, Resource, has_permission
+from app.features.user.permissions import (
+    Action,
+    Authority,
+    Resource,
+    has_permission,
+)
 
 security_log = logging.getLogger("app.security")
 
@@ -74,11 +81,20 @@ CurrentMachine = Annotated[Machine, Depends(get_current_machine)]
 # --- Console user auth (JWT) -----------------------------------------------
 
 
-async def get_current_user(
+async def _authenticate(
     session: SessionDep,
     token: Annotated[str, Depends(oauth2_scheme)],
-) -> User:
-    """Resolve the authenticated console user from a JWT bearer token."""
+) -> tuple[AuthSession, User]:
+    """Resolve the console session a bearer access token belongs to, and its
+    account.
+
+    A valid signature is not enough. The token must be an *access* token, and
+    the session it names (``sid``) must still be live — this is the check that
+    makes a logout, a « fermer cette session » or a password reset take effect
+    on the very next request instead of when the token expires.
+
+    One query: the session row and its account, joined, by primary key.
+    """
     credentials_error = AppError(
         code=ErrorCode.AUTH_CREDENTIALS_INVALID,
         status_code=401,
@@ -89,23 +105,39 @@ async def get_current_user(
         payload = security.decode_access_token(token)
     except InvalidTokenError:
         raise credentials_error from None
-
-    sub = payload.get("sub")
-    if sub is None:
+    if payload.get("type") != security.ACCESS_TOKEN_TYPE:
         raise credentials_error
+
     try:
-        user_id = uuid.UUID(str(sub))
+        # A validly-signed token with a malformed subject or session is still
+        # a bad credential (401), not a server error (500).
+        user_id = uuid.UUID(str(payload.get("sub")))
+        session_id = uuid.UUID(str(payload.get("sid")))
     except ValueError:
-        # A validly-signed token with a malformed subject is still a bad
-        # credential (401), not a server error (500).
         raise credentials_error from None
-    user = await session.get(User, user_id)
-    if user is None or not user.is_active:
-        raise credentials_error
 
-    # A password change (self-service or admin reset) ends earlier sessions:
-    # without this, resetting a compromised account's password would leave the
-    # attacker's token valid until it expires — up to 8h by default.
+    result = await session.exec(
+        select(AuthSession, User)
+        .join(User, col(User.id) == col(AuthSession.user_id))
+        .where(AuthSession.id == session_id)
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise credentials_error
+    auth_session, user = row
+    if user.id != user_id or not user.is_active:
+        raise credentials_error
+    if not auth_sessions.is_live(auth_session):
+        raise AppError(
+            code=ErrorCode.AUTH_SESSION_INVALID,
+            status_code=401,
+            message="This session has ended",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # The older, stateless line behind the session check: a password change
+    # revokes every session in its own transaction, and also stamps the
+    # instant, before which no access token is accepted whatever its session.
     if user.password_changed_at is not None:
         issued_at = payload.get("iat")
         # Compare whole seconds: `iat` is second-granular, so a token minted
@@ -113,7 +145,25 @@ async def get_current_user(
         changed_at = int(user.password_changed_at.timestamp())
         if issued_at is None or int(issued_at) < changed_at:
             raise credentials_error
-    return user
+    return auth_session, user
+
+
+# FastAPI caches a dependency's value for the request: the two below share one
+# ``_authenticate`` call, hence one query, whichever a route asks for.
+_Authenticated = Annotated[tuple[AuthSession, User], Depends(_authenticate)]
+
+
+async def get_current_auth_session(auth: _Authenticated) -> AuthSession:
+    """The console session the request's access token belongs to."""
+    return auth[0]
+
+
+async def get_current_user(auth: _Authenticated) -> User:
+    """The account behind the request's session."""
+    return auth[1]
+
+
+CurrentAuthSession = Annotated[AuthSession, Depends(get_current_auth_session)]
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
@@ -132,6 +182,20 @@ async def get_current_permissions(
 
 
 CurrentPermissions = Annotated[frozenset[str], Depends(get_current_permissions)]
+
+
+async def get_current_authority(
+    session: SessionDep, user: CurrentUser, permissions: CurrentPermissions
+) -> Authority:
+    """What the caller may hand out to others: their permissions, and whether
+    they are an administrator (``permissions.escalation``). Only the routes
+    that grant rights or touch accounts ask for it."""
+    return Authority(
+        is_admin=await user_crud.is_admin(session, user.id), permissions=permissions
+    )
+
+
+CurrentAuthority = Annotated[Authority, Depends(get_current_authority)]
 
 
 def require_permission(

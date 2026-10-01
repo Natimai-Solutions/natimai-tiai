@@ -7,6 +7,12 @@ The three built-in groups (``BuiltinGroup``) cannot be deleted; the
 administrators' permissions cannot be edited because they are implicit.
 Every other edit is subject to the same lock-out guard as the accounts:
 a change that would leave no active account with ``user:write`` is refused.
+
+And to the same rule against escalation (``users.reject_escalation``): a
+non-administrator composes groups out of the permissions they hold, and
+nothing else. A group already granting more than they hold — the
+administrators' first of all — is out of their reach: they can neither edit
+nor delete it, since either would change what more powerful accounts may do.
 """
 
 import uuid
@@ -15,8 +21,8 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from app.api.deps import CurrentUser, SessionDep, require_permission
-from app.api.routes.users import reject_lockout
+from app.api.deps import CurrentAuthority, CurrentUser, SessionDep, require_permission
+from app.api.routes.users import reject_escalation, reject_lockout
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
@@ -26,6 +32,7 @@ from app.features.user.permissions import (
     ALL_PERMISSIONS,
     PERMISSION_CATALOGUE,
     Action,
+    Authority,
     Resource,
 )
 
@@ -155,10 +162,19 @@ async def list_groups(session: SessionDep) -> list[GroupOut]:
 
 @router.post("", response_model=GroupOut, status_code=201, dependencies=[_WRITE])
 async def create_group(
-    payload: GroupCreate, session: SessionDep, current: CurrentUser
+    payload: GroupCreate,
+    session: SessionDep,
+    current: CurrentUser,
+    authority: CurrentAuthority,
 ) -> GroupOut:
     await _reject_name_taken(session, payload.name)
     permissions = _validate_permissions(payload.permissions)
+    reject_escalation(
+        authority,
+        Authority(is_admin=False, permissions=frozenset(permissions)),
+        actor_email=current.email,
+        action="grant",
+    )
     group = Group(name=payload.name, description=payload.description)
     session.add(group)
     await session.flush()
@@ -187,10 +203,17 @@ async def update_group(
     payload: GroupUpdate,
     session: SessionDep,
     current: CurrentUser,
+    authority: CurrentAuthority,
 ) -> GroupOut:
     group = await _require_group(session, group_id)
     fields = payload.model_dump(exclude_unset=True)
 
+    reject_escalation(
+        authority,
+        await crud.groups_authority(session, [group.id]),
+        actor_email=current.email,
+        action="edit",
+    )
     if "permissions" in fields and crud.is_admin_group(group):
         raise AppError(
             code=ErrorCode.GROUP_BUILTIN_PROTECTED,
@@ -205,6 +228,13 @@ async def update_group(
         if "permissions" in fields
         else None
     )
+    if permissions is not None:
+        reject_escalation(
+            authority,
+            Authority(is_admin=False, permissions=frozenset(permissions)),
+            actor_email=current.email,
+            action="grant",
+        )
     for name, value in fields.items():
         setattr(group, name, value)
     group.updated_at = utcnow()
@@ -231,7 +261,10 @@ async def update_group(
 
 @router.delete("/{group_id}", status_code=204, dependencies=[_WRITE])
 async def delete_group(
-    group_id: uuid.UUID, session: SessionDep, current: CurrentUser
+    group_id: uuid.UUID,
+    session: SessionDep,
+    current: CurrentUser,
+    authority: CurrentAuthority,
 ) -> None:
     """Delete a composed group; its members simply lose what it granted."""
     group = await _require_group(session, group_id)
@@ -241,6 +274,12 @@ async def delete_group(
             status_code=400,
             message="Built-in groups cannot be deleted",
         )
+    reject_escalation(
+        authority,
+        await crud.groups_authority(session, [group.id]),
+        actor_email=current.email,
+        action="delete",
+    )
     audit.record(
         session,
         actor=current.email,

@@ -9,23 +9,40 @@ or change the groups of **their own** account. And no change may leave the
 console without an active account able to manage accounts (``user:write``):
 the last one standing cannot be deactivated or deleted, from here or by way
 of a group edit (``routes/groups.py``).
+
+A third keeps ``user:write`` from being administrator in disguise: an account
+only grants, and only reaches, what it holds itself (``reject_escalation``).
+A non-administrator cannot put an account in a group granting more than they
+have, nor in the administrators' group, and cannot edit, deactivate, delete
+or reset the password of an account holding more than they do — the reset
+being the shortest path of all, since it hands the new password back.
 """
 
+import logging
 import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.api.deps import CurrentUser, SessionDep, require_permission
+from app.api.deps import CurrentAuthority, CurrentUser, SessionDep, require_permission
 from app.api.fields import Email, Password
 from app.core import security
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
+from app.features.auth_session import crud as auth_sessions
 from app.features.base import utcnow
 from app.features.user import crud
 from app.features.user.models import EmailPreference, User
-from app.features.user.permissions import Action, Resource, permission_key
+from app.features.user.permissions import (
+    Action,
+    Authority,
+    Resource,
+    escalation,
+    permission_key,
+)
+
+security_log = logging.getLogger("app.security")
 
 router = APIRouter(
     prefix="/users",
@@ -154,6 +171,40 @@ def _reject_self(current: User, target: User, action: str) -> None:
         )
 
 
+def reject_escalation(
+    actor: Authority, target: Authority, *, actor_email: str, action: str
+) -> None:
+    """Refuse when ``target`` grants more than the actor holds.
+
+    ``action`` names what was attempted, for the log and the console: ``grant``
+    (handing out a group or a permission), ``edit``, ``delete``,
+    ``reset_password``. Shared with the groups routes.
+    """
+    found = escalation(actor, target)
+    if found is None:
+        return
+    # Someone with account management trying to reach past it is the event a
+    # security review wants to find without reading the audit log end to end.
+    security_log.warning(
+        "privilege escalation refused: %s tried to %s beyond their rights "
+        "(missing %s%s)",
+        actor_email,
+        action,
+        ", ".join(sorted(found.missing)) or "nothing",
+        ", administrators' group" if found.admin else "",
+    )
+    raise AppError(
+        code=ErrorCode.AUTH_PERMISSION_ESCALATION,
+        status_code=403,
+        message="You cannot grant or reach rights you do not hold yourself",
+        details={
+            "action": action,
+            "missing": sorted(found.missing),
+            "admin": found.admin,
+        },
+    )
+
+
 async def reject_lockout(session: SessionDep) -> None:
     """Refuse the pending change if it leaves nobody able to manage accounts.
 
@@ -210,11 +261,20 @@ async def list_users(
 
 @router.post("", response_model=UserOut, status_code=201, dependencies=[_WRITE])
 async def create_user(
-    payload: UserCreate, session: SessionDep, current: CurrentUser
+    payload: UserCreate,
+    session: SessionDep,
+    current: CurrentUser,
+    authority: CurrentAuthority,
 ) -> UserOut:
     """Create an account with an admin-chosen password."""
     await _reject_email_taken(session, payload.email)
     await _require_groups_exist(session, payload.group_ids)
+    reject_escalation(
+        authority,
+        await crud.groups_authority(session, payload.group_ids),
+        actor_email=current.email,
+        action="grant",
+    )
     # Read before the commit inside ``create_user`` expires the caller's row:
     # touching it afterwards would lazy-load from an async session, which
     # cannot be done outside an await.
@@ -251,16 +311,35 @@ async def update_user(
     payload: UserUpdate,
     session: SessionDep,
     current: CurrentUser,
+    authority: CurrentAuthority,
 ) -> UserOut:
-    """Update an account's email, name, groups, activation or e-mail cadence."""
+    """Update an account's email, name, groups, activation or e-mail cadence.
+
+    Deactivating an account ends its sessions in the same transaction: a
+    deactivation is how an operator who has left is shut out, and it must not
+    wait for anything to expire.
+    """
     user = await _require_user(session, user_id)
     fields = payload.model_dump(exclude_unset=True)
 
-    if "is_active" in fields and not fields["is_active"]:
+    reject_escalation(
+        authority,
+        await crud.user_authority(session, user.id),
+        actor_email=current.email,
+        action="edit",
+    )
+    deactivating = "is_active" in fields and not fields["is_active"]
+    if deactivating:
         _reject_self(current, user, "deactivate")
     if "group_ids" in fields:
         _reject_self(current, user, "change the groups of")
         await _require_groups_exist(session, fields["group_ids"])
+        reject_escalation(
+            authority,
+            await crud.groups_authority(session, fields["group_ids"]),
+            actor_email=current.email,
+            action="grant",
+        )
     if "email" in fields and fields["email"] != user.email:
         await _reject_email_taken(session, fields["email"], exclude=user.id)
 
@@ -274,6 +353,8 @@ async def update_user(
     session.add(user)
     if group_ids is not None:
         await crud.set_user_groups(session, user, group_ids)
+    if deactivating:
+        await auth_sessions.revoke_all(session, user.id)
     audit.record(
         session,
         actor=current.email,
@@ -298,11 +379,24 @@ async def update_user(
 
 @router.delete("/{user_id}", status_code=204, dependencies=[_WRITE])
 async def delete_user(
-    user_id: uuid.UUID, session: SessionDep, current: CurrentUser
+    user_id: uuid.UUID,
+    session: SessionDep,
+    current: CurrentUser,
+    authority: CurrentAuthority,
 ) -> None:
-    """Delete an account for good (prefer deactivation to keep the trail)."""
+    """Delete an account for good (prefer deactivation to keep the trail).
+
+    Its sessions go with it — ``ON DELETE CASCADE`` — and with them any access
+    still open on it, at the next request.
+    """
     user = await _require_user(session, user_id)
     _reject_self(current, user, "delete")
+    reject_escalation(
+        authority,
+        await crud.user_authority(session, user.id),
+        actor_email=current.email,
+        action="delete",
+    )
     audit.record(
         session,
         actor=current.email,
@@ -324,17 +418,25 @@ async def reset_password(
     payload: PasswordReset,
     session: SessionDep,
     current: CurrentUser,
+    authority: CurrentAuthority,
 ) -> PasswordResetOut:
     """Set a new password for an account and return it once.
 
-    Resetting logs the account out everywhere: tokens issued before now stop
-    being accepted, and any pending "forgot password" link is dropped.
+    Resetting logs the account out everywhere: every session is revoked, and
+    any pending "forgot password" link is dropped.
 
-    Audited — whoever holds ``user:write`` can take over any account this way,
-    so the trace says who did it and to whom. Never the password itself: only
-    whether it was generated or typed by the administrator.
+    Refused on an account holding more than the caller (``reject_escalation``):
+    the answer carries the new password, so a reset is a takeover. Audited for
+    the same reason — the trace says who did it and to whom. Never the password
+    itself: only whether it was generated or typed by the administrator.
     """
     user = await _require_user(session, user_id)
+    reject_escalation(
+        authority,
+        await crud.user_authority(session, user.id),
+        actor_email=current.email,
+        action="reset_password",
+    )
     password = payload.password or security.generate_password()
     await crud.set_password(session, user, password)
     await crud.purge_reset_tokens(session, user.id)

@@ -14,6 +14,8 @@ included, so a new resource never has to be granted to it by hand.
 """
 
 import enum
+from collections.abc import Iterable
+from dataclasses import dataclass
 
 
 class Resource(enum.StrEnum):
@@ -146,3 +148,59 @@ def has_permission(
     """Whether a permission set — a user's, as ``crud.user_permissions`` builds
     it — grants ``(resource, action)``."""
     return permission_key(resource, action) in permissions
+
+
+# --- No escalation ------------------------------------------------------------
+#
+# ``user:write`` opens account and group management; on its own it would also
+# open everything else, since whoever holds it could put themselves — or an
+# account of theirs — in a group granting anything, then reset an
+# administrator's password and be handed the new one. The rule that closes
+# that door: an account only ever hands out, or reaches, what it holds itself.
+# Administrators hold everything, so for them the rule never bites.
+
+
+@dataclass(frozen=True)
+class Authority:
+    """What an account holds, as far as granting goes — or what a group, a set
+    of groups, an account would put in someone's hands."""
+
+    is_admin: bool
+    permissions: frozenset[str]
+
+    @classmethod
+    def union(cls, parts: Iterable["Authority"]) -> "Authority":
+        """What several groups grant together: an account's memberships."""
+        is_admin = False
+        permissions: set[str] = set()
+        for part in parts:
+            is_admin = is_admin or part.is_admin
+            permissions |= part.permissions
+        return cls(is_admin=is_admin, permissions=frozenset(permissions))
+
+
+@dataclass(frozen=True)
+class Escalation:
+    """Why ``target`` is out of the actor's reach: the permissions it carries
+    that the actor lacks, and whether it is administrator material."""
+
+    missing: frozenset[str]
+    admin: bool
+
+
+def escalation(actor: Authority, target: Authority) -> Escalation | None:
+    """What ``target`` would grant beyond ``actor``, or None if nothing.
+
+    ``target`` is whatever the actor is about to give out or lay hands on: a
+    group's permissions, the groups an account is being put in, an existing
+    account to edit, deactivate, delete or reset. An administrator reaches
+    everything. Anyone else reaches neither the administrators' group — it
+    grants the catalogue to come, which nobody but an administrator holds —
+    nor a permission outside their own set.
+    """
+    if actor.is_admin:
+        return None
+    missing = target.permissions - actor.permissions
+    if not missing and not target.is_admin:
+        return None
+    return Escalation(missing=frozenset(missing), admin=target.is_admin)
