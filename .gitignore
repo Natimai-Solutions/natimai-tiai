@@ -43,3 +43,7 @@ deploy/backups/
 Thumbs.db
 .idea/
 *.swp
+
+# Playwright (frontend/e2e)
+frontend/playwright-report/
+frontend/test-results/

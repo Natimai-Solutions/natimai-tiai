@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import delete
 from sqlmodel import col, desc, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -93,6 +94,17 @@ async def list_actions(session: AsyncSession) -> list[str]:
         select(AuditEntry.action).distinct().order_by(col(AuditEntry.action))
     )
     return list(result.all())
+
+
+async def purge_before(session: AsyncSession, cutoff: datetime) -> int:
+    """Drop the entries recorded before ``cutoff``. Commits; returns the count.
+
+    By age alone, whatever the action: a retention that kept some slugs
+    longer than others would be a policy nobody could state in one sentence.
+    """
+    result = await session.exec(delete(AuditEntry).where(col(AuditEntry.at) < cutoff))
+    await session.commit()
+    return result.rowcount or 0
 
 
 def _escape_like(value: str) -> str:

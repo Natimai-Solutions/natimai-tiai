@@ -17,39 +17,39 @@
       :rows-per-page-options="[10, 25, 50]"
       no-data-label="Aucune mise à jour en attente."
     >
-      <template #body-cell-severity="props">
-        <q-td :props="props">
-          <q-badge :color="wuSeverityColor(props.value)">
-            {{ wuSeverityLabel(props.value) }}
+      <template #body-cell-severity="cell">
+        <q-td :props="cell">
+          <q-badge :color="wuSeverityColor(cell.value)">
+            {{ wuSeverityLabel(cell.value) }}
           </q-badge>
         </q-td>
       </template>
-      <template #body-cell-type="props">
-        <q-td :props="props">{{ wuTypeLabel(props.value) }}</q-td>
+      <template #body-cell-type="cell">
+        <q-td :props="cell">{{ wuTypeLabel(cell.value) }}</q-td>
       </template>
-      <template #body-cell-size_mb="props">
-        <q-td :props="props">
-          {{ wuSizeLabel(props.value) }}
-          <q-tooltip v-if="props.value != null">
+      <template #body-cell-size_mb="cell">
+        <q-td :props="cell">
+          {{ wuSizeLabel(cell.value) }}
+          <q-tooltip v-if="cell.value != null">
             Majorant relevé par Windows Update : la somme de toutes les charges utiles que la mise à
             jour pourrait avoir à récupérer, alors qu'une seule sera téléchargée. Exact sur un
             pilote, surestimé sur un correctif cumulatif.
           </q-tooltip>
         </q-td>
       </template>
-      <template #body-cell-is_downloaded="props">
-        <q-td :props="props">
+      <template #body-cell-is_downloaded="cell">
+        <q-td :props="cell">
           <q-icon
-            :name="props.value ? 'download_done' : 'cloud_download'"
-            :color="props.value ? 'positive' : 'grey-6'"
+            :name="cell.value ? 'download_done' : 'cloud_download'"
+            :color="cell.value ? 'positive' : 'grey-6'"
           />
           <q-tooltip>
-            {{ props.value ? 'Déjà téléchargée sur le poste' : 'Reste à télécharger' }}
+            {{ cell.value ? 'Déjà téléchargée sur le poste' : 'Reste à télécharger' }}
           </q-tooltip>
         </q-td>
       </template>
-      <template #body-cell-first_seen="props">
-        <q-td :props="props">{{ formatDateTime(props.value) }}</q-td>
+      <template #body-cell-first_seen="cell">
+        <q-td :props="cell">{{ formatDateTime(cell.value) }}</q-td>
       </template>
     </q-table>
   </q-card>

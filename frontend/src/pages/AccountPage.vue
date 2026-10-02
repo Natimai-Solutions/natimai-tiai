@@ -114,18 +114,82 @@
         </q-card-actions>
       </q-form>
     </q-card>
+
+    <q-card flat bordered class="q-mt-md" style="max-width: 520px">
+      <q-card-section class="row items-start no-wrap">
+        <div class="col">
+          <div class="text-subtitle1">Sessions ouvertes</div>
+          <div class="text-caption text-grey">
+            Les appareils connectés à votre compte. Fermez celles que vous ne reconnaissez pas :
+            l'accès y est coupé immédiatement.
+          </div>
+        </div>
+        <q-btn
+          flat
+          dense
+          round
+          icon="refresh"
+          aria-label="Actualiser les sessions"
+          :loading="sessionsLoading"
+          @click="loadSessions"
+        />
+      </q-card-section>
+      <q-separator />
+      <q-list separator>
+        <q-item v-for="s in sessions" :key="s.id">
+          <q-item-section avatar>
+            <q-icon
+              :name="s.current ? 'computer' : 'devices'"
+              :color="s.current ? 'primary' : ''"
+            />
+          </q-item-section>
+          <q-item-section>
+            <q-item-label>
+              {{ describeUserAgent(s.user_agent) }}
+              <q-badge v-if="s.current" color="primary" class="q-ml-xs">Cette session</q-badge>
+            </q-item-label>
+            <q-item-label caption>
+              {{ s.ip || 'Adresse inconnue' }} · dernière activité
+              {{ timeAgoLabel(s.last_used_at) }}
+            </q-item-label>
+            <q-item-label caption>Ouverte le {{ formatDateTime(s.created_at) }}</q-item-label>
+          </q-item-section>
+          <q-item-section side>
+            <q-btn
+              flat
+              dense
+              color="negative"
+              :label="s.current ? 'Se déconnecter' : 'Fermer'"
+              :loading="closing === s.id"
+              @click="onCloseSession(s)"
+            />
+          </q-item-section>
+        </q-item>
+        <q-item v-if="!sessionsLoading && sessions.length === 0">
+          <q-item-section class="text-grey">Aucune session ouverte.</q-item-section>
+        </q-item>
+      </q-list>
+    </q-card>
   </q-page>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
-import { changePassword, updateMe, type EmailPreference } from 'src/services/auth';
+import {
+  changePassword,
+  closeSession,
+  listSessions,
+  updateMe,
+  type AuthSession,
+  type EmailPreference,
+} from 'src/services/auth';
 import { apiErrorMessage } from 'src/services/errors';
 import { PASSWORD_MIN_LENGTH } from 'src/services/users';
 import { useAuthStore } from 'src/stores/auth';
-import { EMAIL_PREFERENCE_OPTIONS } from 'src/utils/format';
+import { EMAIL_PREFERENCE_OPTIONS, formatDateTime, timeAgoLabel } from 'src/utils/format';
+import { describeUserAgent } from 'src/utils/userAgent';
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -187,10 +251,11 @@ async function onSubmit() {
   loading.value = true;
   try {
     await changePassword(currentPassword.value, newPassword.value);
-    // The backend invalidates every token issued before the change, including
-    // the one that authenticated this request — so log out deliberately rather
-    // than letting the next call fail with a confusing 401.
-    auth.logout();
+    // The backend revokes every session of the account, including the one
+    // that authenticated this request — so log out deliberately (which also
+    // clears the refresh cookie) rather than letting the next call fail with
+    // a confusing 401.
+    await auth.logout();
     $q.notify({
       type: 'positive',
       message: 'Mot de passe changé. Reconnectez-vous.',
@@ -200,6 +265,65 @@ async function onSubmit() {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Changement impossible') });
   } finally {
     loading.value = false;
+  }
+}
+
+// --- Sessions ouvertes ---------------------------------------------------------
+
+const sessions = ref<AuthSession[]>([]);
+const sessionsLoading = ref(false);
+const closing = ref<string | null>(null);
+
+async function loadSessions() {
+  sessionsLoading.value = true;
+  try {
+    sessions.value = await listSessions();
+  } catch (e) {
+    $q.notify({
+      type: 'negative',
+      message: apiErrorMessage(e, 'Impossible de lire les sessions ouvertes'),
+    });
+  } finally {
+    sessionsLoading.value = false;
+  }
+}
+
+onMounted(() => void loadSessions());
+
+/** Closing another session is immediate and reversible by logging in again
+ * there — no confirmation. Closing this one logs out, so it asks first. */
+function onCloseSession(session: AuthSession) {
+  if (!session.current) {
+    void closeOne(session);
+    return;
+  }
+  $q.dialog({
+    title: 'Se déconnecter',
+    message: 'Fermer cette session vous déconnecte de la console sur cet appareil.',
+    cancel: { label: 'Annuler', flat: true },
+    ok: { label: 'Se déconnecter', color: 'negative', flat: true },
+    persistent: true,
+  }).onOk(() => void closeOne(session));
+}
+
+async function closeOne(session: AuthSession) {
+  closing.value = session.id;
+  try {
+    if (session.current) {
+      // Logout is the same act — and also clears the refresh cookie.
+      await auth.logout();
+      await router.push({ name: 'login' });
+      return;
+    }
+    await closeSession(session.id);
+    sessions.value = sessions.value.filter((s) => s.id !== session.id);
+    $q.notify({ type: 'positive', message: 'Session fermée' });
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Fermeture impossible') });
+    // Closed elsewhere in the meantime, or not: the server's list is the truth.
+    void loadSessions();
+  } finally {
+    closing.value = null;
   }
 }
 </script>

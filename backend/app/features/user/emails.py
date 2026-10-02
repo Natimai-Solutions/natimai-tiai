@@ -16,24 +16,25 @@ logger = logging.getLogger(__name__)
 
 
 def reset_link(token: str) -> str | None:
-    """Build the console reset URL, or None when CONSOLE_BASE_URL is unset."""
-    if not settings.CONSOLE_BASE_URL:
+    """Build the console reset URL, or None when the console URL is unknown."""
+    if not settings.console_base_url:
         return None
-    return f"{settings.CONSOLE_BASE_URL.rstrip('/')}/reset-password?token={token}"
+    return f"{settings.console_base_url}/reset-password?token={token}"
 
 
 def send_password_reset(session: AsyncSession, email: str, token: str) -> bool:
     """Queue a reset link, in the caller's open transaction. False if it could not be.
 
     The row commits with the reset token itself, so a link only ever goes out
-    for a token that exists. A missing CONSOLE_BASE_URL or e-mail provider configuration
-    is logged loudly: the endpoint answers 204 either way so as not to reveal
+    for a token that exists. An unknown console URL (neither CONSOLE_BASE_URL nor
+    TIAI_SERVER_NAME) or a missing e-mail provider configuration is logged loudly: the endpoint answers 204 either way so as not to reveal
     whether the account exists, which would otherwise make this failure silent.
     """
     link = reset_link(token)
     if link is None:
         logger.error(
-            "Password reset requested but CONSOLE_BASE_URL is not set; no mail sent"
+            "Password reset requested but the console URL is unknown "
+            "(set TIAI_SERVER_NAME or CONSOLE_BASE_URL); no mail sent"
         )
         return False
 

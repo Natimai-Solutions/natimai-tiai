@@ -27,7 +27,22 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "changeme"
 
     # --- Console auth (admin users) ---
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8
+    # A console login is a server-side session (``auth_sessions``) seen through
+    # two tokens. The access token is a short JWT the console keeps in memory
+    # and sends on every call: short, because it is the one a script injected
+    # into the page could read, and because a stateless token cannot be taken
+    # back — the session check in ``app.api.deps`` makes revocation immediate,
+    # the lifetime only bounds what a stolen copy is worth.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15, ge=1, le=24 * 60)
+    # The refresh token lives in an HttpOnly cookie, out of the page's reach,
+    # and buys a new access token. Each use pushes the session's end this far
+    # ahead (sliding): an operator who opens the console every working day is
+    # never asked to log in again by it.
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1, le=365)
+    # ... except here: an absolute ceiling counted from the login, sliding or
+    # not, so a session kept alive by a forgotten tab still ends one day and a
+    # stolen refresh token cannot be milked forever.
+    SESSION_MAX_DAYS: int = Field(default=30, ge=1, le=365)
     # First admin, seeded at startup if it does not exist yet.
     FIRST_ADMIN_EMAIL: str | None = None
     FIRST_ADMIN_PASSWORD: str | None = None
@@ -36,13 +51,42 @@ class Settings(BaseSettings):
     PASSWORD_MIN_LENGTH: int = 12
     # Lifetime of a "forgot password" link.
     PASSWORD_RESET_EXPIRE_MINUTES: int = 60
-    # Public console URL, used to build the reset link mailed to the user
-    # (e.g. https://tiai.natimai.local). Without it, no reset mail can be sent.
+    # The name the server is reached under — the Caddy site name, and the
+    # certificate's CN/SAN. Shared with Caddy through deploy/.env; the backend
+    # reads it only to derive the console URL below.
+    TIAI_SERVER_NAME: str | None = None
+    # Public console URL, used to build the links mailed to users (password
+    # reset, a poste's fiche). Explicit when the console is reached under
+    # something other than https://<TIAI_SERVER_NAME> — another port, a proxy
+    # in front of Caddy; otherwise derived, see ``console_base_url``.
     CONSOLE_BASE_URL: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def console_base_url(self) -> str | None:
+        """The console's public URL, without a trailing slash, or None.
+
+        ``CONSOLE_BASE_URL`` when set; else ``https://<TIAI_SERVER_NAME>``,
+        which is where the Compose stack serves the console. None only when
+        neither is known — a bare backend outside the stack — and then no
+        mail can carry a link.
+        """
+        if self.CONSOLE_BASE_URL:
+            return self.CONSOLE_BASE_URL.rstrip("/")
+        if self.TIAI_SERVER_NAME:
+            return f"https://{self.TIAI_SERVER_NAME.strip().rstrip('/')}"
+        return None
 
     # --- Agent enrollment ---
     # Shared secret deployed by GPO; only authorizes POST /agent/enroll.
     ENROLLMENT_SECRET: str = "changeme-enrollment-secret"
+    # Age, in days, past which a poste's token is renewed on its next
+    # heartbeat — only for an agent that announces it can store a new one
+    # (``supports_token_rotation``); an older agent keeps its token for life.
+    # A token copied off a poste (a disk image, a backup of ProgramData) then
+    # stops working within this many days without anyone revoking it. 0 turns
+    # rotation off. See ``features/machine/token_rotation.py``.
+    AGENT_TOKEN_ROTATE_DAYS: int = Field(default=30, ge=0, le=3650)
 
     # --- Remote commands ---
     # How long a queued command stays valid when the request does not carry its
@@ -58,6 +102,19 @@ class Settings(BaseSettings):
     # route so that a mistyped `.env` refuses to boot instead of failing every
     # queueing call.
     COMMAND_DEFAULT_TTL_MINUTES: int = Field(default=60, ge=1, le=60 * 24 * 30)
+    # How long the command history is kept, in days, before the daily purge
+    # drops it. Only rows that are over: succeeded, failed, expired — and
+    # delivered ones that never got a result, whose agent has had the whole
+    # window to answer. Pending and running rows are never purged, whatever
+    # their age. 0 keeps the history forever.
+    COMMAND_RETENTION_DAYS: int = Field(default=365, ge=0, le=3650)
+
+    # --- Audit log ---
+    # How long audit entries are kept, in days. Two years by default: long
+    # enough to answer "who revoked this poste last school year", short enough
+    # that the table does not grow for the life of the deployment. 0 keeps
+    # every entry forever — for a deployment whose policy requires it.
+    AUDIT_RETENTION_DAYS: int = Field(default=730, ge=0, le=3650)
 
     # --- Rate limiting ---
     # Escape hatch, not a tuning knob: the per-endpoint budgets live with the
@@ -69,6 +126,18 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: Annotated[
         list[AnyUrl] | str, BeforeValidator(parse_list)
     ] = []
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def refresh_cookie_secure(self) -> bool:
+        """Whether the refresh cookie carries ``Secure``.
+
+        Everywhere but ``local``: outside it the console is only ever served
+        through Caddy over HTTPS, and a refresh token must never cross the
+        network in clear. ``local`` is the Quasar dev server on plain HTTP,
+        where a ``Secure`` cookie would simply never be stored.
+        """
+        return self.ENVIRONMENT != "local"
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -117,6 +186,12 @@ class Settings(BaseSettings):
     # endpoint. Whichever is chosen, mail is "enabled" only once that provider
     # has what it needs (``alerts_enabled``); the other provider's variables
     # are then simply ignored.
+    #
+    # All of these but the Mailgun proxy and timeout are *initial* values: the
+    # page Paramètres can store its own, field by field, and a stored value
+    # wins (``app.features.setting.email_policy``). Every sender reads that
+    # resolved policy, never these fields directly — ``alerts_enabled`` and its
+    # siblings below describe the environment alone.
     EMAIL_PROVIDER: Literal["mailgun", "smtp"] = "mailgun"
     # Sender shared by both providers. The MAILGUN_FROM_* names below still
     # work and take over when these are empty, so a deployment written before
@@ -183,7 +258,7 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def alerts_enabled(self) -> bool:
-        """Whether the selected e-mail provider is configured."""
+        """Whether the environment alone configures the selected provider."""
         if self.EMAIL_PROVIDER == "smtp":
             return self.smtp_configured
         return self.mailgun_configured

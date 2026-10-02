@@ -6,6 +6,7 @@ import pytest
 
 from app.core.config import settings
 from app.features.notification import email, mailgun, smtp
+from app.features.setting.email_policy import current_policy
 
 
 class _FakeSMTP:
@@ -111,7 +112,12 @@ async def test_dispatcher_routes_to_smtp(smtp_configured, fake_smtplib, monkeypa
         raise AssertionError("Mailgun called with EMAIL_PROVIDER=smtp")
 
     monkeypatch.setattr(mailgun, "send_email", _mailgun_must_not_be_called)
-    assert await email.send_email("Subject", "Body", to=["a@example.com"]) is True
+    assert (
+        await email.send_email(
+            "Subject", "Body", to=["a@example.com"], policy=current_policy()
+        )
+        is True
+    )
     assert len(fake_smtplib.instances) == 1
 
 
@@ -121,7 +127,7 @@ async def test_dispatcher_routes_to_mailgun(monkeypatch):
     monkeypatch.setattr(settings, "MAILGUN_API_KEY", "key-123")
     calls: list[dict] = []
 
-    async def _fake_mailgun(subject, text, to):
+    async def _fake_mailgun(subject, text, to, *, policy):
         calls.append({"subject": subject, "to": to})
         return True
 
@@ -130,14 +136,22 @@ async def test_dispatcher_routes_to_mailgun(monkeypatch):
 
     monkeypatch.setattr(mailgun, "send_email", _fake_mailgun)
     monkeypatch.setattr(smtp, "send_email", _smtp_must_not_be_called)
-    assert await email.send_email("Subject", "Body", to=["a@example.com"]) is True
+    assert (
+        await email.send_email(
+            "Subject", "Body", to=["a@example.com"], policy=current_policy()
+        )
+        is True
+    )
     assert calls == [{"subject": "Subject", "to": ["a@example.com"]}]
 
 
 async def test_dispatcher_noop_when_nothing_is_configured(monkeypatch):
     monkeypatch.setattr(settings, "EMAIL_PROVIDER", "smtp")
     monkeypatch.setattr(settings, "SMTP_HOST", None)
-    assert await email.send_email("s", "t", to=["a@example.com"]) is False
+    assert (
+        await email.send_email("s", "t", to=["a@example.com"], policy=current_policy())
+        is False
+    )
 
 
 # --- SMTP client -----------------------------------------------------------
@@ -145,13 +159,16 @@ async def test_dispatcher_noop_when_nothing_is_configured(monkeypatch):
 
 async def test_send_email_noop_when_disabled(monkeypatch, fake_smtplib):
     monkeypatch.setattr(settings, "SMTP_HOST", None)
-    assert await smtp.send_email("s", "t", to=["a@example.com"]) is False
+    assert (
+        await smtp.send_email("s", "t", to=["a@example.com"], policy=current_policy())
+        is False
+    )
     assert fake_smtplib.instances == []
 
 
 async def test_send_email_noop_without_recipients(smtp_configured, fake_smtplib):
     """Same rule as Mailgun: no recipient, no mail — never a fallback address."""
-    assert await smtp.send_email("s", "t", to=[]) is False
+    assert await smtp.send_email("s", "t", to=[], policy=current_policy()) is False
     assert fake_smtplib.instances == []
 
 
@@ -159,7 +176,9 @@ async def test_send_email_starttls_session(smtp_configured, fake_smtplib, monkey
     monkeypatch.setattr(settings, "SMTP_USER", "user@example.com")
     monkeypatch.setattr(settings, "SMTP_PASSWORD", "s3cret")
 
-    ok = await smtp.send_email("Subject", "Body text", to=["a@example.com"])
+    ok = await smtp.send_email(
+        "Subject", "Body text", to=["a@example.com"], policy=current_policy()
+    )
 
     assert ok is True
     (session,) = fake_smtplib.instances
@@ -187,7 +206,10 @@ async def test_send_email_implicit_tls_session(
     monkeypatch.setattr(settings, "SMTP_SECURITY", "tls")
     monkeypatch.setattr(settings, "SMTP_PORT", 465)
 
-    assert await smtp.send_email("s", "t", to=["a@example.com"]) is True
+    assert (
+        await smtp.send_email("s", "t", to=["a@example.com"], policy=current_policy())
+        is True
+    )
     (session,) = fake_smtplib.instances
     assert type(session) is _FakeSMTPSSL
     assert session.port == 465
@@ -201,7 +223,10 @@ async def test_send_email_plain_session(smtp_configured, fake_smtplib, monkeypat
     monkeypatch.setattr(settings, "SMTP_SECURITY", "none")
     monkeypatch.setattr(settings, "SMTP_PORT", 25)
 
-    assert await smtp.send_email("s", "t", to=["a@example.com"]) is True
+    assert (
+        await smtp.send_email("s", "t", to=["a@example.com"], policy=current_policy())
+        is True
+    )
     (session,) = fake_smtplib.instances
     assert type(session) is _FakeSMTP
     assert session.starttls_context is None
@@ -212,7 +237,10 @@ async def test_send_email_can_skip_certificate_verification(
     smtp_configured, fake_smtplib, monkeypatch
 ):
     monkeypatch.setattr(settings, "SMTP_VERIFY_TLS", False)
-    assert await smtp.send_email("s", "t", to=["a@example.com"]) is True
+    assert (
+        await smtp.send_email("s", "t", to=["a@example.com"], policy=current_policy())
+        is True
+    )
     (session,) = fake_smtplib.instances
     assert session.starttls_context.check_hostname is False
 
@@ -221,7 +249,7 @@ async def test_send_email_propagates_smtp_error(smtp_configured, fake_smtplib):
     """The outbox turns the exception into a retry; swallowing it here would lose mail."""
     fake_smtplib.fail_with = smtplib.SMTPAuthenticationError(535, b"bad credentials")
     with pytest.raises(smtplib.SMTPAuthenticationError):
-        await smtp.send_email("s", "t", to=["a@example.com"])
+        await smtp.send_email("s", "t", to=["a@example.com"], policy=current_policy())
 
 
 async def test_send_email_treats_refused_recipient_as_failure(
@@ -229,4 +257,4 @@ async def test_send_email_treats_refused_recipient_as_failure(
 ):
     fake_smtplib.refused = {"a@example.com": (550, b"no such user")}
     with pytest.raises(smtplib.SMTPRecipientsRefused):
-        await smtp.send_email("s", "t", to=["a@example.com"])
+        await smtp.send_email("s", "t", to=["a@example.com"], policy=current_policy())

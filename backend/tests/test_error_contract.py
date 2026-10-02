@@ -123,7 +123,7 @@ async def test_malformed_jwt_rejected(client):
 async def test_valid_jwt_unknown_user_rejected(client):
     from app.core import security
 
-    token = security.create_access_token(uuid.uuid4())
+    token = security.create_access_token(uuid.uuid4(), session_id=uuid.uuid4())
     resp = await client.get(
         "/api/v1/machines", headers={"Authorization": f"Bearer {token}"}
     )

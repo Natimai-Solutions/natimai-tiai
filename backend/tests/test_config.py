@@ -77,3 +77,30 @@ def test_usage_thresholds_must_hold_together():
         make_settings(USAGE_WINDOW_DAYS=7, USAGE_HIGH_HOURS=200)
     with pytest.raises(ValidationError):
         make_settings(USAGE_HIGH_HOURS=0)
+
+
+# --- Console URL -------------------------------------------------------------
+
+
+def _settings(**overrides):
+    from app.core.config import Settings
+
+    return Settings(_env_file=None, **overrides)
+
+
+def test_console_url_is_derived_from_the_server_name():
+    assert _settings(TIAI_SERVER_NAME="tiai.lycee.pf").console_base_url == (
+        "https://tiai.lycee.pf"
+    )
+
+
+def test_explicit_console_url_wins_and_loses_its_trailing_slash():
+    s = _settings(
+        TIAI_SERVER_NAME="tiai.lycee.pf", CONSOLE_BASE_URL="https://x.y:8443/"
+    )
+    assert s.console_base_url == "https://x.y:8443"
+
+
+def test_console_url_is_none_when_nothing_names_the_server():
+    assert _settings().console_base_url is None
+    assert _settings(CONSOLE_BASE_URL="").console_base_url is None

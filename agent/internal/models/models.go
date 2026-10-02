@@ -352,6 +352,11 @@ type HeartbeatRequest struct {
 	Inventory   *InventoryState `json:"inventory,omitempty"`
 	Fingerprint *Fingerprint    `json:"fingerprint,omitempty"`
 	Threats     []Threat        `json:"threats,omitempty"`
+	// SupportsTokenRotation tells the server this agent can store a token
+	// handed back on a heartbeat (HeartbeatResponse.NewToken). Always true
+	// from this version on; a server only ever offers a new token to an agent
+	// that says so, so an older agent is never asked to do what it cannot.
+	SupportsTokenRotation bool `json:"supports_token_rotation"`
 }
 
 // Command is a unit of work handed back by the server on heartbeat.
@@ -368,8 +373,15 @@ type Command struct {
 }
 
 // HeartbeatResponse carries the pending commands for this machine.
+//
+// NewToken is set when the token this heartbeat used is due for renewal: the
+// agent stores it (DPAPI, like the enrollment token) and authenticates with it
+// from the next request on, which is what retires the old one server-side.
+// Until then the old token stays valid, so an agent that cannot store the new
+// one simply keeps using the old one and is offered another later.
 type HeartbeatResponse struct {
 	Commands []Command `json:"commands"`
+	NewToken string    `json:"new_token,omitempty"`
 }
 
 // CommandResult is posted back after executing a command.

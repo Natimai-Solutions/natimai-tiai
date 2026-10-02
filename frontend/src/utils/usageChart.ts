@@ -54,7 +54,7 @@ export function countedFrom(
 
 function dayOf(date: string): Date {
   const [y, m, d] = date.split('-').map(Number);
-  return new Date(y!, m! - 1, d!);
+  return new Date(y!, m! - 1, d);
 }
 
 export function usageBars(usage: MachineUsage): UsageBar[] {

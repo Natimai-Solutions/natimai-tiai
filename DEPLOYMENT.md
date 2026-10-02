@@ -11,9 +11,12 @@ installé, il télécharge et démarre tous les composants — base de données,
 backend, console, reverse-proxy — avec les commandes données telles quelles
 ci-dessous, sans rien d'autre à installer sur la machine.
 
-Le TLS n'est pas une dépendance dure : l'authentification passe par des en-têtes
-HTTP, jamais par un cookie `Secure` ou une redirection. On peut donc démarrer les
-tests en HTTP pur et ajouter le certificat plus tard, sans toucher au code.
+Le TLS n'est pas une dépendance dure pour les agents : ils s'authentifient par
+des en-têtes HTTP, jamais par un cookie `Secure` ou une redirection. On peut donc
+démarrer les tests en HTTP pur et ajouter le certificat plus tard, sans toucher
+au code. La console, elle, garde sa session dans un cookie `Secure` dès que
+`ENVIRONMENT` n'est pas `local` : elle n'est de toute façon servie qu'en HTTPS,
+par Caddy (cf. § « [Sessions de la console](#sessions-de-la-console) »).
 
 ## Les trois modes
 
@@ -76,6 +79,16 @@ matchera pas le site. Ajouter le nom au DNS ou au fichier `hosts` :
 Le navigateur signalera un certificat non approuvé : accepter l'avertissement une
 fois, ou importer l'AC locale de Caddy.
 
+**Le nom court aussi.** Taper `tiai` dans la barre d'adresse envoie
+`http://tiai/`, un hôte qui n'est pas le site : Caddy redirige tout ce qui
+arrive en HTTP sous un autre nom (nom court, adresse IP) vers
+`https://<TIAI_SERVER_NAME>/`, même chemin. Pour que `https://tiai` réponde
+aussi (lien enregistré, HSTS), déclarer l'alias dans `TIAI_SERVER_ALIASES` :
+Caddy le sert, et le renvoie vers le nom canonique — la console garde la
+session dans le stockage du navigateur, propre à chaque origine, et deux noms
+feraient deux sessions. Le nom court doit se résoudre côté client (suffixe DNS
+du domaine, ou fichier `hosts`).
+
 **L'auto-signé ne suffit pas pour l'agent**, dont le client HTTP n'offre aucune
 option pour ignorer un certificat non approuvé. Deux choix : laisser les agents
 en HTTP sur 8800 (mode A), ou importer la racine locale dans le magasin machine :
@@ -102,7 +115,10 @@ docker compose up -d
 ```
 
 - Le **CN/SAN du certificat doit correspondre à `TIAI_SERVER_NAME`**, sinon
-  l'agent refuse la connexion.
+  l'agent refuse la connexion. Un alias de `TIAI_SERVER_ALIASES` joint en
+  HTTPS (`https://tiai`) doit figurer lui aussi dans les SAN — en HTTP, la
+  redirection vers le nom canonique part en clair et n'a pas besoin de
+  certificat.
 - `deploy/certs/` est monté en lecture seule et ignoré par git, comme
   `deploy/.env`.
 - Hors `ENVIRONMENT=local`, le backend **refuse de démarrer** si `SECRET_KEY`,
@@ -116,6 +132,49 @@ Repli sans certificat sur cette même stack : remplacer la ligne `tls ...` du
 
 ---
 
+## Hôte Docker derrière un proxy
+
+Le cas courant d'un établissement : le serveur ne sort sur Internet qu'à
+travers un proxy. Docker se configure dans `~/.docker/config.json` (celui de
+l'utilisateur qui lance `docker compose`) :
+
+```json
+{
+  "proxies": {
+    "default": {
+      "httpProxy": "http://proxy.lycee.local:3128",
+      "httpsProxy": "http://proxy.lycee.local:3128"
+    }
+  }
+}
+```
+
+Cette configuration sert au **build** (téléchargement des dépendances), mais
+Compose l'injecte aussi, en `HTTP_PROXY`/`HTTPS_PROXY` et leurs minuscules,
+dans **tous les conteneurs** qu'il démarre. La stack est faite pour que ce
+soit sans effet sur ses échanges internes, et le fichier peut rester en place
+en production :
+
+- **Caddy** joint `backend` et `frontend` sans proxy (`network_proxy none` sur
+  chaque upstream du Caddyfile). Sans cela, il envoyait « `GET
+  http://backend:8000/…` » au proxy de l'établissement, qui répondait par son
+  portail : la console tournait en boucle de redirections (*too many
+  redirects*), et le remède était de retirer `config.json` avant de lancer la
+  stack.
+- Les **contrôles de santé** sondent `127.0.0.1` sans proxy, et chaque service
+  reçoit `NO_PROXY=localhost,127.0.0.1,backend,frontend,db,caddy` (les deux
+  casses — une variable posée par Compose l'emporte sur `config.json` casse par
+  casse).
+- Le **backend** et le **worker** gardent `HTTPS_PROXY` : c'est ce qui permet à
+  Mailgun de sortir par le proxy de l'établissement sans rien configurer
+  d'autre. `MAILGUN_PROXY_URL` reste le réglage explicite si le proxy du build
+  n'est pas celui du trafic sortant. SMTP ne passe pas par un proxy HTTP.
+
+Un `noProxy` dans `config.json` n'atteint pas les services de la stack, dont
+`NO_PROXY` est fixé par le compose.
+
+---
+
 ## Générer les secrets
 
 Quatre valeurs du `.env` doivent être générées aléatoirement — format recommandé
@@ -123,7 +182,7 @@ Quatre valeurs du `.env` doivent être générées aléatoirement — format rec
 
 | Variable | Usage | Conséquence d'une valeur faible |
 |---|---|---|
-| `SECRET_KEY` | Signature des JWT console | Tout JWT devient forgeable → accès admin |
+| `SECRET_KEY` | Signature des JWT console ; clé dont est dérivée celle qui chiffre les identifiants e-mail enregistrés dans la console | Tout JWT devient forgeable → accès admin |
 | `ENROLLMENT_SECRET` | En-tête d'enrôlement des agents | N'importe qui peut enrôler une machine |
 | `POSTGRES_PASSWORD` | Compte PostgreSQL | Accès direct à la base |
 | `FIRST_ADMIN_PASSWORD` | Premier compte console | Accès admin à la console |
@@ -150,8 +209,17 @@ done
   serveur et la configuration de chaque agent. Le faire tourner ne casse pas les
   agents déjà enrôlés — ils n'utilisent plus que leur token par poste — ce qui en
   fait une rotation peu coûteuse.
-- Changer `SECRET_KEY` invalide tous les JWT console : les opérateurs devront se
-  reconnecter.
+- Les **tokens par poste** se renouvellent d'eux-mêmes tous les
+  `AGENT_TOKEN_ROTATE_DAYS` jours (cf. « Rotation des tokens agents »). Rien à
+  faire côté serveur ; un token volé sur un poste cesse de fonctionner au plus
+  tard à la rotation suivante, sans révocation. Les jetons de réinitialisation
+  de mot de passe expirés ou utilisés depuis plus d'un jour sont purgés chaque
+  matin, sans réglage.
+- Changer `SECRET_KEY` invalide les jetons d'accès console en cours (15 min de
+  vie) ; la console en obtient aussitôt de nouveaux par sa session, sans
+  reconnexion. Pour déconnecter tout le monde — fuite de la clé, poste
+  compromis —, fermer aussi les sessions : cf. § « [Sessions de la
+  console](#sessions-de-la-console) ».
 - `FIRST_ADMIN_PASSWORD` ne doit pas dépasser 72 octets (limite bcrypt) et n'est
   utilisé qu'au démarrage, pour créer le compte s'il n'existe pas.
 - `POSTGRES_PASSWORD` n'est appliqué qu'à la **première** initialisation du
@@ -171,7 +239,8 @@ Il n'est jamais committé.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `TIAI_SERVER_NAME` | `tiai.natimai.local` | Nom du site Caddy ; doit correspondre au CN/SAN du certificat en mode C |
+| `TIAI_SERVER_NAME` | `tiai.natimai.local` | Le nom du serveur : site Caddy, CN/SAN du certificat en mode C, et origine de `CONSOLE_BASE_URL` quand elle n'est pas renseignée |
+| `TIAI_SERVER_ALIASES` | *(vide)* | Autres noms sous lesquels la console est tapée (nom court, IP), séparés par des espaces ; chacun est redirigé vers `TIAI_SERVER_NAME`. En HTTPS, l'alias doit être dans les SAN du certificat |
 | `TIAI_VERSION` | `latest` | Version des images `tiai-backend` et `tiai-frontend` tirées de ghcr.io — à épingler en production (cf. § « Mettre à jour le serveur ») |
 | `TIAI_DEV_BACKEND_PORT` | `8800` | Port hôte du backend en HTTP direct (override de dev uniquement) |
 | `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/` (cf. § « Sauvegardes et restauration ») |
@@ -181,21 +250,28 @@ Il n'est jamais committé.
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `ENVIRONMENT` | `local` | `local` / `staging` / `production`. Hors `local` : garde anti-placeholder + masquage des erreurs 500 |
-| `SECRET_KEY` | `changeme` | Signature des JWT console |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `480` | Durée de vie du JWT console |
+| `SECRET_KEY` | `changeme` | Signature des JWT console, et dérivation de la clé qui chiffre les identifiants e-mail enregistrés dans la console. **La changer oblige à ressaisir ces identifiants** (voir « Alertes e-mail ») |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Durée de vie du jeton d'accès console (1 à 1 440). Court à dessein : c'est lui que la page garde en mémoire et envoie à chaque appel, et la console le renouvelle seule par sa session. Ancien défaut : 480 — une valeur `480` restée dans un `.env` reste acceptée mais n'a plus de raison d'être |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Une session console non utilisée pendant ce nombre de jours se ferme. **Glissante** : chaque renouvellement repousse l'échéance, un opérateur qui ouvre la console chaque semaine ne se reconnecte pas |
+| `SESSION_MAX_DAYS` | `30` | Durée **absolue** d'une session, comptée depuis la connexion, glissement compris : au-delà, reconnexion obligatoire. Borne ce que vaut un jeton de session volé |
 | `FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` | — | Compte admin créé au démarrage s'il n'existe pas |
 | `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée à tout mot de passe |
 | `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié » |
-| `CONSOLE_BASE_URL` | — | URL publique de la console, pour le lien de réinitialisation. **Sans elle, aucun e-mail de réinitialisation n'est envoyé** |
+| `CONSOLE_BASE_URL` | `https://<TIAI_SERVER_NAME>` | URL publique de la console, dans les liens des e-mails (réinitialisation, fiche d'un poste). À renseigner seulement si la console est jointe sous une autre URL (autre port, proxy devant Caddy). Si ni elle ni `TIAI_SERVER_NAME` n'est connue, aucun e-mail de réinitialisation n'est envoyé |
 | `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste |
-| `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile si la console passe par Caddy |
+| `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
+| `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | |
 | `POSTGRES_POOL_SIZE` / `POSTGRES_MAX_OVERFLOW` / `POSTGRES_POOL_TIMEOUT` | `20` / `10` / `30` | Pool async partagé backend + worker |
-| `SIGNATURE_MAX_AGE_DAYS` | `3` | Seuil « signatures à jour » |
-| `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif » |
+| `SIGNATURE_MAX_AGE_DAYS` | `3` | Seuil « signatures à jour », en jours. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage ; un changement est appliqué aussitôt à tout le parc, postes éteints compris |
+| `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif », en jours sans contact. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+| `LOW_DISK_FREE_PERCENT` | `10` | Seuil « disque presque plein » : pourcentage d'espace libre sur le volume système. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+| `HARDWARE_AGING_YEARS` | `5` | Âge du poste (date du BIOS), en années, à partir duquel il est compté à renouveler. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
-| `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence |
+| `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+| `COMMAND_RETENTION_DAYS` | `365` | Conservation de l'historique des commandes, en jours (0 à 3650). Chaque matin, le worker supprime les commandes **terminées** (réussies, échouées, périmées) et les commandes délivrées restées sans réponse dont le dernier événement est plus ancien. Jamais une commande en attente ou en cours. `0` = conserver indéfiniment |
+| `AUDIT_RETENTION_DAYS` | `730` | Conservation du journal d'audit, en jours (0 à 3650), purgé chaque matin par le worker. `0` = conserver indéfiniment, si la politique de l'établissement l'exige |
 | `MAINTENANCE_DEFAULT_CYCLE_DAYS` | `90` | Cycle de maintenance par défaut du parc, en jours, **valeur initiale seulement** : la page Paramètres de la console peut en écrire une autre, qui prend alors le dessus. Une salle ou un poste peuvent surcharger le cycle (0 = exclu de la maintenance) et le responsable ; le plus précis gagne |
 | `MAINTENANCE_DUE_SOON_DAYS` | `14` | Fenêtre « à échéance » : un poste est signalé ce nombre de jours avant sa date. Même règle : valeur initiale, modifiable dans Paramètres |
 | `USAGE_WINDOW_DAYS` | `7` | Fenêtre glissante, en jours (1 à 90), sur laquelle sont comptées les heures allumées des postes. **Valeur initiale seulement**, modifiable dans Paramètres |
@@ -203,7 +279,46 @@ Il n'est jamais committé.
 | `USAGE_HIGH_HOURS` | `30` | Au-dessus, un poste est « toujours allumé ». Valeur initiale, modifiable dans Paramètres |
 | `USAGE_RETENTION_DAYS` | `400` | Conservation des compteurs horaires d'utilisation, purgés chaque jour par le worker. Environ 7 200 lignes par jour pour 300 postes |
 | `ROOM_SOURCE` | `manual` | Comment les postes sont rangés en salles. `manual` : depuis la console, à la main. `ad_ou` : par l'**unité d'organisation** qui contient l'objet ordinateur — l'agent lit son propre DN dans le registre, sans interroger l'annuaire — une salle par OU, nommée comme elle. `ad_location` : par l'attribut **Emplacement** de l'objet ordinateur (onglet Emplacement d'ADUC), que l'agent lit via ADSI. Dans les deux modes annuaire, le rattachement manuel est verrouillé ; les salles créées gardent nom, bâtiment et notes modifiables. Après un changement de ce réglage, « Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc d'un coup |
-| `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard |
+| `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+
+### Sessions de la console
+
+Une connexion à la console ouvre une **session côté serveur** (table
+`auth_sessions`), vue à travers deux jetons :
+
+- un **jeton d'accès** (JWT, `ACCESS_TOKEN_EXPIRE_MINUTES`, 15 min), que la page
+  garde en mémoire — jamais dans le stockage du navigateur — et envoie à chaque
+  appel. Le serveur vérifie à chaque requête que sa session est encore ouverte :
+  une déconnexion ou une révocation prend effet **à la requête suivante** ;
+- un **jeton de session**, dans un cookie `HttpOnly; SameSite=Strict;
+  Path=/api/v1/auth`, et `Secure` hors `ENVIRONMENT=local`. Aucun script de la
+  page ne peut le lire ; il ne sert qu'à obtenir un nouveau jeton d'accès, et
+  **change à chaque usage**. Un jeton de session déjà échangé qui se représente
+  signifie qu'une copie circule : la session est fermée pour tout le monde et
+  l'évènement journalisé (`app.security`, « presumed theft »).
+
+Ferment toutes les sessions d'un compte : le changement de son mot de passe, sa
+réinitialisation (par lien ou par un administrateur), sa désactivation, sa
+suppression. Chacun voit et ferme ses propres sessions depuis « Mon compte » —
+fermeture tracée dans le journal d'audit (`auth.session_revoked`).
+
+**À la mise à jour vers cette version**, les jetons émis auparavant ne portent
+pas de session et sont refusés : chaque opérateur se reconnecte une fois. La même
+migration (`0024`) rend les adresses e-mail **insensibles à la casse** — elles
+sont passées en minuscules — et **s'interrompt sans rien modifier** si deux
+comptes ne diffèrent que par la casse de leur adresse, en les nommant : renommer
+ou supprimer l'un des deux (page Utilisateurs de la version précédente, ou en
+base), puis relancer.
+
+Pour **déconnecter tout le monde** d'un coup (clé `SECRET_KEY` divulguée, poste
+compromis), changer `SECRET_KEY` puis fermer toutes les sessions :
+
+```bash
+cd deploy
+docker compose exec db-backup sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+   -c "UPDATE auth_sessions SET revoked_at = now() WHERE revoked_at IS NULL"'
+```
 
 ### Réveil des postes (Wake-on-LAN)
 
@@ -245,6 +360,38 @@ ignorées. L'expéditeur (`EMAIL_FROM_EMAIL` / `EMAIL_FROM_NAME`) est commun aux
 deux — les anciens noms `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` restent
 acceptés, un `.env` écrit avant l'arrivée de SMTP n'a rien à renommer.
 
+**Tout cela se règle aussi depuis la console**, carte « Envoi des e-mails » de la
+page Paramètres (permission `settings:write`) : fournisseur, expéditeur, serveur
+SMTP, port, sécurité, identifiants, vérification du certificat, délai, domaine,
+clé et adresse de l'API Mailgun. Comme pour les seuils, les variables du `.env`
+ne sont plus que des **valeurs initiales** : un champ enregistré dans la console
+prend le dessus, champ par champ, et un champ laissé vide reprend la valeur du
+serveur. Le changement s'applique au prochain envoi, sans redémarrage — le
+worker relit la configuration à chaque passage sur la file. Seuls
+`MAILGUN_PROXY_URL` et `MAILGUN_TIMEOUT_SECONDS`, qui décrivent le réseau du
+serveur et non le compte d'envoi, restent dans le `.env`.
+
+Le bouton **« Envoyer un e-mail de test »** envoie aussitôt un message — sans
+passer par la file — à votre adresse ou à celle indiquée, avec les valeurs du
+formulaire, *même pas encore enregistrées* : on vérifie un serveur et un mot de
+passe avant de les adopter. La réponse dit en clair ce qui coince
+(identifiants refusés, port ou mode de sécurité incohérents, certificat non
+vérifiable, domaine Mailgun inconnu…). Chaque test est inscrit au journal
+d'audit (`settings.email_test`), comme chaque modification (`settings.update`)
+— où un mot de passe ou une clé n'apparaît jamais, seulement « modifié » ou
+« effacé ».
+
+> **Sécurité — identifiants enregistrés dans la console.** Le mot de passe SMTP
+> et la clé API Mailgun saisis dans la console sont **chiffrés** en base
+> (Fernet, clé dérivée de `SECRET_KEY` par HKDF, distincte de celle qui signe
+> les sessions) et ne sont jamais réaffichés : la page indique seulement
+> « enregistré ». Une sauvegarde de la base ne suffit donc pas à les lire, mais
+> **changer `SECRET_KEY` les rend illisibles** : ils sont alors ignorés (la
+> valeur du `.env` s'applique, s'il y en a une) et la page les signale « à
+> ressaisir ». Après une rotation de `SECRET_KEY`, ressaisissez-les dans la
+> carte « Envoi des e-mails ». Une restauration de la base sur un autre serveur
+> demande la même `SECRET_KEY` pour les conserver.
+
 **Qui reçoit quoi se règle par compte**, page « Mon compte » de la console, et un
 administrateur voit et modifie le réglage des autres comptes depuis la page
 Utilisateurs. Quatre cadences :
@@ -270,7 +417,7 @@ adresse réelle et modifiable depuis la console.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `EMAIL_PROVIDER` | `mailgun` | `mailgun` ou `smtp` : le canal par lequel le courrier part |
+| `EMAIL_PROVIDER` | `mailgun` | `mailgun` ou `smtp` : le canal par lequel le courrier part. **Valeur initiale** de cette variable et des suivantes, jusqu'à `SMTP_TIMEOUT_SECONDS` (sauf `MAILGUN_TIMEOUT_SECONDS` et `MAILGUN_PROXY_URL`) : la console peut les remplacer |
 | `EMAIL_FROM_EMAIL` / `EMAIL_FROM_NAME` | — / `Tia'i` | Expéditeur, commun aux deux canaux. Avec un compte SMTP authentifié, l'adresse doit en général être celle du compte ou un alias autorisé. `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` restent acceptés en repli |
 | `MAILGUN_API_BASE_URL` | `https://api.mailgun.net/v3` | |
 | `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` | — | Vides = aucun e-mail n'est envoyé avec `EMAIL_PROVIDER=mailgun` |
@@ -281,15 +428,15 @@ adresse réelle et modifiable depuis la console.
 | `SMTP_USER` / `SMTP_PASSWORD` | — | Identifiants, si le serveur en demande. Vides = pas d'authentification |
 | `SMTP_VERIFY_TLS` | `true` | Vérification du certificat du serveur. À `false` seulement pour un relais interne dont le certificat n'est pas vérifiable depuis le conteneur (auto-signé, AC privée non montée) |
 | `SMTP_TIMEOUT_SECONDS` | `10` | |
-| `MAINTENANCE_REMINDER_WEEKDAY` | `0` | Jour du rappel hebdomadaire des maintenances à chaque responsable, à `DIGEST_HOUR_UTC` : `0` = lundi … `6` = dimanche. Un responsable sans rien de dû ne reçoit rien ; un compte sur « aucun e-mail » non plus |
-| `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place |
+| `MAINTENANCE_REMINDER_WEEKDAY` | `0` | Jour du rappel hebdomadaire des maintenances à chaque responsable, à `DIGEST_HOUR_UTC` : `0` = lundi … `6` = dimanche. Un responsable sans rien de dû ne reçoit rien ; un compte sur « aucun e-mail » non plus. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+| `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `THREAT_ALERT_MAX_AGE_HOURS` | `24` | Une détection plus ancienne ne déclenche pas d'alerte immédiate : un poste qui s'enrôle remonte tout l'historique Defender d'un coup |
 | `NOTIFICATION_MAX_ITEMS` | `10` | Postes détaillés dans un e-mail avant « … et N autres » |
 | `EMAIL_MAX_ATTEMPTS` | `20` | Tentatives d'envoi avant abandon d'un e-mail (délai doublé de 1 min à 1 h entre chacune, soit ≈ 14 h — de quoi traverser une nuit de panne du proxy) |
 | `EMAIL_OUTBOX_RETENTION_DAYS` | `30` | Durée de conservation des lignes réglées (envoyées ou abandonnées) de `email_outbox`, pour consultation |
 
-`CONSOLE_BASE_URL` mérite d'être renseignée ici aussi : c'est ce qui met dans
-chaque e-mail le lien vers la fiche du poste concerné.
+Les liens des e-mails (fiche d'un poste, vos tâches) pointent sur
+`CONSOLE_BASE_URL`, donc par défaut sur `https://<TIAI_SERVER_NAME>`.
 
 ### Hors Docker
 
@@ -824,6 +971,34 @@ L'agent s'auto-enrôle au premier démarrage, stocke le token reçu, puis n'util
 plus que celui-ci. `uninstall` ne retire que l'enregistrement du service : le
 binaire, `C:\ProgramData\Tiai` et `HKLM\SOFTWARE\Tiai` restent en place.
 
+### Rotation des tokens agents
+
+Le token d'un poste n'est plus émis une fois pour toutes : passé
+`AGENT_TOKEN_ROTATE_DAYS` jours (30 par défaut), le serveur en propose un
+nouveau dans la réponse au heartbeat. L'agent l'écrit dans `token.dat` (DPAPI,
+écriture atomique), puis s'en sert dès la requête suivante — c'est ce premier
+usage qui fait refuser l'ancien par le serveur. Jusque-là l'ancien reste
+valide : une réponse perdue ou un `token.dat` impossible à écrire (disque
+plein, antivirus) ne coupent pas le poste ; l'agent garde son token, le
+journalise (`agent.log`), et le serveur en repropose un autre au heartbeat
+suivant.
+
+- Seuls les agents qui l'annoncent (`supports_token_rotation`) sont concernés :
+  un parc en cours de mise à jour mélange sans risque anciens et nouveaux
+  agents, les anciens gardant leur token.
+- À la mise à jour du serveur, la migration date tous les tokens existants du
+  jour de son passage : les premières rotations ont lieu 30 jours plus tard,
+  au fil des heartbeats, pas toutes le même matin.
+- Une révocation, « autoriser le ré-enrôlement » et un ré-enrôlement annulent
+  une rotation en cours : le token proposé meurt avec l'ancien.
+- Les rotations sont tracées dans le journal applicatif du backend
+  (`app.security` : « token rotation offered », « token rotated »), pas dans le
+  journal d'audit de la console, réservé aux actions des opérateurs.
+- **Restauration d'une sauvegarde** : un poste dont le token a tourné depuis
+  le dump présente un token que la base restaurée ne connaît pas. Il reçoit un
+  401, abandonne son token et se ré-enrôle de lui-même avec le secret du parc —
+  le même chemin qu'après une restauration plus ancienne que son enrôlement.
+
 **Mettre à jour un poste** ne passe pas par `uninstall` / `install` — le service
 pointe sur un chemin, pas sur une version. Arrêter, remplacer le binaire,
 redémarrer : le token, l'identité et la file locale sont conservés, donc pas de
@@ -862,10 +1037,21 @@ lignes à chercher, dans l'ordre d'un cycle :
 
 ## Organisation du parc : groupes, salles, tâches, maintenance
 
-Tout se règle depuis la console ; rien à déployer sur les postes. Les
-variables d'environnement concernées sont `ROOM_SOURCE`,
-`MAINTENANCE_DEFAULT_CYCLE_DAYS`, `MAINTENANCE_DUE_SOON_DAYS` et
-`MAINTENANCE_REMINDER_WEEKDAY` (section « Backend » ci-dessus).
+Tout se règle depuis la console ; rien à déployer sur les postes. La seule
+variable d'environnement qui reste à choisir à l'installation est
+`ROOM_SOURCE` ; le cycle, la fenêtre « à échéance » et le jour du rappel ont
+une valeur initiale dans l'environnement, puis se changent dans la page
+Paramètres (section « Backend » ci-dessus).
+
+**Ce qui se règle dans la console, sans redémarrage** (page Paramètres) : les
+défauts de maintenance, les seuils d'utilisation, les seuils de supervision
+(signatures périmées, poste inactif, disque presque plein, poste à
+renouveler, version d'agent de référence, durée de vie d'une commande) et
+l'heure des e-mails programmés. L'environnement n'en donne que la valeur de
+départ ; une valeur enregistrée dans la console prend le dessus, et chaque
+changement est inscrit au journal d'audit. Le worker relit l'heure du résumé
+à chaque tour (30 s) et ne renvoie jamais deux fois le résumé du jour, ni le
+rappel de la semaine, quand on déplace leur heure.
 
 **Utilisation des postes.** Le serveur compte les heures où chaque poste est
 allumé, à partir des battements de l'agent : un écart entre deux battements
@@ -908,7 +1094,9 @@ chaque compte (page « Mon compte »).
 |---|---|---|
 | `curl` HTTPS renvoie un code `000` | Certificat auto-signé non approuvé | `curl -k`, ou importer la racine Caddy |
 | L'agent journalise une erreur TLS x509 | Auto-signé, que le client de l'agent refuse | Basculer sur `http://...:8800`, ou importer la racine Caddy |
-| `https://<ip>` ne répond pas / mauvais certificat | Le site Caddy est lié à un nom d'hôte | Ajouter `TIAI_SERVER_NAME` au DNS ou au fichier `hosts` |
+| `https://<ip>` ne répond pas / mauvais certificat | Le site Caddy est lié à un nom d'hôte ; `http://<ip>` redirige, `https://<ip>` n'a pas de certificat | Taper le nom (`TIAI_SERVER_NAME`, ou un alias déclaré), résolu par le DNS ou le fichier `hosts` |
+| Le nom court (`http://tiai`) donne une page blanche ou une erreur, le nom complet marche | Stack antérieure à la redirection des autres hôtes, ou nom court non résolu | Mettre à jour la stack ; vérifier `nslookup tiai` depuis un poste ; pour `https://tiai`, déclarer l'alias dans `TIAI_SERVER_ALIASES` et le mettre dans les SAN du certificat |
+| La console boucle en redirections (*too many redirects*) sur un hôte Docker derrière un proxy | Compose injecte le proxy de `~/.docker/config.json` dans les conteneurs, et une version antérieure de Caddy l'empruntait pour joindre backend et frontend | Mettre à jour la stack (cf. § « Hôte Docker derrière un proxy ») ; `config.json` peut rester en place |
 | Le navigateur force HTTPS et refuse le HTTP | Cache HSTS d'un accès antérieur au Caddyfile de prod | Purger le HSTS pour ce nom d'hôte, ou utiliser un autre nom en test |
 | Erreur CORS dans la console | Origine absente de `BACKEND_CORS_ORIGINS` | Ajouter l'origine dans `.env`, ou passer par Caddy |
 | `413` sur une requête de l'agent ou de la console | Corps de requête au-delà de 8 Mo, refusé par Caddy (`request_body` du Caddyfile) | Aucun envoi légitime n'en approche : chercher l'agent défaillant dans les journaux de Caddy |

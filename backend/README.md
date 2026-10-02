@@ -13,7 +13,8 @@ app/
   core/        config, db, security (tokens), worker (outbox + tâches périodiques)
   api/         deps + routes (agent, machines, health)
   features/    machine/ threat/ command/ notification/ (modèles + logique)
-               user/ (comptes, groupes, permissions) room/ (bâtiments, salles, annuaire)
+               user/ (comptes, groupes, permissions) auth_session/ (sessions console)
+               room/ (bâtiments, salles, annuaire)
                intervention/ check/ maintenance/ setting/ (exploitation du parc)
                usage/ (heures allumées par poste, comptées depuis les battements)
   alembic/     migrations
@@ -47,11 +48,13 @@ Ajouter une dépendance : `uv add <pkg>` (ou `uv add --dev <pkg>` pour le groupe
 
 **Agent** (auth : secret d'enrôlement puis token par poste)
 - `POST /api/v1/agent/enroll` — en-tête `X-Enrollment-Secret`, renvoie le token du poste.
-- `POST /api/v1/agent/heartbeat` — `Authorization: Bearer <token>`, renvoie les commandes en attente.
+- `POST /api/v1/agent/heartbeat` — `Authorization: Bearer <token>`, renvoie les commandes en attente, et `new_token` quand le token est à renouveler (voir *Rotation des tokens agents*).
 - `POST /api/v1/agent/commands/{id}/result` — résultat d'exécution.
 
-**Console** (auth : JWT utilisateur)
-- `POST /api/v1/auth/login` — email + mot de passe (OAuth2 password), renvoie un JWT.
+**Console** (auth : JWT utilisateur adossé à une session serveur, cf. *Sessions de la console*)
+- `POST /api/v1/auth/login` — email + mot de passe (OAuth2 password) : ouvre une session, renvoie le jeton d'accès et pose le jeton de session en cookie.
+- `POST /api/v1/auth/refresh` — échange le cookie contre un nouveau jeton d'accès (et un nouveau cookie) ; `POST /api/v1/auth/logout` ferme la session courante.
+- `GET /api/v1/auth/sessions`, `DELETE /api/v1/auth/sessions/{id}` — les sessions ouvertes du compte, et la fermeture de l'une d'elles (audit `auth.session_revoked`).
 - `GET  /api/v1/auth/me` — utilisateur courant, ses groupes et ses permissions.
 - `GET/POST/PATCH/DELETE /api/v1/groups` — groupes et leurs droits (permission `user:read` / `user:write`) ; `GET /api/v1/groups/permissions` liste le catalogue.
 - `GET /api/v1/maintenance/due?owner=me|none|<id>`, `POST /api/v1/maintenance`, `GET /api/v1/maintenance[/{id}]`, `GET/PATCH /api/v1/rooms/{id}/maintenance`, `GET/PATCH /api/v1/machines/{id}/maintenance` — maintenance : ce qui est dû par salle et par responsable, enregistrement d'une séance (note globale + note par poste, une ligne « maintenance » dans le journal de chacun, cycle relancé), cycle et responsable par salle et par poste (permission `maintenance:read` / `maintenance:write`). La résolution est à trois niveaux, poste › salle › parc (`features/maintenance/policy.py`), en Python pour les réponses et en SQL pour le filtre `maintenance_state`, le tri `maintenance_due_at` et les compteurs du tableau de bord.
@@ -109,10 +112,68 @@ porte pas. Il joue à trois endroits :
 
 **Seules les `pending` sont périmées.** Une fois délivrée, la commande appartient
 à l'agent et son verdict fait foi : une commande confiée à un agent qui n'est
-jamais revenu reste `delivered` indéfiniment dans l'historique — c'est le
-comportement attendu, pas une ligne oubliée. Passé son délai, elle cesse
-simplement de verrouiller son type sur ce poste, et si l'agent finit par
-répondre, son résultat s'inscrit malgré tout sur la ligne d'origine.
+jamais revenu reste `delivered` dans l'historique — c'est le comportement
+attendu, pas une ligne oubliée. La passer en `expired` dirait « jamais
+distribuée », ce qui est faux, et si l'agent finit par répondre — un poste
+rallumé après des semaines rejoue sa file locale de résultats — son verdict
+s'inscrit sur la ligne d'origine. Passé son délai, elle cesse simplement de
+verrouiller son type sur ce poste. Elle n'est plus gardée *indéfiniment* pour
+autant : voir *Rétention* ci-dessous.
+
+### Rétention
+
+L'historique ne grandit pas sans fin : le worker purge chaque matin (08:00 UTC,
+[worker.py](app/core/worker.py)) les commandes **terminées** — `succeeded`,
+`failed`, `expired` — et les `delivered` restées sans résultat, dont le dernier
+événement (verdict, à défaut remise, à défaut création) date de plus de
+`COMMAND_RETENTION_DAYS` (**365** par défaut, `0` = conserver). Une `delivered`
+orpheline n'est donc gardée que le temps de la rétention : au-delà, le verdict
+qu'on lui réservait ne viendra plus. Une `pending` ou une `running` n'est
+**jamais** purgée, quel que soit son âge : la première est encore due (le
+balayage la périmera), la seconde est une commande qu'un agent a dit exécuter.
+
+Le même créneau purge le journal d'audit au-delà de `AUDIT_RETENTION_DAYS`
+(**730**, `0` = conserver) et les jetons de réinitialisation de mot de passe
+expirés ou utilisés depuis plus d'un jour
+([password_reset_retention.py](app/features/password_reset_retention.py)).
+Comme les purges de l'outbox et des compteurs d'utilisation, chacune supprime
+par âge, jamais par contenu.
+
+## Audit des actions de masse
+
+Une commande sur un seul poste est tracée par sa ligne (`created_by`). Une
+commande visant un **ensemble** — tout le parc, un domaine, un emplacement, un
+statut, ou plusieurs postes listés — écrit en plus une entrée `command.bulk`
+dans le journal d'audit, dans la même transaction : type, cible telle que
+demandée, nombre créé, nombre ignoré (déjà en cours), durée de vie appliquée.
+C'est la seule trace d'un filtre qui n'a touché personne et des postes ignorés,
+qui n'ont pas de ligne. Le réveil Wake-on-LAN de plusieurs postes écrit de même
+`machine.wake_bulk` (postes visés, réveils émis ou confiés, échecs, mode relais).
+
+## Rotation des tokens agents
+
+Le token d'un poste est renouvelé tous les `AGENT_TOKEN_ROTATE_DAYS` jours
+(**30**, `0` = jamais), sans jamais couper l'agent
+([token_rotation.py](app/features/machine/token_rotation.py)) :
+
+1. un heartbeat authentifié par le token courant, d'un agent qui annonce
+   `supports_token_rotation`, reçoit `new_token` une fois l'âge atteint ; le
+   serveur n'en garde que le hash, dans `pending_token_hash`. Le token courant
+   reste valide ;
+2. tant que l'agent revient avec le token courant (réponse perdue, écriture
+   impossible sur le poste), chaque heartbeat lui en propose un **nouveau**,
+   qui remplace le précédent : un token que personne n'a reçu ne reste pas
+   valide ;
+3. la première requête — quel que soit l'endpoint agent — portant le token
+   proposé le promeut : il devient le token courant, l'ancien est refusé dès
+   lors, `token_issued_at` repart. Promotion journalisée (`app.security`), pas
+   auditée : c'est du trafic machine, une fois par mois et par poste.
+
+Un agent qui n'annonce pas la capacité (version antérieure) ne se voit jamais
+rien proposer. Révocation, « autoriser le ré-enrôlement » et ré-enrôlement
+effacent un token proposé en attente. La migration `0025` date tous les tokens
+existants de son passage, pour que le parc ne tourne pas en entier le même
+matin.
 
 ## Exploitation du parc : salles, vérifications, maintenance, journal
 
@@ -142,6 +203,34 @@ que la pastille « allumé » (`features/usage/accounting.py`).
 | Lecture | `features/usage/crud.py` | Une fenêtre de N jours couvre les N × 24 heures pleines avant l'heure courante, plus celle-ci. La même borne sert la liste, son filtre et son tri, l'export et le tableau de bord ; un poste enrôlé pendant la fenêtre n'est jamais « peu utilisé ». |
 | Réglages | `app_settings` (`usage.*`) | Fenêtre et seuils, avec les variables `USAGE_*` pour valeurs initiales (`setting/crud.py`, `usage_policy`). |
 
+## Sessions de la console
+
+Migration `0024`, [features/auth_session/](app/features/auth_session/). Une
+connexion crée une ligne `auth_sessions` ; le jeton d'accès (JWT, `type=access`,
+`sid` = la session, `ACCESS_TOKEN_EXPIRE_MINUTES`) n'est accepté que tant que
+cette ligne est ouverte — une lecture par clé primaire, jointe au compte, à
+chaque requête ([deps.py](app/api/deps.py)). Le jeton de session
+(`<id>.<secret>`, seul son SHA-256 est stocké) voyage dans le cookie
+`tiai_refresh` (`HttpOnly`, `SameSite=Strict`, `Path=/api/v1/auth`, `Secure`
+hors `local`) :
+
+| Évènement | Effet |
+|---|---|
+| `POST /auth/refresh` avec le jeton courant | nouveau jeton d'accès, nouveau jeton de session ; échéance repoussée de `REFRESH_TOKEN_EXPIRE_DAYS`, plafonnée à `created_at + SESSION_MAX_DAYS` |
+| … avec le jeton précédent, dans les 30 s | deux onglets ont rafraîchi ensemble : jeton d'accès, cookie laissé tel quel |
+| … avec un jeton déjà échangé, au-delà | vol présumé : la session est révoquée pour ses deux détenteurs, ligne `presumed theft` dans le journal `app.security` |
+| changement / réinitialisation du mot de passe, désactivation | toutes les sessions du compte révoquées, dans la même transaction |
+| suppression du compte | sessions supprimées (`ON DELETE CASCADE`) |
+
+`crud.purge_expired_sessions` supprime les sessions expirées ou révoquées
+(elles n'autorisent plus rien) ; elle est faite pour le ménage quotidien du
+worker. `password_changed_at` reste en seconde ligne : un jeton émis avant un
+changement de mot de passe est refusé quelle que soit sa session.
+
+La connexion coûte une vérification bcrypt dans tous les cas — contre un hash
+factice pour une adresse inconnue ou un compte désactivé —, et les adresses
+sont comparées et stockées en minuscules (index unique sur `lower(email)`).
+
 ## Utilisateurs, groupes & permissions
 
 Les opérateurs se connectent en **JWT** (email + mot de passe, hash bcrypt). Ce
@@ -162,6 +251,17 @@ Les groupes intégrés se renomment et, sauf les administrateurs, se modifient
 comme les autres ; ils ne se suppriment pas. Aucune modification ne peut laisser
 la console sans compte actif détenant `user:write` (erreur `user.lockout`), et
 personne ne modifie ses propres groupes.
+
+**Pas d'escalade** (`permissions.escalation`, erreur `auth.permission.escalation`,
+403) : un compte qui n'est pas administrateur n'accorde que ce qu'il détient.
+Il ne compose un groupe qu'avec ses propres permissions, ne modifie ni ne
+supprime un groupe qui accorde davantage — le groupe Administrateurs en
+premier —, ne place un compte (création ou modification) que dans des groupes
+qui n'excèdent pas ses droits, et ne touche pas — modification, désactivation,
+suppression, réinitialisation du mot de passe — à un compte plus puissant que
+lui. Le groupe Administrateurs est hors de portée même d'un compte qui
+détiendrait tout le catalogue : il accorde aussi les permissions à venir.
+Chaque refus est journalisé (`app.security`, « privilege escalation refused »).
 
 L'autorisation passe par des permissions `(ressource, action)`
 ([permissions.py](app/features/user/permissions.py)) : les routes demandent une

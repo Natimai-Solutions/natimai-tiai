@@ -19,6 +19,19 @@ x-logging: &logging
     max-size: "10m"
     max-file: "5"
 
+# Hôte Docker derrière le proxy d'un établissement : le bloc « proxies » de
+# ~/.docker/config.json sert au build (téléchargements) mais Compose l'injecte
+# aussi, en HTTP_PROXY/HTTPS_PROXY et leurs minuscules, dans TOUS les
+# conteneurs. Les échanges internes à la stack (healthchecks vers 127.0.0.1,
+# Caddy vers backend et frontend) ne doivent jamais y passer : le proxy ne
+# connaît pas ces noms et répond par son portail, en boucle. Une variable
+# posée ici l'emporte sur celle de config.json, casse par casse — d'où les
+# deux formes. Le trafic sortant du backend (Mailgun) continue, lui, de suivre
+# le proxy de config.json, ou MAILGUN_PROXY_URL.
+x-no-proxy: &no-proxy
+  NO_PROXY: "localhost,127.0.0.1,backend,frontend,db,caddy"
+  no_proxy: "localhost,127.0.0.1,backend,frontend,db,caddy"
+
 services:
   db:
     image: postgres:16-alpine
@@ -64,18 +77,20 @@ services:
     logging: *logging
     env_file: .env
     environment:
+      <<: *no-proxy
       POSTGRES_SERVER: db
     command: ["api"]
     # Sain quand l'API répond ET joint la base : /health renvoie 200 dans les
     # deux cas, c'est le champ `database` qui tranche — lu en JSON par le
-    # Python de l'image, sans dépendre d'un outil de plus. start_period couvre
-    # les migrations Alembic rejouées au démarrage.
+    # Python de l'image, sans dépendre d'un outil de plus, et sans proxy quoi
+    # que dise l'environnement (ProxyHandler vide). start_period couvre les
+    # migrations Alembic rejouées au démarrage.
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - "import json,sys,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=4); sys.exit(0 if json.load(r).get('database') is True else 1)"
+        - "import json,sys,urllib.request as u; o=u.build_opener(u.ProxyHandler({})); r=o.open('http://127.0.0.1:8000/health',timeout=4); sys.exit(0 if json.load(r).get('database') is True else 1)"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -92,6 +107,7 @@ services:
     logging: *logging
     env_file: .env
     environment:
+      <<: *no-proxy
       POSTGRES_SERVER: db
     command: ["worker"]
     # Le worker n'expose aucun port : il touche un fichier témoin à la fin de
@@ -117,8 +133,10 @@ services:
       context: ../frontend
     restart: unless-stopped
     logging: *logging
+    environment: *no-proxy
+    # -Y off : jamais de proxy pour sonder son propre nginx.
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      test: ["CMD", "wget", "-q", "-Y", "off", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -129,10 +147,12 @@ services:
     image: caddy:2.10-alpine
     restart: unless-stopped
     logging: *logging
-    # Seule variable dont le Caddyfile a besoin — pas d'`env_file: .env` ici,
+    # Seules variables dont le Caddyfile a besoin — pas d'`env_file: .env` ici,
     # qui exposerait inutilement les secrets du backend au conteneur Caddy.
     environment:
+      <<: *no-proxy
       TIAI_SERVER_NAME: ${TIAI_SERVER_NAME:-tiai.natimai.local}
+      TIAI_SERVER_ALIASES: ${TIAI_SERVER_ALIASES:-}
     ports:
       - "443:443"
       - "80:80"
@@ -144,7 +164,7 @@ services:
     # L'API d'administration de Caddy (localhost:2019) répond tant que le
     # processus tourne et que sa configuration est chargée.
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      test: ["CMD", "wget", "-q", "-Y", "off", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
       interval: 30s
       timeout: 5s
       retries: 3

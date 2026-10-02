@@ -4,6 +4,7 @@ import pytest
 
 from app.core.config import settings
 from app.features.notification import mailgun
+from app.features.setting.email_policy import current_policy
 
 
 class _FakeResponse:
@@ -46,7 +47,12 @@ def _configure_mailgun(monkeypatch) -> None:
 async def test_send_email_noop_when_disabled(monkeypatch):
     monkeypatch.setattr(settings, "MAILGUN_DOMAIN", None)
     monkeypatch.setattr(settings, "MAILGUN_API_KEY", None)
-    assert await mailgun.send_email("s", "t", to=["a@example.com"]) is False
+    assert (
+        await mailgun.send_email(
+            "s", "t", to=["a@example.com"], policy=current_policy()
+        )
+        is False
+    )
 
 
 async def test_send_email_noop_without_recipients(monkeypatch):
@@ -57,7 +63,7 @@ async def test_send_email_noop_without_recipients(monkeypatch):
     own would be a client able to mail someone nobody chose.
     """
     _configure_mailgun(monkeypatch)
-    assert await mailgun.send_email("s", "t", to=[]) is False
+    assert await mailgun.send_email("s", "t", to=[], policy=current_policy()) is False
 
 
 async def test_send_email_posts_to_mailgun(monkeypatch):
@@ -65,7 +71,9 @@ async def test_send_email_posts_to_mailgun(monkeypatch):
     _FakeAsyncClient.last_call = None
     monkeypatch.setattr(mailgun.httpx, "AsyncClient", _FakeAsyncClient)
 
-    ok = await mailgun.send_email("Subject", "Body", to=["a@example.com"])
+    ok = await mailgun.send_email(
+        "Subject", "Body", to=["a@example.com"], policy=current_policy()
+    )
 
     assert ok is True
     call = _FakeAsyncClient.last_call
@@ -93,7 +101,9 @@ async def test_send_email_routes_through_dedicated_proxy(monkeypatch):
     _FakeAsyncClient.last_init = None
     monkeypatch.setattr(mailgun.httpx, "AsyncClient", _FakeAsyncClient)
 
-    ok = await mailgun.send_email("Subject", "Body", to=["a@example.com"])
+    ok = await mailgun.send_email(
+        "Subject", "Body", to=["a@example.com"], policy=current_policy()
+    )
 
     assert ok is True
     assert _FakeAsyncClient.last_init is not None
@@ -110,4 +120,6 @@ async def test_send_email_propagates_http_error(monkeypatch):
     monkeypatch.setattr(mailgun.httpx, "AsyncClient", _Failing)
 
     with pytest.raises(RuntimeError):
-        await mailgun.send_email("s", "t", to=["a@example.com"])
+        await mailgun.send_email(
+            "s", "t", to=["a@example.com"], policy=current_policy()
+        )

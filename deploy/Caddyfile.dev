@@ -11,7 +11,12 @@
 #   - pas de HSTS : éviter d'épingler « HTTPS obligatoire » dans le navigateur
 #     pour ce nom d'hôte pendant les tests (cache HSTS d'un an).
 
-{$TIAI_SERVER_NAME:tiai.natimai.local} {
+# Un nom canonique, et des alias facultatifs (TIAI_SERVER_ALIASES, séparés par
+# des espaces : « tiai 10.0.0.5 »). Un alias n'est servi qu'en redirection vers
+# le nom canonique : la console garde la session dans le stockage du
+# navigateur, qui est propre à chaque origine — deux noms feraient deux
+# sessions. En HTTPS, le certificat doit porter l'alias dans ses SAN.
+{$TIAI_SERVER_NAME:tiai.natimai.local} {$TIAI_SERVER_ALIASES} {
 	tls internal
 
 	# Mêmes en-têtes qu'en prod (hors HSTS) pour valider la CSP en dev.
@@ -23,6 +28,11 @@
 		-Server
 	}
 
+	# Un alias (ou un hôte autre que le nom canonique) est renvoyé vers le nom
+	# canonique, même chemin.
+	@alias not host {$TIAI_SERVER_NAME:tiai.natimai.local}
+	redir @alias https://{$TIAI_SERVER_NAME:tiai.natimai.local}{uri} permanent
+
 	# API backend
 	handle /api/* {
 		# Plafond de taille d'une requête, refusée en 413 avant d'atteindre le
@@ -33,17 +43,37 @@
 		request_body {
 			max_size 8MB
 		}
-		reverse_proxy backend:8000
+		reverse_proxy backend:8000 {
+			transport http {
+				network_proxy none
+			}
+		}
 	}
 
 	handle /health {
-		reverse_proxy backend:8000
+		reverse_proxy backend:8000 {
+			transport http {
+				network_proxy none
+			}
+		}
 	}
 
 	# Console (build Quasar servi par nginx)
 	handle {
-		reverse_proxy frontend:80
+		reverse_proxy frontend:80 {
+			transport http {
+				network_proxy none
+			}
+		}
 	}
 
 	encode gzip
+}
+
+# Tout ce qui arrive en HTTP sous un autre nom — « tiai » tapé dans la barre
+# d'adresse, l'adresse IP — est renvoyé vers la console, sans certificat à
+# présenter puisque la réponse part en clair. Le nom canonique lui-même est
+# déjà redirigé par Caddy (HTTPS automatique).
+http:// {
+	redir https://{$TIAI_SERVER_NAME:tiai.natimai.local}{uri} permanent
 }

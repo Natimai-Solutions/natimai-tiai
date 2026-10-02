@@ -5,7 +5,6 @@ DB-backed tests require TIAI_TEST_DATABASE_URL; the unit tests at the bottom
 always run.
 """
 
-import asyncio
 from datetime import timedelta
 
 import pytest
@@ -306,10 +305,8 @@ async def test_reset_password_ends_the_target_existing_sessions(client, db_sessi
     )
     assert (await client.get("/api/v1/auth/me", headers=victim)).status_code == 200
 
-    # `iat` has one-second granularity, so let the clock tick past the second
-    # the token was minted in before invalidating it.
-    await asyncio.sleep(1.1)
-
+    # No waiting for the clock to tick past the token's `iat`: the reset revokes
+    # the victim's sessions, and the next request is refused on that alone.
     admin = await _admin(client, db_session)
     users = (await client.get("/api/v1/users", headers=admin)).json()["items"]
     target = next(u for u in users if u["email"] == "victim@test.local")

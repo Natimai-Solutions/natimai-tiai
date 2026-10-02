@@ -32,6 +32,7 @@ from app.features.inventory.models import (
     Volume,
 )
 from app.features.machine import crud as machine_crud
+from app.features.machine import token_rotation
 from app.features.machine.agent_version import FleetVersions, fleet_versions
 from app.features.machine.fingerprint import trustworthy_smbios_uuid
 from app.features.machine.models import Machine
@@ -54,7 +55,7 @@ from app.features.maintenance.policy import MaintenanceState
 from app.features.room import crud as room_crud
 from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
-from app.features.setting.crud import MaintenancePolicy, UsagePolicy
+from app.features.setting.crud import FleetPolicy, MaintenancePolicy, UsagePolicy
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 from app.features.usage.models import SECONDS_PER_HOUR
@@ -795,6 +796,8 @@ def _filtered_machines(
     usage: UsageWindow,
     outdated: list[str] | None = None,
     policy: MaintenancePolicy | None = None,
+    *,
+    fleet: FleetPolicy,
 ) -> Any:
     """The machine SELECT with every requested facet applied.
 
@@ -909,7 +912,7 @@ def _filtered_machines(
         )
     if filters.status is not None:
         stmt = stmt.where(
-            status_clause(filters.status, utcnow(), settings.INACTIVE_AFTER_DAYS)
+            status_clause(filters.status, utcnow(), fleet.inactive_after_days)
         )
     if filters.online is not None:
         # Its own axis, not a MachineStatus value: "allumé maintenant" must stay
@@ -956,7 +959,9 @@ async def list_machines(
     policies = await setting_crud.policies(session)
     policy = policies.maintenance
     usage = _usage_window(policies.usage, filters.usage_days)
-    stmt = _filtered_machines(filters, usage, versions.outdated, policy)
+    stmt = _filtered_machines(
+        filters, usage, versions.outdated, policy, fleet=policies.fleet
+    )
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     # last_seen then id behind the requested column: ties must land on the same
     # page from one request to the next, or rows duplicate and vanish across
@@ -1221,9 +1226,9 @@ async def _export_rows(
     policies = await setting_crud.policies(session)
     policy = policies.maintenance
     usage = _usage_window(policies.usage, filters.usage_days)
-    stmt = _filtered_machines(filters, usage, versions.outdated, policy).order_by(
-        func.lower(col(Machine.hostname)).nulls_last(), col(Machine.id)
-    )
+    stmt = _filtered_machines(
+        filters, usage, versions.outdated, policy, fleet=policies.fleet
+    ).order_by(func.lower(col(Machine.hostname)).nulls_last(), col(Machine.id))
     rows = await session.exec(stmt)
     all_rows = rows.all()
     names = await setting_crud.user_names(session, _owner_ids(all_rows, policy))
@@ -1452,8 +1457,28 @@ async def wake_machines(
             )
         )
 
-    await session.commit()
     woken = sum(1 for r in results if r.ok)
+    requested = list(dict.fromkeys(payload.machine_ids))
+    if len(requested) > 1:
+        # A room or a selection woken in one go. Each poste already has its
+        # wake_on_lan row; the entry adds what no row can say — that it was
+        # one request, and how much of it failed (an unknown id leaves no row
+        # at all). One poste alone is traced by its row, like any command.
+        audit.record(
+            session,
+            actor=user.email,
+            action="machine.wake_bulk",
+            resource_type="machine",
+            # No single machine to name: the ids are in the details.
+            resource_id="",
+            details={
+                "machine_ids": [str(m) for m in requested],
+                "woken": woken,
+                "failed": len(results) - woken,
+                "relayed": settings.WOL_RELAY_ENABLED,
+            },
+        )
+    await session.commit()
     return WakeResponse(
         results=results,
         woken=woken,
@@ -1824,6 +1849,8 @@ async def revoke_token(
     """
     machine = await _require_machine(session, machine_id)
     machine.token_revoked = True
+    # A token offered for rotation and not yet used is a credential too.
+    token_rotation.reset_rotation(machine)
     machine.updated_at = utcnow()
     audit.record(
         session,
@@ -1854,6 +1881,7 @@ async def allow_reenroll(
     machine = await _require_machine(session, machine_id)
     machine.token_revoked = False
     machine.token_hash = None
+    token_rotation.reset_rotation(machine)
     machine.updated_at = utcnow()
     audit.record(
         session,

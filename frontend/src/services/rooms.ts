@@ -136,7 +136,7 @@ export async function unassignMachines(machineIds: string[]): Promise<PlacementR
 
 /** How postes are filed: by hand, or by the directory (`ROOM_SOURCE`). */
 export interface RoomConfig {
-  source: 'manual' | 'ad_ou' | 'ad_location' | string;
+  source: 'manual' | 'ad_ou' | 'ad_location' | (string & {});
   manual: boolean;
 }
 

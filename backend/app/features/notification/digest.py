@@ -33,6 +33,8 @@ from app.features.machine.status import WindowsUpdateFilter as WUFilter
 from app.features.notification.outbox import queue_email
 from app.features.notification.recipients import users_for
 from app.features.notification.tasks import personal_block
+from app.features.setting import crud as setting_crud
+from app.features.setting.email_policy import email_policy
 from app.features.threat.models import Threat
 from app.features.user.models import EmailPreference
 from app.features.windows_update.models import WindowsUpdate
@@ -71,6 +73,9 @@ class Digest:
     wu_pending: int
     reboot_required: int
     inactive: int
+    # The threshold ``inactive`` was counted with, printed beside it: the page
+    # Paramètres can change it, so the mail must say which one it used.
+    inactive_after_days: int = 30
     # --- named examples, capped at NOTIFICATION_MAX_ITEMS ---
     threat_lines: list[MachineLine] = field(default_factory=list)
     update_lines: list[MachineLine] = field(default_factory=list)
@@ -111,7 +116,7 @@ def _name(machine_hostname: str | None, machine_uuid: str) -> str:
 async def build_digest(session: AsyncSession) -> Digest:
     """Read the current state of the fleet."""
     now = utcnow()
-    days = settings.INACTIVE_AFTER_DAYS
+    days = (await setting_crud.fleet_policy(session)).inactive_after_days
     cap = settings.NOTIFICATION_MAX_ITEMS
 
     total = await _count(session, None)
@@ -211,6 +216,7 @@ async def build_digest(session: AsyncSession) -> Digest:
         wu_pending=wu_pending,
         reboot_required=reboot_required,
         inactive=inactive,
+        inactive_after_days=days,
         threat_lines=threat_lines,
         update_lines=update_lines,
         outdated_lines=outdated_lines,
@@ -286,7 +292,7 @@ def render_digest(digest: Digest) -> tuple[str, str]:
         f"  Antivirus périmé ou inactif : {digest.outdated_antivirus} poste(s)",
         f"  Mises à jour Windows en attente : {digest.wu_pending} poste(s)",
         f"  Redémarrage requis : {digest.reboot_required} poste(s)",
-        f"  Sans contact depuis plus de {settings.INACTIVE_AFTER_DAYS} j : "
+        f"  Sans contact depuis plus de {digest.inactive_after_days} j : "
         f"{digest.inactive} poste(s)",
         "",
     ]
@@ -303,8 +309,8 @@ def render_digest(digest: Digest) -> tuple[str, str]:
         "ANTIVIRUS À REPRENDRE", digest.outdated_lines, digest.outdated_antivirus
     )
 
-    if settings.CONSOLE_BASE_URL:
-        body.append(f"Ouvrir la console : {settings.CONSOLE_BASE_URL.rstrip('/')}")
+    if settings.console_base_url:
+        body.append(f"Ouvrir la console : {settings.console_base_url}")
     body.append("")
     body.append(
         "Vous recevez ce message parce que votre compte est réglé sur un résumé "
@@ -339,6 +345,13 @@ async def send_daily_digest(session: AsyncSession) -> int:
         # Not a misconfiguration to work around: either nobody asked for a
         # digest, or nobody had anything to hear about today. Both are answers.
         logger.info("Daily digest: no recipient today, nothing sent")
+        return 0
+
+    # Read the mail settings now, not as the API last saw them: the worker
+    # may run for weeks, and a provider set up in the console this afternoon
+    # must carry this morning's digest.
+    if not (await email_policy(session)).enabled:
+        logger.info("Daily digest: no e-mail provider is configured, nothing queued")
         return 0
 
     subject, text = render_digest(digest)

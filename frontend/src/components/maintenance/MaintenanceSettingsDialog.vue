@@ -70,7 +70,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>();
 const $q = useQuasar();
 const saving = ref(false);
 const form = reactive({
-  cycleMode: 'inherit' as 'inherit' | 'custom' | 'excluded',
+  cycleMode: 'inherit',
   cycleDays: 90,
   ownerId: null as string | null,
 });

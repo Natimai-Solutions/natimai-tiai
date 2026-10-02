@@ -20,10 +20,11 @@ from app.api.deps import (
     SessionDep,
     require_permission,
 )
-from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.command import crud as command_crud
+from app.features.command.bulk import describe_command_target
 from app.features.command.models import (
     RISKY_COMMAND_TYPES,
     Command,
@@ -32,6 +33,7 @@ from app.features.command.models import (
 )
 from app.features.machine.models import Machine
 from app.features.machine.status import MachineStatus, status_clause
+from app.features.setting import crud as setting_crud
 from app.features.user.permissions import Action, Resource, has_permission
 
 router = APIRouter(prefix="/commands", tags=["commands"])
@@ -147,8 +149,9 @@ async def _resolve_targets(
     elif payload.target_location is not None:
         stmt = stmt.where(col(Machine.location) == payload.target_location)
     elif payload.target_status is not None:
+        fleet = await setting_crud.fleet_policy(session)
         stmt = stmt.where(
-            status_clause(payload.target_status, utcnow(), settings.INACTIVE_AFTER_DAYS)
+            status_clause(payload.target_status, utcnow(), fleet.inactive_after_days)
         )
     # target_all → no predicate.
     rows = await session.exec(stmt)
@@ -172,6 +175,12 @@ async def create_commands(
     ask for ``risky_command:execute`` on top, checked here because the type is
     in the body. A machine that already has an unfinished command of the same
     type is skipped, not queued twice: see ``command_crud.create_for_machines``.
+
+    A request aimed at a set of postes — a filter, or a list of several — is
+    also written to the audit log as ``command.bulk``, in the same
+    transaction: the rows say which postes received the command, the entry
+    says what was asked and how much of it was skipped. A command on a single
+    poste is traced by its row's ``created_by`` alone, as it always was.
     """
     if payload.type in RISKY_COMMAND_TYPES and not has_permission(
         permissions, Resource.RISKY_COMMAND, Action.EXECUTE
@@ -192,7 +201,9 @@ async def create_commands(
     await command_crud.mark_expired(session)
     ttl_minutes = payload.ttl_minutes
     if ttl_minutes is None:
-        ttl_minutes = settings.COMMAND_DEFAULT_TTL_MINUTES
+        ttl_minutes = (
+            await setting_crud.fleet_policy(session)
+        ).command_default_ttl_minutes
     expires_at = utcnow() + timedelta(minutes=ttl_minutes)
     created, skipped = await command_crud.create_for_machines(
         session,
@@ -201,6 +212,30 @@ async def create_commands(
         created_by=user.email,
         expires_at=expires_at,
     )
+    target = describe_command_target(
+        machine_ids=payload.machine_ids,
+        target_all=payload.target_all,
+        target_domain=payload.target_domain,
+        target_location=payload.target_location,
+        target_status=payload.target_status,
+    )
+    if target is not None:
+        audit.record(
+            session,
+            actor=user.email,
+            action="command.bulk",
+            resource_type="command",
+            # The type, so the log can be filtered on "every bulk reboot"
+            # without opening the details.
+            resource_id=payload.type.value,
+            details={
+                "command_type": payload.type.value,
+                **target,
+                "created": len(created),
+                "skipped": len(skipped),
+                "ttl_minutes": ttl_minutes,
+            },
+        )
     await session.commit()
     return CreateCommandsResponse(
         created=created, count=len(created), skipped=len(skipped)

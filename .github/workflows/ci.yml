@@ -187,6 +187,12 @@ jobs:
       - name: Typecheck (vue-tsc)
         run: npm run typecheck
 
+      # Correctness rules Prettier and vue-tsc do not cover (a mutated prop, a
+      # floating promise, a variable never used). Warnings fail the step too:
+      # a warning nobody has to fix is a warning nobody reads.
+      - name: Lint (ESLint)
+        run: npm run lint
+
       - name: Tests (+ coverage)
         run: npm run test:coverage
 
@@ -245,3 +251,60 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+  e2e:
+    name: Console (bout en bout)
+    runs-on: ubuntu-latest
+    # The console in a real browser against the real stack, as Compose runs it
+    # (Caddy, API, worker, PostgreSQL): login and session cookie, a command
+    # from a button to the database and back, the audit log, a setting that
+    # survives a reload. The wiring unit tests cannot see.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Préparer la stack de test
+        working-directory: deploy
+        run: |
+          cp .env.example .env
+          sed -i 's/^TIAI_SERVER_NAME=.*/TIAI_SERVER_NAME=localhost/; s/^ENVIRONMENT=.*/ENVIRONMENT=local/' .env
+
+      # Override de dev : `tls internal` (AC locale de Caddy) et secrets
+      # d'exemple acceptés. --build : les images du commit testé, jamais
+      # celles du registre.
+      - name: Démarrer la stack
+        working-directory: deploy
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait --wait-timeout 300
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Installer Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Tests de bout en bout
+        working-directory: frontend
+        run: npm run test:e2e
+
+      - name: Journaux de la stack (en cas d'échec)
+        if: failure()
+        working-directory: deploy
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --no-color --tail 200
+
+      - name: Rapport Playwright (en cas d'échec)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7

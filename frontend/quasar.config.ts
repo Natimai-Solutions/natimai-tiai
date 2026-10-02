@@ -41,6 +41,12 @@ export default defineConfig(() => {
     },
 
     framework: {
+      // Le pack de langue de Quasar : sans lui, les libellés internes des
+      // composants (pagination des tableaux « Records per page », « 1-10 of
+      // 50 », sélecteurs de date, « Loading… ») restent en anglais au milieu
+      // d'une interface française, et chaque page devrait les surcharger une
+      // à une — ce qu'aucune ne faisait, sauf le journal d'audit.
+      lang: 'fr',
       plugins: ['Notify', 'Dialog'],
     },
   };

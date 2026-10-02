@@ -281,9 +281,12 @@ commands               -- file de commandes (une ligne par poste, même en broad
 
 | Méthode | Endpoint | Rôle |
 |---|---|---|
-| `POST` | `/api/v1/auth/login` | Email + mot de passe (OAuth2 password) → JWT. |
+| `POST` | `/api/v1/auth/login` | Email (insensible à la casse) + mot de passe (OAuth2 password) → jeton d'accès (JWT court, `sid`) + jeton de session en cookie `HttpOnly`. |
+| `POST` | `/api/v1/auth/refresh` | Cookie de session → nouveau jeton d'accès, jeton de session renouvelé (réutilisation d'un ancien = session révoquée). |
+| `POST` | `/api/v1/auth/logout` | Révoque la session courante, efface le cookie. |
+| `GET` / `DELETE` | `/api/v1/auth/sessions[/{id}]` | Sessions ouvertes du compte ; fermeture de l'une d'elles. |
 | `GET` | `/api/v1/auth/me` | Utilisateur courant. |
-| `POST` | `/api/v1/auth/password` | Changement de son propre mot de passe (preuve : mot de passe actuel). Ferme les autres sessions. |
+| `POST` | `/api/v1/auth/password` | Changement de son propre mot de passe (preuve : mot de passe actuel). Ferme toutes les sessions du compte. |
 | `POST` | `/api/v1/auth/password-reset/request` | **Public.** Envoie un lien de réinitialisation par e-mail (Mailgun). Répond 204 quoi qu'il arrive (anti-énumération). |
 | `POST` | `/api/v1/auth/password-reset/confirm` | **Public.** Consomme le jeton (usage unique, expirant) et définit le nouveau mot de passe. |
 | `GET` | `/api/v1/machines?search=&domain=&antivirus=&status=&page=` | Liste filtrable/paginée (`search` couvre hostname / UUID / IP / nom d'antivirus ; `antivirus` filtre par sous-chaîne). |
@@ -470,7 +473,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 | M1 Tranche verticale | 🟢 agent fonctionnel (service Windows, WMI `MSFT_MpComputerStatus`, token DPAPI) ; reste validation end-to-end sur serveur déployé |
 | M2 Agent Defender complet | 🟢 implémenté (état + menaces WMI, scans/MAJ PowerShell, config YAML/registre, file locale/back-off) ; reste DoD end-to-end sur poste réel |
 | M3 Backend complet | 🟢 commandes (broadcast par filtre + suivi + expiration), stats `/overview`, recherche/filtrage `/machines`, listing `/threats`, révocation de token, `is_up_to_date` calculé, pool DB configurable ; tests verts sur Postgres |
-| M4 Console | 🟢 login JWT + dashboard KPI/alertes + filtres + détail poste + actions de masse + révocation + fusion de postes + catalogue d'actions factorisé (sections + confirmations + dialog Résultat) |
+| M4 Console | 🟢 login JWT + dashboard KPI/alertes + filtres + détail poste + actions de masse + révocation + fusion de postes + catalogue d'actions factorisé (sections + confirmations + dialog Résultat) ; dette (1re vague) : pack de langue Quasar français, liste des postes découpée en composants + fonctions pures (page de 1 961 → 299 lignes), tests de composants (Vitest jsdom + Quasar). Restent ESLint et les tests de bout en bout |
 | Commandes de maintenance | 🟢 catalogue fermé de 11 commandes (maintenance + diagnostic) de bout en bout : types backend, exécution agent, console ; statut `running` câblé. Reste la validation en `LocalSystem` des huit commandes exigeant l'élévation (cf. `plan-commandes-distantes.md` §5) |
 | Phase 2 Windows Update | 🟢 état WU remonté (MAJ en attente, redémarrage requis, dates) + 4 commandes de bout en bout : cycle lent dédié côté agent, table `windows_updates` à sémantique de remplacement, carte + tableau + KPI côté console. Reste la validation sur poste réel d'une installation effective et d'un redémarrage |
 | M5 Durcissement | 🟡 JWT + rôles, provider Mailgun, notifications par compte (digest quotidien + alerte immédiate) via l'outbox e-mail et le worker, garde secrets prod, timing-safe enroll, en-têtes sécurité, rate-limit (login / reset / enroll), journal d'audit (2 actions tracées + lecture console) ; reste rotation des tokens, élargissement de l'audit + page console |
@@ -573,8 +576,10 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] Journal d'audit (2026-08-28) : migration `0013_audit_log`, `audit.record` dans la transaction de l'appelant, lecture console `GET /audit` (admin, filtres, paginé) ; tracées : révocation de token, ré-autorisation d'enrôlement — les commandes portent `created_by` depuis M3
 - [x] Couverture d'audit élargie (2026-10-01) : fusion de postes (`machine.merge`, identité de la fiche supprimée dans les détails) et réinitialisation de mot de passe par un administrateur (`user.reset_password`, jamais le mot de passe) ; les comptes l'étaient déjà. Lecture filtrable par auteur, type de ressource et période (`since` inclus, `until` exclu, fuseau obligatoire), `GET /audit/actions`
 - [x] Page console « Journal d'audit » (2026-10-01) : `/audit`, permission `audit:read`, filtres et page dans l'URL, détail par entrée
-- [ ] Audit des actions de masse — les commandes portent déjà `created_by`, reste la trace d'une commande groupée en tant que telle
-- [ ] Rotation automatique des tokens agents
+- [x] Audit des actions de masse (2026-10-01) : `command.bulk` pour toute commande visant un ensemble (parc, domaine, emplacement, statut, plusieurs postes listés — type, cible demandée, créées, ignorées, durée de vie) et `machine.wake_bulk` pour un réveil de plusieurs postes ; un poste seul reste tracé par `created_by`
+- [x] Rotation automatique des tokens agents (2026-10-01) : `AGENT_TOKEN_ROTATE_DAYS` (30), proposée au heartbeat aux seuls agents qui l'annoncent, ancien token valide jusqu'au premier usage du nouveau (`pending_token_hash`), stockage DPAPI atomique côté agent, migration `0025`
+- [x] Rétention (2026-10-01) : purges quotidiennes du journal d'audit (`AUDIT_RETENTION_DAYS`, 730), de l'historique des commandes terminées (`COMMAND_RETENTION_DAYS`, 365) et des jetons de réinitialisation consommés
+- [x] **Sécurité des comptes console** (2026-10-01) : (1) **pas d'escalade** — un compte non administrateur n'accorde que ce qu'il détient (groupes composés, placement d'un compte, et aucune prise sur un compte ou un groupe plus puissant, groupe Administrateurs compris), erreur `auth.permission.escalation` ; (2) **sessions serveur** — table `auth_sessions` (migration `0024`), jeton d'accès de 15 min portant `sid` et vérifié contre sa session à chaque requête, jeton de session tournant en cookie `HttpOnly; SameSite=Strict; Secure`, réutilisation = vol présumé et révocation, `POST /auth/refresh`, `POST /auth/logout`, « Sessions ouvertes » dans « Mon compte » (audit `auth.session_revoked`), révocation de toutes les sessions au changement/réinitialisation de mot de passe et à la désactivation ; console : jeton en mémoire, un seul rafraîchissement partagé sur 401, rafraîchissement silencieux au rechargement ; (3) connexion à **temps constant** (bcrypt contre un hash factice) et e-mails **insensibles à la casse** (index unique sur `lower(email)`, migration refusant les doublons de casse)
 
 **M6 — Packaging & GPO** · 🟡 packaging et vecteurs de déploiement livrés ; reste la signature et le pilote
 - [x] Workflow de release (`.github/workflows/release.yml`) : tag `v*` → `.exe` windows/amd64 + arm64 cross-compilés, `.msi` WiX construits sur runner Windows, `SHA256SUMS.txt`, noms versionnés et fixes attachés à la release
@@ -599,8 +604,9 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 | Étape | Mesure |
 |---|---|
 | MVP (M0–M1) | **TLS dès le départ** (Caddy + AC interne) ; **auto-enrôlement** : secret d'enrôlement partagé → **token unique par poste** (DPAPI) ; identité = `machine_uuid` ; **auth console JWT** avec rôles `admin` / `readonly`. |
-| Durcissement (M5) | Garde-fou de ré-enrôlement + révocation de token ; journal d'audit ; moindre privilège + limitation de débit sur l'API. |
-| Plus tard | Rotation automatique des tokens ; mTLS ; attestation d'identité AD à l'enrôlement ; **permissions fines par ressource/table** (lecture/écriture) au-delà des deux rôles. |
+| Durcissement (M5) | Garde-fou de ré-enrôlement + révocation de token ; journal d'audit ; moindre privilège + limitation de débit sur l'API. ✅ côté console : sessions serveur révocables (jeton d'accès court + jeton de session tournant en cookie `HttpOnly`), pas d'escalade de privilèges par la gestion des comptes, connexion à temps constant. |
+| Durcissement (exploitation) | **Rotation automatique des tokens agents** (livrée) ; rétention du journal d'audit et de l'historique des commandes. |
+| Plus tard | mTLS ; attestation d'identité AD à l'enrôlement ; **permissions fines par ressource/table** (lecture/écriture) au-delà des deux rôles. |
 
 Points permanents : binaire agent **signé**, validation stricte des entrées API, limitation de débit côté agent pour éviter l'effet « troupeau ».
 

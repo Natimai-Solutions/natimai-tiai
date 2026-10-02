@@ -1,8 +1,9 @@
-"""Machine reconciliation: merging a duplicate record into the one to keep."""
+"""Machine reconciliation (merging a duplicate record into the one to keep), and
+the fleet-wide recomputation of the stored up-to-date flag."""
 
 from sqlalchemy import delete, exists, update
 from sqlalchemy.orm import aliased
-from sqlmodel import col
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
@@ -10,6 +11,7 @@ from app.features.check import crud as check_crud
 from app.features.command.models import Command
 from app.features.intervention import crud as intervention_crud
 from app.features.machine.models import Machine
+from app.features.machine.status import compute_is_up_to_date
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 
@@ -85,3 +87,33 @@ async def merge_into(
     target.updated_at = utcnow()
 
     await session.delete(source)
+
+
+async def recompute_up_to_date(session: AsyncSession, *, max_age_days: int) -> int:
+    """Re-derive ``is_up_to_date`` on every machine against a new threshold.
+
+    The flag is stored, computed on each heartbeat, so a change of the
+    signature age threshold would otherwise reach a poste only at its next
+    heartbeat — never, for one that is off — and the list, the dashboard and
+    the digest would disagree for as long. Recomputed here from what each
+    machine last reported, by the heartbeat's own function, so the two can
+    never differ. Only the machines whose verdict moved are written. Returns
+    how many; the caller commits.
+    """
+    machines = (await session.exec(select(Machine))).all()
+    changed = 0
+    for machine in machines:
+        verdict = compute_is_up_to_date(
+            av_enabled=machine.av_enabled,
+            rtp_enabled=machine.rtp_enabled,
+            signature_age_days=machine.signature_age_days,
+            max_age_days=max_age_days,
+            av_product_enabled=machine.av_product_enabled,
+            av_product_signatures_up_to_date=machine.av_product_signatures_up_to_date,
+            av_product_is_defender=machine.av_product_is_defender,
+        )
+        if verdict is not machine.is_up_to_date:
+            machine.is_up_to_date = verdict
+            session.add(machine)
+            changed += 1
+    return changed

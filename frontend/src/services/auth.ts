@@ -43,13 +43,52 @@ export interface User {
   permissions: string[];
 }
 
+/**
+ * Log in. The access token comes back in the body; the refresh token is set
+ * by the server as an HttpOnly cookie the page never reads (see
+ * `services/session`). `withCredentials` lets that cookie be stored even when
+ * the API sits on another origin than the console (`BACKEND_CORS_ORIGINS`).
+ */
 export async function login(email: string, password: string): Promise<Token> {
   // OAuth2 password flow: the backend expects form-encoded username/password.
   const form = new URLSearchParams();
   form.append('username', email);
   form.append('password', password);
-  const { data } = await api.post<Token>('/auth/login', form);
+  const { data } = await api.post<Token>('/auth/login', form, { withCredentials: true });
   return data;
+}
+
+/**
+ * End the session on the server: it is revoked there — the access token
+ * stops working at once, everywhere — and the refresh cookie is cleared.
+ * Always succeeds server-side (204), even for a session already over.
+ */
+export async function logout(): Promise<void> {
+  await api.post('/auth/logout', undefined, { withCredentials: true });
+}
+
+/** One of the account's open sessions, as « Mon compte » lists them. */
+export interface AuthSession {
+  id: string;
+  created_at: string;
+  /** Last time the session bought a new access token: accurate to ~15 min. */
+  last_used_at: string;
+  expires_at: string;
+  user_agent: string | null;
+  ip: string | null;
+  /** The session this console is using: closing it is logging out. */
+  current: boolean;
+}
+
+/** The account's open sessions, most recently active first. */
+export async function listSessions(): Promise<AuthSession[]> {
+  const { data } = await api.get<AuthSession[]>('/auth/sessions');
+  return data;
+}
+
+/** Close one of the account's sessions (a workstation left logged in). */
+export async function closeSession(id: string): Promise<void> {
+  await api.delete(`/auth/sessions/${encodeURIComponent(id)}`, { withCredentials: true });
 }
 
 export async function getMe(): Promise<User> {
@@ -64,7 +103,7 @@ export interface ProfileUpdate {
    * removed, a key not sent is left alone — so a page that remembers one
    * thing never overwrites what another page stored.
    */
-  preferences?: Record<string, unknown | null>;
+  preferences?: Record<string, unknown>;
 }
 
 /**
@@ -78,8 +117,8 @@ export async function updateMe(payload: ProfileUpdate): Promise<User> {
 }
 
 /**
- * Change one's own password. The backend invalidates every token issued before
- * the change — including the one that authenticated this call — so the caller
+ * Change one's own password. The backend revokes every session of the
+ * account — including the one that authenticated this call — so the caller
  * must log in again right after.
  */
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {

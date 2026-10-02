@@ -30,15 +30,16 @@ from app.features.maintenance import crud as maintenance_crud
 from app.features.maintenance.policy import MaintenanceState
 from app.features.notification.outbox import queue_email
 from app.features.setting import crud as setting_crud
+from app.features.setting.email_policy import email_policy
 from app.features.user.models import EmailPreference, User
 
 logger = logging.getLogger(__name__)
 
 
 def _console_link(path: str) -> str | None:
-    if not settings.CONSOLE_BASE_URL:
+    if not settings.console_base_url:
         return None
-    return f"{settings.CONSOLE_BASE_URL.rstrip('/')}/#{path}"
+    return f"{settings.console_base_url}/#{path}"
 
 
 def _wants_mail(user: User) -> bool:
@@ -184,6 +185,9 @@ async def send_maintenance_reminders(session: AsyncSession) -> int:
     """One mail per owner with a maintenance overdue or due soon, on the
     parc's reminder morning. Returns how many were queued. Owners with
     nothing due, and accounts on « aucun e-mail », get nothing."""
+    if not (await email_policy(session)).enabled:
+        logger.info("Maintenance reminders: no e-mail provider is configured")
+        return 0
     users = await session.exec(select(User).where(col(User.is_active).is_(True)))
     now = utcnow()
     queued = 0

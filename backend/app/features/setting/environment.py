@@ -84,44 +84,70 @@ def _item(env: Settings, key: str, description: str, value: Any = ...) -> EnvIte
     return EnvItem(key=key, value=_fmt(raw), description=description)
 
 
+# Appended to every mail variable the card « Envoi des e-mails » can override:
+# the value read here is where the console starts from, not necessarily what
+# it sends with.
+_MAIL_INITIAL = " — valeur initiale : la carte « Envoi des e-mails » prend le dessus"
+
+
 def _email_group(env: Settings) -> EnvGroup:
-    """The mail channel: the provider chosen, whether it is complete, and the
-    variables of that provider alone — the other's are ignored by the server
-    and would only confuse here."""
-    configured = env.alerts_enabled
+    """The mail channel as the environment describes it: the provider chosen,
+    whether the environment alone is complete, and the variables of that
+    provider — the other's are ignored by the server and would only confuse
+    here. Every one of them is an initial value the console's card may
+    override; the credentials are not listed at all (``_NEVER_SHOWN``)."""
     state = (
-        "configuré, les e-mails partent"
-        if configured
-        else "incomplet, aucun e-mail ne part"
+        "configuré dans l'environnement"
+        if env.alerts_enabled
+        else "incomplet dans l'environnement : aucun e-mail ne part sans "
+        "réglage dans la console"
     )
     items = [
         _item(
             env,
             "EMAIL_PROVIDER",
-            "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP",
+            "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP"
+            + _MAIL_INITIAL,
             f"{env.EMAIL_PROVIDER} ({state})",
         ),
         _item(
             env,
             "EMAIL_FROM_EMAIL",
-            "Adresse d'expéditeur (ou MAILGUN_FROM_EMAIL pour un .env plus ancien)",
+            "Adresse d'expéditeur (ou MAILGUN_FROM_EMAIL pour un .env plus ancien)"
+            + _MAIL_INITIAL,
             env.email_from_email,
         ),
-        _item(env, "EMAIL_FROM_NAME", "Nom d'expéditeur affiché", env.email_from_name),
+        _item(
+            env,
+            "EMAIL_FROM_NAME",
+            "Nom d'expéditeur affiché" + _MAIL_INITIAL,
+            env.email_from_name,
+        ),
     ]
     if env.EMAIL_PROVIDER == "smtp":
         items += [
-            _item(env, "SMTP_HOST", "Serveur SMTP ; vide = SMTP non configuré"),
-            _item(env, "SMTP_PORT", "Port du serveur SMTP"),
+            _item(
+                env,
+                "SMTP_HOST",
+                "Serveur SMTP ; vide = SMTP non configuré" + _MAIL_INITIAL,
+            ),
+            _item(env, "SMTP_PORT", "Port du serveur SMTP" + _MAIL_INITIAL),
             _item(
                 env,
                 "SMTP_SECURITY",
-                "starttls (587), tls (465) ou none (relais interne sur 25)",
+                "starttls (587), tls (465) ou none (relais interne sur 25)"
+                + _MAIL_INITIAL,
             ),
             _item(
                 env,
                 "SMTP_VERIFY_TLS",
-                "Vérification du certificat du serveur ; non = relais à certificat privé",
+                "Vérification du certificat du serveur ; non = relais à certificat privé"
+                + _MAIL_INITIAL,
+            ),
+            _item(
+                env,
+                "SMTP_TIMEOUT_SECONDS",
+                "Délai d'attente du serveur SMTP, en secondes" + _MAIL_INITIAL,
             ),
         ]
     else:
@@ -129,19 +155,21 @@ def _email_group(env: Settings) -> EnvGroup:
             _item(
                 env,
                 "MAILGUN_DOMAIN",
-                "Domaine d'envoi Mailgun ; vide = Mailgun non configuré",
+                "Domaine d'envoi Mailgun ; vide = Mailgun non configuré"
+                + _MAIL_INITIAL,
             ),
             _item(
                 env,
                 "MAILGUN_API_BASE_URL",
-                "Point d'entrée de l'API Mailgun (EU ou US)",
+                "Point d'entrée de l'API Mailgun (EU ou US)" + _MAIL_INITIAL,
             ),
         ]
     items += [
         _item(
             env,
             "DIGEST_HOUR_UTC",
-            "Heure UTC d'envoi du résumé quotidien et du rappel de maintenance",
+            "Heure UTC d'envoi du résumé quotidien et du rappel de maintenance "
+            "— valeur initiale : le réglage enregistré prend le dessus",
         ),
         _item(
             env,
@@ -174,12 +202,13 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "SIGNATURE_MAX_AGE_DAYS",
                     "Âge maximal des signatures antivirus, en jours, avant qu'un poste "
-                    "soit « base antivirus périmée »",
+                    "soit « base antivirus périmée » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(
                     env,
                     "INACTIVE_AFTER_DAYS",
-                    "Jours sans contact de l'agent avant qu'un poste soit « inactif »",
+                    "Jours sans contact de l'agent avant qu'un poste soit « inactif »"
+                    " — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(
                     env,
@@ -191,24 +220,42 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "LOW_DISK_FREE_PERCENT",
                     "Seuil « disque presque plein » : pourcentage libre sur le volume "
-                    "système en dessous duquel un poste est signalé",
+                    "système en dessous duquel un poste est signalé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(
                     env,
                     "HARDWARE_AGING_YEARS",
-                    "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler",
+                    "Âge du poste (date du BIOS) à partir duquel il est compté à "
+                    "renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(
                     env,
                     "AGENT_EXPECTED_VERSION",
                     "Version d'agent de référence pour « agent obsolète » ; vide = la plus "
-                    "haute version remontée par le parc",
+                    "haute version remontée par le parc — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(
                     env,
                     "COMMAND_DEFAULT_TTL_MINUTES",
                     "Durée de vie, en minutes, d'une commande encore en attente avant "
-                    "qu'elle soit périmée",
+                    "qu'elle soit périmée — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+                ),
+                _item(
+                    env,
+                    "COMMAND_RETENTION_DAYS",
+                    "Jours de conservation de l'historique des commandes terminées "
+                    "(0 = indéfiniment)",
+                ),
+                _item(
+                    env,
+                    "AGENT_TOKEN_ROTATE_DAYS",
+                    "Âge, en jours, au-delà duquel le token d'un poste est renouvelé "
+                    "(0 = jamais)",
+                ),
+                _item(
+                    env,
+                    "AUDIT_RETENTION_DAYS",
+                    "Jours de conservation du journal d'audit (0 = indéfiniment)",
                 ),
             ],
         ),
@@ -230,7 +277,7 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "MAINTENANCE_REMINDER_WEEKDAY",
                     "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … "
-                    "6 = dimanche), à l'heure du résumé",
+                    "6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                     f"{weekday} ({_WEEKDAYS[weekday]})",
                 ),
             ],
@@ -324,13 +371,26 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 _item(
                     env,
                     "CONSOLE_BASE_URL",
-                    "URL publique de la console, pour le lien « mot de passe oublié » ; "
-                    "vide = aucun e-mail de réinitialisation",
+                    "URL publique de la console, dans les liens des e-mails ; "
+                    "déduite de TIAI_SERVER_NAME quand elle n'est pas renseignée. "
+                    "Vide = aucun e-mail de réinitialisation",
+                    env.console_base_url,
                 ),
                 _item(
                     env,
                     "ACCESS_TOKEN_EXPIRE_MINUTES",
-                    "Durée de vie d'une session console, en minutes",
+                    "Durée de vie, en minutes, du jeton d'accès console (renouvelé seul "
+                    "par la session)",
+                ),
+                _item(
+                    env,
+                    "REFRESH_TOKEN_EXPIRE_DAYS",
+                    "Jours sans usage avant qu'une session console se ferme (glissant)",
+                ),
+                _item(
+                    env,
+                    "SESSION_MAX_DAYS",
+                    "Durée maximale d'une session console depuis la connexion, en jours",
                 ),
                 _item(
                     env,
