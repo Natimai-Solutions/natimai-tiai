@@ -584,12 +584,19 @@ export function ramLabel(
 /**
  * A date without its time, for the fields that are dates: a BIOS release, an
  * install date. `formatDateTime` would append a midnight nobody reported.
+ *
+ * Read from the string, never through `new Date()`: the API sends a pure
+ * `AAAA-MM-JJ`, which `Date` takes for midnight UTC — the day before, in
+ * Papeete. A calendar date has no zone to convert from.
  */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString('fr-FR');
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return '—';
+  const [, year, month, day] = match;
+  const probe = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (probe.getUTCDate() !== Number(day)) return '—';
+  return `${day}/${month}/${year}`;
 }
 
 /**

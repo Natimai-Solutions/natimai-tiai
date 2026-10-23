@@ -512,6 +512,10 @@ describe('inventory formatting', () => {
     expect(formatDate('2024-01-15')).toBe('15/01/2024');
     expect(formatDate(null)).toBe('—');
     expect(formatDate('not a date')).toBe('—');
+    // A pure date is a calendar day, whatever the zone: Papeete is UTC-10 and
+    // used to see the day before (the suite runs in Pacific/Tahiti).
+    expect(formatDate('2024-03-01')).toBe('01/03/2024');
+    expect(formatDate('2024-02-30')).toBe('—');
   });
 
   it('names a chassis in words', () => {
