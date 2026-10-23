@@ -123,7 +123,9 @@ docker compose up -d
   `deploy/.env`.
 - Hors `ENVIRONMENT=local`, le backend **refuse de démarrer** si `SECRET_KEY`,
   `ENROLLMENT_SECRET`, `POSTGRES_PASSWORD` ou `FIRST_ADMIN_PASSWORD` est vide ou
-  commence encore par `changeme`.
+  commence encore par `changeme`, ou si `SECRET_KEY` fait moins de 32 caractères
+  ou `ENROLLMENT_SECRET` moins de 16 (`openssl rand -hex 32` en produit un).
+  `ENVIRONMENT` absent vaut `production` : un `.env` qui l'oublie reste gardé.
 - Les postes du domaine font déjà confiance à l'AC racine : aucun import de
   certificat n'est nécessaire côté agent.
 
@@ -249,8 +251,8 @@ Il n'est jamais committé.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `ENVIRONMENT` | `local` | `local` / `staging` / `production`. Hors `local` : garde anti-placeholder + masquage des erreurs 500 |
-| `SECRET_KEY` | `changeme` | Signature des JWT console, et dérivation de la clé qui chiffre les identifiants e-mail enregistrés dans la console. **La changer oblige à ressaisir ces identifiants** (voir « Alertes e-mail ») |
+| `ENVIRONMENT` | `production` | `local` / `staging` / `production`. Hors `local` : garde anti-placeholder et longueur minimale des secrets + masquage des erreurs 500. Absent, il vaut `production` : un `.env` qui l'oublie reste gardé |
+| `SECRET_KEY` | `changeme` | 32 caractères minimum hors `local`. Signature des JWT console, et dérivation de la clé qui chiffre les identifiants e-mail enregistrés dans la console. **La changer oblige à ressaisir ces identifiants** (voir « Alertes e-mail ») |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Durée de vie du jeton d'accès console (1 à 1 440). Court à dessein : c'est lui que la page garde en mémoire et envoie à chaque appel, et la console le renouvelle seule par sa session. Ancien défaut : 480 — une valeur `480` restée dans un `.env` reste acceptée mais n'a plus de raison d'être |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Une session console non utilisée pendant ce nombre de jours se ferme. **Glissante** : chaque renouvellement repousse l'échéance, un opérateur qui ouvre la console chaque semaine ne se reconnecte pas |
 | `SESSION_MAX_DAYS` | `30` | Durée **absolue** d'une session, comptée depuis la connexion, glissement compris : au-delà, reconnexion obligatoire. Borne ce que vaut un jeton de session volé |
@@ -258,7 +260,7 @@ Il n'est jamais committé.
 | `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée à tout mot de passe |
 | `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié » |
 | `CONSOLE_BASE_URL` | `https://<TIAI_SERVER_NAME>` | URL publique de la console, dans les liens des e-mails (réinitialisation, fiche d'un poste). À renseigner seulement si la console est jointe sous une autre URL (autre port, proxy devant Caddy). Si ni elle ni `TIAI_SERVER_NAME` n'est connue, aucun e-mail de réinitialisation n'est envoyé |
-| `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste |
+| `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste — 16 caractères minimum hors `local` |
 | `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |

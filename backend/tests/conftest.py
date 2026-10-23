@@ -26,6 +26,9 @@ if sys.platform == "win32":
 # A long-enough key avoids PyJWT's HMAC key-length warning in tests (set before
 # app.core.config is imported). Real deployments override SECRET_KEY via env.
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production-0123456789")
+# The code defaults to production, whose guard refuses the placeholder secrets
+# the tests run with.
+os.environ.setdefault("ENVIRONMENT", "local")
 
 TEST_DATABASE_URL = os.getenv("TIAI_TEST_DATABASE_URL")
 REQUIRE_TEST_DB = os.getenv("TIAI_REQUIRE_TEST_DB", "").lower() in {"1", "true", "yes"}

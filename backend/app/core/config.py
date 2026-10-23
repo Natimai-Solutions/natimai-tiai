@@ -14,6 +14,12 @@ def parse_list(v: Any) -> list[str] | str:
     raise ValueError(v)
 
 
+# Minimum lengths enforced outside `local`. SECRET_KEY signs every console JWT
+# (HS256 wants 32 bytes of key); the enrollment secret only opens /agent/enroll,
+# behind a rate limit, but is shared by the whole parc.
+SECRET_MIN_LENGTHS = {"SECRET_KEY": 32, "ENROLLMENT_SECRET": 16}
+
+
 class Settings(BaseSettings):
     """Application settings, loaded from environment / .env."""
 
@@ -23,7 +29,10 @@ class Settings(BaseSettings):
 
     PROJECT_NAME: str = "Tia'i"
     API_V1_STR: str = "/api/v1"
-    ENVIRONMENT: Literal["local", "staging", "production"] = "local"
+    # Production unless told otherwise: a deploy `.env` that forgets this line
+    # must get the secret guard below, not skip it. Dev and tests opt out
+    # explicitly (docker-compose.dev.yml, tests/conftest.py).
+    ENVIRONMENT: Literal["local", "staging", "production"] = "production"
     SECRET_KEY: str = "changeme"
 
     # --- Console auth (admin users) ---
@@ -449,13 +458,14 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _refuse_placeholder_secrets(self) -> Self:
+    def _refuse_weak_secrets(self) -> Self:
         """Fail fast outside `local` when a secret is empty or a placeholder.
 
         Guards against an incomplete deploy `.env`: booting production with
         `SECRET_KEY=changeme` would make every console JWT forgeable (plan §7).
         Placeholders in code defaults and deploy/.env.example all start with
-        "changeme".
+        "changeme". The two keys that gate access also have a minimum length:
+        `SECRET_KEY=secret` is no placeholder, and no better.
         """
         if self.ENVIRONMENT == "local":
             return self
@@ -472,6 +482,13 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"{name} is empty or still a 'changeme' placeholder; refusing "
                     f"to start in {self.ENVIRONMENT} (see deploy/.env.example)"
+                )
+        for name, minimum in SECRET_MIN_LENGTHS.items():
+            if len(getattr(self, name)) < minimum:
+                raise ValueError(
+                    f"{name} must be at least {minimum} characters; refusing to "
+                    f"start in {self.ENVIRONMENT} (generate one with "
+                    f"`openssl rand -hex 32`)"
                 )
         return self
 

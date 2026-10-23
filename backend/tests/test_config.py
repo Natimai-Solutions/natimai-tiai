@@ -10,7 +10,7 @@ from app.core.config import Settings
 # Every secret set to a real value — the baseline that must boot in production.
 PROD_OK: dict[str, Any] = {
     "ENVIRONMENT": "production",
-    "SECRET_KEY": "a-real-secret-key",
+    "SECRET_KEY": "a-real-secret-key-of-at-least-32-chars",
     "ENROLLMENT_SECRET": "a-real-enrollment-secret",
     "POSTGRES_PASSWORD": "a-real-db-password",
 }
@@ -104,3 +104,25 @@ def test_explicit_console_url_wins_and_loses_its_trailing_slash():
 def test_console_url_is_none_when_nothing_names_the_server():
     assert _settings().console_base_url is None
     assert _settings(CONSOLE_BASE_URL="").console_base_url is None
+
+
+def test_production_is_the_default(monkeypatch: pytest.MonkeyPatch):
+    """A deploy .env that forgets ENVIRONMENT still gets the guard."""
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    overrides = {k: v for k, v in PROD_OK.items() if k != "ENVIRONMENT"}
+    with pytest.raises(ValidationError, match="SECRET_KEY"):
+        Settings(_env_file=None, **{**overrides, "SECRET_KEY": "changeme"})
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("SECRET_KEY", "secret"),
+        ("SECRET_KEY", "x" * 31),
+        ("ENROLLMENT_SECRET", "short-secret"),
+    ],
+)
+def test_production_refuses_short_secrets(field: str, value: str):
+    """A secret that is no placeholder but too short aborts startup too."""
+    with pytest.raises(ValidationError, match=f"{field} must be at least"):
+        make_settings(**{field: value})
