@@ -186,19 +186,20 @@ Quatre valeurs du `.env` doivent être générées aléatoirement — format rec
 |---|---|---|
 | `SECRET_KEY` | Signature des JWT console ; clé dont est dérivée celle qui chiffre les identifiants e-mail enregistrés dans la console | Tout JWT devient forgeable → accès admin |
 | `ENROLLMENT_SECRET` | En-tête d'enrôlement des agents | N'importe qui peut enrôler une machine |
-| `POSTGRES_PASSWORD` | Compte PostgreSQL | Accès direct à la base |
+| `POSTGRES_PASSWORD` | Compte d'administration PostgreSQL (superutilisateur) | Accès total au serveur de base |
+| `POSTGRES_APP_PASSWORD` | Rôle applicatif PostgreSQL, celui du backend | Accès aux tables de Tia'i |
 | `FIRST_ADMIN_PASSWORD` | Premier compte console | Accès admin à la console |
 
 ```bash
 # Linux / macOS / Git Bash
-for v in SECRET_KEY ENROLLMENT_SECRET POSTGRES_PASSWORD FIRST_ADMIN_PASSWORD; do
+for v in SECRET_KEY ENROLLMENT_SECRET POSTGRES_PASSWORD POSTGRES_APP_PASSWORD FIRST_ADMIN_PASSWORD; do
   echo "$v=$(openssl rand -hex 32)"
 done
 ```
 
 ```powershell
 # Windows — générateur cryptographique .NET, pas Get-Random
-'SECRET_KEY','ENROLLMENT_SECRET','POSTGRES_PASSWORD','FIRST_ADMIN_PASSWORD' | ForEach-Object {
+'SECRET_KEY','ENROLLMENT_SECRET','POSTGRES_PASSWORD','POSTGRES_APP_PASSWORD','FIRST_ADMIN_PASSWORD' | ForEach-Object {
     $b = New-Object byte[] 32
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
     "$_=" + [System.BitConverter]::ToString($b).Replace('-','').ToLower()
@@ -264,7 +265,8 @@ Il n'est jamais committé.
 | `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | Compte d'administration (superutilisateur) : initialisation du volume, sauvegardes |
+| `POSTGRES_APP_USER` / `POSTGRES_APP_PASSWORD` | `tiai_app` / — | Rôle applicatif du backend et du worker, sans superutilisateur (cf. § « Rôle applicatif PostgreSQL »). Le compose les passe au backend comme `POSTGRES_USER` / `POSTGRES_PASSWORD` |
 | `POSTGRES_POOL_SIZE` / `POSTGRES_MAX_OVERFLOW` / `POSTGRES_POOL_TIMEOUT` | `20` / `10` / `30` | Pool async partagé backend + worker |
 | `SIGNATURE_MAX_AGE_DAYS` | `3` | Seuil « signatures à jour », en jours. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage ; un changement est appliqué aussitôt à tout le parc, postes éteints compris |
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif », en jours sans contact. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
@@ -449,6 +451,37 @@ Les liens des e-mails (fiche d'un poste, vos tâches) pointent sur
 
 ---
 
+## Rôle applicatif PostgreSQL
+
+Le backend et le worker se connectent avec un rôle **sans superutilisateur**,
+propriétaire des seules tables de Tia'i (`POSTGRES_APP_USER`, `tiai_app` par
+défaut). Le compte `POSTGRES_USER` de l'image, superutilisateur, ne sert plus
+qu'à l'initialisation et aux sauvegardes. Un superutilisateur peut lire et
+écrire n'importe quel fichier du serveur de base et y lancer un programme : une
+injection SQL ou une dépendance compromise côté backend vaudrait la main sur
+l'hôte de la base. Hors `ENVIRONMENT=local`, le backend et le worker
+**refusent de démarrer** s'ils se retrouvent superutilisateurs.
+
+**Installation neuve** : renseigner `POSTGRES_APP_PASSWORD` dans le `.env` ;
+le script [deploy/db/app-role.sh](deploy/db/app-role.sh) crée le rôle à la
+première initialisation du volume.
+
+**Base existante** (montée depuis une version sans ce rôle), une seule fois :
+
+```bash
+cd deploy
+# 1. Ajouter POSTGRES_APP_PASSWORD au .env (openssl rand -hex 32).
+# 2. Recréer db pour qu'il voie la variable, puis créer le rôle et lui donner
+#    la base et ses tables (le script est idempotent) :
+docker compose up -d db
+docker compose exec db sh /docker-entrypoint-initdb.d/10-app-role.sh
+# 3. Lever le reste de la stack, qui se connecte désormais avec ce rôle :
+docker compose pull && docker compose up -d
+```
+
+Sans `POSTGRES_APP_PASSWORD`, `docker compose up` s'arrête avec un message qui
+renvoie ici.
+
 ## Sauvegardes et restauration
 
 Toute la mémoire de Tia'i — postes, historique des menaces, commandes (qui a
@@ -487,9 +520,14 @@ cd deploy
 docker compose stop backend worker      # plus personne n'écrit dans la base
 docker compose exec db-backup sh -c \
   'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -h db -U "$POSTGRES_USER" \
-   -d "$POSTGRES_DB" --clean --if-exists /backups/tiai-AAAAMMJJ-HHMMSS.dump'
+   -d "$POSTGRES_DB" --clean --if-exists --no-owner --role="$POSTGRES_APP_USER" \
+   /backups/tiai-AAAAMMJJ-HHMMSS.dump'
 docker compose start backend worker
 ```
+
+`--no-owner --role` rend les objets restaurés au rôle applicatif, y compris
+depuis un dump antérieur à ce rôle : sans eux, les tables reviendraient au
+superutilisateur et le backend ne pourrait plus y écrire.
 
 Au redémarrage, le backend rejoue les migrations Alembic si le dump vient
 d'une version plus ancienne du schéma — restaurer un dump d'hier après une
@@ -540,6 +578,10 @@ docker compose ps                   # tous les services « healthy » en 2 min
 ```
 
 Le backend rejoue les migrations Alembic à son démarrage.
+
+> **Montée vers la version qui introduit le rôle applicatif PostgreSQL** : créer
+> le rôle avant l'étape 2 (§ « Rôle applicatif PostgreSQL »). Sans lui, le
+> backend refuse de démarrer.
 
 **Revenir en arrière** : remettre l'ancienne valeur de `TIAI_VERSION` et
 relancer `docker compose up -d` — tant que la version quittée n'a pas migré la

@@ -126,3 +126,28 @@ def test_production_refuses_short_secrets(field: str, value: str):
     """A secret that is no placeholder but too short aborts startup too."""
     with pytest.raises(ValidationError, match=f"{field} must be at least"):
         make_settings(**{field: value})
+
+
+async def test_superuser_role_is_refused_outside_local(engine, monkeypatch):
+    """A superuser role is tolerated in local and refused in production; the
+    application role passes in both. The suite runs as either (CI's postgres
+    service user is a superuser), so the expectation follows the role."""
+    from sqlalchemy import text
+
+    from app.core.config import settings
+    from app.core.db import assert_not_superuser
+
+    async with engine.connect() as conn:
+        is_super = (
+            await conn.execute(
+                text("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
+            )
+        ).scalar_one()
+
+    await assert_not_superuser(engine)  # local: always tolerated
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    if is_super:
+        with pytest.raises(RuntimeError, match="superuser"):
+            await assert_not_superuser(engine)
+    else:
+        await assert_not_superuser(engine)
