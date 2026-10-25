@@ -4,7 +4,7 @@
       <q-card-section class="row items-center q-pb-none">
         <div>
           <div class="text-h6">Colonnes de la liste</div>
-          <div class="text-caption text-grey">
+          <div class="text-caption text-muted">
             Cochez les colonnes à afficher et ordonnez-les. Le choix est enregistré sur votre
             compte.
           </div>
@@ -21,7 +21,7 @@
                 :disable="entry.key === MANDATORY_MACHINE_COLUMN"
               />
             </q-item-section>
-            <q-item-section :class="{ 'text-grey': !entry.visible }">
+            <q-item-section :class="{ 'text-muted': !entry.visible }">
               {{ entry.label }}
             </q-item-section>
             <q-item-section side>

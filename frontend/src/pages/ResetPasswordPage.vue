@@ -2,7 +2,7 @@
   <!-- Route montée hors de MainLayout : QPage exige un QLayout ancêtre. -->
   <q-layout view="lHh Lpr lFf">
     <q-page-container>
-      <q-page class="flex flex-center bg-grey-2">
+      <q-page class="flex flex-center surface-grey">
         <q-card style="width: 380px; max-width: 90vw">
           <q-card-section class="text-center">
             <q-icon name="lock_reset" size="48px" color="primary" />
@@ -10,7 +10,7 @@
           </q-card-section>
 
           <q-card-section v-if="!token" class="q-pt-none">
-            <q-banner dense class="bg-red-1 text-red-9">
+            <q-banner dense class="surface-red">
               <template #avatar><q-icon name="error" /></template>
               Lien incomplet : il ne contient pas de jeton de réinitialisation.
             </q-banner>

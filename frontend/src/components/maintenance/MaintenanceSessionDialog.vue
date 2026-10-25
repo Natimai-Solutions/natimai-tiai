@@ -50,7 +50,7 @@
                 <td><q-checkbox v-model="row.done" dense /></td>
                 <td>
                   {{ row.hostname }}
-                  <div v-if="row.hint" class="text-caption text-grey">{{ row.hint }}</div>
+                  <div v-if="row.hint" class="text-caption text-muted">{{ row.hint }}</div>
                 </td>
                 <td>
                   <q-input
@@ -65,7 +65,7 @@
               </tr>
             </tbody>
           </q-markup-table>
-          <div class="text-caption text-grey">
+          <div class="text-caption text-muted">
             {{ doneCount }} poste(s) coché(s) : chacun reçoit une ligne « Maintenance » dans son
             historique et repart pour un cycle.
           </div>

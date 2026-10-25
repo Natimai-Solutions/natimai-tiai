@@ -47,6 +47,9 @@ export default defineConfig(() => {
       // d'une interface française, et chaque page devrait les surcharger une
       // à une — ce qu'aucune ne faisait, sauf le journal d'audit.
       lang: 'fr',
+      // Follow the operator's system theme. Every tinted background goes
+      // through a `surface-*` class (src/css/surfaces.scss) so it holds in both.
+      config: { dark: 'auto' },
       plugins: ['Notify', 'Dialog'],
     },
   };

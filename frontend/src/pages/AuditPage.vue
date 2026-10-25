@@ -3,7 +3,7 @@
     <div class="row items-center q-col-gutter-md q-mb-md">
       <div class="col-auto">
         <div class="text-h5">Journal d'audit</div>
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           Actions administratives, de la plus récente à la plus ancienne. Heures affichées dans
           votre fuseau ({{ timeZone }}).
         </div>

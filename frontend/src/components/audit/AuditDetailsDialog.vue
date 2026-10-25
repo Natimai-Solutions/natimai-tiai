@@ -3,7 +3,7 @@
     <q-card v-if="entry" style="width: 640px; max-width: 95vw">
       <q-card-section>
         <div class="text-h6">{{ auditActionLabel(entry.action) }}</div>
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           {{ formatDateTime(entry.at) }} · {{ entry.actor }}
           <span v-if="actionIsUnknown"> · {{ entry.action }}</span>
         </div>
@@ -28,7 +28,7 @@
           <tr v-for="row in detailRows" :key="row.key">
             <th class="text-left audit-key">
               {{ auditDetailKeyLabel(row.key) }}
-              <div v-if="row.label !== row.key" class="text-caption text-grey audit-mono">
+              <div v-if="row.label !== row.key" class="text-caption text-muted audit-mono">
                 {{ row.key }}
               </div>
             </th>
@@ -43,12 +43,12 @@
             </td>
           </tr>
           <tr v-if="!detailRows.length">
-            <td colspan="2" class="text-grey">Aucun détail enregistré.</td>
+            <td colspan="2" class="text-muted">Aucun détail enregistré.</td>
           </tr>
         </tbody>
       </q-markup-table>
 
-      <q-expansion-item dense dense-toggle label="JSON brut" header-class="text-grey-8">
+      <q-expansion-item dense dense-toggle label="JSON brut" header-class="text-muted">
         <q-card-section class="q-pt-none">
           <pre class="audit-json">{{ rawJson }}</pre>
         </q-card-section>

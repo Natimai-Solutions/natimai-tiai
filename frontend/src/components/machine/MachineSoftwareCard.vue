@@ -3,7 +3,7 @@
     <q-card-section class="text-subtitle1 row items-center">
       <div>
         Logiciels installés
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           Lus dans le registre du poste, comme « Applications et fonctionnalités ». Les correctifs
           Windows n'y figurent pas : ils ont leur propre carte.
         </div>

@@ -58,12 +58,12 @@
             }}
           </q-tooltip>
         </q-btn>
-        <div v-if="positionLabel" class="text-caption text-grey q-ml-sm">
+        <div v-if="positionLabel" class="text-caption text-muted q-ml-sm">
           {{ positionLabel }}
         </div>
       </template>
       <q-space />
-      <div v-if="lastRefreshedAt" class="text-caption text-grey q-mr-sm">
+      <div v-if="lastRefreshedAt" class="text-caption text-muted q-mr-sm">
         Actualisé à {{ lastRefreshLabel }}
       </div>
       <q-btn flat dense round icon="refresh" :loading="loading" class="q-mr-sm" @click="load">
@@ -160,7 +160,7 @@
       />
     </div>
 
-    <q-banner v-if="machine?.token_revoked" class="bg-red-2 q-mb-md" rounded>
+    <q-banner v-if="machine?.token_revoked" class="surface-red q-mb-md" rounded>
       <template #avatar><q-icon name="key_off" color="negative" /></template>
       Token révoqué : le poste est coupé du serveur et ne peut plus se ré-enrôler, même avec le
       secret du parc, tant que le ré-enrôlement n'est pas autorisé ici.
@@ -181,7 +181,7 @@
          address to make it on. -->
     <q-banner
       v-if="machine?.reenroll_requested_at && !machine.token_revoked"
-      class="bg-orange-2 q-mb-md"
+      class="surface-orange q-mb-md"
       rounded
     >
       <template #avatar><q-icon name="key" color="orange" /></template>
@@ -202,7 +202,7 @@
       </template>
     </q-banner>
 
-    <q-banner v-if="machine?.needs_verification" class="bg-orange-2 q-mb-md" rounded>
+    <q-banner v-if="machine?.needs_verification" class="surface-orange q-mb-md" rounded>
       <template #avatar><q-icon name="warning" color="orange" /></template>
       Empreinte divergente : ce poste nécessite une vérification manuelle (clone, swap matériel ou
       ré-image).
@@ -211,7 +211,7 @@
       </template>
     </q-banner>
 
-    <q-banner v-if="machine?.open_check" class="bg-blue-1 q-mb-md" rounded>
+    <q-banner v-if="machine?.open_check" class="surface-blue q-mb-md" rounded>
       <template #avatar><q-icon name="fact_check" color="primary" /></template>
       <div>
         <span class="text-weight-medium">Vérification demandée</span>
@@ -248,7 +248,7 @@
       @closed="onCheckClosed"
     />
 
-    <q-banner v-if="machine?.location_mismatch" class="bg-orange-1 q-mb-md" rounded>
+    <q-banner v-if="machine?.location_mismatch" class="surface-orange q-mb-md" rounded>
       <template #avatar><q-icon name="wrong_location" color="orange" /></template>
       Emplacement divergent : l'agent déclare « {{ machine.location }} », mais la salle
       {{ machine.room_name }} est à « {{ machine.room_location }} ». Une GPO mal ciblée, ou un poste
@@ -295,7 +295,7 @@
         dense
         no-caps
         align="left"
-        class="text-grey"
+        class="text-muted"
         active-color="primary"
         indicator-color="primary"
       >

@@ -4,7 +4,7 @@
       <q-card-section class="text-subtitle1 row items-center">
         <div>
           {{ title }}
-          <div v-if="caption" class="text-caption text-grey">{{ caption }}</div>
+          <div v-if="caption" class="text-caption text-muted">{{ caption }}</div>
         </div>
         <q-space />
         <slot name="side" />
@@ -16,7 +16,7 @@
         <q-list dense>
           <q-item v-for="r in rows ?? []" :key="r.label">
             <q-item-section>{{ r.label }}</q-item-section>
-            <q-item-section side class="text-black">{{ r.value }}</q-item-section>
+            <q-item-section side class="text-strong">{{ r.value }}</q-item-section>
           </q-item>
         </q-list>
       </slot>

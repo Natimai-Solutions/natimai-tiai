@@ -7,14 +7,14 @@
            two records of one poste carry the *same* hostname, and naming both
            sides "PC-042" is what made the dialog read as a merge with itself. -->
       <q-card-section class="q-pt-none">
-        <div class="text-caption text-grey">Poste conservé (celui-ci)</div>
+        <div class="text-caption text-muted">Poste conservé (celui-ci)</div>
         <div class="text-body2 text-weight-medium">{{ title }}</div>
-        <div class="text-caption text-grey merge-uuid">{{ machine?.machine_uuid }}</div>
-        <div class="text-caption text-grey q-mt-xs">
+        <div class="text-caption text-muted merge-uuid">{{ machine?.machine_uuid }}</div>
+        <div class="text-caption text-muted q-mt-xs">
           Enrôlé le {{ formatDateTime(machine?.first_seen) }} — vu le
           {{ formatDateTime(machine?.last_seen) }}
         </div>
-        <div class="text-caption text-grey q-mt-sm">
+        <div class="text-caption text-muted q-mt-sm">
           Le poste choisi ci-dessous sera supprimé : ses menaces et commandes seront rattachées à
           l'enregistrement conservé. Action irréversible.
         </div>
@@ -46,7 +46,7 @@
           </q-item-section>
         </q-item>
         <q-item v-if="!duplicates.length">
-          <q-item-section class="text-grey">
+          <q-item-section class="text-muted">
             Aucun doublon détecté : aucun autre poste ne partage l'ancre matérielle (SMBIOS ou TPM)
             ni le nom de celui-ci. Un doublon dont le nom a changé se cherche ci-dessous.
           </q-item-section>
@@ -58,7 +58,7 @@
            needs merging: when the anchor itself drifted, the two records have
            nothing left in common for the server to match on. -->
       <q-card-section>
-        <div class="text-caption text-grey q-mb-sm">
+        <div class="text-caption text-muted q-mb-sm">
           Chercher un autre poste à fusionner dans celui-ci — vérifiez l'UUID avant de
           confirmer&nbsp;: rien ne garantit qu'il s'agisse du même matériel.
         </div>
@@ -86,7 +86,7 @@
             </q-item-section>
           </q-item>
         </q-list>
-        <div v-else-if="search && !searching" class="text-caption text-grey q-mt-sm">
+        <div v-else-if="search && !searching" class="text-caption text-muted q-mt-sm">
           Aucun autre poste ne correspond.
         </div>
       </q-card-section>

@@ -3,7 +3,7 @@
     <q-card flat bordered>
       <q-card-section class="text-subtitle1">
         Stockage
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           Occupation relevée au dernier inventaire — « Rafraîchir l'inventaire » force un relevé.
         </div>
       </q-card-section>
@@ -14,7 +14,7 @@
           <q-item-section>
             <q-item-label>
               {{ v.letter }}
-              <span v-if="v.label" class="text-grey"> — {{ v.label }}</span>
+              <span v-if="v.label" class="text-muted"> — {{ v.label }}</span>
               <q-badge v-if="v.is_system" color="primary" class="q-ml-sm" label="Système" />
               <q-badge
                 :color="encryptionColor(v.encryption_status)"
@@ -37,18 +37,18 @@
               <span v-if="freePercent(v.total_mb, v.free_mb) != null">
                 ({{ freePercent(v.total_mb, v.free_mb) }} %)
               </span>
-              <span v-if="v.filesystem" class="text-grey"> — {{ v.filesystem }}</span>
+              <span v-if="v.filesystem" class="text-muted"> — {{ v.filesystem }}</span>
             </q-item-label>
           </q-item-section>
         </q-item>
       </q-list>
-      <q-card-section v-else class="text-caption text-grey">
+      <q-card-section v-else class="text-caption text-muted">
         Aucun volume relevé sur ce poste.
       </q-card-section>
 
       <template v-if="machine.disks.length">
         <q-separator />
-        <q-card-section class="text-caption text-grey q-pb-none">Disques physiques</q-card-section>
+        <q-card-section class="text-caption text-muted q-pb-none">Disques physiques</q-card-section>
         <q-list dense>
           <q-item v-for="d in machine.disks" :key="d.id">
             <q-item-section>
@@ -57,7 +57,7 @@
                 {{ mediaTypeLabel(d.media_type) }}
                 <span v-if="d.bus_type"> — {{ d.bus_type }}</span>
                 — {{ sizeLabel(d.size_mb) }}
-                <span v-if="d.serial" class="text-grey"> — n° {{ d.serial }}</span>
+                <span v-if="d.serial" class="text-muted"> — n° {{ d.serial }}</span>
               </q-item-label>
             </q-item-section>
             <q-item-section side>

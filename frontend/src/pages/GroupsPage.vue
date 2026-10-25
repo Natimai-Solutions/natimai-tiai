@@ -12,7 +12,7 @@
       />
     </div>
 
-    <div class="text-body2 text-grey-8 q-mb-md" style="max-width: 720px">
+    <div class="text-body2 text-muted q-mb-md" style="max-width: 720px">
       Un compte peut ce que ses groupes lui accordent, tous groupes confondus. Les trois groupes
       intégrés se renomment et, sauf les administrateurs, se modifient comme les autres ; ils ne se
       suppriment pas.
@@ -34,13 +34,13 @@
             <q-icon
               :name="props.row.is_admin ? 'shield' : props.row.builtin_key ? 'lock' : 'group'"
               size="18px"
-              class="q-mr-sm text-grey-7"
+              class="q-mr-sm text-muted"
             >
               <q-tooltip v-if="props.row.builtin_key">Groupe intégré</q-tooltip>
             </q-icon>
             <div>
               <div>{{ props.row.name }}</div>
-              <div v-if="props.row.description" class="text-caption text-grey">
+              <div v-if="props.row.description" class="text-caption text-muted">
                 {{ props.row.description }}
               </div>
             </div>
@@ -53,7 +53,7 @@
              chips, and a single line would push the actions off the screen. -->
         <q-td :props="props" style="white-space: normal; max-width: 720px">
           <span v-if="props.row.is_admin" class="text-weight-medium">Tous les droits</span>
-          <span v-else-if="!props.row.permissions.length" class="text-grey">Aucun</span>
+          <span v-else-if="!props.row.permissions.length" class="text-muted">Aucun</span>
           <template v-else>
             <q-chip
               v-for="key in props.row.permissions"
@@ -135,7 +135,7 @@
 
             <div>
               <div class="text-subtitle2 q-mb-xs">Droits</div>
-              <q-banner v-if="editing?.is_admin" dense class="bg-blue-1 text-blue-9 q-mb-sm">
+              <q-banner v-if="editing?.is_admin" dense class="surface-blue q-mb-sm">
                 Les administrateurs ont tous les droits, y compris ceux des ressources à venir.
                 Cette grille n'est pas modifiable.
               </q-banner>
@@ -153,7 +153,7 @@
                         dense
                         :disable="editing?.is_admin === true"
                       />
-                      <div v-if="entry.hint" class="text-caption text-grey q-ml-lg q-mb-xs">
+                      <div v-if="entry.hint" class="text-caption text-muted q-ml-lg q-mb-xs">
                         {{ entry.hint }}
                       </div>
                     </div>

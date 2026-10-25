@@ -22,7 +22,7 @@
 
     <!-- A directory mode: the membership is the directory's, and a sync is
          how a setting switched on the server reaches the whole parc at once. -->
-    <q-banner v-if="config && !config.manual" class="bg-blue-1 q-mb-md" rounded>
+    <q-banner v-if="config && !config.manual" class="surface-blue q-mb-md" rounded>
       <template #avatar><q-icon name="account_tree" color="primary" /></template>
       Les postes sont rangés {{ sourceLabel }} (<code>ROOM_SOURCE={{ config.source }}</code
       >) : les salles se créent toutes seules et le rattachement manuel est désactivé. Nom, bâtiment
@@ -38,14 +38,14 @@
       </template>
     </q-banner>
 
-    <q-tabs v-model="tab" dense align="left" class="text-grey-8 q-mb-sm" active-color="primary">
+    <q-tabs v-model="tab" dense align="left" class="text-muted q-mb-sm" active-color="primary">
       <q-tab name="rooms" icon="meeting_room" label="Salles" />
       <q-tab name="buildings" icon="apartment" label="Bâtiments" />
     </q-tabs>
 
     <q-tab-panels v-model="tab" animated>
       <q-tab-panel name="rooms" class="q-px-none">
-        <div class="text-body2 text-grey-8 q-mb-sm" style="max-width: 760px">
+        <div class="text-body2 text-muted q-mb-sm" style="max-width: 760px">
           Une salle regroupe des postes qui se trouvent au même endroit — une classe, un bureau, un
           local technique — tels que la console les a rangés. Elle hérite de l'emplacement de son
           bâtiment ; un poste dont l'agent déclare un autre emplacement est signalé, jamais refusé.
@@ -69,14 +69,14 @@
                   v-if="props.row.ad_key"
                   name="account_tree"
                   size="16px"
-                  class="q-ml-xs text-grey-7"
+                  class="q-ml-xs text-muted"
                 >
                   <q-tooltip>Créée depuis l'annuaire : {{ props.row.ad_key }}</q-tooltip>
                 </q-icon>
               </div>
               <div
                 v-if="props.row.notes"
-                class="text-caption text-grey ellipsis"
+                class="text-caption text-muted ellipsis"
                 style="max-width: 320px"
               >
                 {{ props.row.notes }}
@@ -99,10 +99,10 @@
               </q-badge>
               <span
                 v-if="!props.row.maintenance_overdue && !props.row.maintenance_due_soon"
-                class="text-grey"
+                class="text-muted"
                 >—</span
               >
-              <div class="text-caption text-grey">
+              <div class="text-caption text-muted">
                 {{
                   props.row.effective_cycle_days > 0
                     ? `${props.row.effective_cycle_days} j`
@@ -119,7 +119,7 @@
                   {{ props.value }} poste(s) dont l'agent déclare un autre emplacement que la salle
                 </q-tooltip>
               </q-badge>
-              <span v-else class="text-grey">—</span>
+              <span v-else class="text-muted">—</span>
             </q-td>
           </template>
           <template #body-cell-actions="props">
@@ -157,7 +157,7 @@
       </q-tab-panel>
 
       <q-tab-panel name="buildings" class="q-px-none">
-        <div class="text-body2 text-grey-8 q-mb-sm" style="max-width: 760px">
+        <div class="text-body2 text-muted q-mb-sm" style="max-width: 760px">
           Un bâtiment porte l'emplacement — dans les mots que les agents remontent — et regroupe des
           salles. Il n'a ni cycle ni responsable propres.
         </div>

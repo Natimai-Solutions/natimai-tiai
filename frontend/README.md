@@ -61,6 +61,17 @@ L'interface est en français jusque dans les libellés internes de Quasar
 `quasar.config.ts`. Une page ne surcharge un de ces libellés que lorsqu'elle
 veut autre chose que le pack.
 
+## Thème clair et sombre
+
+La console suit le thème du système (`dark: 'auto'`). Tout aplat teinté passe
+par une classe `surface-*` de `src/css/surfaces.scss` (`surface-blue`,
+`surface-orange`, `surface-red`…), qui fixe fond et texte dans les deux modes
+à 4,5:1 au moins ; le texte secondaire par `text-muted`, une valeur mise en
+avant par `text-strong` ; une couleur posée en CSS par une variable `--ti-*`
+(bordures, teintes de graphique). Jamais `bg-<teinte>-1/2/3`, `bg-white`,
+`text-grey*`, `text-black` ni ternaire `$q.dark.isActive` : le test
+`src/test/no-fixed-light-colors.spec.ts` échoue.
+
 ## Tests
 
 ```bash

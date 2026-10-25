@@ -30,7 +30,7 @@
         <q-tooltip>Exporter le parc filtré (Excel ou CSV, colonnes au choix)</q-tooltip>
       </q-btn>
     </div>
-    <div v-if="lastRefreshedAt" class="text-caption text-grey col-auto">
+    <div v-if="lastRefreshedAt" class="text-caption text-muted col-auto">
       Actualisé à {{ lastRefreshedAt.toLocaleTimeString('fr-FR') }}
     </div>
     <div class="col-auto">

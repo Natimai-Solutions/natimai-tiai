@@ -6,7 +6,7 @@
        runs on it, what is it made of. -->
   <div class="q-mb-sm filter-panel">
     <div class="row items-center q-mb-xs">
-      <div class="text-caption text-grey">
+      <div class="text-caption text-muted">
         {{ activeCount ? `${activeCount} filtre(s) actif(s)` : 'Aucun filtre' }}
       </div>
       <q-btn
@@ -23,7 +23,7 @@
       />
     </div>
     <div class="row no-wrap items-start q-mb-xs">
-      <div class="text-caption text-grey filter-row-label">Sécurité</div>
+      <div class="text-caption text-muted filter-row-label">Sécurité</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
           :model-value="modelValue.antivirus"
@@ -76,7 +76,7 @@
          console's placement (building, room, « Sans salle ») and the finding
          that ties the two — agent and room disagreeing. -->
     <div class="row no-wrap items-start q-mb-xs">
-      <div class="text-caption text-grey filter-row-label">Emplacement</div>
+      <div class="text-caption text-muted filter-row-label">Emplacement</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
           :model-value="modelValue.location"
@@ -125,7 +125,7 @@
       </div>
     </div>
     <div class="row no-wrap items-start q-mb-xs">
-      <div class="text-caption text-grey filter-row-label">Suivi</div>
+      <div class="text-caption text-muted filter-row-label">Suivi</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
           :model-value="modelValue.maintenance"
@@ -152,7 +152,7 @@
       </div>
     </div>
     <div class="row no-wrap items-start q-mb-xs">
-      <div class="text-caption text-grey filter-row-label">Système</div>
+      <div class="text-caption text-muted filter-row-label">Système</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
           :model-value="modelValue.os"
@@ -183,7 +183,7 @@
          the two bounds for any other. The URL only ever carries the bounds, so
          a card's link and a hand-picked entry read the same. -->
     <div class="row no-wrap items-start q-mb-xs">
-      <div class="text-caption text-grey filter-row-label">Utilisation</div>
+      <div class="text-caption text-muted filter-row-label">Utilisation</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
           v-model="usageMode"
@@ -225,11 +225,11 @@
             @update:model-value="(v) => set({ usageBelow: v })"
           />
         </template>
-        <div class="col-auto text-caption text-grey">sur {{ usageWindowDays }} jours</div>
+        <div class="col-auto text-caption text-muted">sur {{ usageWindowDays }} jours</div>
       </div>
     </div>
     <div class="row no-wrap items-start">
-      <div class="text-caption text-grey filter-row-label">Matériel</div>
+      <div class="text-caption text-muted filter-row-label">Matériel</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
           :model-value="modelValue.manufacturer"
@@ -436,7 +436,7 @@ const usageMode = computed<UsagePreset | null>({
    one thing that opens and closes rather than as part of the page. */
 .filter-panel {
   padding: 8px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--ti-border);
   border-radius: 4px;
 }
 </style>

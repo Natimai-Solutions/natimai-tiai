@@ -4,7 +4,7 @@
   <q-dialog v-model="open">
     <q-card style="width: 420px; max-width: 90vw">
       <q-card-section class="text-h6">Affecter à une salle</q-card-section>
-      <q-card-section class="q-pt-none text-body2 text-grey-8">
+      <q-card-section class="q-pt-none text-body2 text-muted">
         {{ count }} poste(s) sélectionné(s)
       </q-card-section>
       <q-card-section>

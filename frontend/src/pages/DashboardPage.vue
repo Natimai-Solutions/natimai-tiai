@@ -3,7 +3,7 @@
     <div class="row items-center q-mb-md">
       <div class="text-h5">Tableau de bord</div>
       <q-space />
-      <div v-if="lastRefreshedAt" class="text-caption text-grey q-mr-sm">
+      <div v-if="lastRefreshedAt" class="text-caption text-muted q-mr-sm">
         Actualisé à {{ lastRefreshLabel }}
       </div>
       <q-btn flat round icon="refresh" :loading="loading" @click="reload">
@@ -29,8 +29,8 @@
             <q-icon :name="kpi.icon" :color="kpi.color" size="36px" class="q-mr-md" />
             <div>
               <div class="text-h4">{{ kpi.value }}</div>
-              <div class="text-caption text-grey">{{ kpi.label }}</div>
-              <div v-if="kpi.detail" class="text-caption text-grey">{{ kpi.detail }}</div>
+              <div class="text-caption text-muted">{{ kpi.label }}</div>
+              <div v-if="kpi.detail" class="text-caption text-muted">{{ kpi.detail }}</div>
               <div v-if="kpi.caption" class="text-caption text-orange">{{ kpi.caption }}</div>
             </div>
           </q-card-section>
@@ -52,7 +52,7 @@
             <q-icon :name="kpi.icon" :color="kpi.color" size="40px" class="q-mr-md" />
             <div>
               <div class="text-h4">{{ kpi.value }}</div>
-              <div class="text-caption text-grey">{{ kpi.label }}</div>
+              <div class="text-caption text-muted">{{ kpi.label }}</div>
               <div v-if="kpi.caption" class="text-caption text-orange">{{ kpi.caption }}</div>
             </div>
           </q-card-section>
@@ -72,7 +72,7 @@
           <q-card-section class="text-center">
             <q-icon :name="kpi.icon" :color="kpi.color" size="28px" />
             <div class="text-h5 q-mt-xs">{{ kpi.value }}</div>
-            <div class="text-caption text-grey">{{ kpi.label }}</div>
+            <div class="text-caption text-muted">{{ kpi.label }}</div>
             <div v-if="kpi.caption" class="text-caption text-orange">{{ kpi.caption }}</div>
           </q-card-section>
         </q-card>
@@ -114,7 +114,7 @@
               <q-item-section side>{{ formatDateTime(m.last_seen) }}</q-item-section>
             </q-item>
             <q-item v-if="!outdated.length">
-              <q-item-section class="text-grey">Aucun poste non à jour.</q-item-section>
+              <q-item-section class="text-muted">Aucun poste non à jour.</q-item-section>
             </q-item>
           </q-list>
         </q-card>
@@ -143,7 +143,7 @@
               <q-item-section side>{{ formatDateTime(t.detected_at) }}</q-item-section>
             </q-item>
             <q-item v-if="!threats.length">
-              <q-item-section class="text-grey">Aucune menace active.</q-item-section>
+              <q-item-section class="text-muted">Aucune menace active.</q-item-section>
             </q-item>
           </q-list>
         </q-card>

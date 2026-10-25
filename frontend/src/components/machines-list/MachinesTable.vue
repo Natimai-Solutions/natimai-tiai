@@ -92,7 +92,7 @@
     </template>
     <template #body-cell-agent="props">
       <q-td :props="props">
-        <span :class="{ 'text-grey': !props.value }">{{ props.value ?? '—' }}</span>
+        <span :class="{ 'text-muted': !props.value }">{{ props.value ?? '—' }}</span>
         <q-icon
           v-if="isAgentOutdated(props.value, agentLatest)"
           name="system_update_alt"
@@ -153,7 +153,7 @@
             rounded
             style="width: 90px"
           />
-          <div class="text-caption text-grey">
+          <div class="text-caption text-muted">
             {{ sizeLabel(props.row.system_volume_free_mb) }} libres
           </div>
           <q-tooltip>
@@ -161,7 +161,7 @@
             {{ sizeLabel(props.row.system_volume_total_mb) }}
           </q-tooltip>
         </template>
-        <span v-else class="text-grey">—</span>
+        <span v-else class="text-muted">—</span>
       </q-td>
     </template>
     <template #body-cell-session="props">
@@ -174,8 +174,8 @@
     </template>
     <template #body-cell-usage="props">
       <q-td :props="props">
-        <span v-if="props.row.usage_hours === null" class="text-grey">récent</span>
-        <span v-else :class="{ 'text-grey': props.row.usage_hours === 0 }">
+        <span v-if="props.row.usage_hours === null" class="text-muted">récent</span>
+        <span v-else :class="{ 'text-muted': props.row.usage_hours === 0 }">
           {{ hoursLabel(props.row.usage_hours) }}
         </span>
         <q-tooltip>
