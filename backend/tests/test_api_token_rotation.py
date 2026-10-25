@@ -345,7 +345,12 @@ async def test_a_revoked_machine_cannot_promote_its_pending_token(client, db_ses
     assert row.pending_token_hash == security.hash_token(pending)
 
 
-async def test_re_enrollment_drops_a_pending_token(client, db_session):
+async def test_re_enrollment_drops_a_pending_token(client, db_session, monkeypatch):
+    from app.core.config import settings
+
+    # The enrollment path itself, not the console's allow-reenroll (which drops
+    # a pending token too): approval off, as a parc that re-images may run.
+    monkeypatch.setattr(settings, "ENROLLMENT_REENROLL_REQUIRES_APPROVAL", False)
     enrolled = await _enroll(client, "rot-reenroll")
     await _age_token(db_session, enrolled["machine_id"], 31)
     pending = (await _heartbeat(client, enrolled["token"])).json()["new_token"]

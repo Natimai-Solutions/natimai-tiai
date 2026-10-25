@@ -76,6 +76,9 @@ class UserOut(BaseModel):
     # an account left on « aucun e-mail » is how a fleet ends up unwatched.
     email_preference: str
     groups: list[GroupRef]
+    # Set while the account is locked after failed logins; resetting its
+    # password lifts the lock.
+    locked_until: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -232,6 +235,7 @@ async def _out(session: SessionDep, users: list[User]) -> list[UserOut]:
             is_active=u.is_active,
             email_preference=u.email_preference,
             groups=[GroupRef.model_validate(g) for g in groups[u.id]],
+            locked_until=u.locked_until,
             created_at=u.created_at,
             updated_at=u.updated_at,
         )

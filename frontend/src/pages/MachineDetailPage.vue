@@ -175,6 +175,33 @@
       </template>
     </q-banner>
 
+    <!-- The fleet secret was presented for this poste while it still had a
+         live token: a reinstall, or someone claiming its identity. Nothing was
+         issued; the decision is the administrator's, with the date and source
+         address to make it on. -->
+    <q-banner
+      v-if="machine?.reenroll_requested_at && !machine.token_revoked"
+      class="bg-orange-2 q-mb-md"
+      rounded
+    >
+      <template #avatar><q-icon name="key" color="orange" /></template>
+      Ré-enrôlement demandé le {{ formatDateTime(machine.reenroll_requested_at) }}
+      <template v-if="machine.reenroll_requested_ip">
+        depuis {{ machine.reenroll_requested_ip }}</template
+      >, alors que ce poste a encore un token valide. Si le poste a été réinstallé, autorisez-le ;
+      sinon, quelqu'un tente de prendre sa place — n'autorisez rien et le poste garde son token.
+      <template #action>
+        <q-btn
+          v-if="canManage"
+          flat
+          dense
+          no-caps
+          label="Autoriser le ré-enrôlement"
+          @click="confirmAllowReenroll"
+        />
+      </template>
+    </q-banner>
+
     <q-banner v-if="machine?.needs_verification" class="bg-orange-2 q-mb-md" rounded>
       <template #avatar><q-icon name="warning" color="orange" /></template>
       Empreinte divergente : ce poste nécessite une vérification manuelle (clone, swap matériel ou
@@ -447,7 +474,13 @@ import {
   unassignMachines,
   type Room,
 } from 'src/services/rooms';
-import { onlineColor, onlineIcon, onlineLabel, timeAgoLabel } from 'src/utils/format';
+import {
+  formatDateTime,
+  onlineColor,
+  onlineIcon,
+  onlineLabel,
+  timeAgoLabel,
+} from 'src/utils/format';
 
 const props = defineProps<{ id: string }>();
 const $q = useQuasar();

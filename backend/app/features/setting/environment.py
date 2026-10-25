@@ -25,6 +25,7 @@ _NEVER_SHOWN = frozenset(
     {
         "SECRET_KEY",
         "ENROLLMENT_SECRET",
+        "ENROLLMENT_SECRET_PREVIOUS",
         "FIRST_ADMIN_EMAIL",
         "FIRST_ADMIN_PASSWORD",
         "POSTGRES_SERVER",
@@ -401,6 +402,23 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "PASSWORD_RESET_EXPIRE_MINUTES",
                     "Validité, en minutes, d'un lien de réinitialisation",
+                ),
+                _item(
+                    env,
+                    "LOGIN_MAX_FAILED_ATTEMPTS",
+                    "Échecs de connexion consécutifs avant qu'un compte soit verrouillé",
+                ),
+                _item(
+                    env,
+                    "LOGIN_LOCKOUT_MINUTES",
+                    "Durée, en minutes, du verrouillage ; une réinitialisation du mot de "
+                    "passe le lève",
+                ),
+                _item(
+                    env,
+                    "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
+                    "Un poste déjà enrôlé qui redemande un token attend l'approbation "
+                    "d'un administrateur",
                 ),
                 _item(
                     env,

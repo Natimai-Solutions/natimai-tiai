@@ -234,6 +234,12 @@ class Machine(SQLModel, table=True):
     # postes sharing a token would be indistinguishable (NULLs stay distinct).
     token_hash: str | None = Field(default=None, unique=True, index=True)
     token_revoked: bool = Field(default=False)
+    # Set when the fleet secret was presented for a machine_uuid that already
+    # holds a live token: a reinstalled poste, or someone else claiming its
+    # identity. Nothing is minted until an administrator allows it from the
+    # console (allow-reenroll), which clears both columns.
+    reenroll_requested_at: datetime | None = utc_field(default=None, nullable=True)
+    reenroll_requested_ip: str | None = Field(default=None, max_length=64)
     # When ``token_hash`` was issued — at enrollment, or when a rotated token
     # was first used. What AGENT_TOKEN_ROTATE_DAYS is measured against.
     token_issued_at: datetime = utc_field(default_factory=utcnow)

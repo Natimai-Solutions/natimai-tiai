@@ -56,6 +56,15 @@
           <q-badge :color="props.value ? 'positive' : 'negative'">
             {{ props.value ? 'Actif' : 'Désactivé' }}
           </q-badge>
+          <!-- A lock lifts by itself; until then the way out is a password
+               reset, from the menu of the row. -->
+          <q-badge v-if="isLocked(props.row)" color="warning" class="q-ml-xs">
+            Verrouillé
+            <q-tooltip>
+              Trop d’échecs de connexion — jusqu’à {{ formatDateTime(props.row.locked_until) }}.
+              Réinitialiser le mot de passe lève le verrou.
+            </q-tooltip>
+          </q-badge>
         </q-td>
       </template>
 
@@ -281,6 +290,11 @@ import { apiErrorMessage } from 'src/services/errors';
 import type { EmailPreference } from 'src/services/auth';
 import { useAuthStore } from 'src/stores/auth';
 import { EMAIL_PREFERENCE_OPTIONS, emailPreferenceLabel, formatDateTime } from 'src/utils/format';
+
+/** Locked now — `locked_until` stays set after it has passed, until the next login. */
+function isLocked(user: ConsoleUser): boolean {
+  return !!user.locked_until && Date.parse(user.locked_until) > Date.now();
+}
 
 const $q = useQuasar();
 const auth = useAuthStore();

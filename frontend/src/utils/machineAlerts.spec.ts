@@ -73,6 +73,8 @@ function healthy(overrides: Partial<MachineDetail> = {}): MachineDetail {
     smbios_uuid: null,
     tpm_ek_hash: null,
     token_revoked: false,
+    reenroll_requested_at: null,
+    reenroll_requested_ip: null,
     first_seen: daysAgo(100),
     created_at: daysAgo(100),
     updated_at: daysAgo(0),

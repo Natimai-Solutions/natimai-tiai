@@ -10,6 +10,7 @@ from app.api.routes.health import router as health_router
 from app.core.config import settings
 from app.core.db import assert_not_superuser
 from app.core.errors import register_error_handlers
+from app.core.net import ClientIPMiddleware
 from app.features.setting import email_policy
 
 # uvicorn wires handlers for its own loggers only: without this, the app's
@@ -59,6 +60,9 @@ app = FastAPI(
 
 # Standardized error envelope for every error response (plan §2.14).
 register_error_handlers(app)
+
+# Every request's client address, for the audit log (app.core.net).
+app.add_middleware(ClientIPMiddleware)
 
 if settings.all_cors_origins:
     app.add_middleware(

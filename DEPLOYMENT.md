@@ -262,6 +262,9 @@ Il n'est jamais committé.
 | `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié » |
 | `CONSOLE_BASE_URL` | `https://<TIAI_SERVER_NAME>` | URL publique de la console, dans les liens des e-mails (réinitialisation, fiche d'un poste). À renseigner seulement si la console est jointe sous une autre URL (autre port, proxy devant Caddy). Si ni elle ni `TIAI_SERVER_NAME` n'est connue, aucun e-mail de réinitialisation n'est envoyé |
 | `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste — 16 caractères minimum hors `local` |
+| `ENROLLMENT_SECRET_PREVIOUS` | *(vide)* | Ancien secret, encore accepté pendant une rotation (cf. « Enrôlement : approbation et rotation du secret ») |
+| `ENROLLMENT_REENROLL_REQUIRES_APPROVAL` | `true` | Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur |
+| `LOGIN_MAX_FAILED_ATTEMPTS` / `LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Verrouillage d'un compte après N échecs de connexion consécutifs, pour cette durée. Une réinitialisation du mot de passe le lève |
 | `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
@@ -313,6 +316,14 @@ sont passées en minuscules — et **s'interrompt sans rien modifier** si deux
 comptes ne diffèrent que par la casse de leur adresse, en les nommant : renommer
 ou supprimer l'un des deux (page Utilisateurs de la version précédente, ou en
 base), puis relancer.
+
+Après `LOGIN_MAX_FAILED_ATTEMPTS` échecs consécutifs (5), un compte est
+**verrouillé** `LOGIN_LOCKOUT_MINUTES` minutes (15) : la limitation de débit
+plafonne une adresse, le verrouillage plafonne un compte, quel que soit le
+nombre d'adresses qui l'essaient. La page Utilisateurs affiche « Verrouillé » ;
+une réinitialisation du mot de passe par un administrateur lève le verrou. Le
+verrouillage et la réinitialisation figurent au journal d'audit, chaque entrée
+avec l'adresse source de la requête.
 
 Pour **déconnecter tout le monde** d'un coup (clé `SECRET_KEY` divulguée, poste
 compromis), changer `SECRET_KEY` puis fermer toutes les sessions :
@@ -1014,6 +1025,34 @@ créer, est restreint.
 L'agent s'auto-enrôle au premier démarrage, stocke le token reçu, puis n'utilise
 plus que celui-ci. `uninstall` ne retire que l'enregistrement du service : le
 binaire, `C:\ProgramData\Tiai` et `HKLM\SOFTWARE\Tiai` restent en place.
+
+### Enrôlement : approbation et rotation du secret
+
+Le secret d'enrôlement est lisible sur chaque poste (registre ou fichier de la
+GPO). Il permet de **créer** un poste, jamais de **prendre la place** d'un poste
+existant : quand un `machine_uuid` qui détient déjà un token valide redemande
+à s'enrôler, le serveur ne délivre rien. La demande est notée (date, adresse
+source), le token en place continue de fonctionner, et la fiche du poste
+affiche un bandeau « Ré-enrôlement demandé ».
+
+- **Poste réinstallé** (image refaite, agent réinstallé, token perdu) : le
+  bandeau propose **Autoriser le ré-enrôlement**. L'ancien token est annulé et
+  l'agent, qui retente de lui-même, revient avec un token neuf dans les minutes
+  qui suivent.
+- **Demande inattendue** (adresse inconnue, poste qui fonctionne normalement) :
+  ne rien autoriser. Le poste réel garde son token ; changer le secret
+  d'enrôlement coupe court aux nouvelles tentatives.
+
+Chaque demande et chaque autorisation figurent au journal d'audit.
+`ENROLLMENT_REENROLL_REQUIRES_APPROVAL=false` rétablit l'ancien comportement
+(le secret suffit) pour un parc ré-imagé très souvent, en connaissance du
+risque.
+
+**Changer le secret** sans interrompre les enrôlements : mettre le nouveau dans
+`ENROLLMENT_SECRET`, l'ancien dans `ENROLLMENT_SECRET_PREVIOUS`, redémarrer
+le backend, pousser le nouveau par GPO. Les deux sont acceptés le temps que le
+parc le reçoive ; vider ensuite `ENROLLMENT_SECRET_PREVIOUS`. Les postes déjà
+enrôlés ne sont pas concernés : ils n'utilisent que leur token.
 
 ### Rotation des tokens agents
 
