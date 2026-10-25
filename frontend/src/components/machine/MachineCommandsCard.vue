@@ -21,6 +21,7 @@
           <q-badge :color="statusColor(props.value)">{{ statusLabel(props.value) }}</q-badge>
           <q-btn
             v-if="props.row.result_output"
+            aria-label="Voir le résultat"
             flat
             dense
             round
@@ -34,6 +35,7 @@
           </q-btn>
           <q-btn
             v-if="props.row.error"
+            aria-label="Voir l'erreur"
             flat
             dense
             round

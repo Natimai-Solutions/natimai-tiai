@@ -18,6 +18,7 @@
               <q-card-section class="q-pt-none">
                 <q-input
                   v-model="email"
+                  autocomplete="email"
                   type="email"
                   label="E-mail"
                   outlined

@@ -12,6 +12,8 @@ import {
   encryptionColor,
   encryptionLabel,
   formatDate,
+  protectionBadgeLabel,
+  documentTitle,
   formatDateTime,
   freePercent,
   ipAddressLabel,
@@ -530,5 +532,20 @@ describe('inventory formatting', () => {
     expect(nicTypeLabel('wifi')).toBe('Wi-Fi');
     expect(nicTypeLabel('ethernet')).toBe('Ethernet');
     expect(nicTypeLabel(null)).toBe('—');
+  });
+});
+
+describe('protectionBadgeLabel', () => {
+  it('spells out a state the colour alone used to carry', () => {
+    expect(protectionBadgeLabel('Windows Defender', true)).toBe('Windows Defender');
+    expect(protectionBadgeLabel('Windows Defender', false)).toBe('Windows Defender · non à jour');
+    expect(protectionBadgeLabel('Windows Defender', null)).toBe('Windows Defender · état inconnu');
+  });
+});
+
+describe('documentTitle', () => {
+  it('names the page, then the product', () => {
+    expect(documentTitle('Postes')).toBe("Postes — Tia'i");
+    expect(documentTitle(undefined)).toBe("Tia'i");
   });
 });

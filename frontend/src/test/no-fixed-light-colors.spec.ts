@@ -34,6 +34,11 @@ const FORBIDDEN: Array<[RegExp, string]> = [
   // $grey (2,7:1 sur blanc) est illisible en clair ; grey-7/8 le sont en sombre.
   [/\btext-grey(-[5-9]|-10)?\b(?!-)/, 'text-grey* : utiliser text-muted'],
   [/rgba\(\s*0\s*,\s*0\s*,\s*0\s*,/, 'noir translucide fixe : utiliser var(--ti-border)'],
+  // 2,2:1 et 2,6:1 sur blanc.
+  [
+    /\btext-(orange|positive|warning|amber)(-[0-9]+)?\b(?!-)/,
+    'text-orange/positive : utiliser text-warn / text-ok',
+  ],
   // Noir sur une carte sombre : la valeur disparaît.
   [/\btext-(black|dark)\b|color="(black|dark)"/, 'text-black/text-dark : utiliser text-strong'],
 ];

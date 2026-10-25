@@ -1,6 +1,6 @@
 <template>
   <q-page padding>
-    <div class="text-h5 q-mb-md">Mon compte</div>
+    <h1 class="text-h5 q-mb-md">Mon compte</h1>
 
     <q-card flat bordered class="q-mb-md" style="max-width: 520px">
       <q-card-section class="q-gutter-xs">

@@ -146,6 +146,20 @@ export function protectionLabel(isUpToDate: boolean | null | undefined): string 
   return isUpToDate ? 'À jour' : 'Non à jour';
 }
 
+/**
+ * The antivirus badge of the fleet list: the product, and its state in words
+ * when it is not good news. The colour alone said « périmé » to whoever can
+ * tell red from green, and to nobody else.
+ */
+export function protectionBadgeLabel(
+  productLabel: string,
+  isUpToDate: boolean | null | undefined,
+): string {
+  if (isUpToDate === true) return productLabel;
+  if (isUpToDate === false) return `${productLabel} · non à jour`;
+  return `${productLabel} · état inconnu`;
+}
+
 /** Badge colour for the overall protection state: grey when never computed. */
 export function protectionColor(isUpToDate: boolean | null | undefined): string {
   if (isUpToDate === null || isUpToDate === undefined) return 'grey-6';
@@ -612,4 +626,9 @@ export function downloadBlob(blob: Blob, filename: string): void {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+/** The browser tab title for a page: « Postes — Tia'i », or the bare name. */
+export function documentTitle(page?: string | null): string {
+  return page ? `${page} — Tia'i` : "Tia'i";
 }

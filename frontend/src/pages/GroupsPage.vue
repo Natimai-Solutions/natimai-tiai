@@ -1,7 +1,7 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <div class="text-h5 col-auto">Groupes</div>
+      <h1 class="text-h5 q-my-none col-auto">Groupes</h1>
       <q-space />
       <q-btn
         v-if="auth.can('user', 'write')"
@@ -160,7 +160,7 @@
                   </q-item-section>
                 </q-item>
               </q-list>
-              <div v-if="riskyWithoutEveryday" class="text-caption text-orange-9 q-mt-xs">
+              <div v-if="riskyWithoutEveryday" class="text-caption text-warn q-mt-xs">
                 Les commandes à risque ne s'exécutent pas sans les commandes courantes : ce droit
                 seul n'ouvre rien.
               </div>

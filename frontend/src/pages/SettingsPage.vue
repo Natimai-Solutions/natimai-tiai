@@ -1,6 +1,6 @@
 <template>
   <q-page padding>
-    <div class="text-h5 q-mb-md">Paramètres</div>
+    <h1 class="text-h5 q-mb-md">Paramètres</h1>
 
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
@@ -272,7 +272,7 @@
       <q-separator />
       <q-card-section class="q-gutter-md">
         <div
-          :class="status.ok ? 'text-positive' : 'text-negative'"
+          :class="status.ok ? 'text-ok' : 'text-negative'"
           class="row items-center no-wrap q-gutter-x-sm"
         >
           <q-icon :name="status.ok ? 'check_circle' : 'error_outline'" size="sm" />
@@ -379,6 +379,11 @@
                   canWrite &&
                   (settings.email.smtp_password_set || settings.email.smtp_password_unreadable)
                 "
+                :aria-label="
+                  emailForm.clearSmtpPassword
+                    ? 'Garder le mot de passe SMTP'
+                    : 'Effacer le mot de passe SMTP'
+                "
                 flat
                 dense
                 round
@@ -454,6 +459,9 @@
                 v-if="
                   canWrite &&
                   (settings.email.mailgun_api_key_set || settings.email.mailgun_api_key_unreadable)
+                "
+                :aria-label="
+                  emailForm.clearMailgunApiKey ? 'Garder la clé Mailgun' : 'Effacer la clé Mailgun'
                 "
                 flat
                 dense
@@ -552,6 +560,7 @@
       <q-card-section class="q-pt-sm">
         <q-input
           v-model="envFilter"
+          aria-label="Rechercher un réglage"
           dense
           outlined
           clearable

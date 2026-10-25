@@ -55,6 +55,7 @@
                 <td>
                   <q-input
                     v-model="row.note"
+                    :aria-label="`Note pour ${row.hostname}`"
                     dense
                     borderless
                     placeholder="—"

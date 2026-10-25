@@ -10,7 +10,8 @@
  * Usage : `surface-blue` (information), `surface-orange` (avertissement),
  * `surface-grey` (zone neutre), `surface-green` / `surface-red`
  * (confirmation / erreur), `surface-amber` (conseil). `text-muted` pour un
- * texte secondaire lisible dans les deux modes (4,5:1 au moins), `text-strong` pour une valeur mise en avant. Pour une
+ * texte secondaire lisible dans les deux modes (4,5:1 au moins), `text-strong` pour une valeur mise en avant,
+ * `text-warn` / `text-ok` pour un texte d'avertissement ou de bonne nouvelle. Pour une
  * couleur posée en CSS : les variables `--ti-*` ci-dessous.
  */
 
@@ -127,4 +128,37 @@ body.body--dark {
 // 5,6:1. Le texte seulement : un bouton ou un badge `negative` garde son fond.
 body.body--dark .text-negative {
   color: $red-4 !important;
+}
+
+// Coloured text, readable in both modes. Quasar's text-orange (2,2:1 on white)
+// and text-positive (2,6:1) are not.
+.text-warn {
+  color: #a14a00 !important;
+
+  body.body--dark & {
+    color: $orange-3 !important;
+  }
+}
+
+.text-ok {
+  color: $green-9 !important;
+
+  body.body--dark & {
+    color: $green-4 !important;
+  }
+}
+
+// Quasar writes badge and chip text in white. On these light fills it falls
+// to 1,7–2,7:1; dark text reaches 6,3:1 at worst, in either mode (the fill
+// does not change with the theme).
+.q-badge,
+.q-chip {
+  &.bg-positive,
+  &.bg-warning,
+  &.bg-orange,
+  &.bg-amber-7,
+  &.bg-grey-5,
+  &.bg-grey-6 {
+    color: #1d1d1d !important;
+  }
 }

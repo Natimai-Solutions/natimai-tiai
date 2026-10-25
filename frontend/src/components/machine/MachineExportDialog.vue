@@ -30,6 +30,7 @@
           <div class="text-subtitle2 q-mb-xs">Colonnes disponibles</div>
           <q-input
             v-model="filter"
+            aria-label="Rechercher une colonne"
             dense
             outlined
             clearable
@@ -85,6 +86,7 @@
                 <q-item-section side>
                   <div class="row no-wrap">
                     <q-btn
+                      aria-label="Monter la colonne"
                       flat
                       dense
                       round
@@ -94,6 +96,7 @@
                       @click="move(index, -1)"
                     />
                     <q-btn
+                      aria-label="Descendre la colonne"
                       flat
                       dense
                       round
@@ -102,7 +105,15 @@
                       :disable="index === selected.length - 1"
                       @click="move(index, 1)"
                     />
-                    <q-btn flat dense round size="sm" icon="close" @click="remove(index)" />
+                    <q-btn
+                      aria-label="Retirer la colonne"
+                      flat
+                      dense
+                      round
+                      size="sm"
+                      icon="close"
+                      @click="remove(index)"
+                    />
                   </div>
                 </q-item-section>
               </q-item>

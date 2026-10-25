@@ -1,7 +1,7 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <div class="text-h5 col-auto">Salles</div>
+      <h1 class="text-h5 q-my-none col-auto">Salles</h1>
       <q-space />
       <q-btn
         v-if="canWrite"
@@ -64,7 +64,13 @@
           <template #body-cell-name="props">
             <q-td :props="props">
               <div>
-                {{ props.row.name }}
+                <router-link
+                  :to="{ name: 'room-detail', params: { id: props.row.id } }"
+                  class="row-link"
+                  @click.stop
+                >
+                  {{ props.row.name }}
+                </router-link>
                 <q-icon
                   v-if="props.row.ad_key"
                   name="account_tree"

@@ -27,6 +27,7 @@
             <q-item-section side>
               <div class="row no-wrap">
                 <q-btn
+                  aria-label="Monter la colonne"
                   flat
                   dense
                   round
@@ -36,6 +37,7 @@
                   @click="move(index, -1)"
                 />
                 <q-btn
+                  aria-label="Descendre la colonne"
                   flat
                   dense
                   round

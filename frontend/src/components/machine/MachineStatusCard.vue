@@ -90,7 +90,7 @@
         </q-item-section>
       </q-item>
     </q-list>
-    <q-card-section v-else class="row items-center text-positive">
+    <q-card-section v-else class="row items-center text-ok">
       <q-icon name="check_circle" class="q-mr-sm" />
       Aucune alerte sur ce poste.
     </q-card-section>

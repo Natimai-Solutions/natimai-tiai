@@ -14,6 +14,7 @@
             <q-card-section class="q-gutter-md">
               <q-input
                 v-model="email"
+                autocomplete="username"
                 type="email"
                 label="E-mail"
                 outlined
@@ -23,6 +24,7 @@
               />
               <q-input
                 v-model="password"
+                autocomplete="current-password"
                 type="password"
                 label="Mot de passe"
                 outlined

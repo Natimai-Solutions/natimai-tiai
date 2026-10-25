@@ -4,7 +4,7 @@
        all of it read as a strip of look-alike icons stuck together, so each
        button carries a label and a colour of its own. -->
   <div class="row items-center q-col-gutter-md q-mb-sm">
-    <div class="text-h5 col-auto">Postes</div>
+    <h1 class="text-h5 q-my-none col-auto">Postes</h1>
     <q-space />
     <div class="col-auto">
       <q-btn

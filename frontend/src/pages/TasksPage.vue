@@ -1,7 +1,7 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <div class="text-h5 col-auto">Mes tâches</div>
+      <h1 class="text-h5 q-my-none col-auto">Mes tâches</h1>
       <q-space />
       <!-- Wrapped in its own column: the gutter pads every direct child of the
            row, and on a toggle that padding showed as a white band inside the
@@ -39,7 +39,15 @@
     >
       <template #body-cell-machine="props">
         <q-td :props="props">
-          <div>{{ props.row.machine?.hostname ?? '—' }}</div>
+          <div>
+            <router-link
+              :to="{ name: 'machine-detail', params: { id: props.row.machine_id } }"
+              class="row-link"
+              @click.stop
+            >
+              {{ props.row.machine?.hostname ?? 'Poste' }}
+            </router-link>
+          </div>
           <div class="text-caption text-muted">
             {{ placeLabel(props.row.machine) }}
           </div>

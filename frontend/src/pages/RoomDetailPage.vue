@@ -2,13 +2,13 @@
   <q-page padding>
     <div class="row items-center q-mb-md">
       <q-btn flat dense round icon="arrow_back" aria-label="Retour" :to="{ name: 'rooms' }" />
-      <div class="text-h5 q-ml-sm">
+      <h1 class="text-h5 q-my-none q-ml-sm">
         <template v-if="room">
           <span v-if="room.building" class="text-muted">{{ room.building.name }} › </span
           >{{ room.name }}
         </template>
         <span v-else>Salle</span>
-      </div>
+      </h1>
       <q-space />
       <template v-if="room && canWrite">
         <q-btn
@@ -156,7 +156,13 @@
             size="16px"
             class="q-mr-xs"
           />
-          {{ cell.value || cell.row.machine_uuid }}
+          <router-link
+            :to="{ name: 'machine-detail', params: { id: cell.row.id } }"
+            class="row-link"
+            @click.stop
+          >
+            {{ cell.value || cell.row.machine_uuid }}
+          </router-link>
         </q-td>
       </template>
       <template #body-cell-location="cell">
@@ -238,7 +244,7 @@
               </q-item>
             </template>
           </q-select>
-          <div v-if="pickedMismatch.length" class="text-caption text-orange-9 q-mt-sm">
+          <div v-if="pickedMismatch.length" class="text-caption text-warn q-mt-sm">
             {{ pickedMismatch.length }} poste(s) sélectionné(s) déclarent un autre emplacement que
             la salle ({{ room?.effective_location }}) : ils seront affectés et signalés.
           </div>
@@ -312,7 +318,13 @@ import {
 } from 'src/services/rooms';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
-import { formatDateTime, onlineColor, onlineIcon, timeAgoLabel } from 'src/utils/format';
+import {
+  documentTitle,
+  formatDateTime,
+  onlineColor,
+  onlineIcon,
+  timeAgoLabel,
+} from 'src/utils/format';
 
 const props = defineProps<{ id: string }>();
 
@@ -321,6 +333,13 @@ const router = useRouter();
 const auth = useAuthStore();
 
 const room = ref<Room | null>(null);
+// The tab says which room, once known — the router could only say « Salle ».
+watch(
+  () => room.value?.name,
+  (name) => {
+    if (name) document.title = documentTitle(name);
+  },
+);
 const machines = ref<Machine[]>([]);
 const buildings = ref<Building[]>([]);
 const locations = ref<string[]>([]);

@@ -1,10 +1,11 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <div class="text-h5 col-auto">Utilisateurs</div>
+      <h1 class="text-h5 q-my-none col-auto">Utilisateurs</h1>
       <q-space />
       <q-input
         v-model="search"
+        aria-label="Rechercher un compte"
         dense
         outlined
         debounce="300"
@@ -251,7 +252,14 @@
               Mot de passe défini. Il n'est plus consultable ensuite — transmettez-le maintenant,
               par un canal distinct de l'e-mail du compte.
             </div>
-            <q-input :model-value="resetResult" readonly outlined dense class="text-weight-medium">
+            <q-input
+              aria-label="Mot de passe défini"
+              :model-value="resetResult"
+              readonly
+              outlined
+              dense
+              class="text-weight-medium"
+            >
               <template #append>
                 <q-btn
                   flat

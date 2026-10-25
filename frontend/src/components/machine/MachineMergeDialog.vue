@@ -64,6 +64,7 @@
         </div>
         <q-input
           v-model="search"
+          aria-label="Poste à fusionner"
           dense
           outlined
           clearable

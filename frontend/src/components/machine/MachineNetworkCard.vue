@@ -22,7 +22,7 @@
           <q-item-section>
             <q-item-label>
               {{ n.name || n.mac }}
-              <q-badge v-if="n.is_virtual" color="blue-grey" class="q-ml-sm" label="Virtuelle" />
+              <q-badge v-if="n.is_virtual" color="blue-grey-8" class="q-ml-sm" label="Virtuelle" />
               <q-badge v-if="isElected(n)" color="primary" class="q-ml-sm" label="Élue" />
             </q-item-label>
             <q-item-label caption>
