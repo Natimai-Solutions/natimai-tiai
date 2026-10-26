@@ -1,6 +1,6 @@
 module tiai/agent
 
-go 1.27.0
+go 1.27.2
 
 require (
 	github.com/go-ole/go-ole v1.3.0
