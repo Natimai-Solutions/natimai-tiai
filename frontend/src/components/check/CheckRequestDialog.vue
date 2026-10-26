@@ -6,7 +6,7 @@
       <q-card-section class="text-h6">
         {{ check ? 'Modifier la demande' : 'Demander une vérification' }}
       </q-card-section>
-      <q-card-section v-if="subtitle" class="q-pt-none text-body2 text-grey-8">
+      <q-card-section v-if="subtitle" class="q-pt-none text-body2 text-muted">
         {{ subtitle }}
       </q-card-section>
       <q-form @submit="submit">

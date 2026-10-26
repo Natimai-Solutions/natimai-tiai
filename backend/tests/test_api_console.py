@@ -1192,6 +1192,10 @@ async def test_heartbeat_fingerprint_change_flags_verification(client, db_sessio
 async def test_reenroll_without_known_anchor_flags_verification(client, db_session):
     headers = await _admin_headers(client, db_session)
     enrolled = await _enroll(client, "m-fpomit", fingerprint={"smbios_uuid": "SMB-9"})
+    # Approved first: a live identity is never re-enrolled on the secret alone.
+    await client.post(
+        f"/api/v1/machines/{enrolled['machine_id']}/allow-reenroll", headers=headers
+    )
     # Re-enrolling while *omitting* the anchor the machine used to report is as
     # suspicious as changing it: omission is the cheapest way around the diff.
     await _enroll(client, "m-fpomit")

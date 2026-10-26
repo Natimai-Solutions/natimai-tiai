@@ -38,11 +38,21 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login
 async def verify_enrollment_secret(
     x_enrollment_secret: Annotated[str | None, Header()] = None,
 ) -> None:
-    """Guard for POST /agent/enroll — validates the shared enrollment secret."""
-    if x_enrollment_secret is None or not hmac.compare_digest(
-        x_enrollment_secret.encode("utf-8"),
-        settings.ENROLLMENT_SECRET.encode("utf-8"),
-    ):
+    """Guard for POST /agent/enroll — validates the shared enrollment secret.
+
+    The previous secret, when configured, is accepted too: rotating the secret
+    is a GPO push that reaches postes over days, not an instant switch.
+    """
+    accepted = [settings.ENROLLMENT_SECRET, settings.ENROLLMENT_SECRET_PREVIOUS]
+    presented = (x_enrollment_secret or "").encode("utf-8")
+    # Every candidate is compared, match or not: the time taken must not tell
+    # which of the two secrets a guess came close to.
+    matches = [
+        hmac.compare_digest(presented, secret.encode("utf-8"))
+        for secret in accepted
+        if secret
+    ]
+    if x_enrollment_secret is None or not any(matches):
         raise AppError(
             code=ErrorCode.AUTH_ENROLLMENT_SECRET_INVALID,
             status_code=401,

@@ -24,6 +24,22 @@ DELIMITER = ";"
 BOM = "﻿"
 
 
+# A cell starting with one of these is read by Excel as a formula. Hostnames,
+# session names and program names come from the agents — a poste can name itself
+# `=HYPERLINK(...)` — so such a cell is prefixed with an apostrophe, which Excel
+# and LibreOffice both take as "this is text" (OWASP, CSV injection).
+FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def neutralize(value: object) -> object:
+    """Return ``value`` safe to land in a spreadsheet cell; ``None`` → ``""``."""
+    if value is None:
+        return ""
+    if isinstance(value, str) and value.startswith(FORMULA_TRIGGERS):
+        return "'" + value
+    return value
+
+
 def csv_response(
     filename: str, header: Sequence[str], rows: Iterable[Sequence[object]]
 ) -> Response:
@@ -31,14 +47,15 @@ def csv_response(
 
     Values are written through ``str`` except ``None``, which becomes an empty
     cell — a spreadsheet has no notion of "never reported", and "None" printed
-    in a column of serial numbers reads as a serial number.
+    in a column of serial numbers reads as a serial number. Text that Excel would
+    run as a formula is neutralized (``neutralize``).
     """
     buffer = io.StringIO()
     buffer.write(BOM)
     writer = csv.writer(buffer, delimiter=DELIMITER, lineterminator="\r\n")
     writer.writerow(header)
     for row in rows:
-        writer.writerow(["" if value is None else value for value in row])
+        writer.writerow([neutralize(value) for value in row])
     return Response(
         content=buffer.getvalue(),
         media_type="text/csv; charset=utf-8",

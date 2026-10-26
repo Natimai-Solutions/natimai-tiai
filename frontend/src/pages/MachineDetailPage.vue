@@ -2,6 +2,7 @@
   <q-page padding>
     <div class="row items-center q-mb-md">
       <q-btn
+        aria-label="Retour à la liste des postes"
         flat
         dense
         round
@@ -13,7 +14,7 @@
           {{ fromSearch ? 'Retour aux résultats de la recherche' : 'Retour aux postes' }}
         </q-tooltip>
       </q-btn>
-      <div class="text-h5 row items-center no-wrap">
+      <h1 class="text-h5 q-my-none row items-center no-wrap">
         <!-- Leading, same dot as the list: the fiche answers « allumé ? » at a glance too. -->
         <q-icon
           v-if="machine"
@@ -28,11 +29,12 @@
           </q-tooltip>
         </q-icon>
         {{ title }}
-      </div>
+      </h1>
       <!-- Only when the fiche was opened from a list query: elsewhere there is
            no search to walk, and dead arrows would be worse than none. -->
       <template v-if="fromSearch">
         <q-btn
+          aria-label="Poste précédent"
           flat
           dense
           round
@@ -49,7 +51,15 @@
             }}
           </q-tooltip>
         </q-btn>
-        <q-btn flat dense round icon="chevron_right" :disable="!nextMachine" @click="goNext">
+        <q-btn
+          aria-label="Poste suivant"
+          flat
+          dense
+          round
+          icon="chevron_right"
+          :disable="!nextMachine"
+          @click="goNext"
+        >
           <q-tooltip>
             {{
               nextMachine
@@ -58,15 +68,24 @@
             }}
           </q-tooltip>
         </q-btn>
-        <div v-if="positionLabel" class="text-caption text-grey q-ml-sm">
+        <div v-if="positionLabel" class="text-caption text-muted q-ml-sm">
           {{ positionLabel }}
         </div>
       </template>
       <q-space />
-      <div v-if="lastRefreshedAt" class="text-caption text-grey q-mr-sm">
+      <div v-if="lastRefreshedAt" class="text-caption text-muted q-mr-sm">
         Actualisé à {{ lastRefreshLabel }}
       </div>
-      <q-btn flat dense round icon="refresh" :loading="loading" class="q-mr-sm" @click="load">
+      <q-btn
+        aria-label="Actualiser"
+        flat
+        dense
+        round
+        icon="refresh"
+        :loading="loading"
+        class="q-mr-sm"
+        @click="load"
+      >
         <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
       </q-btn>
       <q-btn-dropdown
@@ -160,7 +179,14 @@
       />
     </div>
 
-    <q-banner v-if="machine?.token_revoked" class="bg-red-2 q-mb-md" rounded>
+    <LoadErrorBanner
+      v-if="lastError && !lastRefreshedAt"
+      :error="lastError"
+      :loading="loading"
+      @retry="load"
+    />
+
+    <q-banner v-if="machine?.token_revoked" class="surface-red q-mb-md" rounded>
       <template #avatar><q-icon name="key_off" color="negative" /></template>
       Token révoqué : le poste est coupé du serveur et ne peut plus se ré-enrôler, même avec le
       secret du parc, tant que le ré-enrôlement n'est pas autorisé ici.
@@ -175,7 +201,34 @@
       </template>
     </q-banner>
 
-    <q-banner v-if="machine?.needs_verification" class="bg-orange-2 q-mb-md" rounded>
+    <!-- The fleet secret was presented for this poste while it still had a
+         live token: a reinstall, or someone claiming its identity. Nothing was
+         issued; the decision is the administrator's, with the date and source
+         address to make it on. -->
+    <q-banner
+      v-if="machine?.reenroll_requested_at && !machine.token_revoked"
+      class="surface-orange q-mb-md"
+      rounded
+    >
+      <template #avatar><q-icon name="key" color="orange" /></template>
+      Ré-enrôlement demandé le {{ formatDateTime(machine.reenroll_requested_at) }}
+      <template v-if="machine.reenroll_requested_ip">
+        depuis {{ machine.reenroll_requested_ip }}</template
+      >, alors que ce poste a encore un token valide. Si le poste a été réinstallé, autorisez-le ;
+      sinon, quelqu'un tente de prendre sa place — n'autorisez rien et le poste garde son token.
+      <template #action>
+        <q-btn
+          v-if="canManage"
+          flat
+          dense
+          no-caps
+          label="Autoriser le ré-enrôlement"
+          @click="confirmAllowReenroll"
+        />
+      </template>
+    </q-banner>
+
+    <q-banner v-if="machine?.needs_verification" class="surface-orange q-mb-md" rounded>
       <template #avatar><q-icon name="warning" color="orange" /></template>
       Empreinte divergente : ce poste nécessite une vérification manuelle (clone, swap matériel ou
       ré-image).
@@ -184,7 +237,7 @@
       </template>
     </q-banner>
 
-    <q-banner v-if="machine?.open_check" class="bg-blue-1 q-mb-md" rounded>
+    <q-banner v-if="machine?.open_check" class="surface-blue q-mb-md" rounded>
       <template #avatar><q-icon name="fact_check" color="primary" /></template>
       <div>
         <span class="text-weight-medium">Vérification demandée</span>
@@ -221,7 +274,7 @@
       @closed="onCheckClosed"
     />
 
-    <q-banner v-if="machine?.location_mismatch" class="bg-orange-1 q-mb-md" rounded>
+    <q-banner v-if="machine?.location_mismatch" class="surface-orange q-mb-md" rounded>
       <template #avatar><q-icon name="wrong_location" color="orange" /></template>
       Emplacement divergent : l'agent déclare « {{ machine.location }} », mais la salle
       {{ machine.room_name }} est à « {{ machine.room_location }} ». Une GPO mal ciblée, ou un poste
@@ -268,7 +321,7 @@
         dense
         no-caps
         align="left"
-        class="text-grey"
+        class="text-muted"
         active-color="primary"
         indicator-color="primary"
       >
@@ -382,6 +435,7 @@
 </template>
 
 <script setup lang="ts">
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
@@ -431,6 +485,7 @@ import { useAuthStore } from 'src/stores/auth';
 import { listThreats, type Threat } from 'src/services/threats';
 import {
   commandActionGroups,
+  commandConfirm,
   createCommands,
   listCommands,
   type Command,
@@ -447,7 +502,14 @@ import {
   unassignMachines,
   type Room,
 } from 'src/services/rooms';
-import { onlineColor, onlineIcon, onlineLabel, timeAgoLabel } from 'src/utils/format';
+import {
+  documentTitle,
+  formatDateTime,
+  onlineColor,
+  onlineIcon,
+  onlineLabel,
+  timeAgoLabel,
+} from 'src/utils/format';
 
 const props = defineProps<{ id: string }>();
 const $q = useQuasar();
@@ -640,6 +702,10 @@ async function savePlace() {
 }
 
 const title = computed(() => machine.value?.hostname || machine.value?.machine_uuid || 'Poste');
+// The tab says which poste, once known — the router could only say « Poste ».
+watch(title, (value) => {
+  document.title = documentTitle(value);
+});
 
 function showDetail(cmd: Command, kind: 'output' | 'error') {
   detailCommand.value = cmd;
@@ -689,7 +755,7 @@ async function fetchAll() {
  * behind a modal is the one moment a background refresh is worse than stale
  * data.
  */
-const { lastRefreshedAt, refreshNow } = useAutoRefresh(fetchAll, {
+const { lastRefreshedAt, lastError, refreshNow } = useAutoRefresh(fetchAll, {
   paused: () => detailOpen.value || mergeOpen.value,
 });
 
@@ -716,12 +782,7 @@ function runOne(action: CommandAction) {
     void send(action);
     return;
   }
-  $q.dialog({
-    title: action.label,
-    message: [`Lancer « ${action.label} » sur ce poste ?`, action.hint].filter(Boolean).join(' '),
-    cancel: true,
-    persistent: true,
-  }).onOk(() => {
+  $q.dialog(commandConfirm(action, 1, machine.value?.session_user_present ? 1 : 0)).onOk(() => {
     void send(action);
   });
 }

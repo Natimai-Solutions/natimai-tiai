@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -32,3 +33,24 @@ async def ping() -> bool:
     async with AsyncSession(engine) as session:
         await session.exec(select(1))
         return True
+
+
+async def assert_not_superuser(bind: AsyncEngine | None = None) -> None:
+    """Refuse to run outside `local` as a PostgreSQL superuser.
+
+    A superuser reads and writes any file of the database server and runs
+    programs there (``COPY … TO PROGRAM``): an SQL injection or a compromised
+    dependency in this process would own the database host. The application
+    role owns Tia'i's tables and nothing more (deploy/db/app-role.sh).
+    """
+    async with (bind or engine).connect() as conn:
+        result = await conn.execute(
+            text("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
+        )
+        is_super = bool(result.scalar_one())
+    if is_super and settings.ENVIRONMENT != "local":
+        raise RuntimeError(
+            f"POSTGRES_USER={settings.POSTGRES_USER} is a PostgreSQL superuser; "
+            f"refusing to start in {settings.ENVIRONMENT}. Run deploy/db/app-role.sh "
+            "and point the backend at the application role (DEPLOYMENT.md)."
+        )

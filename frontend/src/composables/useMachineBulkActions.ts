@@ -1,7 +1,12 @@
 import { ref, type Ref } from 'vue';
 import { useQuasar } from 'quasar';
 import { bulkCheckNotification, createChecksBulk, type CheckPayload } from 'src/services/checks';
-import { bulkSendNotification, createCommands, type CommandAction } from 'src/services/commands';
+import {
+  bulkSendNotification,
+  commandConfirm,
+  createCommands,
+  type CommandAction,
+} from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import { wakeMachines, wakeNotification, type Machine } from 'src/services/machines';
 import { placeMachines, placementNotification, unassignMachines } from 'src/services/rooms';
@@ -68,14 +73,8 @@ export function useMachineBulkActions(options: {
     }
     // The count is the whole point of the confirmation here: "sfc sur 1 poste"
     // and "sfc sur 340 postes" are very different decisions.
-    $q.dialog({
-      title: action.label,
-      message: [`Lancer « ${action.label} » sur ${ids.length} poste(s) ?`, action.hint]
-        .filter(Boolean)
-        .join(' '),
-      cancel: true,
-      persistent: true,
-    }).onOk(() => {
+    const withSession = selected.value.filter((m) => m.session_user_present).length;
+    $q.dialog(commandConfirm(action, ids.length, withSession)).onOk(() => {
       void sendBulk(action, ids);
     });
   }

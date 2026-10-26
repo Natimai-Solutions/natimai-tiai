@@ -146,6 +146,20 @@ export function protectionLabel(isUpToDate: boolean | null | undefined): string 
   return isUpToDate ? 'À jour' : 'Non à jour';
 }
 
+/**
+ * The antivirus badge of the fleet list: the product, and its state in words
+ * when it is not good news. The colour alone said « périmé » to whoever can
+ * tell red from green, and to nobody else.
+ */
+export function protectionBadgeLabel(
+  productLabel: string,
+  isUpToDate: boolean | null | undefined,
+): string {
+  if (isUpToDate === true) return productLabel;
+  if (isUpToDate === false) return `${productLabel} · non à jour`;
+  return `${productLabel} · état inconnu`;
+}
+
 /** Badge colour for the overall protection state: grey when never computed. */
 export function protectionColor(isUpToDate: boolean | null | undefined): string {
   if (isUpToDate === null || isUpToDate === undefined) return 'grey-6';
@@ -584,12 +598,19 @@ export function ramLabel(
 /**
  * A date without its time, for the fields that are dates: a BIOS release, an
  * install date. `formatDateTime` would append a midnight nobody reported.
+ *
+ * Read from the string, never through `new Date()`: the API sends a pure
+ * `AAAA-MM-JJ`, which `Date` takes for midnight UTC — the day before, in
+ * Papeete. A calendar date has no zone to convert from.
  */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString('fr-FR');
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return '—';
+  const [, year, month, day] = match;
+  const probe = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (probe.getUTCDate() !== Number(day)) return '—';
+  return `${day}/${month}/${year}`;
 }
 
 /**
@@ -605,4 +626,9 @@ export function downloadBlob(blob: Blob, filename: string): void {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+/** The browser tab title for a page: « Postes — Tia'i », or the bare name. */
+export function documentTitle(page?: string | null): string {
+  return page ? `${page} — Tia'i` : "Tia'i";
 }

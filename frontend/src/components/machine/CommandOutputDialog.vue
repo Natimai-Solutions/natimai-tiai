@@ -4,7 +4,7 @@
       <q-card-section class="text-h6">
         {{ kind === 'error' ? "Détail de l'erreur" : 'Résultat de la commande' }}
       </q-card-section>
-      <q-card-section v-if="command" class="q-pt-none text-caption text-grey">
+      <q-card-section v-if="command" class="q-pt-none text-caption text-muted">
         {{ commandTypeLabel(command.type) }} — terminée le
         {{ formatDateTime(command.finished_at) }}
       </q-card-section>

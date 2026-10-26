@@ -1,0 +1,131 @@
+# Sécurité en continu (repris de natimai-paie) : secrets commis, dépendances
+# vulnérables des trois écosystèmes, image du backend, analyse statique.
+# Sur chaque PR, sur main, et chaque lundi pour les bases de vulnérabilités qui
+# évoluent sans que le dépôt change.
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Secrets commis (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # Binaire vérifié par empreinte plutôt qu'une action tierce : rien
+      # d'autre que gitleaks ne tourne avec l'historique complet du dépôt.
+      - name: gitleaks sur tout l'historique
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSL --fail --retry 3 -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          cd "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact --no-banner --exit-code 1 .
+
+  python-deps:
+    name: Dépendances Python (pip-audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      # --no-emit-project : le paquet local n'est pas sur PyPI, pip-audit ne
+      # saurait pas l'auditer (et n'a pas à le faire).
+      - run: uv export --no-dev --no-hashes --no-emit-project --format requirements-txt > "$RUNNER_TEMP/requirements.txt"
+      - run: uvx pip-audit --strict -r "$RUNNER_TEMP/requirements.txt"
+
+  js-deps:
+    name: Dépendances JavaScript (npm audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # Lit le lockfile, sans rien installer.
+      - run: npm audit --omit=dev --audit-level=moderate
+
+  go-deps:
+    name: Dépendances Go (govulncheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      # govulncheck ne signale que le code réellement atteint, bibliothèque
+      # standard comprise : une alerte ici vise le binaire publié, qui est
+      # compilé avec cette même version de Go (release.yml). Deux passes, car
+      # le vrai code de l'agent est derrière l'étiquette de build windows.
+      # L'outil est installé avant, pour le runner : avec `go run` sous
+      # GOOS=windows, il serait compilé en .exe et ne pourrait pas s'exécuter.
+      - name: Installer govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      - name: govulncheck (windows)
+        run: govulncheck ./...
+        env:
+          GOOS: windows
+      - name: govulncheck (linux, stubs de dev)
+        run: govulncheck ./...
+
+  image:
+    name: Image backend (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t tiai-backend:ci ./backend
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: tiai-backend:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  semgrep:
+    name: Analyse statique (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      # Règles maison (.semgrep/) : les invariants propres à Tia'i, bloquants.
+      - name: Règles maison
+        run: uvx semgrep@1.182.1 scan --metrics=off --error --config .semgrep/ .
+      # Packs du registre : informatifs tant que leur premier passage n'a pas
+      # été trié — un constat accepté s'annote `# nosemgrep: <id>` avec sa
+      # raison, puis l'étape devient bloquante (retirer continue-on-error).
+      - name: Packs du registre (informatif)
+        continue-on-error: true
+        run: >-
+          uvx semgrep@1.182.1 scan --metrics=off --error
+          --config p/python --config p/gosec --config p/typescript
+          --config p/dockerfile --config p/docker-compose
+          --config p/github-actions --config p/secrets .

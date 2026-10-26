@@ -15,6 +15,7 @@ from app.core import ratelimit, security
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.net import client_ip
+from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.command import crud as command_crud
 from app.features.command.models import (
@@ -438,11 +439,12 @@ async def enroll(
 ) -> EnrollResponse:
     """Register a machine (trust on first use) and emit its token once.
 
-    Idempotent on machine_uuid: re-enrollment rotates the token. A known
-    machine_uuid re-enrolling is a guard-rail signal (reinstall vs token theft),
-    and a *revoked* machine is refused outright: the revocation is lifted from
-    the console (allow-reenroll), never by the fleet-wide secret — otherwise
-    anyone holding that secret could undo the kill-switch.
+    A known machine_uuid gets a new token only when it holds none — first
+    contact, or after an administrator's allow-reenroll. One that still holds a
+    live token is held for approval (``ENROLLMENT_REENROLL_REQUIRES_APPROVAL``),
+    and a *revoked* one is refused outright: both are lifted from the console,
+    never by the fleet-wide secret — otherwise anyone holding that secret could
+    take over a poste's identity, or undo the kill-switch.
     """
     result = await session.exec(
         select(Machine).where(Machine.machine_uuid == payload.machine_uuid)
@@ -468,6 +470,43 @@ async def enroll(
                 status_code=403,
                 message="Machine token was revoked; an administrator must "
                 "allow re-enrollment from the console",
+            )
+        if (
+            machine.token_hash is not None
+            and settings.ENROLLMENT_REENROLL_REQUIRES_APPROVAL
+        ):
+            # A live token already exists for this identity. Its own agent never
+            # asks for another while it holds one (it re-enrolls only after
+            # losing it), so this is either a reinstalled poste or someone
+            # presenting the fleet secret under a stolen machine_uuid — the
+            # secret is readable on every poste. Minting here would hand the
+            # identity over and lock the real poste out; the request waits for
+            # an administrator instead, and the live token keeps working.
+            ip = client_ip(request)
+            machine.reenroll_requested_at = utcnow()
+            machine.reenroll_requested_ip = ip
+            audit.record(
+                session,
+                actor="agent",
+                action="machine.reenroll_requested",
+                resource_type="machine",
+                resource_id=str(machine.id),
+                details={
+                    "hostname": payload.hostname,
+                    "machine_uuid": payload.machine_uuid,
+                },
+            )
+            await session.commit()
+            security_log.warning(
+                "re-enrollment of %s from %s held for approval (live token exists)",
+                payload.machine_uuid,
+                ip,
+            )
+            raise AppError(
+                code=ErrorCode.MACHINE_ENROLLMENT_APPROVAL_REQUIRED,
+                status_code=403,
+                message="This machine is already enrolled; an administrator must "
+                "approve the re-enrollment from the console",
             )
         # Re-enrollment of a known identity: a changed hardware anchor is a
         # guard-rail signal (reinstall vs token theft / clone).
@@ -516,6 +555,8 @@ async def enroll(
         machine.needs_verification = True
     machine.token_hash = security.hash_token(token)
     machine.token_issued_at = utcnow()
+    machine.reenroll_requested_at = None
+    machine.reenroll_requested_ip = None
     # A rotation the previous agent left half-done must not leave a second
     # token valid next to the one minted here.
     token_rotation.reset_rotation(machine)

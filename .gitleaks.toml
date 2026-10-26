@@ -1,0 +1,11 @@
+# gitleaks (CI, workflow security.yml) : règles par défaut, plus les valeurs
+# factices des tests, qui ressemblent à des secrets sans en être.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Valeurs de test, sans valeur réelle"
+paths = [
+  '''^backend/tests/''',
+  '''^deploy/\.env\.example$''',
+]

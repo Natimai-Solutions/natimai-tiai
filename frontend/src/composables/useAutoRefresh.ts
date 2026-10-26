@@ -32,6 +32,12 @@ export interface AutoRefresh {
   refreshing: Ref<boolean>;
   /** When the last refresh succeeded; null until the first one does. */
   lastRefreshedAt: Ref<Date | null>;
+  /**
+   * What the last refresh failed with; null once one succeeds. Kept even
+   * though failures are swallowed: a page that has *never* loaded must say so,
+   * or a down API reads as an empty parc.
+   */
+  lastError: Ref<unknown>;
   /** Refresh now, and restart the countdown so the next tick is a full period away. */
   refreshNow: () => Promise<void>;
   /** Stop polling. Called for you when the component's scope is disposed. */
@@ -66,6 +72,7 @@ export function useAutoRefresh(
   const intervalMs = options.intervalMs ?? AUTO_REFRESH_INTERVAL_MS;
   const refreshing = ref(false);
   const lastRefreshedAt = ref<Date | null>(null);
+  const lastError = ref<unknown>(null);
 
   // Captured rather than read at each use: there is none under the unit tests,
   // which run in node.
@@ -94,8 +101,10 @@ export function useAutoRefresh(
       try {
         await refresh();
         lastRefreshedAt.value = new Date();
-      } catch {
-        // Deliberate: see the doc comment.
+        lastError.value = null;
+      } catch (e) {
+        // Not rethrown: see the doc comment. Recorded for the page to decide.
+        lastError.value = e;
       } finally {
         refreshing.value = false;
         inFlight = null;
@@ -157,5 +166,5 @@ export function useAutoRefresh(
   doc?.addEventListener('visibilitychange', onVisibilityChange);
   onScopeDispose(stop);
 
-  return { refreshing, lastRefreshedAt, refreshNow, stop };
+  return { refreshing, lastRefreshedAt, lastError, refreshNow, stop };
 }

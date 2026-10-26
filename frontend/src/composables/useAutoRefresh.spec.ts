@@ -110,6 +110,23 @@ describe('useAutoRefresh', () => {
     dispose();
   });
 
+  it('records the last failure, and clears it on the next success', async () => {
+    // A page that never loaded must be able to tell « no data » from « no API ».
+    const error = new Error('502');
+    const refresh = vi.fn().mockRejectedValueOnce(error).mockResolvedValue(undefined);
+    const { value, dispose } = inScope(() => useAutoRefresh(refresh, { intervalMs: 1000 }));
+
+    await value.refreshNow();
+    expect(value.lastError.value).toBe(error);
+    expect(value.lastRefreshedAt.value).toBeNull();
+
+    await value.refreshNow();
+    expect(value.lastError.value).toBeNull();
+    expect(value.lastRefreshedAt.value).toBeInstanceOf(Date);
+
+    dispose();
+  });
+
   it('never overlaps two refreshes', async () => {
     let release: (() => void) | undefined;
     const refresh = vi.fn(

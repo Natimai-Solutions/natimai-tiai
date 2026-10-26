@@ -4,7 +4,7 @@
       <q-card-section class="row items-center q-pb-none">
         <div>
           <div class="text-h6">Exporter le parc</div>
-          <div class="text-caption text-grey">
+          <div class="text-caption text-muted">
             {{ countLabel }} — les filtres de la liste s'appliquent, pas la pagination.
           </div>
         </div>
@@ -30,6 +30,7 @@
           <div class="text-subtitle2 q-mb-xs">Colonnes disponibles</div>
           <q-input
             v-model="filter"
+            aria-label="Rechercher une colonne"
             dense
             outlined
             clearable
@@ -56,7 +57,7 @@
                 </q-item>
               </template>
               <q-item v-if="!availableSections.length">
-                <q-item-section class="text-grey">Aucune colonne ne correspond.</q-item-section>
+                <q-item-section class="text-muted">Aucune colonne ne correspond.</q-item-section>
               </q-item>
             </q-list>
           </q-scroll-area>
@@ -85,6 +86,7 @@
                 <q-item-section side>
                   <div class="row no-wrap">
                     <q-btn
+                      aria-label="Monter la colonne"
                       flat
                       dense
                       round
@@ -94,6 +96,7 @@
                       @click="move(index, -1)"
                     />
                     <q-btn
+                      aria-label="Descendre la colonne"
                       flat
                       dense
                       round
@@ -102,12 +105,20 @@
                       :disable="index === selected.length - 1"
                       @click="move(index, 1)"
                     />
-                    <q-btn flat dense round size="sm" icon="close" @click="remove(index)" />
+                    <q-btn
+                      aria-label="Retirer la colonne"
+                      flat
+                      dense
+                      round
+                      size="sm"
+                      icon="close"
+                      @click="remove(index)"
+                    />
                   </div>
                 </q-item-section>
               </q-item>
               <q-item v-if="!selected.length">
-                <q-item-section class="text-grey">
+                <q-item-section class="text-muted">
                   Aucune colonne : choisissez-en à gauche, ou revenez aux colonnes par défaut.
                 </q-item-section>
               </q-item>
@@ -294,6 +305,6 @@ async function doExport() {
 
 <style scoped>
 .bordered-list {
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--ti-border);
 }
 </style>

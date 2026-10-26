@@ -7,6 +7,7 @@ from sqlalchemy import delete
 from sqlmodel import col, desc, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.net import current_client_ip
 from app.features.audit.models import AuditEntry
 
 
@@ -18,6 +19,7 @@ def record(
     resource_type: str,
     resource_id: str,
     details: dict[str, Any] | None = None,
+    ip: str | None = None,
 ) -> None:
     """Queue one audit entry on the caller's transaction.
 
@@ -33,6 +35,9 @@ def record(
             resource_type=resource_type,
             resource_id=resource_id,
             details=details or {},
+            # The request's address unless the caller knows better: every
+            # console and agent action gets one without each call site asking.
+            ip=ip if ip is not None else current_client_ip.get(),
         )
     )
 

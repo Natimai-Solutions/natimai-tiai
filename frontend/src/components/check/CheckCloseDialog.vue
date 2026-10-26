@@ -4,7 +4,7 @@
   <q-dialog :model-value="modelValue" @update:model-value="(v) => emit('update:modelValue', v)">
     <q-card style="width: 480px; max-width: 95vw">
       <q-card-section class="text-h6">Clore la vérification</q-card-section>
-      <q-card-section v-if="check?.instructions" class="q-pt-none text-body2 text-grey-8">
+      <q-card-section v-if="check?.instructions" class="q-pt-none text-body2 text-muted">
         Consignes : {{ check.instructions }}
       </q-card-section>
       <q-form @submit="submit">

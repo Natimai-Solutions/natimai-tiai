@@ -3,7 +3,7 @@
     <q-card flat bordered>
       <q-card-section class="text-subtitle1">
         Mémoire
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           {{ ramLabel(machine.ram_total_mb, machine.ram_slots_used, machine.ram_slots_total) }}
         </div>
       </q-card-section>
@@ -13,18 +13,18 @@
           <q-item-section>
             <q-item-label>
               {{ m.slot }}
-              <span class="text-grey"> — {{ sizeLabel(m.capacity_mb) }}</span>
+              <span class="text-muted"> — {{ sizeLabel(m.capacity_mb) }}</span>
             </q-item-label>
             <q-item-label caption>
               {{ [m.type, m.form_factor].filter(Boolean).join(' ') || 'Type inconnu' }}
               <span v-if="m.speed_mhz"> — {{ m.speed_mhz }} MHz</span>
               <span v-if="m.manufacturer"> — {{ m.manufacturer }}</span>
-              <span v-if="m.serial" class="text-grey"> — n° {{ m.serial }}</span>
+              <span v-if="m.serial" class="text-muted"> — n° {{ m.serial }}</span>
             </q-item-label>
           </q-item-section>
         </q-item>
       </q-list>
-      <q-card-section v-else class="text-caption text-grey">
+      <q-card-section v-else class="text-caption text-muted">
         Aucune barrette relevée sur ce poste.
       </q-card-section>
     </q-card>

@@ -29,6 +29,8 @@ class ErrorCode(enum.StrEnum):
     AUTH_CREDENTIALS_INVALID = "auth.credentials.invalid"
     AUTH_REQUIRED = "auth.required"
     AUTH_PERMISSION_DENIED = "auth.permission.denied"
+    # Too many failed logins in a row: the account waits LOGIN_LOCKOUT_MINUTES.
+    AUTH_ACCOUNT_LOCKED = "auth.account.locked"
     # Refused because it would hand out, or reach, more than the caller holds:
     # a permission they lack, the administrators' group, or an account that is
     # more powerful than they are.
@@ -48,6 +50,7 @@ class ErrorCode(enum.StrEnum):
     MACHINE_NOT_FOUND = "machine.not_found"
     MACHINE_MERGE_SELF = "machine.merge.self"
     MACHINE_ENROLLMENT_REVOKED = "machine.enrollment.revoked"
+    MACHINE_ENROLLMENT_APPROVAL_REQUIRED = "machine.enrollment.approval_required"
     USER_NOT_FOUND = "user.not_found"
     USER_EMAIL_TAKEN = "user.email.taken"
     USER_SELF_FORBIDDEN = "user.self.forbidden"

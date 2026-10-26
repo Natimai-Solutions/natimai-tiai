@@ -8,7 +8,9 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api import api_router
 from app.api.routes.health import router as health_router
 from app.core.config import settings
+from app.core.db import assert_not_superuser
 from app.core.errors import register_error_handlers
+from app.core.net import ClientIPMiddleware
 from app.features.setting import email_policy
 
 # uvicorn wires handlers for its own loggers only: without this, the app's
@@ -22,7 +24,11 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Read the console's mail settings once, before the first request.
+    """Check the database role, then read the console's mail settings once,
+    before the first request.
+
+    The role check is not best effort: a superuser connection outside `local`
+    must stop the deploy, not be discovered after an incident.
 
     ``queue_email`` decides synchronously whether mail is configured, off the
     last policy this process resolved; without this load, a password reset
@@ -35,6 +41,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     from app.core.db import engine
 
+    await assert_not_superuser()
     try:
         async with AsyncSession(engine) as session:
             await email_policy.load_stored(session)
@@ -53,6 +60,9 @@ app = FastAPI(
 
 # Standardized error envelope for every error response (plan §2.14).
 register_error_handlers(app)
+
+# Every request's client address, for the audit log (app.core.net).
+app.add_middleware(ClientIPMiddleware)
 
 if settings.all_cors_origins:
     app.add_middleware(

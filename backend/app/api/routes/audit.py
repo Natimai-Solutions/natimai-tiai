@@ -27,6 +27,7 @@ class AuditEntryOut(BaseModel):
     action: str
     resource_type: str
     resource_id: str
+    ip: str | None
     details: dict[str, Any]
 
     model_config = {"from_attributes": True}

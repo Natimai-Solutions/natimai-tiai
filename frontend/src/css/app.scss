@@ -1,1 +1,47 @@
 // Global styles for the Tiai console.
+
+// Themable surfaces (light and dark), shared with natimai-paie.
+@import 'surfaces.scss';
+
+// Motion is decoration here: an operator who asked the system for less of it
+// gets none — slide-downs, tab panels and ripples included.
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .q-ripple {
+    display: none !important;
+  }
+}
+
+// A name in a table that opens its fiche. The row stays clickable for the
+// mouse; the link is what Tab reaches and what opens in a new tab.
+.row-link {
+  color: inherit;
+  text-decoration: none;
+
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+  }
+}
+
+// A card that is a link (dashboard figures): no link styling, a visible focus.
+.card-link {
+  display: block;
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 4px;
+
+  &:focus-visible {
+    outline: 2px solid var(--q-primary);
+    outline-offset: 2px;
+  }
+}

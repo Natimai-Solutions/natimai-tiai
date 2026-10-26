@@ -5,7 +5,7 @@
     v-if="count && (actionGroups.length || canPlace || canCheck)"
     class="row items-center q-mb-sm"
   >
-    <div class="text-caption text-grey q-mr-md">{{ count }} sélectionné(s)</div>
+    <div class="text-caption text-muted q-mr-md">{{ count }} sélectionné(s)</div>
     <q-btn
       v-if="canPlace"
       flat
