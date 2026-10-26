@@ -86,12 +86,16 @@ jobs:
       # standard comprise : une alerte ici vise le binaire publié, qui est
       # compilé avec cette même version de Go (release.yml). Deux passes, car
       # le vrai code de l'agent est derrière l'étiquette de build windows.
+      # L'outil est installé avant, pour le runner : avec `go run` sous
+      # GOOS=windows, il serait compilé en .exe et ne pourrait pas s'exécuter.
+      - name: Installer govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
       - name: govulncheck (windows)
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        run: govulncheck ./...
         env:
           GOOS: windows
       - name: govulncheck (linux, stubs de dev)
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        run: govulncheck ./...
 
   image:
     name: Image backend (Trivy)
