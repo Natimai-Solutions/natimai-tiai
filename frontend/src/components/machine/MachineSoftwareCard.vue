@@ -3,7 +3,7 @@
     <q-card-section class="text-subtitle1 row items-center">
       <div>
         Logiciels installés
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           Lus dans le registre du poste, comme « Applications et fonctionnalités ». Les correctifs
           Windows n'y figurent pas : ils ont leur propre carte.
         </div>
@@ -27,7 +27,15 @@
       no-data-label="Aucun logiciel relevé — l'inventaire logiciel est peut-être désactivé sur ce poste."
     >
       <template #top-right>
-        <q-input v-model="filter" dense outlined clearable debounce="200" placeholder="Filtrer…">
+        <q-input
+          v-model="filter"
+          aria-label="Filtrer les logiciels"
+          dense
+          outlined
+          clearable
+          debounce="200"
+          placeholder="Filtrer…"
+        >
           <template #prepend><q-icon name="search" /></template>
         </q-input>
       </template>
@@ -37,6 +45,7 @@
           <!-- The drill-down that makes an inventory a fleet tool: from one
                poste's program to every poste that carries it. -->
           <q-btn
+            aria-label="Voir les postes qui l'ont"
             flat
             dense
             round

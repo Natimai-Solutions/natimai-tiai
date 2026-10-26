@@ -123,7 +123,9 @@ docker compose up -d
   `deploy/.env`.
 - Hors `ENVIRONMENT=local`, le backend **refuse de démarrer** si `SECRET_KEY`,
   `ENROLLMENT_SECRET`, `POSTGRES_PASSWORD` ou `FIRST_ADMIN_PASSWORD` est vide ou
-  commence encore par `changeme`.
+  commence encore par `changeme`, ou si `SECRET_KEY` fait moins de 32 caractères
+  ou `ENROLLMENT_SECRET` moins de 16 (`openssl rand -hex 32` en produit un).
+  `ENVIRONMENT` absent vaut `production` : un `.env` qui l'oublie reste gardé.
 - Les postes du domaine font déjà confiance à l'AC racine : aucun import de
   certificat n'est nécessaire côté agent.
 
@@ -184,19 +186,20 @@ Quatre valeurs du `.env` doivent être générées aléatoirement — format rec
 |---|---|---|
 | `SECRET_KEY` | Signature des JWT console ; clé dont est dérivée celle qui chiffre les identifiants e-mail enregistrés dans la console | Tout JWT devient forgeable → accès admin |
 | `ENROLLMENT_SECRET` | En-tête d'enrôlement des agents | N'importe qui peut enrôler une machine |
-| `POSTGRES_PASSWORD` | Compte PostgreSQL | Accès direct à la base |
+| `POSTGRES_PASSWORD` | Compte d'administration PostgreSQL (superutilisateur) | Accès total au serveur de base |
+| `POSTGRES_APP_PASSWORD` | Rôle applicatif PostgreSQL, celui du backend | Accès aux tables de Tia'i |
 | `FIRST_ADMIN_PASSWORD` | Premier compte console | Accès admin à la console |
 
 ```bash
 # Linux / macOS / Git Bash
-for v in SECRET_KEY ENROLLMENT_SECRET POSTGRES_PASSWORD FIRST_ADMIN_PASSWORD; do
+for v in SECRET_KEY ENROLLMENT_SECRET POSTGRES_PASSWORD POSTGRES_APP_PASSWORD FIRST_ADMIN_PASSWORD; do
   echo "$v=$(openssl rand -hex 32)"
 done
 ```
 
 ```powershell
 # Windows — générateur cryptographique .NET, pas Get-Random
-'SECRET_KEY','ENROLLMENT_SECRET','POSTGRES_PASSWORD','FIRST_ADMIN_PASSWORD' | ForEach-Object {
+'SECRET_KEY','ENROLLMENT_SECRET','POSTGRES_PASSWORD','POSTGRES_APP_PASSWORD','FIRST_ADMIN_PASSWORD' | ForEach-Object {
     $b = New-Object byte[] 32
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
     "$_=" + [System.BitConverter]::ToString($b).Replace('-','').ToLower()
@@ -249,8 +252,8 @@ Il n'est jamais committé.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `ENVIRONMENT` | `local` | `local` / `staging` / `production`. Hors `local` : garde anti-placeholder + masquage des erreurs 500 |
-| `SECRET_KEY` | `changeme` | Signature des JWT console, et dérivation de la clé qui chiffre les identifiants e-mail enregistrés dans la console. **La changer oblige à ressaisir ces identifiants** (voir « Alertes e-mail ») |
+| `ENVIRONMENT` | `production` | `local` / `staging` / `production`. Hors `local` : garde anti-placeholder et longueur minimale des secrets + masquage des erreurs 500. Absent, il vaut `production` : un `.env` qui l'oublie reste gardé |
+| `SECRET_KEY` | `changeme` | 32 caractères minimum hors `local`. Signature des JWT console, et dérivation de la clé qui chiffre les identifiants e-mail enregistrés dans la console. **La changer oblige à ressaisir ces identifiants** (voir « Alertes e-mail ») |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Durée de vie du jeton d'accès console (1 à 1 440). Court à dessein : c'est lui que la page garde en mémoire et envoie à chaque appel, et la console le renouvelle seule par sa session. Ancien défaut : 480 — une valeur `480` restée dans un `.env` reste acceptée mais n'a plus de raison d'être |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Une session console non utilisée pendant ce nombre de jours se ferme. **Glissante** : chaque renouvellement repousse l'échéance, un opérateur qui ouvre la console chaque semaine ne se reconnecte pas |
 | `SESSION_MAX_DAYS` | `30` | Durée **absolue** d'une session, comptée depuis la connexion, glissement compris : au-delà, reconnexion obligatoire. Borne ce que vaut un jeton de session volé |
@@ -258,11 +261,15 @@ Il n'est jamais committé.
 | `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée à tout mot de passe |
 | `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié » |
 | `CONSOLE_BASE_URL` | `https://<TIAI_SERVER_NAME>` | URL publique de la console, dans les liens des e-mails (réinitialisation, fiche d'un poste). À renseigner seulement si la console est jointe sous une autre URL (autre port, proxy devant Caddy). Si ni elle ni `TIAI_SERVER_NAME` n'est connue, aucun e-mail de réinitialisation n'est envoyé |
-| `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste |
+| `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste — 16 caractères minimum hors `local` |
+| `ENROLLMENT_SECRET_PREVIOUS` | *(vide)* | Ancien secret, encore accepté pendant une rotation (cf. « Enrôlement : approbation et rotation du secret ») |
+| `ENROLLMENT_REENROLL_REQUIRES_APPROVAL` | `true` | Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur |
+| `LOGIN_MAX_FAILED_ATTEMPTS` / `LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Verrouillage d'un compte après N échecs de connexion consécutifs, pour cette durée. Une réinitialisation du mot de passe le lève |
 | `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | Compte d'administration (superutilisateur) : initialisation du volume, sauvegardes |
+| `POSTGRES_APP_USER` / `POSTGRES_APP_PASSWORD` | `tiai_app` / — | Rôle applicatif du backend et du worker, sans superutilisateur (cf. § « Rôle applicatif PostgreSQL »). Le compose les passe au backend comme `POSTGRES_USER` / `POSTGRES_PASSWORD` |
 | `POSTGRES_POOL_SIZE` / `POSTGRES_MAX_OVERFLOW` / `POSTGRES_POOL_TIMEOUT` | `20` / `10` / `30` | Pool async partagé backend + worker |
 | `SIGNATURE_MAX_AGE_DAYS` | `3` | Seuil « signatures à jour », en jours. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage ; un changement est appliqué aussitôt à tout le parc, postes éteints compris |
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif », en jours sans contact. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
@@ -309,6 +316,14 @@ sont passées en minuscules — et **s'interrompt sans rien modifier** si deux
 comptes ne diffèrent que par la casse de leur adresse, en les nommant : renommer
 ou supprimer l'un des deux (page Utilisateurs de la version précédente, ou en
 base), puis relancer.
+
+Après `LOGIN_MAX_FAILED_ATTEMPTS` échecs consécutifs (5), un compte est
+**verrouillé** `LOGIN_LOCKOUT_MINUTES` minutes (15) : la limitation de débit
+plafonne une adresse, le verrouillage plafonne un compte, quel que soit le
+nombre d'adresses qui l'essaient. La page Utilisateurs affiche « Verrouillé » ;
+une réinitialisation du mot de passe par un administrateur lève le verrou. Le
+verrouillage et la réinitialisation figurent au journal d'audit, chaque entrée
+avec l'adresse source de la requête.
 
 Pour **déconnecter tout le monde** d'un coup (clé `SECRET_KEY` divulguée, poste
 compromis), changer `SECRET_KEY` puis fermer toutes les sessions :
@@ -447,6 +462,37 @@ Les liens des e-mails (fiche d'un poste, vos tâches) pointent sur
 
 ---
 
+## Rôle applicatif PostgreSQL
+
+Le backend et le worker se connectent avec un rôle **sans superutilisateur**,
+propriétaire des seules tables de Tia'i (`POSTGRES_APP_USER`, `tiai_app` par
+défaut). Le compte `POSTGRES_USER` de l'image, superutilisateur, ne sert plus
+qu'à l'initialisation et aux sauvegardes. Un superutilisateur peut lire et
+écrire n'importe quel fichier du serveur de base et y lancer un programme : une
+injection SQL ou une dépendance compromise côté backend vaudrait la main sur
+l'hôte de la base. Hors `ENVIRONMENT=local`, le backend et le worker
+**refusent de démarrer** s'ils se retrouvent superutilisateurs.
+
+**Installation neuve** : renseigner `POSTGRES_APP_PASSWORD` dans le `.env` ;
+le script [deploy/db/app-role.sh](deploy/db/app-role.sh) crée le rôle à la
+première initialisation du volume.
+
+**Base existante** (montée depuis une version sans ce rôle), une seule fois :
+
+```bash
+cd deploy
+# 1. Ajouter POSTGRES_APP_PASSWORD au .env (openssl rand -hex 32).
+# 2. Recréer db pour qu'il voie la variable, puis créer le rôle et lui donner
+#    la base et ses tables (le script est idempotent) :
+docker compose up -d db
+docker compose exec db sh /docker-entrypoint-initdb.d/10-app-role.sh
+# 3. Lever le reste de la stack, qui se connecte désormais avec ce rôle :
+docker compose pull && docker compose up -d
+```
+
+Sans `POSTGRES_APP_PASSWORD`, `docker compose up` s'arrête avec un message qui
+renvoie ici.
+
 ## Sauvegardes et restauration
 
 Toute la mémoire de Tia'i — postes, historique des menaces, commandes (qui a
@@ -485,9 +531,14 @@ cd deploy
 docker compose stop backend worker      # plus personne n'écrit dans la base
 docker compose exec db-backup sh -c \
   'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -h db -U "$POSTGRES_USER" \
-   -d "$POSTGRES_DB" --clean --if-exists /backups/tiai-AAAAMMJJ-HHMMSS.dump'
+   -d "$POSTGRES_DB" --clean --if-exists --no-owner --role="$POSTGRES_APP_USER" \
+   /backups/tiai-AAAAMMJJ-HHMMSS.dump'
 docker compose start backend worker
 ```
+
+`--no-owner --role` rend les objets restaurés au rôle applicatif, y compris
+depuis un dump antérieur à ce rôle : sans eux, les tables reviendraient au
+superutilisateur et le backend ne pourrait plus y écrire.
 
 Au redémarrage, le backend rejoue les migrations Alembic si le dump vient
 d'une version plus ancienne du schéma — restaurer un dump d'hier après une
@@ -538,6 +589,10 @@ docker compose ps                   # tous les services « healthy » en 2 min
 ```
 
 Le backend rejoue les migrations Alembic à son démarrage.
+
+> **Montée vers la version qui introduit le rôle applicatif PostgreSQL** : créer
+> le rôle avant l'étape 2 (§ « Rôle applicatif PostgreSQL »). Sans lui, le
+> backend refuse de démarrer.
 
 **Revenir en arrière** : remettre l'ancienne valeur de `TIAI_VERSION` et
 relancer `docker compose up -d` — tant que la version quittée n'a pas migré la
@@ -970,6 +1025,34 @@ créer, est restreint.
 L'agent s'auto-enrôle au premier démarrage, stocke le token reçu, puis n'utilise
 plus que celui-ci. `uninstall` ne retire que l'enregistrement du service : le
 binaire, `C:\ProgramData\Tiai` et `HKLM\SOFTWARE\Tiai` restent en place.
+
+### Enrôlement : approbation et rotation du secret
+
+Le secret d'enrôlement est lisible sur chaque poste (registre ou fichier de la
+GPO). Il permet de **créer** un poste, jamais de **prendre la place** d'un poste
+existant : quand un `machine_uuid` qui détient déjà un token valide redemande
+à s'enrôler, le serveur ne délivre rien. La demande est notée (date, adresse
+source), le token en place continue de fonctionner, et la fiche du poste
+affiche un bandeau « Ré-enrôlement demandé ».
+
+- **Poste réinstallé** (image refaite, agent réinstallé, token perdu) : le
+  bandeau propose **Autoriser le ré-enrôlement**. L'ancien token est annulé et
+  l'agent, qui retente de lui-même, revient avec un token neuf dans les minutes
+  qui suivent.
+- **Demande inattendue** (adresse inconnue, poste qui fonctionne normalement) :
+  ne rien autoriser. Le poste réel garde son token ; changer le secret
+  d'enrôlement coupe court aux nouvelles tentatives.
+
+Chaque demande et chaque autorisation figurent au journal d'audit.
+`ENROLLMENT_REENROLL_REQUIRES_APPROVAL=false` rétablit l'ancien comportement
+(le secret suffit) pour un parc ré-imagé très souvent, en connaissance du
+risque.
+
+**Changer le secret** sans interrompre les enrôlements : mettre le nouveau dans
+`ENROLLMENT_SECRET`, l'ancien dans `ENROLLMENT_SECRET_PREVIOUS`, redémarrer
+le backend, pousser le nouveau par GPO. Les deux sont acceptés le temps que le
+parc le reçoive ; vider ensuite `ENROLLMENT_SECRET_PREVIOUS`. Les postes déjà
+enrôlés ne sont pas concernés : ils n'utilisent que leur token.
 
 ### Rotation des tokens agents
 

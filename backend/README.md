@@ -48,11 +48,15 @@ Ajouter une dépendance : `uv add <pkg>` (ou `uv add --dev <pkg>` pour le groupe
 
 **Agent** (auth : secret d'enrôlement puis token par poste)
 - `POST /api/v1/agent/enroll` — en-tête `X-Enrollment-Secret`, renvoie le token du poste.
+  Un `machine_uuid` qui détient déjà un token valide reçoit un 403
+  `machine.enrollment.approval_required` : la demande attend
+  `POST /api/v1/machines/{id}/allow-reenroll` depuis la console.
 - `POST /api/v1/agent/heartbeat` — `Authorization: Bearer <token>`, renvoie les commandes en attente, et `new_token` quand le token est à renouveler (voir *Rotation des tokens agents*).
 - `POST /api/v1/agent/commands/{id}/result` — résultat d'exécution.
 
 **Console** (auth : JWT utilisateur adossé à une session serveur, cf. *Sessions de la console*)
 - `POST /api/v1/auth/login` — email + mot de passe (OAuth2 password) : ouvre une session, renvoie le jeton d'accès et pose le jeton de session en cookie.
+  423 `auth.account.locked` après 5 échecs consécutifs (15 min).
 - `POST /api/v1/auth/refresh` — échange le cookie contre un nouveau jeton d'accès (et un nouveau cookie) ; `POST /api/v1/auth/logout` ferme la session courante.
 - `GET /api/v1/auth/sessions`, `DELETE /api/v1/auth/sessions/{id}` — les sessions ouvertes du compte, et la fermeture de l'une d'elles (audit `auth.session_revoked`).
 - `GET  /api/v1/auth/me` — utilisateur courant, ses groupes et ses permissions.

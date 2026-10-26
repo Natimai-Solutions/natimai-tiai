@@ -14,6 +14,16 @@ def parse_list(v: Any) -> list[str] | str:
     raise ValueError(v)
 
 
+# Minimum lengths enforced outside `local`. SECRET_KEY signs every console JWT
+# (HS256 wants 32 bytes of key); the enrollment secret only opens /agent/enroll,
+# behind a rate limit, but is shared by the whole parc.
+SECRET_MIN_LENGTHS = {
+    "SECRET_KEY": 32,
+    "ENROLLMENT_SECRET": 16,
+    "ENROLLMENT_SECRET_PREVIOUS": 16,
+}
+
+
 class Settings(BaseSettings):
     """Application settings, loaded from environment / .env."""
 
@@ -23,7 +33,10 @@ class Settings(BaseSettings):
 
     PROJECT_NAME: str = "Tia'i"
     API_V1_STR: str = "/api/v1"
-    ENVIRONMENT: Literal["local", "staging", "production"] = "local"
+    # Production unless told otherwise: a deploy `.env` that forgets this line
+    # must get the secret guard below, not skip it. Dev and tests opt out
+    # explicitly (docker-compose.dev.yml, tests/conftest.py).
+    ENVIRONMENT: Literal["local", "staging", "production"] = "production"
     SECRET_KEY: str = "changeme"
 
     # --- Console auth (admin users) ---
@@ -80,6 +93,15 @@ class Settings(BaseSettings):
     # --- Agent enrollment ---
     # Shared secret deployed by GPO; only authorizes POST /agent/enroll.
     ENROLLMENT_SECRET: str = "changeme-enrollment-secret"
+    # The secret being retired, still accepted while the GPO pushes the new one
+    # (both are valid at once; unset it once every poste has the new value).
+    ENROLLMENT_SECRET_PREVIOUS: str | None = None
+    # A machine_uuid that already holds a live token cannot get a new one with
+    # the fleet secret alone: the request waits for an administrator. Without
+    # this, anyone holding the secret — readable on every poste — could take
+    # over any poste's identity and feed the console its state. Turn off only
+    # on a parc that re-images often and accepts that risk.
+    ENROLLMENT_REENROLL_REQUIRES_APPROVAL: bool = True
     # Age, in days, past which a poste's token is renewed on its next
     # heartbeat — only for an agent that announces it can store a new one
     # (``supports_token_rotation``); an older agent keeps its token for life.
@@ -121,6 +143,11 @@ class Settings(BaseSettings):
     # limiters (app.core.ratelimit). Off only for a deployment whose operators
     # all arrive from one shared address (VPN, proxy) and lock each other out.
     RATE_LIMIT_ENABLED: bool = True
+    # Consecutive failed logins before an account is locked, and for how long.
+    # The rate limiter caps one address; this caps one account, whatever the
+    # number of addresses trying it.
+    LOGIN_MAX_FAILED_ATTEMPTS: int = Field(default=5, ge=1, le=100)
+    LOGIN_LOCKOUT_MINUTES: int = Field(default=15, ge=1, le=24 * 60)
 
     # --- CORS ---
     BACKEND_CORS_ORIGINS: Annotated[
@@ -449,19 +476,21 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _refuse_placeholder_secrets(self) -> Self:
+    def _refuse_weak_secrets(self) -> Self:
         """Fail fast outside `local` when a secret is empty or a placeholder.
 
         Guards against an incomplete deploy `.env`: booting production with
         `SECRET_KEY=changeme` would make every console JWT forgeable (plan §7).
         Placeholders in code defaults and deploy/.env.example all start with
-        "changeme".
+        "changeme". The two keys that gate access also have a minimum length:
+        `SECRET_KEY=secret` is no placeholder, and no better.
         """
         if self.ENVIRONMENT == "local":
             return self
         for name in (
             "SECRET_KEY",
             "ENROLLMENT_SECRET",
+            "ENROLLMENT_SECRET_PREVIOUS",
             "POSTGRES_PASSWORD",
             "FIRST_ADMIN_PASSWORD",
         ):
@@ -472,6 +501,14 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"{name} is empty or still a 'changeme' placeholder; refusing "
                     f"to start in {self.ENVIRONMENT} (see deploy/.env.example)"
+                )
+        for name, minimum in SECRET_MIN_LENGTHS.items():
+            secret: str | None = getattr(self, name)
+            if secret is not None and len(secret) < minimum:
+                raise ValueError(
+                    f"{name} must be at least {minimum} characters; refusing to "
+                    f"start in {self.ENVIRONMENT} (generate one with "
+                    f"`openssl rand -hex 32`)"
                 )
         return self
 

@@ -1,7 +1,7 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-md q-mb-md">
-      <div class="text-h5 col-auto">Logiciels du parc</div>
+      <h1 class="text-h5 q-my-none col-auto">Logiciels du parc</h1>
       <q-space />
       <div class="col-auto">
         <!-- Excel or CSV, as the fleet export offers: the same catalogue, and
@@ -44,6 +44,7 @@
       <q-card-section>
         <q-input
           v-model="search"
+          aria-label="Rechercher un logiciel"
           dense
           outlined
           clearable

@@ -4,7 +4,7 @@
        all of it read as a strip of look-alike icons stuck together, so each
        button carries a label and a colour of its own. -->
   <div class="row items-center q-col-gutter-md q-mb-sm">
-    <div class="text-h5 col-auto">Postes</div>
+    <h1 class="text-h5 q-my-none col-auto">Postes</h1>
     <q-space />
     <div class="col-auto">
       <q-btn
@@ -30,7 +30,7 @@
         <q-tooltip>Exporter le parc filtré (Excel ou CSV, colonnes au choix)</q-tooltip>
       </q-btn>
     </div>
-    <div v-if="lastRefreshedAt" class="text-caption text-grey col-auto">
+    <div v-if="lastRefreshedAt" class="text-caption text-muted col-auto">
       Actualisé à {{ lastRefreshedAt.toLocaleTimeString('fr-FR') }}
     </div>
     <div class="col-auto">

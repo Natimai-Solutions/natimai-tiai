@@ -14,7 +14,7 @@
     </q-card-section>
     <q-separator />
 
-    <q-card-section v-if="!items.length && !loading" class="text-grey">
+    <q-card-section v-if="!items.length && !loading" class="text-muted">
       Aucune intervention enregistrée sur ce poste.
     </q-card-section>
 

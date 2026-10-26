@@ -26,7 +26,17 @@
             {{ timeAgoLabel(props.row.last_seen) }}
           </q-tooltip>
         </q-icon>
-        {{ props.value || props.row.machine_uuid }}
+        <!-- The row opens on click; the name is also a link, so the fiche is
+             reachable with Tab and Enter, and opens in a new tab on demand. -->
+        <router-link
+          v-if="detailRoute"
+          :to="detailRoute(props.row, props.pageIndex)"
+          class="row-link"
+          @click.stop
+        >
+          {{ props.value || props.row.machine_uuid }}
+        </router-link>
+        <template v-else>{{ props.value || props.row.machine_uuid }}</template>
         <q-icon
           v-if="props.row.check_open"
           name="fact_check"
@@ -92,7 +102,7 @@
     </template>
     <template #body-cell-agent="props">
       <q-td :props="props">
-        <span :class="{ 'text-grey': !props.value }">{{ props.value ?? '—' }}</span>
+        <span :class="{ 'text-muted': !props.value }">{{ props.value ?? '—' }}</span>
         <q-icon
           v-if="isAgentOutdated(props.value, agentLatest)"
           name="system_update_alt"
@@ -107,7 +117,9 @@
     <template #body-cell-antivirus="props">
       <q-td :props="props">
         <q-badge :color="protectionColor(props.row.is_up_to_date)">
-          {{ antivirusLabel(props.row.av_product_name) }}
+          {{
+            protectionBadgeLabel(antivirusLabel(props.row.av_product_name), props.row.is_up_to_date)
+          }}
         </q-badge>
         <q-tooltip>{{ antivirusTooltip(props.row) }}</q-tooltip>
       </q-td>
@@ -153,7 +165,7 @@
             rounded
             style="width: 90px"
           />
-          <div class="text-caption text-grey">
+          <div class="text-caption text-muted">
             {{ sizeLabel(props.row.system_volume_free_mb) }} libres
           </div>
           <q-tooltip>
@@ -161,7 +173,7 @@
             {{ sizeLabel(props.row.system_volume_total_mb) }}
           </q-tooltip>
         </template>
-        <span v-else class="text-grey">—</span>
+        <span v-else class="text-muted">—</span>
       </q-td>
     </template>
     <template #body-cell-session="props">
@@ -174,8 +186,8 @@
     </template>
     <template #body-cell-usage="props">
       <q-td :props="props">
-        <span v-if="props.row.usage_hours === null" class="text-grey">récent</span>
-        <span v-else :class="{ 'text-grey': props.row.usage_hours === 0 }">
+        <span v-if="props.row.usage_hours === null" class="text-muted">récent</span>
+        <span v-else :class="{ 'text-muted': props.row.usage_hours === 0 }">
           {{ hoursLabel(props.row.usage_hours) }}
         </span>
         <q-tooltip>
@@ -195,6 +207,7 @@
 
 <script setup lang="ts">
 import type { QTableColumn, QTableProps } from 'quasar';
+import type { RouteLocationRaw } from 'vue-router';
 import type { Machine } from 'src/services/machines';
 import { maintenanceStateColor, maintenanceStateLabel } from 'src/services/maintenance';
 import { isAgentOutdated } from 'src/utils/agentVersion';
@@ -206,6 +219,7 @@ import {
   onlineColor,
   onlineIcon,
   onlineLabel,
+  protectionBadgeLabel,
   protectionColor,
   sessionColor,
   sessionLabel,
@@ -235,6 +249,8 @@ defineProps<{
   agentLatest: string | null;
   /** The usage window the server answered with, in days. */
   usageWindowDays: number;
+  /** Where a row's name links to (its fiche); without it, the name is text. */
+  detailRoute?: (row: Machine, index: number) => RouteLocationRaw;
 }>();
 
 const selected = defineModel<Machine[]>('selected', { required: true });

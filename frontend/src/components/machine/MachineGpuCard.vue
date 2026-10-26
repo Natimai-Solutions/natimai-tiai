@@ -18,7 +18,7 @@
           </q-item-section>
         </q-item>
       </q-list>
-      <q-card-section v-else class="text-caption text-grey">
+      <q-card-section v-else class="text-caption text-muted">
         Aucune carte graphique relevée sur ce poste.
       </q-card-section>
     </q-card>

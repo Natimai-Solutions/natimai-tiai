@@ -30,7 +30,7 @@ from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
-from app.core.db import engine
+from app.core.db import assert_not_superuser, engine
 from app.features import password_reset_retention
 from app.features.audit import crud as audit_crud
 from app.features.auth_session import crud as auth_session_crud
@@ -350,6 +350,7 @@ def mark_alive() -> None:
 
 
 async def main(stop: asyncio.Event) -> None:
+    await assert_not_superuser()
     jobs = build_jobs(utcnow(), await load_schedule())
     logger.info("Worker started: %d jobs, tick %ds", len(jobs), POLL_SECONDS)
     while not stop.is_set():

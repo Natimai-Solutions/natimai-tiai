@@ -12,6 +12,8 @@ import {
   encryptionColor,
   encryptionLabel,
   formatDate,
+  protectionBadgeLabel,
+  documentTitle,
   formatDateTime,
   freePercent,
   ipAddressLabel,
@@ -512,6 +514,10 @@ describe('inventory formatting', () => {
     expect(formatDate('2024-01-15')).toBe('15/01/2024');
     expect(formatDate(null)).toBe('—');
     expect(formatDate('not a date')).toBe('—');
+    // A pure date is a calendar day, whatever the zone: Papeete is UTC-10 and
+    // used to see the day before (the suite runs in Pacific/Tahiti).
+    expect(formatDate('2024-03-01')).toBe('01/03/2024');
+    expect(formatDate('2024-02-30')).toBe('—');
   });
 
   it('names a chassis in words', () => {
@@ -526,5 +532,20 @@ describe('inventory formatting', () => {
     expect(nicTypeLabel('wifi')).toBe('Wi-Fi');
     expect(nicTypeLabel('ethernet')).toBe('Ethernet');
     expect(nicTypeLabel(null)).toBe('—');
+  });
+});
+
+describe('protectionBadgeLabel', () => {
+  it('spells out a state the colour alone used to carry', () => {
+    expect(protectionBadgeLabel('Windows Defender', true)).toBe('Windows Defender');
+    expect(protectionBadgeLabel('Windows Defender', false)).toBe('Windows Defender · non à jour');
+    expect(protectionBadgeLabel('Windows Defender', null)).toBe('Windows Defender · état inconnu');
+  });
+});
+
+describe('documentTitle', () => {
+  it('names the page, then the product', () => {
+    expect(documentTitle('Postes')).toBe("Postes — Tia'i");
+    expect(documentTitle(undefined)).toBe("Tia'i");
   });
 });

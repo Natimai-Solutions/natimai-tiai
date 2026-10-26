@@ -1,7 +1,7 @@
 <template>
   <MachineInfoCard title="Matériel" :caption="caption" :rows="rows">
     <template #side>
-      <q-badge v-if="machine.hw_is_virtual" color="blue-grey" class="q-ml-sm">
+      <q-badge v-if="machine.hw_is_virtual" color="blue-grey-8" class="q-ml-sm">
         {{ machine.hw_hypervisor || 'Machine virtuelle' }}
       </q-badge>
     </template>

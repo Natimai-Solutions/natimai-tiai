@@ -188,6 +188,12 @@ async def test_main_marks_alive_after_a_tick(tmp_path, monkeypatch):
         return None
 
     monkeypatch.setattr(worker, "load_schedule", no_schedule)
+
+    async def role_ok() -> None:
+        return None
+
+    # The role check reads the database; this test runs without one.
+    monkeypatch.setattr(worker, "assert_not_superuser", role_ok)
     stop = asyncio.Event()
 
     async def stop_after_first_tick() -> None:

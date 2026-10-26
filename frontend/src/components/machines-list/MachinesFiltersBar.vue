@@ -2,6 +2,7 @@
   <div class="row items-center q-col-gutter-md q-mb-sm">
     <div class="col-12 col-sm">
       <q-input
+        aria-label="Rechercher un poste"
         :model-value="modelValue.search"
         dense
         outlined

@@ -3,14 +3,14 @@
     <!-- The five facts read on the way to an action, one glance each. -->
     <q-card-section class="row q-col-gutter-md">
       <div class="col-6 col-sm-4 col-md">
-        <div class="text-caption text-grey">Antivirus</div>
+        <div class="text-caption text-muted">Antivirus</div>
         <q-badge :color="protectionColor(machine.is_up_to_date)" class="q-mt-xs">
           {{ antivirusLabel(machine.av_product_name) }}
         </q-badge>
         <div class="text-caption q-mt-xs">{{ protectionLabel(machine.is_up_to_date) }}</div>
       </div>
       <div class="col-6 col-sm-4 col-md">
-        <div class="text-caption text-grey">Windows Update</div>
+        <div class="text-caption text-muted">Windows Update</div>
         <q-badge :color="wuPendingColor(machine.wu_pending_count)" class="q-mt-xs">
           {{ wuPendingLabel(machine.wu_pending_count) }}
         </q-badge>
@@ -28,7 +28,7 @@
         </div>
       </div>
       <div class="col-6 col-sm-4 col-md">
-        <div class="text-caption text-grey">Disque système</div>
+        <div class="text-caption text-muted">Disque système</div>
         <template v-if="machine.system_volume_total_mb">
           <q-linear-progress
             :value="usedRatio"
@@ -42,10 +42,10 @@
             {{ sizeLabel(machine.system_volume_free_mb) }} libres ({{ free }} %)
           </div>
         </template>
-        <div v-else class="text-caption text-grey q-mt-xs">Non relevé</div>
+        <div v-else class="text-caption text-muted q-mt-xs">Non relevé</div>
       </div>
       <div class="col-6 col-sm-4 col-md">
-        <div class="text-caption text-grey">Session</div>
+        <div class="text-caption text-muted">Session</div>
         <q-badge :color="sessionColor(machine.session_user_present)" class="q-mt-xs">
           {{ sessionLabel(machine.session_user_present, machine.session_username) }}
         </q-badge>
@@ -54,7 +54,7 @@
         </div>
       </div>
       <div class="col-6 col-sm-4 col-md">
-        <div class="text-caption text-grey">Dernier contact</div>
+        <div class="text-caption text-muted">Dernier contact</div>
         <div class="q-mt-xs">
           <q-icon
             :name="onlineIcon(machine.is_online)"
@@ -90,7 +90,7 @@
         </q-item-section>
       </q-item>
     </q-list>
-    <q-card-section v-else class="row items-center text-positive">
+    <q-card-section v-else class="row items-center text-ok">
       <q-icon name="check_circle" class="q-mr-sm" />
       Aucune alerte sur ce poste.
     </q-card-section>

@@ -42,6 +42,10 @@ def xlsx_response(
     display format rather than as text, which is the whole reason to prefer
     this format over CSV. Aware datetimes must be made naive by the caller —
     Excel has no timezone, and openpyxl refuses an aware value.
+
+    openpyxl stores any string starting with ``=`` as a formula; the values here
+    come from the agents (a poste can name itself ``=HYPERLINK(...)``), so every
+    string cell is forced to text.
     """
     workbook = Workbook()
     # A new sheet rather than the default one: ``active`` is typed as possibly
@@ -60,7 +64,10 @@ def xlsx_response(
         values = ["" if v is None else v for v in row]
         sheet.append(values)
         for i, value in enumerate(values):
-            if isinstance(value, datetime):
+            if isinstance(value, str):
+                sheet.cell(row=sheet.max_row, column=i + 1).data_type = "s"
+                length = len(value)
+            elif isinstance(value, datetime):
                 sheet.cell(
                     row=sheet.max_row, column=i + 1
                 ).number_format = DATETIME_FORMAT

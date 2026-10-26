@@ -10,6 +10,7 @@ import {
   canRunCommand,
   commandActionGroups,
   commandActions,
+  commandConfirm,
   commandTypeLabel,
   createCommands,
   listCommands,
@@ -307,5 +308,35 @@ describe('listCommands', () => {
     await listCommands();
 
     expect(api.get).toHaveBeenCalledWith('/commands', { params: {} });
+  });
+});
+
+describe('commandConfirm', () => {
+  const action = (type: string) => {
+    const found = commandActions.find((a) => a.type === type);
+    if (!found) throw new Error(type);
+    return found;
+  };
+
+  it('names the OK button after what it does, in red for a restart', () => {
+    const c = commandConfirm(action('reboot'), 12, 3);
+    expect(c.ok.label).toBe('Redémarrer 12 postes');
+    expect(c.ok.color).toBe('negative');
+    expect(c.message).toContain('Dont 3 avec une session ouverte.');
+    expect(c.cancel.label).toBe('Annuler');
+  });
+
+  it('keeps the singular on one poste and says when someone is logged on', () => {
+    const c = commandConfirm(action('shutdown'), 1, 1);
+    expect(c.ok.label).toBe('Arrêter le poste');
+    expect(c.message).toContain('sur ce poste');
+    expect(c.message).toContain('Une session utilisateur est ouverte');
+  });
+
+  it('stays primary and silent on sessions for a harmless action', () => {
+    const c = commandConfirm(action('full_scan'), 4, 2);
+    expect(c.ok.label).toBe('Lancer sur 4 postes');
+    expect(c.ok.color).toBe('primary');
+    expect(c.message).not.toContain('session');
   });
 });

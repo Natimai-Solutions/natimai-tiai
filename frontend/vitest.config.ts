@@ -28,6 +28,9 @@ export default defineConfig({
     tsconfigRaw: '{}',
   },
   test: {
+    // The parc's zone, behind UTC: a date parsed as UTC midnight shows up as
+    // the day before here, where it would pass unnoticed in Paris.
+    env: { TZ: 'Pacific/Tahiti' },
     globals: true,
     // Two projects rather than a per-file environment comment: the rule is
     // "a component spec gets a DOM", and saying it once here means a new

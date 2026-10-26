@@ -8,6 +8,13 @@
       @refresh="reload"
     />
 
+    <LoadErrorBanner
+      v-if="lastError && !lastRefreshedAt"
+      :error="lastError"
+      :loading="loading"
+      @retry="reload"
+    />
+
     <MachinesFiltersBar
       :model-value="filters"
       :options="fleetOptions"
@@ -34,6 +41,7 @@
       :loading="loading"
       :agent-latest="agentLatest"
       :usage-window-days="usageWindowDays"
+      :detail-route="detailRoute"
       @request="onRequest"
       @open="goDetail"
     />
@@ -71,8 +79,9 @@
 </template>
 
 <script setup lang="ts">
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
 import MachineColumnsDialog from 'src/components/machine/MachineColumnsDialog.vue';
 import MachineExportDialog from 'src/components/machine/MachineExportDialog.vue';
@@ -208,14 +217,18 @@ watch(
 /** Open a poste, carrying the whole list query plus the row's absolute rank in
  * it (`i`). The detail page uses the query to come back to this exact search,
  * and the rank to walk to the previous/next result of it. */
-function goDetail(row: Machine, rowIndex: number) {
+function detailRoute(row: Machine, rowIndex: number): RouteLocationRaw {
   const p = pagination.value;
   const i = (p.page - 1) * p.rowsPerPage + rowIndex;
-  void router.push({
+  return {
     name: 'machine-detail',
     params: { id: row.id },
     query: { ...buildQuery(), i: String(i) },
-  });
+  };
+}
+
+function goDetail(row: Machine, rowIndex: number) {
+  void router.push(detailRoute(row, rowIndex));
 }
 
 /** The current filters as API params, for the list and the export alike. */
@@ -270,7 +283,7 @@ async function fetchMachines() {
 // every minute, so a page left open shows postes coming online without a
 // keypress. Paused while rows are selected — a bulk action being composed must
 // not have its rows shuffled underneath it.
-const { lastRefreshedAt, refreshNow } = useAutoRefresh(fetchMachines, {
+const { lastRefreshedAt, lastError, refreshNow } = useAutoRefresh(fetchMachines, {
   paused: () => selected.value.length > 0,
 });
 

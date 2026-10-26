@@ -7,6 +7,7 @@ import {
   createWebHistory,
 } from 'vue-router';
 import routes from './routes';
+import { documentTitle } from 'src/utils/format';
 
 import { refreshSession } from 'boot/axios';
 import { ensureSession, getAccessToken } from 'src/services/session';
@@ -60,6 +61,13 @@ export default defineRouter(() => {
       return { name: 'dashboard' };
     }
     return true;
+  });
+
+  // One title per page: it is what a screen reader announces on navigation,
+  // and what tells twelve open tabs apart. The fiches of a poste and of a room
+  // replace it with their name once loaded.
+  router.afterEach((to) => {
+    document.title = documentTitle(to.meta.title as string | undefined);
   });
 
   return router;

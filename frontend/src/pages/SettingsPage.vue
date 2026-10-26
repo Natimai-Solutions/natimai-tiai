@@ -1,11 +1,11 @@
 <template>
   <q-page padding>
-    <div class="text-h5 q-mb-md">Paramètres</div>
+    <h1 class="text-h5 q-mb-md">Paramètres</h1>
 
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
         Maintenance
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           Les défauts du parc. Une salle ou un poste peut les remplacer ; la valeur la plus précise
           gagne.
         </div>
@@ -60,7 +60,7 @@
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
         Utilisation des postes
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           Ce que comptent les cartes « Peu utilisés » et « Toujours allumés » du tableau de bord, et
           le filtre Utilisation de la liste des postes.
         </div>
@@ -121,7 +121,7 @@
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
         Supervision du parc
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           Les seuils qui décident de ce que la console signale sur un poste. Appliqués aussitôt,
           sans redémarrer le serveur.
         </div>
@@ -217,7 +217,7 @@
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
         E-mails programmés
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           L'heure du résumé quotidien et le jour du rappel hebdomadaire des maintenances. Pris en
           compte en moins d'une minute, sans redémarrer le serveur.
         </div>
@@ -264,7 +264,7 @@
     <q-card v-if="settings" flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
         Envoi des e-mails
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           Le chemin des alertes, des résumés et des liens « mot de passe oublié ». Un champ laissé
           vide reprend la valeur du serveur (<code>deploy/.env</code>), rappelée en dessous.
         </div>
@@ -272,14 +272,14 @@
       <q-separator />
       <q-card-section class="q-gutter-md">
         <div
-          :class="status.ok ? 'text-positive' : 'text-negative'"
+          :class="status.ok ? 'text-ok' : 'text-negative'"
           class="row items-center no-wrap q-gutter-x-sm"
         >
           <q-icon :name="status.ok ? 'check_circle' : 'error_outline'" size="sm" />
           <span>{{ status.text }}</span>
         </div>
         <div>
-          <div class="text-caption text-grey-8 q-mb-xs">Fournisseur</div>
+          <div class="text-caption text-muted q-mb-xs">Fournisseur</div>
           <q-btn-toggle
             v-model="emailForm.provider"
             :options="providerOptions"
@@ -288,7 +288,7 @@
             toggle-color="primary"
             :disable="!canWrite"
           />
-          <div class="text-caption text-grey q-mt-xs">
+          <div class="text-caption text-muted q-mt-xs">
             valeur du serveur : {{ providerLabel(settings.email.env.provider) }}
           </div>
         </div>
@@ -379,6 +379,11 @@
                   canWrite &&
                   (settings.email.smtp_password_set || settings.email.smtp_password_unreadable)
                 "
+                :aria-label="
+                  emailForm.clearSmtpPassword
+                    ? 'Garder le mot de passe SMTP'
+                    : 'Effacer le mot de passe SMTP'
+                "
                 flat
                 dense
                 round
@@ -401,7 +406,7 @@
                 label="Vérifier le certificat du serveur"
                 :disable="!canWrite"
               />
-              <div class="text-caption text-grey">
+              <div class="text-caption text-muted">
                 Non seulement pour un relais interne à certificat privé · valeur du serveur :
                 {{ settings.email.env.smtp_verify_tls ? 'oui' : 'non' }}
               </div>
@@ -454,6 +459,9 @@
                 v-if="
                   canWrite &&
                   (settings.email.mailgun_api_key_set || settings.email.mailgun_api_key_unreadable)
+                "
+                :aria-label="
+                  emailForm.clearMailgunApiKey ? 'Garder la clé Mailgun' : 'Effacer la clé Mailgun'
                 "
                 flat
                 dense
@@ -516,7 +524,7 @@
             v-if="testResult"
             dense
             rounded
-            :class="testResult.ok ? 'bg-green-1 text-positive' : 'bg-red-1 text-negative'"
+            :class="testResult.ok ? 'surface-green' : 'surface-red'"
           >
             <template #avatar>
               <q-icon :name="testResult.ok ? 'check_circle' : 'error_outline'" />
@@ -542,7 +550,7 @@
     <q-card v-if="settings" flat bordered style="max-width: 960px">
       <q-card-section class="text-subtitle1">
         Réglages du serveur
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           Variables d'environnement du serveur (<code>deploy/.env</code>), en lecture seule ici. Une
           valeur se change dans ce fichier, puis en redémarrant le serveur — sauf celles marquées «
           valeur initiale », que les réglages ci-dessus remplacent dès qu'ils sont enregistrés.
@@ -552,6 +560,7 @@
       <q-card-section class="q-pt-sm">
         <q-input
           v-model="envFilter"
+          aria-label="Rechercher un réglage"
           dense
           outlined
           clearable
@@ -572,14 +581,14 @@
               </td>
               <td class="env-value">
                 <span v-if="item.value !== null">{{ item.value }}</span>
-                <span v-else class="text-grey">— non défini</span>
+                <span v-else class="text-muted">— non défini</span>
               </td>
-              <td class="text-grey-8">{{ item.description }}</td>
+              <td class="text-muted">{{ item.description }}</td>
             </tr>
           </tbody>
         </q-markup-table>
       </template>
-      <q-card-section v-if="!environmentGroups.length" class="text-grey">
+      <q-card-section v-if="!environmentGroups.length" class="text-muted">
         Aucun réglage ne correspond.
       </q-card-section>
     </q-card>
