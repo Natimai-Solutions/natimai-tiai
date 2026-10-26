@@ -1,7 +1,7 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <div class="text-h5 col-auto">Mes tâches</div>
+      <h1 class="text-h5 q-my-none col-auto">Mes tâches</h1>
       <q-space />
       <!-- Wrapped in its own column: the gutter pads every direct child of the
            row, and on a toggle that padding showed as a white band inside the
@@ -19,7 +19,7 @@
       </div>
     </div>
 
-    <div class="text-body2 text-grey-8 q-mb-md" style="max-width: 760px">
+    <div class="text-body2 text-muted q-mb-md" style="max-width: 760px">
       Les vérifications demandées sur des postes et les maintenances à faire : les vôtres, celles
       que personne n'a encore prises, ou toutes.
     </div>
@@ -39,8 +39,16 @@
     >
       <template #body-cell-machine="props">
         <q-td :props="props">
-          <div>{{ props.row.machine?.hostname ?? '—' }}</div>
-          <div class="text-caption text-grey">
+          <div>
+            <router-link
+              :to="{ name: 'machine-detail', params: { id: props.row.machine_id } }"
+              class="row-link"
+              @click.stop
+            >
+              {{ props.row.machine?.hostname ?? 'Poste' }}
+            </router-link>
+          </div>
+          <div class="text-caption text-muted">
             {{ placeLabel(props.row.machine) }}
           </div>
         </q-td>
@@ -59,7 +67,7 @@
       <template #body-cell-created_at="props">
         <q-td :props="props">
           {{ timeAgoLabel(props.value) }}
-          <div class="text-caption text-grey">par {{ props.row.requested_by }}</div>
+          <div class="text-caption text-muted">par {{ props.row.requested_by }}</div>
         </q-td>
       </template>
       <template #body-cell-actions="props">
@@ -103,7 +111,7 @@
       <div class="row items-center q-mb-sm">
         <div class="text-h6">Maintenances à faire</div>
         <q-space />
-        <div v-if="due" class="text-caption text-grey">
+        <div v-if="due" class="text-caption text-muted">
           {{ due.overdue }} en retard · {{ due.due_soon }} à échéance
         </div>
       </div>
@@ -118,7 +126,7 @@
           <template #header>
             <q-item-section>
               <q-item-label>
-                <span v-if="r.building_name" class="text-grey-7">{{ r.building_name }} › </span
+                <span v-if="r.building_name" class="text-muted">{{ r.building_name }} › </span
                 >{{ r.name }}
               </q-item-label>
               <q-item-label caption>
@@ -193,7 +201,7 @@
           </q-item-section>
         </q-item>
       </q-list>
-      <div v-else-if="due" class="text-grey">Rien à faire.</div>
+      <div v-else-if="due" class="text-muted">Rien à faire.</div>
     </div>
 
     <MaintenanceSessionDialog

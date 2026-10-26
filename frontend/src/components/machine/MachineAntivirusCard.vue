@@ -6,7 +6,7 @@
     :rows="rows"
   >
     <template v-if="unread" #default>
-      <q-card-section class="text-caption text-grey">
+      <q-card-section class="text-caption text-muted">
         Jamais relevé sur ce poste : son agent est antérieur à la lecture du Security Center, ou
         l'hôte n'en a pas — un SKU Windows Server n'en embarque aucun. C'est ce que dit « Non relevé
         » dans la liste des postes : non pas que le poste soit sans antivirus, mais que ce relevé-là

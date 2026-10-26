@@ -427,6 +427,65 @@ export interface ListCommandsParams {
   page_size?: number;
 }
 
+/** The two actions that can cost somebody their unsaved work. */
+export function isDisruptive(action: CommandAction): boolean {
+  return action.type === 'reboot' || action.type === 'shutdown';
+}
+
+/** What the confirmation dialog of an action shows — plain options for `$q.dialog`. */
+export interface CommandConfirm {
+  title: string;
+  message: string;
+  ok: { label: string; color: string; unelevated: true; noCaps: true };
+  cancel: { label: string; flat: true; noCaps: true };
+  persistent: true;
+}
+
+/**
+ * The confirmation of an action on `count` postes, `withSession` of which had a
+ * user logged on at their last contact.
+ *
+ * The OK button says what it does — « Redémarrer 12 postes », not « OK » — and
+ * turns red for the two actions that can lose somebody's work. For those, the
+ * logged-on users are counted: « dont 3 avec une session ouverte » is the
+ * sentence that makes an operator wait for lunch.
+ */
+export function commandConfirm(
+  action: CommandAction,
+  count: number,
+  withSession = 0,
+): CommandConfirm {
+  const plural = count > 1;
+  const target = plural ? `${count} postes` : 'ce poste';
+  const disruptive = isDisruptive(action);
+  const lines = [`Lancer « ${action.label} » sur ${target} ?`];
+  if (disruptive && withSession > 0) {
+    lines.push(
+      plural
+        ? `Dont ${withSession} avec une session ouverte.`
+        : 'Une session utilisateur est ouverte sur ce poste.',
+    );
+  }
+  if (action.hint) lines.push(action.hint);
+  const okLabel = disruptive
+    ? action.label.replace(' le poste', plural ? ` ${count} postes` : ' le poste')
+    : plural
+      ? `Lancer sur ${count} postes`
+      : 'Lancer';
+  return {
+    title: action.label,
+    message: lines.join(' '),
+    ok: {
+      label: okLabel,
+      color: disruptive ? 'negative' : 'primary',
+      unelevated: true,
+      noCaps: true,
+    },
+    cancel: { label: 'Annuler', flat: true, noCaps: true },
+    persistent: true,
+  };
+}
+
 /**
  * What a bulk send actually did, as a notification.
  *

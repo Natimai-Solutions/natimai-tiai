@@ -2,8 +2,8 @@
   <q-page padding>
     <div class="row items-center q-col-gutter-md q-mb-md">
       <div class="col-auto">
-        <div class="text-h5">Journal d'audit</div>
-        <div class="text-caption text-grey">
+        <h1 class="text-h5 q-my-none">Journal d'audit</h1>
+        <div class="text-caption text-muted">
           Actions administratives, de la plus récente à la plus ancienne. Heures affichées dans
           votre fuseau ({{ timeZone }}).
         </div>

@@ -24,7 +24,7 @@
     <q-separator />
     <q-card-section v-if="info" class="q-gutter-xs">
       <div class="row items-center">
-        <div class="col-4 text-grey-7">État</div>
+        <div class="col-4 text-muted">État</div>
         <div class="col">
           <q-badge :color="maintenanceStateColor(info.resolved.state)">
             {{ maintenanceStateLabel(info.resolved.state) }}
@@ -35,25 +35,25 @@
         </div>
       </div>
       <div class="row items-center">
-        <div class="col-4 text-grey-7">Cycle</div>
+        <div class="col-4 text-muted">Cycle</div>
         <div class="col">
           {{ cycleLabel(info.resolved.cycle_days, info.resolved.cycle_origin) }}
         </div>
       </div>
       <div class="row items-center">
-        <div class="col-4 text-grey-7">Responsable</div>
+        <div class="col-4 text-muted">Responsable</div>
         <div class="col">
           <template v-if="info.resolved.owner">
             {{ info.resolved.owner.name }}
-            <span class="text-caption text-grey"
+            <span class="text-caption text-muted"
               >({{ ORIGIN_LABELS[info.resolved.owner_origin] }})</span
             >
           </template>
-          <span v-else class="text-grey">personne</span>
+          <span v-else class="text-muted">personne</span>
         </div>
       </div>
       <div class="row items-center">
-        <div class="col-4 text-grey-7">Dernière maintenance</div>
+        <div class="col-4 text-muted">Dernière maintenance</div>
         <div class="col">
           {{
             info.resolved.last_maintenance_at

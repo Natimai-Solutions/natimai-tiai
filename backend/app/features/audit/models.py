@@ -49,3 +49,7 @@ class AuditEntry(SQLModel, table=True):
     # What would otherwise be lost: the merged source's identity, the fields
     # an update touched, the hostname behind a machine id.
     details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
+    # Where the request came from (app.core.net.client_ip): what ties an
+    # action to a workstation when the account itself is the question. NULL
+    # for what no request carried (the worker's own jobs).
+    ip: str | None = Field(default=None, max_length=64)

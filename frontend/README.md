@@ -61,6 +61,35 @@ L'interface est en français jusque dans les libellés internes de Quasar
 `quasar.config.ts`. Une page ne surcharge un de ces libellés que lorsqu'elle
 veut autre chose que le pack.
 
+## Thème clair et sombre
+
+La console suit le thème du système (`dark: 'auto'`). Tout aplat teinté passe
+par une classe `surface-*` de `src/css/surfaces.scss` (`surface-blue`,
+`surface-orange`, `surface-red`…), qui fixe fond et texte dans les deux modes
+à 4,5:1 au moins ; le texte secondaire par `text-muted`, une valeur mise en
+avant par `text-strong` ; une couleur posée en CSS par une variable `--ti-*`
+(bordures, teintes de graphique). Jamais `bg-<teinte>-1/2/3`, `bg-white`,
+`text-grey*`, `text-black` ni ternaire `$q.dark.isActive` : le test
+`src/test/no-fixed-light-colors.spec.ts` échoue.
+
+## Accessibilité
+
+- Un bouton icône porte un `aria-label` (un tooltip ne donne pas de nom
+  accessible) ; un `q-input` / `q-select` un `label` ou un `aria-label` (un
+  placeholder n'en est pas un).
+- Ce qui mène ailleurs est un lien (`router-link`, `:to`), jamais un `@click`
+  sur une carte ou un bloc : atteignable au clavier, ouvrable dans un nouvel
+  onglet. Dans un tableau, la ligne reste cliquable et le nom est le lien
+  (classe `row-link`).
+- Chaque page a un `h1` et un titre d'onglet (`meta.title` de la route).
+- Un état ne se dit pas qu'en couleur : le badge antivirus écrit « non à
+  jour ».
+- Une confirmation nomme son action sur son bouton (« Redémarrer 12 postes »),
+  en rouge quand elle peut coûter du travail (`commandConfirm`).
+- Une page qui n'a jamais pu charger l'affiche (`LoadErrorBanner`).
+
+Ces règles sont vérifiées par `src/test/quasar-a11y.spec.ts`.
+
 ## Tests
 
 ```bash

@@ -14,6 +14,8 @@ export interface ConsoleUser {
    * supervision, not a private setting. */
   email_preference: EmailPreference;
   groups: GroupRef[];
+  /** Set while the account is locked after failed logins. */
+  locked_until: string | null;
   created_at: string;
   updated_at: string;
 }

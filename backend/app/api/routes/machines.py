@@ -398,6 +398,11 @@ class MachineDetailOut(MachineOut):
     # back: « autoriser le ré-enrôlement » (the fleet secret no longer clears
     # a revocation on its own).
     token_revoked: bool
+    # A re-enrollment held for approval: the fleet secret was presented for
+    # this identity while it still had a live token. Shown with its source
+    # address so the administrator can tell a reinstall from an impostor.
+    reenroll_requested_at: datetime | None
+    reenroll_requested_ip: str | None
     first_seen: datetime
     created_at: datetime
     updated_at: datetime
@@ -1871,16 +1876,26 @@ async def revoke_token(
 async def allow_reenroll(
     machine_id: uuid.UUID, session: SessionDep, user: CurrentUser
 ) -> dict[str, str]:
-    """Lift a revocation: the machine may enroll again with the shared secret.
+    """Let the machine enroll again with the shared secret.
+
+    Two situations, one gesture: lifting a revocation, and approving a
+    re-enrollment held because the poste still had a live token (a reinstall —
+    or an impostor, which is why it is a human's call).
 
     The old token stays dead — ``token_hash`` is cleared rather than left in
-    place, so a token stolen before the revocation never comes back to life.
-    The poste returns on its next enrollment attempt with a fresh token (its
-    agent drops the stale token on the first 401 and re-enrolls by itself).
+    place, so a token stolen before never comes back to life. The poste returns
+    on its next enrollment attempt with a fresh token (its agent drops a stale
+    token on the first 401, and retries a held enrollment by itself).
     """
     machine = await _require_machine(session, machine_id)
+    details = {"hostname": machine.hostname, "machine_uuid": machine.machine_uuid}
+    if machine.reenroll_requested_at is not None:
+        details["requested_at"] = machine.reenroll_requested_at.isoformat()
+        details["requested_ip"] = machine.reenroll_requested_ip
     machine.token_revoked = False
     machine.token_hash = None
+    machine.reenroll_requested_at = None
+    machine.reenroll_requested_ip = None
     token_rotation.reset_rotation(machine)
     machine.updated_at = utcnow()
     audit.record(
@@ -1889,7 +1904,7 @@ async def allow_reenroll(
         action="machine.allow_reenroll",
         resource_type="machine",
         resource_id=str(machine.id),
-        details={"hostname": machine.hostname, "machine_uuid": machine.machine_uuid},
+        details=details,
     )
     await session.commit()
     return {"status": "reenroll-allowed"}

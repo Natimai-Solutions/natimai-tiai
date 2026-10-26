@@ -1,19 +1,19 @@
 <template>
   <q-page padding>
-    <div class="text-h5 q-mb-md">Mon compte</div>
+    <h1 class="text-h5 q-mb-md">Mon compte</h1>
 
     <q-card flat bordered class="q-mb-md" style="max-width: 520px">
       <q-card-section class="q-gutter-xs">
         <div class="row items-center">
-          <div class="col-4 text-grey-7">E-mail</div>
+          <div class="col-4 text-muted">E-mail</div>
           <div class="col">{{ auth.user?.email ?? '—' }}</div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-grey-7">Nom</div>
+          <div class="col-4 text-muted">Nom</div>
           <div class="col">{{ auth.user?.full_name || '—' }}</div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-grey-7">Groupes</div>
+          <div class="col-4 text-muted">Groupes</div>
           <div class="col">
             <template v-if="auth.user?.groups.length">
               <q-chip
@@ -27,7 +27,7 @@
                 {{ group.name }}
               </q-chip>
             </template>
-            <span v-else class="text-grey">Aucun — ce compte ne peut rien consulter</span>
+            <span v-else class="text-muted">Aucun — ce compte ne peut rien consulter</span>
           </div>
         </div>
       </q-card-section>
@@ -36,7 +36,7 @@
     <q-card flat bordered class="q-mb-md" style="max-width: 520px">
       <q-card-section class="text-subtitle1">
         Notifications par e-mail
-        <div class="text-caption text-grey">
+        <div class="text-caption text-muted">
           Ce que Tia'i vous envoie. Le choix est personnel : il ne change rien pour les autres
           comptes de la console.
         </div>
@@ -59,11 +59,11 @@
                 <q-icon :name="opt.icon" size="18px" class="q-mr-sm" />
                 <span>{{ opt.label }}</span>
               </div>
-              <div class="text-caption text-grey q-ml-lg">{{ opt.hint }}</div>
+              <div class="text-caption text-muted q-ml-lg">{{ opt.hint }}</div>
             </div>
           </template>
         </q-option-group>
-        <div v-if="savingPreference" class="text-caption text-grey q-mt-sm">
+        <div v-if="savingPreference" class="text-caption text-muted q-mt-sm">
           <q-spinner size="14px" class="q-mr-xs" />
           Enregistrement…
         </div>
@@ -103,7 +103,7 @@
             autocomplete="new-password"
             :rules="[required, matches]"
           />
-          <q-banner dense class="bg-blue-1 text-blue-9">
+          <q-banner dense class="surface-blue">
             <template #avatar><q-icon name="info" /></template>
             Toutes vos sessions seront fermées : vous devrez vous reconnecter.
           </q-banner>
@@ -119,7 +119,7 @@
       <q-card-section class="row items-start no-wrap">
         <div class="col">
           <div class="text-subtitle1">Sessions ouvertes</div>
-          <div class="text-caption text-grey">
+          <div class="text-caption text-muted">
             Les appareils connectés à votre compte. Fermez celles que vous ne reconnaissez pas :
             l'accès y est coupé immédiatement.
           </div>
@@ -166,7 +166,7 @@
           </q-item-section>
         </q-item>
         <q-item v-if="!sessionsLoading && sessions.length === 0">
-          <q-item-section class="text-grey">Aucune session ouverte.</q-item-section>
+          <q-item-section class="text-muted">Aucune session ouverte.</q-item-section>
         </q-item>
       </q-list>
     </q-card>

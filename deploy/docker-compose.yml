@@ -38,11 +38,18 @@ services:
     restart: unless-stopped
     logging: *logging
     environment:
+      # Compte d'administration (superutilisateur) : initialisation, sauvegardes.
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      # Rôle applicatif, créé par db/app-role.sh (cf. DEPLOYMENT.md).
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-tiai_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-}
     volumes:
       - db_data:/var/lib/postgresql/data
+      # Lancé par l'image à la première initialisation du volume ; à lancer à
+      # la main une fois sur une base existante (DEPLOYMENT.md).
+      - ./db/app-role.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -60,6 +67,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      # Pour la restauration : les objets restaurés reviennent au rôle applicatif.
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-tiai_app}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
     entrypoint: ["sh", "/backup.sh"]
     volumes:
@@ -79,6 +88,10 @@ services:
     environment:
       <<: *no-proxy
       POSTGRES_SERVER: db
+      # Le rôle applicatif, jamais le superutilisateur : le backend refuse de
+      # démarrer hors ENVIRONMENT=local s'il se retrouve superutilisateur.
+      POSTGRES_USER: ${POSTGRES_APP_USER:-tiai_app}
+      POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD manquant, cf. DEPLOYMENT.md « Rôle applicatif PostgreSQL »}
     command: ["api"]
     # Sain quand l'API répond ET joint la base : /health renvoie 200 dans les
     # deux cas, c'est le champ `database` qui tranche — lu en JSON par le
@@ -109,6 +122,10 @@ services:
     environment:
       <<: *no-proxy
       POSTGRES_SERVER: db
+      # Le rôle applicatif, jamais le superutilisateur : le backend refuse de
+      # démarrer hors ENVIRONMENT=local s'il se retrouve superutilisateur.
+      POSTGRES_USER: ${POSTGRES_APP_USER:-tiai_app}
+      POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD manquant, cf. DEPLOYMENT.md « Rôle applicatif PostgreSQL »}
     command: ["worker"]
     # Le worker n'expose aucun port : il touche un fichier témoin à la fin de
     # chaque tour de boucle (30 s), et il est déclaré malade quand ce fichier

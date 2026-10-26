@@ -6,7 +6,7 @@
        runs on it, what is it made of. -->
   <div class="q-mb-sm filter-panel">
     <div class="row items-center q-mb-xs">
-      <div class="text-caption text-grey">
+      <div class="text-caption text-muted">
         {{ activeCount ? `${activeCount} filtre(s) actif(s)` : 'Aucun filtre' }}
       </div>
       <q-btn
@@ -23,9 +23,10 @@
       />
     </div>
     <div class="row no-wrap items-start q-mb-xs">
-      <div class="text-caption text-grey filter-row-label">Sécurité</div>
+      <div class="text-caption text-muted filter-row-label">Sécurité</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
+          aria-label="Antivirus"
           :model-value="modelValue.antivirus"
           :options="options.antivirus"
           emit-value
@@ -37,6 +38,7 @@
           @update:model-value="(v) => set({ antivirus: v })"
         />
         <q-select
+          aria-label="État de protection"
           :model-value="modelValue.status"
           :options="STATUS_OPTIONS"
           emit-value
@@ -48,6 +50,7 @@
           @update:model-value="(v) => set({ status: v })"
         />
         <q-select
+          aria-label="Windows Update"
           :model-value="modelValue.wu"
           :options="WU_OPTIONS"
           emit-value
@@ -59,6 +62,7 @@
           @update:model-value="(v) => set({ wu: v })"
         />
         <q-select
+          aria-label="Dernier scan"
           :model-value="modelValue.scan"
           :options="SCAN_OPTIONS"
           emit-value
@@ -76,9 +80,10 @@
          console's placement (building, room, « Sans salle ») and the finding
          that ties the two — agent and room disagreeing. -->
     <div class="row no-wrap items-start q-mb-xs">
-      <div class="text-caption text-grey filter-row-label">Emplacement</div>
+      <div class="text-caption text-muted filter-row-label">Emplacement</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
+          aria-label="Emplacement"
           :model-value="modelValue.location"
           :options="options.location"
           emit-value
@@ -90,6 +95,7 @@
           @update:model-value="(v) => set({ location: v })"
         />
         <q-select
+          aria-label="Bâtiment"
           :model-value="modelValue.building"
           :options="options.building"
           emit-value
@@ -101,6 +107,7 @@
           @update:model-value="(v) => set({ building: v })"
         />
         <q-select
+          aria-label="Salle"
           :model-value="modelValue.room"
           :options="options.room"
           emit-value
@@ -112,6 +119,7 @@
           @update:model-value="(v) => set({ room: v })"
         />
         <q-select
+          aria-label="Salle déclarée et salle déduite"
           :model-value="modelValue.mismatch"
           :options="MISMATCH_OPTIONS"
           emit-value
@@ -125,9 +133,10 @@
       </div>
     </div>
     <div class="row no-wrap items-start q-mb-xs">
-      <div class="text-caption text-grey filter-row-label">Suivi</div>
+      <div class="text-caption text-muted filter-row-label">Suivi</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
+          aria-label="Maintenance"
           :model-value="modelValue.maintenance"
           :options="MAINTENANCE_OPTIONS"
           emit-value
@@ -139,6 +148,7 @@
           @update:model-value="(v) => set({ maintenance: v })"
         />
         <q-select
+          aria-label="Vérification demandée"
           :model-value="modelValue.checkOpen"
           :options="CHECK_OPTIONS"
           emit-value
@@ -152,9 +162,10 @@
       </div>
     </div>
     <div class="row no-wrap items-start q-mb-xs">
-      <div class="text-caption text-grey filter-row-label">Système</div>
+      <div class="text-caption text-muted filter-row-label">Système</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
+          aria-label="Système d'exploitation"
           :model-value="modelValue.os"
           :options="options.os"
           emit-value
@@ -166,6 +177,7 @@
           @update:model-value="(v) => set({ os: v })"
         />
         <q-select
+          aria-label="Version de l'agent"
           :model-value="modelValue.agent"
           :options="options.agent"
           emit-value
@@ -183,10 +195,11 @@
          the two bounds for any other. The URL only ever carries the bounds, so
          a card's link and a hand-picked entry read the same. -->
     <div class="row no-wrap items-start q-mb-xs">
-      <div class="text-caption text-grey filter-row-label">Utilisation</div>
+      <div class="text-caption text-muted filter-row-label">Utilisation</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
           v-model="usageMode"
+          aria-label="Utilisation"
           :options="usageOptions"
           emit-value
           map-options
@@ -197,6 +210,7 @@
         />
         <template v-if="usageMode === 'custom'">
           <q-input
+            aria-label="Heures allumées au-dessus de"
             :model-value="modelValue.usageAbove"
             type="number"
             min="0"
@@ -211,6 +225,7 @@
             @update:model-value="(v) => set({ usageAbove: v })"
           />
           <q-input
+            aria-label="Heures allumées en dessous de"
             :model-value="modelValue.usageBelow"
             type="number"
             min="0"
@@ -225,13 +240,14 @@
             @update:model-value="(v) => set({ usageBelow: v })"
           />
         </template>
-        <div class="col-auto text-caption text-grey">sur {{ usageWindowDays }} jours</div>
+        <div class="col-auto text-caption text-muted">sur {{ usageWindowDays }} jours</div>
       </div>
     </div>
     <div class="row no-wrap items-start">
-      <div class="text-caption text-grey filter-row-label">Matériel</div>
+      <div class="text-caption text-muted filter-row-label">Matériel</div>
       <div class="col row items-center q-col-gutter-sm">
         <q-select
+          aria-label="Constructeur"
           :model-value="modelValue.manufacturer"
           :options="options.manufacturer"
           emit-value
@@ -243,6 +259,7 @@
           @update:model-value="(v) => set({ manufacturer: v })"
         />
         <q-select
+          aria-label="Modèle"
           :model-value="modelValue.model"
           :options="options.model"
           emit-value
@@ -254,6 +271,7 @@
           @update:model-value="(v) => set({ model: v })"
         />
         <q-select
+          aria-label="Processeur"
           :model-value="modelValue.processor"
           :options="options.processor"
           emit-value
@@ -265,6 +283,7 @@
           @update:model-value="(v) => set({ processor: v })"
         />
         <q-select
+          aria-label="Type de poste"
           :model-value="modelValue.chassis"
           :options="options.chassis"
           emit-value
@@ -279,6 +298,7 @@
              upgrade question is asked, and no closed list holds every parc's
              sizes. The filter applies once both halves are set. -->
         <q-select
+          aria-label="Comparaison de mémoire"
           :model-value="modelValue.ramOp"
           :options="RAM_OP_OPTIONS"
           emit-value
@@ -290,6 +310,7 @@
           @update:model-value="(v) => set({ ramOp: v })"
         />
         <q-input
+          aria-label="Comparaison de mémoire"
           :model-value="modelValue.ramGb"
           type="number"
           min="1"
@@ -305,6 +326,7 @@
           @update:model-value="(v) => set({ ramGb: v })"
         />
         <q-select
+          aria-label="Espace libre du disque système"
           :model-value="modelValue.diskFree"
           :options="DISK_OPTIONS"
           emit-value
@@ -436,7 +458,7 @@ const usageMode = computed<UsagePreset | null>({
    one thing that opens and closes rather than as part of the page. */
 .filter-panel {
   padding: 8px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--ti-border);
   border-radius: 4px;
 }
 </style>

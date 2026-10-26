@@ -2,13 +2,13 @@
   <q-page padding>
     <div class="row items-center q-mb-md">
       <q-btn flat dense round icon="arrow_back" aria-label="Retour" :to="{ name: 'rooms' }" />
-      <div class="text-h5 q-ml-sm">
+      <h1 class="text-h5 q-my-none q-ml-sm">
         <template v-if="room">
-          <span v-if="room.building" class="text-grey-7">{{ room.building.name }} › </span
+          <span v-if="room.building" class="text-muted">{{ room.building.name }} › </span
           >{{ room.name }}
         </template>
         <span v-else>Salle</span>
-      </div>
+      </h1>
       <q-space />
       <template v-if="room && canWrite">
         <q-btn
@@ -36,16 +36,16 @@
     <q-card v-if="room" flat bordered class="q-mb-md" style="max-width: 640px">
       <q-card-section class="q-gutter-xs">
         <div class="row items-center">
-          <div class="col-4 text-grey-7">Emplacement</div>
+          <div class="col-4 text-muted">Emplacement</div>
           <div class="col">
             {{ room.effective_location ?? '—' }}
-            <span v-if="room.building && room.effective_location" class="text-caption text-grey">
+            <span v-if="room.building && room.effective_location" class="text-caption text-muted">
               (hérité du bâtiment)
             </span>
           </div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-grey-7">Postes</div>
+          <div class="col-4 text-muted">Postes</div>
           <div class="col">
             {{ room.machine_count }}
             <q-badge v-if="room.mismatch_count" color="orange" class="q-ml-sm">
@@ -54,11 +54,11 @@
           </div>
         </div>
         <div v-if="room.ad_key" class="row items-center">
-          <div class="col-4 text-grey-7">Annuaire</div>
+          <div class="col-4 text-muted">Annuaire</div>
           <div class="col text-caption">{{ room.ad_key }}</div>
         </div>
         <div v-if="room.notes" class="row">
-          <div class="col-4 text-grey-7">Notes</div>
+          <div class="col-4 text-muted">Notes</div>
           <div class="col" style="white-space: pre-line">{{ room.notes }}</div>
         </div>
       </q-card-section>
@@ -80,14 +80,14 @@
       <q-separator />
       <q-card-section class="q-gutter-xs">
         <div class="row items-center">
-          <div class="col-4 text-grey-7">Cycle</div>
+          <div class="col-4 text-muted">Cycle</div>
           <div class="col">
             {{
               maintenance.effective_cycle_days > 0
                 ? `${maintenance.effective_cycle_days} jours`
                 : 'exclue'
             }}
-            <span class="text-caption text-grey">
+            <span class="text-caption text-muted">
               ({{
                 maintenance.maintenance_cycle_days === null
                   ? 'défaut du parc'
@@ -97,19 +97,19 @@
           </div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-grey-7">Responsable</div>
+          <div class="col-4 text-muted">Responsable</div>
           <div class="col">
             <template v-if="maintenance.effective_owner">
               {{ maintenance.effective_owner.name }}
-              <span class="text-caption text-grey">
+              <span class="text-caption text-muted">
                 ({{ maintenance.maintenance_owner ? 'propre à la salle' : 'défaut du parc' }})
               </span>
             </template>
-            <span v-else class="text-grey">personne</span>
+            <span v-else class="text-muted">personne</span>
           </div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-grey-7">Postes</div>
+          <div class="col-4 text-muted">Postes</div>
           <div class="col">
             <q-badge v-if="room.maintenance_overdue" color="negative" class="q-mr-xs">
               {{ room.maintenance_overdue }} en retard
@@ -117,18 +117,18 @@
             <q-badge v-if="room.maintenance_due_soon" color="orange" class="q-mr-xs">
               {{ room.maintenance_due_soon }} à échéance
             </q-badge>
-            <span v-if="!room.maintenance_overdue && !room.maintenance_due_soon" class="text-grey">
+            <span v-if="!room.maintenance_overdue && !room.maintenance_due_soon" class="text-muted">
               rien à faire
             </span>
           </div>
         </div>
         <div v-if="sessions.length" class="row">
-          <div class="col-4 text-grey-7">Dernières séances</div>
+          <div class="col-4 text-muted">Dernières séances</div>
           <div class="col">
             <div v-for="s in sessions" :key="s.id" class="q-mb-xs">
               {{ formatDateTime(s.performed_at) }} · {{ s.performed_by }} ·
               {{ s.machine_count }} poste(s)
-              <div v-if="s.note" class="text-caption text-grey" style="white-space: pre-line">
+              <div v-if="s.note" class="text-caption text-muted" style="white-space: pre-line">
                 {{ s.note }}
               </div>
             </div>
@@ -156,7 +156,13 @@
             size="16px"
             class="q-mr-xs"
           />
-          {{ cell.value || cell.row.machine_uuid }}
+          <router-link
+            :to="{ name: 'machine-detail', params: { id: cell.row.id } }"
+            class="row-link"
+            @click.stop
+          >
+            {{ cell.value || cell.row.machine_uuid }}
+          </router-link>
         </q-td>
       </template>
       <template #body-cell-location="cell">
@@ -238,7 +244,7 @@
               </q-item>
             </template>
           </q-select>
-          <div v-if="pickedMismatch.length" class="text-caption text-orange-9 q-mt-sm">
+          <div v-if="pickedMismatch.length" class="text-caption text-warn q-mt-sm">
             {{ pickedMismatch.length }} poste(s) sélectionné(s) déclarent un autre emplacement que
             la salle ({{ room?.effective_location }}) : ils seront affectés et signalés.
           </div>
@@ -312,7 +318,13 @@ import {
 } from 'src/services/rooms';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
-import { formatDateTime, onlineColor, onlineIcon, timeAgoLabel } from 'src/utils/format';
+import {
+  documentTitle,
+  formatDateTime,
+  onlineColor,
+  onlineIcon,
+  timeAgoLabel,
+} from 'src/utils/format';
 
 const props = defineProps<{ id: string }>();
 
@@ -321,6 +333,13 @@ const router = useRouter();
 const auth = useAuthStore();
 
 const room = ref<Room | null>(null);
+// The tab says which room, once known — the router could only say « Salle ».
+watch(
+  () => room.value?.name,
+  (name) => {
+    if (name) document.title = documentTitle(name);
+  },
+);
 const machines = ref<Machine[]>([]);
 const buildings = ref<Building[]>([]);
 const locations = ref<string[]>([]);

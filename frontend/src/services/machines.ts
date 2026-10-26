@@ -269,6 +269,9 @@ export interface MachineDetail extends Machine {
    * fleet-wide secret cannot re-enroll it — until an admin allows it back.
    */
   token_revoked: boolean;
+  /** A re-enrollment held for approval: when, and from which address. */
+  reenroll_requested_at: string | null;
+  reenroll_requested_ip: string | null;
   first_seen: string;
   created_at: string;
   updated_at: string;

@@ -172,10 +172,39 @@ async def login(
 
     Returns the access token; sets the refresh token as a cookie.
     """
-    user = await crud.authenticate(session, form.username, form.password)
-    if user is None:
+    try:
+        user = await crud.authenticate(session, form.username, form.password)
+    except crud.AccountLockedError as exc:
+        if exc.just_locked:
+            audit.record(
+                session,
+                actor=exc.user.email,
+                action="user.locked",
+                resource_type="user",
+                resource_id=str(exc.user.id),
+                details={"locked_until": exc.locked_until.isoformat()},
+            )
+        await session.commit()
+        # %r: the field is typed by whoever is at the keyboard; a line break in
+        # it must not forge a second log line.
         security_log.warning(
-            "login failed for %s from %s", form.username, client_ip(request)
+            "login refused for %r from %s: account locked until %s",
+            form.username,
+            client_ip(request),
+            exc.locked_until.isoformat(),
+        )
+        raise AppError(
+            code=ErrorCode.AUTH_ACCOUNT_LOCKED,
+            status_code=423,
+            message="Too many failed attempts; this account is temporarily locked",
+            details={"locked_until": exc.locked_until.isoformat()},
+        ) from None
+    if user is None:
+        # The failure counter, when the address has an account, is part of the
+        # outcome: committed before answering.
+        await session.commit()
+        security_log.warning(
+            "login failed for %r from %s", form.username, client_ip(request)
         )
         raise AppError(
             code=ErrorCode.AUTH_CREDENTIALS_INVALID,

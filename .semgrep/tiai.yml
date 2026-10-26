@@ -1,0 +1,47 @@
+# Règles maison : les invariants de Tia'i qu'aucun pack générique ne connaît.
+# Lancées en CI (security.yml, job Semgrep), bloquantes. Une règle = un piège
+# déjà corrigé une fois ; la règle empêche qu'il revienne.
+rules:
+  - id: tiai-csv-writer-outside-helper
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Écrire un CSV passe par app.api.csv_export.csv_response, qui neutralise
+      les cellules qu'Excel prendrait pour une formule (=, +, -, @) : les
+      valeurs viennent des agents.
+    patterns:
+      - pattern-either:
+          - pattern: csv.writer(...)
+          - pattern: csv.DictWriter(...)
+    paths:
+      include: [/backend/app/]
+      exclude: [/backend/app/api/csv_export.py]
+
+  - id: tiai-workbook-outside-helper
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Un classeur Excel passe par app.api.xlsx_export.xlsx_response, qui force
+      les chaînes en texte : openpyxl stocke toute chaîne commençant par « = »
+      comme une formule.
+    pattern-either:
+      - pattern: openpyxl.Workbook(...)
+      - pattern: Workbook(...)
+    paths:
+      include: [/backend/app/]
+      exclude: [/backend/app/api/xlsx_export.py]
+
+  - id: tiai-raw-sql-fstring
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Pas de SQL construit par f-string ou concaténation : passer par l'ORM ou
+      par des paramètres liés.
+    pattern-either:
+      - pattern: sqlalchemy.text(f"...")
+      - pattern: text(f"...")
+      - pattern: text("..." + $X)
+      - pattern: text("...".format(...))
+    paths:
+      include: [/backend/app/]
+      exclude: [/backend/app/alembic/]

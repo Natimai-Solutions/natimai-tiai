@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Iterable, Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, or_
 from sqlmodel import col, select
@@ -71,19 +71,48 @@ async def create_user(
     return user
 
 
+class AccountLockedError(Exception):
+    """The account is locked after too many failed logins."""
+
+    def __init__(self, user: User, locked_until: datetime, *, just_locked: bool):
+        super().__init__(f"account locked until {locked_until.isoformat()}")
+        self.user = user
+        self.locked_until = locked_until
+        # True on the failure that tripped the lock: the one worth auditing.
+        self.just_locked = just_locked
+
+
 async def authenticate(session: AsyncSession, email: str, password: str) -> User | None:
     """Return the user if credentials are valid and the account is active.
 
     Every path costs one bcrypt check, the refusals included: an unknown or
     deactivated account is checked against a dummy hash, so how long the answer
     takes says nothing about which addresses have an account.
+
+    Raises ``AccountLockedError`` while the account is locked, and on the
+    failure that locks it: the rate limiter caps an address, this caps an
+    account, however many addresses try it. Counters are changed on the
+    session, not committed — the caller commits, refusal or not.
     """
     user = await get_by_email(session, email)
     if user is None or not user.is_active:
         security.burn_password_check(password)
         return None
+    now = utcnow()
+    if user.locked_until is not None and user.locked_until > now:
+        raise AccountLockedError(user, user.locked_until, just_locked=False)
     if not security.verify_password(password, user.hashed_password):
+        user.failed_login_attempts += 1
+        session.add(user)
+        if user.failed_login_attempts >= settings.LOGIN_MAX_FAILED_ATTEMPTS:
+            user.failed_login_attempts = 0
+            user.locked_until = now + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
+            raise AccountLockedError(user, user.locked_until, just_locked=True)
         return None
+    if user.failed_login_attempts or user.locked_until is not None:
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        session.add(user)
     return user
 
 
@@ -130,6 +159,10 @@ async def set_password(session: AsyncSession, user: User, password: str) -> None
     user.hashed_password = security.get_password_hash(password)
     user.password_changed_at = utcnow()
     user.updated_at = utcnow()
+    # A new password is also the way out of a lockout: the administrator who
+    # resets it, or the owner who redeems a reset link, proved more than a guess.
+    user.failed_login_attempts = 0
+    user.locked_until = None
     session.add(user)
     await auth_sessions.revoke_all(session, user.id)
 

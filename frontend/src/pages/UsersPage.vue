@@ -1,10 +1,11 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <div class="text-h5 col-auto">Utilisateurs</div>
+      <h1 class="text-h5 q-my-none col-auto">Utilisateurs</h1>
       <q-space />
       <q-input
         v-model="search"
+        aria-label="Rechercher un compte"
         dense
         outlined
         debounce="300"
@@ -47,7 +48,7 @@
               {{ group.name }}
             </q-chip>
           </template>
-          <span v-else class="text-grey">Aucun</span>
+          <span v-else class="text-muted">Aucun</span>
         </q-td>
       </template>
 
@@ -56,12 +57,21 @@
           <q-badge :color="props.value ? 'positive' : 'negative'">
             {{ props.value ? 'Actif' : 'Désactivé' }}
           </q-badge>
+          <!-- A lock lifts by itself; until then the way out is a password
+               reset, from the menu of the row. -->
+          <q-badge v-if="isLocked(props.row)" color="warning" class="q-ml-xs">
+            Verrouillé
+            <q-tooltip>
+              Trop d’échecs de connexion — jusqu’à {{ formatDateTime(props.row.locked_until) }}.
+              Réinitialiser le mot de passe lève le verrou.
+            </q-tooltip>
+          </q-badge>
         </q-td>
       </template>
 
       <template #body-cell-email_preference="props">
         <q-td :props="props">
-          <span :class="props.value === 'none' ? 'text-grey' : ''">
+          <span :class="props.value === 'none' ? 'text-muted' : ''">
             {{ emailPreferenceLabel(props.value) }}
           </span>
         </q-td>
@@ -205,7 +215,7 @@
     <q-dialog v-model="resetOpen" @hide="resetResult = null">
       <q-card style="width: 460px; max-width: 90vw">
         <q-card-section class="text-h6">Réinitialiser le mot de passe</q-card-section>
-        <q-card-section class="q-pt-none text-body2 text-grey-8">
+        <q-card-section class="q-pt-none text-body2 text-muted">
           {{ resetTarget?.email }}
         </q-card-section>
 
@@ -223,7 +233,7 @@
                 :hint="`${PASSWORD_MIN_LENGTH} caractères minimum`"
                 :rules="[required, longEnough]"
               />
-              <q-banner dense class="bg-orange-1 text-orange-9">
+              <q-banner dense class="surface-orange">
                 <template #avatar><q-icon name="warning" /></template>
                 Les sessions ouvertes de ce compte seront fermées.
               </q-banner>
@@ -242,7 +252,14 @@
               Mot de passe défini. Il n'est plus consultable ensuite — transmettez-le maintenant,
               par un canal distinct de l'e-mail du compte.
             </div>
-            <q-input :model-value="resetResult" readonly outlined dense class="text-weight-medium">
+            <q-input
+              aria-label="Mot de passe défini"
+              :model-value="resetResult"
+              readonly
+              outlined
+              dense
+              class="text-weight-medium"
+            >
               <template #append>
                 <q-btn
                   flat
@@ -281,6 +298,11 @@ import { apiErrorMessage } from 'src/services/errors';
 import type { EmailPreference } from 'src/services/auth';
 import { useAuthStore } from 'src/stores/auth';
 import { EMAIL_PREFERENCE_OPTIONS, emailPreferenceLabel, formatDateTime } from 'src/utils/format';
+
+/** Locked now — `locked_until` stays set after it has passed, until the next login. */
+function isLocked(user: ConsoleUser): boolean {
+  return !!user.locked_until && Date.parse(user.locked_until) > Date.now();
+}
 
 const $q = useQuasar();
 const auth = useAuthStore();

@@ -2,7 +2,7 @@
   <q-card v-if="updates.length" flat bordered class="q-mt-md">
     <q-card-section class="text-subtitle1">
       Mises à jour en attente
-      <div class="text-caption text-grey">
+      <div class="text-caption text-muted">
         Relevé au dernier passage de l'agent ({{ formatDateTime(machine.wu_last_search) }}) — «
         Rechercher les mises à jour » force un nouveau relevé.
       </div>

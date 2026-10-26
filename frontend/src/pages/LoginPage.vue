@@ -2,18 +2,19 @@
   <!-- Route montée hors de MainLayout : QPage exige un QLayout ancêtre. -->
   <q-layout view="lHh Lpr lFf">
     <q-page-container>
-      <q-page class="flex flex-center bg-grey-2">
+      <q-page class="flex flex-center surface-grey">
         <q-card style="width: 360px; max-width: 90vw">
           <q-card-section class="text-center">
             <q-icon name="shield" size="48px" color="primary" />
             <div class="text-h6 q-mt-sm">Tia'i — Console</div>
-            <div class="text-caption text-grey">Supervision du parc</div>
+            <div class="text-caption text-muted">Supervision du parc</div>
           </q-card-section>
 
           <q-form @submit="onSubmit">
             <q-card-section class="q-gutter-md">
               <q-input
                 v-model="email"
+                autocomplete="username"
                 type="email"
                 label="E-mail"
                 outlined
@@ -23,6 +24,7 @@
               />
               <q-input
                 v-model="password"
+                autocomplete="current-password"
                 type="password"
                 label="Mot de passe"
                 outlined

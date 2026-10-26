@@ -87,7 +87,9 @@ describe('useMachineBulkActions', () => {
       expect(q.dialog).toHaveBeenCalledWith(
         expect.objectContaining({
           title: costly.label,
-          message: expect.stringContaining(`sur 2 poste(s) ?`),
+          message: expect.stringContaining(`sur 2 postes ?`),
+          // Named after what it does, not « OK ».
+          ok: expect.objectContaining({ label: expect.stringMatching(/2 postes/) }),
           persistent: true,
         }),
       );

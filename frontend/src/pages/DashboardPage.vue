@@ -1,15 +1,22 @@
 <template>
   <q-page padding>
     <div class="row items-center q-mb-md">
-      <div class="text-h5">Tableau de bord</div>
+      <h1 class="text-h5 q-my-none">Tableau de bord</h1>
       <q-space />
-      <div v-if="lastRefreshedAt" class="text-caption text-grey q-mr-sm">
+      <div v-if="lastRefreshedAt" class="text-caption text-muted q-mr-sm">
         Actualisé à {{ lastRefreshLabel }}
       </div>
-      <q-btn flat round icon="refresh" :loading="loading" @click="reload">
+      <q-btn aria-label="Actualiser" flat round icon="refresh" :loading="loading" @click="reload">
         <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
       </q-btn>
     </div>
+
+    <LoadErrorBanner
+      v-if="lastError && !lastRefreshedAt"
+      :error="lastError"
+      :loading="loading"
+      @retry="reload"
+    />
 
     <!-- Three rows, three readings. The first is the parc itself — its size,
          and how much its postes are used. The next two are what needs doing about it, most urgent first:
@@ -18,64 +25,57 @@
          below, smaller. Every card is a list an administrator opens and acts on. -->
     <div class="row q-col-gutter-md q-mb-md">
       <div v-for="kpi in inventoryKpis" :key="kpi.label" class="col-12 col-sm-6 col-md-3">
-        <q-card
-          v-ripple
-          flat
-          bordered
-          class="cursor-pointer relative-position full-height"
-          @click="go(kpi.to)"
-        >
-          <q-card-section class="row items-center no-wrap">
-            <q-icon :name="kpi.icon" :color="kpi.color" size="36px" class="q-mr-md" />
-            <div>
-              <div class="text-h4">{{ kpi.value }}</div>
-              <div class="text-caption text-grey">{{ kpi.label }}</div>
-              <div v-if="kpi.detail" class="text-caption text-grey">{{ kpi.detail }}</div>
-              <div v-if="kpi.caption" class="text-caption text-orange">{{ kpi.caption }}</div>
-            </div>
-          </q-card-section>
-        </q-card>
+        <router-link :to="kpi.to" class="card-link">
+          <q-card v-ripple flat bordered class="cursor-pointer relative-position full-height">
+            <q-card-section class="row items-center no-wrap">
+              <q-icon :name="kpi.icon" :color="kpi.color" size="36px" class="q-mr-md" />
+              <div>
+                <div class="text-h4">{{ kpi.value }}</div>
+                <div class="text-caption text-muted">{{ kpi.label }}</div>
+                <div v-if="kpi.detail" class="text-caption text-muted">{{ kpi.detail }}</div>
+                <div v-if="kpi.caption" class="text-caption text-warn">{{ kpi.caption }}</div>
+              </div>
+            </q-card-section>
+          </q-card>
+        </router-link>
       </div>
     </div>
 
     <div class="row q-col-gutter-md q-mb-md">
       <div v-for="kpi in priorityKpis" :key="kpi.label" class="col-12 col-sm-6 col-md-3">
-        <q-card
-          v-ripple
-          flat
-          bordered
-          class="cursor-pointer relative-position full-height"
-          :class="kpi.value ? `priority-card priority-card--${kpi.color}` : ''"
-          @click="go(kpi.to)"
-        >
-          <q-card-section class="row items-center no-wrap">
-            <q-icon :name="kpi.icon" :color="kpi.color" size="40px" class="q-mr-md" />
-            <div>
-              <div class="text-h4">{{ kpi.value }}</div>
-              <div class="text-caption text-grey">{{ kpi.label }}</div>
-              <div v-if="kpi.caption" class="text-caption text-orange">{{ kpi.caption }}</div>
-            </div>
-          </q-card-section>
-        </q-card>
+        <router-link :to="kpi.to" class="card-link">
+          <q-card
+            v-ripple
+            flat
+            bordered
+            class="cursor-pointer relative-position full-height"
+            :class="kpi.value ? `priority-card priority-card--${kpi.color}` : ''"
+          >
+            <q-card-section class="row items-center no-wrap">
+              <q-icon :name="kpi.icon" :color="kpi.color" size="40px" class="q-mr-md" />
+              <div>
+                <div class="text-h4">{{ kpi.value }}</div>
+                <div class="text-caption text-muted">{{ kpi.label }}</div>
+                <div v-if="kpi.caption" class="text-caption text-warn">{{ kpi.caption }}</div>
+              </div>
+            </q-card-section>
+          </q-card>
+        </router-link>
       </div>
     </div>
 
     <div class="row q-col-gutter-md q-mb-lg">
       <div v-for="kpi in alertKpis" :key="kpi.label" class="col-6 col-sm-4 col-md">
-        <q-card
-          v-ripple
-          flat
-          bordered
-          class="cursor-pointer relative-position full-height"
-          @click="go(kpi.to)"
-        >
-          <q-card-section class="text-center">
-            <q-icon :name="kpi.icon" :color="kpi.color" size="28px" />
-            <div class="text-h5 q-mt-xs">{{ kpi.value }}</div>
-            <div class="text-caption text-grey">{{ kpi.label }}</div>
-            <div v-if="kpi.caption" class="text-caption text-orange">{{ kpi.caption }}</div>
-          </q-card-section>
-        </q-card>
+        <router-link :to="kpi.to" class="card-link">
+          <q-card v-ripple flat bordered class="cursor-pointer relative-position full-height">
+            <q-card-section class="text-center">
+              <q-icon :name="kpi.icon" :color="kpi.color" size="28px" />
+              <div class="text-h5 q-mt-xs">{{ kpi.value }}</div>
+              <div class="text-caption text-muted">{{ kpi.label }}</div>
+              <div v-if="kpi.caption" class="text-caption text-warn">{{ kpi.caption }}</div>
+            </q-card-section>
+          </q-card>
+        </router-link>
       </div>
     </div>
 
@@ -114,7 +114,7 @@
               <q-item-section side>{{ formatDateTime(m.last_seen) }}</q-item-section>
             </q-item>
             <q-item v-if="!outdated.length">
-              <q-item-section class="text-grey">Aucun poste non à jour.</q-item-section>
+              <q-item-section class="text-muted">Aucun poste non à jour.</q-item-section>
             </q-item>
           </q-list>
         </q-card>
@@ -143,7 +143,7 @@
               <q-item-section side>{{ formatDateTime(t.detected_at) }}</q-item-section>
             </q-item>
             <q-item v-if="!threats.length">
-              <q-item-section class="text-grey">Aucune menace active.</q-item-section>
+              <q-item-section class="text-muted">Aucune menace active.</q-item-section>
             </q-item>
           </q-list>
         </q-card>
@@ -153,15 +153,14 @@
 </template>
 
 <script setup lang="ts">
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { computed, onMounted, ref } from 'vue';
-import { useRouter, type RouteLocationRaw } from 'vue-router';
+import { type RouteLocationRaw } from 'vue-router';
 import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { getOverview, type StatsOverview } from 'src/services/stats';
 import { listMachines, type Machine } from 'src/services/machines';
 import { listThreats, type Threat } from 'src/services/threats';
 import { formatDateTime, threatSeverityLabel, threatStatusLabel } from 'src/utils/format';
-
-const router = useRouter();
 
 const stats = ref<StatsOverview | null>(null);
 const outdated = ref<Machine[]>([]);
@@ -349,10 +348,6 @@ const alertKpis = computed<Kpi[]>(() => {
   ];
 });
 
-function go(to: RouteLocationRaw) {
-  void router.push(to);
-}
-
 /**
  * Union of the two "behind" teasers — a poste can be behind on both — freshest
  * first. Capped like the threats list beside it: the dashboard shows a sample,
@@ -378,7 +373,7 @@ async function fetchAll() {
 
 // The dashboard is a wall screen as much as a page: left open, it has to keep
 // telling the truth without anyone pressing anything.
-const { lastRefreshedAt, refreshNow } = useAutoRefresh(fetchAll);
+const { lastRefreshedAt, lastError, refreshNow } = useAutoRefresh(fetchAll);
 
 /**
  * The button's own load, spinner and all. The automatic ones deliberately do

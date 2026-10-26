@@ -1,0 +1,164 @@
+/**
+ * Surfaces thémables (reprises de natimai-paie, elles-mêmes héritées de
+ * FenuaPro).
+ *
+ * Une classe = un couple fond/texte **dans les deux modes**. Jamais de
+ * `bg-<teinte>-1/2/3`, de `bg-white` ni de ternaire `$q.dark.isActive` dans un
+ * template : le garde-fou Vitest `src/test/no-fixed-light-colors.spec.ts`
+ * échoue.
+ *
+ * Usage : `surface-blue` (information), `surface-orange` (avertissement),
+ * `surface-grey` (zone neutre), `surface-green` / `surface-red`
+ * (confirmation / erreur), `surface-amber` (conseil). `text-muted` pour un
+ * texte secondaire lisible dans les deux modes (4,5:1 au moins), `text-strong` pour une valeur mise en avant,
+ * `text-warn` / `text-ok` pour un texte d'avertissement ou de bonne nouvelle. Pour une
+ * couleur posée en CSS : les variables `--ti-*` ci-dessous.
+ */
+
+// teinte: (fond clair, texte clair, fond sombre, texte sombre)
+// Chaque couple atteint 4,5:1 (WCAG AA). $orange-9 et $amber-9, que paie
+// emploie, n'en font que 2,8 et 2,6 sur leur fond clair : bruns ici.
+$ti-surfaces: (
+  'blue': (
+    $blue-1,
+    $blue-9,
+    #16263c,
+    $blue-2,
+  ),
+  'orange': (
+    $orange-1,
+    #a14a00,
+    #332414,
+    $orange-2,
+  ),
+  'grey': (
+    $grey-2,
+    $grey-8,
+    #24272b,
+    $grey-4,
+  ),
+  'green': (
+    $green-1,
+    $green-9,
+    #16281a,
+    $green-2,
+  ),
+  'red': (
+    $red-1,
+    $red-10,
+    #301b1b,
+    $red-2,
+  ),
+  'amber': (
+    $amber-1,
+    #7a4a00,
+    #2f2612,
+    $amber-2,
+  ),
+);
+
+@each $name, $palette in $ti-surfaces {
+  .surface-#{$name} {
+    background: nth($palette, 1);
+    color: nth($palette, 2);
+
+    body.body--dark & {
+      background: nth($palette, 3);
+      color: nth($palette, 4);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+
+      .text-h6,
+      .text-subtitle1,
+      .text-subtitle2,
+      .text-weight-bold,
+      .text-caption {
+        color: inherit;
+      }
+    }
+  }
+}
+
+:root {
+  @each $name, $palette in $ti-surfaces {
+    --ti-surface-#{$name}: #{nth($palette, 1)};
+    --ti-surface-#{$name}-text: #{nth($palette, 2)};
+  }
+  --ti-surface-card: #fff;
+  --ti-border: rgba(0, 0, 0, 0.12);
+  // $grey-8 : 6,2:1 sur blanc. Le `text-grey` de Quasar ($grey, #9e9e9e) n'y
+  // atteignait que 2,7:1.
+  --ti-text-muted: #{$grey-8};
+  --ti-text-strong: rgba(0, 0, 0, 0.87);
+  // Light tints over a surface, for charts and hover states: darken in the
+  // light theme, lighten in the dark one.
+  --ti-tint-1: rgba(0, 0, 0, 0.035);
+  --ti-tint-2: rgba(0, 0, 0, 0.06);
+  --ti-tint-3: rgba(0, 0, 0, 0.07);
+  --ti-rule: #{$grey-4};
+  --ti-rule-faint: #{$grey-3};
+}
+
+body.body--dark {
+  @each $name, $palette in $ti-surfaces {
+    --ti-surface-#{$name}: #{nth($palette, 3)};
+    --ti-surface-#{$name}-text: #{nth($palette, 4)};
+  }
+  --ti-surface-card: #1d1d1d;
+  --ti-border: rgba(255, 255, 255, 0.16);
+  --ti-text-muted: #b0b0b0;
+  --ti-text-strong: #fff;
+  --ti-tint-1: rgba(255, 255, 255, 0.04);
+  --ti-tint-2: rgba(255, 255, 255, 0.08);
+  --ti-tint-3: rgba(255, 255, 255, 0.1);
+  --ti-rule: #{$grey-8};
+  --ti-rule-faint: #2c2c2c;
+}
+
+.text-muted {
+  color: var(--ti-text-muted) !important;
+}
+
+// A value that must stand out from its label, in both modes (`text-black`
+// vanished on a dark card).
+.text-strong {
+  color: var(--ti-text-strong) !important;
+}
+
+// $negative (#c10015) tombe à 2,6:1 sur une carte sombre ; $red-4 y fait
+// 5,6:1. Le texte seulement : un bouton ou un badge `negative` garde son fond.
+body.body--dark .text-negative {
+  color: $red-4 !important;
+}
+
+// Coloured text, readable in both modes. Quasar's text-orange (2,2:1 on white)
+// and text-positive (2,6:1) are not.
+.text-warn {
+  color: #a14a00 !important;
+
+  body.body--dark & {
+    color: $orange-3 !important;
+  }
+}
+
+.text-ok {
+  color: $green-9 !important;
+
+  body.body--dark & {
+    color: $green-4 !important;
+  }
+}
+
+// Quasar writes badge and chip text in white. On these light fills it falls
+// to 1,7–2,7:1; dark text reaches 6,3:1 at worst, in either mode (the fill
+// does not change with the theme).
+.q-badge,
+.q-chip {
+  &.bg-positive,
+  &.bg-warning,
+  &.bg-orange,
+  &.bg-amber-7,
+  &.bg-grey-5,
+  &.bg-grey-6 {
+    color: #1d1d1d !important;
+  }
+}

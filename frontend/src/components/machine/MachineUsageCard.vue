@@ -4,7 +4,7 @@
       <q-card-section class="row items-start no-wrap">
         <div class="col">
           <div class="text-subtitle1">Utilisation</div>
-          <div class="text-caption text-grey">
+          <div class="text-caption text-muted">
             Heures allumées par jour sur les {{ DAYS }} derniers jours, comptées à partir des
             battements de l'agent, dans votre fuseau horaire.
           </div>
@@ -23,7 +23,7 @@
       </q-card-section>
       <q-separator />
 
-      <q-card-section v-if="!usage" class="text-caption text-grey">
+      <q-card-section v-if="!usage" class="text-caption text-muted">
         {{ failed ? "Impossible de lire l'utilisation de ce poste." : 'Chargement…' }}
       </q-card-section>
 
@@ -35,7 +35,7 @@
             <div class="text-h5">
               {{ machine.usage_hours === null ? '—' : hoursLabel(machine.usage_hours) }}
             </div>
-            <div class="text-caption text-grey">
+            <div class="text-caption text-muted">
               {{
                 machine.usage_hours === null
                   ? `enrôlé il y a moins de ${machine.usage_days} jours`
@@ -45,13 +45,13 @@
           </div>
           <div>
             <div class="text-h5">{{ hoursLabel(usage.total_hours) }}</div>
-            <div class="text-caption text-grey">
+            <div class="text-caption text-muted">
               sur {{ DAYS }} jours, dont {{ measured }} mesuré{{ measured > 1 ? 's' : '' }}
             </div>
           </div>
           <div v-if="measured">
             <div class="text-h5">{{ hoursLabel(average) }}</div>
-            <div class="text-caption text-grey">par jour mesuré, en moyenne</div>
+            <div class="text-caption text-muted">par jour mesuré, en moyenne</div>
           </div>
         </q-card-section>
 
@@ -99,7 +99,7 @@
               {{ (bars.length - 1 - i) % 7 === 0 ? axisLabel(bar.date) : '' }}
             </div>
           </div>
-          <div class="text-caption text-grey q-mt-sm">
+          <div class="text-caption text-muted q-mt-sm">
             Fonds grisés : samedis et dimanches.
             <template v-if="bars.some((b) => !b.counted)">
               Hachures : jours antérieurs au début du comptage.
@@ -118,7 +118,7 @@
             <tbody>
               <tr v-for="bar in [...bars].reverse()" :key="bar.date">
                 <td class="text-left">{{ bar.label }}</td>
-                <td class="text-right" :class="{ 'text-grey': !bar.counted }">
+                <td class="text-right" :class="{ 'text-muted': !bar.counted }">
                   {{ bar.counted ? hoursLabel(bar.hours) : 'non mesuré' }}
                 </td>
               </tr>
@@ -207,14 +207,14 @@ watch(
   position: relative;
   height: 140px;
   margin-left: 36px;
-  border-bottom: 1px solid #bdbdbd;
+  border-bottom: 1px solid var(--ti-rule);
 }
 
 .usage-grid {
   position: absolute;
   left: 0;
   right: 0;
-  border-top: 1px solid #eeeeee;
+  border-top: 1px solid var(--ti-rule-faint);
 }
 
 .usage-tick {
@@ -224,7 +224,7 @@ watch(
   width: 30px;
   text-align: right;
   font-size: 11px;
-  color: #757575;
+  color: var(--ti-text-muted);
 }
 
 .usage-bars {
@@ -243,17 +243,17 @@ watch(
 }
 
 .usage-col--weekend {
-  background: rgba(0, 0, 0, 0.035);
+  background: var(--ti-tint-1);
 }
 
 /* Not measured: a 45° hatch, so the day reads as unknown rather than idle. */
 .usage-col--unmeasured {
-  background: repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.06) 0 2px, transparent 2px 6px);
+  background: repeating-linear-gradient(45deg, var(--ti-tint-2) 0 2px, transparent 2px 6px);
 }
 
 .usage-col:hover,
 .usage-col:focus-visible {
-  background-color: rgba(0, 0, 0, 0.07);
+  background-color: var(--ti-tint-3);
 }
 
 .usage-bar {
@@ -278,7 +278,7 @@ watch(
 .usage-axis-label {
   flex: 1;
   font-size: 11px;
-  color: #757575;
+  color: var(--ti-text-muted);
   white-space: nowrap;
   overflow: visible;
   text-align: center;
