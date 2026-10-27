@@ -17,6 +17,7 @@ Construire un agent léger déployé par GPO sur les postes Windows, un backend 
 | Windows Update | 🟠 Moyen | Fin d'année |
 | Déploiement logiciel | 🟡 Bas | Fin d'année |
 | Inventaire matériel/logiciel | 🟡 Bas | Fin d'année — 🟢 livré |
+| Agents Linux et macOS | 🟡 Bas | À planifier (Phase 5) |
 
 Tout le projet est pensé pour que l'ajout des modules suivants réutilise **le même agent, le même canal de communication et le même modèle de commandes** — seuls les types de commandes et les données remontées changent.
 
@@ -380,6 +381,23 @@ Cadrée et livrée : cf. `plan-phase2-windows-update.md`. Réutilise l'agent et 
 
 ### Phase 4 — Exploitation du parc *(septembre 2026)* · 🟢 implémentée
 Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans la console (commandes à risque à part), bâtiments et salles (à la main ou depuis l'annuaire : OU ou attribut Emplacement, lus par l'agent), journal des interventions par poste, vérifications demandées et affectables, maintenance à cycle et responsable sur trois niveaux avec séances par salle, et les e-mails qui vont avec.
+
+### Phase 5 — Agents Linux et macOS *(à planifier)*
+Étendre le parc supervisé aux postes Linux et macOS avec **le même agent Go, le même canal et le même modèle de commandes**. Le découpage existe déjà : chaque collecteur a une implémentation `_windows.go` et un bouchon `_other.go` (`//go:build !windows`), utilisé aujourd'hui pour le développement. Le travail consiste à remplacer ces bouchons par de vraies implémentations `_linux.go` et `_darwin.go`, sans toucher au protocole. Plan détaillé à rédiger (`plan-agents-linux-macos.md`).
+- **Socle par OS** :
+  - service : systemd sur Linux, launchd (`LaunchDaemon`) sur macOS ;
+  - stockage du token : remplacer DPAPI par un fichier `0600` appartenant à root, ou le trousseau système sur macOS ;
+  - configuration : fichier seul, sans registre ;
+  - identité : SMBIOS UUID (`/sys/class/dmi/id/product_uuid` sur Linux, `IOPlatformUUID` sur macOS), avec les mêmes règles d'empreinte qu'en §2.3.
+- **Collecteurs à porter**, dans l'ordre de valeur : système et inventaire matériel, logiciels installés (dpkg/rpm, `/Applications` + `pkgutil`), réseau, session utilisateur (avec le même interrupteur de confidentialité à la source), mises à jour en attente (apt/dnf, `softwareupdate`).
+- **Ce qui ne se porte pas tel quel** : Defender et Windows Update sont propres à Windows. L'antivirus doit être cadré par OS (ClamAV ou EDR du parc sous Linux, XProtect sous macOS), et les commandes doivent annoncer les OS qu'elles visent. La console ne propose que les commandes applicables au poste, et le backend refuse les autres avec un code d'erreur stable (§2.14).
+- **Backend et console** : une colonne `os_family` (`windows` / `linux` / `macos`) sur `machines`, un filtre de liste et des blocs du heartbeat qui restent optionnels. Un agent Linux qui n'envoie ni `defender` ni `windows_update` n'efface rien, comme aujourd'hui.
+- **Packaging et confiance** :
+  - Linux : paquets `.deb`/`.rpm` signés, avec unité systemd ;
+  - macOS : `.pkg` signé avec un certificat Developer ID et notarisé par Apple ;
+  - déploiement sans GPO, par l'outil de gestion du parc (Ansible, MDM) ou par script, avec la racine AC interne et le secret d'enrôlement, comme pour les postes en workgroup (§10) ;
+  - la CI ajoute des builds croisés `linux/amd64`, `linux/arm64`, `darwin/amd64` et `darwin/arm64`, ainsi que govulncheck sur ces cibles.
+- **DoD** : un poste Linux et un Mac pilotes enrôlés, visibles dans la console avec leur inventaire et leur session, et des commandes non applicables refusées proprement.
 
 ---
 
