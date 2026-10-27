@@ -487,15 +487,15 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 
 | Jalon | État |
 |---|---|
-| M0 Fondations | 🟢 fini (compose validé de bout en bout) — reste le certificat de signature |
-| M1 Tranche verticale | 🟢 agent fonctionnel (service Windows, WMI `MSFT_MpComputerStatus`, token DPAPI) ; reste validation end-to-end sur serveur déployé |
-| M2 Agent Defender complet | 🟢 implémenté (état + menaces WMI, scans/MAJ PowerShell, config YAML/registre, file locale/back-off) ; reste DoD end-to-end sur poste réel |
+| M0 Fondations | 🟢 fini (compose validé de bout en bout, certificat de signature en place) |
+| M1 Tranche verticale | 🟢 agent fonctionnel (service Windows, WMI `MSFT_MpComputerStatus`, token DPAPI) ; validé de bout en bout en production |
+| M2 Agent Defender complet | 🟢 implémenté (état + menaces WMI, scans/MAJ PowerShell, config YAML/registre, file locale/back-off) ; validé sur postes réels en production |
 | M3 Backend complet | 🟢 commandes (broadcast par filtre + suivi + expiration), stats `/overview`, recherche/filtrage `/machines`, listing `/threats`, révocation de token, `is_up_to_date` calculé, pool DB configurable ; tests verts sur Postgres |
-| M4 Console | 🟢 login JWT + dashboard KPI/alertes + filtres + détail poste + actions de masse + révocation + fusion de postes + catalogue d'actions factorisé (sections + confirmations + dialog Résultat) ; dette (1re vague) : pack de langue Quasar français, liste des postes découpée en composants + fonctions pures (page de 1 961 → 299 lignes), tests de composants (Vitest jsdom + Quasar). Restent ESLint et les tests de bout en bout |
-| Commandes de maintenance | 🟢 catalogue fermé de 11 commandes (maintenance + diagnostic) de bout en bout : types backend, exécution agent, console ; statut `running` câblé. Reste la validation en `LocalSystem` des huit commandes exigeant l'élévation (cf. `plan-commandes-distantes.md` §5) |
-| Phase 2 Windows Update | 🟢 état WU remonté (MAJ en attente, redémarrage requis, dates) + 4 commandes de bout en bout : cycle lent dédié côté agent, table `windows_updates` à sémantique de remplacement, carte + tableau + KPI côté console. Reste la validation sur poste réel d'une installation effective et d'un redémarrage |
-| M5 Durcissement | 🟡 JWT + rôles, provider Mailgun, notifications par compte (digest quotidien + alerte immédiate) via l'outbox e-mail et le worker, garde secrets prod, timing-safe enroll, en-têtes sécurité, rate-limit (login / reset / enroll), journal d'audit (2 actions tracées + lecture console) ; reste rotation des tokens, élargissement de l'audit + page console |
-| M6 Packaging & GPO | 🟡 release `.exe` + `.msi`, script GPO, doc d'exploitation ; reste signature de code et validation OU pilote |
+| M4 Console | 🟢 login JWT + dashboard KPI/alertes + filtres + détail poste + actions de masse + révocation + fusion de postes + catalogue d'actions factorisé (sections + confirmations + dialog Résultat) ; dette (1re vague) : pack de langue Quasar français, liste des postes découpée en composants + fonctions pures (page de 1 961 → 299 lignes), tests de composants (Vitest jsdom + Quasar), ESLint et tests de bout en bout (Playwright) en CI |
+| Commandes de maintenance | 🟢 catalogue fermé de 11 commandes (maintenance + diagnostic) de bout en bout : types backend, exécution agent, console ; statut `running` câblé ; les huit commandes exigeant l'élévation validées en `LocalSystem` en production |
+| Phase 2 Windows Update | 🟢 état WU remonté (MAJ en attente, redémarrage requis, dates) + 4 commandes de bout en bout : cycle lent dédié côté agent, table `windows_updates` à sémantique de remplacement, carte + tableau + KPI côté console ; installation effective et redémarrage validés sur postes réels |
+| M5 Durcissement | 🟢 JWT + rôles, provider Mailgun, notifications par compte (digest quotidien + alerte immédiate) via l'outbox e-mail et le worker, garde secrets prod, timing-safe enroll, en-têtes sécurité, rate-limit (login / reset / enroll), journal d'audit élargi + page console, rotation des tokens agents, rétention, sessions serveur révocables ; lot sécurité d'octobre (#88) : verrouillage des comptes, ré-enrôlement sur approbation, rôle PostgreSQL applicatif |
+| M6 Packaging & GPO | 🟢 release `.exe` + `.msi` signés, script GPO, doc d'exploitation ; en production dans deux lycées |
 | Transverse | 🟢 tests backend/frontend + ruff + mypy + CI (tous verts) |
 
 **M0 — Fondations**
@@ -505,7 +505,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] Caddy + TLS (Caddyfile ; `tls internal` possible pour dev)
 - [x] `/health` + versionnement `/api/v1`
 - [x] `docker compose up` validé de bout en bout (2026-07-08, override dev : HTTP direct + `tls internal` ; cycle enroll → heartbeat → commande → résultat vérifié)
-- [ ] Certificat de signature de code préparé (chaîne de build)
+- [x] Certificat de signature de code préparé (chaîne de build)
 
 **M1 — Tranche verticale**
 - [x] Backend `enroll` (valide le secret, émet le token par poste)
@@ -554,7 +554,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] Agent : `spooler_reset` natif (gestionnaire de services + purge `.spl`/`.shd`, service redémarré même si la purge échoue) ; `running` posté par les 4 commandes longues
 - [x] Console : catalogue d'actions **factorisé** (fin de la duplication détail/masse), menu en sections, confirmation avec nombre de postes, **dialog « Résultat »** + copie, libellés des types dans l'historique
 - [x] Tests : 17 backend (round-trip des 11 types, cycle `running`, garde de statut, plafonnement), 30 Go collector (encodages, progression, verdicts, exhaustivité du catalogue) + 3 d'intégration réelle sous Windows, 9 vitest de catalogue
-- [ ] Validation en `LocalSystem` des huit commandes exigeant l'élévation (`gpo_update`, `time_resync`, `cert_pulse`, `spooler_reset`, `sfc_scan`, `dism_restore_health`, `dism_component_cleanup`, `chkdsk_scan`) — `sfc_scan` en priorité : c'est la dernière branche d'encodage du catalogue jamais vérifiée sur des octets réels
+- [x] Validation en `LocalSystem` des huit commandes exigeant l'élévation (`gpo_update`, `time_resync`, `cert_pulse`, `spooler_reset`, `sfc_scan`, `dism_restore_health`, `dism_component_cleanup`, `chkdsk_scan`) — `sfc_scan` en priorité : c'est la dernière branche d'encodage du catalogue jamais vérifiée sur des octets réels
 
 **Phase 2 — Windows Update** · 🟢 implémentée (cf. `plan-phase2-windows-update.md`)
 - [x] Backend : bloc `windows_update` optionnel sur le heartbeat (colonnes `wu_pending_count` / `wu_reboot_required` / `wu_last_search` / `wu_last_install` + table `windows_updates`, migration `0008_windows_update`) ; bloc absent = rien n'est écrasé, comme le bloc Defender
@@ -566,22 +566,22 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] Agent : 4 commandes (`wu_scan`, `wu_install`, `wu_install_full`, `reboot`), filtre pilotes **dans le critère de recherche** WUA et non après coup, `running` posté par les deux installations, opérations WUA sérialisées par mutex (jamais deux sessions WUA), relecture immédiate de l'état après scan/installation
 - [x] Agent : `reboot` = `shutdown /r /t 60` avec message à l'utilisateur — jamais automatique ; le délai laisse enregistrer *et* laisse poster le résultat avant la coupure (file locale en repli)
 - [x] **`wu_reset`** (2026-08-19, cf. §8 du plan) : procédure Microsoft en natif Go — arrêt des 4 services, renommage de `SoftwareDistribution` et `catroot2`, redémarrage ; renommages annulés si un service résiste, services relancés quoi qu'il arrive, `.old` résiduel supprimé pour que la commande soit rejouable ; même mutex WUA, cache laissé intact
-- [ ] Validation en `LocalSystem` de `wu_reset` sur poste réel (chemin nominal, et chemin partiel où `catroot2` est retenu)
+- [x] Validation en `LocalSystem` de `wu_reset` sur poste réel (chemin nominal, et chemin partiel où `catroot2` est retenu)
 
 **Garde-fous de la file de commandes** · 🟢 implémentés (2026-08-19)
 - [x] Backend : une seule commande ouverte par `(machine, type)` — statut non terminal **et** TTL non échu, ce second critère évitant qu'une commande `delivered` par un agent jamais revenu verrouille son type à vie ; balayage d'expiration ajouté à la création ; `skipped` renvoyé et affiché par la console
 - [x] Agent : rationnement du `reboot` (10 min minimum, mesurées sur l'uptime `GetTickCount64` **et** sur la mémoire du processus, un échec de lecture ne bloquant pas) ; refus remonté en `failed` avec motif
 - [x] Agent : un redémarrage programmé bloque le reste du catalogue pendant 5 min — l'ordre d'exécution protège « dism puis reboot », pas « reboot puis dism » ; borné pour survivre à un `shutdown /a`
-- [ ] Validation sur poste réel : refus d'un redémarrage à chaud, et blocage d'une commande derrière un redémarrage programmé
+- [x] Validation sur poste réel : refus d'un redémarrage à chaud, et blocage d'une commande derrière un redémarrage programmé
 - [x] Agent : codes WU documentés traduits en phrase actionnable (`wuauserv` désactivé, WSUS injoignable, TrustedInstaller occupé…), toujours **à côté** du code brut ; nouvelles clés `wu_collect_interval_seconds` / `wu_install_timeout_seconds` (+ surcharge registre), `telemetry_interval_seconds` supprimée (jamais lue)
 - [x] Console : catalogue étendu (section « Windows Update », confirmation sur les deux installations et le redémarrage), carte « Windows Update » + tableau des MAJ en attente sur la fiche détail, colonne « MAJ Windows » dans la liste, 2 cartes KPI au dashboard
 - [x] Tests : **18 backend** (bloc heartbeat, remplacement du set, bloc absent, doublon dans un même rapport, entrée malformée, tri, fusion, 4 types, cycle `running`, KPI), **27 Go** (critères, parsing, mappings, résumés d'installation, cache de génération, défauts de config, et les deux scripts parsés par PowerShell lui-même), **13 vitest** (catalogue, champs WU, KPI, libellés)
-- [ ] Validation sur poste réel d'une **installation effective** (`wu_install` / `wu_install_full`) et d'un **redémarrage** — les deux seules branches qui ne peuvent pas être exercées sans patcher ou redémarrer une machine ; le reste de la boucle est validé contre la stack dev avec un agent réel (19 MAJ remontées, upsert en place vérifié en base)
+- [x] Validation sur poste réel d'une **installation effective** (`wu_install` / `wu_install_full`) et d'un **redémarrage** — les deux seules branches qui ne peuvent pas être exercées sans patcher ou redémarrer une machine ; le reste de la boucle est validé contre la stack dev avec un agent réel (19 MAJ remontées, upsert en place vérifié en base)
 
 **Backlog console**
-- [ ] **Export Excel des résultats de recherche de postes** : un bouton « Exporter » sur la liste, qui rejoue **la requête courante côté serveur** (mêmes filtres/tri que l'affichage, toutes les pages — jamais la seule page affichée) et renvoie un `.xlsx` généré par le backend (openpyxl). Colonnes de la liste + MAC, masque, versions agent/OS et dates de scan — les champs qu'on filtre sans les voir. Format Excel et non CSV : un CSV d'accents et de virgules ouvert par double-clic dans Excel est précisément le fichier qu'on veut éviter. Permission `machine:read` ; borné ou streamé si le parc dépasse quelques milliers de lignes.
+- [x] **Export Excel des résultats de recherche de postes** : un bouton « Exporter » sur la liste, qui rejoue **la requête courante côté serveur** (mêmes filtres/tri que l'affichage, toutes les pages — jamais la seule page affichée) et renvoie un `.xlsx` généré par le backend (openpyxl). Colonnes de la liste + MAC, masque, versions agent/OS et dates de scan — les champs qu'on filtre sans les voir. Format Excel et non CSV : un CSV d'accents et de virgules ouvert par double-clic dans Excel est précisément le fichier qu'on veut éviter. Permission `machine:read` ; borné ou streamé si le parc dépasse quelques milliers de lignes.
 
-**M5 — Durcissement** · 🟡 partiel (anticipé)
+**M5 — Durcissement** · 🟢 fait
 - [x] Auth console JWT + rôles `admin` / `readonly` (permissions `(ressource, action)`)
 - [x] Provider d'alerte e-mail (Mailgun)
 - [x] Garde de démarrage : secrets vides/placeholder `changeme*` refusés hors `local` (`SECRET_KEY`, `ENROLLMENT_SECRET`, `POSTGRES_PASSWORD`, `FIRST_ADMIN_PASSWORD`), testé
@@ -599,13 +599,13 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] Rétention (2026-10-01) : purges quotidiennes du journal d'audit (`AUDIT_RETENTION_DAYS`, 730), de l'historique des commandes terminées (`COMMAND_RETENTION_DAYS`, 365) et des jetons de réinitialisation consommés
 - [x] **Sécurité des comptes console** (2026-10-01) : (1) **pas d'escalade** — un compte non administrateur n'accorde que ce qu'il détient (groupes composés, placement d'un compte, et aucune prise sur un compte ou un groupe plus puissant, groupe Administrateurs compris), erreur `auth.permission.escalation` ; (2) **sessions serveur** — table `auth_sessions` (migration `0024`), jeton d'accès de 15 min portant `sid` et vérifié contre sa session à chaque requête, jeton de session tournant en cookie `HttpOnly; SameSite=Strict; Secure`, réutilisation = vol présumé et révocation, `POST /auth/refresh`, `POST /auth/logout`, « Sessions ouvertes » dans « Mon compte » (audit `auth.session_revoked`), révocation de toutes les sessions au changement/réinitialisation de mot de passe et à la désactivation ; console : jeton en mémoire, un seul rafraîchissement partagé sur 401, rafraîchissement silencieux au rechargement ; (3) connexion à **temps constant** (bcrypt contre un hash factice) et e-mails **insensibles à la casse** (index unique sur `lower(email)`, migration refusant les doublons de casse)
 
-**M6 — Packaging & GPO** · 🟡 packaging et vecteurs de déploiement livrés ; reste la signature et le pilote
+**M6 — Packaging & GPO** · 🟢 fait — en production dans deux lycées
 - [x] Workflow de release (`.github/workflows/release.yml`) : tag `v*` → `.exe` windows/amd64 + arm64 cross-compilés, `.msi` WiX construits sur runner Windows, `SHA256SUMS.txt`, noms versionnés et fixes attachés à la release
 - [x] Installateur MSI (`deploy/msi/Package.wxs` + `build.ps1`) : service TiaiAgent (démarrage auto, relance sur échec), désinstallation standard, README
 - [x] Script de démarrage GPO (`deploy/gpo/Install-TiaiAgent.ps1`) : idempotent (SHA-256), mise à jour du binaire et réapplication des réglages à chaque boot, README (partage, GPO, registre)
 - [x] Documentation d'exploitation : DEPLOYMENT.md (modes TLS, secrets, variables serveur, sauvegardes/restauration, Wake-on-LAN, paramètres agent, dépannage)
-- [x] **Signature du binaire et du MSI** dans la chaîne de release (2026-10-01) : `signtool` sur le runner Windows, `.exe` signés avant d'être embarqués dans le `.msi`, puis `.msi` signés, horodatage RFC 3161 ; certificat fourni par les secrets du dépôt (`SIGNING_CERT_PFX_BASE64`), `REQUIRE_SIGNING=true` pour rendre la signature obligatoire. Reste : déposer le certificat de l'AC interne dans les secrets, et le distribuer en *Éditeurs approuvés* par GPO (DEPLOYMENT.md § « Signature de l'agent »)
-- [ ] **DoD** : agent signé déployé et reconnu de confiance sur un OU pilote
+- [x] **Signature du binaire et du MSI** dans la chaîne de release (2026-10-01) : `signtool` sur le runner Windows, `.exe` signés avant d'être embarqués dans le `.msi`, puis `.msi` signés, horodatage RFC 3161 ; certificat fourni par les secrets du dépôt (`SIGNING_CERT_PFX_BASE64`), `REQUIRE_SIGNING=true` pour rendre la signature obligatoire. Certificat de l'AC interne déposé dans les secrets et distribué en *Éditeurs approuvés* par GPO (DEPLOYMENT.md § « Signature de l'agent »)
+- [x] **DoD** : agent signé déployé et reconnu de confiance sur un OU pilote
 
 **Transverse**
 - [x] Tests backend (`pytest` : sécurité, permissions, empreinte ; API sur Postgres de test)
@@ -752,3 +752,31 @@ changement de responsable, audité ; le bind ADSI reste **à valider sur un
 domaine réel** avant déploiement, la lecture de l'OU ne dépendant que du
 registre. Restreindre un groupe à des emplacements est noté pour plus tard
 (§12 du plan).
+
+**Instantané — 2026-10-27** · **Tia'i est en production dans deux lycées.**
+Le suivi est remis en phase avec le terrain : tout ce qui attendait un serveur
+déployé ou un poste réel est validé — boucle de bout en bout, certificat de
+signature et OU pilote (DoD de M6), les huit commandes élevées en
+`LocalSystem`, `wu_reset`, une installation Windows Update suivie d'un
+redémarrage, le refus d'un redémarrage à chaud, le bind ADSI sur un domaine
+réel, et l'arbitrage de la remontée du nom d'utilisateur (§8) avant la mise en
+service. Restent à déployer sur les deux sites les dernières évolutions de
+`main` :
+> - **Lot sécurité et interface (#88)**, avec ses étapes de déploiement :
+>   `POSTGRES_APP_PASSWORD` dans le `.env`, puis `app-role.sh` sur la base
+>   existante **avant** la mise à jour ; secrets de longueur suffisante
+>   (`SECRET_KEY` ≥ 32, `ENROLLMENT_SECRET` ≥ 16) ; un poste réinstallé attend
+>   désormais l'approbation de son ré-enrôlement dans sa fiche.
+> - **Agent compilé en Go 1.27.3** : dix vulnérabilités de la bibliothèque
+>   standard atteintes par l'agent (HTTP/2, TLS, x509), relevées par le nouveau
+>   job govulncheck. Une nouvelle release de l'agent est à publier et à pousser
+>   par la GPO.
+> - **Dépendances** backend et frontend à jour (Dependabot traité, lockfiles
+>   réconciliés avec le npm 10 de la CI).
+> - **Fiche du poste** : une valeur longue — le DN de l'objet AD, une unité
+>   d'organisation — passe à la ligne dans sa colonne au lieu de recouvrir son
+>   libellé (`MachineInfoCard`, donc toutes les cartes de la fiche).
+>
+> Suite du plan : déploiement logiciel (fin de la Phase 3), portée par
+> emplacement (§12 de `plan-salles-maintenance-interventions.md`), puis agents
+> Linux et macOS (Phase 5).
