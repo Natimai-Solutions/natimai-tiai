@@ -15,8 +15,8 @@
       <slot>
         <q-list dense>
           <q-item v-for="r in rows ?? []" :key="r.label">
-            <q-item-section>{{ r.label }}</q-item-section>
-            <q-item-section side class="text-strong">{{ r.value }}</q-item-section>
+            <q-item-section class="info-label">{{ r.label }}</q-item-section>
+            <q-item-section class="info-value text-strong">{{ r.value }}</q-item-section>
           </q-item>
         </q-list>
       </slot>
@@ -46,3 +46,22 @@ defineProps<{
   rows?: InfoRow[] | undefined;
 }>();
 </script>
+
+<style scoped>
+/* Two columns that share the line instead of a `side` section, which never
+   shrinks: a long value (the DN of the AD object, an OU) then spilled over
+   its label. The label keeps a readable width; the value takes the rest and
+   wraps, between words first, anywhere if a single word is still too long. */
+.info-label {
+  flex: 0 1 auto;
+  min-width: 8em;
+  max-width: 45%;
+}
+.info-value {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-left: 16px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+</style>
