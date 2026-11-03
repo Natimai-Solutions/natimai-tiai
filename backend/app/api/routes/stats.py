@@ -1,14 +1,15 @@
 """Console dashboard KPIs (plan §6, M3)."""
 
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import and_, exists, func
+from sqlalchemy import and_, exists, func, true
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 
-from app.api.deps import SessionDep, require_permission
+from app.api.deps import CurrentScope, SessionDep, require_permission
 from app.features.base import utcnow
 from app.features.check.models import MachineCheck
 from app.features.inventory.models import MachineSoftware, Volume
@@ -28,6 +29,7 @@ from app.features.setting import crud as setting_crud
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 from app.features.user.permissions import Action, Resource
+from app.features.user.scope import machine_clause, machine_ids_clause, restrict
 
 # What ``Win32_EncryptableVolume`` reports for a volume BitLocker has finished
 # protecting. Anything else — in progress, decrypting, suspended, off — is a
@@ -96,40 +98,52 @@ class StatsOverview(BaseModel):
     usage_since: datetime | None
 
 
-async def _count(session: SessionDep, clause: ColumnElement[bool] | None = None) -> int:
-    stmt = select(func.count()).select_from(Machine)
+async def _count(
+    session: SessionDep, scope: Any, clause: ColumnElement[bool] | None = None
+) -> int:
+    """Machines matching ``clause`` within ``scope`` (a ``machine_clause``)."""
+    stmt = restrict(select(func.count()).select_from(Machine), scope)
     if clause is not None:
         stmt = stmt.where(clause)
     return await session.scalar(stmt) or 0
 
 
 @router.get("/overview", response_model=StatsOverview)
-async def overview(session: SessionDep) -> StatsOverview:
-    """Aggregate fleet status (total, freshness, verification, inactivity, threats)."""
+async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
+    """Aggregate fleet status (total, freshness, verification, inactivity, threats).
+
+    Every figure is the caller's scope's: an account confined to a site sees
+    that site's dashboard, and the cards link to lists narrowed the same way.
+    """
     now: datetime = utcnow()
+    in_scope = machine_clause(scope)
     policies = await setting_crud.policies(session)
     fleet_policy = policies.fleet
     days = fleet_policy.inactive_after_days
 
-    total = await _count(session)
+    total = await _count(session, in_scope)
     up_to_date = await _count(
-        session, status_clause(MachineStatus.UP_TO_DATE, now, days)
+        session, in_scope, status_clause(MachineStatus.UP_TO_DATE, now, days)
     )
     needs_verification = await _count(
-        session, status_clause(MachineStatus.NEEDS_VERIFICATION, now, days)
+        session, in_scope, status_clause(MachineStatus.NEEDS_VERIFICATION, now, days)
     )
-    inactive = await _count(session, status_clause(MachineStatus.INACTIVE, now, days))
+    inactive = await _count(
+        session, in_scope, status_clause(MachineStatus.INACTIVE, now, days)
+    )
 
-    machines_wu_pending = await _count(session, col(Machine.wu_pending_count) > 0)
+    machines_wu_pending = await _count(
+        session, in_scope, col(Machine.wu_pending_count) > 0
+    )
     machines_reboot_required = await _count(
-        session, col(Machine.wu_reboot_required).is_(True)
+        session, in_scope, col(Machine.wu_reboot_required).is_(True)
     )
 
     machines_low_disk = await _count(
-        session, low_disk_clause(fleet_policy.low_disk_free_percent)
+        session, in_scope, low_disk_clause(fleet_policy.low_disk_free_percent)
     )
     machines_aging = await _count(
-        session, aging_hardware_clause(now, fleet_policy.hardware_aging_years)
+        session, in_scope, aging_hardware_clause(now, fleet_policy.hardware_aging_years)
     )
     # Machines whose *system* volume is not fully encrypted. Read off the volume
     # rows and not off a machine column, unlike the disk figure above: this is
@@ -143,6 +157,7 @@ async def overview(session: SessionDep) -> StatsOverview:
     # a dashboard gets ignored.
     machines_unencrypted = await _count(
         session,
+        in_scope,
         exists().where(
             and_(
                 col(Volume.machine_id) == col(Machine.id),
@@ -158,16 +173,20 @@ async def overview(session: SessionDep) -> StatsOverview:
     # something the parc runs.
     software_count = (
         await session.scalar(
-            select(func.count(func.distinct(col(MachineSoftware.software_id))))
+            restrict(
+                select(func.count(func.distinct(col(MachineSoftware.software_id)))),
+                machine_ids_clause(scope, col(MachineSoftware.machine_id)),
+            )
         )
         or 0
     )
 
     with_active_threats = (
         await session.scalar(
-            select(func.count(func.distinct(Threat.machine_id))).where(
-                col(Threat.status) == "active"
-            )
+            restrict(
+                select(func.count(func.distinct(Threat.machine_id))),
+                machine_ids_clause(scope, col(Threat.machine_id)),
+            ).where(col(Threat.status) == "active")
         )
         or 0
     )
@@ -177,23 +196,25 @@ async def overview(session: SessionDep) -> StatsOverview:
     # the card and the list it opens cannot disagree.
     fleet = await fleet_versions(session)
     machines_agent_outdated = (
-        await _count(session, agent_outdated_clause(fleet.outdated, True))
+        await _count(session, in_scope, agent_outdated_clause(fleet.outdated, True))
         if fleet.outdated
         else 0
     )
 
     open_checks_result = await session.exec(
-        select(func.count())
-        .select_from(MachineCheck)
-        .where(col(MachineCheck.closed_at).is_(None))
+        restrict(
+            select(func.count()).select_from(MachineCheck),
+            machine_ids_clause(scope, col(MachineCheck.machine_id)),
+        ).where(col(MachineCheck.closed_at).is_(None))
     )
     open_checks = open_checks_result.one() or 0
 
     policy = policies.maintenance
-    joined = (
+    joined = restrict(
         select(func.count())
         .select_from(Machine)
-        .outerjoin(Room, col(Room.id) == col(Machine.room_id))
+        .outerjoin(Room, col(Room.id) == col(Machine.room_id)),
+        in_scope,
     )
     overdue_result = await session.exec(
         joined.where(
@@ -226,6 +247,7 @@ async def overview(session: SessionDep) -> StatsOverview:
         )
         .select_from(Machine)
         .outerjoin(usage_seconds, usage_crud.join_condition(usage_seconds))
+        .where(in_scope if in_scope is not None else true())
     )
     usage_low, usage_high = usage_counts.one()
 

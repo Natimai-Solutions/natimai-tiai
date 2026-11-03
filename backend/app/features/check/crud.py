@@ -1,6 +1,7 @@
 """Verification requests: the open one of a poste, the list of a person."""
 
 import uuid
+from typing import Any
 
 from sqlalchemy import func, update
 from sqlmodel import col, select
@@ -35,10 +36,14 @@ async def list_checks(
     machine_id: uuid.UUID | None,
     page: int,
     page_size: int,
+    where: Any = None,
 ) -> tuple[list[MachineCheck], int]:
     """Open first, oldest open first (the one waiting longest is the one to
     do), then closed newest first."""
     stmt = select(MachineCheck)
+    if where is not None:
+        # The caller's scope (``user/scope.py``), as a predicate on the rows.
+        stmt = stmt.where(where)
     if open_only:
         stmt = stmt.where(col(MachineCheck.closed_at).is_(None))
     if assigned_to_id is not None:

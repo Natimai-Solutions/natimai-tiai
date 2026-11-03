@@ -282,6 +282,7 @@
 </template>
 
 <script setup lang="ts">
+import { escapeHtml } from 'src/utils/html';
 import { onMounted, reactive, ref } from 'vue';
 import { copyToClipboard, useQuasar, type QTableColumn } from 'quasar';
 import {
@@ -520,7 +521,7 @@ function confirmDelete(user: ConsoleUser) {
   $q.dialog({
     title: 'Supprimer le compte',
     message:
-      `Supprimer définitivement <b>${user.email}</b> ?<br>` +
+      `Supprimer définitivement <b>${escapeHtml(user.email)}</b> ?<br>` +
       'La désactivation est préférable si vous voulez garder la trace du compte.',
     html: true,
     cancel: true,

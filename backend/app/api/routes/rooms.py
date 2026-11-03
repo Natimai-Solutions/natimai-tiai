@@ -11,12 +11,13 @@ Placing a poste by hand is always allowed here; the directory-driven mode
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlmodel import col, select
 
-from app.api.deps import CurrentUser, SessionDep, require_permission
+from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.api.routes.agent import clean_location
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
@@ -29,6 +30,13 @@ from app.features.room import crud
 from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
 from app.features.user.permissions import Action, Resource
+from app.features.user.scope import (
+    Scope,
+    building_clause,
+    machine_clause,
+    restrict,
+    room_clause,
+)
 
 _READ = Depends(require_permission(Resource.ROOM, Action.READ))
 _WRITE = Depends(require_permission(Resource.ROOM, Action.WRITE))
@@ -150,9 +158,51 @@ class PlacementResult(BaseModel):
 # --- Helpers ----------------------------------------------------------------
 
 
-async def _require_building(session: SessionDep, building_id: uuid.UUID) -> Building:
+async def _visible(
+    session: SessionDep, model: Any, ident: uuid.UUID, clause: Any
+) -> bool:
+    if clause is None:
+        return True
+    found = await session.exec(select(model.id).where(model.id == ident).where(clause))
+    return found.first() is not None
+
+
+def _reject_out_of_scope(allowed: bool) -> None:
+    if not allowed:
+        raise AppError(
+            code=ErrorCode.AUTH_SCOPE_RESTRICTED,
+            status_code=403,
+            message="This reaches beyond the places your account is confined to",
+        )
+
+
+def _building_writable(building: Building, scope: Scope | None) -> bool:
+    """A confined account edits a building only when its scope names it, or
+    its site — not merely one of its rooms, which shows the building but does
+    not hand over the whole of it."""
+    return (
+        scope is None
+        or building.id in scope.buildings
+        or (building.location is not None and building.location in scope.locations)
+    )
+
+
+async def _room_writable(
+    session: SessionDep, room_id: uuid.UUID, scope: Scope | None
+) -> bool:
+    """A room is the account's to edit if it is in its scope — checked against
+    the flushed state, so a move out of scope is refused as well."""
+    await session.flush()
+    return await _visible(session, Room, room_id, room_clause(scope))
+
+
+async def _require_building(
+    session: SessionDep, building_id: uuid.UUID, scope: Scope | None = None
+) -> Building:
     building = await crud.get_building(session, building_id)
-    if building is None:
+    if building is None or not await _visible(
+        session, Building, building_id, building_clause(scope)
+    ):
         raise AppError(
             code=ErrorCode.BUILDING_NOT_FOUND,
             status_code=404,
@@ -161,9 +211,11 @@ async def _require_building(session: SessionDep, building_id: uuid.UUID) -> Buil
     return building
 
 
-async def _require_room(session: SessionDep, room_id: uuid.UUID) -> Room:
+async def _require_room(
+    session: SessionDep, room_id: uuid.UUID, scope: Scope | None = None
+) -> Room:
     room = await crud.get_room(session, room_id)
-    if room is None:
+    if room is None or not await _visible(session, Room, room_id, room_clause(scope)):
         raise AppError(
             code=ErrorCode.ROOM_NOT_FOUND, status_code=404, message="Room not found"
         )
@@ -308,19 +360,27 @@ async def _room_out(session: SessionDep, room: Room) -> RoomOut:
 
 
 @buildings_router.get("", response_model=list[BuildingOut])
-async def list_buildings(session: SessionDep) -> list[BuildingOut]:
+async def list_buildings(session: SessionDep, scope: CurrentScope) -> list[BuildingOut]:
     """Every building, by site then name. Not paginated: a parc has dozens."""
-    return await _buildings_out(session, await crud.list_buildings(session))
+    return await _buildings_out(
+        session, await crud.list_buildings(session, building_clause(scope))
+    )
 
 
 @buildings_router.post(
     "", response_model=BuildingOut, status_code=201, dependencies=[_WRITE]
 )
 async def create_building(
-    payload: BuildingCreate, session: SessionDep, current: CurrentUser
+    payload: BuildingCreate,
+    session: SessionDep,
+    current: CurrentUser,
+    scope: CurrentScope,
 ) -> BuildingOut:
     name = _clean_name(payload.name)
     location = clean_location(payload.location)
+    _reject_out_of_scope(
+        scope is None or (location is not None and location in scope.locations)
+    )
     await _reject_building_name_taken(session, location, name)
     building = Building(name=name, location=location, notes=payload.notes)
     session.add(building)
@@ -346,8 +406,10 @@ async def update_building(
     payload: BuildingUpdate,
     session: SessionDep,
     current: CurrentUser,
+    scope: CurrentScope,
 ) -> BuildingOut:
-    building = await _require_building(session, building_id)
+    building = await _require_building(session, building_id, scope)
+    _reject_out_of_scope(_building_writable(building, scope))
     fields = payload.model_dump(exclude_unset=True)
     if "name" in fields:
         fields["name"] = _clean_name(fields["name"])
@@ -359,6 +421,7 @@ async def update_building(
         await _reject_building_name_taken(session, location, name, exclude=building.id)
     for key, value in fields.items():
         setattr(building, key, value)
+    _reject_out_of_scope(_building_writable(building, scope))
     building.updated_at = utcnow()
     session.add(building)
     audit.record(
@@ -376,11 +439,15 @@ async def update_building(
 
 @buildings_router.delete("/{building_id}", status_code=204, dependencies=[_WRITE])
 async def delete_building(
-    building_id: uuid.UUID, session: SessionDep, current: CurrentUser
+    building_id: uuid.UUID,
+    session: SessionDep,
+    current: CurrentUser,
+    scope: CurrentScope,
 ) -> None:
     """Delete a building. Its rooms stay, building-less, and keep the site they
     inherited from it."""
-    building = await _require_building(session, building_id)
+    building = await _require_building(session, building_id, scope)
+    _reject_out_of_scope(_building_writable(building, scope))
     await crud.detach_building(session, building)
     audit.record(
         session,
@@ -406,7 +473,9 @@ async def room_config() -> RoomConfigOut:
 
 
 @rooms_router.post("/sync-directory", response_model=SyncOut, dependencies=[_WRITE])
-async def sync_directory(session: SessionDep, current: CurrentUser) -> SyncOut:
+async def sync_directory(
+    session: SessionDep, current: CurrentUser, scope: CurrentScope
+) -> SyncOut:
     """Re-file every poste from what its agent last said of the directory.
 
     The agents send the block only when *their* reading changes, so a
@@ -414,6 +483,8 @@ async def sync_directory(session: SessionDep, current: CurrentUser) -> SyncOut:
     poste at a time, on the day each one moves. In manual mode this does
     nothing and says so.
     """
+    # Parc-wide by nature: it refiles every poste, whatever its site.
+    _reject_out_of_scope(scope is None)
     result = await crud.sync_from_directory(session, settings.ROOM_SOURCE)
     audit.record(
         session,
@@ -437,18 +508,18 @@ async def sync_directory(session: SessionDep, current: CurrentUser) -> SyncOut:
 
 
 @rooms_router.get("", response_model=list[RoomOut])
-async def list_rooms(session: SessionDep) -> list[RoomOut]:
+async def list_rooms(session: SessionDep, scope: CurrentScope) -> list[RoomOut]:
     """Every room with its building and counts, by site, building, name."""
-    return await _rooms_out(session, await crud.list_rooms(session))
+    return await _rooms_out(session, await crud.list_rooms(session, room_clause(scope)))
 
 
 @rooms_router.post("", response_model=RoomOut, status_code=201, dependencies=[_WRITE])
 async def create_room(
-    payload: RoomCreate, session: SessionDep, current: CurrentUser
+    payload: RoomCreate, session: SessionDep, current: CurrentUser, scope: CurrentScope
 ) -> RoomOut:
     name = _clean_name(payload.name)
     if payload.building_id is not None:
-        await _require_building(session, payload.building_id)
+        await _require_building(session, payload.building_id, scope)
     await _reject_room_name_taken(session, payload.building_id, name)
     room = Room(
         name=name,
@@ -462,6 +533,7 @@ async def create_room(
     )
     session.add(room)
     await session.flush()
+    _reject_out_of_scope(await _room_writable(session, room.id, scope))
     audit.record(
         session,
         actor=current.email,
@@ -479,22 +551,28 @@ async def create_room(
 
 
 @rooms_router.get("/{room_id}", response_model=RoomOut)
-async def get_room(room_id: uuid.UUID, session: SessionDep) -> RoomOut:
-    return await _room_out(session, await _require_room(session, room_id))
+async def get_room(
+    room_id: uuid.UUID, session: SessionDep, scope: CurrentScope
+) -> RoomOut:
+    return await _room_out(session, await _require_room(session, room_id, scope))
 
 
 @rooms_router.patch("/{room_id}", response_model=RoomOut, dependencies=[_WRITE])
 async def update_room(
-    room_id: uuid.UUID, payload: RoomUpdate, session: SessionDep, current: CurrentUser
+    room_id: uuid.UUID,
+    payload: RoomUpdate,
+    session: SessionDep,
+    current: CurrentUser,
+    scope: CurrentScope,
 ) -> RoomOut:
-    room = await _require_room(session, room_id)
+    room = await _require_room(session, room_id, scope)
     fields = payload.model_dump(exclude_unset=True)
     if "name" in fields:
         fields["name"] = _clean_name(fields["name"])
     if "location" in fields:
         fields["location"] = clean_location(fields["location"])
     if fields.get("building_id") is not None:
-        await _require_building(session, fields["building_id"])
+        await _require_building(session, fields["building_id"], scope)
     name = fields.get("name", room.name)
     building_id = fields.get("building_id", room.building_id)
     if name != room.name or building_id != room.building_id:
@@ -507,6 +585,7 @@ async def update_room(
         room.location = None
     room.updated_at = utcnow()
     session.add(room)
+    _reject_out_of_scope(await _room_writable(session, room.id, scope))
     audit.record(
         session,
         actor=current.email,
@@ -522,10 +601,10 @@ async def update_room(
 
 @rooms_router.delete("/{room_id}", status_code=204, dependencies=[_WRITE])
 async def delete_room(
-    room_id: uuid.UUID, session: SessionDep, current: CurrentUser
+    room_id: uuid.UUID, session: SessionDep, current: CurrentUser, scope: CurrentScope
 ) -> None:
     """Delete a room. Its postes stay, room-less (``ON DELETE SET NULL``)."""
-    room = await _require_room(session, room_id)
+    room = await _require_room(session, room_id, scope)
     audit.record(
         session,
         actor=current.email,
@@ -539,9 +618,14 @@ async def delete_room(
 
 
 async def _require_machines(
-    session: SessionDep, machine_ids: list[uuid.UUID]
+    session: SessionDep, machine_ids: list[uuid.UUID], scope: Scope | None
 ) -> list[Machine]:
-    result = await session.exec(select(Machine).where(col(Machine.id).in_(machine_ids)))
+    result = await session.exec(
+        restrict(
+            select(Machine).where(col(Machine.id).in_(machine_ids)),
+            machine_clause(scope),
+        )
+    )
     machines = list(result.all())
     if len(machines) != len(set(machine_ids)):
         raise AppError(
@@ -556,7 +640,11 @@ async def _require_machines(
     "/{room_id}/machines", response_model=PlacementResult, dependencies=[_WRITE]
 )
 async def place_machines(
-    room_id: uuid.UUID, payload: MachineIds, session: SessionDep, current: CurrentUser
+    room_id: uuid.UUID,
+    payload: MachineIds,
+    session: SessionDep,
+    current: CurrentUser,
+    scope: CurrentScope,
 ) -> PlacementResult:
     """Put postes in this room — from another room, or from none.
 
@@ -565,8 +653,8 @@ async def place_machines(
     (a GPO, a move), not a reason to leave a poste unfiled.
     """
     _reject_locked_placement()
-    room = await _require_room(session, room_id)
-    machines = await _require_machines(session, payload.machine_ids)
+    room = await _require_room(session, room_id, scope)
+    machines = await _require_machines(session, payload.machine_ids, scope)
     site = (await crud.placement(session, room.id)).location
     mismatched = [m.id for m in machines if crud.location_mismatch(m.location, site)]
     moved = await crud.set_room(session, payload.machine_ids, room.id)
@@ -587,11 +675,11 @@ async def place_machines(
 
 @rooms_router.post("/unassign", response_model=PlacementResult, dependencies=[_WRITE])
 async def unassign_machines(
-    payload: MachineIds, session: SessionDep, current: CurrentUser
+    payload: MachineIds, session: SessionDep, current: CurrentUser, scope: CurrentScope
 ) -> PlacementResult:
     """Take postes out of whatever room they are in."""
     _reject_locked_placement()
-    await _require_machines(session, payload.machine_ids)
+    await _require_machines(session, payload.machine_ids, scope)
     moved = await crud.set_room(session, payload.machine_ids, None)
     audit.record(
         session,

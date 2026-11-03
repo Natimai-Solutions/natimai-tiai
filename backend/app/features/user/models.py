@@ -125,6 +125,28 @@ class GroupPermission(SQLModel, table=True):
     permission: str = Field(primary_key=True, max_length=100)
 
 
+class GroupScope(SQLModel, table=True):
+    """One place a group is restricted to (``user/scope.py``).
+
+    A group with no row here sees the whole parc — which is every group that
+    existed before scopes did. ``kind`` is ``location`` (a site, in the words
+    the agents report it), ``building`` or ``room`` (an id, as text).
+
+    ``value`` is deliberately **not** a foreign key. Deleting a room must not
+    cascade to its scope rows: removing a group's last row would widen it to
+    the whole parc. A row naming a room that no longer exists matches nothing,
+    which fails closed, and the console shows it for an administrator to tidy.
+    """
+
+    __tablename__ = "group_scopes"
+
+    group_id: uuid.UUID = Field(
+        sa_column=Column(ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
+    )
+    kind: str = Field(primary_key=True, max_length=20)
+    value: str = Field(primary_key=True, max_length=120)
+
+
 class UserGroup(SQLModel, table=True):
     """Membership. Deleting either side ends it; nothing else refers to it."""
 

@@ -232,6 +232,7 @@
 </template>
 
 <script setup lang="ts">
+import { escapeHtml } from 'src/utils/html';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
@@ -363,7 +364,7 @@ function confirmDeleteRoom(room: Room) {
   $q.dialog({
     title: 'Supprimer la salle',
     message:
-      `Supprimer <b>${room.name}</b> ?<br>` +
+      `Supprimer <b>${escapeHtml(room.name)}</b> ?<br>` +
       `Ses ${room.machine_count} poste(s) restent dans le parc, sans salle.`,
     html: true,
     cancel: true,
@@ -385,7 +386,7 @@ function confirmDeleteBuilding(building: Building) {
   $q.dialog({
     title: 'Supprimer le bâtiment',
     message:
-      `Supprimer <b>${building.name}</b> ?<br>` +
+      `Supprimer <b>${escapeHtml(building.name)}</b> ?<br>` +
       `Ses ${building.room_count} salle(s) restent, sans bâtiment, et gardent son emplacement.`,
     html: true,
     cancel: true,

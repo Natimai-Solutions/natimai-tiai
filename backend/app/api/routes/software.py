@@ -16,15 +16,16 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_, true
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 from sqlmodel import col, select
 
 from app.api.csv_export import csv_response
-from app.api.deps import SessionDep, require_permission
+from app.api.deps import CurrentScope, SessionDep, require_permission
 from app.api.xlsx_export import xlsx_response
 from app.features.inventory.models import MachineSoftware, Software
 from app.features.user.permissions import Action, Resource
+from app.features.user.scope import Scope, machine_ids_clause
 
 router = APIRouter(
     prefix="/software",
@@ -88,7 +89,7 @@ def _sort_clause(field: SoftwareSortField, descending: bool) -> UnaryExpression[
     return key.desc() if descending else key.asc()
 
 
-def _catalogue_query(search: str | None) -> Any:
+def _catalogue_query(search: str | None, scope: Scope | None) -> Any:
     """The grouped catalogue, entries nobody carries excluded.
 
     ``HAVING count > 0`` is the whole difference between a catalogue and a
@@ -102,7 +103,14 @@ def _catalogue_query(search: str | None) -> Any:
         select(Software, count.label("machine_count"))
         .join(
             MachineSoftware,
-            col(MachineSoftware.software_id) == col(Software.id),
+            # The scope sits in the join, not the WHERE: it narrows what is
+            # counted, and ``HAVING`` then drops what nobody in scope carries.
+            and_(
+                col(MachineSoftware.software_id) == col(Software.id),
+                machine_ids_clause(scope, col(MachineSoftware.machine_id))
+                if scope is not None
+                else true(),
+            ),
             isouter=True,
         )
         .group_by(col(Software.id))
@@ -116,6 +124,7 @@ def _catalogue_query(search: str | None) -> Any:
 @router.get("", response_model=SoftwareList)
 async def list_software(
     session: SessionDep,
+    scope: CurrentScope,
     search: str | None = None,
     sort_by: SoftwareSortField = "machine_count",
     sort_desc: bool = True,
@@ -128,7 +137,7 @@ async def list_software(
     the parc actually runs, and the bottom is where the one poste with an
     unapproved program sits.
     """
-    stmt = _catalogue_query(search)
+    stmt = _catalogue_query(search, scope)
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     # Name then version behind the requested column: ties must land on the same
     # page from one request to the next, or rows duplicate across page
@@ -157,14 +166,14 @@ EXPORT_HEADER = ["Nom", "Version", "Éditeur", "Postes", "Vu pour la première f
 
 
 async def _export_rows(
-    session: SessionDep, search: str | None
+    session: SessionDep, search: str | None, scope: Scope | None
 ) -> list[tuple[Software, int]]:
     """The catalogue, every row, most widespread first.
 
     The same query as the listing without the pagination, because an export
     of the first fifty rows is not an export.
     """
-    stmt = _catalogue_query(search).order_by(
+    stmt = _catalogue_query(search, scope).order_by(
         _installed_count().desc(), func.lower(col(Software.name)), col(Software.version)
     )
     rows = await session.exec(stmt)
@@ -175,7 +184,9 @@ async def _export_rows(
 # differ only in what lands in the cells — text for the CSV, a real date for
 # Excel, which is what makes the column sortable there.
 @router.get("/export.csv")
-async def export_software(session: SessionDep, search: str | None = None) -> Response:
+async def export_software(
+    session: SessionDep, scope: CurrentScope, search: str | None = None
+) -> Response:
     """The catalogue as CSV, honouring the same search."""
     return csv_response(
         "logiciels.csv",
@@ -188,14 +199,14 @@ async def export_software(session: SessionDep, search: str | None = None) -> Res
                 count,
                 entry.first_seen.date().isoformat(),
             )
-            for entry, count in await _export_rows(session, search)
+            for entry, count in await _export_rows(session, search, scope)
         ],
     )
 
 
 @router.get("/export.xlsx")
 async def export_software_xlsx(
-    session: SessionDep, search: str | None = None
+    session: SessionDep, scope: CurrentScope, search: str | None = None
 ) -> Response:
     """The catalogue as an Excel workbook, honouring the same search."""
     return xlsx_response(
@@ -203,7 +214,7 @@ async def export_software_xlsx(
         EXPORT_HEADER,
         [
             (entry.name, entry.version, entry.publisher, count, entry.first_seen.date())
-            for entry, count in await _export_rows(session, search)
+            for entry, count in await _export_rows(session, search, scope)
         ],
         sheet_title="Logiciels",
     )

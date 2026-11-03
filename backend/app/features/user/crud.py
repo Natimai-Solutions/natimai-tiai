@@ -13,6 +13,7 @@ from app.features.base import utcnow
 from app.features.user.models import (
     Group,
     GroupPermission,
+    GroupScope,
     PasswordResetToken,
     User,
     UserGroup,
@@ -24,6 +25,8 @@ from app.features.user.permissions import (
     Authority,
     BuiltinGroup,
 )
+from app.features.user.scope import Scope
+from app.features.user.scope import union as scope_union
 
 
 async def get_by_email(session: AsyncSession, email: str) -> User | None:
@@ -428,11 +431,66 @@ async def user_permissions(session: AsyncSession, user_id: uuid.UUID) -> frozens
     return frozenset(result.all())
 
 
+async def scopes_of_groups(
+    session: AsyncSession, group_ids: Iterable[uuid.UUID]
+) -> dict[uuid.UUID, Scope | None]:
+    """Each group's scope — ``None`` for an unrestricted one, which includes
+    the administrators' group whatever rows it may carry."""
+    ids = list(group_ids)
+    if not ids:
+        return {}
+    rows: dict[uuid.UUID, list[tuple[str, str]]] = {gid: [] for gid in ids}
+    result = await session.exec(
+        select(GroupScope.group_id, GroupScope.kind, GroupScope.value).where(
+            col(GroupScope.group_id).in_(ids)
+        )
+    )
+    for gid, kind, value in result.all():
+        rows[gid].append((kind, value))
+    admins = set(
+        (
+            await session.exec(
+                select(Group.id).where(
+                    col(Group.id).in_(ids),
+                    Group.builtin_key == BuiltinGroup.ADMIN.value,
+                )
+            )
+        ).all()
+    )
+    return {
+        gid: None if gid in admins or not pairs else Scope.from_rows(pairs)
+        for gid, pairs in rows.items()
+    }
+
+
+async def set_group_scope(
+    session: AsyncSession, group: Group, scope: Scope | None
+) -> None:
+    """Replace the group's scope; ``None`` lifts the restriction. Does not
+    commit."""
+    await session.exec(delete(GroupScope).where(col(GroupScope.group_id) == group.id))
+    for kind, value in scope.rows() if scope is not None else []:
+        session.add(GroupScope(group_id=group.id, kind=kind, value=value))
+    group.updated_at = utcnow()
+    session.add(group)
+
+
+async def user_scope(session: AsyncSession, user_id: uuid.UUID) -> Scope | None:
+    """Where the account may look (``scope.union`` of its groups). ``None`` is
+    the whole parc: administrators, and members of any unrestricted group."""
+    if await is_admin(session, user_id):
+        return None
+    group_ids = await user_group_ids(session, user_id)
+    scopes = await scopes_of_groups(session, group_ids)
+    return scope_union(scopes.values())
+
+
 async def user_authority(session: AsyncSession, user_id: uuid.UUID) -> Authority:
     """What an existing account holds — what editing it would lay hands on."""
     return Authority(
         is_admin=await is_admin(session, user_id),
         permissions=await user_permissions(session, user_id),
+        scope=await user_scope(session, user_id),
     )
 
 
@@ -443,18 +501,19 @@ async def groups_authority(
     nothing (the routes refuse them before asking)."""
     ids = list(set(group_ids))
     if not ids:
-        return Authority(is_admin=False, permissions=frozenset())
+        return Authority(is_admin=False, permissions=frozenset(), scope=Scope())
     admins = await session.exec(
         select(func.count())
         .select_from(Group)
         .where(col(Group.id).in_(ids), Group.builtin_key == BuiltinGroup.ADMIN.value)
     )
     permissions = await permissions_of_groups(session, ids)
-    return Authority.union(
-        [
-            Authority(is_admin=(admins.one() or 0) > 0, permissions=frozenset()),
-            *(Authority(is_admin=False, permissions=p) for p in permissions.values()),
-        ]
+    scopes = await scopes_of_groups(session, ids)
+    is_admin_ = (admins.one() or 0) > 0
+    return Authority(
+        is_admin=is_admin_,
+        permissions=frozenset().union(*permissions.values()),
+        scope=None if is_admin_ else scope_union(scopes.values()),
     )
 
 

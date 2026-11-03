@@ -780,3 +780,13 @@ service. Restent à déployer sur les deux sites les dernières évolutions de
 > Suite du plan : déploiement logiciel (fin de la Phase 3), portée par
 > emplacement (§12 de `plan-salles-maintenance-interventions.md`), puis agents
 > Linux et macOS (Phase 5).
+
+**Instantané — 2026-11-03** · **Groupes limités à des emplacements,
+bâtiments ou salles** (§12 de `plan-salles-maintenance-interventions.md`) :
+un technicien d'un lycée ne voit et ne pilote que les postes de son lycée,
+dans la console comme dans les e-mails. Un groupe sans restriction voit tout
+le parc, ce qui garde chaque groupe existant tel quel ; un poste hors de
+portée répond 404 ; la règle anti-escalade couvre la portée, pour qu'un compte
+limité ne puisse pas composer un groupe ouvert et s'y ajouter. Migration
+`0028_group_scopes`. **Déploiement logiciel** : cadrage proposé dans
+`plan-deploiement-logiciel.md`, en attente de validation (§9) avant le code.

@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api.deps import CurrentUser, SessionDep, require_permission
+from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
@@ -21,6 +21,7 @@ from app.features.intervention import crud
 from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
 from app.features.user.permissions import Action, Resource
+from app.features.user.scope import Scope, machine_visible
 
 _READ = Depends(require_permission(Resource.INTERVENTION, Action.READ))
 _WRITE = Depends(require_permission(Resource.INTERVENTION, Action.WRITE))
@@ -83,9 +84,11 @@ def _clean(text: str | None) -> str | None:
     return cleaned or None
 
 
-async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machine:
+async def _require_machine(
+    session: SessionDep, machine_id: uuid.UUID, scope: Scope | None
+) -> Machine:
     machine = await session.get(Machine, machine_id)
-    if machine is None:
+    if machine is None or not await machine_visible(session, machine_id, scope):
         raise AppError(
             code=ErrorCode.MACHINE_NOT_FOUND,
             status_code=404,
@@ -95,10 +98,10 @@ async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machin
 
 
 async def _require_intervention(
-    session: SessionDep, intervention_id: uuid.UUID
+    session: SessionDep, intervention_id: uuid.UUID, scope: Scope | None
 ) -> Intervention:
     row = await crud.get(session, intervention_id)
-    if row is None:
+    if row is None or not await machine_visible(session, row.machine_id, scope):
         raise AppError(
             code=ErrorCode.INTERVENTION_NOT_FOUND,
             status_code=404,
@@ -111,11 +114,12 @@ async def _require_intervention(
 async def list_interventions(
     machine_id: uuid.UUID,
     session: SessionDep,
+    scope: CurrentScope,
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
 ) -> InterventionList:
     """A poste's journal, newest first."""
-    await _require_machine(session, machine_id)
+    await _require_machine(session, machine_id, scope)
     rows, total = await crud.list_for_machine(
         session, machine_id, page=page, page_size=page_size
     )
@@ -137,9 +141,10 @@ async def create_intervention(
     machine_id: uuid.UUID,
     payload: InterventionCreate,
     session: SessionDep,
+    scope: CurrentScope,
     current: CurrentUser,
 ) -> InterventionOut:
-    machine = await _require_machine(session, machine_id)
+    machine = await _require_machine(session, machine_id, scope)
     now = utcnow()
     row = Intervention(
         machine_id=machine.id,
@@ -165,9 +170,10 @@ async def update_intervention(
     intervention_id: uuid.UUID,
     payload: InterventionUpdate,
     session: SessionDep,
+    scope: CurrentScope,
     current: CurrentUser,
 ) -> InterventionOut:
-    row = await _require_intervention(session, intervention_id)
+    row = await _require_intervention(session, intervention_id, scope)
     fields = payload.model_dump(exclude_unset=True)
     if "kind" in fields:
         row.kind = payload.kind.value if payload.kind else row.kind
@@ -201,9 +207,12 @@ async def update_intervention(
 
 @router.delete("/{intervention_id}", status_code=204, dependencies=[_WRITE])
 async def delete_intervention(
-    intervention_id: uuid.UUID, session: SessionDep, current: CurrentUser
+    intervention_id: uuid.UUID,
+    session: SessionDep,
+    scope: CurrentScope,
+    current: CurrentUser,
 ) -> None:
-    row = await _require_intervention(session, intervention_id)
+    row = await _require_intervention(session, intervention_id, scope)
     audit.record(
         session,
         actor=current.email,

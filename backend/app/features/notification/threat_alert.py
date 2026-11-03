@@ -29,10 +29,12 @@ from app.core.config import settings
 from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.notification.outbox import queue_email
-from app.features.notification.recipients import recipients_for
+from app.features.notification.recipients import users_for
 from app.features.setting.email_policy import email_policy
 from app.features.threat.crud import NewDetection
+from app.features.user import crud as user_crud
 from app.features.user.models import EmailPreference
+from app.features.user.scope import machine_visible
 
 
 @dataclass(frozen=True)
@@ -144,7 +146,16 @@ async def queue_threat_alert(
     fresh = recent_detections(detections)
     if not fresh:
         return 0
-    recipients = await recipients_for(session, [EmailPreference.IMMEDIATE])
+    # Only the accounts whose scope reaches this poste (``user/scope.py``):
+    # an alert names a machine, and naming it to somebody confined to another
+    # site is exactly what the scope exists to prevent.
+    recipients = [
+        user.email
+        for user in await users_for(session, [EmailPreference.IMMEDIATE])
+        if await machine_visible(
+            session, machine.id, await user_crud.user_scope(session, user.id)
+        )
+    ]
     if not recipients:
         return 0
     # Only now, once there is someone to tell: one read of the mail settings

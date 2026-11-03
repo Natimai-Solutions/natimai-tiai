@@ -26,6 +26,7 @@ from app.api.routes.users import reject_escalation, reject_lockout
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
+from app.features.room import crud as room_crud
 from app.features.user import crud
 from app.features.user.models import Group
 from app.features.user.permissions import (
@@ -35,6 +36,7 @@ from app.features.user.permissions import (
     Authority,
     Resource,
 )
+from app.features.user.scope import Scope
 
 router = APIRouter(
     prefix="/groups",
@@ -65,23 +67,58 @@ class GroupOut(BaseModel):
     # catalogue, shown but not editable.
     is_admin: bool
     permissions: list[str]
+    # Where the group is confined (``user/scope.py``); null for the whole parc.
+    scope: "ScopeBody | None"
     member_count: int
     created_at: datetime
     updated_at: datetime
+
+
+class ScopeBody(BaseModel):
+    """The places a group is confined to. All three lists empty — or the
+    field null — is the whole parc."""
+
+    locations: list[str] = Field(default=[], max_length=200)
+    buildings: list[uuid.UUID] = Field(default=[], max_length=200)
+    rooms: list[uuid.UUID] = Field(default=[], max_length=500)
+
+    def to_scope(self) -> Scope | None:
+        scope = Scope(
+            frozenset(v.strip() for v in self.locations if v.strip()),
+            frozenset(self.buildings),
+            frozenset(self.rooms),
+        )
+        return None if scope.is_empty() else scope
+
+    @classmethod
+    def of(cls, scope: Scope | None) -> "ScopeBody | None":
+        if scope is None:
+            return None
+        return cls(
+            locations=sorted(scope.locations),
+            buildings=sorted(scope.buildings),
+            rooms=sorted(scope.rooms),
+        )
+
+
+GroupOut.model_rebuild()
 
 
 class GroupCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
     permissions: list[str] = []
+    scope: ScopeBody | None = None
 
 
 class GroupUpdate(BaseModel):
-    """Partial update — only the supplied fields are changed."""
+    """Partial update — only the supplied fields are changed. ``scope: null``
+    lifts the restriction; leaving the field out keeps it."""
 
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
     permissions: list[str] | None = None
+    scope: ScopeBody | None = None
 
 
 async def _require_group(session: SessionDep, group_id: uuid.UUID) -> Group:
@@ -117,9 +154,35 @@ def _validate_permissions(permissions: list[str]) -> set[str]:
     return set(permissions)
 
 
+async def _validate_scope(session: SessionDep, body: ScopeBody | None) -> Scope | None:
+    """The scope to store, refusing a building or room that does not exist —
+    a typo would otherwise confine a group to nothing, silently."""
+    scope = body.to_scope() if body is not None else None
+    if scope is None:
+        return None
+    unknown = [
+        str(b)
+        for b in sorted(scope.buildings)
+        if await room_crud.get_building(session, b) is None
+    ] + [
+        str(r)
+        for r in sorted(scope.rooms)
+        if await room_crud.get_room(session, r) is None
+    ]
+    if unknown:
+        raise AppError(
+            code=ErrorCode.GROUP_SCOPE_UNKNOWN,
+            status_code=422,
+            message="Unknown building or room in scope",
+            details={"ids": unknown},
+        )
+    return scope
+
+
 async def _out(session: SessionDep, groups: list[Group]) -> list[GroupOut]:
     ids = [g.id for g in groups]
     permissions = await crud.permissions_of_groups(session, ids)
+    scopes = await crud.scopes_of_groups(session, ids)
     counts = await crud.member_counts(session, ids)
     return [
         GroupOut(
@@ -129,6 +192,7 @@ async def _out(session: SessionDep, groups: list[Group]) -> list[GroupOut]:
             builtin_key=g.builtin_key,
             is_admin=crud.is_admin_group(g),
             permissions=sorted(permissions.get(g.id, frozenset())),
+            scope=ScopeBody.of(scopes.get(g.id)),
             member_count=counts.get(g.id, 0),
             created_at=g.created_at,
             updated_at=g.updated_at,
@@ -169,9 +233,10 @@ async def create_group(
 ) -> GroupOut:
     await _reject_name_taken(session, payload.name)
     permissions = _validate_permissions(payload.permissions)
+    scope = await _validate_scope(session, payload.scope)
     reject_escalation(
         authority,
-        Authority(is_admin=False, permissions=frozenset(permissions)),
+        Authority(is_admin=False, permissions=frozenset(permissions), scope=scope),
         actor_email=current.email,
         action="grant",
     )
@@ -179,13 +244,18 @@ async def create_group(
     session.add(group)
     await session.flush()
     await crud.set_group_permissions(session, group, permissions)
+    await crud.set_group_scope(session, group, scope)
     audit.record(
         session,
         actor=current.email,
         action="group.create",
         resource_type="group",
         resource_id=str(group.id),
-        details={"name": group.name, "permissions": sorted(permissions)},
+        details={
+            "name": group.name,
+            "permissions": sorted(permissions),
+            **({"scope": scope.rows()} if scope is not None else {}),
+        },
     )
     await session.commit()
     await session.refresh(group)
@@ -228,10 +298,28 @@ async def update_group(
         if "permissions" in fields
         else None
     )
-    if permissions is not None:
+    scope_changed = "scope" in fields
+    if scope_changed and crud.is_admin_group(group):
+        raise AppError(
+            code=ErrorCode.GROUP_BUILTIN_PROTECTED,
+            status_code=400,
+            message="The administrators' group sees the whole parc",
+        )
+    fields.pop("scope", None)
+    scope = await _validate_scope(session, payload.scope) if scope_changed else None
+    if permissions is not None or scope_changed:
+        current_scope = (await crud.scopes_of_groups(session, [group.id]))[group.id]
         reject_escalation(
             authority,
-            Authority(is_admin=False, permissions=frozenset(permissions)),
+            Authority(
+                is_admin=False,
+                permissions=(
+                    frozenset(permissions)
+                    if permissions is not None
+                    else await crud.group_permissions(session, group)
+                ),
+                scope=scope if scope_changed else current_scope,
+            ),
             actor_email=current.email,
             action="grant",
         )
@@ -241,6 +329,8 @@ async def update_group(
     session.add(group)
     if permissions is not None:
         await crud.set_group_permissions(session, group, permissions)
+    if scope_changed:
+        await crud.set_group_scope(session, group, scope)
     audit.record(
         session,
         actor=current.email,
@@ -251,6 +341,11 @@ async def update_group(
             "name": group.name,
             "fields": sorted(fields),
             **({"permissions": sorted(permissions)} if permissions is not None else {}),
+            **(
+                {"scope": scope.rows() if scope is not None else None}
+                if scope_changed
+                else {}
+            ),
         },
     )
     await reject_lockout(session)

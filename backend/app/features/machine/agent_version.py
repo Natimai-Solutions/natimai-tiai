@@ -17,6 +17,7 @@ does not want the rest of the fleet flagged on the pilot's account.
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import func
 from sqlmodel import col, select
@@ -86,7 +87,9 @@ class FleetVersions:
     counts: list[tuple[str, int]]
 
 
-async def fleet_versions(session: AsyncSession) -> FleetVersions:
+async def fleet_versions(
+    session: AsyncSession, *, count_where: Any = None
+) -> FleetVersions:
     """Distinct agent versions on the parc, the reference, and which are behind.
 
     One query over a column of a handful of distinct values — cheap enough to
@@ -102,6 +105,17 @@ async def fleet_versions(session: AsyncSession) -> FleetVersions:
     )
     counts = [(name, count) for name, count in rows.all() if name]
     names = [name for name, _ in counts]
+    # The reference is the parc's, whoever asks; only the head counts follow
+    # the caller's scope (``count_where``, a predicate on ``machines``).
+    if count_where is not None:
+        scoped = await session.exec(
+            select(version, func.count().label("count"))
+            .where(version.is_not(None))
+            .where(version != "")
+            .where(count_where)
+            .group_by(version)
+        )
+        counts = [(name, count) for name, count in scoped.all() if name]
     pinned = (await setting_crud.fleet_policy(session)).agent_expected_version
     latest = pinned or latest_version(names)
     return FleetVersions(

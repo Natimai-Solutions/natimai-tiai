@@ -16,6 +16,7 @@ from sqlmodel import col, select
 
 from app.api.deps import (
     CurrentPermissions,
+    CurrentScope,
     CurrentUser,
     SessionDep,
     require_permission,
@@ -35,6 +36,7 @@ from app.features.machine.models import Machine
 from app.features.machine.status import MachineStatus, status_clause
 from app.features.setting import crud as setting_crud
 from app.features.user.permissions import Action, Resource, has_permission
+from app.features.user.scope import Scope, machine_clause, machine_ids_clause, restrict
 
 router = APIRouter(prefix="/commands", tags=["commands"])
 
@@ -137,10 +139,12 @@ class CommandList(BaseModel):
 
 
 async def _resolve_targets(
-    session: SessionDep, payload: CreateCommands
+    session: SessionDep, payload: CreateCommands, scope: Scope | None
 ) -> list[uuid.UUID]:
-    """Resolve the payload's target into existing machine ids."""
-    stmt = select(Machine.id)
+    """Resolve the payload's target into existing machine ids, within the
+    caller's scope: "the whole parc" from an account confined to a site is
+    that site, and a listed poste outside it is dropped like an unknown id."""
+    stmt = restrict(select(Machine.id), machine_clause(scope))
     if payload.machine_ids:
         # Restrict to ids that actually exist (avoids FK violations on insert).
         stmt = stmt.where(col(Machine.id).in_(payload.machine_ids))
@@ -168,6 +172,7 @@ async def create_commands(
     session: SessionDep,
     user: CurrentUser,
     permissions: CurrentPermissions,
+    scope: CurrentScope,
 ) -> CreateCommandsResponse:
     """Queue one command per resolved target machine.
 
@@ -194,7 +199,7 @@ async def create_commands(
                 "action": Action.EXECUTE.value,
             },
         )
-    machine_ids = await _resolve_targets(session, payload)
+    machine_ids = await _resolve_targets(session, payload, scope)
     # Same sweep the tracking endpoint runs: a command left pending past its TTL
     # must not block the one an administrator is queueing now, on a poste that
     # was simply off the whole time.
@@ -249,6 +254,7 @@ async def create_commands(
 )
 async def list_commands(
     session: SessionDep,
+    scope: CurrentScope,
     status: CommandStatus | None = None,
     machine_id: uuid.UUID | None = None,
     page: int = Query(1, ge=1),
@@ -259,7 +265,7 @@ async def list_commands(
     await command_crud.mark_expired(session)
     await session.commit()
 
-    stmt = select(Command)
+    stmt = restrict(select(Command), machine_ids_clause(scope, col(Command.machine_id)))
     if status is not None:
         stmt = stmt.where(col(Command.status) == status)
     if machine_id is not None:

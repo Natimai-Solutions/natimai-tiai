@@ -13,7 +13,7 @@ from sqlmodel import col, select
 
 from app.api import machine_export
 from app.api.csv_export import csv_response
-from app.api.deps import CurrentUser, SessionDep, require_permission
+from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.api.xlsx_export import xlsx_response
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
@@ -61,6 +61,7 @@ from app.features.usage import crud as usage_crud
 from app.features.usage.models import SECONDS_PER_HOUR
 from app.features.user.models import User
 from app.features.user.permissions import Action, Resource
+from app.features.user.scope import Scope, machine_clause, machine_visible, restrict
 from app.features.windows_update.models import WindowsUpdate
 from app.features.wol import relay as wol_relay
 from app.features.wol.sender import wake as emit_wake
@@ -656,6 +657,10 @@ class MachineFilters:
     half the filters the reader had set would be worse than no export at all.
     """
 
+    # Where the caller may look (``user/scope.py``); not a facet the client
+    # sets but one it cannot unset, carried here so the list and both exports
+    # are narrowed by the same line of ``_filtered_machines``.
+    scope: Scope | None = None
     search: str | None = None
     domain: str | None = None
     # Exact, like the domain: the dropdown feeds it values the fleet reported,
@@ -707,6 +712,7 @@ class MachineFilters:
 
 
 def machine_filters(
+    scope: CurrentScope,
     search: str | None = None,
     domain: str | None = None,
     location: str | None = None,
@@ -775,6 +781,7 @@ def machine_filters(
         usage_days=usage_days,
         usage_hours_below=usage_hours_below,
         usage_hours_above=usage_hours_above,
+        scope=scope,
     )
 
 
@@ -831,6 +838,7 @@ def _filtered_machines(
         )
         .outerjoin(usage.seconds, usage_crud.join_condition(usage.seconds))
     )
+    stmt = restrict(stmt, machine_clause(filters.scope))
     if filters.usage_hours_below is not None or filters.usage_hours_above is not None:
         stmt = stmt.where(
             usage_crud.usage_clause(
@@ -1010,7 +1018,9 @@ class AntivirusProduct(BaseModel):
 # Declared before ``/{machine_id}``: FastAPI matches in declaration order, and
 # the other way round "antivirus-products" would be parsed as a machine id.
 @router.get("/antivirus-products", response_model=list[AntivirusProduct])
-async def list_antivirus_products(session: SessionDep) -> list[AntivirusProduct]:
+async def list_antivirus_products(
+    session: SessionDep, scope: CurrentScope
+) -> list[AntivirusProduct]:
     """Antivirus names reported across the fleet, most widespread first.
 
     Feeds the console's filter dropdown: which products are installed is fleet
@@ -1023,7 +1033,7 @@ async def list_antivirus_products(session: SessionDep) -> list[AntivirusProduct]
     """
     name = col(Machine.av_product_name)
     rows = await session.exec(
-        select(name, func.count().label("count"))
+        restrict(select(name, func.count().label("count")), machine_clause(scope))
         .where(name.is_not(None))
         .where(name != "")
         .group_by(name)
@@ -1062,11 +1072,13 @@ class AgentVersions(BaseModel):
 
 # Declared before ``/{machine_id}`` like the listings around it.
 @router.get("/agent-versions", response_model=AgentVersions)
-async def list_agent_versions(session: SessionDep) -> AgentVersions:
+async def list_agent_versions(
+    session: SessionDep, scope: CurrentScope
+) -> AgentVersions:
     """Agent versions reported across the fleet, newest first, each flagged
     against the reference. Feeds the console's agent filter, and the counts
     are the deployment's progress bar ("combien restent sur 0.4.1")."""
-    fleet = await fleet_versions(session)
+    fleet = await fleet_versions(session, count_where=machine_clause(scope))
     behind = set(fleet.outdated)
     return AgentVersions(
         latest=fleet.latest,
@@ -1088,7 +1100,7 @@ class OsVersion(BaseModel):
 # Declared before ``/{machine_id}`` like the antivirus listing: FastAPI matches
 # in declaration order, and "os-versions" would otherwise be read as an id.
 @router.get("/os-versions", response_model=list[OsVersion])
-async def list_os_versions(session: SessionDep) -> list[OsVersion]:
+async def list_os_versions(session: SessionDep, scope: CurrentScope) -> list[OsVersion]:
     """OS versions reported across the fleet, most widespread first.
 
     Feeds the console's OS filter dropdown, on the same reasoning as the
@@ -1101,7 +1113,7 @@ async def list_os_versions(session: SessionDep) -> list[OsVersion]:
     """
     name = col(Machine.os_version)
     rows = await session.exec(
-        select(name, func.count().label("count"))
+        restrict(select(name, func.count().label("count")), machine_clause(scope))
         .where(name.is_not(None))
         .where(name != "")
         .group_by(name)
@@ -1122,7 +1134,9 @@ class FleetValue(BaseModel):
     count: int
 
 
-async def _distinct_values(session: SessionDep, column: Any) -> list[FleetValue]:
+async def _distinct_values(
+    session: SessionDep, column: Any, scope: Scope | None
+) -> list[FleetValue]:
     """Distinct non-empty values of one machine column, most widespread first.
 
     The shape ``/antivirus-products`` and ``/os-versions`` already established:
@@ -1131,7 +1145,7 @@ async def _distinct_values(session: SessionDep, column: Any) -> list[FleetValue]
     """
     name = col(column)
     rows = await session.exec(
-        select(name, func.count().label("count"))
+        restrict(select(name, func.count().label("count")), machine_clause(scope))
         .where(name.is_not(None))
         .where(name != "")
         .group_by(name)
@@ -1144,46 +1158,50 @@ async def _distinct_values(session: SessionDep, column: Any) -> list[FleetValue]
 # Declared before ``/{machine_id}`` like the two listings above: FastAPI matches
 # in declaration order, and "models" would otherwise be read as an id.
 @router.get("/models", response_model=list[FleetValue])
-async def list_models(session: SessionDep) -> list[FleetValue]:
+async def list_models(session: SessionDep, scope: CurrentScope) -> list[FleetValue]:
     """Hardware models present in the fleet, most widespread first.
 
     The renewal plan reads this list top-down, and the console's model filter
     is fed from it.
     """
-    return await _distinct_values(session, Machine.hw_model)
+    return await _distinct_values(session, Machine.hw_model, scope)
 
 
 @router.get("/manufacturers", response_model=list[FleetValue])
-async def list_manufacturers(session: SessionDep) -> list[FleetValue]:
+async def list_manufacturers(
+    session: SessionDep, scope: CurrentScope
+) -> list[FleetValue]:
     """Hardware manufacturers present in the fleet, most widespread first."""
-    return await _distinct_values(session, Machine.hw_manufacturer)
+    return await _distinct_values(session, Machine.hw_manufacturer, scope)
 
 
 @router.get("/processors", response_model=list[FleetValue])
-async def list_processors(session: SessionDep) -> list[FleetValue]:
+async def list_processors(session: SessionDep, scope: CurrentScope) -> list[FleetValue]:
     """Processor models present in the fleet, most widespread first.
 
     Feeds the console's processor filter. The list is read the way the model
     list is: the top is what the parc is made of, the bottom is the odd poste.
     """
-    return await _distinct_values(session, Machine.cpu_model)
+    return await _distinct_values(session, Machine.cpu_model, scope)
 
 
 @router.get("/chassis-types", response_model=list[FleetValue])
-async def list_chassis_types(session: SessionDep) -> list[FleetValue]:
+async def list_chassis_types(
+    session: SessionDep, scope: CurrentScope
+) -> list[FleetValue]:
     """Chassis kinds present in the fleet (desktop, laptop…), most common first."""
-    return await _distinct_values(session, Machine.hw_chassis_type)
+    return await _distinct_values(session, Machine.hw_chassis_type, scope)
 
 
 @router.get("/locations", response_model=list[FleetValue])
-async def list_locations(session: SessionDep) -> list[FleetValue]:
+async def list_locations(session: SessionDep, scope: CurrentScope) -> list[FleetValue]:
     """Sites the agents report, most populated first.
 
     Feeds the console's location filter, and the counts double as a head
     count per site. Postes whose agent names no site are not a site: they are
     left out here, and reached by clearing the filter.
     """
-    return await _distinct_values(session, Machine.location)
+    return await _distinct_values(session, Machine.location, scope)
 
 
 class ExportColumnOut(BaseModel):
@@ -1363,7 +1381,7 @@ class WakeResponse(BaseModel):
     dependencies=[Depends(require_permission(Resource.COMMAND, Action.EXECUTE))],
 )
 async def wake_machines(
-    payload: WakeRequest, session: SessionDep, user: CurrentUser
+    payload: WakeRequest, session: SessionDep, user: CurrentUser, scope: CurrentScope
 ) -> WakeResponse:
     """Broadcast a Wake-on-LAN magic packet for each machine (admin only).
 
@@ -1388,8 +1406,12 @@ async def wake_machines(
     others — the batch is not the unit of success here, the poste is.
     """
     rows = await session.exec(
-        select(Machine).where(col(Machine.id).in_(payload.machine_ids))
+        restrict(
+            select(Machine).where(col(Machine.id).in_(payload.machine_ids)),
+            machine_clause(scope),
+        )
     )
+    # Out of scope reads as unknown: reported like a stale id, below.
     machines = {m.id: m for m in rows.all()}
 
     results: list[WakeOut] = []
@@ -1492,10 +1514,13 @@ async def wake_machines(
     )
 
 
-async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machine:
-    """Fetch a machine or raise the stable not-found error."""
+async def _require_machine(
+    session: SessionDep, machine_id: uuid.UUID, scope: Scope | None
+) -> Machine:
+    """Fetch a machine or raise the stable not-found error — the same error
+    for one outside the caller's scope, which must not learn that it exists."""
     machine = await session.get(Machine, machine_id)
-    if machine is None:
+    if machine is None or not await machine_visible(session, machine_id, scope):
         raise AppError(
             code=ErrorCode.MACHINE_NOT_FOUND,
             status_code=404,
@@ -1650,9 +1675,11 @@ async def _attach_inventory(
 
 
 @router.get("/{machine_id}", response_model=MachineDetailOut)
-async def get_machine(machine_id: uuid.UUID, session: SessionDep) -> MachineDetailOut:
+async def get_machine(
+    machine_id: uuid.UUID, session: SessionDep, scope: CurrentScope
+) -> MachineDetailOut:
     """Fetch a single machine by id (full Defender state + fingerprint)."""
-    machine = await _require_machine(session, machine_id)
+    machine = await _require_machine(session, machine_id, scope)
     return await _machine_detail(session, machine)
 
 
@@ -1683,6 +1710,7 @@ class MachineUsageOut(BaseModel):
 async def get_machine_usage(
     machine_id: uuid.UUID,
     session: SessionDep,
+    scope: CurrentScope,
     days: int = Query(28, ge=1, le=90),
     tz: str | None = None,
 ) -> MachineUsageOut:
@@ -1694,7 +1722,7 @@ async def get_machine_usage(
     from the rounded days. It covers whole calendar days, so it is not the
     list's figure, which counts a sliding window anchored on the hour.
     """
-    machine = await _require_machine(session, machine_id)
+    machine = await _require_machine(session, machine_id, scope)
     zone = machine_export.resolve_timezone(tz)
     daily = await usage_crud.daily_seconds(session, machine.id, utcnow(), days, zone)
     return MachineUsageOut(
@@ -1758,7 +1786,7 @@ def _duplicate_candidate(
 
 @router.get("/{machine_id}/duplicates", response_model=list[DuplicateCandidateOut])
 async def list_duplicates(
-    machine_id: uuid.UUID, session: SessionDep
+    machine_id: uuid.UUID, session: SessionDep, scope: CurrentScope
 ) -> list[DuplicateCandidateOut]:
     """Candidate duplicates of this machine — the records an admin may merge.
 
@@ -1794,7 +1822,7 @@ async def list_duplicates(
     without Sysprep, which is precisely the case where clones share it — it
     would group a whole image, not the copies of one machine.
     """
-    machine = await _require_machine(session, machine_id)
+    machine = await _require_machine(session, machine_id, scope)
 
     anchor = trustworthy_smbios_uuid(machine.smbios_uuid)
     tpm = (machine.tpm_ek_hash or "").strip()
@@ -1811,7 +1839,7 @@ async def list_duplicates(
         return []
 
     rows = await session.exec(
-        select(Machine)
+        restrict(select(Machine), machine_clause(scope))
         .where(or_(*clauses))
         .where(col(Machine.id) != machine_id)
         .order_by(col(Machine.last_seen).desc())
@@ -1846,13 +1874,13 @@ async def list_duplicates(
     dependencies=[Depends(require_permission(Resource.MACHINE, Action.WRITE))],
 )
 async def revoke_token(
-    machine_id: uuid.UUID, session: SessionDep, user: CurrentUser
+    machine_id: uuid.UUID, session: SessionDep, scope: CurrentScope, user: CurrentUser
 ) -> dict[str, str]:
     """Revoke a machine's token (kill-switch): its next call is rejected, and
     so is any re-enrollment attempt — the fleet-wide secret must not be enough
     to undo a revocation (plan §2.4). The way back is ``allow-reenroll``.
     """
-    machine = await _require_machine(session, machine_id)
+    machine = await _require_machine(session, machine_id, scope)
     machine.token_revoked = True
     # A token offered for rotation and not yet used is a credential too.
     token_rotation.reset_rotation(machine)
@@ -1874,7 +1902,7 @@ async def revoke_token(
     dependencies=[Depends(require_permission(Resource.MACHINE, Action.WRITE))],
 )
 async def allow_reenroll(
-    machine_id: uuid.UUID, session: SessionDep, user: CurrentUser
+    machine_id: uuid.UUID, session: SessionDep, scope: CurrentScope, user: CurrentUser
 ) -> dict[str, str]:
     """Let the machine enroll again with the shared secret.
 
@@ -1887,7 +1915,7 @@ async def allow_reenroll(
     on its next enrollment attempt with a fresh token (its agent drops a stale
     token on the first 401, and retries a held enrollment by itself).
     """
-    machine = await _require_machine(session, machine_id)
+    machine = await _require_machine(session, machine_id, scope)
     details = {"hostname": machine.hostname, "machine_uuid": machine.machine_uuid}
     if machine.reenroll_requested_at is not None:
         details["requested_at"] = machine.reenroll_requested_at.isoformat()
@@ -1925,6 +1953,7 @@ async def merge_machine(
     machine_id: uuid.UUID,
     payload: MergeRequest,
     session: SessionDep,
+    scope: CurrentScope,
     user: CurrentUser,
 ) -> MachineDetailOut:
     """Merge a duplicate record into this one (plan §8): the source's threats
@@ -1941,8 +1970,8 @@ async def merge_machine(
             status_code=400,
             message="Cannot merge a machine into itself",
         )
-    target = await _require_machine(session, machine_id)
-    source = await _require_machine(session, payload.source_id)
+    target = await _require_machine(session, machine_id, scope)
+    source = await _require_machine(session, payload.source_id, scope)
     audit.record(
         session,
         actor=user.email,

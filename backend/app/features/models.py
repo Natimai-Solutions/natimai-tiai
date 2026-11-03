@@ -28,6 +28,7 @@ from app.features.usage.models import MachineUptime  # noqa: F401
 from app.features.user.models import (  # noqa: F401
     Group,
     GroupPermission,
+    GroupScope,
     PasswordResetToken,
     User,
     UserGroup,
