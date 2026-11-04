@@ -3,6 +3,7 @@
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import func
 from sqlmodel import col, select
@@ -34,15 +35,17 @@ class DueRoom:
 
 
 async def fleet_resolved(
-    session: AsyncSession, policy: MaintenancePolicy, now: datetime
+    session: AsyncSession, policy: MaintenancePolicy, now: datetime, where: Any = None
 ) -> list[tuple[Machine, Room | None, Building | None, Resolved]]:
-    """Every poste with its placement and resolved maintenance. One query
-    over the parc: what the due list and the room counts are built from."""
-    rows = await session.exec(
+    """Every poste — or those matching ``where``, a scope's ``machine_clause``
+    — with its placement and resolved maintenance. One query over the parc:
+    what the due list and the room counts are built from."""
+    stmt = (
         select(Machine, Room, Building)
         .outerjoin(Room, col(Room.id) == col(Machine.room_id))
         .outerjoin(Building, col(Building.id) == col(Room.building_id))
     )
+    rows = await session.exec(stmt if where is None else stmt.where(where))
     return [(m, r, b, resolve(m, r, policy, now)) for m, r, b in rows.all()]
 
 
@@ -168,8 +171,9 @@ async def list_sessions(
     machine_id: uuid.UUID | None,
     page: int,
     page_size: int,
+    where: Any = None,
 ) -> tuple[list[Maintenance], int]:
-    stmt = select(Maintenance)
+    stmt = select(Maintenance) if where is None else select(Maintenance).where(where)
     if room_id is not None:
         stmt = stmt.where(col(Maintenance.room_id) == room_id)
     if machine_id is not None:
@@ -191,13 +195,17 @@ async def list_sessions(
 
 
 async def session_items(
-    session: AsyncSession, maintenance_id: uuid.UUID
+    session: AsyncSession, maintenance_id: uuid.UUID, where: Any = None
 ) -> list[tuple[Intervention, Machine]]:
+    stmt = select(Intervention, Machine).join(
+        Machine, col(Machine.id) == col(Intervention.machine_id)
+    )
+    if where is not None:
+        stmt = stmt.where(where)
     rows = await session.exec(
-        select(Intervention, Machine)
-        .join(Machine, col(Machine.id) == col(Intervention.machine_id))
-        .where(col(Intervention.maintenance_id) == maintenance_id)
-        .order_by(func.lower(col(Machine.hostname)).nulls_last())
+        stmt.where(col(Intervention.maintenance_id) == maintenance_id).order_by(
+            func.lower(col(Machine.hostname)).nulls_last()
+        )
     )
     return [(i, m) for i, m in rows.all()]
 

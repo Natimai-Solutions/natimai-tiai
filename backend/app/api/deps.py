@@ -27,6 +27,7 @@ from app.features.user.permissions import (
     Resource,
     has_permission,
 )
+from app.features.user.scope import Scope
 
 security_log = logging.getLogger("app.security")
 
@@ -198,14 +199,30 @@ async def get_current_permissions(
 CurrentPermissions = Annotated[frozenset[str], Depends(get_current_permissions)]
 
 
+async def get_current_scope(session: SessionDep, user: CurrentUser) -> Scope | None:
+    """Where the caller may look (``user/scope.py``): ``None`` for the whole
+    parc. Every route that reads or acts on machines — or on what hangs off
+    them — narrows its query with it; a machine outside it answers 404, as if
+    it did not exist, rather than 403, which would confirm that it does."""
+    return await user_crud.user_scope(session, user.id)
+
+
+CurrentScope = Annotated[Scope | None, Depends(get_current_scope)]
+
+
 async def get_current_authority(
-    session: SessionDep, user: CurrentUser, permissions: CurrentPermissions
+    session: SessionDep,
+    user: CurrentUser,
+    permissions: CurrentPermissions,
+    scope: CurrentScope,
 ) -> Authority:
     """What the caller may hand out to others: their permissions, and whether
     they are an administrator (``permissions.escalation``). Only the routes
     that grant rights or touch accounts ask for it."""
     return Authority(
-        is_admin=await user_crud.is_admin(session, user.id), permissions=permissions
+        is_admin=await user_crud.is_admin(session, user.id),
+        permissions=permissions,
+        scope=scope,
     )
 
 

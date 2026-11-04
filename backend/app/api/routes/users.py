@@ -190,11 +190,12 @@ def reject_escalation(
     # security review wants to find without reading the audit log end to end.
     security_log.warning(
         "privilege escalation refused: %s tried to %s beyond their rights "
-        "(missing %s%s)",
+        "(missing %s%s%s)",
         actor_email,
         action,
         ", ".join(sorted(found.missing)) or "nothing",
         ", administrators' group" if found.admin else "",
+        ", places outside their scope" if found.wider_scope else "",
     )
     raise AppError(
         code=ErrorCode.AUTH_PERMISSION_ESCALATION,
@@ -204,6 +205,7 @@ def reject_escalation(
             "action": action,
             "missing": sorted(found.missing),
             "admin": found.admin,
+            "wider_scope": found.wider_scope,
         },
     )
 

@@ -112,6 +112,7 @@ import {
 } from 'src/services/machines';
 import { apiErrorMessage } from 'src/services/errors';
 import { formatDateTime, timeAgoLabel } from 'src/utils/format';
+import { escapeHtml } from 'src/utils/html';
 
 const props = defineProps<{
   /** The record being kept — the merge target. */
@@ -208,15 +209,6 @@ function doMerge(source: Machine) {
   }).onOk(() => {
     void runMerge(source.id);
   });
-}
-
-/** Escape interpolated machine-reported text before it goes into the dialog's
- * HTML: a hostname comes from a poste, not from this console. */
-function escapeHtml(value: string): string {
-  return value.replace(
-    /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
 }
 
 async function runMerge(sourceId: string) {

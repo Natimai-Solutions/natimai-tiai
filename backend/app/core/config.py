@@ -444,6 +444,16 @@ class Settings(BaseSettings):
     # choice a deployment makes knowingly. Either mode, never both: a remote
     # server emitting into the void would only report a success it cannot have.
     WOL_RELAY_ENABLED: bool = False
+
+    # Software deployment (dev/plan-deploiement-logiciel.md). Where uploaded
+    # package files are kept — one file per SHA-256 — and the largest file
+    # accepted. The Caddy route that receives them is sized to match
+    # (deploy/Caddyfile, 2 GB).
+    PACKAGES_DIR: str = "/data/packages"
+    PACKAGE_MAX_BYTES: int = Field(default=2 * 1024**3, ge=1024**2, le=8 * 1024**3)
+    # Package downloads served at once by one API process; beyond it agents
+    # are told to retry (429 + Retry-After), without failing their command.
+    PACKAGE_MAX_CONCURRENT_DOWNLOADS: int = Field(default=20, ge=1, le=500)
     # How long a relayed wake waits for a poste to claim it before expiring. Ten
     # minutes and not the general command TTL: a wake nobody relayed within ten
     # minutes is a site with nothing on, and a magic packet an hour late meets

@@ -35,6 +35,9 @@ class ErrorCode(enum.StrEnum):
     # a permission they lack, the administrators' group, or an account that is
     # more powerful than they are.
     AUTH_PERMISSION_ESCALATION = "auth.permission.escalation"
+    # The account is confined to some sites (``user/scope.py``) and the
+    # action reaches beyond them, or is parc-wide by nature.
+    AUTH_SCOPE_RESTRICTED = "auth.scope.restricted"
     # The console session is over (logged out, revoked, expired) or the refresh
     # token presented does not open one: log in again.
     AUTH_SESSION_INVALID = "auth.session.invalid"
@@ -62,6 +65,15 @@ class ErrorCode(enum.StrEnum):
     # cannot be edited: they are implicit.
     GROUP_BUILTIN_PROTECTED = "group.builtin.protected"
     GROUP_PERMISSION_UNKNOWN = "group.permission.unknown"
+    GROUP_SCOPE_UNKNOWN = "group.scope.unknown"
+    PACKAGE_NOT_FOUND = "package.not_found"
+    PACKAGE_INVALID = "package.invalid"
+    PACKAGE_FILE_TOO_LARGE = "package.file.too_large"
+    PACKAGE_FILE_NAME_INVALID = "package.file.name_invalid"
+    PACKAGE_SIGNATURE_INVALID = "package.signature.invalid"
+    PACKAGE_NOT_READY = "package.not_ready"
+    PACKAGE_RETIRED = "package.retired"
+    PACKAGE_REQUIRED = "package.required"
     BUILDING_NOT_FOUND = "building.not_found"
     BUILDING_NAME_TAKEN = "building.name.taken"
     ROOM_NOT_FOUND = "room.not_found"

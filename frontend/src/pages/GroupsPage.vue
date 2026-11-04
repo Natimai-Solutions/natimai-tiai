@@ -15,7 +15,9 @@
     <div class="text-body2 text-muted q-mb-md" style="max-width: 720px">
       Un compte peut ce que ses groupes lui accordent, tous groupes confondus. Les trois groupes
       intégrés se renomment et, sauf les administrateurs, se modifient comme les autres ; ils ne se
-      suppriment pas.
+      suppriment pas. Un groupe peut être limité à des emplacements, bâtiments ou salles : ses
+      membres ne voient alors que ces postes — à condition qu'aucun de leurs autres groupes ne soit
+      ouvert à tout le parc.
     </div>
 
     <q-table
@@ -65,6 +67,24 @@
               class="q-ml-none"
             >
               {{ permissionLabel(key) }}
+            </q-chip>
+          </template>
+        </q-td>
+      </template>
+
+      <template #body-cell-scope="props">
+        <q-td :props="props" style="white-space: normal; max-width: 320px">
+          <span v-if="props.row.is_admin || !props.row.scope" class="text-muted">Tout le parc</span>
+          <template v-else>
+            <q-chip
+              v-for="label in scopeLabels(props.row)"
+              :key="label"
+              dense
+              size="sm"
+              icon="place"
+              class="q-ml-none"
+            >
+              {{ label }}
             </q-chip>
           </template>
         </q-td>
@@ -165,6 +185,51 @@
                 seul n'ouvre rien.
               </div>
             </div>
+
+            <div v-if="!editing?.is_admin">
+              <div class="text-subtitle2 q-mb-xs">Postes concernés</div>
+              <div class="text-caption text-muted q-mb-sm">
+                Rien de coché : tout le parc. Sinon, les postes d'au moins un de ces emplacements,
+                bâtiments ou salles — et les salles, vérifications, maintenances et e-mails qui s'y
+                rapportent.
+              </div>
+              <div class="q-gutter-sm">
+                <q-select
+                  v-model="form.scope.locations"
+                  :options="locationOptions"
+                  label="Emplacements"
+                  outlined
+                  dense
+                  multiple
+                  use-chips
+                  use-input
+                  new-value-mode="add-unique"
+                  hint="Tels que les agents les déclarent ; saisie libre possible"
+                />
+                <q-select
+                  v-model="form.scope.buildings"
+                  :options="buildingOptions"
+                  label="Bâtiments"
+                  outlined
+                  dense
+                  multiple
+                  use-chips
+                  emit-value
+                  map-options
+                />
+                <q-select
+                  v-model="form.scope.rooms"
+                  :options="roomOptions"
+                  label="Salles"
+                  outlined
+                  dense
+                  multiple
+                  use-chips
+                  emit-value
+                  map-options
+                />
+              </div>
+            </div>
           </q-card-section>
 
           <q-card-actions align="right" class="q-px-md q-pb-md">
@@ -180,7 +245,17 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useQuasar, type QTableColumn } from 'quasar';
-import { createGroup, deleteGroup, listGroups, updateGroup, type Group } from 'src/services/groups';
+import {
+  createGroup,
+  deleteGroup,
+  listGroups,
+  scopeOrNull,
+  updateGroup,
+  type Group,
+} from 'src/services/groups';
+import { listLocations } from 'src/services/machines';
+import { listBuildings, listRooms, type Building, type Room } from 'src/services/rooms';
+import { escapeHtml } from 'src/utils/html';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { permissionLabel, permissionRows } from 'src/utils/permissions';
@@ -198,11 +273,44 @@ const form = reactive({
   name: '',
   description: '',
   permissions: [] as string[],
+  scope: { locations: [] as string[], buildings: [] as string[], rooms: [] as string[] },
 });
+
+// What the scope pickers offer, and how a stored id is named in the table.
+const locations = ref<string[]>([]);
+const buildings = ref<Building[]>([]);
+const rooms = ref<Room[]>([]);
+const locationOptions = computed(() => locations.value);
+const buildingOptions = computed(() =>
+  buildings.value.map((b) => ({
+    label: b.location ? `${b.name} (${b.location})` : b.name,
+    value: b.id,
+  })),
+);
+const roomOptions = computed(() =>
+  rooms.value.map((r) => ({
+    label: r.building ? `${r.name} — ${r.building.name}` : r.name,
+    value: r.id,
+  })),
+);
+
+function scopeLabels(group: Group): string[] {
+  if (!group.scope) return [];
+  const building = new Map(buildingOptions.value.map((o) => [o.value, o.label]));
+  const room = new Map(roomOptions.value.map((o) => [o.value, o.label]));
+  return [
+    ...group.scope.locations,
+    // An id that names nothing any more matches no poste: shown as such so
+    // that an administrator can tidy it, never silently dropped.
+    ...group.scope.buildings.map((id) => building.get(id) ?? 'Bâtiment supprimé'),
+    ...group.scope.rooms.map((id) => room.get(id) ?? 'Salle supprimée'),
+  ];
+}
 
 const columns: QTableColumn<Group>[] = [
   { name: 'name', label: 'Groupe', field: 'name', align: 'left' },
   { name: 'permissions', label: 'Droits', field: 'permissions', align: 'left' },
+  { name: 'scope', label: 'Postes', field: 'scope', align: 'left' },
   { name: 'member_count', label: 'Comptes', field: 'member_count', align: 'center' },
   { name: 'actions', label: '', field: 'id', align: 'right' },
 ];
@@ -220,7 +328,18 @@ const riskyWithoutEveryday = computed(
 async function reload() {
   loading.value = true;
   try {
-    rows.value = await listGroups();
+    // The places only name the scope chips: their failure must not blank
+    // the groups, which the page is about.
+    const [groups, sites, bs, rs] = await Promise.all([
+      listGroups(),
+      listLocations().catch(() => []),
+      listBuildings().catch(() => []),
+      listRooms().catch(() => []),
+    ]);
+    rows.value = groups;
+    locations.value = sites.map((v) => v.name);
+    buildings.value = bs;
+    rooms.value = rs;
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
   } finally {
@@ -230,7 +349,12 @@ async function reload() {
 
 function openCreate() {
   editing.value = null;
-  Object.assign(form, { name: '', description: '', permissions: [] });
+  Object.assign(form, {
+    name: '',
+    description: '',
+    permissions: [],
+    scope: { locations: [], buildings: [], rooms: [] },
+  });
   formOpen.value = true;
 }
 
@@ -240,6 +364,11 @@ function openEdit(group: Group) {
     name: group.name,
     description: group.description ?? '',
     permissions: [...group.permissions],
+    scope: {
+      locations: [...(group.scope?.locations ?? [])],
+      buildings: [...(group.scope?.buildings ?? [])],
+      rooms: [...(group.scope?.rooms ?? [])],
+    },
   });
   formOpen.value = true;
 }
@@ -252,7 +381,9 @@ async function submitForm() {
         name: form.name.trim(),
         description: form.description.trim() || null,
         // Implicit for the administrators: sending them would be refused.
-        ...(editing.value.is_admin ? {} : { permissions: form.permissions }),
+        ...(editing.value.is_admin
+          ? {}
+          : { permissions: form.permissions, scope: scopeOrNull(form.scope) }),
       });
       $q.notify({ type: 'positive', message: 'Groupe mis à jour' });
     } else {
@@ -260,6 +391,7 @@ async function submitForm() {
         name: form.name.trim(),
         description: form.description.trim() || null,
         permissions: form.permissions,
+        scope: scopeOrNull(form.scope),
       });
       $q.notify({ type: 'positive', message: 'Groupe créé' });
     }
@@ -278,7 +410,7 @@ function confirmDelete(group: Group) {
   $q.dialog({
     title: 'Supprimer le groupe',
     message:
-      `Supprimer <b>${group.name}</b> ?<br>` +
+      `Supprimer <b>${escapeHtml(group.name)}</b> ?<br>` +
       `Les ${group.member_count} compte(s) qui en font partie perdent ce qu'il leur accordait.`,
     html: true,
     cancel: true,

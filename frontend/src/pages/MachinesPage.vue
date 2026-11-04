@@ -28,8 +28,10 @@
       :can-place="canPlace"
       :can-check="auth.can('check', 'write')"
       :action-groups="actionGroups"
+      :can-deploy="canDeploy"
       @place="placeOpen = true"
       @ask="askOpen = true"
+      @deploy="deployOpen = true"
       @run="runBulk"
     />
 
@@ -52,6 +54,8 @@
       :subtitle="`${selected.length} poste(s) sélectionné(s)`"
       :save="askSelection"
     />
+
+    <PackageDeployDialog v-model="deployOpen" :machine-ids="selected.map((m) => m.id)" />
 
     <MachinePlaceDialog
       v-model="placeOpen"
@@ -87,6 +91,7 @@ import MachineColumnsDialog from 'src/components/machine/MachineColumnsDialog.vu
 import MachineExportDialog from 'src/components/machine/MachineExportDialog.vue';
 import MachinePlaceDialog from 'src/components/machines-list/MachinePlaceDialog.vue';
 import MachinesBulkBar from 'src/components/machines-list/MachinesBulkBar.vue';
+import PackageDeployDialog from 'src/components/package/PackageDeployDialog.vue';
 import MachinesFiltersBar from 'src/components/machines-list/MachinesFiltersBar.vue';
 import MachinesTable from 'src/components/machines-list/MachinesTable.vue';
 import MachinesToolbar from 'src/components/machines-list/MachinesToolbar.vue';
@@ -151,6 +156,15 @@ const exportOpen = ref(false);
 
 // Moving postes by hand: the permission, and a server not in a directory mode.
 const canPlace = computed(() => auth.can('room', 'write') && manualMode.value);
+
+// Installing software: picking a package, and the risky commands it is.
+const deployOpen = ref(false);
+const canDeploy = computed(
+  () =>
+    auth.can('package', 'read') &&
+    auth.can('command', 'execute') &&
+    auth.can('risky_command', 'execute'),
+);
 
 // bulkOnly: the two diagnostics stay on the detail page. Their value is reading
 // one machine's output; fired on a selection they queue a report per poste that

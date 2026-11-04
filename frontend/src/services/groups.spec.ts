@@ -5,7 +5,7 @@ vi.mock('boot/axios', () => ({
 }));
 
 import { api } from 'boot/axios';
-import { createGroup, deleteGroup, listGroups, updateGroup } from './groups';
+import { createGroup, deleteGroup, listGroups, scopeOrNull, updateGroup } from './groups';
 
 const group = {
   id: 'g-1',
@@ -14,6 +14,7 @@ const group = {
   builtin_key: null,
   is_admin: false,
   permissions: ['machine:read', 'command:execute'],
+  scope: null,
   member_count: 2,
   created_at: '2026-09-10T00:00:00Z',
   updated_at: '2026-09-10T00:00:00Z',
@@ -52,5 +53,11 @@ describe('groups service', () => {
     vi.mocked(api.delete).mockResolvedValue({ data: undefined });
     await deleteGroup('g-1');
     expect(api.delete).toHaveBeenCalledWith('/groups/g-1');
+  });
+
+  it('sends no scope when nothing is ticked, and the lists otherwise', () => {
+    expect(scopeOrNull({ locations: [], buildings: [], rooms: [] })).toBeNull();
+    const site = { locations: ['Lycée A'], buildings: [], rooms: [] };
+    expect(scopeOrNull(site)).toEqual(site);
   });
 });

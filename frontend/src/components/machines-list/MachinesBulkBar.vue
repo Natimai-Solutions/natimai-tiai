@@ -2,7 +2,7 @@
   <!-- Shown only when there is a selection and something the account may do
        with it: a bar of buttons that all refuse would only be noise. -->
   <div
-    v-if="count && (actionGroups.length || canPlace || canCheck)"
+    v-if="count && (actionGroups.length || canPlace || canCheck || canDeploy)"
     class="row items-center q-mb-sm"
   >
     <div class="text-caption text-muted q-mr-md">{{ count }} sélectionné(s)</div>
@@ -25,6 +25,16 @@
       label="Demander une vérification"
       class="q-mr-sm"
       @click="emit('ask')"
+    />
+    <q-btn
+      v-if="canDeploy"
+      flat
+      dense
+      color="primary"
+      icon="install_desktop"
+      label="Installer un logiciel"
+      class="q-mr-sm"
+      @click="emit('deploy')"
     />
     <q-btn-dropdown
       v-if="actionGroups.length"
@@ -65,7 +75,14 @@ defineProps<{
   canCheck: boolean;
   /** The bulk commands the account may run, in their sections. */
   actionGroups: CommandActionGroup[];
+  /** Installing or removing a package: package:read and the risky commands. */
+  canDeploy?: boolean;
 }>();
 
-const emit = defineEmits<{ place: []; ask: []; run: [action: CommandAction] }>();
+const emit = defineEmits<{
+  place: [];
+  ask: [];
+  deploy: [];
+  run: [action: CommandAction];
+}>();
 </script>

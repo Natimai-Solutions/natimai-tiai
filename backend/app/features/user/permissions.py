@@ -17,6 +17,10 @@ import enum
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from app.features.user.scope import Scope
+from app.features.user.scope import union as scope_union
+from app.features.user.scope import wider as scope_wider
+
 
 class Resource(enum.StrEnum):
     """Protected resource families."""
@@ -44,6 +48,9 @@ class Resource(enum.StrEnum):
     # The audit log. Admin material like USER: who did what to the parc's
     # accounts and tokens.
     AUDIT = "audit"
+    # Software packages: reading the catalogue, and composing it (uploading
+    # files, signing, retiring). *Deploying* one is a risky command.
+    PACKAGE = "package"
 
 
 class Action(enum.StrEnum):
@@ -77,6 +84,8 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.USER, Action.READ),
     (Resource.USER, Action.WRITE),
     (Resource.AUDIT, Action.READ),
+    (Resource.PACKAGE, Action.READ),
+    (Resource.PACKAGE, Action.WRITE),
 )
 
 
@@ -137,6 +146,8 @@ BUILTIN_GROUP_DEFAULTS: dict[BuiltinGroup, tuple[str, str, frozenset[str]]] = {
             permission_key(Resource.INTERVENTION, Action.WRITE),
             permission_key(Resource.CHECK, Action.WRITE),
             permission_key(Resource.MAINTENANCE, Action.WRITE),
+            # To pick the package a deployment installs.
+            permission_key(Resource.PACKAGE, Action.READ),
         },
     ),
 }
@@ -163,29 +174,39 @@ def has_permission(
 @dataclass(frozen=True)
 class Authority:
     """What an account holds, as far as granting goes — or what a group, a set
-    of groups, an account would put in someone's hands."""
+    of groups, an account would put in someone's hands.
+
+    ``scope`` is where it holds it (``user/scope.py``): ``None`` is the whole
+    parc, which is what an administrator, and every unrestricted group, has.
+    """
 
     is_admin: bool
     permissions: frozenset[str]
+    scope: Scope | None = None
 
     @classmethod
     def union(cls, parts: Iterable["Authority"]) -> "Authority":
-        """What several groups grant together: an account's memberships."""
+        """What several groups grant together: an account's memberships.
+        Their scopes add up, and one unrestricted part lifts the restriction."""
         is_admin = False
         permissions: set[str] = set()
-        for part in parts:
+        items = list(parts)
+        for part in items:
             is_admin = is_admin or part.is_admin
             permissions |= part.permissions
-        return cls(is_admin=is_admin, permissions=frozenset(permissions))
+        scope = None if is_admin else scope_union(p.scope for p in items)
+        return cls(is_admin=is_admin, permissions=frozenset(permissions), scope=scope)
 
 
 @dataclass(frozen=True)
 class Escalation:
     """Why ``target`` is out of the actor's reach: the permissions it carries
-    that the actor lacks, and whether it is administrator material."""
+    that the actor lacks, whether it is administrator material, and whether it
+    reaches places the actor is confined out of."""
 
     missing: frozenset[str]
     admin: bool
+    wider_scope: bool = False
 
 
 def escalation(actor: Authority, target: Authority) -> Escalation | None:
@@ -201,6 +222,9 @@ def escalation(actor: Authority, target: Authority) -> Escalation | None:
     if actor.is_admin:
         return None
     missing = target.permissions - actor.permissions
-    if not missing and not target.is_admin:
+    wider_scope = scope_wider(actor.scope, target.scope)
+    if not missing and not target.is_admin and not wider_scope:
         return None
-    return Escalation(missing=frozenset(missing), admin=target.is_admin)
+    return Escalation(
+        missing=frozenset(missing), admin=target.is_admin, wider_scope=wider_scope
+    )

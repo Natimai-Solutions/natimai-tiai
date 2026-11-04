@@ -370,6 +370,34 @@ type Command struct {
 	// emits on its own subnets only — see collector.RelayWake for what that
 	// bounds.
 	TargetMAC string `json:"target_mac,omitempty"`
+	// Package is the second argument the protocol carries, on the two
+	// deployment types only (package_install, package_uninstall). Whether it
+	// may run is decided here, from trust anchors the GPO set — never from
+	// anything in this struct alone (internal/deploy).
+	Package *PackageDelivery `json:"package,omitempty"`
+}
+
+// PackageDelivery is a package as the server hands it over. Manifest,
+// Signature and Certificate are base64: the signature covers the manifest's
+// exact bytes.
+type PackageDelivery struct {
+	ID                 string             `json:"id"`
+	Kind               string             `json:"kind"` // "winget" | "files"
+	Name               string             `json:"name"`
+	WingetID           string             `json:"winget_id,omitempty"`
+	WingetVersion      string             `json:"winget_version,omitempty"`
+	Manifest           string             `json:"manifest,omitempty"`
+	Signature          string             `json:"signature,omitempty"`
+	SignatureAlgorithm string             `json:"signature_algorithm,omitempty"`
+	Certificate        string             `json:"certificate,omitempty"`
+	Files              []PackageFileEntry `json:"files,omitempty"`
+}
+
+// PackageFileEntry is one file of a package, as listed by the server.
+type PackageFileEntry struct {
+	Name   string `json:"name"`
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
 }
 
 // HeartbeatResponse carries the pending commands for this machine.

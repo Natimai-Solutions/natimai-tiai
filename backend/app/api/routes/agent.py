@@ -1,14 +1,17 @@
 """Agent-facing endpoints: enroll, heartbeat (+ command pickup), command result."""
 
+import base64
 import logging
 import uuid
 from datetime import datetime
 from ipaddress import ip_address
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 from sqlmodel import col, select
+from starlette.background import BackgroundTask
 
 from app.api.deps import CurrentMachine, SessionDep, verify_enrollment_secret
 from app.core import ratelimit, security
@@ -20,6 +23,7 @@ from app.features.base import utcnow
 from app.features.command import crud as command_crud
 from app.features.command.models import (
     AGENT_REPORTABLE_STATUSES,
+    PACKAGE_COMMAND_TYPES,
     TERMINAL_STATUSES,
     Command,
     CommandStatus,
@@ -31,6 +35,9 @@ from app.features.machine import fingerprint, token_rotation
 from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
 from app.features.notification import threat_alert
+from app.features.package import crud as package_crud
+from app.features.package import storage as package_storage
+from app.features.package.models import Package, PackageFile
 from app.features.room import crud as room_crud
 from app.features.setting import crud as setting_crud
 from app.features.threat.crud import NewDetection, upsert_threats
@@ -366,6 +373,69 @@ class CommandOut(BaseModel):
     id: uuid.UUID
     type: str
     target_mac: str | None = None
+    # The second argument the protocol carries, on the two deployment types
+    # only: the package, whole. What the agent may do with it is decided on
+    # the poste, from trust anchors its GPO set (plan-deploiement-logiciel §4).
+    package: "PackageDelivery | None" = None
+
+
+class PackageFileDelivery(BaseModel):
+    name: str
+    sha256: str
+    size: int
+
+
+class PackageDelivery(BaseModel):
+    """A package as the agent receives it. ``manifest``, ``signature`` and
+    ``certificate`` are base64: the signature covers the manifest's exact
+    bytes, which a JSON string could not carry through unchanged."""
+
+    id: uuid.UUID
+    kind: str
+    name: str
+    winget_id: str | None = None
+    winget_version: str | None = None
+    manifest: str | None = None
+    signature: str | None = None
+    signature_algorithm: str | None = None
+    certificate: str | None = None
+    files: list[PackageFileDelivery] = []
+
+
+CommandOut.model_rebuild()
+
+
+async def _package_deliveries(
+    session: SessionDep, package_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, PackageDelivery]:
+    if not package_ids:
+        return {}
+    packages = (
+        await session.exec(select(Package).where(col(Package.id).in_(package_ids)))
+    ).all()
+    files = await package_crud.files_of_many(session, [p.id for p in packages])
+
+    def b64(value: bytes | None) -> str | None:
+        return base64.b64encode(value).decode("ascii") if value is not None else None
+
+    return {
+        p.id: PackageDelivery(
+            id=p.id,
+            kind=p.kind,
+            name=p.name,
+            winget_id=p.winget_id,
+            winget_version=p.winget_version,
+            manifest=b64(p.manifest),
+            signature=b64(p.signature),
+            signature_algorithm=p.signature_algorithm,
+            certificate=b64(p.signer_certificate),
+            files=[
+                PackageFileDelivery(name=f.name, sha256=f.sha256, size=f.size)
+                for f in files[p.id]
+            ],
+        )
+        for p in packages
+    }
 
 
 class HeartbeatResponse(BaseModel):
@@ -760,7 +830,27 @@ async def heartbeat(
 
     # Build the payload before commit: expire_on_commit would otherwise trigger
     # a sync refresh on attribute access — MissingGreenlet under asyncio.
-    commands = [CommandOut(id=c.id, type=c.type) for c in pending]
+    deliveries = await _package_deliveries(
+        session, {c.package_id for c in pending if c.package_id is not None}
+    )
+    commands = [
+        CommandOut(
+            id=c.id,
+            type=c.type,
+            package=deliveries.get(c.package_id) if c.package_id else None,
+        )
+        for c in pending
+        # A deployment whose package was deleted cannot be run: it is closed
+        # below rather than handed out empty.
+        if c.package_id is None
+        or c.package_id in deliveries
+        or c.type not in PACKAGE_COMMAND_TYPES
+    ]
+    for c in pending:
+        if c.type in PACKAGE_COMMAND_TYPES and c.package_id not in deliveries:
+            c.status = CommandStatus.FAILED
+            c.error = "Paquet supprimé avant l'exécution"
+            c.finished_at = now
 
     if settings.WOL_RELAY_ENABLED:
         # This poste is awake, whatever woke it: the wakes queued for it are
@@ -856,3 +946,79 @@ async def command_result(
     cmd.finished_at = utcnow()
     await session.commit()
     return {"status": "ok"}
+
+
+# --- Package files ----------------------------------------------------------
+
+# Downloads in progress, in this process. A room switched on at 8 o'clock
+# asks for the same installer forty times in a minute: beyond the bound the
+# agent is told to come back later (429 + Retry-After) — which it does without
+# failing the command — instead of the server serving them all at once.
+_downloads_in_flight = 0
+
+
+def _release_download() -> None:
+    global _downloads_in_flight
+    _downloads_in_flight = max(0, _downloads_in_flight - 1)
+
+
+@router.get("/packages/{package_id}/files/{sha256}")
+async def download_package_file(
+    package_id: uuid.UUID,
+    sha256: str,
+    machine: CurrentMachine,
+    session: SessionDep,
+) -> FileResponse:
+    """A file of a package, for a poste that has a deployment of it open.
+
+    The token says which poste asks; the open command says it was asked to.
+    Without one: 404, as for a file that does not exist — a poste has no
+    business browsing the store. ``Range`` is honoured (FileResponse), so a
+    download cut halfway resumes where it stopped.
+    """
+    global _downloads_in_flight
+    not_found = AppError(
+        code=ErrorCode.PACKAGE_NOT_FOUND, status_code=404, message="Not found"
+    )
+    open_command = (
+        await session.exec(
+            select(Command.id)
+            .where(col(Command.machine_id) == machine.id)
+            .where(col(Command.package_id) == package_id)
+            .where(
+                col(Command.status).in_(
+                    [CommandStatus.DELIVERED.value, CommandStatus.RUNNING.value]
+                )
+            )
+            .limit(1)
+        )
+    ).first()
+    if open_command is None:
+        raise not_found
+    row = (
+        await session.exec(
+            select(PackageFile)
+            .where(col(PackageFile.package_id) == package_id)
+            .where(col(PackageFile.sha256) == sha256)
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        raise not_found
+    path = package_storage.path_for(row.sha256)
+    if not path.exists():
+        raise not_found
+    if _downloads_in_flight >= settings.PACKAGE_MAX_CONCURRENT_DOWNLOADS:
+        raise AppError(
+            code=ErrorCode.RATE_LIMITED,
+            status_code=429,
+            message="Too many downloads in progress",
+            headers={"Retry-After": "60"},
+        )
+    _downloads_in_flight += 1
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=row.name,
+        background=BackgroundTask(_release_download),
+    )

@@ -112,6 +112,20 @@
           </template>
         </q-list>
       </q-btn-dropdown>
+      <q-btn
+        v-if="canDeploy"
+        flat
+        dense
+        no-caps
+        color="primary"
+        icon="install_desktop"
+        label="Logiciel"
+        class="q-ml-sm"
+        :disable="!machine"
+        @click="deployOpen = true"
+      >
+        <q-tooltip>Installer ou désinstaller un paquet sur ce poste</q-tooltip>
+      </q-btn>
       <!-- check:write: ask somebody to go and look. One open at a time, so
            the button reads as the state. -->
       <q-btn
@@ -431,6 +445,8 @@
     />
 
     <CommandOutputDialog v-model="detailOpen" :command="detailCommand" :kind="detailKind" />
+
+    <PackageDeployDialog v-model="deployOpen" :machine-ids="[id]" @sent="load" />
   </q-page>
 </template>
 
@@ -455,6 +471,7 @@ import { createCheck, updateCheck, type Check, type CheckPayload } from 'src/ser
 import MachineIdentityCard from 'src/components/machine/MachineIdentityCard.vue';
 import MachineMemoryCard from 'src/components/machine/MachineMemoryCard.vue';
 import MachineMergeDialog from 'src/components/machine/MachineMergeDialog.vue';
+import PackageDeployDialog from 'src/components/package/PackageDeployDialog.vue';
 import MachineNetworkCard from 'src/components/machine/MachineNetworkCard.vue';
 import MachineUsageCard from 'src/components/machine/MachineUsageCard.vue';
 import MachinePendingUpdatesCard from 'src/components/machine/MachinePendingUpdatesCard.vue';
@@ -576,6 +593,13 @@ const commandPagination = ref<TablePagination>({
 // What this profile may trigger: the menu never offers what the backend would
 // refuse, and goes away entirely for an account that may run nothing.
 const actionGroups = computed(() => commandActionGroups({ permissions: auth.permissions }));
+const deployOpen = ref(false);
+const canDeploy = computed(
+  () =>
+    auth.can('package', 'read') &&
+    auth.can('command', 'execute') &&
+    auth.can('risky_command', 'execute'),
+);
 // Revoke, re-enroll, merge: the machine:write half of the fiche.
 const canManage = computed(() => auth.can('machine', 'write'));
 

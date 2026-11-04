@@ -16,7 +16,8 @@ export type Resource =
   | 'maintenance'
   | 'settings'
   | 'user'
-  | 'audit';
+  | 'audit'
+  | 'package';
 
 export type Action = 'read' | 'write' | 'execute';
 
@@ -180,6 +181,22 @@ export const PERMISSION_CATALOGUE: PermissionEntry[] = [
     action: 'read',
     resourceLabel: "Journal d'audit",
     label: 'Consulter',
+  },
+  {
+    key: 'package:read',
+    resource: 'package',
+    action: 'read',
+    resourceLabel: 'Paquets logiciels',
+    label: 'Consulter',
+    hint: 'Voir le catalogue des paquets. Déployer demande en plus les commandes à risque.',
+  },
+  {
+    key: 'package:write',
+    resource: 'package',
+    action: 'write',
+    resourceLabel: 'Paquets logiciels',
+    label: 'Gérer',
+    hint: 'Créer des paquets, déposer leurs fichiers, joindre la signature, les retirer.',
   },
 ];
 

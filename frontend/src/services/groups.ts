@@ -10,22 +10,43 @@ export interface Group {
   /** The administrators: every permission, shown but not editable. */
   is_admin: boolean;
   permissions: string[];
+  /** Where the group is confined; null = the whole parc. */
+  scope: GroupScope | null;
   member_count: number;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * The places a group is confined to: sites (in the agents' words), buildings
+ * and rooms (ids). A poste is in scope if it matches any of them. An account
+ * sees the union of its groups' scopes — and the whole parc as soon as one of
+ * its groups has none.
+ */
+export interface GroupScope {
+  locations: string[];
+  buildings: string[];
+  rooms: string[];
 }
 
 export interface CreateGroupPayload {
   name: string;
   description?: string | null;
   permissions: string[];
+  scope?: GroupScope | null;
 }
 
-/** Partial update — only the supplied fields are changed. */
+/** Partial update — only the supplied fields are changed; `scope: null` lifts the restriction. */
 export interface UpdateGroupPayload {
   name?: string;
   description?: string | null;
   permissions?: string[];
+  scope?: GroupScope | null;
+}
+
+/** The scope to send for what the form holds: null when nothing is ticked. */
+export function scopeOrNull(scope: GroupScope): GroupScope | null {
+  return scope.locations.length || scope.buildings.length || scope.rooms.length ? scope : null;
 }
 
 /** Every group, built-in ones first. Not paginated: a console has a handful. */

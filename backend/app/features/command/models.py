@@ -84,6 +84,13 @@ class CommandType(enum.StrEnum):
     GPO_REPORT = "gpo_report"
     NET_CONFIG = "net_config"
 
+    # Software deployment (dev/plan-deploiement-logiciel.md). The two types that
+    # break the "a type name and nothing else" rule, and knowingly: they carry
+    # a package (``Command.package_id``). What bounds them is on the poste —
+    # trust anchors its GPO set, never the server — not in this enum.
+    PACKAGE_INSTALL = "package_install"
+    PACKAGE_UNINSTALL = "package_uninstall"
+
 
 # The half of the catalogue that can cost somebody their work or change the
 # poste for good: a group granted ``command:execute`` alone runs everything
@@ -106,7 +113,14 @@ RISKY_COMMAND_TYPES = frozenset(
         CommandType.SPOOLER_RESET,
         CommandType.DISM_RESTORE_HEALTH,
         CommandType.DISM_COMPONENT_CLEANUP,
+        CommandType.PACKAGE_INSTALL,
+        CommandType.PACKAGE_UNINSTALL,
     }
+)
+
+# The types that carry a package, and must.
+PACKAGE_COMMAND_TYPES = frozenset(
+    {CommandType.PACKAGE_INSTALL, CommandType.PACKAGE_UNINSTALL}
 )
 
 
@@ -168,4 +182,12 @@ class Command(SQLModel, table=True):
     relay_machine_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(ForeignKey("machines.id", ondelete="SET NULL"), nullable=True),
+    )
+    # Set on the package types alone: the package to install or remove. SET
+    # NULL so that deleting a package leaves the history readable.
+    package_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("packages.id", ondelete="SET NULL"), nullable=True, index=True
+        ),
     )

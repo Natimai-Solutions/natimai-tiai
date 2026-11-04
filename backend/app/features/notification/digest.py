@@ -15,8 +15,9 @@ definitions, same thresholds, one source of truth for "périmé" and "inactif".
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, true
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -36,7 +37,9 @@ from app.features.notification.tasks import personal_block
 from app.features.setting import crud as setting_crud
 from app.features.setting.email_policy import email_policy
 from app.features.threat.models import Threat
-from app.features.user.models import EmailPreference
+from app.features.user import crud as user_crud
+from app.features.user.models import EmailPreference, User
+from app.features.user.scope import Scope, machine_clause, machine_ids_clause, restrict
 from app.features.windows_update.models import WindowsUpdate
 
 logger = logging.getLogger(__name__)
@@ -101,8 +104,10 @@ class Digest:
         )
 
 
-async def _count(session: AsyncSession, clause: ColumnElement[bool] | None) -> int:
-    stmt = select(func.count()).select_from(Machine)
+async def _count(
+    session: AsyncSession, clause: ColumnElement[bool] | None, scope: Any = None
+) -> int:
+    stmt = restrict(select(func.count()).select_from(Machine), scope)
     if clause is not None:
         stmt = stmt.where(clause)
     return await session.scalar(stmt) or 0
@@ -113,25 +118,33 @@ def _name(machine_hostname: str | None, machine_uuid: str) -> str:
     return machine_hostname or machine_uuid
 
 
-async def build_digest(session: AsyncSession) -> Digest:
-    """Read the current state of the fleet."""
+async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Digest:
+    """Read the current state of the fleet — of the part of it ``scope``
+    covers, for an account confined to some sites (``user/scope.py``)."""
+    in_scope = machine_clause(scope)
     now = utcnow()
     days = (await setting_crud.fleet_policy(session)).inactive_after_days
     cap = settings.NOTIFICATION_MAX_ITEMS
 
-    total = await _count(session, None)
+    total = await _count(session, None, in_scope)
     # Same window the console's green dot uses, so the two never disagree.
     online_since = now - timedelta(seconds=settings.OFFLINE_AFTER_SECONDS)
-    online = await _count(session, col(Machine.last_seen) > online_since)
+    online = await _count(session, col(Machine.last_seen) > online_since, in_scope)
 
-    outdated = await _count(session, status_clause(MachineStatus.OUTDATED, now, days))
-    needs_verification = await _count(
-        session, status_clause(MachineStatus.NEEDS_VERIFICATION, now, days)
+    outdated = await _count(
+        session, status_clause(MachineStatus.OUTDATED, now, days), in_scope
     )
-    inactive = await _count(session, status_clause(MachineStatus.INACTIVE, now, days))
-    wu_pending = await _count(session, windows_update_clause(WUFilter.PENDING))
+    needs_verification = await _count(
+        session, status_clause(MachineStatus.NEEDS_VERIFICATION, now, days), in_scope
+    )
+    inactive = await _count(
+        session, status_clause(MachineStatus.INACTIVE, now, days), in_scope
+    )
+    wu_pending = await _count(
+        session, windows_update_clause(WUFilter.PENDING), in_scope
+    )
     reboot_required = await _count(
-        session, windows_update_clause(WUFilter.REBOOT_REQUIRED)
+        session, windows_update_clause(WUFilter.REBOOT_REQUIRED), in_scope
     )
 
     # --- machines carrying an active threat, named ---
@@ -139,6 +152,7 @@ async def build_digest(session: AsyncSession) -> Digest:
         select(Machine.hostname, Machine.machine_uuid, func.count().label("n"))
         .join(Threat, col(Threat.machine_id) == col(Machine.id))
         .where(col(Threat.status) == "active")
+        .where(in_scope if in_scope is not None else true())
         .group_by(col(Machine.id), col(Machine.hostname), col(Machine.machine_uuid))
         .order_by(func.count().desc())
     )
@@ -156,6 +170,7 @@ async def build_digest(session: AsyncSession) -> Digest:
         select(Machine.hostname, Machine.machine_uuid, func.count().label("n"))
         .join(WindowsUpdate, col(WindowsUpdate.machine_id) == col(Machine.id))
         .where(func.lower(col(WindowsUpdate.severity)).in_(HIGH_SEVERITIES))
+        .where(in_scope if in_scope is not None else true())
         .group_by(col(Machine.id), col(Machine.hostname), col(Machine.machine_uuid))
         .order_by(func.count().desc())
     )
@@ -173,6 +188,7 @@ async def build_digest(session: AsyncSession) -> Digest:
     outdated_rows = await session.exec(
         select(Machine.hostname, Machine.machine_uuid, Machine.signature_age_days)
         .where(status_clause(MachineStatus.OUTDATED, now, days))
+        .where(in_scope if in_scope is not None else true())
         .order_by(col(Machine.signature_age_days).desc().nulls_last())
         .limit(cap)
     )
@@ -197,9 +213,10 @@ async def build_digest(session: AsyncSession) -> Digest:
     since = now - timedelta(hours=settings.THREAT_ALERT_MAX_AGE_HOURS)
     new_threats = (
         await session.scalar(
-            select(func.count())
-            .select_from(Threat)
-            .where(col(Threat.detected_at) >= since)
+            restrict(
+                select(func.count()).select_from(Threat),
+                machine_ids_clause(scope, col(Threat.machine_id)),
+            ).where(col(Threat.detected_at) >= since)
         )
         or 0
     )
@@ -331,16 +348,28 @@ async def send_daily_digest(session: AsyncSession) -> int:
     instead of losing it. The body is a dated snapshot ("État du parc au …"),
     so a retried digest stays truthful about the morning it describes.
     """
-    digest = await build_digest(session)
-
     wants_daily = await users_for(session, [EmailPreference.DIGEST_DAILY])
-    wants_events = (
-        await users_for(session, [EmailPreference.DIGEST_EVENTS])
-        if digest.has_events
-        else []
-    )
-    recipients = list({u.id: u for u in [*wants_daily, *wants_events]}.values())
-    recipients.sort(key=lambda u: u.email)
+    wants_events = await users_for(session, [EmailPreference.DIGEST_EVENTS])
+
+    # One digest per distinct scope: an account confined to a site is told
+    # about that site, and "events only" is decided on what *it* would read.
+    # Most installations have one scope — everybody's — hence one build.
+    digests: dict[Scope | None, Digest] = {}
+    chosen: list[tuple[User, Digest]] = []
+    for user in sorted(
+        {u.id: u for u in [*wants_daily, *wants_events]}.values(),
+        key=lambda u: u.email,
+    ):
+        scope = await user_crud.user_scope(session, user.id)
+        if scope not in digests:
+            digests[scope] = await build_digest(session, scope)
+        digest = digests[scope]
+        if user.email_preference == EmailPreference.DIGEST_EVENTS and not (
+            digest.has_events
+        ):
+            continue
+        chosen.append((user, digest))
+    recipients = [user for user, _ in chosen]
     if not recipients:
         # Not a misconfiguration to work around: either nobody asked for a
         # digest, or nobody had anything to hear about today. Both are answers.
@@ -354,9 +383,9 @@ async def send_daily_digest(session: AsyncSession) -> int:
         logger.info("Daily digest: no e-mail provider is configured, nothing queued")
         return 0
 
-    subject, text = render_digest(digest)
     queued = 0
-    for user in recipients:
+    for user, digest in chosen:
+        subject, text = render_digest(digest)
         # The same parc for everyone, then what is *theirs*: the verifications
         # they were handed, the maintenances they own that are due.
         personal = await personal_block(session, user, digest.generated_at)

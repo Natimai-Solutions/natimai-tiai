@@ -8,9 +8,10 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlmodel import col, select
 
-from app.api.deps import SessionDep, require_permission
+from app.api.deps import CurrentScope, SessionDep, require_permission
 from app.features.threat.models import Threat
 from app.features.user.permissions import Action, Resource
+from app.features.user.scope import machine_ids_clause, restrict
 
 router = APIRouter(
     prefix="/threats",
@@ -47,6 +48,7 @@ class ThreatList(BaseModel):
 @router.get("", response_model=ThreatList)
 async def list_threats(
     session: SessionDep,
+    scope: CurrentScope,
     machine_id: uuid.UUID | None = None,
     status: str | None = None,
     severity: str | None = None,
@@ -54,7 +56,7 @@ async def list_threats(
     page_size: int = Query(50, ge=1, le=200),
 ) -> ThreatList:
     """List threats, optionally filtered by machine, status, and severity."""
-    stmt = select(Threat)
+    stmt = restrict(select(Threat), machine_ids_clause(scope, col(Threat.machine_id)))
     if machine_id is not None:
         stmt = stmt.where(col(Threat.machine_id) == machine_id)
     if status is not None:

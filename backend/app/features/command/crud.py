@@ -22,6 +22,7 @@ async def machines_with_open_command(
     *,
     machine_ids: list[uuid.UUID],
     command_type: CommandType,
+    package_id: uuid.UUID | None = None,
 ) -> set[uuid.UUID]:
     """Which of these machines already carry an unfinished command of this type.
 
@@ -48,6 +49,10 @@ async def machines_with_open_command(
         .where(col(Command.status).notin_([s.value for s in TERMINAL_STATUSES]))
         .where(col(Command.expires_at) > utcnow())
     )
+    # Per package for the deployment types: installing Firefox and 7-Zip on
+    # the same room must not exclude each other.
+    if package_id is not None:
+        stmt = stmt.where(col(Command.package_id) == package_id)
     rows = await session.exec(stmt)
     return set(rows.all())
 
@@ -59,6 +64,7 @@ async def create_for_machines(
     command_type: CommandType,
     created_by: str | None,
     expires_at: datetime,
+    package_id: uuid.UUID | None = None,
 ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
     """Queue one command per machine, skipping those that already have it open.
 
@@ -79,7 +85,10 @@ async def create_for_machines(
     a migration and a data cleanup, and buys a case the console has never seen.
     """
     already_open = await machines_with_open_command(
-        session, machine_ids=machine_ids, command_type=command_type
+        session,
+        machine_ids=machine_ids,
+        command_type=command_type,
+        package_id=package_id,
     )
     targets = [m for m in machine_ids if m not in already_open]
 
@@ -89,6 +98,7 @@ async def create_for_machines(
             type=command_type.value,
             created_by=created_by,
             expires_at=expires_at,
+            package_id=package_id,
         )
         for machine_id in targets
     ]

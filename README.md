@@ -156,9 +156,10 @@ l'exécution est figée dans le binaire de l'agent.
 | Microsoft Defender | 🟢 Livré |
 | Maintenance & diagnostic | 🟢 Livré |
 | Windows Update | 🟢 Livré |
-| Déploiement logiciel | ⚪ À venir |
+| Déploiement logiciel (winget, paquets signés, éditeurs approuvés) | 🟢 Livré — validation sur poste réel en cours |
 | Inventaire matériel / logiciel | 🟢 Livré |
 | Groupes de droits | 🟢 Livré |
+| Groupes limités à des emplacements, bâtiments ou salles | 🟢 Livré |
 | Bâtiments, salles, classement depuis l'annuaire | 🟢 Livré |
 | Historique des interventions | 🟢 Livré |
 | Vérifications demandées | 🟢 Livré |
@@ -230,7 +231,10 @@ et un accès réseau au serveur.
 - **Console authentifiée** (JWT), **groupes de droits** composés dans la console
   — lecture seule, techniciens, administrateurs, ou n'importe quel assemblage,
   les commandes à risque (arrêt, redémarrage, installation de mises à jour)
-  étant un droit à part —, journal d'audit et limitation de débit.
+  étant un droit à part —, journal d'audit et limitation de débit. Un groupe
+  peut être **limité à des emplacements, bâtiments ou salles** : ses membres ne
+  voient et ne pilotent que ces postes, partout dans la console et dans les
+  e-mails (un poste hors de portée répond « introuvable »).
 - **Sessions révocables** : une connexion est une session tenue par le serveur.
   Le jeton d'accès vit un quart d'heure, en mémoire de la page ; le jeton de
   session, dans un cookie que la page ne peut pas lire, change à chaque usage, et
@@ -274,6 +278,8 @@ une issue publique.
 
 - [DEPLOYMENT.md](DEPLOYMENT.md) — déploiement, TLS, configuration du serveur et
   de l'agent.
+- [deploy/packages/README.md](deploy/packages/README.md) — déploiement
+  logiciel : activation par GPO, création et signature des paquets, suivi.
 - Chaque composant a son propre README : [agent/](agent/README.md),
   [backend/](backend/README.md), [frontend/](frontend/README.md).
 - Le dossier [dev/](dev/) rassemble les documents de conception et de suivi du

@@ -3,6 +3,7 @@
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import func, update
 from sqlmodel import col, select
@@ -107,22 +108,31 @@ async def room_by_name(
     return result.one_or_none()
 
 
-async def list_buildings(session: AsyncSession) -> list[Building]:
+async def list_buildings(session: AsyncSession, where: Any = None) -> list[Building]:
+    """Every building — or those matching ``where`` (a scope's
+    ``building_clause``)."""
+    stmt = select(Building) if where is None else select(Building).where(where)
     result = await session.exec(
-        select(Building).order_by(
+        stmt.order_by(
             col(Building.location).nulls_last(), func.lower(col(Building.name))
         )
     )
     return list(result.all())
 
 
-async def list_rooms(session: AsyncSession) -> list[tuple[Room, Building | None]]:
-    """Every room with its building, ordered as the page reads them: by site,
-    then building, then room name."""
+async def list_rooms(
+    session: AsyncSession, where: Any = None
+) -> list[tuple[Room, Building | None]]:
+    """Every room with its building — or those matching ``where`` (a scope's
+    ``room_clause``) — ordered as the page reads them: by site, then
+    building, then room name."""
+    stmt = select(Room, Building).outerjoin(
+        Building, col(Building.id) == col(Room.building_id)
+    )
+    if where is not None:
+        stmt = stmt.where(where)
     result = await session.exec(
-        select(Room, Building)
-        .outerjoin(Building, col(Building.id) == col(Room.building_id))
-        .order_by(
+        stmt.order_by(
             func.coalesce(col(Building.location), col(Room.location)).nulls_last(),
             func.lower(col(Building.name)).nulls_last(),
             func.lower(col(Room.name)),

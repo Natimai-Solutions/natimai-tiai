@@ -109,4 +109,7 @@ def test_authority_union_adds_permissions_and_admin_status():
     )
     assert union.is_admin
     assert union.permissions == {"machine:read", "user:read"}
-    assert Authority.union([]) == _authority()
+    empty = Authority.union([])
+    assert not empty.is_admin and empty.permissions == frozenset()
+    # No group confines to nothing rather than to everything (``scope.union``).
+    assert empty.scope is not None and empty.scope.is_empty()

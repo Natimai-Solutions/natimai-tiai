@@ -7,15 +7,18 @@ is the same write, audited.
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlmodel import col, select
 
-from app.api.deps import CurrentUser, SessionDep, require_permission
+from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
+from app.features.intervention.models import Intervention
 from app.features.machine.models import Machine
 from app.features.maintenance import crud
 from app.features.maintenance.models import Maintenance
@@ -25,6 +28,14 @@ from app.features.room.models import Room
 from app.features.setting import crud as setting_crud
 from app.features.user.models import User
 from app.features.user.permissions import Action, Resource
+from app.features.user.scope import (
+    Scope,
+    machine_clause,
+    machine_ids_clause,
+    machine_visible,
+    restrict,
+    room_clause,
+)
 
 _READ = Depends(require_permission(Resource.MAINTENANCE, Action.READ))
 _WRITE = Depends(require_permission(Resource.MAINTENANCE, Action.WRITE))
@@ -160,9 +171,11 @@ def _clean(text: str | None) -> str | None:
     return cleaned or None
 
 
-async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machine:
+async def _require_machine(
+    session: SessionDep, machine_id: uuid.UUID, scope: Scope | None
+) -> Machine:
     machine = await session.get(Machine, machine_id)
-    if machine is None:
+    if machine is None or not await machine_visible(session, machine_id, scope):
         raise AppError(
             code=ErrorCode.MACHINE_NOT_FOUND,
             status_code=404,
@@ -171,9 +184,20 @@ async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machin
     return machine
 
 
-async def _require_room(session: SessionDep, room_id: uuid.UUID) -> Room:
+async def _require_room(
+    session: SessionDep, room_id: uuid.UUID, scope: Scope | None
+) -> Room:
     room = await session.get(Room, room_id)
-    if room is None:
+    clause = room_clause(scope)
+    if room is None or (
+        clause is not None
+        and (
+            await session.exec(
+                select(col(Room.id)).where(col(Room.id) == room_id).where(clause)
+            )
+        ).first()
+        is None
+    ):
         raise AppError(
             code=ErrorCode.ROOM_NOT_FOUND, status_code=404, message="Room not found"
         )
@@ -215,11 +239,11 @@ def _resolved_out(
 
 @machine_router.get("/{machine_id}/maintenance", response_model=MachineSettingsOut)
 async def machine_maintenance(
-    machine_id: uuid.UUID, session: SessionDep
+    machine_id: uuid.UUID, session: SessionDep, scope: CurrentScope
 ) -> MachineSettingsOut:
     from app.features.maintenance.policy import resolve
 
-    machine = await _require_machine(session, machine_id)
+    machine = await _require_machine(session, machine_id, scope)
     placement = await room_crud.placement(session, machine.room_id)
     policy = await setting_crud.maintenance_policy(session)
     res = resolve(machine, placement.room, policy, utcnow())
@@ -242,9 +266,10 @@ async def update_machine_maintenance(
     machine_id: uuid.UUID,
     payload: SettingsUpdate,
     session: SessionDep,
+    scope: CurrentScope,
     current: CurrentUser,
 ) -> MachineSettingsOut:
-    machine = await _require_machine(session, machine_id)
+    machine = await _require_machine(session, machine_id, scope)
     fields = payload.model_dump(exclude_unset=True)
     if "maintenance_owner_id" in fields:
         await _require_owner(session, fields["maintenance_owner_id"])
@@ -266,12 +291,14 @@ async def update_machine_maintenance(
     )
     await session.commit()
     await session.refresh(machine)
-    return await machine_maintenance(machine.id, session)
+    return await machine_maintenance(machine.id, session, scope)
 
 
 @room_router.get("/{room_id}/maintenance", response_model=RoomSettingsOut)
-async def room_maintenance(room_id: uuid.UUID, session: SessionDep) -> RoomSettingsOut:
-    room = await _require_room(session, room_id)
+async def room_maintenance(
+    room_id: uuid.UUID, session: SessionDep, scope: CurrentScope
+) -> RoomSettingsOut:
+    room = await _require_room(session, room_id, scope)
     policy = await setting_crud.maintenance_policy(session)
     effective_owner = (
         room.maintenance_owner_id
@@ -300,9 +327,10 @@ async def update_room_maintenance(
     room_id: uuid.UUID,
     payload: SettingsUpdate,
     session: SessionDep,
+    scope: CurrentScope,
     current: CurrentUser,
 ) -> RoomSettingsOut:
-    room = await _require_room(session, room_id)
+    room = await _require_room(session, room_id, scope)
     fields = payload.model_dump(exclude_unset=True)
     if "maintenance_owner_id" in fields:
         await _require_owner(session, fields["maintenance_owner_id"])
@@ -321,7 +349,7 @@ async def update_room_maintenance(
     )
     await session.commit()
     await session.refresh(room)
-    return await room_maintenance(room.id, session)
+    return await room_maintenance(room.id, session, scope)
 
 
 # --- What is due ----------------------------------------------------------------
@@ -331,6 +359,7 @@ async def update_room_maintenance(
 async def due(
     session: SessionDep,
     current: CurrentUser,
+    scope: CurrentScope,
     owner: str | None = Query(
         None,
         description="An account id, 'me', 'none' for the unowned; absent = everybody",
@@ -355,7 +384,7 @@ async def due(
             ) from None
     policy = await setting_crud.maintenance_policy(session)
     now = utcnow()
-    resolved = await crud.fleet_resolved(session, policy, now)
+    resolved = await crud.fleet_resolved(session, policy, now, machine_clause(scope))
     rooms, loose = crud.group_due(
         resolved, policy, owner_filter=owner_id, unowned=unowned
     )
@@ -416,10 +445,35 @@ async def due(
 # --- Sessions ---------------------------------------------------------------------
 
 
+def _visit_clause(scope: Scope | None) -> Any:
+    """A maintenance session is visible when its room is, or when one of the
+    postes it covers is — a session recorded without a room has only those."""
+    if scope is None:
+        return None
+    return or_(
+        col(Maintenance.room_id).in_(
+            select(col(Room.id)).where(room_clause(scope)).correlate(None)
+        ),
+        col(Maintenance.id).in_(
+            select(col(Intervention.maintenance_id))
+            .where(machine_ids_clause(scope, col(Intervention.machine_id)))
+            .correlate(None)
+        ),
+    )
+
+
 async def _session_out(
-    session: SessionDep, visit: Maintenance, *, with_items: bool
+    session: SessionDep,
+    visit: Maintenance,
+    *,
+    with_items: bool,
+    scope: Scope | None = None,
 ) -> SessionOut:
-    items = await crud.session_items(session, visit.id) if with_items else []
+    items = (
+        await crud.session_items(session, visit.id, machine_clause(scope))
+        if with_items
+        else []
+    )
     count = (await crud.item_counts(session, [visit.id]))[visit.id]
     return SessionOut(
         id=visit.id,
@@ -440,12 +494,21 @@ async def _session_out(
 
 @router.post("", response_model=SessionOut, status_code=201, dependencies=[_WRITE])
 async def record_session(
-    payload: SessionCreate, session: SessionDep, current: CurrentUser
+    payload: SessionCreate,
+    session: SessionDep,
+    scope: CurrentScope,
+    current: CurrentUser,
 ) -> SessionOut:
     """Record a visit: the global note, and one journal line per poste done."""
-    room = await _require_room(session, payload.room_id) if payload.room_id else None
+    room = (
+        await _require_room(session, payload.room_id, scope)
+        if payload.room_id
+        else None
+    )
     ids = [i.machine_id for i in payload.items]
-    found = await session.exec(select(Machine).where(col(Machine.id).in_(ids)))
+    found = await session.exec(
+        restrict(select(Machine).where(col(Machine.id).in_(ids)), machine_clause(scope))
+    )
     machines = list(found.all())
     if len(machines) != len(set(ids)):
         raise AppError(
@@ -465,12 +528,13 @@ async def record_session(
     )
     await session.commit()
     await session.refresh(visit)
-    return await _session_out(session, visit, with_items=True)
+    return await _session_out(session, visit, with_items=True, scope=scope)
 
 
 @router.get("", response_model=SessionList)
 async def list_sessions(
     session: SessionDep,
+    scope: CurrentScope,
     room_id: uuid.UUID | None = None,
     machine_id: uuid.UUID | None = None,
     page: int = Query(1, ge=1),
@@ -478,7 +542,12 @@ async def list_sessions(
 ) -> SessionList:
     """Visits, newest first, for a room, a poste, or the parc."""
     rows, total = await crud.list_sessions(
-        session, room_id=room_id, machine_id=machine_id, page=page, page_size=page_size
+        session,
+        room_id=room_id,
+        machine_id=machine_id,
+        page=page,
+        page_size=page_size,
+        where=_visit_clause(scope),
     )
     counts = await crud.item_counts(session, [r.id for r in rows])
     return SessionList(
@@ -501,9 +570,22 @@ async def list_sessions(
 
 
 @router.get("/{maintenance_id}", response_model=SessionOut)
-async def get_session(maintenance_id: uuid.UUID, session: SessionDep) -> SessionOut:
+async def get_session(
+    maintenance_id: uuid.UUID, session: SessionDep, scope: CurrentScope
+) -> SessionOut:
     visit = await session.get(Maintenance, maintenance_id)
-    if visit is None:
+    clause = _visit_clause(scope)
+    if visit is None or (
+        clause is not None
+        and (
+            await session.exec(
+                select(col(Maintenance.id))
+                .where(col(Maintenance.id) == maintenance_id)
+                .where(clause)
+            )
+        ).first()
+        is None
+    ):
         raise AppError(
             code=ErrorCode.MAINTENANCE_NOT_FOUND,
             status_code=404,

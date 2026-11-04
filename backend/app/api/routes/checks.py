@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlmodel import col, select
 
-from app.api.deps import CurrentUser, SessionDep, require_permission
+from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
@@ -25,6 +25,13 @@ from app.features.notification import tasks as task_mail
 from app.features.room import crud as room_crud
 from app.features.user.models import User
 from app.features.user.permissions import Action, Resource
+from app.features.user.scope import (
+    Scope,
+    machine_clause,
+    machine_ids_clause,
+    machine_visible,
+    restrict,
+)
 
 _READ = Depends(require_permission(Resource.CHECK, Action.READ))
 _WRITE = Depends(require_permission(Resource.CHECK, Action.WRITE))
@@ -116,9 +123,11 @@ def _clean(text: str | None) -> str | None:
     return cleaned or None
 
 
-async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machine:
+async def _require_machine(
+    session: SessionDep, machine_id: uuid.UUID, scope: Scope | None
+) -> Machine:
     machine = await session.get(Machine, machine_id)
-    if machine is None:
+    if machine is None or not await machine_visible(session, machine_id, scope):
         raise AppError(
             code=ErrorCode.MACHINE_NOT_FOUND,
             status_code=404,
@@ -127,9 +136,11 @@ async def _require_machine(session: SessionDep, machine_id: uuid.UUID) -> Machin
     return machine
 
 
-async def _require_check(session: SessionDep, check_id: uuid.UUID) -> MachineCheck:
+async def _require_check(
+    session: SessionDep, check_id: uuid.UUID, scope: Scope | None
+) -> MachineCheck:
     row = await crud.get(session, check_id)
-    if row is None:
+    if row is None or not await machine_visible(session, row.machine_id, scope):
         raise AppError(
             code=ErrorCode.CHECK_NOT_FOUND, status_code=404, message="Check not found"
         )
@@ -216,10 +227,11 @@ async def create_check(
     machine_id: uuid.UUID,
     payload: CheckCreate,
     session: SessionDep,
+    scope: CurrentScope,
     current: CurrentUser,
 ) -> CheckOut:
     """Ask for a verification of this poste. One open request at a time."""
-    machine = await _require_machine(session, machine_id)
+    machine = await _require_machine(session, machine_id, scope)
     if await crud.open_for_machine(session, machine.id) is not None:
         raise AppError(
             code=ErrorCode.CHECK_ALREADY_OPEN,
@@ -253,11 +265,12 @@ async def create_check(
 async def list_machine_checks(
     machine_id: uuid.UUID,
     session: SessionDep,
+    scope: CurrentScope,
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
 ) -> CheckList:
     """A poste's requests, open first, then closed newest first."""
-    await _require_machine(session, machine_id)
+    await _require_machine(session, machine_id, scope)
     rows, total = await crud.list_checks(
         session,
         open_only=False,
@@ -293,12 +306,18 @@ async def assignable_users(session: SessionDep) -> list[UserRef]:
     "/bulk", response_model=CheckBulkOut, status_code=201, dependencies=[_WRITE]
 )
 async def create_checks_bulk(
-    payload: CheckBulkCreate, session: SessionDep, current: CurrentUser
+    payload: CheckBulkCreate,
+    session: SessionDep,
+    current: CurrentUser,
+    scope: CurrentScope,
 ) -> CheckBulkOut:
     """One request per poste of a selection, skipping those already asked."""
     assignee = await _require_assignee(session, payload.assigned_to_id)
     found_machines = await session.exec(
-        select(Machine).where(col(Machine.id).in_(payload.machine_ids))
+        restrict(
+            select(Machine).where(col(Machine.id).in_(payload.machine_ids)),
+            machine_clause(scope),
+        )
     )
     machines = {m.id: m for m in found_machines.all()}
     machine_ids = list(machines)
@@ -346,6 +365,7 @@ async def create_checks_bulk(
 async def list_checks(
     session: SessionDep,
     current: CurrentUser,
+    scope: CurrentScope,
     open: bool = True,
     assigned_to: str | None = Query(
         None, description="An account id, or 'me'; 'none' for the unassigned"
@@ -375,6 +395,7 @@ async def list_checks(
         assigned_to_id=assigned_to_id,
         unassigned=unassigned,
         machine_id=None,
+        where=machine_ids_clause(scope, col(MachineCheck.machine_id)),
         page=page,
         page_size=page_size,
     )
@@ -387,16 +408,22 @@ async def list_checks(
 
 
 @router.get("/{check_id}", response_model=CheckOut)
-async def get_check(check_id: uuid.UUID, session: SessionDep) -> CheckOut:
-    return await _one(session, await _require_check(session, check_id))
+async def get_check(
+    check_id: uuid.UUID, session: SessionDep, scope: CurrentScope
+) -> CheckOut:
+    return await _one(session, await _require_check(session, check_id, scope))
 
 
 @router.patch("/{check_id}", response_model=CheckOut, dependencies=[_WRITE])
 async def update_check(
-    check_id: uuid.UUID, payload: CheckUpdate, session: SessionDep, current: CurrentUser
+    check_id: uuid.UUID,
+    payload: CheckUpdate,
+    session: SessionDep,
+    scope: CurrentScope,
+    current: CurrentUser,
 ) -> CheckOut:
     """Reassign or reword an open request."""
-    row = await _require_check(session, check_id)
+    row = await _require_check(session, check_id, scope)
     if row.closed_at is not None:
         raise AppError(
             code=ErrorCode.CHECK_CLOSED, status_code=409, message="This check is closed"
@@ -413,7 +440,7 @@ async def update_check(
     row.updated_at = utcnow()
     session.add(row)
     if new_assignee is not None and new_assignee.id != current.id:
-        machine = await _require_machine(session, row.machine_id)
+        machine = await _require_machine(session, row.machine_id, scope)
         task_mail.send_checks_assigned(
             session,
             assignee=new_assignee,
@@ -448,10 +475,14 @@ async def update_check(
 
 @router.post("/{check_id}/close", response_model=CheckOut, dependencies=[_WRITE])
 async def close_check(
-    check_id: uuid.UUID, payload: CheckClose, session: SessionDep, current: CurrentUser
+    check_id: uuid.UUID,
+    payload: CheckClose,
+    session: SessionDep,
+    scope: CurrentScope,
+    current: CurrentUser,
 ) -> CheckOut:
     """Close a request with what was found. Writes the poste's journal."""
-    row = await _require_check(session, check_id)
+    row = await _require_check(session, check_id, scope)
     if row.closed_at is not None:
         raise AppError(
             code=ErrorCode.CHECK_CLOSED, status_code=409, message="This check is closed"

@@ -377,7 +377,7 @@ Cadrée et livrée : cf. `plan-phase2-windows-update.md`. Réutilise l'agent et 
 
 ### Phase 3 — Déploiement logiciel + inventaire *(fin d'année)*
 - **Inventaire : 🟢 livré** — cf. `plan-inventaire.md`. Un bloc `inventory` optionnel sur le heartbeat, un type de commande (`inventory_scan`), sept tables et un catalogue logiciel à l'échelle du parc. Le `software.id` de ce catalogue est la prise à laquelle le déploiement se rattachera.
-- Déploiement : nouveau type de commande « installer un paquet » + dépôt de paquets (à concevoir : stockage, intégrité, versions).
+- **Déploiement : 🟢 livré (2026-11-04)** — cf. `plan-deploiement-logiciel.md`. winget, paquets signés par l'administrateur (méthode B) et exécutables d'éditeurs approuvés (méthode A), chacun ouvert par GPO sur le poste ; la confiance est portée par le poste, pas par le serveur. Validation sur poste réel à faire (§8 du plan).
 
 ### Phase 4 — Exploitation du parc *(septembre 2026)* · 🟢 implémentée
 Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans la console (commandes à risque à part), bâtiments et salles (à la main ou depuis l'annuaire : OU ou attribut Emplacement, lus par l'agent), journal des interventions par poste, vérifications demandées et affectables, maintenance à cycle et responsable sur trois niveaux avec séances par salle, et les e-mails qui vont avec.
@@ -780,3 +780,13 @@ service. Restent à déployer sur les deux sites les dernières évolutions de
 > Suite du plan : déploiement logiciel (fin de la Phase 3), portée par
 > emplacement (§12 de `plan-salles-maintenance-interventions.md`), puis agents
 > Linux et macOS (Phase 5).
+
+**Instantané — 2026-11-03** · **Groupes limités à des emplacements,
+bâtiments ou salles** (§12 de `plan-salles-maintenance-interventions.md`) :
+un technicien d'un lycée ne voit et ne pilote que les postes de son lycée,
+dans la console comme dans les e-mails. Un groupe sans restriction voit tout
+le parc, ce qui garde chaque groupe existant tel quel ; un poste hors de
+portée répond 404 ; la règle anti-escalade couvre la portée, pour qu'un compte
+limité ne puisse pas composer un groupe ouvert et s'y ajouter. Migration
+`0028_group_scopes`. **Déploiement logiciel** : cadrage proposé dans
+`plan-deploiement-logiciel.md`, en attente de validation (§9) avant le code.

@@ -493,6 +493,27 @@ docker compose pull && docker compose up -d
 Sans `POSTGRES_APP_PASSWORD`, `docker compose up` s'arrête avec un message qui
 renvoie ici.
 
+## Déploiement logiciel
+
+Installer et désinstaller des logiciels depuis la console : par **winget**,
+par **paquet signé** par l'administrateur (méthode B) ou par **exécutable d'un
+éditeur approuvé** (méthode A). Chaque méthode est coupée tant qu'une GPO ne
+l'ouvre pas sur les postes. **Le guide d'activation et d'utilisation est
+[deploy/packages/README.md](deploy/packages/README.md)**, avec le script de
+signature [Sign-TiaiPackage.ps1](deploy/packages/Sign-TiaiPackage.ps1).
+
+Côté serveur :
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `PACKAGES_DIR` | `/data/packages` | Où les fichiers des paquets sont stockés, un par empreinte SHA-256. Monté sur le volume Docker `packages` |
+| `PACKAGE_MAX_BYTES` | `2147483648` (2 Gio) | Taille maximale d'un fichier déposé. Caddy accepte 2 Go sur la seule route de dépôt : relever les deux ensemble |
+| `PACKAGE_MAX_CONCURRENT_DOWNLOADS` | `20` | Téléchargements servis en même temps par le processus de l'API. Au-delà, l'agent est prié de revenir (429) sans que sa commande échoue |
+
+Le volume `packages` **n'est pas dans le dump PostgreSQL** (voir ci-dessous) :
+le sauvegarder à part, ou garder les installateurs d'origine pour pouvoir les
+redéposer.
+
 ## Sauvegardes et restauration
 
 Toute la mémoire de Tia'i — postes, historique des menaces, commandes (qui a
@@ -967,6 +988,10 @@ le secret d'enrôlement, plutôt qu'en clair dans le YAML.
 | `ReportSessionUsername` | `REG_DWORD` | `report_session_username` |
 | `ReportSoftware` | `REG_DWORD` | `report_software` |
 | `Location` | `REG_SZ` | `location` |
+| `DeployWinget` | `REG_DWORD` | — (registre seulement) |
+| `DeployWingetAllow` | `REG_MULTI_SZ` | — (registre seulement) |
+| `DeploySigners` | `REG_MULTI_SZ` | — (registre seulement) |
+| `DeployPublishers` | `REG_MULTI_SZ` | — (registre seulement) |
 
 Pour les intervalles, `0` est ignoré et signifie « laisser le défaut ». Une
 `ProxyURL` vide est ignorée de même : pour annuler par GPO un proxy qu'un YAML
@@ -991,6 +1016,12 @@ New-Item -Path 'HKLM:\SOFTWARE\Tiai' -Force | Out-Null
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'ApiBaseURL' -Value 'http://192.168.1.50:8800'
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'EnrollmentSecret' -Value '<secret>'
 ```
+
+Les quatre valeurs `Deploy*` ouvrent le **déploiement logiciel** sur le poste.
+Elles ne se lisent **que dans le registre**, jamais dans le YAML, et sont
+relues à chaque commande. Absentes, tout déploiement est refusé. Leur rôle et
+la façon de les poser sont décrits dans
+[deploy/packages/README.md](deploy/packages/README.md).
 
 ### Commandes
 

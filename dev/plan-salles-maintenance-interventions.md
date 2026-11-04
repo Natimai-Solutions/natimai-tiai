@@ -641,7 +641,9 @@ texte. Reste ouvert : le §2.2.
 - Une PR unique de J1 à J8 plutôt que les deux prévues : les jalons sont des
   commits distincts sur la branche, relisibles un par un.
 
-## 12. Plus tard — portée par emplacement
+## 12. Portée par emplacement — livrée (2026-11-03)
+
+> Ce qui suit était la note de cadrage ; l'implémentation est décrite après.
 
 Restreindre un groupe à des emplacements, bâtiments ou salles : une table
 `group_scopes (group_id, kind, value)` et, dans chaque requête de liste, de
@@ -650,3 +652,50 @@ profil (`machines.location IN (...)` ou `room_id IN (...)`), plus la même
 règle sur les cibles d'une commande groupée et sur les agrégats du tableau
 de bord. Un groupe sans scope voit tout — c'est la compatibilité. À chiffrer
 quand le besoin se présente ; rien dans le modèle de J1 ne s'y oppose.
+
+### Réalisation (2026-11-03)
+
+- **Table `group_scopes (group_id, kind, value)`** (migration `0028`), `kind`
+  valant `location`, `building` ou `room`. `value` n'est **pas** une clé
+  étrangère : supprimer une salle ne doit pas, par cascade, retirer la
+  dernière ligne d'un groupe et l'ouvrir à tout le parc. Une ligne qui ne
+  désigne plus rien ne correspond à aucun poste — l'échec est toujours
+  fermé — et la console l'affiche « Salle supprimée ».
+- **Portée par compte, pas par droit** : un compte voit l'union des portées
+  de ses groupes, et tout le parc dès qu'un de ses groupes n'en a pas (ou
+  qu'il est administrateur). Le modèle plus fin — une portée par permission —
+  aurait demandé de rendre chaque contrôle d'accès dépendant du poste visé ;
+  la règle retenue est celle qu'on explique en une phrase, et la page des
+  groupes la dit.
+- **Un poste est dans la portée** si son emplacement déclaré par l'agent
+  **ou** celui de sa salle (`COALESCE(bâtiment, salle)`) est dans la liste, si
+  sa salle est dans un bâtiment listé, ou s'il est dans une salle listée. Un
+  poste dont la GPO et la salle divergent apparaît des deux côtés — c'est
+  précisément quand quelqu'un doit le voir.
+- **Un seul prédicat** (`user/scope.py`, `machine_clause`), en sous-requêtes
+  non corrélées (`correlate(None)`) pour s'insérer dans des requêtes qui
+  joignent déjà `rooms`, `buildings` ou `machines` sans que SQLAlchemy ne les
+  lie à la ligne extérieure. Appliqué à : liste, exports et facettes des
+  postes, fiche et toutes ses sous-ressources, commandes (cibles d'une commande
+  groupée comprises : « tout le parc » vu d'un site, c'est ce site), menaces,
+  tableau de bord, catalogue logiciel, salles et bâtiments, vérifications,
+  interventions, maintenance (liste à faire, séances), réveil.
+- **Hors portée = 404**, jamais 403 : la réponse ne confirme pas qu'un poste
+  existe ailleurs. Les écritures qui sortiraient de la portée (créer un
+  bâtiment sur un autre site, déplacer une salle hors de la portée) et la
+  resynchronisation depuis l'annuaire, qui reclasse tout le parc, répondent
+  `auth.scope.restricted` (403).
+- **Pas d'évasion par la gestion des comptes** : la règle anti-escalade porte
+  aussi sur la portée. Un compte limité ne crée, ne modifie ni n'attribue un
+  groupe plus large que lui — sans quoi il lui suffirait de composer un
+  groupe sans restriction et de s'y ajouter.
+- **E-mails** : le résumé quotidien est construit une fois par portée
+  distincte (une seule sur un parc sans restriction), et l'alerte de menace
+  ne part qu'aux comptes qui voient le poste.
+- **Non couvert, volontairement** : la liste des comptes et le journal
+  d'audit (ressources d'administration, pas de postes), et les tâches qu'un
+  administrateur affecte nommément à un compte limité hors de sa portée — il
+  ne les verra pas ; affecter dans la portée de la personne est la règle.
+- Tests : `tests/test_api_scope.py` (21 cas, deux sites et un compte limité au
+  premier, sur chaque famille de routes).
+

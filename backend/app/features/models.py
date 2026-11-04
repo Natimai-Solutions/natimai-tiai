@@ -21,6 +21,7 @@ from app.features.inventory.models import (  # noqa: F401
 from app.features.machine.models import Machine  # noqa: F401
 from app.features.maintenance.models import Maintenance  # noqa: F401
 from app.features.notification.models import EmailOutbox  # noqa: F401
+from app.features.package.models import Package, PackageFile  # noqa: F401
 from app.features.room.models import Building, Room  # noqa: F401
 from app.features.setting.models import AppSetting  # noqa: F401
 from app.features.threat.models import Threat  # noqa: F401
@@ -28,6 +29,7 @@ from app.features.usage.models import MachineUptime  # noqa: F401
 from app.features.user.models import (  # noqa: F401
     Group,
     GroupPermission,
+    GroupScope,
     PasswordResetToken,
     User,
     UserGroup,
