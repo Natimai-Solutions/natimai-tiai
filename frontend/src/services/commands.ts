@@ -28,7 +28,11 @@ export type CommandType =
   | 'wake_on_lan'
   // Diagnostics: read-only, the value is in reading the result.
   | 'gpo_report'
-  | 'net_config';
+  | 'net_config'
+  // Software deployment: the two types that carry a package. Not in the
+  // generic menu — they need a package chosen — but listed in histories.
+  | 'package_install'
+  | 'package_uninstall';
 
 export type CommandStatus =
   'pending' | 'delivered' | 'running' | 'succeeded' | 'failed' | 'expired';
@@ -362,8 +366,13 @@ export function commandActionGroups(
  * value: a type this build does not know (an older console against a newer
  * server) must still be readable, not blank.
  */
+const packageCommandLabels: Record<string, string> = {
+  package_install: 'Installation de logiciel',
+  package_uninstall: 'Désinstallation de logiciel',
+};
+
 export function commandTypeLabel(type: string): string {
-  return commandActions.find((a) => a.type === type)?.label ?? type;
+  return commandActions.find((a) => a.type === type)?.label ?? packageCommandLabels[type] ?? type;
 }
 
 export interface CreateCommandsPayload {
@@ -403,6 +412,10 @@ export interface Command {
    * every other row. Optional: an older server does not send it.
    */
   relay_machine_id?: string | null;
+  /** The package of a deployment command. Optional: an older server does not send it. */
+  package_id?: string | null;
+  /** The poste's name, sent by the list endpoint. */
+  machine_hostname?: string | null;
   created_by: string | null;
   created_at: string;
   expires_at: string;

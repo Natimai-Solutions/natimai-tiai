@@ -1022,8 +1022,16 @@ def test_catalogue_is_fully_covered_below():
     # Forces the daily hardware/software collection to run now. Covered by
     # tests/test_api_inventory.py, round trip included.
     inventory = {"inventory_scan"}
+    # Software deployment: the two types that carry a package. Covered by
+    # tests/test_api_packages.py, delivery and download included.
+    deployment = {"package_install", "package_uninstall"}
     assert {t.value for t in CommandType} == (
-        defender | windows_update | power | inventory | set(MAINTENANCE_TYPES)
+        defender
+        | windows_update
+        | power
+        | inventory
+        | deployment
+        | set(MAINTENANCE_TYPES)
     )
 
 

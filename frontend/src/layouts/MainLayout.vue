@@ -42,6 +42,10 @@
           <q-item-section avatar><q-icon name="inventory_2" /></q-item-section>
           <q-item-section>Logiciels</q-item-section>
         </q-item>
+        <q-item v-if="auth.can('package', 'read')" v-ripple clickable :to="{ name: 'packages' }">
+          <q-item-section avatar><q-icon name="install_desktop" /></q-item-section>
+          <q-item-section>Paquets</q-item-section>
+        </q-item>
         <q-item v-if="auth.can('check', 'read')" v-ripple clickable :to="{ name: 'tasks' }">
           <q-item-section avatar><q-icon name="task_alt" /></q-item-section>
           <q-item-section>Mes tâches</q-item-section>

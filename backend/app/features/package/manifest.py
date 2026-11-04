@@ -49,7 +49,7 @@ def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
         out.append(Problem("no_files", "Aucun fichier déposé"))
     if not package.install_run:
         out.append(Problem("no_install", "Fichier à lancer non choisi"))
-    elif package.install_run not in names:
+    elif package.install_run != MSIEXEC and package.install_run not in names:
         out.append(
             Problem(
                 "install_missing", f"« {package.install_run} » n'est pas dans le paquet"

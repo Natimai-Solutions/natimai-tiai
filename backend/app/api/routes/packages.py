@@ -244,13 +244,19 @@ def _apply(package: Package, fields: dict[str, Any]) -> None:
             value = getattr(package, key)
             if value is None:
                 continue
-            if value == manifest.MSIEXEC and key == "uninstall_run":
+            if value == manifest.MSIEXEC:
+                # An MSI is not an executable: msiexec runs it, with the
+                # package's .msi among the arguments ("/i {dir}\\app.msi").
                 continue
             if not manifest.valid_file_name(value):
                 raise _invalid("Nom de fichier à lancer invalide", field=key)
         if package.uninstall_run == manifest.MSIEXEC and not package.uninstall_args:
             raise _invalid(
                 "Désinstallation par msiexec : indiquer les arguments (ex. /x {code produit} /qn)"
+            )
+        if package.install_run == manifest.MSIEXEC and not package.install_args:
+            raise _invalid(
+                "Installation par msiexec : indiquer les arguments (ex. /i {dir}\\app.msi /qn)"
             )
 
 

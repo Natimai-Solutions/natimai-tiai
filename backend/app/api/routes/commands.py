@@ -128,6 +128,9 @@ class CommandOut(BaseModel):
     relay_machine_id: uuid.UUID | None = None
     # The package a deployment command installs or removes.
     package_id: uuid.UUID | None = None
+    # The poste's name, so that a list across postes (a package's
+    # deployments) reads without a lookup per row.
+    machine_hostname: str | None = None
     created_by: str | None
     created_at: datetime
     expires_at: datetime
@@ -325,6 +328,7 @@ async def list_commands(
     scope: CurrentScope,
     status: CommandStatus | None = None,
     machine_id: uuid.UUID | None = None,
+    package_id: uuid.UUID | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> CommandList:
@@ -338,6 +342,8 @@ async def list_commands(
         stmt = stmt.where(col(Command.status) == status)
     if machine_id is not None:
         stmt = stmt.where(col(Command.machine_id) == machine_id)
+    if package_id is not None:
+        stmt = stmt.where(col(Command.package_id) == package_id)
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     # ``id`` behind the timestamp: a broadcast queues one row per poste in the
@@ -348,5 +354,17 @@ async def list_commands(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    items = [CommandOut.model_validate(c) for c in rows.all()]
+    commands = list(rows.all())
+    names: dict[uuid.UUID, str | None] = {}
+    ids = {c.machine_id for c in commands}
+    if ids:
+        found = await session.exec(
+            select(Machine.id, Machine.hostname).where(col(Machine.id).in_(ids))
+        )
+        names = dict(found.all())
+    items = []
+    for c in commands:
+        out = CommandOut.model_validate(c)
+        out.machine_hostname = names.get(c.machine_id)
+        items.append(out)
     return CommandList(items=items, total=total or 0, page=page, page_size=page_size)

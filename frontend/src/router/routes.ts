@@ -45,6 +45,19 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Logiciels' },
       },
       {
+        path: 'packages',
+        name: 'packages',
+        component: () => import('pages/PackagesPage.vue'),
+        meta: { title: 'Paquets', requiresPermission: 'package:read' },
+      },
+      {
+        path: 'packages/:id',
+        name: 'package-detail',
+        component: () => import('pages/PackageDetailPage.vue'),
+        props: true,
+        meta: { title: 'Paquet', requiresPermission: 'package:read' },
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: () => import('pages/SettingsPage.vue'),

@@ -1,6 +1,7 @@
 # Déploiement logiciel : plan de travail
 
-> **Statut : cadrage validé le 2026-11-04.** Trois façons d'installer, chacune
+> **Statut : cadrage validé et implémenté le 2026-11-04** (J1 à J4, J5 hors
+> validation sur poste réel — cf. §8). Trois façons d'installer, chacune
 > coupée tant qu'une GPO ne l'a pas ouverte sur le poste :
 >
 > - **winget** — un identifiant du dépôt communautaire ; c'est winget qui
@@ -152,3 +153,46 @@ logiciel sans attendre le cycle quotidien.
   considérer comme reconstructible depuis les installateurs d'origine.
 - **SHA-256, pas SHA-1**, pour l'empreinte des certificats de signature : c'est
   une ancre de confiance, et les collisions SHA-1 à préfixe choisi existent.
+
+## 8. État de réalisation *(2026-11-04)*
+
+- **J1–J2 (backend)** : migration `0029_packages`, stockage par empreinte,
+  manifeste régénéré à chaque modification (la signature tombe avec lui),
+  vérification RSA/ECDSA, lecture du signataire Authenticode des `.exe`
+  déposés, commandes `package_install`/`package_uninstall` dédoublonnées par
+  paquet, livraison au heartbeat, téléchargement réservé aux postes ayant une
+  commande ouverte (`Range`, 429). Tests : `tests/test_api_packages.py`.
+- **J3 (agent)** : `internal/deploy`, Go pur testé hors Windows (manifeste,
+  méthode B, lecture Authenticode par émetteur et numéro de série comme
+  Windows, winget, téléchargement repris et vérifié) ; `WinVerifyTrust` et la
+  localisation de `winget.exe` sous Windows. Clés GPO relues à chaque
+  commande.
+- **J4 (console)** : pages Paquets et fiche d'un paquet (définition, fichiers,
+  confiance, déploiements), boîte « Installer un logiciel » sur la fiche d'un
+  poste, la sélection de la liste et la page du paquet.
+- **J5** : `deploy/packages/Sign-TiaiPackage.ps1` et le guide
+  `deploy/packages/README.md`.
+
+**Écart au cadrage** : l'empreinte des certificats et les noms d'éditeurs. Le
+§1 prévoyait de comparer des *sujets* de certificat ; trois outils (PowerShell,
+Go, Python) ne les écrivent pas de la même façon (`S=` contre `ST=`, ordre,
+espaces), et un administrateur recopie le nom depuis l'onglet *Signatures
+numériques*. `DeployPublishers` porte donc le **nom du signataire** (CN), la
+chaîne étant validée par Windows. `msiexec` est accepté en installation comme
+en désinstallation (un MSI ne se lance pas lui-même), en méthode B seulement.
+
+**Reste à valider sur poste réel** — rien de ce qui suit ne peut l'être
+ailleurs :
+
+1. winget en `LocalSystem` : localisation de `winget.exe`, installation et
+   désinstallation de `Mozilla.Firefox`, code « déjà installé » ;
+2. Pronote en méthode A : `WinVerifyTrust` sur l'installateur réel, nom du
+   signataire lu, installation silencieuse `.iss`, code 3010 éventuel ;
+3. un paquet signé (méthode B) avec le certificat de l'AC interne, signé par
+   `Sign-TiaiPackage.ps1` sous Windows PowerShell 5.1 (RSA, et ECDSA si le
+   certificat l'est) ;
+4. les refus : paquet non signé sans éditeur approuvé, empreinte absente de
+   `DeploySigners`, fichier altéré après dépôt ;
+5. Caddy : le dépôt d'un installateur de plusieurs centaines de Mo à travers la
+   route à 2 Go, les autres routes restant à 8 Mo.
+

@@ -67,7 +67,14 @@ describe('command catalogue', () => {
   ];
 
   it('covers every command type exactly once', () => {
+    // The two deployment types are not menu entries — they need a package —
+    // and are checked below.
     expect(commandActions.map((a) => a.type)).toEqual(expected);
+  });
+
+  it('names the deployment types in a history', () => {
+    expect(commandTypeLabel('package_install')).toBe('Installation de logiciel');
+    expect(commandTypeLabel('package_uninstall')).toBe('Désinstallation de logiciel');
   });
 
   it('gives every action a label and an icon', () => {

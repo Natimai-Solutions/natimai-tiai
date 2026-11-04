@@ -428,3 +428,35 @@ async def test_installed_count_reads_the_inventory(client, db_session, store):
     await db_session.commit()
     got = await client.get(f"/api/v1/packages/{package['id']}", headers=admin)
     assert got.json()["installed_count"] == 1
+
+
+async def test_an_msi_is_installed_through_msiexec(client, db_session, store):
+    admin = await _admin(client, db_session)
+    created = await client.post(
+        "/api/v1/packages",
+        headers=admin,
+        json={"kind": "files", "name": "App", "install_run": "msiexec"},
+    )
+    # msiexec alone would do nothing: it needs the package's MSI.
+    assert created.status_code == 422
+    created = await client.post(
+        "/api/v1/packages",
+        headers=admin,
+        json={
+            "kind": "files",
+            "name": "App",
+            "install_run": "msiexec",
+            "install_args": ["/i", "{dir}\\app.msi", "/qn", "/norestart"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    package = created.json()
+    up = await client.post(
+        f"/api/v1/packages/{package['id']}/files",
+        headers=admin,
+        files=[("files", ("app.msi", b"\xd0\xcf\x11\xe0 not really an msi"))],
+    )
+    body = up.json()
+    assert body["problems"] == []
+    # Not a signed executable: only method B can carry it.
+    assert body["publisher_name"] is None
