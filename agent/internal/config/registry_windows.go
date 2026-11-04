@@ -71,3 +71,43 @@ func applyRegistryOverrides(cfg *Config) {
 		cfg.DefenderFullScanTimeoutSeconds = int(v)
 	}
 }
+
+// DeployKeys reads the deployment trust anchors afresh, for each deployment:
+// a GPO that adds a publisher or switches winget on takes effect at the next
+// command, without restarting the service.
+func DeployKeys() DeployTrust {
+	k, err := registry.OpenKey(
+		registry.LOCAL_MACHINE,
+		`SOFTWARE\Tiai`,
+		registry.QUERY_VALUE|registry.WOW64_64KEY,
+	)
+	if err != nil {
+		return DeployTrust{}
+	}
+	defer k.Close()
+	return readDeployKeys(k)
+}
+
+func readDeployKeys(k registry.Key) DeployTrust {
+	t := DeployTrust{
+		Signers:     readList(k, "DeploySigners"),
+		Publishers:  readList(k, "DeployPublishers"),
+		WingetAllow: readList(k, "DeployWingetAllow"),
+	}
+	if v, _, err := k.GetIntegerValue("DeployWinget"); err == nil {
+		t.Winget = v != 0
+	}
+	return t
+}
+
+// readList reads a list value: REG_MULTI_SZ as a GPO preference writes it, or
+// a REG_SZ whose items are separated by ";" for whoever set it by hand.
+func readList(k registry.Key, name string) []string {
+	if v, _, err := k.GetStringsValue(name); err == nil {
+		return SplitList(strings.Join(v, ";"))
+	}
+	if v, _, err := k.GetStringValue(name); err == nil {
+		return SplitList(v)
+	}
+	return nil
+}

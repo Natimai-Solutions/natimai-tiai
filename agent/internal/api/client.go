@@ -8,12 +8,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
+	"tiai/agent/internal/deploy"
 	"tiai/agent/internal/models"
 )
 
@@ -161,6 +166,58 @@ func (c *Client) do(ctx context.Context, method, path string, headers map[string
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
+	}
+	return nil
+}
+
+// FetchPackageFile streams a package file into f from offset — a Range
+// request when resuming. Implements deploy.Fetcher: a 429 (the server is
+// serving its quota of downloads) and network failures come back as
+// *deploy.RetryLater, never as a failed command.
+func (c *Client) FetchPackageFile(ctx context.Context, packageID, sha256 string, offset int64, f *os.File) error {
+	path := fmt.Sprintf("/api/v1/agent/packages/%s/files/%s", url.PathEscape(packageID), url.PathEscape(sha256))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token())
+	if offset > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return &deploy.RetryLater{Err: fmt.Errorf("GET %s: %w", path, err)}
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		// The whole file, range or not: start the local copy over.
+		if offset > 0 {
+			if err := f.Truncate(0); err != nil {
+				return err
+			}
+			if _, err := f.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+		}
+	case resp.StatusCode == http.StatusPartialContent && offset > 0:
+	case resp.StatusCode == http.StatusRequestedRangeNotSatisfiable:
+		if err := f.Truncate(0); err != nil {
+			return err
+		}
+		return &deploy.RetryLater{Wait: time.Second, Err: errors.New("reprise refusée, nouveau départ")}
+	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+		wait := time.Minute
+		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
+			wait = time.Duration(s) * time.Second
+		}
+		return &deploy.RetryLater{Wait: wait, Err: fmt.Errorf("serveur occupé (%d)", resp.StatusCode)}
+	default:
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("GET %s: %w", path, &StatusError{StatusCode: resp.StatusCode, Body: string(b)})
+	}
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return &deploy.RetryLater{Err: fmt.Errorf("transfert interrompu : %w", err)}
 	}
 	return nil
 }

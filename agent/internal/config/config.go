@@ -394,3 +394,36 @@ func writeSynced(path string, data []byte, perm os.FileMode) error {
 	}
 	return f.Close()
 }
+
+// SplitList splits a ";"- or newline-separated list, trimming each item and
+// dropping the empty ones.
+func SplitList(value string) []string {
+	var out []string
+	for _, item := range strings.FieldsFunc(value, func(r rune) bool {
+		return r == ';' || r == '\n' || r == '\r'
+	}) {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// DeployTrust is the deployment trust a GPO granted
+// (dev/plan-deploiement-logiciel.md), read by DeployKeys from
+// HKLM\SOFTWARE\Tiai alone — never from the YAML: it decides what this poste
+// runs as SYSTEM on a server's word, so it comes from where the domain's
+// administrators, and only they, write. All empty, deployment is off.
+//
+//   - Signers: SHA-256 thumbprints of the certificates whose signature over a
+//     package manifest is trusted (method B);
+//   - Publishers: names of Authenticode signers ("INDEX EDUCATION SAS") whose
+//     executables may run without an administrator's signature (method A);
+//   - Winget: whether winget packages may be installed, and WingetAllow, when
+//     set, the identifiers they are limited to ("Mozilla.Firefox", "Mozilla.*").
+type DeployTrust struct {
+	Signers     []string
+	Publishers  []string
+	Winget      bool
+	WingetAllow []string
+}

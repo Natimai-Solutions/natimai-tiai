@@ -23,6 +23,7 @@ import (
 	"tiai/agent/internal/api"
 	"tiai/agent/internal/collector"
 	"tiai/agent/internal/config"
+	"tiai/agent/internal/deploy"
 	"tiai/agent/internal/identity"
 	"tiai/agent/internal/logging"
 	"tiai/agent/internal/models"
@@ -648,6 +649,13 @@ func (a *Agent) resolve(cmd models.Command) (run func(context.Context) (string, 
 		return func(ctx context.Context) (string, error) {
 			return a.runPowerAction(ctx, actionShutdown, collector.Shutdown)
 		}, false, true
+	case "package_install", "package_uninstall":
+		// Long: a download, then an installer that takes minutes. What may run
+		// is decided in internal/deploy, from the trust anchors the GPO set.
+		pkg, cmdType := cmd.Package, cmd.Type
+		return func(ctx context.Context) (string, error) {
+			return a.runPackage(ctx, cmdType, pkg)
+		}, true, true
 	case "wake_on_lan":
 		// Handed to *this* poste as a relay for another one that is off: the
 		// server is not on the target's segment, this poste is. The MAC rides
@@ -796,4 +804,41 @@ func jitterBackoff(step time.Duration) time.Duration {
 	half := step / 2
 	// rand.N(n) is in [0, n): +1 makes the step itself reachable.
 	return step - half + rand.N(half+1)
+}
+
+// packageBudget bounds a deployment: downloads included, which on a slow site
+// is most of it. The worker is sequential; nothing may hold it forever.
+const packageBudget = 4 * time.Hour
+
+// runPackage installs or removes a software package (internal/deploy).
+func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.PackageDelivery) (string, error) {
+	if !deploy.Supported {
+		return "", errors.New("déploiement logiciel non pris en charge sur ce système")
+	}
+	ctx, cancel := context.WithTimeout(ctx, packageBudget)
+	defer cancel()
+	// The Windows Installer serves one installation at a time, and Windows
+	// Update is a client of it too: an msiexec started under a WUA install
+	// fails with 1618. The WU mutex keeps the two apart on this agent's side.
+	a.wuOp.Lock()
+	defer a.wuOp.Unlock()
+
+	trust := config.DeployKeys()
+	policy := deploy.Policy{
+		Signers:     trust.Signers,
+		Publishers:  trust.Publishers,
+		Winget:      trust.Winget,
+		WingetAllow: trust.WingetAllow,
+	}
+	env := &deploy.SystemEnv{Fetcher: a.client, DataDir: config.DefaultConfigDir()}
+	res, err := deploy.Execute(ctx, env, policy, cmdType, pkg)
+	if err != nil {
+		return "", err
+	}
+	// So that the console shows the program — or its absence — now, rather
+	// than at the next daily collection.
+	if _, ierr := a.runInventoryScan(ctx); ierr != nil {
+		log.Printf("agent: inventory after %s: %v", cmdType, ierr)
+	}
+	return res.Output, nil
 }
