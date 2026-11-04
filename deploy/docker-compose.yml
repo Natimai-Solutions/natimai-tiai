@@ -93,6 +93,11 @@ services:
       POSTGRES_USER: ${POSTGRES_APP_USER:-tiai_app}
       POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD manquant, cf. DEPLOYMENT.md « Rôle applicatif PostgreSQL »}
     command: ["api"]
+    # Les fichiers des paquets de déploiement, un par empreinte SHA-256
+    # (PACKAGES_DIR). À sauvegarder avec la base, ou à tenir pour
+    # reconstructible depuis les installateurs d'origine.
+    volumes:
+      - packages:/data/packages
     # Sain quand l'API répond ET joint la base : /health renvoie 200 dans les
     # deux cas, c'est le champ `database` qui tranche — lu en JSON par le
     # Python de l'image, sans dépendre d'un outil de plus, et sans proxy quoi
@@ -191,5 +196,6 @@ services:
 
 volumes:
   db_data:
+  packages:
   caddy_data:
   caddy_config:

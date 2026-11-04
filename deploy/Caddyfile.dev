@@ -40,7 +40,21 @@
 		# l'inventaire complet d'un poste (quelques centaines de Kio) ; 8 Mo
 		# laissent une marge d'un ordre de grandeur sans laisser un agent
 		# défaillant ou hostile pousser des centaines de Mo dans l'API.
-		request_body {
+		# Sauf le dépôt des fichiers d'un paquet de déploiement (cf. Caddyfile).
+		@package_upload {
+			method POST
+			path_regexp ^/api/v1/packages/[0-9a-fA-F-]+/files$
+		}
+		request_body @package_upload {
+			max_size 2GB
+		}
+		@not_package_upload {
+			not {
+				method POST
+				path_regexp ^/api/v1/packages/[0-9a-fA-F-]+/files$
+			}
+		}
+		request_body @not_package_upload {
 			max_size 8MB
 		}
 		reverse_proxy backend:8000 {

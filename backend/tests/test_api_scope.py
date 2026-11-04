@@ -267,6 +267,7 @@ async def test_checks_and_interventions_follow_their_poste(client, db_session):
 
 async def test_the_due_list_is_the_sites(client, db_session):
     t = await two_sites(client, db_session)
+
     def names(body):
         return sorted(m["hostname"] for m in body["machines"])
 

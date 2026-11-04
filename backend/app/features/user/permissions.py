@@ -48,6 +48,9 @@ class Resource(enum.StrEnum):
     # The audit log. Admin material like USER: who did what to the parc's
     # accounts and tokens.
     AUDIT = "audit"
+    # Software packages: reading the catalogue, and composing it (uploading
+    # files, signing, retiring). *Deploying* one is a risky command.
+    PACKAGE = "package"
 
 
 class Action(enum.StrEnum):
@@ -81,6 +84,8 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.USER, Action.READ),
     (Resource.USER, Action.WRITE),
     (Resource.AUDIT, Action.READ),
+    (Resource.PACKAGE, Action.READ),
+    (Resource.PACKAGE, Action.WRITE),
 )
 
 
@@ -141,6 +146,8 @@ BUILTIN_GROUP_DEFAULTS: dict[BuiltinGroup, tuple[str, str, frozenset[str]]] = {
             permission_key(Resource.INTERVENTION, Action.WRITE),
             permission_key(Resource.CHECK, Action.WRITE),
             permission_key(Resource.MAINTENANCE, Action.WRITE),
+            # To pick the package a deployment installs.
+            permission_key(Resource.PACKAGE, Action.READ),
         },
     ),
 }

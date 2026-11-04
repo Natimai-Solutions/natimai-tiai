@@ -27,6 +27,7 @@ from app.features.base import utcnow
 from app.features.command import crud as command_crud
 from app.features.command.bulk import describe_command_target
 from app.features.command.models import (
+    PACKAGE_COMMAND_TYPES,
     RISKY_COMMAND_TYPES,
     Command,
     CommandStatus,
@@ -34,6 +35,9 @@ from app.features.command.models import (
 )
 from app.features.machine.models import Machine
 from app.features.machine.status import MachineStatus, status_clause
+from app.features.package import crud as package_crud
+from app.features.package import manifest
+from app.features.package.models import Package, PackageKind
 from app.features.setting import crud as setting_crud
 from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import Scope, machine_clause, machine_ids_clause, restrict
@@ -61,6 +65,9 @@ class CreateCommands(BaseModel):
     # the domain.
     target_location: str | None = None
     target_status: MachineStatus | None = None
+    # The package to install or remove: required by the two deployment types,
+    # refused on every other.
+    package_id: uuid.UUID | None = None
 
     @field_validator("type")
     @classmethod
@@ -90,6 +97,8 @@ class CreateCommands(BaseModel):
                 "provide exactly one target: machine_ids, target_all, "
                 "target_domain, target_location, or target_status"
             )
+        if self.package_id is not None and self.type not in PACKAGE_COMMAND_TYPES:
+            raise ValueError("package_id only goes with package_install/uninstall")
         return self
 
 
@@ -117,6 +126,8 @@ class CommandOut(BaseModel):
     # The poste that emitted a relayed wake on behalf of ``machine_id``; null
     # on every other row (``Command.relay_machine_id``).
     relay_machine_id: uuid.UUID | None = None
+    # The package a deployment command installs or removes.
+    package_id: uuid.UUID | None = None
     created_by: str | None
     created_at: datetime
     expires_at: datetime
@@ -162,6 +173,56 @@ async def _resolve_targets(
     return list(rows.all())
 
 
+async def _deployable_package(
+    session: SessionDep, payload: CreateCommands
+) -> Package | None:
+    """The package a deployment command names, if it can be deployed.
+
+    Retired packages are refused for an install and accepted for an
+    uninstall — taking a program off the parc is exactly what one does with a
+    package nobody should install any more. An incomplete ``files`` package is
+    refused outright: no poste could run it.
+    """
+    if payload.type not in PACKAGE_COMMAND_TYPES:
+        return None
+    if payload.package_id is None:
+        raise AppError(
+            code=ErrorCode.PACKAGE_REQUIRED,
+            status_code=422,
+            message="A deployment command names its package",
+        )
+    package = await session.get(Package, payload.package_id)
+    if package is None:
+        raise AppError(
+            code=ErrorCode.PACKAGE_NOT_FOUND,
+            status_code=404,
+            message="Package not found",
+        )
+    if package.retired_at is not None and payload.type == CommandType.PACKAGE_INSTALL:
+        raise AppError(
+            code=ErrorCode.PACKAGE_RETIRED,
+            status_code=409,
+            message="This package is retired",
+        )
+    if package.kind == PackageKind.FILES:
+        problems = manifest.problems(
+            package, await package_crud.files_of(session, package.id)
+        )
+        if payload.type == CommandType.PACKAGE_UNINSTALL and not package.uninstall_run:
+            problems = [
+                *problems,
+                manifest.Problem("no_uninstall", "Pas de désinstallation définie"),
+            ]
+        if problems:
+            raise AppError(
+                code=ErrorCode.PACKAGE_NOT_READY,
+                status_code=409,
+                message="This package cannot be deployed yet",
+                details={"problems": [p.message for p in problems]},
+            )
+    return package
+
+
 @router.post(
     "",
     response_model=CreateCommandsResponse,
@@ -199,6 +260,7 @@ async def create_commands(
                 "action": Action.EXECUTE.value,
             },
         )
+    package = await _deployable_package(session, payload)
     machine_ids = await _resolve_targets(session, payload, scope)
     # Same sweep the tracking endpoint runs: a command left pending past its TTL
     # must not block the one an administrator is queueing now, on a poste that
@@ -216,6 +278,7 @@ async def create_commands(
         command_type=payload.type,
         created_by=user.email,
         expires_at=expires_at,
+        package_id=package.id if package is not None else None,
     )
     target = describe_command_target(
         machine_ids=payload.machine_ids,
@@ -235,6 +298,11 @@ async def create_commands(
             resource_id=payload.type.value,
             details={
                 "command_type": payload.type.value,
+                **(
+                    {"package_id": str(package.id), "package": package.name}
+                    if package is not None
+                    else {}
+                ),
                 **target,
                 "created": len(created),
                 "skipped": len(skipped),
