@@ -286,7 +286,10 @@ une issue publique.
   projet, pour qui veut le détail des choix techniques — dont
   [plan-salles-maintenance-interventions.md](dev/plan-salles-maintenance-interventions.md)
   pour les groupes de droits, les salles, les vérifications, la maintenance et
-  l'historique des interventions.
+  l'historique des interventions, et
+  [plan-audit-2026-11.md](dev/plan-audit-2026-11.md) pour l'audit sécurité,
+  bugs et UI/UX de novembre 2026 et les corrections qui en découlent, par
+  ordre de priorité.
 
 ## Licence
 

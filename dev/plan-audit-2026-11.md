@@ -1,8 +1,14 @@
-# Audit de Tia'i : sécurité, bugs et UI/UX
+# Audit de novembre 2026 (sécurité, bugs, UI/UX) : plan de travail
 
-*Audit du 10 novembre 2026, sur le commit `fc5c507` (branche `main`, PR #102).*
+> **Statut : audit livré le 2026-11-10, corrections à faire.** L'audit porte sur le commit `fc5c507` (`main`, après la PR #102 du déploiement logiciel). Il a retenu **102 constats vérifiés**, regroupés en **43 tâches** classées en quatre priorités (§3) : 5 immédiates, 17 à court terme, 11 à moyen terme et 10 de fond. Chaque tâche est aussi reportée dans le document de travail du chantier qu'elle touche (§4), dans le même ordre.
+>
+> **Objectif :** corriger d'abord ce qui permet une exécution de code sur les postes, une escalade de droits ou une fuite hors périmètre, puis ce qui fausse des données ou bloque une fonction, et enfin le confort d'usage.
+>
+> **Ce document reste la référence.** Le détail de chaque constat (preuve, scénario, recommandation) est au §7. Les identifiants `Sxx` (sécurité), `Bxx` (bugs) et `Uxx` (UI/UX) y renvoient. Les tâches `Txx` sont la seule numérotation à reprendre dans les commits et les PR.
 
-## Méthode
+---
+
+## 1. Méthode
 
 Seize auditeurs indépendants ont lu le code en entier, chacun sur un angle et un périmètre précis :
 
@@ -14,7 +20,7 @@ Chaque lot de constats est ensuite passé par un vérificateur chargé de les r�
 
 Les auditeurs n'ont pas pu lancer la suite de tests backend, faute de PostgreSQL disponible : les comportements ont été vérifiés par lecture du code.
 
-## Synthèse
+## 2. Synthèse
 
 | Angle | Élevée | Moyenne | Faible | Info | Total |
 |---|---|---|---|---|---|
@@ -39,18 +45,260 @@ Les faiblesses se concentrent sur cinq sujets :
 4. **La maintenance** : une date future ou une ligne supprimée fausse l'échéance (B06), et les comptes désactivés bloquent des écrans (B08).
 5. **Des pertes de saisie et des messages d'erreur génériques** dans la console (U03, U05, U14).
 
-## Plan d'action proposé
+## 3. Plan de travail par priorité
 
-| Priorité | Constats | Pourquoi |
-|---|---|---|
-| Immédiate | S01, S02 | Valider `pkg.ID` côté agent (UUID strict) et isoler les fichiers des paquets de méthode A : une compromission du serveur ne doit pas valoir exécution de code en SYSTEM sur tout le parc. |
-| Immédiate | S05, S06, S10 | Escalade de périmètre, fuite hors périmètre, exfiltration des secrets SMTP ou Mailgun. |
-| Courte | S03, S04, S08, S09, S11, B10, B13, B15, B16 | Déni de service sur les comptes, intégrité des déploiements, fiabilité des commandes, disque. |
-| Courte | B01, B02, B04, B06, B07, B08, B12, B17 | Bugs visibles par tous les utilisateurs ou qui faussent des données. |
-| Moyenne | U02 à U06, U14 | Pertes de saisie, confirmations manquantes, messages d'erreur. |
-| Fond | les constats « faible » et « info » | À traiter par lots, par fichier. |
+> Coché = fait. Une tâche n'est cochée qu'avec son test de non-régression. La date et l'écart éventuel par rapport à la recommandation sont notés au §6.
 
-## Index
+### Priorité 0 — immédiate
+
+Exécution de code en SYSTEM sur les postes si le serveur est compromis, escalade de périmètre, fuite hors périmètre, exfiltration de secrets. À traiter avant toute nouvelle fonctionnalité.
+
+- [ ] **T01 — Agent : n'accepter qu'un UUID comme identifiant de paquet** ([S01](plan-audit-2026-11.md#s01))
+  Dans `agent/internal/deploy/executor.go`, refuser tout `pkg.ID` qui n'est pas un UUID canonique avant `MkdirAll`. En défense en profondeur, vérifier par `filepath.Rel` que le répertoire de travail reste sous `PackagesDir` avant d'écrire et avant `RemoveAll`. Ajouter un test avec un identifiant contenant `..`.
+  *Document de travail :* `plan-deploiement-logiciel.md`
+
+- [ ] **T02 — Méthode A : plus de fichier chargeable non signé à côté de l'exécutable** ([S02](plan-audit-2026-11.md#s02))
+  En méthode A, ne télécharger que le fichier lancé : refuser un manifeste non signé qui en nomme d'autres, ou au minimum refuser les extensions chargeables (`.dll`, `.ocx`, `.cpl`, `.sys`, `.manifest`, `.local`, `.config`). Purger le répertoire du paquet avant chaque exécution.
+  *Document de travail :* `plan-deploiement-logiciel.md`
+
+- [ ] **T03 — Groupes : contrôler l'autorité des membres à la modification** ([S05](plan-audit-2026-11.md#s05))
+  Dans `PATCH /groups/{id}` (`backend/app/api/routes/groups.py`), appliquer `reject_escalation` à l'autorité de chaque membre, comme le fait `PATCH /users`, ou réserver la modification des permissions aux comptes sans restriction. Ajouter à `test_api_scope.py` le cas d'un membre partagé avec un groupe sans restriction.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`
+
+- [ ] **T04 — Séance de maintenance : filtrer ses postes par périmètre** ([S06](plan-audit-2026-11.md#s06))
+  Passer `scope` à `_session_out` dans le détail d'une séance (`backend/app/api/routes/maintenance.py:594`). Ajouter un test avec une séance à cheval sur deux sites.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`
+
+- [ ] **T05 — Réglages e-mail : ne plus réutiliser un secret stocké vers un nouvel hôte** ([S10](plan-audit-2026-11.md#s10))
+  Quand l'hôte, le port ou le mode de sécurité SMTP changent, ou l'URL ou le domaine Mailgun, exiger que le mot de passe ou la clé soient ressaisis dans la même requête, pour l'e-mail de test comme pour le `PATCH` (`settings_routes.py`).
+  *Document de travail :* `plan-projet-tiai.md`
+
+### Priorité 1 — court terme
+
+Déni de service sur les comptes, intégrité des déploiements et des commandes, et bugs qui faussent des données ou bloquent une fonction pour tous.
+
+- [ ] **T06 — Verrouillage de compte : supprimer le déni de service et l'énumération** ([S03](plan-audit-2026-11.md#s03), [S12](plan-audit-2026-11.md#s12), [S13](plan-audit-2026-11.md#s13))
+  Ne plus refuser le bon mot de passe pendant un verrouillage : passer à un délai progressif, ou ne verrouiller que par couple compte et adresse IP. Répondre au compte verrouillé par le même 401 générique qu'à un échec, en calculant tout de même un bcrypt. Incrémenter `failed_login_attempts` de façon atomique en base.
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T07 — `POST /auth/password` : limite de débit et bcrypt hors de la boucle** ([S04](plan-audit-2026-11.md#s04))
+  Ajouter un limiteur indexé par compte, compter les échecs de `current_password` et révoquer la session après N échecs. Exécuter bcrypt dans `asyncio.to_thread` sur ce chemin comme sur celui de connexion.
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T08 — Figer le contenu d'un paquet à la mise en file** ([S08](plan-audit-2026-11.md#s08))
+  Enregistrer sur la commande une empreinte du paquet approuvé (manifeste, signature, winget et version), et la passer en `failed` à la livraison si le paquet a changé depuis (`agent.py:408`).
+  *Document de travail :* `plan-deploiement-logiciel.md`
+
+- [ ] **T09 — Fichiers de paquet : plus d'orphelin, plus de déploiement cassé** ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13))
+  Au remplacement d'un fichier et après un dépôt multiple en échec, supprimer les fichiers stockés qui ne sont plus référencés. Ne pas supprimer un fichier qu'une commande ouverte doit encore télécharger, et servir le téléchargement à partir de l'empreinte remise (`packages.py:383`, `agent.py:998`).
+  *Document de travail :* `plan-deploiement-logiciel.md`
+
+- [ ] **T10 — Cycle de vie des commandes remises : relivraison, expiration, pertes côté agent** ([B10](plan-audit-2026-11.md#b10), [B15](plan-audit-2026-11.md#b15), [B16](plan-audit-2026-11.md#b16), [B34](plan-audit-2026-11.md#b34))
+  Choisir une règle unique : soit le serveur relivre les commandes « Transmise » sans verdict après un délai (l'agent est déjà idempotent par identifiant), soit le worker les expire. Côté agent, ne jamais jeter une commande acceptée : file pleine, arrêt du service ou type inconnu donnent un résultat `failed` explicite, rejoué par `queue.Queue`.
+  *Document de travail :* `plan-commandes-distantes.md`
+
+- [ ] **T11 — Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
+  Ajouter `order_by(created_at, id)` à la sélection du heartbeat (`agent.py:815`), avec un test : « installer les MAJ » puis « redémarrer » doivent être remises dans cet ordre.
+  *Document de travail :* `plan-commandes-distantes.md`, `plan-phase2-windows-update.md`
+
+- [ ] **T12 — Export Excel : neutraliser les caractères de contrôle** ([S11](plan-audit-2026-11.md#s11))
+  Dans `xlsx_response`, retirer les caractères refusés par openpyxl (`ILLEGAL_CHARACTERS_RE`), et idéalement dès la réception du heartbeat, dans `bound_text`.
+  *Document de travail :* `plan-inventaire.md`
+
+- [ ] **T13 — Placement par l'annuaire : borner le nom de salle à la colonne** ([S07](plan-audit-2026-11.md#s07))
+  Tronquer le nom en tenant compte du suffixe dans `room_for_key` (`room/crud.py:287`), aligner les bornes de `ad_location` et de `ou` sur la colonne, et isoler l'échec du placement pour qu'il ne fasse plus échouer le heartbeat en 500.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`
+
+- [ ] **T14 — Fiche poste et tableau de bord sans `threat:read` ni `command:read`** ([B02](plan-audit-2026-11.md#b02))
+  Ne charger les menaces et les commandes que si l'utilisateur a le droit de les lire, et charger les données annexes avec `Promise.allSettled` (`MachineDetailPage.vue:750`, `DashboardPage.vue`).
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T15 — Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
+  Ajouter `'inventory'` à `groupOrder` (`frontend/src/services/commands.ts:324`), avec un test qui vérifie que chaque action du catalogue apparaît dans un groupe.
+  *Document de travail :* `plan-inventaire.md`, `plan-commandes-distantes.md`
+
+- [ ] **T16 — Échéance de maintenance : la recalculer depuis le journal** ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17))
+  Recalculer `last_maintenance_at` comme le maximum des `performed_at` de type maintenance à chaque création, modification ou suppression d'une intervention. Refuser côté serveur une date future, à la séance de maintenance comme dans le journal.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`
+
+- [ ] **T17 — Responsables désactivés ou supprimés : ne plus bloquer la maintenance** ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35))
+  Traiter un responsable inactif ou supprimé comme « sans responsable » dans `resolve()`, et proposer une réaffectation à la désactivation. Les `PATCH` des vérifications, du cycle et de la carte Maintenance des réglages ne doivent plus échouer en 404 tant qu'on ne change pas ce responsable. Ouvrir la liste des responsables possibles à `maintenance:write` et `settings:write`.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`
+
+- [ ] **T18 — Suppression d'un bâtiment : gérer les noms de salle en collision** ([B07](plan-audit-2026-11.md#b07))
+  Détecter la collision avant la suppression (`rooms.py:451`) et renvoyer un 409 qui liste les salles concernées, ou les renommer avec un suffixe comme le fait `room_for_key`.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`
+
+- [ ] **T19 — Carte « Disque presque plein » : respecter le seuil réglé** ([B01](plan-audit-2026-11.md#b01))
+  Accepter tout seuil de 1 à 99 dans `machineFiltersFromQuery` (`machineListFilters.ts:314`) et l'afficher dans la puce de filtre.
+  *Document de travail :* `plan-inventaire.md`
+
+- [ ] **T20 — Liste et fiche des postes : signaler les échecs de chargement** ([B04](plan-audit-2026-11.md#b04), [U01](plan-audit-2026-11.md#u01))
+  Distinguer le rafraîchissement automatique, qui reste silencieux, du chargement demandé : sur ce dernier, notifier l'erreur et vider ou griser les lignes périmées. Sur la fiche, afficher un état de chargement ou d'erreur quand on passe au poste précédent ou suivant.
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T21 — `useAutoRefresh` : plus de relance après le démontage** ([B11](plan-audit-2026-11.md#b11))
+  Ajouter un drapeau `disposed` et ne relancer le minuteur que s'il est faux. Couvrir le cas dans le test du composable.
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T22 — Fusion de postes : conserver `first_seen` et les réglages de maintenance** ([B03](plan-audit-2026-11.md#b03))
+  Dans `merge_into`, garder le plus ancien `first_seen` et reprendre le cycle et le responsable de maintenance quand la cible n'en a pas. Ajouter un test.
+  *Document de travail :* `plan-projet-tiai.md`
+
+### Priorité 2 — moyen terme
+
+Pertes de saisie, confirmations manquantes, cas secondaires de périmètre, et parcours du technicien.
+
+- [ ] **T23 — Déploiement : confirmation et refus des paquets inexécutables** ([U04](plan-audit-2026-11.md#u04), [B30](plan-audit-2026-11.md#b30))
+  Réinitialiser le ciblage à chaque ouverture du dialogue. Demander une confirmation qui annonce le nombre de postes pour « Tout le parc » et pour toute désinstallation. Refuser, côté serveur comme dans le dialogue, un paquet de fichiers qu'aucune méthode de confiance ne couvre.
+  *Document de travail :* `plan-deploiement-logiciel.md`
+
+- [ ] **T24 — Fiche paquet : saisie préservée, dépôt contrôlé, messages justes** ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36))
+  Ne plus écraser le formulaire non enregistré après un dépôt, une signature ou un retrait. Vérifier la taille avant l'envoi, permettre l'annulation et traduire le 413 de Caddy. Passer le plafond Caddy à `2GiB`, et créer un code d'erreur « fichier introuvable dans ce paquet ».
+  *Document de travail :* `plan-deploiement-logiciel.md`
+
+- [ ] **T25 — Fiche paquet : pagination et bilan des déploiements** ([B14](plan-audit-2026-11.md#b14))
+  Brancher la pagination côté serveur et afficher un décompte par statut du dernier déploiement (`PackageDetailPage.vue:313`).
+  *Document de travail :* `plan-deploiement-logiciel.md`
+
+- [ ] **T26 — Groupes : ne plus perdre un emplacement saisi sans Entrée** ([U02](plan-audit-2026-11.md#u02))
+  Valider le texte en cours de saisie à la perte du focus et avant l'enregistrement, et demander confirmation avant d'enregistrer un groupe qui s'ouvrirait à tout le parc (`GroupsPage.vue:197`).
+  *Document de travail :* `plan-salles-maintenance-interventions.md`
+
+- [ ] **T27 — Afficher les messages d'erreur utiles du backend** ([U03](plan-audit-2026-11.md#u03))
+  Pour les codes dont le message est rédigé pour l'utilisateur (`package.invalid` en tête), afficher le détail. Pour une erreur de validation, nommer le champ fautif (`errors.ts:90`).
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T28 — Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
+  Pour chaque carte de réglages : champ requis, entier, dans les bornes du serveur, erreur affichée sous le champ et bouton Enregistrer désactivé tant qu'elle persiste. Ne plus convertir un champ vide en 0 (`SettingsPage.vue:844`).
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T29 — Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
+  Rendre persistants la séance de maintenance de salle, avec une confirmation si la saisie a été modifiée, et le dialogue qui affiche une seule fois le mot de passe réinitialisé.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`, `plan-projet-tiai.md`
+
+- [ ] **T30 — Mes tâches et séance de salle : parcours du technicien** ([B09](plan-audit-2026-11.md#b09), [U18](plan-audit-2026-11.md#u18), [U19](plan-audit-2026-11.md#u19), [U20](plan-audit-2026-11.md#u20), [U21](plan-audit-2026-11.md#u21), [U22](plan-audit-2026-11.md#u22), [U23](plan-audit-2026-11.md#u23), [U24](plan-audit-2026-11.md#u24), [U26](plan-audit-2026-11.md#u26))
+  Plusieurs corrections du parcours :
+  - Ne pré-cocher que les postes dus et décocher les postes exclus.
+  - N'afficher dans « à faire » que les salles qui ont quelque chose à faire.
+  - Ajouter « Me l'affecter » et « Transmettre » depuis Mes tâches.
+  - Compter les maintenances dans le badge et rafraîchir ce badge après une action.
+  - Garder les notes des postes non faits.
+  - Ajouter des libellés accessibles aux cases à cocher.
+  - Afficher « en retard depuis N jours » et des échéances sans heure.
+  - Adapter Mes tâches au mobile et élargir la colonne Consignes.
+  - Paginer les salles de plus de 200 postes.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`
+
+- [ ] **T31 — Liste des postes : sélection, navigation et fusion cohérentes** ([B05](plan-audit-2026-11.md#b05), [B18](plan-audit-2026-11.md#b18), [B19](plan-audit-2026-11.md#b19))
+  Vider la sélection au changement de filtre ou de page, ou montrer les postes sélectionnés masqués. Ancrer la navigation précédent/suivant sur un curseur stable. Recharger le journal des interventions après une fusion.
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T32 — Périmètres : cas secondaires** ([S16](plan-audit-2026-11.md#s16), [S17](plan-audit-2026-11.md#s17), [S18](plan-audit-2026-11.md#s18))
+  Un compte restreint ne doit pas déplacer un bâtiment ou une salle hors de son site. Pour le journal d'audit, filtrer les entrées « poste » par périmètre, ou refuser `audit:read` à un groupe restreint. Refuser d'assigner une vérification à un compte qui ne voit pas le poste, et filtrer `/checks/assignable-users` en conséquence.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`
+
+- [ ] **T33 — Vérifications concurrentes et salle sortie de son bâtiment** ([B21](plan-audit-2026-11.md#b21), [B22](plan-audit-2026-11.md#b22))
+  Transformer en 409 la violation de `uq_machine_checks_open`, utiliser `ON CONFLICT DO NOTHING` pour la création en masse, et faire une clôture atomique. Conserver l'emplacement d'une salle qui quitte son bâtiment.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`
+
+### Priorité 3 — fond
+
+Durcissements de fond, infrastructure et finitions. Se traitent par lots, fichier par fichier.
+
+- [ ] **T34 — Comptes : réinitialisation et compte initial** ([S14](plan-audit-2026-11.md#s14), [S15](plan-audit-2026-11.md#s15), [S33](plan-audit-2026-11.md#s33))
+  Limiter les demandes de réinitialisation par compte cible, sans invalider le lien en cours. Purger les liens de réinitialisation quand un administrateur change l'e-mail. Imposer `PASSWORD_MIN_LENGTH` à `FIRST_ADMIN_PASSWORD`.
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T35 — Wake-on-LAN : ne plus croire l'agent sur parole** ([S19](plan-audit-2026-11.md#s19), [S35](plan-audit-2026-11.md#s35), [B29](plan-audit-2026-11.md#b29))
+  Pour le relais : exiger un emplacement validé côté serveur, borner le masque et n'accepter que des réseaux privés ou une liste configurée. Exclure les agents trop anciens pour relayer, et remettre en attente un réveil remis sans verdict.
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T36 — Données déclarées par l'agent : placement en salle et catalogue logiciel** ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21))
+  Vérifier que le DN rapporté est cohérent avec la machine avant de la rattacher à une salle de l'annuaire, et ne plus adopter automatiquement une salle créée à la main. Limiter le débit du heartbeat par poste et purger les logiciels qui ne sont plus installés sur aucun poste.
+  *Document de travail :* `plan-salles-maintenance-interventions.md`, `plan-inventaire.md`
+
+- [ ] **T37 — Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))
+  Refuser `http://` sauf option de développement, et ne plus suivre les redirections. Borner les corps d'erreur lus, faire tourner le journal à chaud, et borner les téléchargements à la taille annoncée. Distinguer un `token.dat` illisible d'un `token.dat` absent. Allonger le délai entre deux tentatives quand l'enrôlement attend une approbation, et ne l'auditer qu'une fois.
+  *Document de travail :* `plan-projet-tiai.md`, `plan-deploiement-logiciel.md`
+
+- [ ] **T38 — Script de signature : neutraliser les caractères de contrôle** ([S25](plan-audit-2026-11.md#s25))
+  Refuser les caractères de contrôle, ou les afficher échappés, dans le nom, la version, `run` et `args` avant la confirmation, et les rejeter aussi côté serveur.
+  *Document de travail :* `plan-deploiement-logiciel.md`
+
+- [ ] **T39 — Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
+  Factoriser `_escape_like` et l'appliquer à toutes les recherches par sous-chaîne : logiciels, postes et comptes.
+  *Document de travail :* `plan-inventaire.md`, `plan-projet-tiai.md`
+
+- [ ] **T40 — Infrastructure et CI** ([S27](plan-audit-2026-11.md#s27), [S28](plan-audit-2026-11.md#s28), [S29](plan-audit-2026-11.md#s29), [S30](plan-audit-2026-11.md#s30), [S31](plan-audit-2026-11.md#s31), [S32](plan-audit-2026-11.md#s32), [S34](plan-audit-2026-11.md#s34), [S36](plan-audit-2026-11.md#s36))
+  Plusieurs durcissements :
+  - Sauvegardes : `umask 077`, et chiffrement des dumps.
+  - `X-Forwarded-For` : ne le lire que depuis des proxys de confiance, et n'exposer le port de développement que sur `127.0.0.1`.
+  - Actions GitHub : les épingler par SHA, avec des permissions minimales.
+  - `GIST_SECRET` : le sortir de l'`env` des jobs.
+  - nginx : passer en 1.28, et ajouter le frontend au scan Trivy.
+  - Conteneurs backend et worker : exécution sans root, `cap_drop` et `no-new-privileges`.
+  - `index.html` : le servir en `no-cache`.
+  - OpenAPI : le couper hors environnement local.
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T41 — Console d'administration : finitions** ([B23](plan-audit-2026-11.md#b23), [B24](plan-audit-2026-11.md#b24), [B25](plan-audit-2026-11.md#b25), [B26](plan-audit-2026-11.md#b26), [B27](plan-audit-2026-11.md#b27))
+  Plusieurs finitions :
+  - Session expirée : un seul message, au lieu d'un toast « identifiants invalides » par requête.
+  - Longueur minimale du mot de passe et durée de validité du lien : les lire depuis le serveur.
+  - Journal d'audit : ajouter les libellés des actions sur les paquets, `user.locked` et `machine.reenroll_requested`.
+  - Utilisateurs : revenir à la page précédente quand la dernière page se vide.
+  - `PATCH` des comptes, groupes et salles : renvoyer 422 au lieu de 500 sur un champ obligatoire envoyé à `null`.
+  *Document de travail :* `plan-projet-tiai.md`
+
+- [ ] **T42 — Page Logiciels et filtre par logiciel** ([B20](plan-audit-2026-11.md#b20), [U08](plan-audit-2026-11.md#u08), [U09](plan-audit-2026-11.md#u09))
+  Mettre la recherche, le tri et la page dans l'URL. Afficher « Vu depuis » dans le fuseau du navigateur. Nommer le logiciel dans la puce de filtre, et distinguer « aucun résultat » d'« erreur ».
+  *Document de travail :* `plan-inventaire.md`
+
+- [ ] **T43 — Console : finitions visuelles et accessibilité** ([U07](plan-audit-2026-11.md#u07), [U10](plan-audit-2026-11.md#u10), [U11](plan-audit-2026-11.md#u11), [U12](plan-audit-2026-11.md#u12), [U15](plan-audit-2026-11.md#u15), [U17](plan-audit-2026-11.md#u17), [U25](plan-audit-2026-11.md#u25), [U27](plan-audit-2026-11.md#u27), [U28](plan-audit-2026-11.md#u28), [U29](plan-audit-2026-11.md#u29), [U30](plan-audit-2026-11.md#u30))
+  Plusieurs finitions :
+  - Tableau de bord : n'afficher l'état vide qu'une fois les données chargées.
+  - Retour arrière : restaurer la position de défilement.
+  - Dialogue de fusion : utilisable sur mobile.
+  - Révocation du jeton : bouton « Révoquer » en rouge.
+  - Comptes : renseigner `autocomplete` sur les formulaires.
+  - Réglages : reformuler l'aide sur la vérification du certificat, et empiler les lignes de réglages serveur sur mobile.
+  - Liste des postes : jeu de colonnes par défaut resserré, avec première colonne collante.
+  - Badge antivirus : couleur cohérente avec son libellé.
+  - En-tête mobile : masquer l'e-mail.
+  - Boutons de la fiche : une seule casse.
+  *Document de travail :* `plan-projet-tiai.md`
+
+## 4. Répartition dans les documents de travail
+
+Chaque document de travail de chantier porte, dans une section « Suites de l'audit 2026-11 », les tâches qui le concernent, dans l'ordre de priorité. `plan-projet-tiai.md` porte celles qui ne relèvent d'aucun chantier particulier (authentification, console, infrastructure, agent), et renvoie ici pour le tableau d'ensemble.
+
+| Document | Tâches |
+|---|---|
+| [plan-deploiement-logiciel.md](plan-deploiement-logiciel.md) | T01, T02, T08, T09, T23, T24, T25, T37, T38 |
+| [plan-commandes-distantes.md](plan-commandes-distantes.md) | T10, T11, T15 |
+| [plan-phase2-windows-update.md](plan-phase2-windows-update.md) | T11 |
+| [plan-salles-maintenance-interventions.md](plan-salles-maintenance-interventions.md) | T03, T04, T13, T16, T17, T18, T26, T29, T30, T32, T33, T36 |
+| [plan-inventaire.md](plan-inventaire.md) | T12, T15, T19, T36, T39, T42 |
+| [plan-projet-tiai.md](plan-projet-tiai.md) | T05, T06, T07, T14, T20, T21, T22, T27, T28, T29, T31, T34, T35, T37, T39, T40, T41, T43 |
+
+`plan-session-utilisateur.md` et `plan-utilisation-postes.md` ne sont concernés par aucun constat.
+
+## 5. Points d'attention
+
+- **T01, T02 et T37 ne protègent qu'après la mise à jour des agents.** Tant que le parc garde l'agent actuel, la méthode A reste exposée. Il faut publier une nouvelle version de l'agent (MSI et GPO), et en attendant, ne pas activer `DeployPublishers` sur de nouveaux postes.
+- **T10 touche le protocole des deux côtés.** Sur un parc à versions mixtes, un agent ancien ne saura pas rendre un verdict `failed` pour une commande qu'il a jetée. La règle côté serveur (relivraison ou expiration) doit donc suffire seule, et le côté agent n'est qu'un raccourci.
+- **T16 demande une migration de données.** Il faut recalculer une fois `last_maintenance_at` pour tout le parc à partir du journal, en vérifiant au préalable combien de postes changeraient d'échéance.
+- **T03 et T32 peuvent refuser des opérations qui passaient jusqu'ici** à un administrateur délégué. Il faut l'annoncer dans les notes de version, avec le message d'erreur précis.
+- **T06 change le comportement visible du verrouillage.** Le README et la page Utilisateurs décrivent le verrouillage actuel : il faut les mettre à jour en même temps.
+- **Tests backend :** l'audit n'a pas pu lancer la suite sur PostgreSQL. Chaque correction backend doit passer la CI avec la base, en particulier `test_api_scope.py` pour T03, T04 et T32.
+
+## 6. Écarts constatés à l'implémentation
+
+*À compléter tâche par tâche, au fil des corrections : date, PR, et écart éventuel par rapport à la recommandation.*
+
+## 7. Détail des constats
+
 
 | # | Sévérité | Constat |
 |---|---|---|
@@ -157,12 +405,11 @@ Les faiblesses se concentrent sur cinq sujets :
 | [U29](#u29) | Faible | En mobile, le titre « Tia'i — Console » est tronqué en « Tia'i … » par l'adresse e-mail affichée en permanence |
 | [U30](#u30) | Info | Fiche poste : boutons d'en-tête incohérents, « Logiciel » en casse normale et les autres en majuscules |
 
-
-## 1. Sécurité
+### 7.1 Sécurité
 
 <a id="s01"></a>
 
-### S01 — Agent : l'identifiant de paquet envoyé par le serveur sert de chemin sans validation (traversée de répertoire, écriture et suppression récursive en SYSTEM)
+#### S01 — Agent : l'identifiant de paquet envoyé par le serveur sert de chemin sans validation (traversée de répertoire, écriture et suppression récursive en SYSTEM)
 
 **Sévérité :** Élevée · **Statut :** vérifié + contre-expertise confirmée · **Emplacement :** `agent/internal/deploy/executor.go:140`
 
@@ -185,7 +432,7 @@ _ = os.RemoveAll(dir)
 
 <a id="s02"></a>
 
-### S02 — Méthode A : des fichiers non signés (DLL) sont déposés à côté de l'exécutable signé, ce qui permet un chargement de DLL détourné et l'exécution de code arbitraire en SYSTEM
+#### S02 — Méthode A : des fichiers non signés (DLL) sont déposés à côté de l'exécutable signé, ce qui permet un chargement de DLL détourné et l'exécution de code arbitraire en SYSTEM
 
 **Sévérité :** Élevée · **Statut :** vérifié + contre-expertise confirmée · **Emplacement :** `agent/internal/deploy/executor.go:147`
 
@@ -206,7 +453,7 @@ code, err := env.Run(ctx, exe, ExpandArgs(step.Args, dir), dir)
 
 <a id="s03"></a>
 
-### S03 — Verrouillage de compte déclenchable à volonté : déni de service permanent sur n'importe quel compte, administrateur compris
+#### S03 — Verrouillage de compte déclenchable à volonté : déni de service permanent sur n'importe quel compte, administrateur compris
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/features/user/crud.py:105`
 
@@ -229,7 +476,7 @@ if user.locked_until is not None and user.locked_until > now:
 
 <a id="s04"></a>
 
-### S04 — POST /auth/password sans limitation : brute-force du mot de passe actuel et blocage de toute l'API par bcrypt synchrone
+#### S04 — POST /auth/password sans limitation : brute-force du mot de passe actuel et blocage de toute l'API par bcrypt synchrone
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/auth.py:515`
 
@@ -251,7 +498,7 @@ async def change_password(
 
 <a id="s05"></a>
 
-### S05 — Escalade de périmètre par la modification d'un groupe : un gestionnaire limité à un site accorde des droits sur tout le parc
+#### S05 — Escalade de périmètre par la modification d'un groupe : un gestionnaire limité à un site accorde des droits sur tout le parc
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/groups.py:281`
 
@@ -274,7 +521,7 @@ reject_escalation(
 
 <a id="s06"></a>
 
-### S06 — Le détail d'une session de maintenance liste les postes hors périmètre
+#### S06 — Le détail d'une session de maintenance liste les postes hors périmètre
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/maintenance.py:594` · aussi : 
 
@@ -292,7 +539,7 @@ return await _session_out(session, visit, with_items=True)
 
 <a id="s07"></a>
 
-### S07 — Heartbeat en erreur 500 permanente en mode ROOM_SOURCE=ad_location dès que l'attribut AD « location » dépasse 100 caractères
+#### S07 — Heartbeat en erreur 500 permanente en mode ROOM_SOURCE=ad_location dès que l'attribut AD « location » dépasse 100 caractères
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/features/room/crud.py:287`
 
@@ -314,7 +561,7 @@ if source == "ad_location":
 
 <a id="s08"></a>
 
-### S08 — Le contenu du paquet est lu à la livraison, pas à la mise en file : un détenteur de package:write modifie un déploiement déjà approuvé par un autre
+#### S08 — Le contenu du paquet est lu à la livraison, pas à la mise en file : un détenteur de package:write modifie un déploiement déjà approuvé par un autre
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/agent.py:408`
 
@@ -336,7 +583,7 @@ async def _package_deliveries(
 
 <a id="s09"></a>
 
-### S09 — Fichiers de paquets jamais supprimés : remplacement, échec partiel d'un dépôt multi-fichiers et absence de suppression de paquet saturent le disque (partagé avec PostgreSQL)
+#### S09 — Fichiers de paquets jamais supprimés : remplacement, échec partiel d'un dépôt multi-fichiers et absence de suppression de paquet saturent le disque (partagé avec PostgreSQL)
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/packages.py:383` · aussi : 
 
@@ -359,7 +606,7 @@ session.add(
 
 <a id="s10"></a>
 
-### S10 — Exfiltration du mot de passe SMTP ou de la clé API Mailgun stockés, via l'« e-mail de test » ou un PATCH qui ne change que l'hôte ou l'URL
+#### S10 — Exfiltration du mot de passe SMTP ou de la clé API Mailgun stockés, via l'« e-mail de test » ou un PATCH qui ne change que l'hôte ou l'URL
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/settings_routes.py:557` · aussi : `backend/app/api/routes/settings_routes.py:559`
 
@@ -383,7 +630,7 @@ stored = await mail.load_stored(session)
 
 <a id="s11"></a>
 
-### S11 — Export Excel (parc et logiciels) cassé en 500 par un caractère de contrôle venu d'un agent
+#### S11 — Export Excel (parc et logiciels) cassé en 500 par un caractère de contrôle venu d'un agent
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/xlsx_export.py:128`
 
@@ -407,7 +654,7 @@ def bound_text(value: str | None, limit: int = TEXT_MAX) -> str | None:
 
 <a id="s12"></a>
 
-### S12 — Énumération des comptes via le 423 « compte verrouillé » malgré le faux hachage
+#### S12 — Énumération des comptes via le 423 « compte verrouillé » malgré le faux hachage
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/auth.py:196`
 
@@ -428,7 +675,7 @@ raise AppError(
 
 <a id="s13"></a>
 
-### S13 — Compteur d'échecs de connexion sujet aux mises à jour perdues : le verrouillage par compte se contourne en rafale
+#### S13 — Compteur d'échecs de connexion sujet aux mises à jour perdues : le verrouillage par compte se contourne en rafale
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `backend/app/features/user/crud.py:108`
 
@@ -448,7 +695,7 @@ user = await get_by_email(session, email)
 
 <a id="s14"></a>
 
-### S14 — Demande de réinitialisation : n'importe qui peut invalider le lien en cours d'un utilisateur et inonder sa boîte, la limite étant par IP et non par compte
+#### S14 — Demande de réinitialisation : n'importe qui peut invalider le lien en cours d'un utilisateur et inonder sa boîte, la limite étant par IP et non par compte
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/features/user/crud.py:194`
 
@@ -467,7 +714,7 @@ await session.exec(
 
 <a id="s15"></a>
 
-### S15 — Changement d'adresse e-mail par un administrateur sans invalidation des liens de réinitialisation en attente
+#### S15 — Changement d'adresse e-mail par un administrateur sans invalidation des liens de réinitialisation en attente
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/users.py:349`
 
@@ -489,7 +736,7 @@ if "email" in fields and fields["email"] != user.email:
 
 <a id="s16"></a>
 
-### S16 — Un compte limité à un bâtiment ou à une salle peut déplacer ce lieu vers un autre site et retirer des postes du périmètre des autres équipes
+#### S16 — Un compte limité à un bâtiment ou à une salle peut déplacer ce lieu vers un autre site et retirer des postes du périmètre des autres équipes
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/rooms.py:185`
 
@@ -509,7 +756,7 @@ return (
 
 <a id="s17"></a>
 
-### S17 — Journal d'audit non filtré par périmètre
+#### S17 — Journal d'audit non filtré par périmètre
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/audit.py:66`
 
@@ -530,7 +777,7 @@ entries, total = await crud.list_entries(
 
 <a id="s18"></a>
 
-### S18 — Assignation d'une vérification à un compte qui ne voit pas le poste : le courriel lui révèle des postes hors périmètre
+#### S18 — Assignation d'une vérification à un compte qui ne voit pas le poste : le courriel lui révèle des postes hors périmètre
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/checks.py:315`
 
@@ -549,7 +796,7 @@ assignee = await _require_assignee(session, payload.assigned_to_id)
 
 <a id="s19"></a>
 
-### S19 — Relais Wake-on-LAN détournable : l'emplacement et l'IP déclarés par l'agent décident seuls qui reçoit les réveils d'un site
+#### S19 — Relais Wake-on-LAN détournable : l'emplacement et l'IP déclarés par l'agent décident seuls qui reçoit les réveils d'un site
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/features/wol/relay.py:62`
 
@@ -569,7 +816,7 @@ if target.location:
 
 <a id="s20"></a>
 
-### S20 — Placement en salle piloté par l'agent : choix de la salle, salles existantes captées et création de salles illimitée
+#### S20 — Placement en salle piloté par l'agent : choix de la salle, salles existantes captées et création de salles illimitée
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/features/room/crud.py:277`
 
@@ -591,7 +838,7 @@ loose = await room_by_name(session, None, name)
 
 <a id="s21"></a>
 
-### S21 — Catalogue logiciel global sans limite de croissance, alimenté par n'importe quel token d'agent, sans limite de débit sur le heartbeat
+#### S21 — Catalogue logiciel global sans limite de croissance, alimenté par n'importe quel token d'agent, sans limite de débit sur le heartbeat
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/features/inventory/crud.py:104`
 
@@ -608,7 +855,7 @@ stmt = pg_insert(Software).values(rows)
 
 <a id="s22"></a>
 
-### S22 — L'agent accepte une ApiBaseURL en http:// et envoie alors en clair le secret de flotte puis le token
+#### S22 — L'agent accepte une ApiBaseURL en http:// et envoie alors en clair le secret de flotte puis le token
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `agent/internal/config/config.go:252`
 
@@ -627,7 +874,7 @@ if cfg.APIBaseURL == "" {
 
 <a id="s23"></a>
 
-### S23 — Journal de l'agent sans limite pendant que le service tourne : corps d'erreur lus et journalisés en entier, rotation seulement au démarrage
+#### S23 — Journal de l'agent sans limite pendant que le service tourne : corps d'erreur lus et journalisés en entier, rotation seulement au démarrage
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `agent/internal/api/client.go:161`
 
@@ -646,7 +893,7 @@ if resp.StatusCode >= 300 {
 
 <a id="s24"></a>
 
-### S24 — L'agent télécharge sans plafond de taille : un serveur compromis peut remplir le disque système des postes
+#### S24 — L'agent télécharge sans plafond de taille : un serveur compromis peut remplir le disque système des postes
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `agent/internal/api/client.go:219`
 
@@ -664,7 +911,7 @@ if _, err := io.Copy(f, resp.Body); err != nil {
 
 <a id="s25"></a>
 
-### S25 — Le script de signature affiche les arguments, nom et version sans les neutraliser : des séquences de contrôle (ESC, CR) peuvent cacher la vraie commande à l'administrateur qui signe
+#### S25 — Le script de signature affiche les arguments, nom et version sans les neutraliser : des séquences de contrôle (ESC, CR) peuvent cacher la vraie commande à l'administrateur qui signe
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `deploy/packages/Sign-TiaiPackage.ps1:123`
 
@@ -683,7 +930,7 @@ Write-Host "Installation    : $(Format-Step $doc.install)"
 
 <a id="s26"></a>
 
-### S26 — Recherche LIKE non échappée : « _ » et « % » saisis élargissent les résultats des listes et des exports
+#### S26 — Recherche LIKE non échappée : « _ » et « % » saisis élargissent les résultats des listes et des exports
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/software.py:66` · aussi : `backend/app/features/user/crud.py:135`
 
@@ -705,7 +952,7 @@ def _search_clause(search: str) -> ColumnElement[bool]:
 
 <a id="s27"></a>
 
-### S27 — Sauvegardes de la base non chiffrées et lisibles par tout utilisateur de l'hôte
+#### S27 — Sauvegardes de la base non chiffrées et lisibles par tout utilisateur de l'hôte
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `deploy/backup/backup.sh:27`
 
@@ -722,7 +969,7 @@ if pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$tmp"; then
 
 <a id="s28"></a>
 
-### S28 — Override de dev : backend en clair sur 0.0.0.0:8800 qui fait confiance à X-Forwarded-For (limitation de débit et IP d'audit contournables)
+#### S28 — Override de dev : backend en clair sur 0.0.0.0:8800 qui fait confiance à X-Forwarded-For (limitation de débit et IP d'audit contournables)
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/core/net.py:27`
 
@@ -743,7 +990,7 @@ forwarded = request.headers.get("x-forwarded-for", "")
 
 <a id="s29"></a>
 
-### S29 — Actions GitHub tierces référencées par tag mutable alors qu'elles reçoivent un jeton en écriture ou un PAT
+#### S29 — Actions GitHub tierces référencées par tag mutable alors qu'elles reçoivent un jeton en écriture ou un PAT
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `.github/workflows/ci.yml:209`
 
@@ -767,7 +1014,7 @@ permissions:
 
 <a id="s30"></a>
 
-### S30 — PAT GIST_SECRET exposé en variable d'environnement à tout le code des jobs de test
+#### S30 — PAT GIST_SECRET exposé en variable d'environnement à tout le code des jobs de test
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `.github/workflows/ci.yml:169`
 
@@ -790,7 +1037,7 @@ frontend:
 
 <a id="s31"></a>
 
-### S31 — Image frontend sur nginx:1.27-alpine (branche en fin de vie) et jamais scannée par Trivy
+#### S31 — Image frontend sur nginx:1.27-alpine (branche en fin de vie) et jamais scannée par Trivy
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/Dockerfile:14`
 
@@ -808,7 +1055,7 @@ FROM nginx:1.27-alpine AS runner
 
 <a id="s32"></a>
 
-### S32 — Backend et worker exécutés en root dans le conteneur, avec curl installé sans usage
+#### S32 — Backend et worker exécutés en root dans le conteneur, avec curl installé sans usage
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/Dockerfile:9`
 
@@ -828,7 +1075,7 @@ ENTRYPOINT ["bash", "/app/app/scripts/entrypoint.sh"]
 
 <a id="s33"></a>
 
-### S33 — FIRST_ADMIN_PASSWORD n'a pas de longueur minimale et le compte admin initial échappe à PASSWORD_MIN_LENGTH
+#### S33 — FIRST_ADMIN_PASSWORD n'a pas de longueur minimale et le compte admin initial échappe à PASSWORD_MIN_LENGTH
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/core/config.py:505`
 
@@ -850,7 +1097,7 @@ SECRET_MIN_LENGTHS = {
 
 <a id="s34"></a>
 
-### S34 — index.html servi sans Cache-Control : console cassée après une mise à jour
+#### S34 — index.html servi sans Cache-Control : console cassée après une mise à jour
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/nginx.conf:16`
 
@@ -872,7 +1119,7 @@ location ~* \.(js|css|woff2?|ttf|eot|svg|png|jpg|ico)$ {
 
 <a id="s35"></a>
 
-### S35 — Réveil direct : l'IP et le masque déclarés par l'agent choisissent la destination UDP du serveur, y compris 255.255.255.255 ou un hôte quelconque
+#### S35 — Réveil direct : l'IP et le masque déclarés par l'agent choisissent la destination UDP du serveur, y compris 255.255.255.255 ou un hôte quelconque
 
 **Sévérité :** Info · **Statut :** vérifié · **Emplacement :** `backend/app/features/wol/packet.py:105`
 
@@ -891,7 +1138,7 @@ interface = ipaddress.ip_interface(f"{ip}/{prefixlen}")
 
 <a id="s36"></a>
 
-### S36 — Schéma OpenAPI complet exposé sans authentification via Caddy
+#### S36 — Schéma OpenAPI complet exposé sans authentification via Caddy
 
 **Sévérité :** Info · **Statut :** vérifié · **Emplacement :** `backend/app/main.py:57`
 
@@ -908,11 +1155,11 @@ app = FastAPI(
 **Recommandation.** Mettre openapi_url (et docs_url/redoc_url) à None hors ENVIRONMENT=local, ou le servir derrière une dépendance d'authentification.
 
 
-## 2. Bugs fonctionnels frontend / backend
+### 7.2 Bugs fonctionnels frontend / backend
 
 <a id="b01"></a>
 
-### B01 — La carte « Disque presque plein » ouvre tout le parc dès que le seuil réglé n'est ni 10 ni 20 %
+#### B01 — La carte « Disque presque plein » ouvre tout le parc dès que le seuil réglé n'est ni 10 ni 20 %
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/utils/machineListFilters.ts:314`
 
@@ -928,7 +1175,7 @@ diskFree: DISK_OPTIONS.some((o) => o.value === below) ? below : null,  // DISK_O
 
 <a id="b02"></a>
 
-### B02 — Fiche poste et tableau de bord entièrement inaccessibles sans les droits threat:read ou command:read
+#### B02 — Fiche poste et tableau de bord entièrement inaccessibles sans les droits threat:read ou command:read
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/MachineDetailPage.vue:750` · aussi : 
 
@@ -951,7 +1198,7 @@ const [m, t, active, c] = await Promise.all([
 
 <a id="b03"></a>
 
-### B03 — La fusion de postes perd first_seen et les réglages de maintenance de l'enregistrement supprimé
+#### B03 — La fusion de postes perd first_seen et les réglages de maintenance de l'enregistrement supprimé
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/features/machine/crud.py:76`
 
@@ -972,7 +1219,7 @@ if source.last_seen > target.last_seen:
 
 <a id="b04"></a>
 
-### B04 — Échecs de rechargement ignorés après le premier succès : la liste affiche d'anciennes lignes sous le nouveau filtre
+#### B04 — Échecs de rechargement ignorés après le premier succès : la liste affiche d'anciennes lignes sous le nouveau filtre
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/MachinesPage.vue:12` · aussi : 
 
@@ -995,7 +1242,7 @@ Chaque chargement lancé par l'utilisateur (changement de filtre, de page ou de 
 
 <a id="b05"></a>
 
-### B05 — La sélection de postes survit aux changements de filtre et de page, et les actions groupées visent des postes masqués
+#### B05 — La sélection de postes survit aux changements de filtre et de page, et les actions groupées visent des postes masqués
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/MachinesPage.vue:203` · aussi : `frontend/src/components/machines-list/MachinesBulkBar.vue:8`
 
@@ -1017,7 +1264,7 @@ function onFilters(next: MachineFilters) {
 
 <a id="b06"></a>
 
-### B06 — Supprimer une ligne « Maintenance » ou enregistrer une date future fausse durablement l'échéance du poste, sans moyen de correction
+#### B06 — Supprimer une ligne « Maintenance » ou enregistrer une date future fausse durablement l'échéance du poste, sans moyen de correction
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/features/maintenance/crud.py:157` · aussi : `frontend/src/components/maintenance/MaintenanceSessionDialog.vue:13`
 
@@ -1042,7 +1289,7 @@ if (
 
 <a id="b07"></a>
 
-### B07 — Supprimer un bâtiment échoue en 500 dès qu'une salle de même nom existe déjà hors bâtiment
+#### B07 — Supprimer un bâtiment échoue en 500 dès qu'une salle de même nom existe déjà hors bâtiment
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/rooms.py:451`
 
@@ -1063,7 +1310,7 @@ UniqueConstraint("building_id", "name", name="uq_rooms_building_name", postgresq
 
 <a id="b08"></a>
 
-### B08 — Responsable par défaut supprimé ou désactivé : ses postes n'apparaissent plus dans aucun filtre « Les miennes » ou « À prendre »
+#### B08 — Responsable par défaut supprimé ou désactivé : ses postes n'apparaissent plus dans aucun filtre « Les miennes » ou « À prendre »
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/features/maintenance/crud.py:68` · aussi : `backend/app/api/routes/settings_routes.py:483`, `backend/app/api/routes/checks.py:583`
 
@@ -1086,7 +1333,7 @@ owner_id=uuid.UUID(owner) if isinstance(owner, str) and owner else None
 
 <a id="b09"></a>
 
-### B09 — La séance de salle coche par défaut les postes exclus, et « Maintenances à faire » liste aussi les postes à jour
+#### B09 — La séance de salle coche par défaut les postes exclus, et « Maintenances à faire » liste aussi les postes à jour
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/features/maintenance/crud.py:94` · aussi : `frontend/src/pages/TasksPage.vue:118`
 
@@ -1110,7 +1357,7 @@ entry.total += 1
 
 <a id="b10"></a>
 
-### B10 — Les commandes « Transmise » ou « En cours » ne sont jamais relivrées ni expirées : l'agent compte sur une relivraison que le serveur ne fait pas
+#### B10 — Les commandes « Transmise » ou « En cours » ne sont jamais relivrées ni expirées : l'agent compte sur une relivraison que le serveur ne fait pas
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/agent.py:815`
 
@@ -1138,7 +1385,7 @@ agent/internal/agent/agent.go:524-530
 
 <a id="b11"></a>
 
-### B11 — useAutoRefresh relance l'intervalle après le démontage si refreshNow() était en cours : polling qui fuit
+#### B11 — useAutoRefresh relance l'intervalle après le démontage si refreshNow() était en cours : polling qui fuit
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/composables/useAutoRefresh.ts:160`
 
@@ -1165,7 +1412,7 @@ async function refreshNow(): Promise<void> {
 
 <a id="b12"></a>
 
-### B12 — « Rafraîchir l'inventaire » n'apparaît dans aucun menu : le groupe 'inventory' manque à groupOrder
+#### B12 — « Rafraîchir l'inventaire » n'apparaît dans aucun menu : le groupe 'inventory' manque à groupOrder
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/services/commands.ts:324`
 
@@ -1187,7 +1434,7 @@ const groupOrder: CommandGroup[] = [
 
 <a id="b13"></a>
 
-### B13 — Remplacer ou retirer un fichier d'un paquet casse les déploiements déjà remis (404 sur le téléchargement)
+#### B13 — Remplacer ou retirer un fichier d'un paquet casse les déploiements déjà remis (404 sur le téléchargement)
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/agent.py:998`
 
@@ -1212,7 +1459,7 @@ row = (
 
 <a id="b14"></a>
 
-### B14 — La page d'un paquet n'affiche que les 50 derniers déploiements, sans pagination ni total ni agrégat
+#### B14 — La page d'un paquet n'affiche que les 50 derniers déploiements, sans pagination ni total ni agrégat
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/PackageDetailPage.vue:313`
 
@@ -1238,7 +1485,7 @@ PackageDetailPage.vue:313-320
 
 <a id="b15"></a>
 
-### B15 — Commandes perdues sans retour quand la file en mémoire de l'agent est pleine (16)
+#### B15 — Commandes perdues sans retour quand la file en mémoire de l'agent est pleine (16)
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `agent/internal/agent/agent.go:523`
 
@@ -1261,7 +1508,7 @@ select {
 
 <a id="b16"></a>
 
-### B16 — Commandes en attente abandonnées à l'arrêt du service, sans résultat ni nouvelle remise
+#### B16 — Commandes en attente abandonnées à l'arrêt du service, sans résultat ni nouvelle remise
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `agent/internal/agent/agent.go:546`
 
@@ -1283,7 +1530,7 @@ case <-ctx.Done():
 
 <a id="b17"></a>
 
-### B17 — Une intervention « Maintenance » saisie (ou supprimée) dans le journal ne met pas à jour le cycle du poste
+#### B17 — Une intervention « Maintenance » saisie (ou supprimée) dans le journal ne met pas à jour le cycle du poste
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/interventions.py:148` · aussi : `frontend/src/components/machine/MachineHistoryCard.vue:73`
 
@@ -1307,7 +1554,7 @@ row = Intervention(
 
 <a id="b18"></a>
 
-### B18 — Les flèches poste précédent/suivant sautent ou répètent des postes avec le tri par défaut (dernier contact)
+#### B18 — Les flèches poste précédent/suivant sautent ou répètent des postes avec le tri par défaut (dernier contact)
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/composables/useMachineNavigation.ts:87`
 
@@ -1327,7 +1574,7 @@ const data = await listMachines({
 
 <a id="b19"></a>
 
-### B19 — Après une fusion, le journal des interventions de la fiche n'est pas rechargé
+#### B19 — Après une fusion, le journal des interventions de la fiche n'est pas rechargé
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/MachineDetailPage.vue:444`
 
@@ -1347,7 +1594,7 @@ La fusion rattache côté serveur les interventions de la source à la cible (in
 
 <a id="b20"></a>
 
-### B20 — Catalogue logiciel : recherche et page absentes de l'URL, et date « Vu depuis » affichée en UTC
+#### B20 — Catalogue logiciel : recherche et page absentes de l'URL, et date « Vu depuis » affichée en UTC
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/SoftwarePage.vue:86` · aussi : `frontend/src/pages/SoftwarePage.vue:111`
 
@@ -1366,7 +1613,7 @@ const search = ref('');
 
 <a id="b21"></a>
 
-### B21 — « Une seule vérification ouverte par poste » : en concurrence, erreur 500 à la création et double écriture au journal à la clôture
+#### B21 — « Une seule vérification ouverte par poste » : en concurrence, erreur 500 à la création et double écriture au journal à la clôture
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/checks.py:384`
 
@@ -1390,7 +1637,7 @@ if await crud.open_for_machine(session, machine.id) is not None:
 
 <a id="b22"></a>
 
-### B22 — Sortir une salle de son bâtiment efface silencieusement son emplacement et fait disparaître les signalements de divergence
+#### B22 — Sortir une salle de son bâtiment efface silencieusement son emplacement et fait disparaître les signalements de divergence
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/room/RoomFormDialog.vue:89`
 
@@ -1408,7 +1655,7 @@ form.location = props.room?.location ?? null;
 
 <a id="b23"></a>
 
-### B23 — Session expirée : toasts « Identifiants invalides » trompeurs, un par requête en cours
+#### B23 — Session expirée : toasts « Identifiants invalides » trompeurs, un par requête en cours
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/services/session.ts:131`
 
@@ -1428,7 +1675,7 @@ errors.ts l.18 : 'auth.credentials.invalid': 'Identifiants invalides',
 
 <a id="b24"></a>
 
-### B24 — Longueur minimale du mot de passe et durée du lien de réinitialisation codées en dur dans le front alors qu'elles sont configurables
+#### B24 — Longueur minimale du mot de passe et durée du lien de réinitialisation codées en dur dans le front alors qu'elles sont configurables
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/services/users.ts:5` · aussi : 
 
@@ -1448,7 +1695,7 @@ ForgotPasswordPage.vue l.54 : « … vient d'être envoyé. Il expire dans une h
 
 <a id="b25"></a>
 
-### B25 — Le journal d'audit ne sait ni nommer ni filtrer les actions sur les paquets, user.locked et machine.reenroll_requested
+#### B25 — Le journal d'audit ne sait ni nommer ni filtrer les actions sur les paquets, user.locked et machine.reenroll_requested
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/utils/auditLabels.ts:53`
 
@@ -1466,7 +1713,7 @@ backend : audit.record(..., action="package.retire", resource_type="package", ..
 
 <a id="b26"></a>
 
-### B26 — Utilisateurs : supprimer le dernier compte d'une page laisse un tableau vide
+#### B26 — Utilisateurs : supprimer le dernier compte d'une page laisse un tableau vide
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/UsersPage.vue:395`
 
@@ -1486,7 +1733,7 @@ UsersPage.vue l.394-397 :
 
 <a id="b27"></a>
 
-### B27 — PATCH /users/{id} et /groups/{id} : un champ obligatoire envoyé à null provoque une 500
+#### B27 — PATCH /users/{id} et /groups/{id} : un champ obligatoire envoyé à null provoque une 500
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/users.py:337` · aussi : `backend/app/api/routes/rooms.py:571`
 
@@ -1507,7 +1754,7 @@ groups.py l.118 : name: str | None = Field(default=None, min_length=1, max_lengt
 
 <a id="b28"></a>
 
-### B28 — Ordre de remise des commandes non déterministe : « installer les MAJ puis redémarrer » peut s'exécuter à l'envers
+#### B28 — Ordre de remise des commandes non déterministe : « installer les MAJ puis redémarrer » peut s'exécuter à l'envers
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/agent.py:815`
 
@@ -1529,7 +1776,7 @@ rows = await session.exec(
 
 <a id="b29"></a>
 
-### B29 — Réveil relayé capté par un agent incapable de l'exécuter : le réveil est perdu sans repli
+#### B29 — Réveil relayé capté par un agent incapable de l'exécuter : le réveil est perdu sans repli
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `backend/app/features/wol/relay.py:344`
 
@@ -1550,7 +1797,7 @@ for command, target in (await session.exec(stmt)).all():
 
 <a id="b30"></a>
 
-### B30 — Le dialogue de déploiement permet d'envoyer un paquet qu'il déclare lui-même inexécutable
+#### B30 — Le dialogue de déploiement permet d'envoyer un paquet qu'il déclare lui-même inexécutable
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/package/PackageDeployDialog.vue:125`
 
@@ -1571,7 +1818,7 @@ const ready = computed(() => {
 
 <a id="b31"></a>
 
-### B31 — Plafond Caddy (2 GB décimaux, par requête) plus strict que le backend (2 Gio, par fichier) : 413 inattendu au dépôt
+#### B31 — Plafond Caddy (2 GB décimaux, par requête) plus strict que le backend (2 Gio, par fichier) : 413 inattendu au dépôt
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `deploy/Caddyfile:60`
 
@@ -1592,7 +1839,7 @@ backend/app/core/config.py:453
 
 <a id="b32"></a>
 
-### B32 — Échec transitoire de lecture de token.dat : réenrôlement bloqué en attente d'approbation, poste hors ligne alors que son jeton est valide
+#### B32 — Échec transitoire de lecture de token.dat : réenrôlement bloqué en attente d'approbation, poste hors ligne alors que son jeton est valide
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `agent/internal/config/config.go:293`
 
@@ -1615,7 +1862,7 @@ raw, err := os.ReadFile(tokenPath(dir))
 
 <a id="b33"></a>
 
-### B33 — Poste en attente d'approbation : chaque tentative d'enrôlement écrit une entrée d'audit (≈ 288/jour/poste)
+#### B33 — Poste en attente d'approbation : chaque tentative d'enrôlement écrit une entrée d'audit (≈ 288/jour/poste)
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/agent.py:556`
 
@@ -1639,7 +1886,7 @@ machine.reenroll_requested_at = utcnow()
 
 <a id="b34"></a>
 
-### B34 — Type de commande inconnu ignoré sans résultat : commande « transmise » indéfiniment sur un parc à versions mixtes
+#### B34 — Type de commande inconnu ignoré sans résultat : commande « transmise » indéfiniment sur un parc à versions mixtes
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `agent/internal/agent/agent.go:566`
 
@@ -1659,7 +1906,7 @@ run, long, ok := a.resolve(cmd)
 
 <a id="b35"></a>
 
-### B35 — Le choix du responsable de maintenance dépend de check:read
+#### B35 — Le choix du responsable de maintenance dépend de check:read
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/maintenance/MaintenanceSettingsDialog.vue:98`
 
@@ -1675,7 +1922,7 @@ ownerOptions.value = (await listAssignableUsers()).map((u) => ({ label: u.name, 
 
 <a id="b36"></a>
 
-### B36 — Supprimer un fichier absent d'un paquet affiche « Paquet introuvable »
+#### B36 — Supprimer un fichier absent d'un paquet affiche « Paquet introuvable »
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/packages.py:428`
 
@@ -1692,11 +1939,11 @@ raise AppError(
 **Recommandation.** Créer un code dédié (par exemple package.file.not_found) dans ErrorCode et dans ERROR_MESSAGES, avec le libellé « Fichier introuvable dans ce paquet ».
 
 
-## 3. UI / UX
+### 7.3 UI / UX
 
 <a id="u01"></a>
 
-### U01 — Fiche poste : passer au poste précédent/suivant en échec laisse une page vide sans message d'erreur
+#### U01 — Fiche poste : passer au poste précédent/suivant en échec laisse une page vide sans message d'erreur
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/MachineDetailPage.vue:197`
 
@@ -1722,7 +1969,7 @@ watch(
 
 <a id="u02"></a>
 
-### U02 — Groupes : un emplacement saisi sans appuyer sur Entrée est perdu en silence, et le groupe s'ouvre à tout le parc
+#### U02 — Groupes : un emplacement saisi sans appuyer sur Entrée est perdu en silence, et le groupe s'ouvre à tout le parc
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/GroupsPage.vue:197`
 
@@ -1747,7 +1994,7 @@ scope: scopeOrNull(form.scope),
 
 <a id="u03"></a>
 
-### U03 — Le message d'erreur précis du backend est remplacé par un libellé générique (« Paquet invalide », « Requête invalide »)
+#### U03 — Le message d'erreur précis du backend est remplacé par un libellé générique (« Paquet invalide », « Requête invalide »)
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/services/errors.ts:90`
 
@@ -1769,7 +2016,7 @@ if (code && ERROR_MESSAGES[code]) {
 
 <a id="u04"></a>
 
-### U04 — Désinstaller sur tout le parc en un clic : aucune confirmation, et le périmètre « Tout le parc » est conservé d'une ouverture à l'autre
+#### U04 — Désinstaller sur tout le parc en un clic : aucune confirmation, et le périmètre « Tout le parc » est conservé d'une ouverture à l'autre
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/components/package/PackageDeployDialog.vue:157`
 
@@ -1791,7 +2038,7 @@ action.value = props.initialAction ?? 'install';
 
 <a id="u05"></a>
 
-### U05 — Fiche paquet : déposer un fichier, signer ou retirer le paquet efface les modifications non enregistrées de la définition
+#### U05 — Fiche paquet : déposer un fichier, signer ou retirer le paquet efface les modifications non enregistrées de la définition
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/PackageDetailPage.vue:552`
 
@@ -1813,7 +2060,7 @@ if (!updated.install_run) {
 
 <a id="u06"></a>
 
-### U06 — Paramètres : les seuils numériques ne sont pas validés côté client, et un champ vidé devient 0 sans avertissement
+#### U06 — Paramètres : les seuils numériques ne sont pas validés côté client, et un champ vidé devient 0 sans avertissement
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/SettingsPage.vue:844`
 
@@ -1832,7 +2079,7 @@ inactive_after_days: Number(fleetForm.inactiveAfterDays),
 
 <a id="u07"></a>
 
-### U07 — Tableau de bord : « Aucune menace active. » s'affiche pendant le chargement et quand l'API est en panne
+#### U07 — Tableau de bord : « Aucune menace active. » s'affiche pendant le chargement et quand l'API est en panne
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/DashboardPage.vue:145`
 
@@ -1853,7 +2100,7 @@ Les listes « Postes à mettre à jour » et « Menaces actives » affichent leu
 
 <a id="u08"></a>
 
-### U08 — Filtre « logiciel » anonyme, et invisible quand le panneau de filtres est ouvert
+#### U08 — Filtre « logiciel » anonyme, et invisible quand le panneau de filtres est ouvert
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/utils/machineListFilters.ts:495`
 
@@ -1873,7 +2120,7 @@ if (f.softwareId != null) {
 
 <a id="u09"></a>
 
-### U09 — Page Logiciels : « Aucun logiciel inventorié pour l'instant » s'affiche pour une recherche sans résultat ou après une erreur
+#### U09 — Page Logiciels : « Aucun logiciel inventorié pour l'instant » s'affiche pour une recherche sans résultat ou après une erreur
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/SoftwarePage.vue:67`
 
@@ -1892,7 +2139,7 @@ no-data-label="Aucun logiciel inventorié pour l'instant."
 
 <a id="u10"></a>
 
-### U10 — Le routeur remonte toujours en haut de page, même au retour arrière
+#### U10 — Le routeur remonte toujours en haut de page, même au retour arrière
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/router/index.ts:36`
 
@@ -1909,7 +2156,7 @@ const router = createRouter({
 
 <a id="u11"></a>
 
-### U11 — Dialogue de fusion : min-width 560px déborde sur mobile
+#### U11 — Dialogue de fusion : min-width 560px déborde sur mobile
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/machine/MachineMergeDialog.vue:3`
 
@@ -1925,7 +2172,7 @@ La carte du dialogue fixe `min-width: 560px; max-width: 90vw`. En CSS, quand min
 
 <a id="u12"></a>
 
-### U12 — Révocation du token : bouton de confirmation générique « OK », sans couleur d'alerte
+#### U12 — Révocation du token : bouton de confirmation générique « OK », sans couleur d'alerte
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/MachineDetailPage.vue:854`
 
@@ -1946,7 +2193,7 @@ $q.dialog({
 
 <a id="u13"></a>
 
-### U13 — Réinitialisation de mot de passe : le mot de passe affiché une seule fois disparaît sur un clic hors du dialogue ou sur Échap
+#### U13 — Réinitialisation de mot de passe : le mot de passe affiché une seule fois disparaît sur un clic hors du dialogue ou sur Échap
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/UsersPage.vue:215`
 
@@ -1965,7 +2212,7 @@ Le dialogue de réinitialisation n'est pas `persistent`, et @hide remet resetRes
 
 <a id="u14"></a>
 
-### U14 — Saisie de maintenance : les notes par poste sont perdues si le dialogue se ferme par Échap ou par un clic à côté
+#### U14 — Saisie de maintenance : les notes par poste sont perdues si le dialogue se ferme par Échap ou par un clic à côté
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/maintenance/MaintenanceSessionDialog.vue:104` · aussi : `frontend/src/components/maintenance/MaintenanceSessionDialog.vue:5`
 
@@ -1991,7 +2238,7 @@ watch(
 
 <a id="u15"></a>
 
-### U15 — Formulaires de création de compte et de réinitialisation : pas d'attribut autocomplete, le gestionnaire de mots de passe confond avec le compte de l'admin
+#### U15 — Formulaires de création de compte et de réinitialisation : pas d'attribut autocomplete, le gestionnaire de mots de passe confond avec le compte de l'admin
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `frontend/src/pages/UsersPage.vue:194`
 
@@ -2016,7 +2263,7 @@ Le dialogue « Nouveau compte » contient un champ type=email suivi d'un champ t
 
 <a id="u16"></a>
 
-### U16 — Dépôt de fichiers d'un paquet : pas d'annulation, pas de contrôle de taille avant l'envoi, et un refus de Caddy n'affiche qu'un message générique
+#### U16 — Dépôt de fichiers d'un paquet : pas d'annulation, pas de contrôle de taille avant l'envoi, et un refus de Caddy n'affiche qu'un message générique
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/PackageDetailPage.vue:538`
 
@@ -2038,7 +2285,7 @@ const updated = await uploadPackageFiles(pkg.value.id, toUpload.value, (f) => {
 
 <a id="u17"></a>
 
-### U17 — Explication incompréhensible sous le réglage « Vérifier le certificat du serveur »
+#### U17 — Explication incompréhensible sous le réglage « Vérifier le certificat du serveur »
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/SettingsPage.vue:410`
 
@@ -2060,7 +2307,7 @@ Désactiver ce réglage supprime la vérification TLS du relais SMTP. La seule e
 
 <a id="u18"></a>
 
-### U18 — Pas de moyen de prendre en charge une maintenance « À prendre » depuis Mes tâches
+#### U18 — Pas de moyen de prendre en charge une maintenance « À prendre » depuis Mes tâches
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/TasksPage.vue:152`
 
@@ -2077,7 +2324,7 @@ Pour les vérifications, le menu de ligne propose « Me l'affecter » et « Réa
 
 <a id="u19"></a>
 
-### U19 — Le badge « Mes tâches » ne compte que les vérifications et n'est pas mis à jour après une clôture
+#### U19 — Le badge « Mes tâches » ne compte que les vérifications et n'est pas mis à jour après une clôture
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/layouts/MainLayout.vue:98`
 
@@ -2097,7 +2344,7 @@ watch(() => router.currentRoute.value.fullPath, () => void countMyTasks());
 
 <a id="u20"></a>
 
-### U20 — Impossible de noter pourquoi un poste n'a pas été fait : le champ d'observation est désactivé quand le poste est décoché
+#### U20 — Impossible de noter pourquoi un poste n'a pas été fait : le champ d'observation est désactivé quand le poste est décoché
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/maintenance/MaintenanceSessionDialog.vue:63`
 
@@ -2115,7 +2362,7 @@ items: rows.value.filter((r) => r.done).map((r) => ({ machine_id: r.id, note: r.
 
 <a id="u21"></a>
 
-### U21 — Cases à cocher du dialogue de séance sans libellé accessible
+#### U21 — Cases à cocher du dialogue de séance sans libellé accessible
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/maintenance/MaintenanceSessionDialog.vue:50`
 
@@ -2133,7 +2380,7 @@ La case de chaque ligne et la case « tout cocher » de l'en-tête n'ont ni labe
 
 <a id="u22"></a>
 
-### U22 — Échéances peu lisibles : date passée affichée comme « prochaine échéance », à la seconde, sans durée de retard
+#### U22 — Échéances peu lisibles : date passée affichée comme « prochaine échéance », à la seconde, sans durée de retard
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/TasksPage.vue:135`
 
@@ -2153,7 +2400,7 @@ return new Date(value).toLocaleString('fr-FR');
 
 <a id="u23"></a>
 
-### U23 — Sur téléphone, le bouton « Clore » des vérifications est hors écran dans un tableau à défilement horizontal
+#### U23 — Sur téléphone, le bouton « Clore » des vérifications est hors écran dans un tableau à défilement horizontal
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `frontend/src/pages/TasksPage.vue:28` · aussi : `frontend/src/pages/RoomsPage.vue:1`
 
@@ -2173,7 +2420,7 @@ La liste des vérifications est une q-table à 5 colonnes, sans mode grille ni c
 
 <a id="u24"></a>
 
-### U24 — Salle de plus de 200 postes : liste et séance de maintenance tronquées sans avertissement
+#### U24 — Salle de plus de 200 postes : liste et séance de maintenance tronquées sans avertissement
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `frontend/src/pages/RoomDetailPage.vue:415`
 
@@ -2191,7 +2438,7 @@ const sessionMachines = computed(() => machines.value.map((m) => ({ ... })));
 
 <a id="u25"></a>
 
-### U25 — Liste des postes : la mise en page par défaut fait 2 904 px de large, et les colonnes de supervision (Antivirus, MAJ Windows, Session, Vu le) sont hors écran en 1440 px
+#### U25 — Liste des postes : la mise en page par défaut fait 2 904 px de large, et les colonnes de supervision (Antivirus, MAJ Windows, Session, Vu le) sont hors écran en 1440 px
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `frontend/src/components/machines-list/MachinesTable.vue:2`
 
@@ -2209,7 +2456,7 @@ export const DEFAULT_MACHINE_COLUMNS: MachineColumnKey[] = MACHINE_COLUMN_KEYS.f
 
 <a id="u26"></a>
 
-### U26 — « Mes tâches » : la colonne Consignes est écrasée à 116 px et le bouton « Clore » est coupé en 1440 px
+#### U26 — « Mes tâches » : la colonne Consignes est écrasée à 116 px et le bouton « Clore » est coupé en 1440 px
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `frontend/src/pages/TasksPage.vue:57`
 
@@ -2228,7 +2475,7 @@ Les cellules d'un QTable sont en `white-space: nowrap` par défaut. La colonne P
 
 <a id="u27"></a>
 
-### U27 — Paramètres › Réglages du serveur : en mobile, les clés en `nowrap` réduisent la description à une colonne étroite et tronquée
+#### U27 — Paramètres › Réglages du serveur : en mobile, les clés en `nowrap` réduisent la description à une colonne étroite et tronquée
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/SettingsPage.vue:916`
 
@@ -2248,7 +2495,7 @@ La cellule `.env-key` est en `white-space: nowrap` et contient des clés en poli
 
 <a id="u28"></a>
 
-### U28 — Badge antivirus vert alors que le libellé dit « Non relevé » (ou « Aucun »)
+#### U28 — Badge antivirus vert alors que le libellé dit « Non relevé » (ou « Aucun »)
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/machine/MachineStatusCard.vue:7`
 
@@ -2266,7 +2513,7 @@ La couleur du badge vient de l'état global `is_up_to_date` (protectionColor), a
 
 <a id="u29"></a>
 
-### U29 — En mobile, le titre « Tia'i — Console » est tronqué en « Tia'i … » par l'adresse e-mail affichée en permanence
+#### U29 — En mobile, le titre « Tia'i — Console » est tronqué en « Tia'i … » par l'adresse e-mail affichée en permanence
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/layouts/MainLayout.vue:9`
 
@@ -2282,7 +2529,7 @@ L'adresse e-mail de l'utilisateur est toujours affichée dans la barre d'en-têt
 
 <a id="u30"></a>
 
-### U30 — Fiche poste : boutons d'en-tête incohérents, « Logiciel » en casse normale et les autres en majuscules
+#### U30 — Fiche poste : boutons d'en-tête incohérents, « Logiciel » en casse normale et les autres en majuscules
 
 **Sévérité :** Info · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/MachineDetailPage.vue:119`
 
