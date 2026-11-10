@@ -17,6 +17,9 @@
 > Objectif : installer ou désinstaller un logiciel depuis la console sur un
 > poste, une sélection ou un filtre, et savoir où il est présent.
 > Dernière brique de la Phase 3 (cf. `plan-projet-tiai.md` §Phase 3).
+>
+> **Audit du 2026-11-10 : deux constats de sévérité élevée sur la méthode A**
+> (T01, T02), à corriger avant toute évolution de ce chantier. Voir §9.
 
 ---
 
@@ -196,3 +199,37 @@ ailleurs :
 5. Caddy : le dépôt d'un installateur de plusieurs centaines de Mo à travers la
    route à 2 Go, les autres routes restant à 8 Mo.
 
+---
+
+## 9. Suites de l'audit 2026-11 : reste à faire
+
+L'audit du 2026-11-10 (`plan-audit-2026-11.md`) a trouvé dans ce chantier les deux seuls constats de sévérité élevée. **T01 et T02 passent avant toute autre évolution du déploiement logiciel.** En attendant que les agents corrigés soient en place, n'activer `DeployPublishers` (méthode A) sur aucun nouveau poste.
+
+Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
+
+- [ ] **T01** · *P0 immédiate* — **Agent : n'accepter qu'un UUID comme identifiant de paquet** ([S01](plan-audit-2026-11.md#s01))
+  Dans `agent/internal/deploy/executor.go`, refuser tout `pkg.ID` qui n'est pas un UUID canonique avant `MkdirAll`. En défense en profondeur, vérifier par `filepath.Rel` que le répertoire de travail reste sous `PackagesDir` avant d'écrire et avant `RemoveAll`. Ajouter un test avec un identifiant contenant `..`.
+
+- [ ] **T02** · *P0 immédiate* — **Méthode A : plus de fichier chargeable non signé à côté de l'exécutable** ([S02](plan-audit-2026-11.md#s02))
+  En méthode A, ne télécharger que le fichier lancé : refuser un manifeste non signé qui en nomme d'autres, ou au minimum refuser les extensions chargeables (`.dll`, `.ocx`, `.cpl`, `.sys`, `.manifest`, `.local`, `.config`). Purger le répertoire du paquet avant chaque exécution.
+
+- [ ] **T08** · *P1 court terme* — **Figer le contenu d'un paquet à la mise en file** ([S08](plan-audit-2026-11.md#s08))
+  Enregistrer sur la commande une empreinte du paquet approuvé (manifeste, signature, winget et version), et la passer en `failed` à la livraison si le paquet a changé depuis (`agent.py:408`).
+
+- [ ] **T09** · *P1 court terme* — **Fichiers de paquet : plus d'orphelin, plus de déploiement cassé** ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13))
+  Au remplacement d'un fichier et après un dépôt multiple en échec, supprimer les fichiers stockés qui ne sont plus référencés. Ne pas supprimer un fichier qu'une commande ouverte doit encore télécharger, et servir le téléchargement à partir de l'empreinte remise (`packages.py:383`, `agent.py:998`).
+
+- [ ] **T23** · *P2 moyen terme* — **Déploiement : confirmation et refus des paquets inexécutables** ([U04](plan-audit-2026-11.md#u04), [B30](plan-audit-2026-11.md#b30))
+  Réinitialiser le ciblage à chaque ouverture du dialogue. Demander une confirmation qui annonce le nombre de postes pour « Tout le parc » et pour toute désinstallation. Refuser, côté serveur comme dans le dialogue, un paquet de fichiers qu'aucune méthode de confiance ne couvre.
+
+- [ ] **T24** · *P2 moyen terme* — **Fiche paquet : saisie préservée, dépôt contrôlé, messages justes** ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36))
+  Ne plus écraser le formulaire non enregistré après un dépôt, une signature ou un retrait. Vérifier la taille avant l'envoi, permettre l'annulation et traduire le 413 de Caddy. Passer le plafond Caddy à `2GiB`, et créer un code d'erreur « fichier introuvable dans ce paquet ».
+
+- [ ] **T25** · *P2 moyen terme* — **Fiche paquet : pagination et bilan des déploiements** ([B14](plan-audit-2026-11.md#b14))
+  Brancher la pagination côté serveur et afficher un décompte par statut du dernier déploiement (`PackageDetailPage.vue:313`).
+
+- [ ] **T37** · *P3 fond* — **Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))
+  Refuser `http://` sauf option de développement, et ne plus suivre les redirections. Borner les corps d'erreur lus, faire tourner le journal à chaud, et borner les téléchargements à la taille annoncée. Distinguer un `token.dat` illisible d'un `token.dat` absent. Allonger le délai entre deux tentatives quand l'enrôlement attend une approbation, et ne l'auditer qu'une fois.
+
+- [ ] **T38** · *P3 fond* — **Script de signature : neutraliser les caractères de contrôle** ([S25](plan-audit-2026-11.md#s25))
+  Refuser les caractères de contrôle, ou les afficher échappés, dans le nom, la version, `run` et `args` avant la confirmation, et les rejeter aussi côté serveur.

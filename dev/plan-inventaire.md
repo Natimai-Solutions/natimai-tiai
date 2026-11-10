@@ -636,3 +636,29 @@ poste fixe et une VM pour le châssis, l'absence de batterie et `hw_is_virtual` 
 et la preuve qu'un poste stable ne réécrit rien pendant 48 h, que le compteur
 d'écritures donnera comme il a donné les « 18 heartbeats, 2 écritures » de la
 Phase 2.
+
+---
+
+## 12. Suites de l'audit 2026-11 : reste à faire
+
+L'audit du 2026-11-10 (`plan-audit-2026-11.md`) a relevé dans ce chantier des défauts d'export, de filtre et de recherche, et un catalogue logiciel dont la croissance n'est pas bornée.
+
+Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
+
+- [ ] **T12** · *P1 court terme* — **Export Excel : neutraliser les caractères de contrôle** ([S11](plan-audit-2026-11.md#s11))
+  Dans `xlsx_response`, retirer les caractères refusés par openpyxl (`ILLEGAL_CHARACTERS_RE`), et idéalement dès la réception du heartbeat, dans `bound_text`.
+
+- [ ] **T15** · *P1 court terme* — **Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
+  Ajouter `'inventory'` à `groupOrder` (`frontend/src/services/commands.ts:324`), avec un test qui vérifie que chaque action du catalogue apparaît dans un groupe.
+
+- [ ] **T19** · *P1 court terme* — **Carte « Disque presque plein » : respecter le seuil réglé** ([B01](plan-audit-2026-11.md#b01))
+  Accepter tout seuil de 1 à 99 dans `machineFiltersFromQuery` (`machineListFilters.ts:314`) et l'afficher dans la puce de filtre.
+
+- [ ] **T36** · *P3 fond* — **Données déclarées par l'agent : placement en salle et catalogue logiciel** ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21))
+  Vérifier que le DN rapporté est cohérent avec la machine avant de la rattacher à une salle de l'annuaire, et ne plus adopter automatiquement une salle créée à la main. Limiter le débit du heartbeat par poste et purger les logiciels qui ne sont plus installés sur aucun poste.
+
+- [ ] **T39** · *P3 fond* — **Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
+  Factoriser `_escape_like` et l'appliquer à toutes les recherches par sous-chaîne : logiciels, postes et comptes.
+
+- [ ] **T42** · *P3 fond* — **Page Logiciels et filtre par logiciel** ([B20](plan-audit-2026-11.md#b20), [U08](plan-audit-2026-11.md#u08), [U09](plan-audit-2026-11.md#u09))
+  Mettre la recherche, le tri et la page dans l'URL. Afficher « Vu depuis » dans le fuseau du navigateur. Nommer le logiciel dans la puce de filtre, et distinguer « aucun résultat » d'« erreur ».
