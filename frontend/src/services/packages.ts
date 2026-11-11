@@ -193,16 +193,25 @@ export async function updatePackage(id: string, fields: PackageFields): Promise<
 }
 
 /** Upload files, reporting progress as a fraction (0–1). */
+/**
+ * The server's default bound on one file (PACKAGE_MAX_BYTES, 2 Gio), checked
+ * before sending: refused after the transfer, a large file costs minutes for
+ * nothing. A server configured lower still answers 413 with its own figure.
+ */
+export const PACKAGE_FILE_MAX_BYTES = 2 * 1024 ** 3;
+
 export async function uploadPackageFiles(
   id: string,
   files: File[],
   onProgress?: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<Package> {
   const form = new FormData();
   for (const f of files) form.append('files', f, f.name);
   const { data } = await api.post<Package>(`/packages/${id}/files`, form, {
     // An installer is hundreds of megabytes: no request timeout here.
     timeout: 0,
+    ...(signal ? { signal } : {}),
     onUploadProgress: (e) => {
       if (onProgress && e.total) onProgress(e.loaded / e.total);
     },

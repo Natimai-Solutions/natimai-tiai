@@ -155,7 +155,7 @@ Pertes de saisie, confirmations manquantes, cas secondaires de périmètre, et p
   Réinitialiser le ciblage à chaque ouverture du dialogue. Demander une confirmation qui annonce le nombre de postes pour « Tout le parc » et pour toute désinstallation. Refuser, côté serveur comme dans le dialogue, un paquet de fichiers qu'aucune méthode de confiance ne couvre.
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T24 — Fiche paquet : saisie préservée, dépôt contrôlé, messages justes** ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36))
+- [x] **T24 — Fiche paquet : saisie préservée, dépôt contrôlé, messages justes** ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36))
   Ne plus écraser le formulaire non enregistré après un dépôt, une signature ou un retrait. Vérifier la taille avant l'envoi, permettre l'annulation et traduire le 413 de Caddy. Passer le plafond Caddy à `2GiB`, et créer un code d'erreur « fichier introuvable dans ce paquet ».
   *Document de travail :* `plan-deploiement-logiciel.md`
 
@@ -325,6 +325,7 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T21 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
 | T22 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme : le plus ancien `first_seen`, le cycle et le responsable du doublon quand la fiche gardée n'en a pas. |
 | T23 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le ciblage revient à « Un emplacement » à chaque ouverture. « Tout le parc » et toute désinstallation passent par une confirmation qui annonce le nombre de postes. Une installation que ni la méthode B (signature) ni la méthode A (exécutable d'éditeur, sans fichier chargeable à côté, mêmes règles que l'agent depuis T02) ne couvre est refusée : bouton désactivé dans le dialogue, 409 `package.not_ready` côté serveur. La désinstallation n'est pas bloquée : `msiexec /x {code}` passe en méthode A. |
+| T24 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Les actions secondaires (dépôt, retrait d'un fichier, signature, retrait du paquet) ne mettent à jour que les champs que le lecteur n'a pas modifiés ; un indicateur « Modifications non enregistrées » et une confirmation en quittant la page signalent la saisie en cours. Dépôt : un fichier par requête (progression globale), taille vérifiée avant l'envoi contre le plafond par défaut de 2 Gio, bouton Annuler (`AbortController`), 413 du proxy traduit. Caddy passe à `2GiB`. Nouveau code `package.file.not_found`. |
 
 ## 7. Détail des constats
 

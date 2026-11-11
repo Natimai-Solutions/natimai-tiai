@@ -50,6 +50,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'settings.email.secret_required':
     'Le serveur d’envoi a changé : ressaisissez le mot de passe SMTP ou la clé API Mailgun, qui ne sont jamais envoyés à un serveur pour lequel ils n’ont pas été saisis',
   'package.not_found': 'Paquet introuvable',
+  'package.file.not_found': 'Fichier introuvable dans ce paquet : il a peut-être déjà été retiré',
   'package.invalid': 'Paquet invalide',
   'package.file.too_large': 'Fichier trop volumineux',
   'package.file.name_invalid':
@@ -87,8 +88,13 @@ export function apiErrorCode(err: unknown): string | null {
  * code, else the backend-provided message, else the caller's fallback.
  */
 export function apiErrorMessage(err: unknown, fallback = 'Une erreur est survenue'): string {
-  const body = (err as AxiosError<ApiErrorBody>)?.response?.data;
+  const response = (err as AxiosError<ApiErrorBody>)?.response;
+  const body = response?.data;
   const code = body?.error?.code;
+  // Refused by the proxy in front of the API, which answers without the
+  // error envelope (audit U16).
+  if (!code && response?.status === 413)
+    return ERROR_MESSAGES['package.file.too_large'] ?? fallback;
   if (code && ERROR_MESSAGES[code]) {
     return ERROR_MESSAGES[code];
   }

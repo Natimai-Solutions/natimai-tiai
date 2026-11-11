@@ -443,7 +443,9 @@ async def delete_file(
     row = await session.get(PackageFile, (package.id, name))
     if row is None:
         raise AppError(
-            code=ErrorCode.PACKAGE_NOT_FOUND, status_code=404, message="File not found"
+            code=ErrorCode.PACKAGE_FILE_NOT_FOUND,
+            status_code=404,
+            message="File not found in this package",
         )
     await session.delete(row)
     await session.flush()

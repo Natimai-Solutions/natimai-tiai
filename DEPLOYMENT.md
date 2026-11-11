@@ -508,7 +508,7 @@ Côté serveur :
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `PACKAGES_DIR` | `/data/packages` | Où les fichiers des paquets sont stockés, un par empreinte SHA-256. Monté sur le volume Docker `packages` |
-| `PACKAGE_MAX_BYTES` | `2147483648` (2 Gio) | Taille maximale d'un fichier déposé. Caddy accepte 2 Go sur la seule route de dépôt : relever les deux ensemble |
+| `PACKAGE_MAX_BYTES` | `2147483648` (2 Gio) | Taille maximale d'un fichier déposé. Caddy accepte 2 Gio par requête sur la seule route de dépôt, et la console envoie un fichier par requête : relever les deux ensemble |
 | `PACKAGE_MAX_CONCURRENT_DOWNLOADS` | `20` | Téléchargements servis en même temps par le processus de l'API. Au-delà, l'agent est prié de revenir (429) sans que sa commande échoue |
 
 Le volume `packages` **n'est pas dans le dump PostgreSQL** (voir ci-dessous) :

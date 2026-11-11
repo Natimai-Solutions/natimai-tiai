@@ -73,6 +73,8 @@ class ErrorCode(enum.StrEnum):
     PACKAGE_INVALID = "package.invalid"
     PACKAGE_FILE_TOO_LARGE = "package.file.too_large"
     PACKAGE_FILE_NAME_INVALID = "package.file.name_invalid"
+    # The package exists, the file named does not (any more) — audit B36.
+    PACKAGE_FILE_NOT_FOUND = "package.file.not_found"
     PACKAGE_SIGNATURE_INVALID = "package.signature.invalid"
     PACKAGE_NOT_READY = "package.not_ready"
     PACKAGE_RETIRED = "package.retired"

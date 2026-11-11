@@ -630,3 +630,14 @@ async def test_a_removed_file_and_a_failed_upload_leave_nothing_behind(
     )
     assert failed.status_code == 422, failed.text
     assert {p.name for p in store.iterdir()} == before
+
+
+async def test_removing_a_file_already_gone_names_the_file(client, db_session, store):
+    """Audit B36: the package exists — it is the file that is missing."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    url = f"/api/v1/packages/{package['id']}/files/ClientPRONOTE.iss"
+    assert (await client.delete(url, headers=admin)).status_code == 200
+    again = await client.delete(url, headers=admin)
+    assert again.status_code == 404
+    assert again.json()["error"]["code"] == "package.file.not_found"

@@ -32,6 +32,11 @@ describe('apiErrorMessage', () => {
     expect(apiErrorMessage(new Error('boom'), 'Échec')).toBe('Échec');
   });
 
+  it('reads a 413 from the proxy, which has no envelope', () => {
+    const proxy = { response: { status: 413, data: '<html>Request Entity Too Large</html>' } };
+    expect(apiErrorMessage(proxy, 'Dépôt impossible')).toBe('Fichier trop volumineux');
+  });
+
   it('uses the default fallback when nothing else is available', () => {
     expect(apiErrorMessage(undefined)).toBe('Une erreur est survenue');
   });
