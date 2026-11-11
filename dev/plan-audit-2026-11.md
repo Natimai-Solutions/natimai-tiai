@@ -111,7 +111,7 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   Tronquer le nom en tenant compte du suffixe dans `room_for_key` (`room/crud.py:287`), aligner les bornes de `ad_location` et de `ou` sur la colonne, et isoler l'échec du placement pour qu'il ne fasse plus échouer le heartbeat en 500.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T14 — Fiche poste et tableau de bord sans `threat:read` ni `command:read`** ([B02](plan-audit-2026-11.md#b02))
+- [x] **T14 — Fiche poste et tableau de bord sans `threat:read` ni `command:read`** ([B02](plan-audit-2026-11.md#b02))
   Ne charger les menaces et les commandes que si l'utilisateur a le droit de les lire, et charger les données annexes avec `Promise.allSettled` (`MachineDetailPage.vue:750`, `DashboardPage.vue`).
   *Document de travail :* `plan-projet-tiai.md`
 
@@ -135,7 +135,7 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   Accepter tout seuil de 1 à 99 dans `machineFiltersFromQuery` (`machineListFilters.ts:314`) et l'afficher dans la puce de filtre.
   *Document de travail :* `plan-inventaire.md`
 
-- [ ] **T20 — Liste et fiche des postes : signaler les échecs de chargement** ([B04](plan-audit-2026-11.md#b04), [U01](plan-audit-2026-11.md#u01))
+- [x] **T20 — Liste et fiche des postes : signaler les échecs de chargement** ([B04](plan-audit-2026-11.md#b04), [U01](plan-audit-2026-11.md#u01))
   Distinguer le rafraîchissement automatique, qui reste silencieux, du chargement demandé : sur ce dernier, notifier l'erreur et vider ou griser les lignes périmées. Sur la fiche, afficher un état de chargement ou d'erreur quand on passe au poste précédent ou suivant.
   *Document de travail :* `plan-projet-tiai.md`
 

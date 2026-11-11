@@ -2,14 +2,14 @@
   <q-page padding>
     <MachinesToolbar
       :loading="loading"
-      :last-refreshed-at="lastRefreshedAt"
+      :last-refreshed-at="stale ? null : lastRefreshedAt"
       @columns="columnsOpen = true"
       @export="exportOpen = true"
       @refresh="reload"
     />
 
     <LoadErrorBanner
-      v-if="lastError && !lastRefreshedAt"
+      v-if="lastError && (!lastRefreshedAt || stale)"
       :error="lastError"
       :loading="loading"
       @retry="reload"
@@ -301,8 +301,15 @@ const { lastRefreshedAt, lastError, refreshNow } = useAutoRefresh(fetchMachines,
   paused: () => selected.value.length > 0,
 });
 
+// The rows on screen no longer answer the query in the URL: a load the user
+// asked for (a filter, a page, « Actualiser ») failed after an earlier one had
+// succeeded (audit B04).
+const stale = ref(false);
+
 /** The user-visible load: spinner on, and the auto-refresh countdown restarts
- * so the next background tick lands a full period away. */
+ * so the next background tick lands a full period away. Unlike a background
+ * refresh, its failure is said, and the rows of the previous query go: left
+ * under the new filter's chips, they would be acted upon as if they matched. */
 async function reload() {
   loading.value = true;
   try {
@@ -310,7 +317,18 @@ async function reload() {
   } finally {
     loading.value = false;
   }
+  stale.value = lastError.value !== null && lastRefreshedAt.value !== null;
+  if (stale.value) {
+    rows.value = [];
+    selected.value = [];
+    pagination.value = { ...pagination.value, rowsNumber: 0 };
+  }
 }
+
+// A later success, background or not, brings the table back in line.
+watch(lastRefreshedAt, () => {
+  if (lastError.value === null) stale.value = false;
+});
 
 const { askOpen, placeOpen, askSelection, placeSelection, runBulk } = useMachineBulkActions({
   selected,

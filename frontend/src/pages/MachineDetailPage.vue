@@ -73,7 +73,7 @@
         </div>
       </template>
       <q-space />
-      <div v-if="lastRefreshedAt" class="text-caption text-muted q-mr-sm">
+      <div v-if="lastRefreshedAt && machine" class="text-caption text-muted q-mr-sm">
         Actualisé à {{ lastRefreshLabel }}
       </div>
       <q-btn
@@ -193,12 +193,17 @@
       />
     </div>
 
+    <!-- Also after an earlier success: walking to the next poste empties the
+         page first, and a failure there must not leave it blank (audit U01). -->
     <LoadErrorBanner
-      v-if="lastError && !lastRefreshedAt"
+      v-if="lastError && (!lastRefreshedAt || !machine)"
       :error="lastError"
       :loading="loading"
       @retry="load"
     />
+    <div v-else-if="!machine" class="row justify-center q-pa-xl">
+      <q-spinner size="lg" color="primary" aria-label="Chargement du poste" />
+    </div>
 
     <q-banner v-if="machine?.token_revoked" class="surface-red q-mb-md" rounded>
       <template #avatar><q-icon name="key_off" color="negative" /></template>
@@ -354,7 +359,7 @@
             {{ machine.software.length }}
           </q-badge>
         </q-tab>
-        <q-tab name="commands" icon="history" label="Commandes" />
+        <q-tab v-if="canReadCommands" name="commands" icon="history" label="Commandes" />
         <q-tab name="history" icon="handyman" label="Historique">
           <q-badge v-if="interventionTotal" color="grey-7" floating>{{
             interventionTotal
@@ -378,6 +383,7 @@
             <MachineAntivirusCard :machine="machine" />
           </div>
           <MachineThreatsCard
+            v-if="canReadThreats"
             v-model:pagination="threatPagination"
             :threats="threats"
             :loading="loading"
@@ -424,7 +430,7 @@
           />
         </q-tab-panel>
 
-        <q-tab-panel name="commands" class="q-px-none">
+        <q-tab-panel v-if="canReadCommands" name="commands" class="q-px-none">
           <MachineCommandsCard
             v-model:pagination="commandPagination"
             :commands="commands"
@@ -743,26 +749,46 @@ function showDetail(cmd: Command, kind: 'output' | 'error') {
 // numbers back over whatever the reader has since asked for.
 let requestId = 0;
 
+// The poste needs machine:read alone; its threats and its commands each ask
+// for their own permission, and a group may grant machine:read without them
+// (audit B02). What the account may not read is not asked for.
+const canReadThreats = computed(() => auth.can('threat', 'read'));
+const canReadCommands = computed(() => auth.can('command', 'read'));
+
 async function fetchAll() {
   const id = ++requestId;
   const tp = threatPagination.value;
   const cp = commandPagination.value;
-  const [m, t, active, c] = await Promise.all([
+  const noPage = Promise.resolve(null);
+  // The poste decides whether the page can show; the lists beside it only
+  // fill their own card — one of them failing must not blank the fiche.
+  const [m, t, active, c] = await Promise.allSettled([
     getMachine(props.id),
-    listThreats({ machine_id: props.id, page: tp.page, page_size: tp.rowsPerPage }),
+    canReadThreats.value
+      ? listThreats({ machine_id: props.id, page: tp.page, page_size: tp.rowsPerPage })
+      : noPage,
     // One row is enough: only the total is read.
-    listThreats({ machine_id: props.id, status: 'active', page: 1, page_size: 1 }),
-    listCommands({ machine_id: props.id, page: cp.page, page_size: cp.rowsPerPage }),
+    canReadThreats.value
+      ? listThreats({ machine_id: props.id, status: 'active', page: 1, page_size: 1 })
+      : noPage,
+    canReadCommands.value
+      ? listCommands({ machine_id: props.id, page: cp.page, page_size: cp.rowsPerPage })
+      : noPage,
   ]);
   if (id !== requestId) return;
-  machine.value = m;
-  threats.value = t.items;
-  activeThreats.value = active.total;
-  // Merged into the current value, not the snapshot: a page turned while this
-  // request was in the air must not be undone by its answer.
-  threatPagination.value = { ...threatPagination.value, rowsNumber: t.total };
-  commands.value = c.items;
-  commandPagination.value = { ...commandPagination.value, rowsNumber: c.total };
+  if (m.status === 'rejected') throw m.reason;
+  machine.value = m.value;
+  if (t.status === 'fulfilled' && t.value) {
+    threats.value = t.value.items;
+    // Merged into the current value, not the snapshot: a page turned while
+    // this request was in the air must not be undone by its answer.
+    threatPagination.value = { ...threatPagination.value, rowsNumber: t.value.total };
+  }
+  if (active.status === 'fulfilled' && active.value) activeThreats.value = active.value.total;
+  if (c.status === 'fulfilled' && c.value) {
+    commands.value = c.value.items;
+    commandPagination.value = { ...commandPagination.value, rowsNumber: c.value.total };
+  }
   // Not awaited with the rest: the count on the merge button is worth showing,
   // but never worth holding the page for.
   void fetchDuplicates();
@@ -783,13 +809,24 @@ const { lastRefreshedAt, lastError, refreshNow } = useAutoRefresh(fetchAll, {
   paused: () => detailOpen.value || mergeOpen.value,
 });
 
-/** The manual load: this one shows the spinner, the automatic ones do not. */
+/**
+ * The manual load: this one shows the spinner, the automatic ones do not —
+ * and says when it failed over a page already shown, which a background
+ * refresh keeps quiet about (audit B04).
+ */
 async function load() {
   loading.value = true;
   try {
     await refreshNow();
   } finally {
     loading.value = false;
+  }
+  if (lastError.value && machine.value) {
+    $q.notify({
+      type: 'negative',
+      message: apiErrorMessage(lastError.value, 'Actualisation impossible'),
+      caption: 'Les informations affichées sont celles du dernier chargement réussi.',
+    });
   }
 }
 

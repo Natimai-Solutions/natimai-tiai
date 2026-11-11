@@ -120,7 +120,7 @@
         </q-card>
       </div>
 
-      <div class="col-12 col-md-6">
+      <div v-if="canReadThreats" class="col-12 col-md-6">
         <q-card flat bordered>
           <q-card-section class="text-subtitle1 row items-center">
             <q-icon name="coronavirus" color="negative" class="q-mr-sm" />
@@ -160,6 +160,7 @@ import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAut
 import { getOverview, type StatsOverview } from 'src/services/stats';
 import { listMachines, type Machine } from 'src/services/machines';
 import { listThreats, type Threat } from 'src/services/threats';
+import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime, threatSeverityLabel, threatStatusLabel } from 'src/utils/format';
 
 const stats = ref<StatsOverview | null>(null);
@@ -359,16 +360,24 @@ function mergeOutdated(av: Machine[], wuBehind: Machine[]): Machine[] {
   return [...byId.values()].sort((a, b) => b.last_seen.localeCompare(a.last_seen)).slice(0, 5);
 }
 
+// The counters need machine:read alone; the threat list asks for its own
+// permission, which a group may not grant (audit B02).
+const auth = useAuthStore();
+const canReadThreats = computed(() => auth.can('threat', 'read'));
+
 async function fetchAll() {
   const [s, av, wuBehind, t] = await Promise.all([
     getOverview(),
     listMachines({ status: 'outdated', page_size: 5 }),
     listMachines({ wu_status: 'pending', page_size: 5 }),
-    listThreats({ status: 'active', page_size: 5 }),
+    // The sample of threats is a side list: its failure leaves the counters.
+    canReadThreats.value
+      ? listThreats({ status: 'active', page_size: 5 }).catch(() => null)
+      : Promise.resolve(null),
   ]);
   stats.value = s;
   outdated.value = mergeOutdated(av.items, wuBehind.items);
-  threats.value = t.items;
+  if (t) threats.value = t.items;
 }
 
 // The dashboard is a wall screen as much as a page: left open, it has to keep

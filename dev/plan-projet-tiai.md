@@ -634,14 +634,14 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [ ] **T11** · *P1 court terme* — Remettre les commandes dans l'ordre de création ([B28](plan-audit-2026-11.md#b28)), suivi dans `plan-commandes-distantes.md`
 - [ ] **T12** · *P1 court terme* — Export Excel : neutraliser les caractères de contrôle ([S11](plan-audit-2026-11.md#s11)), suivi dans `plan-inventaire.md`
 - [ ] **T13** · *P1 court terme* — Placement par l'annuaire : borner le nom de salle à la colonne ([S07](plan-audit-2026-11.md#s07)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T14** · *P1 court terme* — **Fiche poste et tableau de bord sans `threat:read` ni `command:read`** ([B02](plan-audit-2026-11.md#b02))
+- [x] **T14** · *P1 court terme* — **Fiche poste et tableau de bord sans `threat:read` ni `command:read`** ([B02](plan-audit-2026-11.md#b02))
   Ne charger les menaces et les commandes que si l'utilisateur a le droit de les lire, et charger les données annexes avec `Promise.allSettled` (`MachineDetailPage.vue:750`, `DashboardPage.vue`).
 - [ ] **T15** · *P1 court terme* — Remettre « Rafraîchir l'inventaire » dans les menus ([B12](plan-audit-2026-11.md#b12)), suivi dans `plan-inventaire.md`
 - [ ] **T16** · *P1 court terme* — Échéance de maintenance : la recalculer depuis le journal ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17)), suivi dans `plan-salles-maintenance-interventions.md`
 - [ ] **T17** · *P1 court terme* — Responsables désactivés ou supprimés : ne plus bloquer la maintenance ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35)), suivi dans `plan-salles-maintenance-interventions.md`
 - [ ] **T18** · *P1 court terme* — Suppression d'un bâtiment : gérer les noms de salle en collision ([B07](plan-audit-2026-11.md#b07)), suivi dans `plan-salles-maintenance-interventions.md`
 - [ ] **T19** · *P1 court terme* — Carte « Disque presque plein » : respecter le seuil réglé ([B01](plan-audit-2026-11.md#b01)), suivi dans `plan-inventaire.md`
-- [ ] **T20** · *P1 court terme* — **Liste et fiche des postes : signaler les échecs de chargement** ([B04](plan-audit-2026-11.md#b04), [U01](plan-audit-2026-11.md#u01))
+- [x] **T20** · *P1 court terme* — **Liste et fiche des postes : signaler les échecs de chargement** ([B04](plan-audit-2026-11.md#b04), [U01](plan-audit-2026-11.md#u01))
   Distinguer le rafraîchissement automatique, qui reste silencieux, du chargement demandé : sur ce dernier, notifier l'erreur et vider ou griser les lignes périmées. Sur la fiche, afficher un état de chargement ou d'erreur quand on passe au poste précédent ou suivant.
 - [x] **T21** · *P1 court terme* — **`useAutoRefresh` : plus de relance après le démontage** ([B11](plan-audit-2026-11.md#b11))
   Ajouter un drapeau `disposed` et ne relancer le minuteur que s'il est faux. Couvrir le cas dans le test du composable.
