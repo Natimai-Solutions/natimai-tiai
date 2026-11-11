@@ -508,14 +508,17 @@ async function copyResult() {
 async function toggleActive(user: ConsoleUser) {
   try {
     await updateUser(user.id, { is_active: !user.is_active });
-    $q.notify({
-      type: 'positive',
-      message: user.is_active ? 'Compte désactivé' : 'Compte réactivé',
-      // What a deactivated owner leaves behind is nobody's until it comes back.
-      caption: user.is_active
-        ? 'Ses salles, postes et vérifications passent dans « À prendre » tant que le compte reste désactivé.'
-        : undefined,
-    });
+    $q.notify(
+      user.is_active
+        ? {
+            type: 'positive',
+            message: 'Compte désactivé',
+            // What a deactivated owner leaves behind is nobody's until it comes back.
+            caption:
+              'Ses salles, postes et vérifications passent dans « À prendre » tant que le compte reste désactivé.',
+          }
+        : { type: 'positive', message: 'Compte réactivé' },
+    );
     await reload();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Modification impossible') });
