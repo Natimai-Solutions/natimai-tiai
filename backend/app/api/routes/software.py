@@ -23,6 +23,7 @@ from sqlmodel import col, select
 from app.api.csv_export import csv_response
 from app.api.deps import CurrentScope, SessionDep, require_permission
 from app.api.xlsx_export import xlsx_response
+from app.core.errors import AppError, ErrorCode
 from app.features.base import contains
 from app.features.inventory.models import MachineSoftware, Software
 from app.features.user.permissions import Action, Resource
@@ -217,4 +218,27 @@ async def export_software_xlsx(
             for entry, count in await _export_rows(session, search, scope)
         ],
         sheet_title="Logiciels",
+    )
+
+
+class SoftwareRef(BaseModel):
+    """What names a catalogue entry — for the filter chip of the machine list
+    (audit U08). The catalogue is the parc's, not scoped: it names programs,
+    not postes."""
+
+    id: int
+    name: str
+    version: str
+    publisher: str
+
+
+@router.get("/{software_id}", response_model=SoftwareRef)
+async def get_software(software_id: int, session: SessionDep) -> SoftwareRef:
+    entry = await session.get(Software, software_id)
+    if entry is None or entry.id is None:
+        raise AppError(
+            code=ErrorCode.HTTP_NOT_FOUND, status_code=404, message="Software not found"
+        )
+    return SoftwareRef(
+        id=entry.id, name=entry.name, version=entry.version, publisher=entry.publisher
     )

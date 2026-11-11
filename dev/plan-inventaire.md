@@ -660,5 +660,5 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T39** · *P3 fond* — **Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
   Factoriser `_escape_like` et l'appliquer à toutes les recherches par sous-chaîne : logiciels, postes et comptes.
 
-- [ ] **T42** · *P3 fond* — **Page Logiciels et filtre par logiciel** ([B20](plan-audit-2026-11.md#b20), [U08](plan-audit-2026-11.md#u08), [U09](plan-audit-2026-11.md#u09))
+- [x] **T42** · *P3 fond* — **Page Logiciels et filtre par logiciel** ([B20](plan-audit-2026-11.md#b20), [U08](plan-audit-2026-11.md#u08), [U09](plan-audit-2026-11.md#u09))
   Mettre la recherche, le tri et la page dans l'URL. Afficher « Vu depuis » dans le fuseau du navigateur. Nommer le logiciel dans la puce de filtre, et distinguer « aucun résultat » d'« erreur ».
