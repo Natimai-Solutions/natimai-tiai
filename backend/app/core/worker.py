@@ -79,6 +79,17 @@ async def expire_stale_commands() -> int:
         return result.rowcount or 0
 
 
+async def close_unanswered_commands() -> int:
+    """Fail the delivered or running commands left without a verdict past
+    ``COMMAND_UNANSWERED_HOURS`` (audit B10)."""
+    async with AsyncSession(engine) as session:
+        closed = await command_crud.close_unanswered(
+            session, hours=settings.COMMAND_UNANSWERED_HOURS
+        )
+        await session.commit()
+        return closed
+
+
 async def send_daily_digest() -> int:
     """Queue the daily fleet digest for the accounts that asked for one.
 
@@ -243,6 +254,7 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
         # Due immediately: a restart must resume mail delivery within one tick.
         Job("outbox", process_outbox, now, every(POLL_SECONDS)),
         Job("expire_stale_commands", expire_stale_commands, now, every(300)),
+        Job("close_unanswered_commands", close_unanswered_commands, now, every(300)),
         Job(
             "daily_digest",
             send_daily_digest,

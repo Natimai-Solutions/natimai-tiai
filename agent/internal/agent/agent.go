@@ -37,10 +37,11 @@ import (
 // The literal below is only what a plain `go build` produces.
 var Version = "0.1.0"
 
-// maxPendingCommands bounds the in-memory backlog handed to the worker. Beyond
-// it we simply stop accepting: the command stays pending server-side and comes
-// back on a later heartbeat.
-const maxPendingCommands = 16
+// maxPendingCommands bounds the in-memory backlog handed to the worker. The
+// server hands a command out once (it is then "delivered" for good), so one
+// refused here is answered `failed` rather than dropped — room for a whole
+// back-to-school batch of packages on a salle that was off all weekend.
+const maxPendingCommands = 256
 
 // heavyHeartbeatTimeout is the budget for the rare heartbeat that carries a
 // slow-cycle block — a Windows Update state, an inventory.
@@ -508,8 +509,8 @@ func (a *Agent) logAVError(err error) {
 }
 
 // accept hands a command to the worker without blocking the polling loop.
-// Duplicates are dropped: the server keeps re-offering a command until it gets
-// a result, which for a full scan spans many heartbeats.
+// Duplicates are dropped: a relayed wake, or a command an older server
+// offered again, must not run twice.
 func (a *Agent) accept(cmd models.Command) {
 	a.mu.Lock()
 	if _, dup := a.running[cmd.ID]; dup {
@@ -523,10 +524,26 @@ func (a *Agent) accept(cmd models.Command) {
 	select {
 	case a.commands <- cmd:
 	default:
-		// Backlog full — forget it so a later heartbeat can re-offer it.
+		// Backlog full. The server will not offer it again: say so, through
+		// the local queue (replayed at the next poll), rather than leave it
+		// "transmise" for ever.
 		a.release(cmd.ID)
-		log.Printf("agent: backlog full (%d), deferring %s (id %s)",
+		log.Printf("agent: backlog full (%d), refusing %s (id %s)",
 			maxPendingCommands, cmd.Type, cmd.ID)
+		a.failLater(cmd, fmt.Sprintf(
+			"file d'attente de l'agent pleine (%d commandes) : commande non exécutée, à relancer",
+			maxPendingCommands))
+	}
+}
+
+// failLater records a `failed` verdict for a command that will not run, in
+// the local queue: replayed at the next poll, never lost to a network error
+// or a shutdown. Used where a network call is not wanted — on the polling
+// loop, or while the service stops.
+func (a *Agent) failLater(cmd models.Command, reason string) {
+	res := models.CommandResult{Status: "failed", Error: reason}
+	if err := a.queue.Enqueue(queue.Item{CommandID: cmd.ID, Result: res}); err != nil {
+		log.Printf("agent: queue refusal %s: %v", cmd.ID, err)
 	}
 }
 
@@ -537,20 +554,43 @@ func (a *Agent) release(id string) {
 }
 
 // worker executes accepted commands one at a time until the context is
-// cancelled. On shutdown, commands still waiting are abandoned rather than run
-// with a dead context — the server re-offers them at the next start.
+// cancelled. On shutdown, commands still waiting are not run with a dead
+// context: each gets a `failed` verdict in the local queue, sent at the next
+// start — the server does not hand a delivered command out twice.
 func (a *Agent) worker(ctx context.Context) {
 	defer a.wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
+			a.abandonBacklog()
 			return
 		case cmd := <-a.commands:
 			if ctx.Err() != nil {
+				a.abandon(cmd)
+				a.abandonBacklog()
 				return
 			}
 			a.execute(ctx, cmd)
 			a.release(cmd.ID)
+		}
+	}
+}
+
+const abandonedOnStop = "interrompue par l'arrêt de l'agent avant d'avoir commencé : à relancer"
+
+func (a *Agent) abandon(cmd models.Command) {
+	log.Printf("agent: stopping, %s (id %s) not run", cmd.Type, cmd.ID)
+	a.failLater(cmd, abandonedOnStop)
+	a.release(cmd.ID)
+}
+
+func (a *Agent) abandonBacklog() {
+	for {
+		select {
+		case cmd := <-a.commands:
+			a.abandon(cmd)
+		default:
+			return
 		}
 	}
 }
@@ -564,13 +604,17 @@ var runFullScan = collector.RunFullScan
 func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	run, long, ok := a.resolve(cmd)
 	if !ok {
-		log.Printf("agent: unknown command type %q (id %s), ignoring", cmd.Type, cmd.ID)
+		// A newer server talking to an older agent: the console must say so,
+		// not show the command "transmise" for ever.
+		a.refuse(ctx, cmd, fmt.Errorf(
+			"type de commande %q non pris en charge par l'agent %s : mettez l'agent à jour",
+			cmd.Type, Version))
 		return
 	}
 
 	// Checked here rather than per command: a machine going down in sixty
-	// seconds must not start anything at all, and a command refused now is
-	// re-offered by the server once the poste is back.
+	// seconds must not start anything at all. The refusal says to queue it
+	// again once the poste is back: the server does not re-offer it.
 	if kind := a.power.pending(time.Now()); kind != "" {
 		a.refuse(ctx, cmd, fmt.Errorf(
 			"un %s de ce poste est déjà programmé : commande non exécutée, "+

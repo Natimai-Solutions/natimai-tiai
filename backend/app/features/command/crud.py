@@ -2,9 +2,9 @@
 retention purge."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import delete, func, update
+from sqlalchemy import and_, delete, func, or_, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -33,10 +33,10 @@ async def machines_with_open_command(
       not count: that is precisely the case an administrator re-queues, the
       poste having been off the whole time.
     * **still inside its TTL.** Only PENDING commands are ever swept to EXPIRED
-      (``mark_expired`` — once delivered, the agent owns the command). So a
-      command handed to an agent that never came back stays DELIVERED for good,
-      and without this clause it would lock its type out of that machine
-      permanently. Past ``expires_at`` an administrator is entitled to assume
+      (``mark_expired`` — once delivered, the agent owns the command), and a
+      delivered one without a verdict is only closed after
+      ``COMMAND_UNANSWERED_HOURS`` (``close_unanswered``): without this clause
+      it would lock its type out of that machine until then. Past ``expires_at`` an administrator is entitled to assume
       the poste is not going to answer; should it answer anyway, its verdict
       still lands on the original row, which is written whatever its status.
     """
@@ -112,6 +112,42 @@ async def create_for_machines(
     # reports them gets a stable list.
     skipped = [m for m in machine_ids if m in already_open]
     return [c.id for c in commands], skipped
+
+
+UNANSWERED_ERROR = (
+    "Sans réponse du poste {hours} h après la remise : commande considérée comme "
+    "perdue (poste éteint, agent arrêté ou mis à jour pendant l'exécution). "
+    "Relancez-la si besoin."
+)
+
+
+async def close_unanswered(session: AsyncSession, *, hours: int) -> int:
+    """Close as FAILED the commands delivered or started more than ``hours``
+    ago that never got a verdict (audit B10). The caller commits."""
+    cutoff = utcnow() - timedelta(hours=hours)
+    now = utcnow()
+    result = await session.exec(
+        update(Command)
+        .where(
+            or_(
+                and_(
+                    col(Command.status) == CommandStatus.DELIVERED,
+                    col(Command.delivered_at) < cutoff,
+                ),
+                and_(
+                    col(Command.status) == CommandStatus.RUNNING,
+                    func.coalesce(col(Command.started_at), col(Command.delivered_at))
+                    < cutoff,
+                ),
+            )
+        )
+        .values(
+            status=CommandStatus.FAILED,
+            error=UNANSWERED_ERROR.format(hours=hours),
+            finished_at=now,
+        )
+    )
+    return result.rowcount or 0
 
 
 async def mark_expired(

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"tiai/agent/internal/collector"
 	"tiai/agent/internal/config"
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/queue"
 )
 
 func TestNextBackoffDoublesAndCaps(t *testing.T) {
@@ -196,5 +198,68 @@ func TestResolveMaintenanceAndUnknownTypes(t *testing.T) {
 	}
 	if _, _, ok := a.resolve(models.Command{Type: "format_c"}); ok {
 		t.Error("a type outside every catalogue must not resolve")
+	}
+}
+
+// The server hands a command out once: one the agent cannot take must come
+// back as `failed`, through the local queue, never be dropped (audit B15).
+func TestAFullBacklogAnswersFailed(t *testing.T) {
+	q, err := queue.New(t.TempDir(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{queue: q, commands: make(chan models.Command, 1), running: map[string]struct{}{}}
+	a.accept(models.Command{ID: "c1", Type: "quick_scan"})
+	a.accept(models.Command{ID: "c2", Type: "quick_scan"})
+
+	item, _, err := q.Peek()
+	if err != nil || item == nil {
+		t.Fatalf("nothing queued: %v", err)
+	}
+	if item.CommandID != "c2" || item.Result.Status != "failed" || !strings.Contains(item.Result.Error, "pleine") {
+		t.Errorf("queued %+v", item)
+	}
+	// c2 is free to come again; c1 waits for the worker.
+	if _, held := a.running["c2"]; held {
+		t.Error("c2 still held")
+	}
+}
+
+// On shutdown, what waits in the backlog is answered `failed` (audit B16).
+func TestStoppingAnswersTheBacklog(t *testing.T) {
+	q, err := queue.New(t.TempDir(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{queue: q, commands: make(chan models.Command, 4), running: map[string]struct{}{}}
+	a.accept(models.Command{ID: "c1", Type: "wu_install"})
+	a.accept(models.Command{ID: "c2", Type: "sfc_scan"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	a.wg.Add(1)
+	a.worker(ctx)
+
+	var ids []string
+	for {
+		item, path, err := q.Peek()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item == nil {
+			break
+		}
+		if item.Result.Status != "failed" || !strings.Contains(item.Result.Error, "arrêt de l'agent") {
+			t.Errorf("queued %+v", item)
+		}
+		ids = append(ids, item.CommandID)
+		if err := q.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(ids) != 2 {
+		t.Errorf("answered %v, want c1 and c2", ids)
+	}
+	if len(a.running) != 0 {
+		t.Errorf("still held: %v", a.running)
 	}
 }

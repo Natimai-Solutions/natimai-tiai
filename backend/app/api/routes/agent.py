@@ -825,6 +825,10 @@ async def heartbeat(
         # one waiting for a relay — or, since this poste is evidently on, one
         # that has just succeeded (below).
         .where(col(Command.type) != CommandType.WAKE_ON_LAN.value)
+        # In the order they were queued: the agent runs them in the order
+        # received, and « installer les MAJ » then « redémarrer » must not
+        # arrive the other way round (audit B28).
+        .order_by(col(Command.created_at), col(Command.id))
     )
     pending = rows.all()
     for cmd in pending:

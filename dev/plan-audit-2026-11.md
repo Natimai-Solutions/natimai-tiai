@@ -95,11 +95,11 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   Au remplacement d'un fichier et après un dépôt multiple en échec, supprimer les fichiers stockés qui ne sont plus référencés. Ne pas supprimer un fichier qu'une commande ouverte doit encore télécharger, et servir le téléchargement à partir de l'empreinte remise (`packages.py:383`, `agent.py:998`).
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T10 — Cycle de vie des commandes remises : relivraison, expiration, pertes côté agent** ([B10](plan-audit-2026-11.md#b10), [B15](plan-audit-2026-11.md#b15), [B16](plan-audit-2026-11.md#b16), [B34](plan-audit-2026-11.md#b34))
+- [x] **T10 — Cycle de vie des commandes remises : relivraison, expiration, pertes côté agent** ([B10](plan-audit-2026-11.md#b10), [B15](plan-audit-2026-11.md#b15), [B16](plan-audit-2026-11.md#b16), [B34](plan-audit-2026-11.md#b34))
   Choisir une règle unique : soit le serveur relivre les commandes « Transmise » sans verdict après un délai (l'agent est déjà idempotent par identifiant), soit le worker les expire. La même règle doit fermer les « En cours » trop anciennes, que rien ne purge aujourd'hui. Côté agent, ne jamais jeter une commande acceptée : file pleine, arrêt du service ou type inconnu donnent un résultat `failed` explicite, rejoué par `queue.Queue`.
   *Document de travail :* `plan-commandes-distantes.md`
 
-- [ ] **T11 — Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
+- [x] **T11 — Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
   Ajouter `order_by(created_at, id)` à la sélection du heartbeat (`agent.py:815`), avec un test : « installer les MAJ » puis « redémarrer » doivent être remises dans cet ordre.
   *Document de travail :* `plan-commandes-distantes.md`, `plan-phase2-windows-update.md`
 
@@ -311,6 +311,8 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T07 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Limite de 5 essais par 15 min et par compte. Un mauvais mot de passe actuel compte comme un échec de connexion ; celui qui verrouille le compte révoque aussi toutes ses sessions, jeton de l'appelant compris, et s'inscrit au journal (`user.locked`, `via: password_change`). bcrypt passe par `asyncio.to_thread` partout (connexion, changement, réinitialisation, création de compte). |
 | T08 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Migration `0030` : `commands.package_digest` (SHA-256 du genre, de l'identifiant et de la version winget, du manifeste, de la signature, du certificat et des fichiers) et `commands.package_files`. À la livraison, une empreinte différente passe la commande en `failed` avec un message qui invite à relancer. Les commandes antérieures à la migration (empreinte nulle) sont livrées comme avant. |
 | T09 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le téléchargement est servi d'après les fichiers enregistrés sur la commande ouverte, plus d'après le paquet courant. Un fichier stocké est conservé tant qu'un paquet le nomme ou qu'une commande ouverte (en attente, remise ou en cours) le liste. Le worker n'a pas le volume des paquets : la purge tourne côté API, après chaque dépôt ou retrait, après un dépôt en échec, au verdict d'un déploiement et au démarrage ; elle retire aussi les `.upload-*` de plus de 24 h. La suppression d'un paquet entier n'existe toujours pas (seul le retrait) : rien à purger de ce côté. |
+| T10 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Règle retenue : **expiration, jamais de relivraison** (relivrer un `reboot` après un redémarrage de l'agent bouclerait). Le worker passe toutes les 5 min en `failed` « sans réponse du poste » les commandes `delivered` depuis plus de `COMMAND_UNANSWERED_HOURS` (24 h par défaut, nouvelle variable) et les `running` démarrées depuis plus longtemps ; un verdict tardif l'emporte. Côté agent : file en mémoire portée de 16 à 256, et au-delà un `failed` « file pleine » ; à l'arrêt, chaque commande en attente reçoit un `failed` ; un type inconnu reçoit un `failed` qui nomme la version de l'agent. Ces verdicts passent par `queue.Queue`, rejouée au prochain contact. |
+| T11 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
 
 ## 7. Détail des constats
 

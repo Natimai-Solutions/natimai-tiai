@@ -124,6 +124,14 @@ class Settings(BaseSettings):
     # route so that a mistyped `.env` refuses to boot instead of failing every
     # queueing call.
     COMMAND_DEFAULT_TTL_MINUTES: int = Field(default=60, ge=1, le=60 * 24 * 30)
+    # How long a command handed to an agent may go without a verdict before
+    # the worker closes it as failed (« sans réponse du poste »): an agent
+    # stopped, updated or switched off mid-command, or an older agent that
+    # dropped it. The server never hands a command out twice — a reboot
+    # replayed after a restart would loop — so this is what ends it. From the
+    # start of the command when the agent announced one, else its delivery. A
+    # verdict arriving later still wins.
+    COMMAND_UNANSWERED_HOURS: int = Field(default=24, ge=1, le=24 * 30)
     # How long the command history is kept, in days, before the daily purge
     # drops it. Only rows that are over: succeeded, failed, expired — and
     # delivered ones that never got a result, whose agent has had the whole
