@@ -6,7 +6,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# The Debian security fixes published since the base image was built: the
+# image is scanned (Trivy, HIGH and CRITICAL with a fix) and a base image a
+# few weeks old is enough to fail it — zlib1g in November 2026. Nothing else
+# is installed: curl served no healthcheck nor script (audit S32).
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # uv binary (https://docs.astral.sh/uv/guides/integration/docker/)
