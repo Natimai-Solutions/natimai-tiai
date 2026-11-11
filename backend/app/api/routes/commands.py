@@ -339,6 +339,58 @@ async def create_commands(
     )
 
 
+class PackageSummary(BaseModel):
+    """Where a package stands on the postes: for each poste, its latest
+    command for that package, counted by status — and by action, since an
+    install followed by an uninstall leaves the poste « désinstallé »."""
+
+    postes: int
+    by_status: dict[str, int]
+    by_action: dict[str, int]
+
+
+@router.get(
+    "/package-summary",
+    response_model=PackageSummary,
+    dependencies=[Depends(require_permission(Resource.COMMAND, Action.READ))],
+)
+async def package_summary(
+    package_id: uuid.UUID, session: SessionDep, scope: CurrentScope
+) -> PackageSummary:
+    """The tally above a package's deployments (audit B14): the table pages
+    through every command, this says how the postes stand."""
+    await command_crud.mark_expired(session)
+    await session.commit()
+    latest = (
+        restrict(
+            select(Command.machine_id, Command.type, Command.status)
+            .where(col(Command.package_id) == package_id)
+            .distinct(col(Command.machine_id))
+            .order_by(
+                col(Command.machine_id),
+                col(Command.created_at).desc(),
+                col(Command.id).desc(),
+            ),
+            machine_ids_clause(scope, col(Command.machine_id)),
+        )
+    ).subquery()
+    rows = (
+        await session.exec(
+            select(latest.c.type, latest.c.status, func.count()).group_by(
+                latest.c.type, latest.c.status
+            )
+        )
+    ).all()
+    by_status: dict[str, int] = {}
+    by_action: dict[str, int] = {}
+    for kind, status, n in rows:
+        by_status[status] = by_status.get(status, 0) + n
+        by_action[kind] = by_action.get(kind, 0) + n
+    return PackageSummary(
+        postes=sum(by_status.values()), by_status=by_status, by_action=by_action
+    )
+
+
 @router.get(
     "",
     response_model=CommandList,

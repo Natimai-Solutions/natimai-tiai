@@ -10,6 +10,7 @@ import {
   deployable,
   formatSize,
   joinArgs,
+  getPackageSummary,
   listPackageCommands,
   splitArgs,
   trustMethod,
@@ -122,7 +123,19 @@ describe('deployment calls', () => {
     vi.mocked(api.get).mockResolvedValue({ data: { items: [], total: 0 } });
     await listPackageCommands('p-1');
     expect(api.get).toHaveBeenCalledWith('/commands', {
-      params: { package_id: 'p-1', page: 1, page_size: 50 },
+      params: { package_id: 'p-1', page: 1, page_size: 25 },
+    });
+    await listPackageCommands('p-1', 3, 50, 'failed');
+    expect(api.get).toHaveBeenLastCalledWith('/commands', {
+      params: { package_id: 'p-1', page: 3, page_size: 50, status: 'failed' },
+    });
+  });
+
+  it('reads the tally of a package', async () => {
+    vi.mocked(api.get).mockResolvedValue({ data: { postes: 0, by_status: {}, by_action: {} } });
+    await getPackageSummary('p-1');
+    expect(api.get).toHaveBeenLastCalledWith('/commands/package-summary', {
+      params: { package_id: 'p-1' },
     });
   });
 });

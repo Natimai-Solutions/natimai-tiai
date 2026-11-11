@@ -270,10 +270,29 @@ export async function deployPackage(
   return data;
 }
 
-/** The deployments of a package, newest first. */
-export async function listPackageCommands(id: string, page = 1): Promise<CommandList> {
+/** The deployments of a package, newest first, one page at a time. */
+export async function listPackageCommands(
+  id: string,
+  page = 1,
+  pageSize = 25,
+  status: string | null = null,
+): Promise<CommandList> {
   const { data } = await api.get<CommandList>('/commands', {
-    params: { package_id: id, page, page_size: 50 },
+    params: { package_id: id, page, page_size: pageSize, ...(status ? { status } : {}) },
+  });
+  return data;
+}
+
+/** How the postes stand: each one's latest command for the package, counted. */
+export interface PackageSummary {
+  postes: number;
+  by_status: Record<string, number>;
+  by_action: Record<string, number>;
+}
+
+export async function getPackageSummary(id: string): Promise<PackageSummary> {
+  const { data } = await api.get<PackageSummary>('/commands/package-summary', {
+    params: { package_id: id },
   });
   return data;
 }

@@ -641,3 +641,36 @@ async def test_removing_a_file_already_gone_names_the_file(client, db_session, s
     again = await client.delete(url, headers=admin)
     assert again.status_code == 404
     assert again.json()["error"]["code"] == "package.file.not_found"
+
+
+async def test_the_summary_counts_each_postes_latest_deployment(
+    client, db_session, store
+):
+    """Audit B14: the tally reads every poste, not the first page of rows."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    agents = []
+    for i in range(3):
+        machine_id, agent = await _enroll(client, f"poste-{i}")
+        agents.append(agent)
+        await _deploy(client, admin, package["id"], machine_id)
+    # Poste 0 answers: succeeded. The others are still waiting.
+    hb = await client.post(
+        "/api/v1/agent/heartbeat", headers=agents[0], json={"agent_version": "t"}
+    )
+    (command,) = hb.json()["commands"]
+    await client.post(
+        f"/api/v1/agent/commands/{command['id']}/result",
+        headers=agents[0],
+        json={"status": "succeeded"},
+    )
+    summary = await client.get(
+        "/api/v1/commands/package-summary",
+        headers=admin,
+        params={"package_id": package["id"]},
+    )
+    assert summary.status_code == 200, summary.text
+    body = summary.json()
+    assert body["postes"] == 3
+    assert body["by_status"] == {"succeeded": 1, "pending": 2}
+    assert body["by_action"] == {"package_install": 3}

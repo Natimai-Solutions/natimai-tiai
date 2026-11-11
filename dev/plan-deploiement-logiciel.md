@@ -225,7 +225,7 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T24** · *P2 moyen terme* — **Fiche paquet : saisie préservée, dépôt contrôlé, messages justes** ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36))
   Ne plus écraser le formulaire non enregistré après un dépôt, une signature ou un retrait. Vérifier la taille avant l'envoi, permettre l'annulation et traduire le 413 de Caddy. Passer le plafond Caddy à `2GiB`, et créer un code d'erreur « fichier introuvable dans ce paquet ».
 
-- [ ] **T25** · *P2 moyen terme* — **Fiche paquet : pagination et bilan des déploiements** ([B14](plan-audit-2026-11.md#b14))
+- [x] **T25** · *P2 moyen terme* — **Fiche paquet : pagination et bilan des déploiements** ([B14](plan-audit-2026-11.md#b14))
   Brancher la pagination côté serveur et afficher un décompte par statut du dernier déploiement (`PackageDetailPage.vue:313`).
 
 - [ ] **T37** · *P3 fond* — **Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))

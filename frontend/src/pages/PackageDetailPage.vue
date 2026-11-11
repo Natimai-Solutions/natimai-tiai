@@ -316,15 +316,39 @@
               @click="loadCommands"
             />
           </q-card-section>
+          <!-- Each poste's latest deployment, counted over all of them: the
+               table below pages, this does not (audit B14). A chip filters. -->
+          <q-card-section v-if="summary && summary.postes" class="q-pt-none">
+            <div class="text-body2 q-mb-xs">
+              {{ summary.postes }} poste{{ summary.postes > 1 ? 's' : '' }} visé{{
+                summary.postes > 1 ? 's' : ''
+              }}
+              (dernier déploiement de chacun) :
+            </div>
+            <q-chip
+              v-for="(n, status) in summary.by_status"
+              :key="status"
+              clickable
+              dense
+              :outline="statusFilter !== status"
+              :color="STATUS_COLORS[status] ?? 'grey-7'"
+              :text-color="statusFilter === status ? 'white' : undefined"
+              :aria-pressed="statusFilter === status"
+              @click="toggleStatusFilter(status)"
+            >
+              {{ STATUS_LABELS[status] ?? status }} : {{ n }}
+            </q-chip>
+          </q-card-section>
           <q-table
+            v-model:pagination="commandPagination"
             :rows="commands"
             :columns="commandColumns"
             row-key="id"
             flat
             :loading="loadingCommands"
-            :rows-per-page-options="[0]"
-            hide-pagination
-            no-data-label="Jamais déployé"
+            :rows-per-page-options="[25, 50, 100]"
+            :no-data-label="statusFilter ? 'Aucun déploiement dans cet état' : 'Jamais déployé'"
+            @request="onCommandsRequest"
           >
             <template #body-cell-machine="cell">
               <q-td :props="cell">
@@ -375,6 +399,7 @@ import {
   downloadManifest,
   formatSize,
   getPackage,
+  getPackageSummary,
   PACKAGE_FILE_MAX_BYTES,
   joinArgs,
   listPackageCommands,
@@ -387,6 +412,7 @@ import {
   updatePackage,
   uploadPackageFiles,
   type Package,
+  type PackageSummary,
 } from 'src/services/packages';
 import { useAuthStore } from 'src/stores/auth';
 import { downloadBlob, formatDateTime } from 'src/utils/format';
@@ -528,15 +554,41 @@ async function load() {
   void loadCommands();
 }
 
+const summary = ref<PackageSummary | null>(null);
+const statusFilter = ref<string | null>(null);
+const commandPagination = ref({ page: 1, rowsPerPage: 25, rowsNumber: 0 });
+
 async function loadCommands() {
   loadingCommands.value = true;
+  const p = commandPagination.value;
   try {
-    commands.value = (await listPackageCommands(props.id)).items;
+    const [list, tally] = await Promise.all([
+      listPackageCommands(props.id, p.page, p.rowsPerPage, statusFilter.value),
+      getPackageSummary(props.id).catch(() => null),
+    ]);
+    commands.value = list.items;
+    commandPagination.value = { ...commandPagination.value, rowsNumber: list.total };
+    summary.value = tally;
   } catch {
     commands.value = [];
   } finally {
     loadingCommands.value = false;
   }
+}
+
+function onCommandsRequest(req: { pagination: { page: number; rowsPerPage: number } }) {
+  commandPagination.value = {
+    ...commandPagination.value,
+    page: req.pagination.page,
+    rowsPerPage: req.pagination.rowsPerPage,
+  };
+  void loadCommands();
+}
+
+function toggleStatusFilter(status: string) {
+  statusFilter.value = statusFilter.value === status ? null : status;
+  commandPagination.value = { ...commandPagination.value, page: 1 };
+  void loadCommands();
 }
 
 function notifyError(e: unknown, fallback: string) {
