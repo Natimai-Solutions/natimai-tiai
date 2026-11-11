@@ -19,7 +19,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'auth.required': 'Authentification requise',
   'auth.permission.denied': "Vous n'avez pas la permission requise",
   'auth.account.locked':
-    'Compte verrouillé après trop d’essais. Réessayez plus tard, ou demandez à un administrateur de réinitialiser le mot de passe.',
+    'Compte verrouillé après trop d’essais. Réessayez plus tard ou depuis un autre poste, ou demandez à un administrateur de réinitialiser le mot de passe.',
   'auth.permission.escalation':
     'Refusé : vous ne pouvez accorder que les droits que vous détenez vous-même, sur les emplacements qui vous sont ouverts, et ne pouvez pas modifier un compte ou un groupe qui en détient davantage, ni les droits d’un groupe dont un membre en détient davantage (ni les administrateurs)',
   'auth.scope.restricted':

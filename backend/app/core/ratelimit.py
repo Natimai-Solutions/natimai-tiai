@@ -73,13 +73,73 @@ password_reset_limiter = RateLimiter(max_attempts=5, window_seconds=900)
 # back all at once — roomy, since each poste still arrives from its own IP.
 enroll_limiter = RateLimiter(max_attempts=30, window_seconds=300)
 
-_ALL = (login_limiter, password_reset_limiter, enroll_limiter)
+# Self-service password change: keyed on the account, not the address — a
+# stolen access token is the threat, and it works from anywhere (audit S04).
+password_change_limiter = RateLimiter(max_attempts=5, window_seconds=900)
+
+_ALL = (login_limiter, password_reset_limiter, enroll_limiter, password_change_limiter)
+
+
+class FailureMemory:
+    """When each (account, address) pair last failed a login.
+
+    What a locked account is guarded by (audit S03): the lock refuses the
+    addresses that failed on the account recently, not the account itself —
+    so anyone can no longer keep an administrator out by failing five times
+    from a poste, while the addresses doing the guessing stay shut out.
+    """
+
+    def __init__(self) -> None:
+        self._last: dict[tuple[str, str], float] = {}
+
+    def note(self, account: str, ip: str) -> None:
+        now = time.monotonic()
+        self._last[(account, ip)] = now
+        if len(self._last) > 4096:
+            horizon = now - settings.LOGIN_LOCKOUT_MINUTES * 60
+            for key, at in list(self._last.items()):
+                if at <= horizon:
+                    del self._last[key]
+
+    def failed_recently(self, account: str, ip: str) -> bool:
+        at = self._last.get((account, ip))
+        return at is not None and (
+            time.monotonic() - at < settings.LOGIN_LOCKOUT_MINUTES * 60
+        )
+
+    def forget(self, account: str, ip: str | None = None) -> None:
+        """Forget ``ip`` on ``account``, or every address when ``ip`` is None
+        (a new password: what was guessed before no longer matters)."""
+        for key in list(self._last):
+            if key[0] == account and (ip is None or key[1] == ip):
+                del self._last[key]
+
+    def reset(self) -> None:
+        self._last.clear()
+
+
+login_failures = FailureMemory()
 
 
 def reset_all() -> None:
     """Forget every recorded attempt (tests)."""
     for limiter in _ALL:
         limiter.reset()
+    login_failures.reset()
+
+
+def check_account(limiter: RateLimiter, key: str, surface: str) -> None:
+    """``rate_limit`` for a key the route knows, such as the account."""
+    if not settings.RATE_LIMIT_ENABLED:
+        return
+    if not limiter.allow(key):
+        security_log.warning("rate limit exceeded on %s for %s", surface, key)
+        raise AppError(
+            code=ErrorCode.RATE_LIMITED,
+            status_code=429,
+            message="Too many attempts; try again later",
+            headers={"Retry-After": str(int(limiter.window))},
+        )
 
 
 def rate_limit(limiter: RateLimiter, surface: str) -> Callable[[Request], None]:

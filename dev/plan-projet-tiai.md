@@ -624,9 +624,9 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] **T04** · *P0 immédiate* — Séance de maintenance : filtrer ses postes par périmètre ([S06](plan-audit-2026-11.md#s06)), suivi dans `plan-salles-maintenance-interventions.md`
 - [x] **T05** · *P0 immédiate* — **Réglages e-mail : ne plus réutiliser un secret stocké vers un nouvel hôte** ([S10](plan-audit-2026-11.md#s10))
   Quand l'hôte, le port ou le mode de sécurité SMTP changent, ou l'URL ou le domaine Mailgun, exiger que le mot de passe ou la clé soient ressaisis dans la même requête, pour l'e-mail de test comme pour le `PATCH` (`settings_routes.py`).
-- [ ] **T06** · *P1 court terme* — **Verrouillage de compte : supprimer le déni de service et l'énumération** ([S03](plan-audit-2026-11.md#s03), [S12](plan-audit-2026-11.md#s12), [S13](plan-audit-2026-11.md#s13))
+- [x] **T06** · *P1 court terme* — **Verrouillage de compte : supprimer le déni de service et l'énumération** ([S03](plan-audit-2026-11.md#s03), [S12](plan-audit-2026-11.md#s12), [S13](plan-audit-2026-11.md#s13))
   Ne plus refuser le bon mot de passe pendant un verrouillage : passer à un délai progressif, ou ne verrouiller que par couple compte et adresse IP. Répondre au compte verrouillé par le même 401 générique qu'à un échec, en calculant tout de même un bcrypt. Incrémenter `failed_login_attempts` de façon atomique en base.
-- [ ] **T07** · *P1 court terme* — **`POST /auth/password` : limite de débit et bcrypt hors de la boucle** ([S04](plan-audit-2026-11.md#s04))
+- [x] **T07** · *P1 court terme* — **`POST /auth/password` : limite de débit et bcrypt hors de la boucle** ([S04](plan-audit-2026-11.md#s04))
   Ajouter un limiteur indexé par compte, compter les échecs de `current_password` et révoquer la session après N échecs. Exécuter bcrypt dans `asyncio.to_thread` sur ce chemin comme sur celui de connexion.
 - [ ] **T08** · *P1 court terme* — Figer le contenu d'un paquet à la mise en file ([S08](plan-audit-2026-11.md#s08)), suivi dans `plan-deploiement-logiciel.md`
 - [ ] **T09** · *P1 court terme* — Fichiers de paquet : plus d'orphelin, plus de déploiement cassé ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13)), suivi dans `plan-deploiement-logiciel.md`

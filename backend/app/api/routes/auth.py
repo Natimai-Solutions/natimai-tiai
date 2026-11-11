@@ -172,8 +172,9 @@ async def login(
 
     Returns the access token; sets the refresh token as a cookie.
     """
+    ip = client_ip(request)
     try:
-        user = await crud.authenticate(session, form.username, form.password)
+        user = await crud.authenticate(session, form.username, form.password, ip)
     except crud.AccountLockedError as exc:
         if exc.just_locked:
             audit.record(
@@ -184,35 +185,33 @@ async def login(
                 resource_id=str(exc.user.id),
                 details={"locked_until": exc.locked_until.isoformat()},
             )
-        await session.commit()
         # %r: the field is typed by whoever is at the keyboard; a line break in
         # it must not forge a second log line.
         security_log.warning(
-            "login refused for %r from %s: account locked until %s",
+            "login refused for %r from %s: %s until %s",
             form.username,
-            client_ip(request),
+            ip,
+            "account locked"
+            if exc.just_locked
+            else "address shut out of the locked account",
             exc.locked_until.isoformat(),
         )
-        raise AppError(
-            code=ErrorCode.AUTH_ACCOUNT_LOCKED,
-            status_code=423,
-            message="Too many failed attempts; this account is temporarily locked",
-            details={"locked_until": exc.locked_until.isoformat()},
-        ) from None
+        user = None
+    else:
+        if user is None:
+            security_log.warning("login failed for %r from %s", form.username, ip)
     if user is None:
         # The failure counter, when the address has an account, is part of the
-        # outcome: committed before answering.
+        # outcome: committed before answering. A lock answers the same 401 as
+        # any failure: a 423 would tell which addresses have an account
+        # (audit S12).
         await session.commit()
-        security_log.warning(
-            "login failed for %r from %s", form.username, client_ip(request)
-        )
         raise AppError(
             code=ErrorCode.AUTH_CREDENTIALS_INVALID,
             status_code=401,
             message="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    ip = client_ip(request)
     security_log.info("login ok for %s from %s", user.email, ip)
     row, refresh_token = await auth_sessions.open_session(
         session, user.id, user_agent=request.headers.get("user-agent"), ip=ip
@@ -505,14 +504,43 @@ class PasswordChange(BaseModel):
 
 @router.post("/password", status_code=204)
 async def change_password(
-    payload: PasswordChange, user: CurrentUser, session: SessionDep
+    request: Request, payload: PasswordChange, user: CurrentUser, session: SessionDep
 ) -> None:
     """Change one's own password.
 
     Every session of the account is revoked — the one this request came
     through included — so the console re-authenticates right after.
     """
-    if not security.verify_password(payload.current_password, user.hashed_password):
+    # Keyed on the account: a stolen access token guesses from anywhere, and
+    # each check is a bcrypt the whole API would wait for (audit S04).
+    ratelimit.check_account(
+        ratelimit.password_change_limiter, str(user.id), "auth.password"
+    )
+    if not await security.check_password(
+        payload.current_password, user.hashed_password
+    ):
+        # Guessing the password of an open session is guessing at a login:
+        # it counts towards the lock like one, and the failure that locks the
+        # account also ends its sessions — the guesser's token with them.
+        ip = client_ip(request)
+        until = await crud.record_failure(session, user, ip)
+        if until is not None:
+            await auth_sessions.revoke_all(session, user.id)
+            audit.record(
+                session,
+                actor=user.email,
+                action="user.locked",
+                resource_type="user",
+                resource_id=str(user.id),
+                details={"locked_until": until.isoformat(), "via": "password_change"},
+            )
+            security_log.warning(
+                "password change: too many wrong current passwords for %s from %s, "
+                "sessions revoked",
+                user.email,
+                ip,
+            )
+        await session.commit()
         raise AppError(
             code=ErrorCode.PASSWORD_CURRENT_INVALID,
             status_code=400,

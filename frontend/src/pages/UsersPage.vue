@@ -63,7 +63,8 @@
             Verrouillé
             <q-tooltip>
               Trop d’échecs de connexion — jusqu’à {{ formatDateTime(props.row.locked_until) }}.
-              Réinitialiser le mot de passe lève le verrou.
+              Seules les adresses qui ont échoué sont refusées : le bon mot de passe saisi depuis un
+              autre poste ouvre la session. Réinitialiser le mot de passe lève le verrou.
             </q-tooltip>
           </q-badge>
         </q-td>

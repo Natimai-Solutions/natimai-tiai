@@ -2,11 +2,11 @@ import uuid
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, func, or_
+from sqlalchemy import delete, func, or_, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core import security
+from app.core import ratelimit, security
 from app.core.config import settings
 from app.features.auth_session import crud as auth_sessions
 from app.features.base import utcnow
@@ -57,7 +57,7 @@ async def create_user(
     """
     user = User(
         email=normalize_email(email),
-        hashed_password=security.get_password_hash(password),
+        hashed_password=await security.hash_password(password),
         full_name=full_name,
     )
     session.add(user)
@@ -85,38 +85,79 @@ class AccountLockedError(Exception):
         self.just_locked = just_locked
 
 
-async def authenticate(session: AsyncSession, email: str, password: str) -> User | None:
+async def authenticate(
+    session: AsyncSession, email: str, password: str, ip: str = ""
+) -> User | None:
     """Return the user if credentials are valid and the account is active.
 
     Every path costs one bcrypt check, the refusals included: an unknown or
     deactivated account is checked against a dummy hash, so how long the answer
     takes says nothing about which addresses have an account.
 
-    Raises ``AccountLockedError`` while the account is locked, and on the
-    failure that locks it: the rate limiter caps an address, this caps an
-    account, however many addresses try it. Counters are changed on the
-    session, not committed — the caller commits, refusal or not.
+    LOGIN_MAX_FAILED_ATTEMPTS failures, from wherever, lock the account for
+    LOGIN_LOCKOUT_MINUTES. The lock shuts out the addresses that failed on it
+    recently, not the account (audit S03): the right password from another
+    address still opens it, so failing on purpose keeps nobody out. Raises
+    ``AccountLockedError`` on the failure that locks it (to audit) and on an
+    attempt refused by the lock (to log); the route answers both like any
+    failure (audit S12). The counter moves in the database, so concurrent
+    failures all count (audit S13). Nothing is committed — the caller does.
     """
     user = await get_by_email(session, email)
     if user is None or not user.is_active:
-        security.burn_password_check(password)
+        await security.burn_password_check_async(password)
         return None
     now = utcnow()
-    if user.locked_until is not None and user.locked_until > now:
+    account = str(user.id)
+    if (
+        user.locked_until is not None
+        and user.locked_until > now
+        and ratelimit.login_failures.failed_recently(account, ip)
+    ):
+        await security.burn_password_check_async(password)
         raise AccountLockedError(user, user.locked_until, just_locked=False)
-    if not security.verify_password(password, user.hashed_password):
-        user.failed_login_attempts += 1
-        session.add(user)
-        if user.failed_login_attempts >= settings.LOGIN_MAX_FAILED_ATTEMPTS:
-            user.failed_login_attempts = 0
-            user.locked_until = now + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
-            raise AccountLockedError(user, user.locked_until, just_locked=True)
+    if not await security.check_password(password, user.hashed_password):
+        until = await record_failure(session, user, ip)
+        if until is not None:
+            raise AccountLockedError(user, until, just_locked=True)
         return None
+    ratelimit.login_failures.forget(account, ip)
     if user.failed_login_attempts or user.locked_until is not None:
         user.failed_login_attempts = 0
         user.locked_until = None
         session.add(user)
     return user
+
+
+async def record_failure(session: AsyncSession, user: User, ip: str) -> datetime | None:
+    """Count a wrong password for ``user`` from ``ip``, in the database so
+    that concurrent failures all count (audit S13). Returns the end of the
+    lock when this failure set it — of concurrent ones past the threshold,
+    exactly one does. Does not commit."""
+    ratelimit.login_failures.note(str(user.id), ip)
+    failures = (
+        await session.exec(
+            update(User)
+            .where(col(User.id) == user.id)
+            .values(failed_login_attempts=col(User.failed_login_attempts) + 1)
+            .returning(col(User.failed_login_attempts))
+        )
+    ).scalar_one()
+    if failures < settings.LOGIN_MAX_FAILED_ATTEMPTS:
+        return None
+    until = utcnow() + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
+    locked = (
+        await session.exec(
+            update(User)
+            .where(
+                col(User.id) == user.id,
+                col(User.failed_login_attempts) >= settings.LOGIN_MAX_FAILED_ATTEMPTS,
+            )
+            .values(failed_login_attempts=0, locked_until=until)
+            .returning(col(User.id))
+        )
+    ).first()
+    return until if locked is not None else None
 
 
 # --- Console user management ------------------------------------------------
@@ -159,13 +200,14 @@ async def set_password(session: AsyncSession, user: User, password: str) -> None
     logged in with it: all of the account's sessions are revoked, the caller's
     own included. Does not commit — the caller decides the transaction boundary.
     """
-    user.hashed_password = security.get_password_hash(password)
+    user.hashed_password = await security.hash_password(password)
     user.password_changed_at = utcnow()
     user.updated_at = utcnow()
     # A new password is also the way out of a lockout: the administrator who
     # resets it, or the owner who redeems a reset link, proved more than a guess.
     user.failed_login_attempts = 0
     user.locked_until = None
+    ratelimit.login_failures.forget(str(user.id))
     session.add(user)
     await auth_sessions.revoke_all(session, user.id)
 

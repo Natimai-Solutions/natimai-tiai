@@ -79,11 +79,11 @@ Exécution de code en SYSTEM sur les postes si le serveur est compromis, escalad
 
 Déni de service sur les comptes, intégrité des déploiements et des commandes, et bugs qui faussent des données ou bloquent une fonction pour tous.
 
-- [ ] **T06 — Verrouillage de compte : supprimer le déni de service et l'énumération** ([S03](plan-audit-2026-11.md#s03), [S12](plan-audit-2026-11.md#s12), [S13](plan-audit-2026-11.md#s13))
+- [x] **T06 — Verrouillage de compte : supprimer le déni de service et l'énumération** ([S03](plan-audit-2026-11.md#s03), [S12](plan-audit-2026-11.md#s12), [S13](plan-audit-2026-11.md#s13))
   Ne plus refuser le bon mot de passe pendant un verrouillage : passer à un délai progressif, ou ne verrouiller que par couple compte et adresse IP. Répondre au compte verrouillé par le même 401 générique qu'à un échec, en calculant tout de même un bcrypt. Incrémenter `failed_login_attempts` de façon atomique en base.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T07 — `POST /auth/password` : limite de débit et bcrypt hors de la boucle** ([S04](plan-audit-2026-11.md#s04))
+- [x] **T07 — `POST /auth/password` : limite de débit et bcrypt hors de la boucle** ([S04](plan-audit-2026-11.md#s04))
   Ajouter un limiteur indexé par compte, compter les échecs de `current_password` et révoquer la session après N échecs. Exécuter bcrypt dans `asyncio.to_thread` sur ce chemin comme sur celui de connexion.
   *Document de travail :* `plan-projet-tiai.md`
 
@@ -307,6 +307,8 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T03 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Quand un non-administrateur change les permissions ou le périmètre d'un groupe, chaque membre est passé à `reject_escalation` (action `edit_members`). Renommer ou décrire le groupe reste permis. Message de la console complété. |
 | T04 | 2026-11-11 | `claude/sweet-cray-xhpetg` | En plus du détail, le décompte `machine_count` (détail et liste des séances) ne compte plus que les postes du périmètre : il révélait le nombre de postes hors périmètre. |
 | T05 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nouveau code `settings.email.secret_required` (422, `details.fields`). La destination est comparée après résolution, environnement compris : un secret remis à `null` (celui du `.env`) ne compte pas comme ressaisi. Désactiver la vérification du certificat SMTP compte comme un changement de destination ; la réactiver, non. Le message du test Mailgun ne reprend plus que le champ `message` d'une réponse JSON, plus le corps brut. |
+| T06 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Option « verrouiller par couple compte et adresse IP », sous cette forme : le compte se verrouille toujours après N échecs (toutes adresses confondues, compteur incrémenté par `UPDATE … RETURNING`), mais le verrou ne refuse que les adresses qui ont échoué sur ce compte pendant la durée du verrou (mémoire en processus, comme le limiteur de débit). Le bon mot de passe saisi ailleurs ouvre la session et lève le verrou. Le 423 disparaît : verrou et échec répondent le même 401, bcrypt compris. Pas de décroissance du compteur dans le temps : un verrou ne gêne plus que les adresses fautives, ce qui rend un compteur ancien sans conséquence. Textes de `.env.example` et de la page Utilisateurs mis à jour. |
+| T07 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Limite de 5 essais par 15 min et par compte. Un mauvais mot de passe actuel compte comme un échec de connexion ; celui qui verrouille le compte révoque aussi toutes ses sessions, jeton de l'appelant compris, et s'inscrit au journal (`user.locked`, `via: password_change`). bcrypt passe par `asyncio.to_thread` partout (connexion, changement, réinitialisation, création de compte). |
 
 ## 7. Détail des constats
 
