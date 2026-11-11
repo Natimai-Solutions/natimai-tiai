@@ -520,6 +520,17 @@ class Settings(BaseSettings):
                     f"{name} is empty or still a 'changeme' placeholder; refusing "
                     f"to start in {self.ENVIRONMENT} (see deploy/.env.example)"
                 )
+        # The first administrator is created from it without going through
+        # the console's password rule (audit S33).
+        if (
+            self.FIRST_ADMIN_PASSWORD is not None
+            and len(self.FIRST_ADMIN_PASSWORD) < self.PASSWORD_MIN_LENGTH
+        ):
+            raise ValueError(
+                f"FIRST_ADMIN_PASSWORD must be at least {self.PASSWORD_MIN_LENGTH} "
+                f"characters (PASSWORD_MIN_LENGTH); refusing to start in "
+                f"{self.ENVIRONMENT}"
+            )
         for name, minimum in SECRET_MIN_LENGTHS.items():
             secret: str | None = getattr(self, name)
             if secret is not None and len(secret) < minimum:

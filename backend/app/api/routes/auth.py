@@ -586,6 +586,11 @@ async def request_password_reset(
     user = await crud.get_by_email(session, payload.email)
     if user is None or not user.is_active:
         return
+    if await crud.recent_reset_token(session, user):
+        # The link just mailed stays the one that works, and the inbox is not
+        # filled from another poste (audit S14). Same 204 as any request.
+        security_log.info("password reset for %s: link already sent", user.email)
+        return
     token = await crud.create_reset_token(session, user)
     # Queued before the commit, so the mail and the token it links to are one
     # transaction: no link mailed for a token that was rolled back, no token

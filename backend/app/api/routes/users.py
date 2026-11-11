@@ -346,8 +346,14 @@ async def update_user(
             actor_email=current.email,
             action="grant",
         )
-    if "email" in fields and fields["email"] != user.email:
+    email_changed = "email" in fields and fields["email"] != user.email
+    previous_email = user.email
+    if email_changed:
         await _reject_email_taken(session, fields["email"], exclude=user.id)
+        # A link mailed to the old address must not outlive it: the address
+        # is often changed because the old box is no longer its owner's
+        # (audit S15).
+        await crud.purge_reset_tokens(session, user.id)
 
     group_ids = fields.pop("group_ids", None)
     for name, value in fields.items():
@@ -370,6 +376,7 @@ async def update_user(
         details={
             "email": user.email,
             "fields": sorted(fields),
+            **({"previous_email": previous_email} if email_changed else {}),
             **(
                 {"group_ids": [str(g) for g in group_ids]}
                 if group_ids is not None

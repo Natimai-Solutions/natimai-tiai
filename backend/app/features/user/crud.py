@@ -227,11 +227,30 @@ async def delete_user(session: AsyncSession, user: User) -> None:
 # --- Password reset tokens --------------------------------------------------
 
 
+# A link mailed less than this long ago is left alone: a second request,
+# from whoever, neither voids it nor sends another mail (audit S14).
+RESET_REQUEST_COOLDOWN = timedelta(minutes=5)
+
+
+async def recent_reset_token(session: AsyncSession, user: User) -> bool:
+    """Whether a link still usable was issued within the cooldown."""
+    now = utcnow()
+    found = await session.exec(
+        select(PasswordResetToken.id)
+        .where(col(PasswordResetToken.user_id) == user.id)
+        .where(col(PasswordResetToken.used_at).is_(None))
+        .where(col(PasswordResetToken.expires_at) > now)
+        .where(col(PasswordResetToken.created_at) > now - RESET_REQUEST_COOLDOWN)
+        .limit(1)
+    )
+    return found.first() is not None
+
+
 async def create_reset_token(session: AsyncSession, user: User) -> str:
     """Issue a single-use reset token, returning the clear value (mailed once).
 
     Any previous token for the user is dropped, so the newest link is the only
-    one that works.
+    one that works. The route calls ``recent_reset_token`` first.
     """
     await session.exec(
         delete(PasswordResetToken).where(col(PasswordResetToken.user_id) == user.id)

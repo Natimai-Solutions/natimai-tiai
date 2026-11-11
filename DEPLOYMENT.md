@@ -123,8 +123,9 @@ docker compose up -d
   `deploy/.env`.
 - Hors `ENVIRONMENT=local`, le backend **refuse de démarrer** si `SECRET_KEY`,
   `ENROLLMENT_SECRET`, `POSTGRES_PASSWORD` ou `FIRST_ADMIN_PASSWORD` est vide ou
-  commence encore par `changeme`, ou si `SECRET_KEY` fait moins de 32 caractères
-  ou `ENROLLMENT_SECRET` moins de 16 (`openssl rand -hex 32` en produit un).
+  commence encore par `changeme`, ou si `SECRET_KEY` fait moins de 32 caractères,
+  `ENROLLMENT_SECRET` moins de 16 (`openssl rand -hex 32` en produit un) ou
+  `FIRST_ADMIN_PASSWORD` moins de `PASSWORD_MIN_LENGTH` (12 par défaut).
   `ENVIRONMENT` absent vaut `production` : un `.env` qui l'oublie reste gardé.
 - Les postes du domaine font déjà confiance à l'AC racine : aucun import de
   certificat n'est nécessaire côté agent.

@@ -399,6 +399,63 @@ async def test_reset_request_issues_a_token_for_a_known_address(client, db_sessi
     assert rows[0].used_at is None
 
 
+async def test_a_second_reset_request_keeps_the_link_just_sent(client, db_session):
+    """Audit S14: anyone may ask, but not void the link a user is opening,
+    nor fill the inbox."""
+    from sqlmodel import select
+
+    from app.features.user import crud
+    from app.features.user.models import PasswordResetToken
+
+    await crud.create_user(db_session, email="forgot@test.local", password=STRONG)
+    hashes = []
+    for ip in ("10.0.0.1", "10.0.0.2"):
+        resp = await client.post(
+            "/api/v1/auth/password-reset/request",
+            json={"email": "forgot@test.local"},
+            headers={"X-Forwarded-For": ip},
+        )
+        assert resp.status_code == 204
+        db_session.expire_all()
+        rows = (await db_session.exec(select(PasswordResetToken))).all()
+        assert len(rows) == 1
+        hashes.append(rows[0].token_hash)
+    # The link mailed first is still the one that works.
+    assert hashes[0] == hashes[1]
+
+
+async def test_changing_the_email_voids_a_pending_reset_link(client, db_session):
+    """Audit S15: a link mailed to the old address dies with it."""
+    from sqlmodel import select
+
+    from app.features.user import crud
+    from app.features.user.models import PasswordResetToken
+    from app.features.user.permissions import BuiltinGroup
+
+    await crud.create_user(
+        db_session,
+        email="boss@test.local",
+        password=STRONG,
+        groups=[BuiltinGroup.ADMIN],
+    )
+    target = await crud.create_user(db_session, email="old@test.local", password=STRONG)
+    target_id = str(target.id)
+    login = await client.post(
+        "/api/v1/auth/login", data={"username": "boss@test.local", "password": STRONG}
+    )
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    await client.post(
+        "/api/v1/auth/password-reset/request", json={"email": "old@test.local"}
+    )
+    assert len((await db_session.exec(select(PasswordResetToken))).all()) == 1
+    resp = await client.patch(
+        f"/api/v1/users/{target_id}", headers=headers, json={"email": "new@test.local"}
+    )
+    assert resp.status_code == 200, resp.text
+    db_session.expire_all()
+    assert (await db_session.exec(select(PasswordResetToken))).all() == []
+
+
 async def test_reset_confirm_sets_the_new_password_once(client, db_session):
     from app.features.user import crud
 
