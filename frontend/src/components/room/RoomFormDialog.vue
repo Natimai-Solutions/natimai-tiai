@@ -86,7 +86,9 @@ watch(
     if (!open) return;
     form.name = props.room?.name ?? '';
     form.building_id = props.room?.building?.id ?? null;
-    form.location = props.room?.location ?? null;
+    // The site the room is on, its building's included: choosing « Aucun
+    // bâtiment » then keeps it rather than leaving the field empty (audit B22).
+    form.location = props.room?.location ?? props.room?.effective_location ?? null;
     form.notes = props.room?.notes ?? '';
   },
 );

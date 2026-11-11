@@ -604,6 +604,17 @@ async def update_room(
     if name != room.name or building_id != room.building_id:
         await _reject_room_name_taken(session, building_id, name, exclude=room.id)
     site_before = await _room_site(session, room)
+    if (
+        "building_id" in fields
+        and fields["building_id"] is None
+        and room.building_id is not None
+        and fields.get("location") is None
+    ):
+        # Out of its building, a room keeps the site it had through it — as
+        # deleting the building does (``detach_building``) — rather than
+        # losing it, and with it the site the console compares postes to
+        # (audit B22). Clearing it is a second, explicit change.
+        fields["location"] = site_before
     for key, value in fields.items():
         setattr(room, key, value)
     if room.building_id is not None:

@@ -11,7 +11,9 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
 from app.api.deps import (
@@ -135,6 +137,14 @@ class CheckClose(BaseModel):
     # Omitted = now. Backdatable like an intervention: the check happened
     # yesterday, the note is typed today.
     closed_at: datetime | None = None
+
+
+def _already_open() -> AppError:
+    return AppError(
+        code=ErrorCode.CHECK_ALREADY_OPEN,
+        status_code=409,
+        message="A verification is already open on this machine",
+    )
 
 
 def _clean(text: str | None) -> str | None:
@@ -298,6 +308,13 @@ async def create_check(
         instructions=_clean(payload.instructions),
     )
     session.add(row)
+    try:
+        await session.flush()
+    except IntegrityError:
+        # Another request was opened on this poste between the check above
+        # and this insert: the partial unique index said no (audit B21).
+        await session.rollback()
+        raise _already_open() from None
     # In the same transaction as the request: no mail for a request that
     # was rolled back, and none to oneself.
     if assignee is not None and assignee.id != current.id:
@@ -395,19 +412,31 @@ async def create_checks_bulk(
         )
     )
     open_ids = set(already.all())
-    created_machines: list[Machine] = []
-    for machine_id in machine_ids:
-        if machine_id in open_ids:
-            continue
-        session.add(
-            MachineCheck(
-                machine_id=machine_id,
-                requested_by=current.email,
-                assigned_to_id=payload.assigned_to_id,
-                instructions=_clean(payload.instructions),
+    new_rows = [
+        MachineCheck(
+            machine_id=machine_id,
+            requested_by=current.email,
+            assigned_to_id=payload.assigned_to_id,
+            instructions=_clean(payload.instructions),
+        ).model_dump()
+        for machine_id in machine_ids
+        if machine_id not in open_ids
+    ]
+    inserted: set[uuid.UUID] = set()
+    if new_rows:
+        # A request opened meanwhile on one of them is skipped, not a failure
+        # of the whole batch (audit B21): the partial unique index decides.
+        result = await session.exec(
+            pg_insert(MachineCheck)
+            .values(new_rows)
+            .on_conflict_do_nothing(
+                index_elements=[col(MachineCheck.machine_id)],
+                index_where=col(MachineCheck.closed_at).is_(None),
             )
+            .returning(col(MachineCheck.machine_id))
         )
-        created_machines.append(machines[machine_id])
+        inserted = set(result.scalars().all())
+    created_machines = [machines[m] for m in machine_ids if m in inserted]
     created = len(created_machines)
     # One mail for the whole request, not one per poste.
     if assignee is not None and assignee.id != current.id and created_machines:
@@ -547,22 +576,37 @@ async def close_check(
 ) -> CheckOut:
     """Close a request with what was found. Writes the poste's journal."""
     row = await _require_check(session, check_id, scope)
-    if row.closed_at is not None:
+    closed_at = payload.closed_at or utcnow()
+    note = _clean(payload.note)
+    # Closed in one statement, on the condition that it still is open: of two
+    # closings at the same time, one wins and the other is told (audit B21) —
+    # no second line in the journal.
+    won = (
+        await session.exec(
+            update(MachineCheck)
+            .where(
+                col(MachineCheck.id) == row.id, col(MachineCheck.closed_at).is_(None)
+            )
+            .values(
+                closed_at=closed_at,
+                closed_by=current.email,
+                closing_note=note,
+                updated_at=utcnow(),
+            )
+            .returning(col(MachineCheck.id))
+        )
+    ).first()
+    if won is None:
         raise AppError(
             code=ErrorCode.CHECK_CLOSED, status_code=409, message="This check is closed"
         )
-    closed_at = payload.closed_at or utcnow()
-    row.closed_at = closed_at
-    row.closed_by = current.email
-    row.closing_note = _clean(payload.note)
-    row.updated_at = utcnow()
-    session.add(row)
+    await session.refresh(row)
     session.add(
         Intervention(
             machine_id=row.machine_id,
             kind=InterventionKind.VERIFICATION.value,
             title="Vérification",
-            note=row.closing_note,
+            note=note,
             performed_by=current.email,
             performed_at=closed_at,
             check_id=row.id,
