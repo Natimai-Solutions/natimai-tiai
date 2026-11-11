@@ -473,6 +473,20 @@ class Settings(BaseSettings):
     # heartbeat's head start. Slightly above the agent's 60 s poll so that
     # head start is a full cycle. Zero disables the preference.
     WOL_RELAY_SUBNET_GRACE_SECONDS: int = Field(default=90, ge=0)
+    # Who may relay (audit S19, B29): an agent is taken on its word for its
+    # site and its address, so a poste enrolled minutes ago, one whose
+    # identity is to be confirmed, or one too old to know the command, is
+    # not handed the wakes of a site.
+    WOL_RELAY_MIN_AGE_MINUTES: int = Field(default=60, ge=0, le=60 * 24 * 30)
+    WOL_RELAY_MIN_AGENT_VERSION: str = "1.0.0"
+    # A claimed wake with no verdict after this long goes back to the queue,
+    # for another relay to take (the claiming poste switched off, or dropped
+    # it). Within the wake's own TTL.
+    WOL_RELAY_CLAIM_TIMEOUT_SECONDS: int = Field(default=180, ge=30, le=3600)
+    # The subnets a wake may be broadcast on when the server emits it itself
+    # (CIDR list). Empty: the private ranges (RFC 1918). An address reported
+    # by an agent outside them is not a destination (audit S35).
+    WOL_ALLOWED_NETWORKS: Annotated[list[str] | str, BeforeValidator(parse_list)] = []
 
     @model_validator(mode="after")
     def _usage_thresholds_hold_together(self) -> Self:

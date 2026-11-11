@@ -36,7 +36,7 @@ import ipaddress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -44,6 +44,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.config import settings
 from app.features.base import utcnow
 from app.features.command.models import Command, CommandStatus, CommandType
+from app.features.machine.agent_version import version_key
 from app.features.machine.models import Machine
 from app.features.machine.status import online_clause
 from app.features.wol.packet import normalize_mac
@@ -317,6 +318,43 @@ def _closed(
     return WakeOutcome(ok=ok, detail=detail)
 
 
+def trusted_relay(relay: Machine, now: datetime) -> bool:
+    """Whether this poste may relay at all (audit S19, B29). Its site and
+    subnet are its own word: a poste enrolled minutes ago, one whose identity
+    is to be confirmed, or one whose token is revoked does not get the wakes
+    of a site — nor does an agent too old to know the command, which would
+    hold the wake without ever emitting it."""
+    if relay.needs_verification or relay.token_revoked:
+        return False
+    min_age = timedelta(minutes=settings.WOL_RELAY_MIN_AGE_MINUTES)
+    if relay.first_seen is not None and now - relay.first_seen < min_age:
+        return False
+    version = (relay.agent_version or "").strip()
+    if version and version_key(version)[0]:
+        return version_key(version) >= version_key(settings.WOL_RELAY_MIN_AGENT_VERSION)
+    return True
+
+
+async def release_stale_claims(session: AsyncSession, now: datetime) -> int:
+    """Put back in the queue the wakes a relay took and never answered for —
+    switched off, or dropped them — so that another one can (audit B29)."""
+    cutoff = now - timedelta(seconds=settings.WOL_RELAY_CLAIM_TIMEOUT_SECONDS)
+    result = await session.exec(
+        update(Command)
+        .where(col(Command.type) == CommandType.WAKE_ON_LAN.value)
+        .where(col(Command.status) == CommandStatus.DELIVERED.value)
+        .where(col(Command.relay_machine_id).is_not(None))
+        .where(col(Command.delivered_at) < cutoff)
+        .where(col(Command.expires_at) > now)
+        .values(
+            status=CommandStatus.PENDING.value,
+            relay_machine_id=None,
+            delivered_at=None,
+        )
+    )
+    return result.rowcount or 0
+
+
 async def claim_wakes(
     session: AsyncSession, relay: Machine, now: datetime
 ) -> list[ClaimedWake]:
@@ -331,6 +369,9 @@ async def claim_wakes(
     two magic packets wake a poste exactly once, so the race is left alone
     rather than locked against.
     """
+    await release_stale_claims(session, now)
+    if not trusted_relay(relay, now):
+        return []
     stmt = (
         select(Command, Machine)
         .join(Machine, col(Command.machine_id) == col(Machine.id))

@@ -664,7 +664,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [ ] **T33** · *P2 moyen terme* — Vérifications concurrentes et salle sortie de son bâtiment ([B21](plan-audit-2026-11.md#b21), [B22](plan-audit-2026-11.md#b22)), suivi dans `plan-salles-maintenance-interventions.md`
 - [x] **T34** · *P3 fond* — **Comptes : réinitialisation et compte initial** ([S14](plan-audit-2026-11.md#s14), [S15](plan-audit-2026-11.md#s15), [S33](plan-audit-2026-11.md#s33))
   Limiter les demandes de réinitialisation par compte cible, sans invalider le lien en cours. Purger les liens de réinitialisation quand un administrateur change l'e-mail. Imposer `PASSWORD_MIN_LENGTH` à `FIRST_ADMIN_PASSWORD`.
-- [ ] **T35** · *P3 fond* — **Wake-on-LAN : ne plus croire l'agent sur parole** ([S19](plan-audit-2026-11.md#s19), [S35](plan-audit-2026-11.md#s35), [B29](plan-audit-2026-11.md#b29))
+- [x] **T35** · *P3 fond* — **Wake-on-LAN : ne plus croire l'agent sur parole** ([S19](plan-audit-2026-11.md#s19), [S35](plan-audit-2026-11.md#s35), [B29](plan-audit-2026-11.md#b29))
   Pour le relais : exiger un emplacement validé côté serveur, borner le masque et n'accepter que des réseaux privés ou une liste configurée. Exclure les agents trop anciens pour relayer, et remettre en attente un réveil remis sans verdict.
 - [ ] **T36** · *P3 fond* — Données déclarées par l'agent : placement en salle et catalogue logiciel ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21)), suivi dans `plan-salles-maintenance-interventions.md`
 - [ ] **T37** · *P3 fond* — **Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))

@@ -347,11 +347,14 @@ variables ci-dessous ne décrivent que la destination du paquet.
 |---|---|---|
 | `WOL_SUBNET_PREFIXLEN` | `24` | **Repli seulement.** Le masque vient normalement du poste lui-même : son agent le lit sur la carte et le remonte avec l'adresse, ce qui est la seule source juste sur un parc où cohabitent des /16 et des /24. Ce réglage ne sert qu'aux postes dont l'agent est antérieur à cette remontée, ou dont la carte n'a pas exposé de masque |
 | `WOL_BROADCAST_ADDRESSES` | *(vide)* | Adresses de diffusion explicites, séparées par des virgules. Renseignées, elles **remplacent** l'adresse déduite et servent pour *tous* les postes — la réponse pour un serveur qui doit joindre des segments où il n'a pas d'adresse, et le seul moyen de réveiller un poste qui n'a jamais remonté d'IP |
+| `WOL_ALLOWED_NETWORKS` | *(vide)* | Réseaux (CIDR, séparés par des virgules) vers lesquels le serveur accepte de diffuser un réveil déduit de l'adresse d'un poste. Vide : les plages privées (RFC 1918). Une adresse remontée hors de ces réseaux, ou un masque hors de /16 à /30, ne sert pas de destination |
 | `WOL_PORT` | `9` | Port UDP du paquet magique. Indifférent au matériel (la carte reconnaît le motif n'importe où dans la trame) ; ne compte que pour un pare-feu sur le trajet |
 | `WOL_PACKET_COUNT` | `3` | Nombre de copies émises. Une diffusion UDP n'accuse rien et se perd sans bruit ; trois copies coûtent trois datagrammes |
 | `WOL_RELAY_ENABLED` | `false` | **Serveur distant.** À `true`, le serveur n'émet plus rien lui-même : il confie le réveil au premier poste allumé du **même emplacement** que la cible (à défaut d'emplacement, du même domaine) qui le contacte, et c'est l'agent de ce poste qui diffuse le paquet magique sur ses propres sous-réseaux. Voir le point 4 de la section « Réveil des postes » |
 | `WOL_RELAY_TTL_MINUTES` | `10` | Délai laissé à un poste relais pour prendre un réveil en attente ; passé ce délai, il expire. Court à dessein : un réveil relayé une heure plus tard rencontre un poste que quelqu'un a déjà rallumé à la main |
 | `WOL_RELAY_SUBNET_GRACE_SECONDS` | `90` | Un poste du **même sous-réseau** que la cible prend le réveil aussitôt ; un poste d'un autre VLAN du même emplacement attend ce délai — un cycle d'agent — pour laisser la priorité au mieux placé. `0` supprime la préférence |
+| `WOL_RELAY_MIN_AGE_MINUTES` | `60` | Un poste enrôlé depuis moins longtemps ne relaie pas de réveil ; un poste « identité à confirmer », au token révoqué, ou d'agent plus ancien que `WOL_RELAY_MIN_AGENT_VERSION` (`1.0.0`) non plus |
+| `WOL_RELAY_CLAIM_TIMEOUT_SECONDS` | `180` | Un réveil pris par un relais qui ne rend pas de verdict dans ce délai retourne dans la file, pour qu'un autre poste le prenne |
 
 ### Alertes e-mail et e-mails de compte
 
