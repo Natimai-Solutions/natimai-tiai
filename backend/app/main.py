@@ -40,6 +40,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     from sqlmodel.ext.asyncio.session import AsyncSession
 
     from app.core.db import engine
+    from app.features.package import crud as package_crud
 
     await assert_not_superuser()
     try:
@@ -49,6 +50,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         logging.getLogger(__name__).exception(
             "Could not read the e-mail settings at startup; using the environment"
         )
+    # Package files nothing wants any more — deployments that expired or
+    # closed while nothing else triggered a sweep (audit S09). Best effort.
+    try:
+        async with AsyncSession(engine) as session:
+            await package_crud.sweep_store(session)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not sweep the package store")
     yield
 
 

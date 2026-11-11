@@ -275,6 +275,14 @@ async def create_commands(
             await setting_crud.fleet_policy(session)
         ).command_default_ttl_minutes
     expires_at = utcnow() + timedelta(minutes=ttl_minutes)
+    # The package as approved now: what the postes will run, or nothing
+    # (audit T08); and its files, kept for them meanwhile (T09).
+    digest: str | None = None
+    package_shas: list[str] | None = None
+    if package is not None:
+        package_files = await package_crud.files_of(session, package.id)
+        digest = package_crud.fingerprint(package, package_files)
+        package_shas = sorted({f.sha256 for f in package_files})
     created, skipped = await command_crud.create_for_machines(
         session,
         machine_ids=machine_ids,
@@ -282,6 +290,8 @@ async def create_commands(
         created_by=user.email,
         expires_at=expires_at,
         package_id=package.id if package is not None else None,
+        package_digest=digest,
+        package_files=package_shas,
     )
     target = describe_command_target(
         machine_ids=payload.machine_ids,

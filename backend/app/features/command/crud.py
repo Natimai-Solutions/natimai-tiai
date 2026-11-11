@@ -65,6 +65,8 @@ async def create_for_machines(
     created_by: str | None,
     expires_at: datetime,
     package_id: uuid.UUID | None = None,
+    package_digest: str | None = None,
+    package_files: list[str] | None = None,
 ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
     """Queue one command per machine, skipping those that already have it open.
 
@@ -99,6 +101,8 @@ async def create_for_machines(
             created_by=created_by,
             expires_at=expires_at,
             package_id=package_id,
+            package_digest=package_digest,
+            package_files=package_files,
         )
         for machine_id in targets
     ]

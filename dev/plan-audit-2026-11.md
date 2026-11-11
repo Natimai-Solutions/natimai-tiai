@@ -87,11 +87,11 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   Ajouter un limiteur indexé par compte, compter les échecs de `current_password` et révoquer la session après N échecs. Exécuter bcrypt dans `asyncio.to_thread` sur ce chemin comme sur celui de connexion.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T08 — Figer le contenu d'un paquet à la mise en file** ([S08](plan-audit-2026-11.md#s08))
+- [x] **T08 — Figer le contenu d'un paquet à la mise en file** ([S08](plan-audit-2026-11.md#s08))
   Enregistrer sur la commande une empreinte du paquet approuvé (manifeste, signature, winget et version), et la passer en `failed` à la livraison si le paquet a changé depuis (`agent.py:408`).
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T09 — Fichiers de paquet : plus d'orphelin, plus de déploiement cassé** ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13))
+- [x] **T09 — Fichiers de paquet : plus d'orphelin, plus de déploiement cassé** ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13))
   Au remplacement d'un fichier et après un dépôt multiple en échec, supprimer les fichiers stockés qui ne sont plus référencés. Ne pas supprimer un fichier qu'une commande ouverte doit encore télécharger, et servir le téléchargement à partir de l'empreinte remise (`packages.py:383`, `agent.py:998`).
   *Document de travail :* `plan-deploiement-logiciel.md`
 
@@ -309,6 +309,8 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T05 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nouveau code `settings.email.secret_required` (422, `details.fields`). La destination est comparée après résolution, environnement compris : un secret remis à `null` (celui du `.env`) ne compte pas comme ressaisi. Désactiver la vérification du certificat SMTP compte comme un changement de destination ; la réactiver, non. Le message du test Mailgun ne reprend plus que le champ `message` d'une réponse JSON, plus le corps brut. |
 | T06 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Option « verrouiller par couple compte et adresse IP », sous cette forme : le compte se verrouille toujours après N échecs (toutes adresses confondues, compteur incrémenté par `UPDATE … RETURNING`), mais le verrou ne refuse que les adresses qui ont échoué sur ce compte pendant la durée du verrou (mémoire en processus, comme le limiteur de débit). Le bon mot de passe saisi ailleurs ouvre la session et lève le verrou. Le 423 disparaît : verrou et échec répondent le même 401, bcrypt compris. Pas de décroissance du compteur dans le temps : un verrou ne gêne plus que les adresses fautives, ce qui rend un compteur ancien sans conséquence. Textes de `.env.example` et de la page Utilisateurs mis à jour. |
 | T07 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Limite de 5 essais par 15 min et par compte. Un mauvais mot de passe actuel compte comme un échec de connexion ; celui qui verrouille le compte révoque aussi toutes ses sessions, jeton de l'appelant compris, et s'inscrit au journal (`user.locked`, `via: password_change`). bcrypt passe par `asyncio.to_thread` partout (connexion, changement, réinitialisation, création de compte). |
+| T08 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Migration `0030` : `commands.package_digest` (SHA-256 du genre, de l'identifiant et de la version winget, du manifeste, de la signature, du certificat et des fichiers) et `commands.package_files`. À la livraison, une empreinte différente passe la commande en `failed` avec un message qui invite à relancer. Les commandes antérieures à la migration (empreinte nulle) sont livrées comme avant. |
+| T09 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le téléchargement est servi d'après les fichiers enregistrés sur la commande ouverte, plus d'après le paquet courant. Un fichier stocké est conservé tant qu'un paquet le nomme ou qu'une commande ouverte (en attente, remise ou en cours) le liste. Le worker n'a pas le volume des paquets : la purge tourne côté API, après chaque dépôt ou retrait, après un dépôt en échec, au verdict d'un déploiement et au démarrage ; elle retire aussi les `.upload-*` de plus de 24 h. La suppression d'un paquet entier n'existe toujours pas (seul le retrait) : rien à purger de ce côté. |
 
 ## 7. Détail des constats
 

@@ -213,10 +213,10 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T02** · *P0 immédiate* — **Méthode A : plus de fichier chargeable non signé à côté de l'exécutable** ([S02](plan-audit-2026-11.md#s02))
   En méthode A, ne télécharger que le fichier lancé : refuser un manifeste non signé qui en nomme d'autres, ou au minimum refuser les extensions chargeables (`.dll`, `.ocx`, `.cpl`, `.sys`, `.manifest`, `.local`, `.config`). Purger le répertoire du paquet avant chaque exécution.
 
-- [ ] **T08** · *P1 court terme* — **Figer le contenu d'un paquet à la mise en file** ([S08](plan-audit-2026-11.md#s08))
+- [x] **T08** · *P1 court terme* — **Figer le contenu d'un paquet à la mise en file** ([S08](plan-audit-2026-11.md#s08))
   Enregistrer sur la commande une empreinte du paquet approuvé (manifeste, signature, winget et version), et la passer en `failed` à la livraison si le paquet a changé depuis (`agent.py:408`).
 
-- [ ] **T09** · *P1 court terme* — **Fichiers de paquet : plus d'orphelin, plus de déploiement cassé** ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13))
+- [x] **T09** · *P1 court terme* — **Fichiers de paquet : plus d'orphelin, plus de déploiement cassé** ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13))
   Au remplacement d'un fichier et après un dépôt multiple en échec, supprimer les fichiers stockés qui ne sont plus référencés. Ne pas supprimer un fichier qu'une commande ouverte doit encore télécharger, et servir le téléchargement à partir de l'empreinte remise (`packages.py:383`, `agent.py:998`).
 
 - [ ] **T23** · *P2 moyen terme* — **Déploiement : confirmation et refus des paquets inexécutables** ([U04](plan-audit-2026-11.md#u04), [B30](plan-audit-2026-11.md#b30))

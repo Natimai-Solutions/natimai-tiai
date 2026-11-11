@@ -10,6 +10,7 @@ import hashlib
 import os
 import re
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -79,3 +80,26 @@ def remove_unreferenced(sha256: str) -> None:
         path_for(sha256).unlink(missing_ok=True)
     except ValueError:
         pass
+
+
+def stored_shas() -> list[str]:
+    """The SHA-256 of every file in the store."""
+    return [p.name for p in root().iterdir() if _SHA256.match(p.name) and p.is_file()]
+
+
+# An upload in progress writes ``.upload-*``; one older than this was left by
+# a process that died mid-request.
+_STALE_UPLOAD_SECONDS = 24 * 3600
+
+
+def remove_stale_uploads() -> int:
+    removed = 0
+    horizon = time.time() - _STALE_UPLOAD_SECONDS
+    for p in root().glob(".upload-*"):
+        try:
+            if p.stat().st_mtime < horizon:
+                p.unlink()
+                removed += 1
+        except FileNotFoundError:
+            pass
+    return removed

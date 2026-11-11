@@ -359,6 +359,36 @@ async def upload_files(
     follows."""
     package = await require_package(session, package_id)
     _require_files_kind(package)
+    try:
+        added = await _store_uploads(session, package, files)
+    except BaseException:
+        # Files stored before the one that failed belong to nothing now: the
+        # transaction that would have named them is gone (audit S09).
+        await session.rollback()
+        await crud.sweep_store(session)
+        raise
+    await crud.refresh_manifest(session, package)
+    audit.record(
+        session,
+        actor=current.email,
+        action="package.upload",
+        resource_type="package",
+        resource_id=str(package.id),
+        details={"name": package.name, "files": added},
+    )
+    await session.commit()
+    # A file replaced under the same name goes once no open deployment
+    # downloads it any more.
+    await crud.sweep_store(session)
+    await session.refresh(package)
+    return await _out(session, package, scope)
+
+
+async def _store_uploads(
+    session: SessionDep, package: Package, files: list[UploadFile]
+) -> list[dict[str, Any]]:
+    """Stream each upload to the store and name it in the package, replacing
+    a file of the same name. Flushed, not committed."""
     added: list[dict[str, Any]] = []
     for upload in files:
         name = (upload.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
@@ -395,18 +425,7 @@ async def upload_files(
         )
         added.append({"name": name, "sha256": stored.sha256, "size": stored.size})
     await session.flush()
-    await crud.refresh_manifest(session, package)
-    audit.record(
-        session,
-        actor=current.email,
-        action="package.upload",
-        resource_type="package",
-        resource_id=str(package.id),
-        details={"name": package.name, "files": added},
-    )
-    await session.commit()
-    await session.refresh(package)
-    return await _out(session, package, scope)
+    return added
 
 
 @router.delete(
@@ -426,7 +445,6 @@ async def delete_file(
         raise AppError(
             code=ErrorCode.PACKAGE_NOT_FOUND, status_code=404, message="File not found"
         )
-    sha = row.sha256
     await session.delete(row)
     await session.flush()
     await crud.refresh_manifest(session, package)
@@ -439,8 +457,8 @@ async def delete_file(
         details={"name": package.name, "file": name},
     )
     await session.commit()
-    if not await crud.sha_in_use(session, sha):
-        storage.remove_unreferenced(sha)
+    # Gone from the disk too, unless an open deployment still downloads it.
+    await crud.sweep_store(session)
     await session.refresh(package)
     return await _out(session, package, scope)
 

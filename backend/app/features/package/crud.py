@@ -1,7 +1,11 @@
 """Package queries, and the one rule that keeps signatures honest."""
 
+import base64
+import hashlib
+import json
+import logging
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from sqlalchemy import func
@@ -9,9 +13,19 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
+from app.features.command.models import Command, CommandStatus
 from app.features.inventory.models import MachineSoftware, Software
-from app.features.package import manifest
+from app.features.package import manifest, storage
 from app.features.package.models import Package, PackageFile, PackageKind
+
+logger = logging.getLogger(__name__)
+
+# A deployment that may still download its files.
+OPEN_STATUSES = [
+    CommandStatus.PENDING.value,
+    CommandStatus.DELIVERED.value,
+    CommandStatus.RUNNING.value,
+]
 
 
 async def files_of(session: AsyncSession, package_id: uuid.UUID) -> list[PackageFile]:
@@ -90,8 +104,58 @@ async def installed_count(
     return await session.scalar(stmt) or 0
 
 
+def fingerprint(package: Package, files: Sequence[PackageFile]) -> str:
+    """SHA-256 of everything a poste would run for this package: kind, winget
+    identifier and version, manifest, signature and certificate, files. Taken
+    when a deployment is queued and compared when it is delivered (audit T08)."""
+    document = {
+        "kind": package.kind,
+        "winget_id": package.winget_id,
+        "winget_version": package.winget_version,
+        "manifest": _b64(package.manifest),
+        "signature": _b64(package.signature),
+        "signature_algorithm": package.signature_algorithm,
+        "certificate": _b64(package.signer_certificate),
+        "files": sorted((f.name, f.sha256, f.size) for f in files),
+    }
+    raw = json.dumps(document, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _b64(value: bytes | None) -> str | None:
+    return base64.b64encode(value).decode("ascii") if value is not None else None
+
+
 async def sha_in_use(session: AsyncSession, sha256: str) -> bool:
+    """Whether a stored file is still wanted: named by a package, or by a
+    deployment still open, which downloads what it was queued with (audit
+    T09) — a pending one included, it has not downloaded yet."""
     found = await session.exec(
         select(PackageFile.package_id).where(col(PackageFile.sha256) == sha256).limit(1)
     )
-    return found.first() is not None
+    if found.first() is not None:
+        return True
+    held = await session.exec(
+        select(Command.id)
+        .where(col(Command.status).in_(OPEN_STATUSES))
+        .where(col(Command.package_files).contains([sha256]))
+        .limit(1)
+    )
+    return held.first() is not None
+
+
+async def sweep_store(session: AsyncSession) -> int:
+    """Delete the stored files nothing wants any more (audit S09): replaced or
+    removed files once no open deployment needs them, uploads of a request
+    that failed halfway. Returns how many went. Never raises: a full or
+    read-only volume must not fail the request that triggered the sweep."""
+    removed = 0
+    try:
+        for sha in storage.stored_shas():
+            if not await sha_in_use(session, sha):
+                storage.remove_unreferenced(sha)
+                removed += 1
+        removed += storage.remove_stale_uploads()
+    except OSError:
+        logger.exception("package store sweep failed")
+    return removed
