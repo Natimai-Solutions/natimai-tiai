@@ -77,7 +77,18 @@ enroll_limiter = RateLimiter(max_attempts=30, window_seconds=300)
 # stolen access token is the threat, and it works from anywhere (audit S04).
 password_change_limiter = RateLimiter(max_attempts=5, window_seconds=900)
 
-_ALL = (login_limiter, password_reset_limiter, enroll_limiter, password_change_limiter)
+# Heartbeat: keyed on the poste. An agent polls once a minute, a few more
+# times around a command or a retry; a token in a loop — filling the software
+# catalogue, filing itself in rooms — is cut here (audit S21).
+heartbeat_limiter = RateLimiter(max_attempts=30, window_seconds=60)
+
+_ALL = (
+    login_limiter,
+    password_reset_limiter,
+    enroll_limiter,
+    password_change_limiter,
+    heartbeat_limiter,
+)
 
 
 class FailureMemory:

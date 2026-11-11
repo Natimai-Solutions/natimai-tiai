@@ -752,5 +752,5 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T33** · *P2 moyen terme* — **Vérifications concurrentes et salle sortie de son bâtiment** ([B21](plan-audit-2026-11.md#b21), [B22](plan-audit-2026-11.md#b22))
   Transformer en 409 la violation de `uq_machine_checks_open`, utiliser `ON CONFLICT DO NOTHING` pour la création en masse, et faire une clôture atomique. Conserver l'emplacement d'une salle qui quitte son bâtiment.
 
-- [ ] **T36** · *P3 fond* — **Données déclarées par l'agent : placement en salle et catalogue logiciel** ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21))
+- [x] **T36** · *P3 fond* — **Données déclarées par l'agent : placement en salle et catalogue logiciel** ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21))
   Vérifier que le DN rapporté est cohérent avec la machine avant de la rattacher à une salle de l'annuaire, et ne plus adopter automatiquement une salle créée à la main. Limiter le débit du heartbeat par poste et purger les logiciels qui ne sont plus installés sur aucun poste.

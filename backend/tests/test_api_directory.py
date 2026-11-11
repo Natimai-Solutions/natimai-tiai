@@ -176,10 +176,75 @@ async def test_ou_mode_adopts_a_loose_room_of_the_same_name(
     room_source("ad_ou")
     a = await _enroll(client, "pc-a", hostname="A")
     await _report(client, a, _dir())
+    # One agent's report does not take over a room made by hand (audit S20):
+    # the poste waits, unfiled, and no « Salle B12 (2) » appears.
+    rooms = (await client.get("/api/v1/rooms", headers=headers)).json()
+    assert len(rooms) == 1 and rooms[0]["ad_key"] is None
+    assert (await _machine(client, headers, a))["room_id"] is None
+
+    # The administrator's re-sync does adopt it.
+    synced = await client.post("/api/v1/rooms/sync-directory", headers=headers)
+    assert synced.status_code == 200, synced.text
     rooms = (await client.get("/api/v1/rooms", headers=headers)).json()
     assert len(rooms) == 1
     assert rooms[0]["id"] == loose_id
     assert rooms[0]["ad_key"] is not None
+    assert (await _machine(client, headers, a))["room_id"] == loose_id
+
+
+async def test_an_ou_the_dn_is_not_in_is_not_taken(client, db_session, room_source):
+    """Audit S20: an agent naming another OU than its own DN's is not filed."""
+    room_source("ad_ou")
+    headers = await _admin(client, db_session)
+    a = await _enroll(client, "pc-a", hostname="A")
+    forged = _dir()
+    forged["distinguished_name"] = "CN=PC,OU=Ailleurs,DC=lycee,DC=local"
+    await _report(client, a, forged)
+    assert (await client.get("/api/v1/rooms", headers=headers)).json() == []
+    assert (await _machine(client, headers, a))["room_id"] is None
+
+
+async def test_a_heartbeat_loop_is_cut_per_poste(client, db_session, monkeypatch):
+    """Audit S21: a token in a loop gets 429, other postes are not."""
+    from app.core import ratelimit
+
+    monkeypatch.setattr(ratelimit.heartbeat_limiter, "max_attempts", 3)
+    a = await _enroll(client, "pc-a", hostname="A")
+    b = await _enroll(client, "pc-b", hostname="B")
+    codes = []
+    for _ in range(4):
+        r = await client.post(
+            "/api/v1/agent/heartbeat",
+            headers={"Authorization": f"Bearer {a['token']}"},
+            json={},
+        )
+        codes.append(r.status_code)
+    assert codes == [200, 200, 200, 429]
+    other = await client.post(
+        "/api/v1/agent/heartbeat",
+        headers={"Authorization": f"Bearer {b['token']}"},
+        json={},
+    )
+    assert other.status_code == 200
+
+
+async def test_software_nobody_has_is_purged(client, db_session):
+    from datetime import timedelta
+
+    from sqlmodel import select
+
+    from app.features.base import utcnow
+    from app.features.inventory import crud
+    from app.features.inventory.models import Software
+
+    db_session.add(Software(name="Orphelin", first_seen=utcnow() - timedelta(days=3)))
+    db_session.add(Software(name="Récent"))
+    await db_session.commit()
+    assert (
+        await crud.purge_orphan_software(db_session, utcnow() - timedelta(days=1)) == 1
+    )
+    names = {s.name for s in (await db_session.exec(select(Software))).all()}
+    assert names == {"Récent"}
 
 
 async def test_two_ous_of_one_name_get_two_rooms(client, db_session, room_source):
@@ -239,7 +304,7 @@ async def test_a_failed_placement_does_not_fail_the_heartbeat(
 
     from app.features.room import crud as room_crud
 
-    async def broken(session, machine, source):
+    async def broken(session, machine, source, **_kwargs):
         await session.exec(text("SELECT 1/0"))
 
     monkeypatch.setattr(room_crud, "place_from_directory", broken)

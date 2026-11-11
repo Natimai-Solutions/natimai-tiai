@@ -660,6 +660,9 @@ async def heartbeat(
     session: SessionDep,
 ) -> HeartbeatResponse:
     """Upsert Defender state, then return this machine's pending commands."""
+    ratelimit.check_account(
+        ratelimit.heartbeat_limiter, str(machine.id), "agent.heartbeat"
+    )
     if payload.hostname is not None:
         machine.hostname = payload.hostname
     if payload.domain is not None:
@@ -782,7 +785,7 @@ async def heartbeat(
             try:
                 async with session.begin_nested():
                     await room_crud.place_from_directory(
-                        session, machine, settings.ROOM_SOURCE
+                        session, machine, settings.ROOM_SOURCE, from_agent=True
                     )
             except SQLAlchemyError:
                 logger.exception(
