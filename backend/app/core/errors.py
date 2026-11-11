@@ -90,6 +90,9 @@ class ErrorCode(enum.StrEnum):
     CHECK_NOT_FOUND = "check.not_found"
     CHECK_ALREADY_OPEN = "check.already_open"
     CHECK_CLOSED = "check.closed"
+    # The account a check is given to cannot read checks, or does not see
+    # the poste (audit S18).
+    CHECK_ASSIGNEE_OUT_OF_REACH = "check.assignee.out_of_reach"
     MAINTENANCE_NOT_FOUND = "maintenance.not_found"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"

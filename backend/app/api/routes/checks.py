@@ -11,6 +11,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlmodel import col, select
 
 from app.api.deps import (
@@ -29,8 +30,9 @@ from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
 from app.features.notification import tasks as task_mail
 from app.features.room import crud as room_crud
+from app.features.user import crud as user_crud
 from app.features.user.models import User
-from app.features.user.permissions import Action, Resource
+from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import (
     Scope,
     machine_clause,
@@ -166,8 +168,33 @@ async def _require_check(
     return row
 
 
+async def _can_take(
+    session: SessionDep, user_id: uuid.UUID, machine_ids: list[uuid.UUID]
+) -> bool:
+    """Whether the account can see these checks: check:read, and every poste
+    within its scope. Anyone else would be mailed hostnames and instructions
+    about postes kept out of their sight (audit S18)."""
+    authority = await user_crud.user_authority(session, user_id)
+    if authority.is_admin:
+        return True
+    if not has_permission(
+        authority.permissions, Resource.CHECK.value, Action.READ.value
+    ):
+        return False
+    clause = machine_clause(authority.scope)
+    if clause is None or not machine_ids:
+        return True
+    seen = await session.scalar(
+        select(func.count())
+        .select_from(Machine)
+        .where(col(Machine.id).in_(machine_ids))
+        .where(clause)
+    )
+    return (seen or 0) == len(set(machine_ids))
+
+
 async def _require_assignee(
-    session: SessionDep, user_id: uuid.UUID | None
+    session: SessionDep, user_id: uuid.UUID | None, machine_ids: list[uuid.UUID]
 ) -> User | None:
     if user_id is None:
         return None
@@ -175,6 +202,12 @@ async def _require_assignee(
     if user is None or not user.is_active:
         raise AppError(
             code=ErrorCode.USER_NOT_FOUND, status_code=404, message="User not found"
+        )
+    if not await _can_take(session, user.id, machine_ids):
+        raise AppError(
+            code=ErrorCode.CHECK_ASSIGNEE_OUT_OF_REACH,
+            status_code=422,
+            message="This account cannot see these postes",
         )
     return user
 
@@ -257,7 +290,7 @@ async def create_check(
             status_code=409,
             message="A verification is already open on this machine",
         )
-    assignee = await _require_assignee(session, payload.assigned_to_id)
+    assignee = await _require_assignee(session, payload.assigned_to_id, [machine.id])
     row = MachineCheck(
         machine_id=machine.id,
         requested_by=current.email,
@@ -311,7 +344,9 @@ async def list_machine_checks(
 
 
 @assignable_router.get("/assignable-users", response_model=list[UserRef])
-async def assignable_users(session: SessionDep) -> list[UserRef]:
+async def assignable_users(
+    session: SessionDep, machine_id: uuid.UUID | None = None
+) -> list[UserRef]:
     """Active accounts, id and name only: who a task can be given to, without
     opening the accounts page to everyone who may assign. Also who may own a
     maintenance — so open to whoever sets one, not only to check:read (audit
@@ -319,7 +354,11 @@ async def assignable_users(session: SessionDep) -> list[UserRef]:
     rows = await session.exec(
         select(User).where(col(User.is_active).is_(True)).order_by(col(User.email))
     )
-    return [ref for u in rows.all() if (ref := _user_ref(u)) is not None]
+    users = list(rows.all())
+    if machine_id is not None:
+        # For a check on that poste: only who can see it (audit S18).
+        users = [u for u in users if await _can_take(session, u.id, [machine_id])]
+    return [ref for u in users if (ref := _user_ref(u)) is not None]
 
 
 @router.post(
@@ -332,7 +371,9 @@ async def create_checks_bulk(
     scope: CurrentScope,
 ) -> CheckBulkOut:
     """One request per poste of a selection, skipping those already asked."""
-    assignee = await _require_assignee(session, payload.assigned_to_id)
+    assignee = await _require_assignee(
+        session, payload.assigned_to_id, list(set(payload.machine_ids))
+    )
     found_machines = await session.exec(
         restrict(
             select(Machine).where(col(Machine.id).in_(payload.machine_ids)),
@@ -454,7 +495,9 @@ async def update_check(
         # Unchanged is not a choice: a request whose assignee was deactivated
         # since can still be reworded (audit B08).
         if fields["assigned_to_id"] != row.assigned_to_id:
-            new_assignee = await _require_assignee(session, fields["assigned_to_id"])
+            new_assignee = await _require_assignee(
+                session, fields["assigned_to_id"], [row.machine_id]
+            )
         row.assigned_to_id = fields["assigned_to_id"]
     if "instructions" in fields:
         row.instructions = _clean(fields["instructions"])

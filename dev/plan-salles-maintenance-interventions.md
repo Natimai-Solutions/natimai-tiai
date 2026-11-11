@@ -746,7 +746,7 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
   - Adapter Mes tâches au mobile et élargir la colonne Consignes.
   - Paginer les salles de plus de 200 postes.
 
-- [ ] **T32** · *P2 moyen terme* — **Périmètres : cas secondaires** ([S16](plan-audit-2026-11.md#s16), [S17](plan-audit-2026-11.md#s17), [S18](plan-audit-2026-11.md#s18))
+- [x] **T32** · *P2 moyen terme* — **Périmètres : cas secondaires** ([S16](plan-audit-2026-11.md#s16), [S17](plan-audit-2026-11.md#s17), [S18](plan-audit-2026-11.md#s18))
   Un compte restreint ne doit pas déplacer un bâtiment ou une salle hors de son site. Pour le journal d'audit, filtrer les entrées « poste » par périmètre, ou refuser `audit:read` à un groupe restreint. Refuser d'assigner une vérification à un compte qui ne voit pas le poste, et filtrer `/checks/assignable-users` en conséquence.
 
 - [ ] **T33** · *P2 moyen terme* — **Vérifications concurrentes et salle sortie de son bâtiment** ([B21](plan-audit-2026-11.md#b21), [B22](plan-audit-2026-11.md#b22))

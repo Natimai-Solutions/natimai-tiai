@@ -536,3 +536,118 @@ async def test_a_threat_alert_goes_to_who_can_see_the_poste(db_session, monkeypa
     )
     assert await threat_alert.queue_threat_alert(db_session, context, [detection]) == 1
     assert sent == ["all@x.fr"]
+
+
+# --- audit T32 ------------------------------------------------------------------
+
+
+async def test_a_confined_account_cannot_move_a_place_to_another_site(
+    client, db_session
+):
+    """Audit S16: held by id, a building or a room still stays on its site."""
+    t = await two_sites(client, db_session)
+    b = await client.post(
+        "/api/v1/buildings", headers=t.admin, json={"name": "Bât", "location": SITE_A}
+    )
+    assert b.status_code == 201, b.text
+    held = await group(
+        db_session,
+        "Bât seul",
+        ["room:read", "room:write", "machine:read"],
+        Scope(buildings=frozenset({uuid.UUID(b.json()["id"])})),
+    )
+    tech = await account(client, db_session, "bat@test.local", [held.id])
+    moved = await client.patch(
+        f"/api/v1/buildings/{b.json()['id']}", headers=tech, json={"location": SITE_B}
+    )
+    assert moved.status_code == 403, moved.text
+    assert moved.json()["error"]["code"] == "auth.scope.restricted"
+    renamed = await client.patch(
+        f"/api/v1/buildings/{b.json()['id']}", headers=tech, json={"name": "Bât 2"}
+    )
+    assert renamed.status_code == 200, renamed.text
+
+    room = await client.post(
+        "/api/v1/rooms", headers=t.admin, json={"name": "R1", "location": SITE_A}
+    )
+    by_room = await group(
+        db_session,
+        "Salle seule",
+        ["room:read", "room:write", "machine:read"],
+        Scope(rooms=frozenset({uuid.UUID(room.json()["id"])})),
+    )
+    tech2 = await account(client, db_session, "salle@test.local", [by_room.id])
+    out = await client.patch(
+        f"/api/v1/rooms/{room.json()['id']}", headers=tech2, json={"location": SITE_B}
+    )
+    assert out.status_code == 403, out.text
+    # The unrestricted may.
+    ok = await client.patch(
+        f"/api/v1/rooms/{room.json()['id']}", headers=t.admin, json={"location": SITE_B}
+    )
+    assert ok.status_code == 200, ok.text
+
+
+async def test_the_audit_log_is_the_sites(client, db_session):
+    """Audit S17: entries about postes elsewhere, and the parc's administration,
+    stay out of a confined reader's log; its own actions do not."""
+    t = await two_sites(client, db_session)
+    for m in (t.a, t.b):
+        r = await client.post(f"/api/v1/machines/{m.id}/revoke-token", headers=t.admin)
+        assert r.status_code in (200, 204), r.text
+    own = await client.post(
+        f"/api/v1/machines/{t.a.id}/allow-reenroll", headers=t.scoped
+    )
+    assert own.status_code in (200, 204), own.text
+    mine = (await client.get("/api/v1/audit", headers=t.scoped)).json()["items"]
+    ids = {e["resource_id"] for e in mine}
+    assert str(t.a.id) in ids and str(t.b.id) not in ids
+    assert all(
+        e["resource_type"] == "machine" or e["actor"] == "tech-a@test.local"
+        for e in mine
+    )
+    everything = (await client.get("/api/v1/audit", headers=t.admin)).json()["items"]
+    assert str(t.b.id) in {e["resource_id"] for e in everything}
+
+
+async def test_a_check_goes_only_to_who_sees_the_poste(client, db_session):
+    """Audit S18: the assignee must read checks and see the poste."""
+    t = await two_sites(client, db_session)
+    from app.features.user import crud as user_crud
+
+    tech_a = await user_crud.get_by_email(db_session, "tech-a@test.local")
+    assert tech_a is not None
+    tech_a_id = str(tech_a.id)
+
+    refused = await client.post(
+        f"/api/v1/machines/{t.b.id}/check",
+        headers=t.admin,
+        json={"assigned_to_id": tech_a_id},
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"]["code"] == "check.assignee.out_of_reach"
+    bulk = await client.post(
+        "/api/v1/checks/bulk",
+        headers=t.admin,
+        json={"machine_ids": [str(t.a.id), str(t.b.id)], "assigned_to_id": tech_a_id},
+    )
+    assert bulk.status_code == 422, bulk.text
+    ok = await client.post(
+        f"/api/v1/machines/{t.a.id}/check",
+        headers=t.admin,
+        json={"assigned_to_id": tech_a_id},
+    )
+    assert ok.status_code == 201, ok.text
+
+    for_b = await client.get(
+        "/api/v1/checks/assignable-users",
+        headers=t.admin,
+        params={"machine_id": str(t.b.id)},
+    )
+    assert tech_a_id not in {u["id"] for u in for_b.json()}
+    for_a = await client.get(
+        "/api/v1/checks/assignable-users",
+        headers=t.admin,
+        params={"machine_id": str(t.a.id)},
+    )
+    assert tech_a_id in {u["id"] for u in for_a.json()}

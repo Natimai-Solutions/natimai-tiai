@@ -278,6 +278,7 @@
     <CheckRequestDialog
       v-model="askOpen"
       :check="null"
+      :machine-id="props.id"
       :subtitle="machine?.hostname ?? undefined"
       :save="askCheck"
     />

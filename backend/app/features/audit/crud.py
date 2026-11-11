@@ -53,6 +53,7 @@ async def list_entries(
     until: datetime | None = None,
     page: int = 1,
     page_size: int = 50,
+    where: Any = None,
 ) -> tuple[list[AuditEntry], int]:
     """Newest-first page of the log, optionally filtered.
 
@@ -73,6 +74,8 @@ async def list_entries(
         filters.append(col(AuditEntry.at) >= since)
     if until is not None:
         filters.append(col(AuditEntry.at) < until)
+    if where is not None:
+        filters.append(where)
 
     total_result = await session.exec(
         select(func.count()).select_from(AuditEntry).where(*filters)

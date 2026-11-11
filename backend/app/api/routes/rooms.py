@@ -187,6 +187,24 @@ def _building_writable(building: Building, scope: Scope | None) -> bool:
     )
 
 
+def _site_move_allowed(scope: Scope | None, old: str | None, new: str | None) -> bool:
+    """Whether a confined account may move a place from site ``old`` to site
+    ``new``: only between sites it covers. A building or room it holds by id
+    would otherwise carry its postes into another team's site, out of its
+    own (audit S16)."""
+    if scope is None or old == new:
+        return True
+    return old in scope.locations and new in scope.locations
+
+
+async def _room_site(session: SessionDep, room: Room) -> str | None:
+    """Where a room is: its building's site, or its own."""
+    if room.building_id is not None:
+        building = await session.get(Building, room.building_id)
+        return building.location if building else None
+    return room.location
+
+
 async def _room_writable(
     session: SessionDep, room_id: uuid.UUID, scope: Scope | None
 ) -> bool:
@@ -419,6 +437,7 @@ async def update_building(
     location = fields.get("location", building.location)
     if name != building.name or location != building.location:
         await _reject_building_name_taken(session, location, name, exclude=building.id)
+    _reject_out_of_scope(_site_move_allowed(scope, building.location, location))
     for key, value in fields.items():
         setattr(building, key, value)
     _reject_out_of_scope(_building_writable(building, scope))
@@ -584,12 +603,16 @@ async def update_room(
     building_id = fields.get("building_id", room.building_id)
     if name != room.name or building_id != room.building_id:
         await _reject_room_name_taken(session, building_id, name, exclude=room.id)
+    site_before = await _room_site(session, room)
     for key, value in fields.items():
         setattr(room, key, value)
     if room.building_id is not None:
         # A room in a building is where its building is; a site of its own
         # would only be a second answer.
         room.location = None
+    _reject_out_of_scope(
+        _site_move_allowed(scope, site_before, await _room_site(session, room))
+    )
     room.updated_at = utcnow()
     session.add(room)
     _reject_out_of_scope(await _room_writable(session, room.id, scope))
