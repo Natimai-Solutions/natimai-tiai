@@ -670,7 +670,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] **T37** · *P3 fond* — **Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))
   N'accepter `http://` que sur option explicite, en corrigeant `DEPLOYMENT.md` qui le présente aujourd'hui comme accepté, et ne plus suivre les redirections. Borner les corps d'erreur lus, faire tourner le journal à chaud, et borner les téléchargements à la taille annoncée. Distinguer un `token.dat` illisible d'un `token.dat` absent. Allonger le délai entre deux tentatives quand l'enrôlement attend une approbation, et ne l'auditer qu'une fois.
 - [ ] **T38** · *P3 fond* — Script de signature : neutraliser les caractères de contrôle ([S25](plan-audit-2026-11.md#s25)), suivi dans `plan-deploiement-logiciel.md`
-- [ ] **T39** · *P3 fond* — **Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
+- [x] **T39** · *P3 fond* — **Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
   Factoriser `_escape_like` et l'appliquer à toutes les recherches par sous-chaîne : logiciels, postes et comptes.
 - [ ] **T40** · *P3 fond* — **Infrastructure et CI** ([S27](plan-audit-2026-11.md#s27), [S28](plan-audit-2026-11.md#s28), [S29](plan-audit-2026-11.md#s29), [S30](plan-audit-2026-11.md#s30), [S31](plan-audit-2026-11.md#s31), [S32](plan-audit-2026-11.md#s32), [S34](plan-audit-2026-11.md#s34), [S36](plan-audit-2026-11.md#s36))
   Plusieurs durcissements :

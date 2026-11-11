@@ -12,7 +12,7 @@ from sqlalchemy import func
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.features.base import utcnow
+from app.features.base import contains, utcnow
 from app.features.command.models import Command, CommandStatus
 from app.features.inventory.models import MachineSoftware, Software
 from app.features.package import manifest, storage
@@ -80,10 +80,6 @@ async def refresh_manifest(session: AsyncSession, package: Package) -> bool:
     return True
 
 
-def _escape_like(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
 async def installed_count(
     session: AsyncSession, package: Package, machine_where: Any = None
 ) -> int | None:
@@ -97,7 +93,7 @@ async def installed_count(
         select(func.count(func.distinct(col(MachineSoftware.machine_id))))
         .select_from(MachineSoftware)
         .join(Software, col(Software.id) == col(MachineSoftware.software_id))
-        .where(col(Software.name).ilike(f"%{_escape_like(needle)}%", escape="\\"))
+        .where(contains(col(Software.name), needle))
     )
     if machine_where is not None:
         stmt = stmt.where(machine_where)

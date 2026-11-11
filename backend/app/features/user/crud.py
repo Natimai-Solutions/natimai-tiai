@@ -9,7 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core import ratelimit, security
 from app.core.config import settings
 from app.features.auth_session import crud as auth_sessions
-from app.features.base import utcnow
+from app.features.base import contains, utcnow
 from app.features.user.models import (
     Group,
     GroupPermission,
@@ -173,11 +173,9 @@ async def list_users(
     """List users (optionally filtered on email/full name), newest first."""
     stmt = select(User)
     if search:
-        pattern = f"%{search}%"
         stmt = stmt.where(
             or_(
-                col(User.email).ilike(pattern),
-                col(User.full_name).ilike(pattern),
+                contains(col(User.email), search), contains(col(User.full_name), search)
             )
         )
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))

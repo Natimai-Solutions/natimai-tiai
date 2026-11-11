@@ -967,3 +967,22 @@ async def test_a_command_can_target_a_location(client, db_session):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["count"] == 1
+
+
+async def test_a_search_takes_percent_and_underscore_literally(client, db_session):
+    """Audit S26: « PC_1 » finds PC_1, not PCX1 too."""
+    headers = await _admin_headers(client, db_session)
+    await _machines(
+        db_session,
+        [
+            {"hostname": "PC_1", "machine_uuid": "u-1"},
+            {"hostname": "PCX1", "machine_uuid": "u-2"},
+            {"hostname": "100%-LAB", "machine_uuid": "u-3"},
+        ],
+    )
+    found = await client.get(
+        "/api/v1/machines", headers=headers, params={"search": "PC_1"}
+    )
+    assert [m["hostname"] for m in found.json()["items"]] == ["PC_1"]
+    pct = await client.get("/api/v1/machines", headers=headers, params={"search": "%"})
+    assert [m["hostname"] for m in pct.json()["items"]] == ["100%-LAB"]

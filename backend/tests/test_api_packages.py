@@ -674,3 +674,16 @@ async def test_the_summary_counts_each_postes_latest_deployment(
     assert body["postes"] == 3
     assert body["by_status"] == {"succeeded": 1, "pending": 2}
     assert body["by_action"] == {"package_install": 3}
+
+
+async def test_control_characters_are_refused(client, db_session):
+    """Audit S25: nothing that could rewrite what the signer reads."""
+    admin = await _admin(client, db_session)
+    for body in (
+        {"kind": "files", "name": "App\x1b[1A\x1b[2KPronote"},
+        {"kind": "files", "name": "App", "version": "1\r2"},
+        {"kind": "files", "name": "App", "install_args": ["-s", "\x1b[2Kevil"]},
+        {"kind": "files", "name": "App", "install_args": ["\x9b2K"]},
+    ):
+        resp = await client.post("/api/v1/packages", headers=admin, json=body)
+        assert resp.status_code == 422, (body, resp.text)

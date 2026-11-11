@@ -23,6 +23,7 @@ from sqlmodel import col, select
 from app.api.csv_export import csv_response
 from app.api.deps import CurrentScope, SessionDep, require_permission
 from app.api.xlsx_export import xlsx_response
+from app.features.base import contains
 from app.features.inventory.models import MachineSoftware, Software
 from app.features.user.permissions import Action, Resource
 from app.features.user.scope import Scope, machine_ids_clause
@@ -63,9 +64,8 @@ SoftwareSortField = Literal["name", "version", "publisher", "machine_count"]
 
 def _search_clause(search: str) -> ColumnElement[bool]:
     """Name or publisher. Substring on both: nobody types a version string in full."""
-    pattern = f"%{search}%"
     return or_(
-        col(Software.name).ilike(pattern), col(Software.publisher).ilike(pattern)
+        contains(col(Software.name), search), contains(col(Software.publisher), search)
     )
 
 

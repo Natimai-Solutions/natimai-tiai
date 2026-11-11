@@ -657,7 +657,7 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T36** · *P3 fond* — **Données déclarées par l'agent : placement en salle et catalogue logiciel** ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21))
   Vérifier que le DN rapporté est cohérent avec la machine avant de la rattacher à une salle de l'annuaire, et ne plus adopter automatiquement une salle créée à la main. Limiter le débit du heartbeat par poste et purger les logiciels qui ne sont plus installés sur aucun poste.
 
-- [ ] **T39** · *P3 fond* — **Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
+- [x] **T39** · *P3 fond* — **Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
   Factoriser `_escape_like` et l'appliquer à toutes les recherches par sous-chaîne : logiciels, postes et comptes.
 
 - [ ] **T42** · *P3 fond* — **Page Logiciels et filtre par logiciel** ([B20](plan-audit-2026-11.md#b20), [U08](plan-audit-2026-11.md#u08), [U09](plan-audit-2026-11.md#u09))

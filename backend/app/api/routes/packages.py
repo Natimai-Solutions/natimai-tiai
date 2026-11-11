@@ -60,12 +60,25 @@ def _invalid(message: str, **details: Any) -> AppError:
     )
 
 
+# C0 and C1 controls and DEL: nothing a name, a version or an argument needs,
+# and what a terminal reads as cursor moves and line erasures — able to hide
+# the real command line from the administrator reviewing it before signing
+# (audit S25).
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _no_control(value: str | None) -> str | None:
+    if value is not None and _CONTROL.search(value):
+        raise ValueError("caractère de contrôle refusé")
+    return value
+
+
 def _check_args(args: list[str]) -> list[str]:
     if len(args) > _MAX_ARGS:
         raise ValueError(f"au plus {_MAX_ARGS} arguments")
     for a in args:
-        if len(a) > _MAX_ARG_LEN or "\0" in a:
-            raise ValueError("argument trop long ou invalide")
+        if len(a) > _MAX_ARG_LEN or _CONTROL.search(a):
+            raise ValueError("argument trop long ou contenant un caractère de contrôle")
     return args
 
 
@@ -92,6 +105,11 @@ class PackageBody(BaseModel):
     uninstall_args: list[str] | None = None
     success_codes: list[int] | None = None
     detect_name: str | None = Field(default=None, max_length=200)
+
+    @field_validator("name", "version", "install_run", "uninstall_run", "detect_name")
+    @classmethod
+    def _plain(cls, v: str | None) -> str | None:
+        return _no_control(v)
 
     @field_validator("install_args", "uninstall_args")
     @classmethod
