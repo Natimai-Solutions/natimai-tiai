@@ -60,9 +60,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+# The schema and its pages describe every route of the API: in local
+# development, or where a deployment asks for them (audit S36).
+def openapi_enabled() -> bool:
+    return settings.ENVIRONMENT == "local" or settings.EXPOSE_OPENAPI
+
+
+_openapi = openapi_enabled()
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    openapi_url=f"{settings.API_V1_STR}/openapi.json" if _openapi else None,
+    docs_url="/docs" if _openapi else None,
+    redoc_url="/redoc" if _openapi else None,
     lifespan=lifespan,
 )
 

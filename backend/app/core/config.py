@@ -486,6 +486,16 @@ class Settings(BaseSettings):
     # The subnets a wake may be broadcast on when the server emits it itself
     # (CIDR list). Empty: the private ranges (RFC 1918). An address reported
     # by an agent outside them is not a destination (audit S35).
+    # Who may tell the API the client's address (X-Forwarded-For), besides
+    # loopback: CIDR networks, and host names resolved in the compose network
+    # (Caddy's service). Anyone else's header is ignored (audit S28).
+    TRUSTED_PROXIES: Annotated[list[str] | str, BeforeValidator(parse_list)] = []
+    TRUSTED_PROXY_HOSTS: Annotated[list[str] | str, BeforeValidator(parse_list)] = [
+        "caddy"
+    ]
+    # The OpenAPI schema and its pages (/docs, /redoc): a map of every route
+    # and field, served only in local development unless asked (audit S36).
+    EXPOSE_OPENAPI: bool = False
     WOL_ALLOWED_NETWORKS: Annotated[list[str] | str, BeforeValidator(parse_list)] = []
 
     @model_validator(mode="after")

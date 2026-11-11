@@ -672,7 +672,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [ ] **T38** · *P3 fond* — Script de signature : neutraliser les caractères de contrôle ([S25](plan-audit-2026-11.md#s25)), suivi dans `plan-deploiement-logiciel.md`
 - [x] **T39** · *P3 fond* — **Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
   Factoriser `_escape_like` et l'appliquer à toutes les recherches par sous-chaîne : logiciels, postes et comptes.
-- [ ] **T40** · *P3 fond* — **Infrastructure et CI** ([S27](plan-audit-2026-11.md#s27), [S28](plan-audit-2026-11.md#s28), [S29](plan-audit-2026-11.md#s29), [S30](plan-audit-2026-11.md#s30), [S31](plan-audit-2026-11.md#s31), [S32](plan-audit-2026-11.md#s32), [S34](plan-audit-2026-11.md#s34), [S36](plan-audit-2026-11.md#s36))
+- [x] **T40** · *P3 fond* — **Infrastructure et CI** ([S27](plan-audit-2026-11.md#s27), [S28](plan-audit-2026-11.md#s28), [S29](plan-audit-2026-11.md#s29), [S30](plan-audit-2026-11.md#s30), [S31](plan-audit-2026-11.md#s31), [S32](plan-audit-2026-11.md#s32), [S34](plan-audit-2026-11.md#s34), [S36](plan-audit-2026-11.md#s36))
   Plusieurs durcissements :
   - Sauvegardes : `umask 077`, et chiffrement des dumps.
   - `X-Forwarded-For` : ne le lire que depuis des proxys de confiance, et n'exposer le port de développement que sur `127.0.0.1`.

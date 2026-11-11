@@ -42,9 +42,12 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 curl http://localhost:8800/health
 ```
 
-L'override publie le backend en HTTP direct sur `0.0.0.0:8800` (Caddy
+L'override publie le backend en HTTP direct sur `127.0.0.1:8800` (Caddy
 court-circuité), bascule Caddy en `tls internal` et force `ENVIRONMENT=local`,
 ce qui neutralise la garde de démarrage qui refuse les secrets `changeme`.
+Pour y brancher des postes du réseau, ajouter `TIAI_DEV_BACKEND_BIND=0.0.0.0`
+dans `.env` : ce port est en clair, et l'en-tête `X-Forwarded-For` n'y est pas
+cru (seul Caddy, ou `TRUSTED_PROXIES`, en est digne).
 
 Côté poste, récupérer `tiai-agent-windows-amd64.exe` depuis la page
 *Releases* du dépôt (ou le compiler : `go build -o tiai-agent.exe .` dans
@@ -537,6 +540,12 @@ Vérifier que ça tourne :
 docker compose logs db-backup     # « sauvegarde OK : tiai-20260825-... »
 ls -lh backups/
 ```
+
+Les dumps sont lisibles du seul propriétaire (`umask 077`, `chmod 600`) : ils
+contiennent les hachés des mots de passe et tout l'inventaire du parc. Ils ne
+sont **pas chiffrés** — l'image PostgreSQL n'embarque ni `gpg` ni `openssl` —
+d'où la consigne qui suit : la copie hors de la machine doit l'être (archive
+chiffrée, coffre de sauvegarde, `gpg --symmetric`…).
 
 **Un dump sur le serveur ne protège pas du serveur.** Copier régulièrement
 `deploy/backups/` hors de la machine (rsync, robocopy, tâche planifiée — peu

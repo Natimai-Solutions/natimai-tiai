@@ -93,6 +93,12 @@ services:
       POSTGRES_USER: ${POSTGRES_APP_USER:-tiai_app}
       POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD manquant, cf. DEPLOYMENT.md « Rôle applicatif PostgreSQL »}
     command: ["api"]
+    # Sans root ni capacité (audit S32) : l'entrypoint démarre en root le
+    # temps de confier le volume des paquets au compte `tiai`, puis l'abandonne
+    # — d'où les trois seules capacités gardées, perdues aussitôt après.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
     # Les fichiers des paquets de déploiement, un par empreinte SHA-256
     # (PACKAGES_DIR). À sauvegarder avec la base, ou à tenir pour
     # reconstructible depuis les installateurs d'origine.
@@ -132,6 +138,12 @@ services:
       POSTGRES_USER: ${POSTGRES_APP_USER:-tiai_app}
       POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD manquant, cf. DEPLOYMENT.md « Rôle applicatif PostgreSQL »}
     command: ["worker"]
+    # Sans root ni capacité (audit S32) : l'entrypoint démarre en root le
+    # temps de confier le volume des paquets au compte `tiai`, puis l'abandonne
+    # — d'où les trois seules capacités gardées, perdues aussitôt après.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
     # Le worker n'expose aucun port : il touche un fichier témoin à la fin de
     # chaque tour de boucle (30 s), et il est déclaré malade quand ce fichier
     # a plus de 5 min — une boucle bloquée, pas un résumé un peu long.
