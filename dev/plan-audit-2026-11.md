@@ -175,7 +175,7 @@ Pertes de saisie, confirmations manquantes, cas secondaires de périmètre, et p
   Pour chaque carte de réglages : champ requis, entier, dans les bornes du serveur, erreur affichée sous le champ et bouton Enregistrer désactivé tant qu'elle persiste. Ne plus convertir un champ vide en 0 (`SettingsPage.vue:844`).
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T29 — Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
+- [x] **T29 — Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
   Rendre persistants la séance de maintenance de salle, avec une confirmation si la saisie a été modifiée, et le dialogue qui affiche une seule fois le mot de passe réinitialisé.
   *Document de travail :* `plan-salles-maintenance-interventions.md`, `plan-projet-tiai.md`
 
@@ -330,6 +330,7 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T26 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le texte tapé dans « Emplacements » est validé à la perte du focus et avant l'enregistrement (avec `input-debounce` à 0 : l'anti-rebond par défaut de 500 ms perdait une saisie suivie d'un clic rapide). Enregistrer un groupe sans aucun périmètre demande confirmation, à la création ou quand le groupe était restreint. Vérifié dans un navigateur. |
 | T27 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le libellé du code reste en tête, complété : par le message du serveur pour `package.invalid` ; par le champ fautif et sa raison pour `request.validation_error` (premier champ de `details.errors`, nommé en français pour les plus courants) ; par la liste des problèmes pour `package.not_ready`. La fiche paquet valide aussi côté client le nom, l'identifiant winget, les arguments exigés par msiexec et les codes de sortie, avec les règles du serveur. |
 | T28 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nouvelle fonction `intFieldError` : champ requis, entier, dans les bornes de `SettingsUpdate`. Appliquée aux cartes Maintenance et Supervision du parc : erreur sous le champ, bouton Enregistrer désactivé tant qu'elle persiste ; un champ vidé n'est plus envoyé comme 0. Les cartes Utilisation et E-mail avaient déjà leurs contrôles. Vérifié dans un navigateur. |
+| T29 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Séance de maintenance : dialogue persistant ; Annuler et Échap ferment aussitôt si rien n'a été saisi, sinon demandent confirmation (Échap écouté sur le dialogue, Quasar ne l'émettant plus en mode persistant). La saisie n'est remise à zéro qu'après un enregistrement, une annulation confirmée ou un changement de salle. Mot de passe réinitialisé : dialogue persistant tant que le mot de passe est affiché, et échec de la copie signalé. Vérifié dans un navigateur pour la séance. |
 
 ## 7. Détail des constats
 

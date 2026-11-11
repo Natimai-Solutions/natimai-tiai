@@ -655,7 +655,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
   Pour les codes dont le message est rédigé pour l'utilisateur (`package.invalid` en tête), afficher le détail. Pour une erreur de validation, nommer le champ fautif (`errors.ts:90`).
 - [x] **T28** · *P2 moyen terme* — **Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
   Pour chaque carte de réglages : champ requis, entier, dans les bornes du serveur, erreur affichée sous le champ et bouton Enregistrer désactivé tant qu'elle persiste. Ne plus convertir un champ vide en 0 (`SettingsPage.vue:844`).
-- [ ] **T29** · *P2 moyen terme* — **Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
+- [x] **T29** · *P2 moyen terme* — **Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
   Rendre persistants la séance de maintenance de salle, avec une confirmation si la saisie a été modifiée, et le dialogue qui affiche une seule fois le mot de passe réinitialisé.
 - [ ] **T30** · *P2 moyen terme* — Mes tâches et séance de salle : parcours du technicien ([B09](plan-audit-2026-11.md#b09), [U18](plan-audit-2026-11.md#u18), [U19](plan-audit-2026-11.md#u19), [U20](plan-audit-2026-11.md#u20), [U21](plan-audit-2026-11.md#u21), [U22](plan-audit-2026-11.md#u22), [U23](plan-audit-2026-11.md#u23), [U24](plan-audit-2026-11.md#u24), [U26](plan-audit-2026-11.md#u26)), suivi dans `plan-salles-maintenance-interventions.md`
 - [ ] **T31** · *P2 moyen terme* — **Liste des postes : sélection, navigation et fusion cohérentes** ([B05](plan-audit-2026-11.md#b05), [B18](plan-audit-2026-11.md#b18), [B19](plan-audit-2026-11.md#b19))

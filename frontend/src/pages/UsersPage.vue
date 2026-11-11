@@ -213,7 +213,9 @@
     </q-dialog>
 
     <!-- Réinitialisation : mot de passe généré ou choisi, affiché une seule fois. -->
-    <q-dialog v-model="resetOpen" @hide="resetResult = null">
+    <!-- Persistent once the password is shown: it is applied already and
+         shown only here, so only « Fermer » may take it away (audit U13). -->
+    <q-dialog v-model="resetOpen" :persistent="resetResult !== null" @hide="resetResult = null">
       <q-card style="width: 460px; max-width: 90vw">
         <q-card-section class="text-h6">Réinitialiser le mot de passe</q-card-section>
         <q-card-section class="q-pt-none text-body2 text-muted">
@@ -501,8 +503,15 @@ async function submitReset() {
 
 async function copyResult() {
   if (!resetResult.value) return;
-  await copyToClipboard(resetResult.value);
-  $q.notify({ type: 'positive', message: 'Copié' });
+  try {
+    await copyToClipboard(resetResult.value);
+    $q.notify({ type: 'positive', message: 'Copié' });
+  } catch {
+    $q.notify({
+      type: 'negative',
+      message: 'Copie impossible : sélectionnez le mot de passe et copiez-le à la main',
+    });
+  }
 }
 
 async function toggleActive(user: ConsoleUser) {
