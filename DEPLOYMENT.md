@@ -51,7 +51,7 @@ Côté poste, récupérer `tiai-agent-windows-amd64.exe` depuis la page
 `agent/`), puis le pointer directement sur le port HTTP — **pas** sur Caddy :
 
 ```powershell
-.\tiai-agent.exe init-config --api-url http://192.168.1.50:8800
+.\tiai-agent.exe init-config --api-url http://192.168.1.50:8800 --allow-insecure-http
 .\tiai-agent.exe run
 ```
 
@@ -898,7 +898,8 @@ que fait le bouton, pas parce qu'il ouvre quelque chose.
 `C:\ProgramData\Tiai\config.yaml` (chemin surchargeable par `--config`) :
 
 ```yaml
-api_base_url: http://192.168.1.50:8800   # http:// accepté ; https:// exige un certificat approuvé
+api_base_url: https://tiai.lycee.local    # https:// exige un certificat approuvé
+allow_insecure_http: false                # true seulement pour viser le port HTTP direct
 enrollment_secret: <secret partagé>       # préférer le registre (voir plus bas)
 machine_uuid: ""                          # vide = résolution auto
 heartbeat_interval_seconds: 60
@@ -1018,9 +1019,18 @@ nommée.
 
 ```powershell
 New-Item -Path 'HKLM:\SOFTWARE\Tiai' -Force | Out-Null
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'ApiBaseURL' -Value 'http://192.168.1.50:8800'
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'ApiBaseURL' -Value 'https://tiai.lycee.local'
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'EnrollmentSecret' -Value '<secret>'
 ```
+
+**`http://` est refusé par défaut** (agent publié après la v1.1.0) : le secret de flotte, puis le
+token, passeraient en clair sur le réseau. Une installation qui vise le port
+HTTP direct du backend doit le dire explicitement, par la valeur
+`AllowInsecureHTTP` (`REG_DWORD` 1) ou `allow_insecure_http: true` dans le YAML ;
+l'agent le rappelle alors à chaque démarrage dans son journal. **À poser avant
+de mettre à jour l'agent** sur un parc installé en `http://`, sinon les postes
+cessent de joindre le serveur. L'agent ne suit plus non plus les redirections
+(le 301 de Caddy de `http://` vers `https://` répond une erreur).
 
 Les quatre valeurs `Deploy*` ouvrent le **déploiement logiciel** sur le poste.
 Elles ne se lisent **que dans le registre**, jamais dans le YAML, et sont

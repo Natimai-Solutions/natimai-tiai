@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -117,5 +118,63 @@ func TestTokenSwapUnderConcurrentRequests(t *testing.T) {
 		if tok != "old-token" && tok != "new-token" {
 			t.Fatalf("a request carried %q", tok)
 		}
+	}
+}
+
+// Audit S24: a server that sends more than the manifest's size is cut off
+// at size+1 bytes, not left to fill the disk.
+func TestADownloadStopsAtTheAnnouncedSize(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chunk := strings.Repeat("x", 1024)
+		for i := 0; i < 1024; i++ { // 1 MiB, far beyond the 10 bytes announced
+			if _, err := w.Write([]byte(chunk)); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "t", 5*time.Second, nil)
+	f, err := os.CreateTemp(t.TempDir(), "pkg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	err = c.FetchPackageFile(context.Background(), "p", "s", 0, 10, f)
+	if err == nil || !strings.Contains(err.Error(), "plus que") {
+		t.Fatalf("err = %v", err)
+	}
+	info, _ := f.Stat()
+	if info.Size() > 11 {
+		t.Errorf("wrote %d bytes", info.Size())
+	}
+}
+
+// Audit S22, S23: a redirect is not followed (the secret header would go
+// along), and an error body is bounded.
+func TestNoRedirectAndABoundedErrorBody(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Path == "/elsewhere" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Header.Get("X-Enrollment-Secret") != "" && r.URL.Path == "/api/v1/agent/enroll" {
+			http.Redirect(w, r, "/elsewhere", http.StatusMovedPermanently)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(strings.Repeat("e", 100000)))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "", 5*time.Second, nil)
+	_, err := c.Enroll(context.Background(), "secret", models.EnrollRequest{MachineUUID: "u"})
+	if err == nil || hits != 1 {
+		t.Fatalf("redirect followed: err=%v hits=%d", err, hits)
+	}
+	_, err = c.Heartbeat(context.Background(), models.HeartbeatRequest{})
+	var se *StatusError
+	if !errors.As(err, &se) || len(se.Body) > maxErrorBody {
+		t.Fatalf("err = %v", err)
 	}
 }

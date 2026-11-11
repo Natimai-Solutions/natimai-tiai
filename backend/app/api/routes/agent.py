@@ -3,7 +3,7 @@
 import base64
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from ipaddress import ip_address
 
 from fastapi import APIRouter, Depends, Request
@@ -558,20 +558,29 @@ async def enroll(
             # identity over and lock the real poste out; the request waits for
             # an administrator instead, and the live token keeps working.
             ip = client_ip(request)
-            machine.reenroll_requested_at = utcnow()
-            machine.reenroll_requested_ip = ip
-            audit.record(
-                session,
-                actor="agent",
-                action="machine.reenroll_requested",
-                resource_type="machine",
-                resource_id=str(machine.id),
-                details={
-                    "hostname": payload.hostname,
-                    "machine_uuid": payload.machine_uuid,
-                },
+            # One audit line per request, not per retry: an agent waiting
+            # for approval asks again every few minutes (audit B33). A new
+            # line when the asking address changes, or after a day.
+            already = (
+                machine.reenroll_requested_at is not None
+                and machine.reenroll_requested_ip == ip
+                and utcnow() - machine.reenroll_requested_at < timedelta(hours=24)
             )
-            await session.commit()
+            if not already:
+                machine.reenroll_requested_at = utcnow()
+                machine.reenroll_requested_ip = ip
+                audit.record(
+                    session,
+                    actor="agent",
+                    action="machine.reenroll_requested",
+                    resource_type="machine",
+                    resource_id=str(machine.id),
+                    details={
+                        "hostname": payload.hostname,
+                        "machine_uuid": payload.machine_uuid,
+                    },
+                )
+                await session.commit()
             security_log.warning(
                 "re-enrollment of %s from %s held for approval (live token exists)",
                 payload.machine_uuid,

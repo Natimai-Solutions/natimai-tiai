@@ -16,7 +16,7 @@ import (
 // f itself. A *RetryLater error asks to come back after a while: the server
 // is busy, or the network dropped.
 type Fetcher interface {
-	FetchPackageFile(ctx context.Context, packageID, sha256 string, offset int64, f *os.File) error
+	FetchPackageFile(ctx context.Context, packageID, sha256 string, offset, size int64, f *os.File) error
 }
 
 // RetryLater is a transient failure, worth retrying after Wait.
@@ -97,7 +97,7 @@ func fetchOnce(ctx context.Context, fetch Fetcher, packageID string, f FileRef, 
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return err
 	}
-	if err := fetch.FetchPackageFile(ctx, packageID, f.SHA256, offset, file); err != nil {
+	if err := fetch.FetchPackageFile(ctx, packageID, f.SHA256, offset, f.Size, file); err != nil {
 		return err
 	}
 	info, err = file.Stat()

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -261,5 +262,24 @@ func TestStoppingAnswersTheBacklog(t *testing.T) {
 	}
 	if len(a.running) != 0 {
 		t.Errorf("still held: %v", a.running)
+	}
+}
+
+// Audit B33: waiting for approval, or revoked, is not retried every 5 min.
+func TestAnEnrollmentOnHoldIsRecognised(t *testing.T) {
+	held := fmt.Errorf("POST /api/v1/agent/enroll: %w", &api.StatusError{
+		StatusCode: 403, Body: `{"error":{"code":"machine.enrollment.approval_required"}}`})
+	if !enrollmentOnHold(held) {
+		t.Error("approval_required not recognised")
+	}
+	revoked := &api.StatusError{StatusCode: 403, Body: `{"error":{"code":"machine.enrollment.revoked"}}`}
+	if !enrollmentOnHold(revoked) {
+		t.Error("revoked not recognised")
+	}
+	if enrollmentOnHold(&api.StatusError{StatusCode: 403, Body: `{"error":{"code":"auth.enrollment_secret.invalid"}}`}) {
+		t.Error("a wrong secret is not on hold")
+	}
+	if enrollmentOnHold(errors.New("network down")) {
+		t.Error("a network error is not on hold")
 	}
 }

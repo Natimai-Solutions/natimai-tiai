@@ -51,6 +51,10 @@ type Client struct {
 	token string
 }
 
+// maxErrorBody bounds what an error response may put in an error, and so in
+// the log.
+const maxErrorBody = 4096
+
 // New builds a client with the given per-request timeout, reaching the server
 // through proxy — nil for a direct connection (see ParseProxy).
 //
@@ -73,7 +77,15 @@ func New(baseURL, token string, timeout time.Duration, proxy Proxy) *Client {
 		baseURL: baseURL,
 		token:   token,
 		timeout: timeout,
-		http:    &http.Client{Transport: transport},
+		http: &http.Client{
+			Transport: transport,
+			// Never follow a redirect: Go would resend the custom
+			// X-Enrollment-Secret header to wherever it points (audit S22).
+			// A 3xx is an answer, reported as such.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 
@@ -158,7 +170,9 @@ func (c *Client) do(ctx context.Context, method, path string, headers map[string
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
+		// Bounded: the body goes into the error, and the error into the log
+		// on every failed tick (audit S23).
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 		return fmt.Errorf("%s %s: %w", method, path,
 			&StatusError{StatusCode: resp.StatusCode, Body: string(b)})
 	}
@@ -174,7 +188,7 @@ func (c *Client) do(ctx context.Context, method, path string, headers map[string
 // request when resuming. Implements deploy.Fetcher: a 429 (the server is
 // serving its quota of downloads) and network failures come back as
 // *deploy.RetryLater, never as a failed command.
-func (c *Client) FetchPackageFile(ctx context.Context, packageID, sha256 string, offset int64, f *os.File) error {
+func (c *Client) FetchPackageFile(ctx context.Context, packageID, sha256 string, offset, size int64, f *os.File) error {
 	path := fmt.Sprintf("/api/v1/agent/packages/%s/files/%s", url.PathEscape(packageID), url.PathEscape(sha256))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
@@ -213,11 +227,29 @@ func (c *Client) FetchPackageFile(ctx context.Context, packageID, sha256 string,
 		}
 		return &deploy.RetryLater{Wait: wait, Err: fmt.Errorf("serveur occupé (%d)", resp.StatusCode)}
 	default:
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 		return fmt.Errorf("GET %s: %w", path, &StatusError{StatusCode: resp.StatusCode, Body: string(b)})
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	// Never more than the manifest announced: a server sending without end
+	// must not fill the system volume, as SYSTEM, before the size is checked
+	// (audit S24). One byte more than what remains tells « too long » apart.
+	remaining := size - offset
+	if resp.ContentLength > 0 && resp.StatusCode == http.StatusPartialContent && resp.ContentLength > remaining {
+		return fmt.Errorf("GET %s : %d octets annoncés, %d attendus", path, resp.ContentLength, remaining)
+	}
+	if resp.StatusCode == http.StatusOK && resp.ContentLength > size {
+		return fmt.Errorf("GET %s : %d octets annoncés, %d attendus", path, resp.ContentLength, size)
+	}
+	limit := remaining
+	if resp.StatusCode == http.StatusOK {
+		limit = size
+	}
+	n, err := io.Copy(f, io.LimitReader(resp.Body, limit+1))
+	if err != nil {
 		return &deploy.RetryLater{Err: fmt.Errorf("transfert interrompu : %w", err)}
+	}
+	if n > limit {
+		return fmt.Errorf("GET %s : le serveur envoie plus que les %d octets annoncés", path, size)
 	}
 	return nil
 }

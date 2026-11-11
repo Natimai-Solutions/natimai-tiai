@@ -326,7 +326,7 @@ type fakeFetcher struct {
 	ignore  bool
 }
 
-func (f *fakeFetcher) FetchPackageFile(_ context.Context, _, _ string, offset int64, file *os.File) error {
+func (f *fakeFetcher) FetchPackageFile(_ context.Context, _, _ string, offset, _ int64, file *os.File) error {
 	f.calls = append(f.calls, offset)
 	if f.busy > 0 {
 		f.busy--

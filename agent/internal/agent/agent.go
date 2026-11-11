@@ -16,6 +16,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -158,6 +159,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.identity = id
 	a.host = sysinfo.Collect()
 	log.Printf("agent: identity %s (hostname %s)", id.MachineUUID, a.host.Hostname)
+	if strings.HasPrefix(strings.ToLower(a.cfg.APIBaseURL), "http://") {
+		// Allowed only on purpose (AllowInsecureHTTP), and said at every start:
+		// the fleet secret and the token travel in clear (audit S22).
+		log.Printf("agent: WARNING api_base_url is http:// (AllowInsecureHTTP): secret and token travel in clear")
+	}
 	if a.cfg.Location != "" {
 		// Traced once, like the two switches below: the site is a deployment
 		// setting, and the log is where a poste filed under the wrong one is
@@ -215,6 +221,12 @@ func (a *Agent) Run(ctx context.Context) error {
 		if err := a.tick(ctx); err != nil {
 			wait = nextBackoff(wait, maxBackoff)
 			sleep = jitterBackoff(wait)
+			if enrollmentOnHold(err) {
+				// Waiting for an administrator, or revoked: asking every five
+				// minutes changes nothing but the server's audit log (audit
+				// B33). Still asked, so an approval is picked up.
+				sleep = jitterBackoff(enrollmentOnHoldWait)
+			}
 			log.Printf("agent: tick failed, retrying in %s: %v", sleep.Round(time.Second), err)
 		} else {
 			wait = base
@@ -250,6 +262,22 @@ func (a *Agent) tick(ctx context.Context) error {
 	return err
 }
 
+// enrollmentOnHoldWait is the retry step while an enrollment waits for an
+// administrator's approval, or the poste is revoked.
+const enrollmentOnHoldWait = 30 * time.Minute
+
+// enrollmentOnHold reports whether err is the server's 403 saying the poste
+// waits for approval or is revoked — an answer that a retry in five minutes
+// will not change.
+func enrollmentOnHold(err error) bool {
+	var se *api.StatusError
+	if !errors.As(err, &se) || se.StatusCode != http.StatusForbidden {
+		return false
+	}
+	return strings.Contains(se.Body, "machine.enrollment.approval_required") ||
+		strings.Contains(se.Body, "machine.enrollment.revoked")
+}
+
 // isUnauthorized reports whether err wraps an HTTP 401 from the server.
 func isUnauthorized(err error) bool {
 	var se *api.StatusError
@@ -268,6 +296,16 @@ func (a *Agent) dropToken() {
 // ensureEnrolled performs trust-on-first-use enrollment if no token is stored.
 func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	if a.cfg.AuthToken != "" {
+		return nil
+	}
+	// Read again before enrolling: a token.dat locked for a moment at startup
+	// (an antivirus scanning it) read as « none », and enrolling with the
+	// fleet secret then waits for an approval the poste does not need — its
+	// token is valid (audit B32).
+	if token, _ := config.LoadToken(filepath.Dir(a.cfgPath)); token != "" {
+		log.Printf("agent: stored token readable again, using it")
+		a.cfg.AuthToken = token
+		a.client.SetToken(token)
 		return nil
 	}
 	fp := a.identity.Fingerprint
