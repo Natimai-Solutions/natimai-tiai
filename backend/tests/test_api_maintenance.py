@@ -508,3 +508,45 @@ async def test_settings_are_admin_material_and_reject_a_dead_owner(client, db_se
         json={"maintenance_owner_id": tech_id},
     )
     assert resp.status_code == 200
+
+
+async def test_a_skipped_poste_keeps_why_and_excluded_ones_are_not_listed(
+    client, db_session
+):
+    """Audit U20: the reason a poste was not done lands in its journal, its
+    cycle untouched. Audit B09: an excluded poste is counted, not listed."""
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "B12")
+    a = await _machine(db_session, "A", first_seen_days_ago=100, room_id=room)
+    b = await _machine(db_session, "B", first_seen_days_ago=100, room_id=room)
+    server = await _machine(db_session, "SRV", first_seen_days_ago=100, room_id=room)
+    r = await client.patch(
+        f"/api/v1/machines/{server}/maintenance",
+        headers=admin,
+        json={"maintenance_cycle_days": 0},
+    )
+    assert r.status_code == 200, r.text
+
+    due = (await client.get("/api/v1/maintenance/due", headers=admin)).json()
+    (entry,) = due["rooms"]
+    assert sorted(m["hostname"] for m in entry["machines"]) == ["A", "B"]
+    assert entry["excluded"] == 1
+
+    resp = await client.post(
+        "/api/v1/maintenance",
+        headers=admin,
+        json={
+            "room_id": room,
+            "items": [{"machine_id": a}],
+            "skipped": [{"machine_id": b, "note": "Absent de la salle"}],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["machine_count"] == 1
+    journal = (
+        await client.get(f"/api/v1/machines/{b}/interventions", headers=admin)
+    ).json()
+    (line,) = journal["items"]
+    assert line["kind"] == "other" and line["note"] == "Absent de la salle"
+    assert line["title"] == "Maintenance non faite — B12"
+    assert (await _detail(client, admin, b))["maintenance_state"] == "overdue"

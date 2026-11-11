@@ -97,10 +97,12 @@ def group_due(
             )
             rooms[room.id] = entry
         entry.total += 1
-        entry.machines.append((machine, res))
         if res.state == MaintenanceState.EXCLUDED:
+            # Counted, not listed: a poste kept out of the cycle (a server, a
+            # VM) is not one to tick in a visit (audit B09).
             entry.excluded += 1
             continue
+        entry.machines.append((machine, res))
         if res.state == MaintenanceState.OVERDUE:
             entry.overdue += 1
         elif res.state == MaintenanceState.DUE_SOON:
@@ -133,6 +135,7 @@ async def record_session(
     performed_by: str,
     performed_at: datetime,
     note: str | None,
+    skipped: dict[uuid.UUID, str] | None = None,
 ) -> Maintenance:
     """One visit: the session row, one journal entry per poste, and each
     poste's ``last_maintenance_at`` moved forward. Does not commit."""
@@ -156,6 +159,20 @@ async def record_session(
                 performed_by=performed_by,
                 performed_at=performed_at,
                 maintenance_id=visit.id,
+            )
+        )
+    # A poste left out of the visit keeps why, in its own journal — not as a
+    # maintenance, which would move its cycle (audit U20).
+    where = f" — {room.name}" if room else ""
+    for machine_id, reason in (skipped or {}).items():
+        session.add(
+            Intervention(
+                machine_id=machine_id,
+                kind=InterventionKind.OTHER.value,
+                title=f"Maintenance non faite{where}",
+                note=reason,
+                performed_by=performed_by,
+                performed_at=performed_at,
             )
         )
     # From the journal, like every other change to it: a visit older than the

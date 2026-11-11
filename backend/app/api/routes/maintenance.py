@@ -144,6 +144,9 @@ class SessionCreate(BaseModel):
     performed_at: intervention_crud.PastDatetime | None = None
     note: str | None = Field(default=None, max_length=5000)
     items: list[SessionItemIn] = Field(min_length=1, max_length=1000)
+    # Postes left out, with why (« absent de la salle ») — written to their
+    # own journal as « Maintenance non faite », their cycle untouched.
+    skipped: list[SessionItemIn] = Field(default_factory=list, max_length=1000)
 
 
 class SessionItemOut(BaseModel):
@@ -519,11 +522,22 @@ async def record_session(
         else None
     )
     ids = [i.machine_id for i in payload.items]
+    # Only a skipped poste with something to say is written; one also done
+    # is done.
+    skipped = {
+        i.machine_id: reason
+        for i in payload.skipped
+        if (reason := _clean(i.note)) and i.machine_id not in set(ids)
+    }
+    wanted = set(ids) | set(skipped)
     found = await session.exec(
-        restrict(select(Machine).where(col(Machine.id).in_(ids)), machine_clause(scope))
+        restrict(
+            select(Machine).where(col(Machine.id).in_(wanted)), machine_clause(scope)
+        )
     )
-    machines = list(found.all())
-    if len(machines) != len(set(ids)):
+    every = list(found.all())
+    machines = [m for m in every if m.id in set(ids)]
+    if len(every) != len(wanted):
         raise AppError(
             code=ErrorCode.MACHINE_NOT_FOUND,
             status_code=404,
@@ -538,6 +552,7 @@ async def record_session(
         performed_by=current.email,
         performed_at=payload.performed_at or utcnow(),
         note=_clean(payload.note),
+        skipped=skipped,
     )
     await session.commit()
     await session.refresh(visit)

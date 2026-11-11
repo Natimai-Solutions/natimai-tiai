@@ -46,6 +46,7 @@
                   <q-checkbox
                     :model-value="allDone"
                     dense
+                    aria-label="Tout cocher ou tout décocher"
                     @update:model-value="(v) => toggleAll(v === true)"
                   />
                 </th>
@@ -55,20 +56,23 @@
             </thead>
             <tbody>
               <tr v-for="row in rows" :key="row.id">
-                <td><q-checkbox v-model="row.done" dense /></td>
+                <td>
+                  <q-checkbox v-model="row.done" dense :aria-label="`${row.hostname} : fait`" />
+                </td>
                 <td>
                   {{ row.hostname }}
                   <div v-if="row.hint" class="text-caption text-muted">{{ row.hint }}</div>
                 </td>
                 <td>
+                  <!-- Open on an unticked poste too: why it was not done is
+                       worth keeping, in its own journal (audit U20). -->
                   <q-input
                     v-model="row.note"
                     :aria-label="`Note pour ${row.hostname}`"
                     dense
                     borderless
-                    placeholder="—"
+                    :placeholder="row.done ? '—' : 'Pourquoi non fait (facultatif)'"
                     maxlength="5000"
-                    :disable="!row.done"
                   />
                 </td>
               </tr>
@@ -76,7 +80,8 @@
           </q-markup-table>
           <div class="text-caption text-muted">
             {{ doneCount }} poste(s) coché(s) : chacun reçoit une ligne « Maintenance » dans son
-            historique et repart pour un cycle.
+            historique et repart pour un cycle. Un poste décoché avec une observation reçoit une
+            ligne « Maintenance non faite », sans changer son échéance.
           </div>
         </q-card-section>
         <q-card-actions align="right" class="q-px-md q-pb-md">
@@ -95,6 +100,7 @@
 </template>
 
 <script setup lang="ts">
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { recordSession } from 'src/services/maintenance';
@@ -205,12 +211,16 @@ async function submit() {
       items: rows.value
         .filter((r) => r.done)
         .map((r) => ({ machine_id: r.id, note: r.note.trim() || null })),
+      skipped: rows.value
+        .filter((r) => !r.done && r.note.trim())
+        .map((r) => ({ machine_id: r.id, note: r.note.trim() })),
     });
     $q.notify({
       type: 'positive',
       message: `Maintenance enregistrée sur ${doneCount.value} poste(s)`,
     });
     close();
+    notifyTasksChanged();
     emit('recorded');
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });

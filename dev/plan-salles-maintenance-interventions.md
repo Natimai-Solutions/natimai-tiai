@@ -734,7 +734,7 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T29** · *P2 moyen terme* — **Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
   Rendre persistants la séance de maintenance de salle, avec une confirmation si la saisie a été modifiée, et le dialogue qui affiche une seule fois le mot de passe réinitialisé.
 
-- [ ] **T30** · *P2 moyen terme* — **Mes tâches et séance de salle : parcours du technicien** ([B09](plan-audit-2026-11.md#b09), [U18](plan-audit-2026-11.md#u18), [U19](plan-audit-2026-11.md#u19), [U20](plan-audit-2026-11.md#u20), [U21](plan-audit-2026-11.md#u21), [U22](plan-audit-2026-11.md#u22), [U23](plan-audit-2026-11.md#u23), [U24](plan-audit-2026-11.md#u24), [U26](plan-audit-2026-11.md#u26))
+- [x] **T30** · *P2 moyen terme* — **Mes tâches et séance de salle : parcours du technicien** ([B09](plan-audit-2026-11.md#b09), [U18](plan-audit-2026-11.md#u18), [U19](plan-audit-2026-11.md#u19), [U20](plan-audit-2026-11.md#u20), [U21](plan-audit-2026-11.md#u21), [U22](plan-audit-2026-11.md#u22), [U23](plan-audit-2026-11.md#u23), [U24](plan-audit-2026-11.md#u24), [U26](plan-audit-2026-11.md#u26))
   Plusieurs corrections du parcours :
   - Ne pré-cocher que les postes dus et décocher les postes exclus.
   - N'afficher dans « à faire » que les salles qui ont quelque chose à faire.

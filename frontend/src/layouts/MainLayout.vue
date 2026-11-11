@@ -49,8 +49,17 @@
         <q-item v-if="auth.can('check', 'read')" v-ripple clickable :to="{ name: 'tasks' }">
           <q-item-section avatar><q-icon name="task_alt" /></q-item-section>
           <q-item-section>Mes tâches</q-item-section>
-          <q-item-section v-if="myTasks" side>
-            <q-badge color="primary" :label="myTasks" />
+          <!-- Two counts, two colours: the checks given to me, and the postes of
+               mine overdue for maintenance (audit U19). -->
+          <q-item-section v-if="myTasks || myOverdue" side>
+            <div class="row no-wrap q-gutter-xs">
+              <q-badge v-if="myTasks" color="primary" :label="myTasks">
+                <q-tooltip>Vérifications qui vous sont affectées</q-tooltip>
+              </q-badge>
+              <q-badge v-if="myOverdue" color="negative" :label="myOverdue">
+                <q-tooltip>Postes en retard de maintenance dont vous êtes responsable</q-tooltip>
+              </q-badge>
+            </div>
           </q-item-section>
         </q-item>
         <q-item v-if="auth.can('room', 'read')" v-ripple clickable :to="{ name: 'rooms' }">
@@ -87,6 +96,8 @@ import { onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from 'src/stores/auth';
 import { listChecks } from 'src/services/checks';
+import { getDue } from 'src/services/maintenance';
+import { tasksVersion } from 'src/composables/useTasksBadge';
 
 const drawer = ref(false);
 const auth = useAuthStore();
@@ -96,10 +107,16 @@ const router = useRouter();
 // Read once the profile is known, and again on each navigation — cheap (one
 // count) and enough for a number that changes a few times a day.
 const myTasks = ref(0);
+const myOverdue = ref(0);
 async function countMyTasks() {
   if (!auth.can('check', 'read')) return;
   try {
-    myTasks.value = (await listChecks({ open: true, assigned_to: 'me', page_size: 1 })).total;
+    const [checks, due] = await Promise.all([
+      listChecks({ open: true, assigned_to: 'me', page_size: 1 }),
+      auth.can('maintenance', 'read') ? getDue('me') : Promise.resolve(null),
+    ]);
+    myTasks.value = checks.total;
+    myOverdue.value = due?.overdue ?? 0;
   } catch {
     // The badge is a hint; the page says the truth.
   }
@@ -121,6 +138,8 @@ watch(
   () => router.currentRoute.value.fullPath,
   () => void countMyTasks(),
 );
+// A check closed or a visit recorded where the route does not change.
+watch(tasksVersion, () => void countMyTasks());
 
 // Logging out is a server call — the session is revoked there, not just
 // forgotten here — so the button waits for it rather than racing the router.
