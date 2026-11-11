@@ -461,6 +461,46 @@ async def test_an_msi_is_installed_through_msiexec(client, db_session, store):
     # Not a signed executable: only method B can carry it.
     assert body["publisher_name"] is None
 
+    # And until it is signed, no poste would run it: refused up front rather
+    # than queued for every poste to fail (audit B30).
+    machine_id, _ = await _enroll(client, "poste-msi")
+    refused = await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={
+            "type": "package_install",
+            "machine_ids": [machine_id],
+            "package_id": package["id"],
+        },
+    )
+    assert refused.status_code == 409, refused.text
+    assert "Signez le paquet" in refused.json()["error"]["details"]["problems"][0]
+
+
+async def test_method_a_refuses_a_loadable_file_beside_the_installer(
+    client, db_session, store
+):
+    """The agent would refuse it (audit S02): the server says so first."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    machine_id, _ = await _enroll(client, "poste-dll")
+    up = await client.post(
+        f"/api/v1/packages/{package['id']}/files",
+        headers=admin,
+        files=[("files", ("version.dll", b"MZ"))],
+    )
+    assert up.status_code == 200, up.text
+    refused = await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={
+            "type": "package_install",
+            "machine_ids": [machine_id],
+            "package_id": package["id"],
+        },
+    )
+    assert refused.status_code == 409, refused.text
+
 
 # --- audit T08, T09 ---------------------------------------------------------------
 

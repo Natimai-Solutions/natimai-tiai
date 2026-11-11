@@ -80,7 +80,7 @@ import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { bulkSendNotification } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
-import { listLocations } from 'src/services/machines';
+import { listLocations, listMachines } from 'src/services/machines';
 import {
   deployable,
   deployPackage,
@@ -124,6 +124,8 @@ const canUninstall = computed(
 );
 const ready = computed(() => {
   if (!chosen.value || (action.value === 'install' && !deployable(chosen.value))) return false;
+  // The dialog says no poste will run it: it does not send it either (audit B30).
+  if (action.value === 'install' && trustMethod(chosen.value) === 'none') return false;
   if (action.value === 'uninstall' && !canUninstall.value) return false;
   if (!props.machineIds?.length && scope.value === 'location' && !location.value) return false;
   return true;
@@ -156,6 +158,9 @@ watch(
     if (!open) return;
     action.value = props.initialAction ?? 'install';
     chosenId.value = null;
+    // Never the whole parc by default: the last choice must not carry over to
+    // the next opening, an uninstall least of all (audit U04).
+    scope.value = 'location';
     location.value = null;
     if (!props.machineIds?.length) {
       locations.value = (await listLocations().catch(() => [])).map((v) => v.name);
@@ -173,6 +178,52 @@ watch(
   },
 );
 
+/** How many postes the target names, for the confirmation. */
+async function targetCount(): Promise<number | null> {
+  if (props.machineIds?.length) return props.machineIds.length;
+  try {
+    const list = await listMachines(
+      scope.value === 'all' ? { page_size: 1 } : { location: location.value ?? '', page_size: 1 },
+    );
+    return list.total;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The whole parc, or any uninstall, is confirmed with the number of postes it
+ * reaches — as the bulk actions of the machine list are (audit U04).
+ */
+async function confirmed(): Promise<boolean> {
+  const wide = !props.machineIds?.length && scope.value === 'all';
+  if (!wide && action.value !== 'uninstall') return true;
+  const count = await targetCount();
+  const where =
+    count === null
+      ? wide
+        ? 'tout le parc'
+        : 'les postes visés'
+      : `${count} poste${count > 1 ? 's' : ''}${wide ? ' (tout le parc)' : ''}`;
+  const verb = action.value === 'install' ? 'Installer' : 'Désinstaller';
+  return new Promise((resolve) => {
+    $q.dialog({
+      title: `${verb} ${chosen.value?.name ?? ''}`,
+      message: `${verb} sur ${where} ?`,
+      cancel: { flat: true, noCaps: true, label: 'Annuler' },
+      ok: {
+        unelevated: true,
+        noCaps: true,
+        label: verb,
+        color: action.value === 'uninstall' ? 'negative' : 'primary',
+      },
+      persistent: true,
+    })
+      .onOk(() => resolve(true))
+      .onCancel(() => resolve(false));
+  });
+}
+
 async function send() {
   if (!chosen.value) return;
   const target: DeployTarget = props.machineIds?.length
@@ -180,6 +231,7 @@ async function send() {
     : scope.value === 'all'
       ? { target_all: true }
       : { target_location: location.value ?? '' };
+  if (!(await confirmed())) return;
   sending.value = true;
   try {
     const res = await deployPackage(chosen.value.id, action.value, target);

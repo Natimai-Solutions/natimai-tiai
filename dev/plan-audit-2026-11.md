@@ -151,7 +151,7 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
 
 Pertes de saisie, confirmations manquantes, cas secondaires de périmètre, et parcours du technicien.
 
-- [ ] **T23 — Déploiement : confirmation et refus des paquets inexécutables** ([U04](plan-audit-2026-11.md#u04), [B30](plan-audit-2026-11.md#b30))
+- [x] **T23 — Déploiement : confirmation et refus des paquets inexécutables** ([U04](plan-audit-2026-11.md#u04), [B30](plan-audit-2026-11.md#b30))
   Réinitialiser le ciblage à chaque ouverture du dialogue. Demander une confirmation qui annonce le nombre de postes pour « Tout le parc » et pour toute désinstallation. Refuser, côté serveur comme dans le dialogue, un paquet de fichiers qu'aucune méthode de confiance ne couvre.
   *Document de travail :* `plan-deploiement-logiciel.md`
 
@@ -324,6 +324,7 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T20 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Liste : un chargement demandé qui échoue après un premier succès vide les lignes et la sélection et affiche le bandeau d'erreur (vérifié en coupant l'API). Fiche : bandeau quand le poste n'a pas pu être chargé (passage au poste suivant compris), indicateur de chargement tant qu'il n'est pas là, et notification quand une actualisation demandée échoue sur une fiche déjà affichée. |
 | T21 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
 | T22 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme : le plus ancien `first_seen`, le cycle et le responsable du doublon quand la fiche gardée n'en a pas. |
+| T23 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le ciblage revient à « Un emplacement » à chaque ouverture. « Tout le parc » et toute désinstallation passent par une confirmation qui annonce le nombre de postes. Une installation que ni la méthode B (signature) ni la méthode A (exécutable d'éditeur, sans fichier chargeable à côté, mêmes règles que l'agent depuis T02) ne couvre est refusée : bouton désactivé dans le dialogue, 409 `package.not_ready` côté serveur. La désinstallation n'est pas bloquée : `msiexec /x {code}` passe en méthode A. |
 
 ## 7. Détail des constats
 

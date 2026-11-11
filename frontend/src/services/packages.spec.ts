@@ -75,6 +75,16 @@ describe('trust method', () => {
     expect(trustMethod(pkg())).toBe('none');
     // A signed MSI is not method A: only executables are.
     expect(trustMethod(pkg({ install_run: 'app.msi', publisher_name: 'X' }))).toBe('none');
+    // A DLL beside the executable: the agent refuses method A (audit S02).
+    const file = (name: string) => ({
+      name,
+      sha256: 'a'.repeat(64),
+      size: 1,
+      publisher_name: null,
+    });
+    const pronote = { publisher_name: 'INDEX EDUCATION SAS' };
+    expect(trustMethod(pkg({ ...pronote, files: [file('ClientPRONOTE.iss')] }))).toBe('publisher');
+    expect(trustMethod(pkg({ ...pronote, files: [file('VERSION.DLL')] }))).toBe('none');
   });
 
   it('deploys only what is complete and not retired', () => {

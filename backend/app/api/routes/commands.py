@@ -208,9 +208,20 @@ async def _deployable_package(
             message="This package is retired",
         )
     if package.kind == PackageKind.FILES:
-        problems = manifest.problems(
-            package, await package_crud.files_of(session, package.id)
-        )
+        files = await package_crud.files_of(session, package.id)
+        problems = manifest.problems(package, files)
+        if (
+            payload.type == CommandType.PACKAGE_INSTALL
+            and not problems
+            and not manifest.runnable_somewhere(package, files)
+        ):
+            problems = [
+                manifest.Problem(
+                    "untrusted",
+                    "Ni signé, ni lancé par un exécutable d'éditeur seul dans son "
+                    "dossier : aucun poste ne l'exécutera. Signez le paquet.",
+                )
+            ]
         if payload.type == CommandType.PACKAGE_UNINSTALL and not package.uninstall_run:
             problems = [
                 *problems,

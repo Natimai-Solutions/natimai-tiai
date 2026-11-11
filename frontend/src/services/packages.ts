@@ -81,10 +81,31 @@ export interface CreatePackagePayload extends PackageFields {
 /** Which way a package can reach a poste, as the console explains it. */
 export type TrustMethod = 'winget' | 'signed' | 'publisher' | 'none';
 
+// What the agent refuses beside the executable under method A: Windows could
+// load or run it from that folder (agent deploy.loadableExt, audit S02).
+const LOADABLE_EXTENSIONS = new Set(
+  (
+    '.dll .ocx .cpl .sys .drv .ax .acm .ime .tsp .mui .tlb .winmd .manifest .local .config ' +
+    '.exe .com .scr .pif .msi .msp .mst .msu .appx .msix .bat .cmd .ps1 .psm1 .vbs .vbe .js ' +
+    '.jse .wsf .wsh .hta .lnk .inf .jar'
+  ).split(' '),
+);
+
+function extension(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot < 0 ? '' : name.slice(dot).toLowerCase();
+}
+
 export function trustMethod(p: Package): TrustMethod {
   if (p.kind === 'winget') return 'winget';
   if (p.signed) return 'signed';
-  if (p.publisher_name && (p.install_run ?? '').toLowerCase().endsWith('.exe')) return 'publisher';
+  const run = p.install_run ?? '';
+  if (
+    p.publisher_name &&
+    run.toLowerCase().endsWith('.exe') &&
+    !(p.files ?? []).some((f) => f.name !== run && LOADABLE_EXTENSIONS.has(extension(f.name)))
+  )
+    return 'publisher';
   return 'none';
 }
 
