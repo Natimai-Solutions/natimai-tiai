@@ -99,6 +99,7 @@ import { useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { useMachineBulkActions } from 'src/composables/useMachineBulkActions';
 import { useMachineColumnLayout } from 'src/composables/useMachineColumnLayout';
 import { useMachineFleetOptions } from 'src/composables/useMachineFleetOptions';
+import { resetMachineNavigation } from 'src/composables/useMachineNavigation';
 import { commandActionGroups } from 'src/services/commands';
 import { listMachines, type ListMachinesParams, type Machine } from 'src/services/machines';
 import { useAuthStore } from 'src/stores/auth';
@@ -195,8 +196,11 @@ function buildQuery(): Record<string, string> {
 // from the dashboard, a pasted URL, a widget change and a page turn all take
 // the same path.
 function pushQuery() {
-  // A filter change starts a new search: page 1 of it, sort kept.
+  // A filter change starts a new search: page 1 of it, sort kept — and no
+  // selection carried over from the previous one, whose postes may no longer
+  // be shown (audit B05).
   pagination.value = { ...pagination.value, page: 1 };
+  selected.value = [];
   void router.replace({ query: buildQuery() });
 }
 
@@ -210,6 +214,9 @@ function onRequest(evt: {
   pagination: { sortBy?: string | null; descending?: boolean; page?: number; rowsPerPage?: number };
 }) {
   const p = evt.pagination;
+  // Another page or order shows other postes: a selection made on the rows
+  // left behind would act on postes out of sight (audit B05).
+  selected.value = [];
   pagination.value = {
     sortBy: p.sortBy ?? null,
     descending: p.descending ?? true,
@@ -337,6 +344,8 @@ const { askOpen, placeOpen, askSelection, placeSelection, runBulk } = useMachine
 });
 
 onMounted(() => {
+  // Back on the list: the next fiche opened walks this list as it is now.
+  resetMachineNavigation();
   applyQuery();
   void reload();
   loadFleetOptions();

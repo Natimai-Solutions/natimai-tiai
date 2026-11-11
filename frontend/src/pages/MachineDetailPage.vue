@@ -447,7 +447,7 @@
       :machine="machine"
       :machine-id="id"
       :duplicates="duplicates"
-      @merged="load"
+      @merged="onCheckClosed"
     />
 
     <CommandOutputDialog v-model="detailOpen" :command="detailCommand" :kind="detailKind" />
@@ -652,6 +652,7 @@ async function onMaintenanceChanged() {
   await loadInterventions(1);
 }
 
+/** The fiche and its journal: closing a check or merging a duplicate writes to both (audit B19). */
 async function onCheckClosed() {
   await load();
   await loadInterventions(1);
