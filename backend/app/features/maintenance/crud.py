@@ -10,6 +10,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
+from app.features.intervention import crud as intervention_crud
 from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
 from app.features.maintenance.models import Maintenance
@@ -152,15 +153,11 @@ async def record_session(
                 maintenance_id=visit.id,
             )
         )
-        # Forward only: recording a visit older than the last one known is
-        # history, not a step back on the cycle.
-        if (
-            machine.last_maintenance_at is None
-            or performed_at > machine.last_maintenance_at
-        ):
-            machine.last_maintenance_at = performed_at
-            machine.updated_at = utcnow()
-            session.add(machine)
+    # From the journal, like every other change to it: a visit older than the
+    # last one known is history, not a step back on the cycle.
+    await intervention_crud.recompute_last_maintenance(
+        session, [m.id for m in machines]
+    )
     return visit
 
 

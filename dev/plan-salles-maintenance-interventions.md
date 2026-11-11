@@ -719,7 +719,7 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T13** · *P1 court terme* — **Placement par l'annuaire : borner le nom de salle à la colonne** ([S07](plan-audit-2026-11.md#s07))
   Tronquer le nom en tenant compte du suffixe dans `room_for_key` (`room/crud.py:287`), aligner les bornes de `ad_location` et de `ou` sur la colonne, et isoler l'échec du placement pour qu'il ne fasse plus échouer le heartbeat en 500.
 
-- [ ] **T16** · *P1 court terme* — **Échéance de maintenance : la recalculer depuis le journal** ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17))
+- [x] **T16** · *P1 court terme* — **Échéance de maintenance : la recalculer depuis le journal** ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17))
   Recalculer `last_maintenance_at` comme le maximum des `performed_at` de type maintenance à chaque création, modification ou suppression d'une intervention. Refuser côté serveur une date future, à la séance de maintenance comme dans le journal.
 
 - [ ] **T17** · *P1 court terme* — **Responsables désactivés ou supprimés : ne plus bloquer la maintenance** ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35))

@@ -254,6 +254,73 @@ async def test_recording_a_visit_writes_the_journal_and_moves_the_cycle(
     assert rooms[0]["maintenance_overdue"] == 0
 
 
+async def test_the_cycle_follows_the_journal(client, db_session):
+    """Audit B06, B17: an entry typed in the journal moves the cycle, a
+    deleted or redated one moves it back, and a date in the future is
+    refused — at the visit as in the journal."""
+    admin, _ = await _admin(client, db_session)
+    a = await _machine(db_session, "A", first_seen_days_ago=100)
+    assert (await _detail(client, admin, a))["maintenance_state"] == "overdue"
+
+    future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
+    refused = await client.post(
+        "/api/v1/maintenance",
+        headers=admin,
+        json={"performed_at": future, "items": [{"machine_id": a}]},
+    )
+    assert refused.status_code == 422
+    refused = await client.post(
+        f"/api/v1/machines/{a}/interventions",
+        headers=admin,
+        json={"kind": "maintenance", "performed_at": future},
+    )
+    assert refused.status_code == 422
+    assert "performed_at" in refused.text
+
+    # Typed in the journal: the cycle moves.
+    entry = await client.post(
+        f"/api/v1/machines/{a}/interventions",
+        headers=admin,
+        json={"kind": "maintenance", "title": "Nettoyage"},
+    )
+    assert entry.status_code == 201, entry.text
+    entry_id = entry.json()["id"]
+    assert (await _detail(client, admin, a))["maintenance_state"] == "ok"
+
+    # Redated far back: the cycle moves back with it.
+    old = (datetime.now(UTC) - timedelta(days=400)).isoformat()
+    redated = await client.patch(
+        f"/api/v1/interventions/{entry_id}",
+        headers=admin,
+        json={"performed_at": old},
+    )
+    assert redated.status_code == 200, redated.text
+    assert (await _detail(client, admin, a))["maintenance_state"] == "overdue"
+    redated = await client.patch(
+        f"/api/v1/interventions/{entry_id}",
+        headers=admin,
+        json={"performed_at": future},
+    )
+    assert redated.status_code == 422
+
+    # A visit, then its line deleted: back to what the journal says.
+    visit = await client.post(
+        "/api/v1/maintenance", headers=admin, json={"items": [{"machine_id": a}]}
+    )
+    assert visit.status_code == 201
+    assert (await _detail(client, admin, a))["maintenance_state"] == "ok"
+    line = visit.json()["items"][0]["intervention_id"]
+    gone = await client.delete(f"/api/v1/interventions/{line}", headers=admin)
+    assert gone.status_code == 204
+    detail = await _detail(client, admin, a)
+    assert detail["maintenance_state"] == "overdue"
+    assert detail["last_maintenance_at"].startswith(old[:10])
+
+    # Nothing left in the journal: no last maintenance at all.
+    await client.delete(f"/api/v1/interventions/{entry_id}", headers=admin)
+    assert (await _detail(client, admin, a))["last_maintenance_at"] is None
+
+
 async def test_list_filters_and_sorts_on_maintenance(client, db_session):
     admin, _ = await _admin(client, db_session)
     a = await _machine(db_session, "A", first_seen_days_ago=100)

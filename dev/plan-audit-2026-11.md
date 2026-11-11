@@ -119,7 +119,7 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   Ajouter `'inventory'` à `groupOrder` (`frontend/src/services/commands.ts:324`), avec un test qui vérifie que chaque action du catalogue apparaît dans un groupe.
   *Document de travail :* `plan-inventaire.md`, `plan-commandes-distantes.md`
 
-- [ ] **T16 — Échéance de maintenance : la recalculer depuis le journal** ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17))
+- [x] **T16 — Échéance de maintenance : la recalculer depuis le journal** ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17))
   Recalculer `last_maintenance_at` comme le maximum des `performed_at` de type maintenance à chaque création, modification ou suppression d'une intervention. Refuser côté serveur une date future, à la séance de maintenance comme dans le journal.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
@@ -319,6 +319,7 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T19 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Tout entier de 1 à 99 est accepté depuis l'URL ; le menu du filtre ajoute le seuil en cours quand il n'est pas l'un des deux proposés, et la puce affiche « Moins de N % libres ». |
 | T21 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
 | T22 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme : le plus ancien `first_seen`, le cycle et le responsable du doublon quand la fiche gardée n'en a pas. |
+| T16 | 2026-11-11 | `claude/sweet-cray-xhpetg` | `recompute_last_maintenance` après toute création, modification ou suppression d'une entrée du journal, et à l'enregistrement d'une séance. Une date future (au-delà de 5 min de tolérance d'horloge) est refusée en 422 sur `performed_at`, pour la séance comme pour le journal. Migration `0031` : recalcul unique pour tout le parc, qui affiche le nombre de postes modifiés. |
 
 ## 7. Détail des constats
 

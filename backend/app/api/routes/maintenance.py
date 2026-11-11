@@ -18,6 +18,7 @@ from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permissi
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
+from app.features.intervention import crud as intervention_crud
 from app.features.intervention.models import Intervention
 from app.features.machine.models import Machine
 from app.features.maintenance import crud
@@ -134,7 +135,8 @@ class SessionCreate(BaseModel):
     or off that day is simply left out."""
 
     room_id: uuid.UUID | None = None
-    performed_at: datetime | None = None
+    # Not in the future: it would push the cycle out of reach (audit B06).
+    performed_at: intervention_crud.PastDatetime | None = None
     note: str | None = Field(default=None, max_length=5000)
     items: list[SessionItemIn] = Field(min_length=1, max_length=1000)
 
