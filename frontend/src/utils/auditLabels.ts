@@ -22,9 +22,18 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'machine.allow_reenroll': 'Ré-enrôlement autorisé',
   'machine.revoke_token': "Révocation du token d'un poste",
   'machine.merge': 'Fusion de deux fiches poste',
+  'machine.reenroll_requested': "Demande de ré-enrôlement d'un poste",
   'machine.wake_bulk': 'Réveil groupé de postes',
   'maintenance.machine_settings': "Réglage de maintenance d'un poste",
   'maintenance.room_settings': "Réglage de maintenance d'une salle",
+  'package.create': "Création d'un paquet",
+  'package.update': "Modification d'un paquet",
+  'package.upload': 'Dépôt de fichiers dans un paquet',
+  'package.file_delete': "Retrait d'un fichier d'un paquet",
+  'package.sign': "Signature d'un paquet",
+  'package.unsign': "Retrait de la signature d'un paquet",
+  'package.retire': "Retrait d'un paquet",
+  'package.restore': "Remise en service d'un paquet",
   'room.create': "Création d'une salle",
   'room.update': "Modification d'une salle",
   'room.delete': "Suppression d'une salle",
@@ -38,6 +47,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'user.update': "Modification d'un compte",
   'user.delete': "Suppression d'un compte",
   'user.reset_password': "Réinitialisation d'un mot de passe",
+  'user.locked': 'Compte verrouillé après des échecs de connexion',
 };
 
 /** Resource type → label, in the order the filter offers them. */
@@ -50,6 +60,7 @@ export const AUDIT_RESOURCE_TYPE_LABELS: Record<string, string> = {
   check: 'Vérification',
   user: 'Compte',
   group: 'Groupe',
+  package: 'Paquet',
   settings: 'Paramètres',
 };
 

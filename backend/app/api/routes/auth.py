@@ -551,6 +551,24 @@ async def change_password(
     await session.commit()
 
 
+class PasswordPolicy(BaseModel):
+    """What the password forms must say and check: configured on the server
+    (PASSWORD_MIN_LENGTH, PASSWORD_RESET_EXPIRE_MINUTES), not fixed in the
+    console (audit B24)."""
+
+    min_length: int
+    reset_expire_minutes: int
+
+
+@router.get("/password-policy", response_model=PasswordPolicy)
+async def password_policy() -> PasswordPolicy:
+    """Public: the reset page needs it before anyone is logged in."""
+    return PasswordPolicy(
+        min_length=settings.PASSWORD_MIN_LENGTH,
+        reset_expire_minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES,
+    )
+
+
 class PasswordResetRequest(BaseModel):
     """Ask for a reset link to be mailed."""
 

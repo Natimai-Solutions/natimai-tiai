@@ -199,7 +199,7 @@
               label="Mot de passe"
               outlined
               dense
-              :hint="`${PASSWORD_MIN_LENGTH} caractères minimum`"
+              :hint="`${passwordMin} caractères minimum`"
               :rules="[required, longEnough]"
             />
           </q-card-section>
@@ -233,7 +233,7 @@
                 label="Nouveau mot de passe"
                 outlined
                 dense
-                :hint="`${PASSWORD_MIN_LENGTH} caractères minimum`"
+                :hint="`${passwordMin} caractères minimum`"
                 :rules="[required, longEnough]"
               />
               <q-banner dense class="surface-orange">
@@ -285,6 +285,7 @@
 </template>
 
 <script setup lang="ts">
+import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { escapeHtml } from 'src/utils/html';
 import { onMounted, reactive, ref } from 'vue';
 import { copyToClipboard, useQuasar, type QTableColumn } from 'quasar';
@@ -292,7 +293,6 @@ import {
   createUser,
   deleteUser,
   listUsers,
-  PASSWORD_MIN_LENGTH,
   resetUserPassword,
   updateUser,
   type ConsoleUser,
@@ -302,6 +302,8 @@ import { apiErrorMessage } from 'src/services/errors';
 import type { EmailPreference } from 'src/services/auth';
 import { useAuthStore } from 'src/stores/auth';
 import { EMAIL_PREFERENCE_OPTIONS, emailPreferenceLabel, formatDateTime } from 'src/utils/format';
+
+const { passwordMin } = usePasswordPolicy();
 
 /** Locked now — `locked_until` stays set after it has passed, until the next login. */
 function isLocked(user: ConsoleUser): boolean {
@@ -373,7 +375,7 @@ const columns: QTableColumn<ConsoleUser>[] = [
 
 const required = (v: string) => !!v || 'Requis';
 const longEnough = (v: string) =>
-  v.length >= PASSWORD_MIN_LENGTH || `${PASSWORD_MIN_LENGTH} caractères minimum`;
+  v.length >= passwordMin.value || `${passwordMin.value} caractères minimum`;
 
 function isSelf(user: ConsoleUser) {
   return user.id === auth.user?.id;
@@ -396,6 +398,17 @@ async function reload() {
     if (search.value) params.search = search.value;
     const data = await listUsers(params);
     if (id !== requestId) return;
+    if (!data.items.length && data.total > 0 && p.page > 1) {
+      // The last account of the last page went (a deletion): fall back on
+      // the last page that still exists, as the journal does (audit B26).
+      pagination.value = {
+        ...pagination.value,
+        page: Math.ceil(data.total / p.rowsPerPage),
+        rowsNumber: data.total,
+      };
+      void reload();
+      return;
+    }
     rows.value = data.items;
     pagination.value = { ...pagination.value, rowsNumber: data.total };
   } catch (e) {

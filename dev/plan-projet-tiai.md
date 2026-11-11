@@ -682,7 +682,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
   - Conteneurs backend et worker : exécution sans root, `cap_drop` et `no-new-privileges`.
   - `index.html` : le servir en `no-cache`.
   - OpenAPI : le couper hors environnement local.
-- [ ] **T41** · *P3 fond* — **Console d'administration : finitions** ([B23](plan-audit-2026-11.md#b23), [B24](plan-audit-2026-11.md#b24), [B25](plan-audit-2026-11.md#b25), [B26](plan-audit-2026-11.md#b26), [B27](plan-audit-2026-11.md#b27))
+- [x] **T41** · *P3 fond* — **Console d'administration : finitions** ([B23](plan-audit-2026-11.md#b23), [B24](plan-audit-2026-11.md#b24), [B25](plan-audit-2026-11.md#b25), [B26](plan-audit-2026-11.md#b26), [B27](plan-audit-2026-11.md#b27))
   Plusieurs finitions :
   - Session expirée : un seul message, au lieu d'un toast « identifiants invalides » par requête.
   - Longueur minimale du mot de passe et durée de validité du lien : les lire depuis le serveur.

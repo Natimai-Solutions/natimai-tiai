@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from app.api.deps import CurrentAuthority, CurrentUser, SessionDep, require_permission
-from app.api.fields import Email, Password
+from app.api.fields import Email, Password, not_null
 from app.core import security
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
@@ -113,6 +113,8 @@ class UserUpdate(BaseModel):
     group_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None
     email_preference: EmailPreference | None = None
+
+    _not_null = not_null("email", "is_active", "email_preference")
 
 
 class PasswordReset(BaseModel):

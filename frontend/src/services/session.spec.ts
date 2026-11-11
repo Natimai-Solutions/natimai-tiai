@@ -10,6 +10,7 @@ import {
   singleFlight,
   type ReplayableConfig,
 } from './session';
+import { apiErrorMessage } from './errors';
 
 afterEach(() => {
   setAccessToken(null);
@@ -131,7 +132,10 @@ describe('createUnauthorizedHandler', () => {
     });
     const error = httpError(401, { url: '/machines' });
 
-    await expect(handler(error)).rejects.toBe(error);
+    // One message for every request in flight, the session's — not the
+    // server's « identifiants invalides » (audit B23).
+    const thrown = await handler(error).catch((e: unknown) => e);
+    expect(apiErrorMessage(thrown)).toBe('Votre session a pris fin : reconnectez-vous');
     expect(onSessionLost).toHaveBeenCalledTimes(1);
     expect(replay).not.toHaveBeenCalled();
   });
@@ -141,7 +145,8 @@ describe('createUnauthorizedHandler', () => {
     const { handler, onSessionLost } = setup(refresh);
     const error = httpError(401, { url: '/machines', _retriedAfterRefresh: true });
 
-    await expect(handler(error)).rejects.toBe(error);
+    const thrown = await handler(error).catch((e: unknown) => e);
+    expect((thrown as { sessionEnded?: boolean }).sessionEnded).toBe(true);
     expect(refresh).not.toHaveBeenCalled();
     expect(onSessionLost).toHaveBeenCalledTimes(1);
   });

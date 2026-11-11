@@ -65,6 +65,16 @@ describe('auditActionLabel', () => {
       'user.update',
       'user.delete',
       'user.reset_password',
+      'user.locked',
+      'machine.reenroll_requested',
+      'package.create',
+      'package.update',
+      'package.upload',
+      'package.file_delete',
+      'package.sign',
+      'package.unsign',
+      'package.retire',
+      'package.restore',
     ];
     expect(Object.keys(AUDIT_ACTION_LABELS).sort()).toEqual([...slugs].sort());
   });

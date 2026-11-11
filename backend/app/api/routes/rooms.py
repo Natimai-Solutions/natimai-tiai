@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import col, select
 
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
+from app.api.fields import not_null
 from app.api.routes.agent import clean_location
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
@@ -73,6 +74,8 @@ class BuildingUpdate(BaseModel):
     location: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
 
+    _not_null = not_null("name")
+
 
 class BuildingRef(BaseModel):
     id: uuid.UUID
@@ -125,6 +128,8 @@ class RoomUpdate(BaseModel):
     building_id: uuid.UUID | None = None
     location: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
+
+    _not_null = not_null("name")
 
 
 class RoomConfigOut(BaseModel):

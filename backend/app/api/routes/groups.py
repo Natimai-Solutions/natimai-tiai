@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentAuthority, CurrentUser, SessionDep, require_permission
+from app.api.fields import not_null
 from app.api.routes.users import reject_escalation, reject_lockout
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
@@ -119,6 +120,8 @@ class GroupUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     permissions: list[str] | None = None
     scope: ScopeBody | None = None
+
+    _not_null = not_null("name", "permissions")
 
 
 async def _require_group(session: SessionDep, group_id: uuid.UUID) -> Group:

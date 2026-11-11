@@ -1,8 +1,8 @@
 """Shared request-field types for route payloads."""
 
-from typing import Annotated
+from typing import Annotated, Any
 
-from pydantic import AfterValidator, Field
+from pydantic import AfterValidator, Field, model_validator
 
 from app.core.config import settings
 from app.features.user.models import normalize_email
@@ -21,3 +21,18 @@ Email = Annotated[
     Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=255),
     AfterValidator(normalize_email),
 ]
+
+
+def not_null(*names: str) -> Any:
+    """A model validator for a partial update: these fields may be left out,
+    not sent as null — their columns are NOT NULL, and a null used to end as
+    a 500 when written (audit B27). Assign it in the class body."""
+
+    def check(cls: Any, data: Any) -> Any:
+        if isinstance(data, dict):
+            bad = [n for n in names if n in data and data[n] is None]
+            if bad:
+                raise ValueError(f"{', '.join(bad)} : valeur requise (null refusé)")
+        return data
+
+    return model_validator(mode="before")(check)

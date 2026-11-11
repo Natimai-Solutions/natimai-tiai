@@ -713,3 +713,44 @@ async def test_cadence_is_stored_as_its_value_not_the_enum_repr(client, db_sessi
         )
     ).one()
     assert stored == "digest_events"
+
+
+async def test_the_password_policy_is_public(client):
+    """Audit B24: the console reads the configured rules."""
+    from app.core.config import settings
+
+    resp = await client.get("/api/v1/auth/password-policy")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "min_length": settings.PASSWORD_MIN_LENGTH,
+        "reset_expire_minutes": settings.PASSWORD_RESET_EXPIRE_MINUTES,
+    }
+
+
+async def test_a_required_field_sent_as_null_is_a_422(client, db_session):
+    """Audit B27: not a 500."""
+    from app.features.user import crud
+    from app.features.user.permissions import BuiltinGroup
+
+    await crud.create_user(
+        db_session,
+        email="boss@test.local",
+        password=STRONG,
+        groups=[BuiltinGroup.ADMIN],
+    )
+    target = await crud.create_user(db_session, email="t@test.local", password=STRONG)
+    target_id = str(target.id)
+    login = await client.post(
+        "/api/v1/auth/login", data={"username": "boss@test.local", "password": STRONG}
+    )
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    for body in ({"email": None}, {"is_active": None}, {"email_preference": None}):
+        resp = await client.patch(
+            f"/api/v1/users/{target_id}", headers=headers, json=body
+        )
+        assert resp.status_code == 422, (body, resp.text)
+    groups = (await client.get("/api/v1/groups", headers=headers)).json()
+    resp = await client.patch(
+        f"/api/v1/groups/{groups[0]['id']}", headers=headers, json={"name": None}
+    )
+    assert resp.status_code == 422, resp.text
