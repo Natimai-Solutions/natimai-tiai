@@ -722,10 +722,10 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T16** · *P1 court terme* — **Échéance de maintenance : la recalculer depuis le journal** ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17))
   Recalculer `last_maintenance_at` comme le maximum des `performed_at` de type maintenance à chaque création, modification ou suppression d'une intervention. Refuser côté serveur une date future, à la séance de maintenance comme dans le journal.
 
-- [ ] **T17** · *P1 court terme* — **Responsables désactivés ou supprimés : ne plus bloquer la maintenance** ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35))
+- [x] **T17** · *P1 court terme* — **Responsables désactivés ou supprimés : ne plus bloquer la maintenance** ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35))
   Traiter un responsable inactif ou supprimé comme « sans responsable » dans `resolve()`, et proposer une réaffectation à la désactivation. Les `PATCH` des vérifications, du cycle et de la carte Maintenance des réglages ne doivent plus échouer en 404 tant qu'on ne change pas ce responsable. Ouvrir la liste des responsables possibles à `maintenance:write` et `settings:write`.
 
-- [ ] **T18** · *P1 court terme* — **Suppression d'un bâtiment : gérer les noms de salle en collision** ([B07](plan-audit-2026-11.md#b07))
+- [x] **T18** · *P1 court terme* — **Suppression d'un bâtiment : gérer les noms de salle en collision** ([B07](plan-audit-2026-11.md#b07))
   Détecter la collision avant la suppression (`rooms.py:451`) et renvoyer un 409 qui liste les salles concernées, ou les renommer avec un suffixe comme le fait `room_for_key`.
 
 - [ ] **T26** · *P2 moyen terme* — **Groupes : ne plus perdre un emplacement saisi sans Entrée** ([U02](plan-audit-2026-11.md#u02))

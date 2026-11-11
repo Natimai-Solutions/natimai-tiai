@@ -497,7 +497,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 | M5 Durcissement | 🟢 JWT + rôles, provider Mailgun, notifications par compte (digest quotidien + alerte immédiate) via l'outbox e-mail et le worker, garde secrets prod, timing-safe enroll, en-têtes sécurité, rate-limit (login / reset / enroll), journal d'audit élargi + page console, rotation des tokens agents, rétention, sessions serveur révocables ; lot sécurité d'octobre (#88) : verrouillage des comptes, ré-enrôlement sur approbation, rôle PostgreSQL applicatif |
 | M6 Packaging & GPO | 🟢 release `.exe` + `.msi` signés, script GPO, doc d'exploitation ; en production dans deux lycées |
 | Transverse | 🟢 tests backend/frontend + ruff + mypy + CI (tous verts) |
-| Audit 2026-11 | 🔴 43 tâches à faire, dont 5 immédiates : sécurité, bugs et UI/UX, cf. `plan-audit-2026-11.md` |
+| Audit 2026-11 | **Immédiat et court terme faits le 2026-11-11 (T01 à T22)** : paquets de méthode A confinés côté agent, escalade par les groupes, séance de maintenance et secrets e-mail, verrouillage de compte, changement de mot de passe, paquets figés à l'approbation et fichiers orphelins, cycle de vie des commandes, échéance de maintenance recalculée (migration `0031`). **Reste :** moyen terme (T23 à T33) puis durcissements de fond (T34 à T43). **Avant de déployer :** publier la nouvelle version de l'agent (T01, T02, T10 n'ont d'effet qu'après sa mise à jour) et lire les notes de version de T03, T05 et T06, qui changent des comportements visibles. Cf. `plan-audit-2026-11.md`. |
 
 **M0 — Fondations**
 - [x] Mono-repo `/agent` `/backend` `/frontend` `/deploy`

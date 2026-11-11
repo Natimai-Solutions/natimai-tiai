@@ -1,6 +1,6 @@
 # Audit de novembre 2026 (sécurité, bugs, UI/UX) : plan de travail
 
-> **Statut : audit livré le 2026-11-10, corrections à faire.** L'audit porte sur le commit `fc5c507` (`main`, après la PR #102 du déploiement logiciel). Il a retenu **102 constats vérifiés**, regroupés en **43 tâches** classées en quatre priorités (§3) : 5 immédiates, 17 à court terme, 11 à moyen terme et 10 de fond. Chaque tâche est aussi reportée dans le document de travail du chantier qu'elle touche (§4), dans le même ordre.
+> **Statut : audit livré le 2026-11-10. Priorités 0 et 1 (T01 à T22) corrigées le 2026-11-11 (§6) ; priorités 2 et 3 à faire.** L'audit porte sur le commit `fc5c507` (`main`, après la PR #102 du déploiement logiciel). Il a retenu **102 constats vérifiés**, regroupés en **43 tâches** classées en quatre priorités (§3) : 5 immédiates, 17 à court terme, 11 à moyen terme et 10 de fond. Chaque tâche est aussi reportée dans le document de travail du chantier qu'elle touche (§4), dans le même ordre.
 >
 > **Objectif :** corriger d'abord ce qui permet une exécution de code sur les postes, une escalade de droits ou une fuite hors périmètre, puis ce qui fausse des données ou bloque une fonction, et enfin le confort d'usage.
 >
@@ -123,11 +123,11 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   Recalculer `last_maintenance_at` comme le maximum des `performed_at` de type maintenance à chaque création, modification ou suppression d'une intervention. Refuser côté serveur une date future, à la séance de maintenance comme dans le journal.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T17 — Responsables désactivés ou supprimés : ne plus bloquer la maintenance** ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35))
+- [x] **T17 — Responsables désactivés ou supprimés : ne plus bloquer la maintenance** ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35))
   Traiter un responsable inactif ou supprimé comme « sans responsable » dans `resolve()`, et proposer une réaffectation à la désactivation. Les `PATCH` des vérifications, du cycle et de la carte Maintenance des réglages ne doivent plus échouer en 404 tant qu'on ne change pas ce responsable. Ouvrir la liste des responsables possibles à `maintenance:write` et `settings:write`.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T18 — Suppression d'un bâtiment : gérer les noms de salle en collision** ([B07](plan-audit-2026-11.md#b07))
+- [x] **T18 — Suppression d'un bâtiment : gérer les noms de salle en collision** ([B07](plan-audit-2026-11.md#b07))
   Détecter la collision avant la suppression (`rooms.py:451`) et renvoyer un 409 qui liste les salles concernées, ou les renommer avec un suffixe comme le fait `room_for_key`.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
@@ -315,11 +315,15 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T11 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
 | T12 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Fait dans `xlsx_response` seulement (`ILLEGAL_CHARACTERS_RE`) : `bound_text` n'est pas touché, ses valeurs étant comparées telles que rapportées (nom d'hôte, empreinte). |
 | T13 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nom coupé à 100 caractères, suffixe « (n) » compris ; la clé (`ad_key`, 500) garde la valeur entière. Le placement tourne dans un savepoint : un échec est journalisé et n'empêche plus le heartbeat. Les bornes `ad_location` (200) et `ou_dn` (500) tenaient déjà dans `ad_key`. |
+| T14 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Fiche : `Promise.allSettled`, menaces et commandes demandées seulement avec `threat:read` / `command:read` ; sans ces droits, la carte des menaces et l'onglet Commandes sont masqués. Tableau de bord : la liste des menaces actives est masquée sans `threat:read`, et son échec n'empêche plus les compteurs. Vérifié dans un navigateur avec un compte `machine:read` seul. |
 | T15 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme ; le test qui figeait l'ordre sans `inventory` est corrigé. |
+| T16 | 2026-11-11 | `claude/sweet-cray-xhpetg` | `recompute_last_maintenance` après toute création, modification ou suppression d'une entrée du journal, et à l'enregistrement d'une séance. Une date future (au-delà de 5 min de tolérance d'horloge) est refusée en 422 sur `performed_at`, pour la séance comme pour le journal. Migration `0031` : recalcul unique pour tout le parc, qui affiche le nombre de postes modifiés. |
+| T17 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Un responsable désactivé est sauté dans la résolution (poste, puis salle, puis parc) au lieu d'être traité comme une impasse ; le responsable par défaut qui ne désigne plus aucun compte, ou un compte désactivé, vaut « aucun ». Une vérification assignée à un compte désactivé apparaît dans « À prendre ». Les `PATCH` (poste, salle, réglages, vérification) ne revalident le responsable que s'il change. `/checks/assignable-users` est ouverte à `check:read`, `maintenance:write` ou `settings:write` (nouvelle dépendance `require_any_permission`). Pas de réaffectation automatique à la désactivation : un compte réactivé retrouve ses tâches ; la console le signale à la désactivation. |
+| T18 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Option « renommer » : la salle en collision devient « Salle 101 (Bâtiment B) », numérotée au besoin, et le journal d'audit liste les renommages. |
 | T19 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Tout entier de 1 à 99 est accepté depuis l'URL ; le menu du filtre ajoute le seuil en cours quand il n'est pas l'un des deux proposés, et la puce affiche « Moins de N % libres ». |
+| T20 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Liste : un chargement demandé qui échoue après un premier succès vide les lignes et la sélection et affiche le bandeau d'erreur (vérifié en coupant l'API). Fiche : bandeau quand le poste n'a pas pu être chargé (passage au poste suivant compris), indicateur de chargement tant qu'il n'est pas là, et notification quand une actualisation demandée échoue sur une fiche déjà affichée. |
 | T21 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
 | T22 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme : le plus ancien `first_seen`, le cycle et le responsable du doublon quand la fiche gardée n'en a pas. |
-| T16 | 2026-11-11 | `claude/sweet-cray-xhpetg` | `recompute_last_maintenance` après toute création, modification ou suppression d'une entrée du journal, et à l'enregistrement d'une séance. Une date future (au-delà de 5 min de tolérance d'horloge) est refusée en 422 sur `performed_at`, pour la séance comme pour le journal. Migration `0031` : recalcul unique pour tout le parc, qui affiche le nombre de postes modifiés. |
 
 ## 7. Détail des constats
 
