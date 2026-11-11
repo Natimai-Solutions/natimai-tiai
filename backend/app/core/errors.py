@@ -66,6 +66,9 @@ class ErrorCode(enum.StrEnum):
     GROUP_BUILTIN_PROTECTED = "group.builtin.protected"
     GROUP_PERMISSION_UNKNOWN = "group.permission.unknown"
     GROUP_SCOPE_UNKNOWN = "group.scope.unknown"
+    # The SMTP host or the Mailgun URL changed and the stored secret would
+    # follow it: it must be typed again in the same request.
+    SETTINGS_EMAIL_SECRET_REQUIRED = "settings.email.secret_required"
     PACKAGE_NOT_FOUND = "package.not_found"
     PACKAGE_INVALID = "package.invalid"
     PACKAGE_FILE_TOO_LARGE = "package.file.too_large"

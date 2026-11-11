@@ -361,6 +361,15 @@ async def member_counts(
     return counts
 
 
+async def group_member_ids(
+    session: AsyncSession, group_id: uuid.UUID
+) -> list[uuid.UUID]:
+    result = await session.exec(
+        select(UserGroup.user_id).where(UserGroup.group_id == group_id)
+    )
+    return list(result.all())
+
+
 async def user_group_ids(session: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
     result = await session.exec(
         select(UserGroup.group_id).where(UserGroup.user_id == user_id)

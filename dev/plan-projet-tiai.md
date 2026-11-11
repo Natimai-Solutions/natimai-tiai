@@ -620,9 +620,9 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 
 - [ ] **T01** · *P0 immédiate* — Agent : n'accepter qu'un UUID comme identifiant de paquet ([S01](plan-audit-2026-11.md#s01)), suivi dans `plan-deploiement-logiciel.md`
 - [ ] **T02** · *P0 immédiate* — Méthode A : plus de fichier chargeable non signé à côté de l'exécutable ([S02](plan-audit-2026-11.md#s02)), suivi dans `plan-deploiement-logiciel.md`
-- [ ] **T03** · *P0 immédiate* — Groupes : contrôler l'autorité des membres à la modification ([S05](plan-audit-2026-11.md#s05)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T04** · *P0 immédiate* — Séance de maintenance : filtrer ses postes par périmètre ([S06](plan-audit-2026-11.md#s06)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T05** · *P0 immédiate* — **Réglages e-mail : ne plus réutiliser un secret stocké vers un nouvel hôte** ([S10](plan-audit-2026-11.md#s10))
+- [x] **T03** · *P0 immédiate* — Groupes : contrôler l'autorité des membres à la modification ([S05](plan-audit-2026-11.md#s05)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T04** · *P0 immédiate* — Séance de maintenance : filtrer ses postes par périmètre ([S06](plan-audit-2026-11.md#s06)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T05** · *P0 immédiate* — **Réglages e-mail : ne plus réutiliser un secret stocké vers un nouvel hôte** ([S10](plan-audit-2026-11.md#s10))
   Quand l'hôte, le port ou le mode de sécurité SMTP changent, ou l'URL ou le domaine Mailgun, exiger que le mot de passe ou la clé soient ressaisis dans la même requête, pour l'e-mail de test comme pour le `PATCH` (`settings_routes.py`).
 - [ ] **T06** · *P1 court terme* — **Verrouillage de compte : supprimer le déni de service et l'énumération** ([S03](plan-audit-2026-11.md#s03), [S12](plan-audit-2026-11.md#s12), [S13](plan-audit-2026-11.md#s13))
   Ne plus refuser le bon mot de passe pendant un verrouillage : passer à un délai progressif, ou ne verrouiller que par couple compte et adresse IP. Répondre au compte verrouillé par le même 401 générique qu'à un échec, en calculant tout de même un bcrypt. Incrémenter `failed_login_attempts` de façon atomique en base.

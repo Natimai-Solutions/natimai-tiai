@@ -710,10 +710,10 @@ L'audit du 2026-11-10 (`plan-audit-2026-11.md`) a relevé dans ce chantier deux 
 
 Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
 
-- [ ] **T03** · *P0 immédiate* — **Groupes : contrôler l'autorité des membres à la modification** ([S05](plan-audit-2026-11.md#s05))
+- [x] **T03** · *P0 immédiate* — **Groupes : contrôler l'autorité des membres à la modification** ([S05](plan-audit-2026-11.md#s05))
   Dans `PATCH /groups/{id}` (`backend/app/api/routes/groups.py`), appliquer `reject_escalation` à l'autorité de chaque membre, comme le fait `PATCH /users`, ou réserver la modification des permissions aux comptes sans restriction. Ajouter à `test_api_scope.py` le cas d'un membre partagé avec un groupe sans restriction.
 
-- [ ] **T04** · *P0 immédiate* — **Séance de maintenance : filtrer ses postes par périmètre** ([S06](plan-audit-2026-11.md#s06))
+- [x] **T04** · *P0 immédiate* — **Séance de maintenance : filtrer ses postes par périmètre** ([S06](plan-audit-2026-11.md#s06))
   Passer `scope` à `_session_out` dans le détail d'une séance (`backend/app/api/routes/maintenance.py:594`). Ajouter un test avec une séance à cheval sur deux sites.
 
 - [ ] **T13** · *P1 court terme* — **Placement par l'annuaire : borner le nom de salle à la colonne** ([S07](plan-audit-2026-11.md#s07))

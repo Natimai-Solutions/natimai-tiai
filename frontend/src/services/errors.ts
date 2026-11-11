@@ -21,7 +21,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'auth.account.locked':
     'Compte verrouillé après trop d’essais. Réessayez plus tard, ou demandez à un administrateur de réinitialiser le mot de passe.',
   'auth.permission.escalation':
-    'Refusé : vous ne pouvez accorder que les droits que vous détenez vous-même, sur les emplacements qui vous sont ouverts, et ne pouvez pas modifier un compte ou un groupe qui en détient davantage (ni les administrateurs)',
+    'Refusé : vous ne pouvez accorder que les droits que vous détenez vous-même, sur les emplacements qui vous sont ouverts, et ne pouvez pas modifier un compte ou un groupe qui en détient davantage, ni les droits d’un groupe dont un membre en détient davantage (ni les administrateurs)',
   'auth.scope.restricted':
     'Refusé : votre compte est limité à certains emplacements, et cette action en sort',
   'auth.session.invalid': 'Votre session a pris fin : reconnectez-vous',
@@ -47,6 +47,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'group.builtin.protected': 'Ce groupe intégré ne peut pas être supprimé, ni ses droits modifiés',
   'group.permission.unknown': 'Permission inconnue',
   'group.scope.unknown': 'Bâtiment ou salle inconnus dans la restriction',
+  'settings.email.secret_required':
+    'Le serveur d’envoi a changé : ressaisissez le mot de passe SMTP ou la clé API Mailgun, qui ne sont jamais envoyés à un serveur pour lequel ils n’ont pas été saisis',
   'package.not_found': 'Paquet introuvable',
   'package.invalid': 'Paquet invalide',
   'package.file.too_large': 'Fichier trop volumineux',

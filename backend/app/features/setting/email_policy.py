@@ -237,6 +237,55 @@ def resolve(stored: StoredEmailSettings, environment: Settings = env) -> EmailPo
     )
 
 
+# --- Where a secret goes ------------------------------------------------------
+
+# What decides who receives each secret: change one of these and the stored
+# password or key would leave for a server it was never typed for.
+_SECRET_DESTINATION: dict[str, tuple[str, ...]] = {
+    "smtp_password": ("smtp_host", "smtp_port", "smtp_security", "smtp_verify_tls"),
+    "mailgun_api_key": ("mailgun_base_url", "mailgun_domain"),
+}
+
+
+def _same_place(value: str) -> str:
+    """A host or URL as compared: case and a trailing slash do not move it."""
+    return value.strip().lower().rstrip("/")
+
+
+def secrets_to_retype(
+    stored: StoredEmailSettings,
+    changes: Mapping[str, Any],
+    environment: Settings = env,
+) -> list[str]:
+    """The secrets ``changes`` would send somewhere new without carrying them.
+
+    The console never shows a stored secret; it must not hand one to a
+    server chosen afterwards either (audit S10). So when the destination of
+    the SMTP password (host, port, security, certificate check turned off) or
+    of the Mailgun key (API URL, domain) changes — as resolved, environment
+    included — the secret must be typed again in the same request. A secret
+    sent as null (back to the environment's) does not count as typed.
+    """
+    before = resolve(stored, environment)
+    after = resolve(stored.merged(changes), environment)
+    out: list[str] = []
+    for secret, fields in _SECRET_DESTINATION.items():
+        if isinstance(changes.get(secret), str) or not getattr(after, secret):
+            continue
+        for name in fields:
+            old, new = getattr(before, name), getattr(after, name)
+            if name == "smtp_verify_tls":
+                moved = bool(old) and not new
+            elif isinstance(old, str) and isinstance(new, str):
+                moved = _same_place(old) != _same_place(new)
+            else:
+                moved = old != new
+            if moved:
+                out.append(secret)
+                break
+    return out
+
+
 # --- The process's last resolution ---------------------------------------------
 
 _EMPTY = StoredEmailSettings()

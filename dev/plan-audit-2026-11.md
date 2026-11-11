@@ -63,15 +63,15 @@ Exécution de code en SYSTEM sur les postes si le serveur est compromis, escalad
   En méthode A, ne télécharger que le fichier lancé : refuser un manifeste non signé qui en nomme d'autres, ou au minimum refuser les extensions chargeables (`.dll`, `.ocx`, `.cpl`, `.sys`, `.manifest`, `.local`, `.config`). Purger le répertoire du paquet avant chaque exécution.
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T03 — Groupes : contrôler l'autorité des membres à la modification** ([S05](plan-audit-2026-11.md#s05))
+- [x] **T03 — Groupes : contrôler l'autorité des membres à la modification** ([S05](plan-audit-2026-11.md#s05))
   Dans `PATCH /groups/{id}` (`backend/app/api/routes/groups.py`), appliquer `reject_escalation` à l'autorité de chaque membre, comme le fait `PATCH /users`, ou réserver la modification des permissions aux comptes sans restriction. Ajouter à `test_api_scope.py` le cas d'un membre partagé avec un groupe sans restriction.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T04 — Séance de maintenance : filtrer ses postes par périmètre** ([S06](plan-audit-2026-11.md#s06))
+- [x] **T04 — Séance de maintenance : filtrer ses postes par périmètre** ([S06](plan-audit-2026-11.md#s06))
   Passer `scope` à `_session_out` dans le détail d'une séance (`backend/app/api/routes/maintenance.py:594`). Ajouter un test avec une séance à cheval sur deux sites.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T05 — Réglages e-mail : ne plus réutiliser un secret stocké vers un nouvel hôte** ([S10](plan-audit-2026-11.md#s10))
+- [x] **T05 — Réglages e-mail : ne plus réutiliser un secret stocké vers un nouvel hôte** ([S10](plan-audit-2026-11.md#s10))
   Quand l'hôte, le port ou le mode de sécurité SMTP changent, ou l'URL ou le domaine Mailgun, exiger que le mot de passe ou la clé soient ressaisis dans la même requête, pour l'e-mail de test comme pour le `PATCH` (`settings_routes.py`).
   *Document de travail :* `plan-projet-tiai.md`
 
@@ -304,6 +304,9 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 |---|---|---|---|
 | T01 | 2026-11-11 | `claude/sweet-cray-xhpetg` | UUID canonique en minuscules exigé dès l'entrée d'`executeFiles` (avant tout décodage), puis `PackageDir` vérifie par `filepath.Rel` que le dossier est l'enfant direct de `PackagesDir`. |
 | T02 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Option « au minimum » retenue, élargie : le cas Pronote (`.exe` + `.iss`) reste possible en méthode A. Liste refusée plus large que celle de la recommandation (autres `.exe`, `.msi`/`.msp`/`.mst`, scripts, `.mui`, `.tlb`, `.inf`, `.lnk`…). Plutôt qu'une purge totale, qui casserait la reprise des gros téléchargements, l'agent retire avant chaque exécution tout ce que le manifeste ne nomme pas ; les fichiers nommés sont revérifiés par empreinte. La désinstallation `msiexec /x {code}` en méthode A ne télécharge plus aucun fichier. Guide `deploy/packages/README.md` mis à jour. |
+| T03 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Quand un non-administrateur change les permissions ou le périmètre d'un groupe, chaque membre est passé à `reject_escalation` (action `edit_members`). Renommer ou décrire le groupe reste permis. Message de la console complété. |
+| T04 | 2026-11-11 | `claude/sweet-cray-xhpetg` | En plus du détail, le décompte `machine_count` (détail et liste des séances) ne compte plus que les postes du périmètre : il révélait le nombre de postes hors périmètre. |
+| T05 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nouveau code `settings.email.secret_required` (422, `details.fields`). La destination est comparée après résolution, environnement compris : un secret remis à `null` (celui du `.env`) ne compte pas comme ressaisi. Désactiver la vérification du certificat SMTP compte comme un changement de destination ; la réactiver, non. Le message du test Mailgun ne reprend plus que le champ `message` d'une réponse JSON, plus le corps brut. |
 
 ## 7. Détail des constats
 

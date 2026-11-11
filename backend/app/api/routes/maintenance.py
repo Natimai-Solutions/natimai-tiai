@@ -474,7 +474,9 @@ async def _session_out(
         if with_items
         else []
     )
-    count = (await crud.item_counts(session, [visit.id]))[visit.id]
+    count = (await crud.item_counts(session, [visit.id], machine_clause(scope)))[
+        visit.id
+    ]
     return SessionOut(
         id=visit.id,
         room_id=visit.room_id,
@@ -549,7 +551,9 @@ async def list_sessions(
         page_size=page_size,
         where=_visit_clause(scope),
     )
-    counts = await crud.item_counts(session, [r.id for r in rows])
+    counts = await crud.item_counts(
+        session, [r.id for r in rows], machine_clause(scope)
+    )
     return SessionList(
         items=[
             SessionOut(
@@ -591,4 +595,6 @@ async def get_session(
             status_code=404,
             message="Maintenance session not found",
         )
-    return await _session_out(session, visit, with_items=True)
+    # The visit is visible through one of its postes; the others may lie
+    # outside the caller's scope (audit S06).
+    return await _session_out(session, visit, with_items=True, scope=scope)

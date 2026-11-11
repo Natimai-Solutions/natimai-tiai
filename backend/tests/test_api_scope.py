@@ -265,6 +265,38 @@ async def test_checks_and_interventions_follow_their_poste(client, db_session):
     assert r.status_code == 404
 
 
+async def test_a_visit_across_two_sites_shows_only_the_sites_postes(client, db_session):
+    """Audit S06: a visit is visible through one poste of the site, but the
+    postes of the other site stay out of its detail and its count."""
+    t = await two_sites(client, db_session)
+    r = await client.post(
+        "/api/v1/maintenance",
+        headers=t.admin,
+        json={
+            "items": [
+                {"machine_id": str(t.a.id), "note": "ok"},
+                {"machine_id": str(t.b.id), "note": "secret B"},
+            ]
+        },
+    )
+    assert r.status_code == 201, r.text
+    visit_id = r.json()["id"]
+    assert r.json()["machine_count"] == 2
+
+    detail = await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.scoped)
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert [i["machine_id"] for i in body["items"]] == [str(t.a.id)]
+    assert body["machine_count"] == 1
+    assert "secret B" not in detail.text
+
+    listed = await client.get("/api/v1/maintenance", headers=t.scoped)
+    assert [v["machine_count"] for v in listed.json()["items"]] == [1]
+
+    full = await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.admin)
+    assert len(full.json()["items"]) == 2
+
+
 async def test_the_due_list_is_the_sites(client, db_session):
     t = await two_sites(client, db_session)
 
@@ -382,6 +414,67 @@ async def test_a_confined_manager_cannot_widen_anyone(client, db_session):
         json={"scope": None},
     )
     assert lifted.status_code == 403
+
+
+async def test_a_confined_manager_cannot_widen_a_member_through_a_group(
+    client, db_session
+):
+    """Audit S05: the group stays on site A, but one of its members is also in
+    an unrestricted group — what is added here would reach the whole parc."""
+    from app.features.user import crud
+    from app.features.user.permissions import BuiltinGroup
+
+    t = await two_sites(
+        client,
+        db_session,
+        permissions=["user:read", "user:write", "machine:read", "command:execute"],
+    )
+    tech = await group(
+        db_session, "Tech A", ["machine:read"], Scope(locations=frozenset({SITE_A}))
+    )
+    await account(client, db_session, "m@test.local", [tech.id, BuiltinGroup.READONLY])
+
+    resp = await client.patch(
+        f"/api/v1/groups/{tech.id}",
+        headers=t.scoped,
+        json={"permissions": ["machine:read", "command:execute"]},
+    )
+    assert resp.status_code == 403, resp.text
+    err = resp.json()["error"]
+    assert err["code"] == "auth.permission.escalation"
+    assert err["details"]["action"] == "edit_members"
+    assert err["details"]["wider_scope"] is True
+    m = await crud.get_by_email(db_session, "m@test.local")
+    assert "command:execute" not in await crud.user_permissions(db_session, m.id)
+
+    # Renaming is no grant: still allowed.
+    renamed = await client.patch(
+        f"/api/v1/groups/{tech.id}", headers=t.scoped, json={"name": "Tech A bis"}
+    )
+    assert renamed.status_code == 200, renamed.text
+
+    # A group whose members all sit within the caller's reach: allowed.
+    alone = await group(
+        db_session,
+        "Tech A seuls",
+        ["machine:read"],
+        Scope(locations=frozenset({SITE_A})),
+    )
+    await account(client, db_session, "n@test.local", [alone.id])
+    ok = await client.patch(
+        f"/api/v1/groups/{alone.id}",
+        headers=t.scoped,
+        json={"permissions": ["machine:read", "command:execute"]},
+    )
+    assert ok.status_code == 200, ok.text
+
+    # The administrator is not held back.
+    admin = await client.patch(
+        f"/api/v1/groups/{tech.id}",
+        headers=t.admin,
+        json={"permissions": ["machine:read", "command:execute"]},
+    )
+    assert admin.status_code == 200, admin.text
 
 
 # --- e-mail ------------------------------------------------------------------------------

@@ -203,8 +203,26 @@ async def test_patch_stores_fields_and_seals_the_secret(client, db_session):
     assert entry.details["email.smtp_host"] == "smtp.office365.com"
     assert "Pa55-word-SMTP" not in str(entry.details)
 
-    # Absent = unchanged: a patch of the port keeps the stored password.
-    email = await _patch(client, admin, smtp_port=465, smtp_security="tls")
+    # Absent = unchanged: a patch of the sender keeps the stored password.
+    email = await _patch(client, admin, from_name="Tia'i")
+    assert email["smtp_password_set"] is True
+    # But the password does not follow a new port or security mode unless it
+    # is typed again (audit S10).
+    refused = await client.patch(
+        "/api/v1/settings",
+        headers=admin,
+        json={"email": {"smtp_port": 465, "smtp_security": "tls"}},
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"]["code"] == "settings.email.secret_required"
+    assert refused.json()["error"]["details"]["fields"] == ["smtp_password"]
+    email = await _patch(
+        client,
+        admin,
+        smtp_port=465,
+        smtp_security="tls",
+        smtp_password="Pa55-word-SMTP",
+    )
     assert email["smtp_port"] == 465 and email["smtp_password_set"] is True
 
     # Null = forget it, the environment's applies again; so does an empty box.
@@ -346,7 +364,9 @@ async def test_test_send_tries_unsaved_values_without_saving_them(
         smtp_password="pw-stored",
     )
 
-    resp = await client.post(
+    # The stored password does not leave for a server chosen afterwards
+    # (audit S10): nothing is sent, nothing is saved.
+    refused = await client.post(
         "/api/v1/settings/email/test",
         headers=admin,
         json={
@@ -354,18 +374,105 @@ async def test_test_send_tries_unsaved_values_without_saving_them(
             "email": {"smtp_host": "new.x.fr", "smtp_port": 2525},
         },
     )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"]["code"] == "settings.email.secret_required"
+    assert fake_smtp.instances == []
+
+    # A field that does not move the password: it is used as stored.
+    same = await client.post(
+        "/api/v1/settings/email/test",
+        headers=admin,
+        json={"to": "autre@x.fr", "email": {"from_name": "Essai"}},
+    )
+    assert same.json()["ok"] is True
+    assert fake_smtp.instances[-1].login_args == ("tiai@x.fr", "pw-stored")
+
+    resp = await client.post(
+        "/api/v1/settings/email/test",
+        headers=admin,
+        json={
+            "to": "autre@x.fr",
+            "email": {
+                "smtp_host": "new.x.fr",
+                "smtp_port": 2525,
+                "smtp_password": "pw-new",
+            },
+        },
+    )
 
     assert resp.json()["ok"] is True
-    (session,) = fake_smtp.instances
+    session = fake_smtp.instances[-1]
     assert (session.host, session.port) == ("new.x.fr", 2525)
-    # The stored password was used without being typed again.
-    assert session.login_args == ("tiai@x.fr", "pw-stored")
+    assert session.login_args == ("tiai@x.fr", "pw-new")
     assert session.sent["To"] == "autre@x.fr"
     rows = await get_all(db_session)
     assert rows["email.smtp_host"] == "old.x.fr"
     assert "email.smtp_port" not in rows
-    (entry,) = await _audit(db_session, "settings.email_test")
-    assert entry.details["unsaved"] == "smtp_host, smtp_port"
+    assert secretbox.decrypt(rows["email.smtp_password"]) == "pw-stored"
+    entry = (await _audit(db_session, "settings.email_test"))[-1]
+    assert entry.details["unsaved"] == "smtp_host, smtp_password, smtp_port"
+
+
+async def test_the_mailgun_key_does_not_follow_a_new_url(
+    client, db_session, monkeypatch
+):
+    """Audit S10: the scenario of the report, a collector URL. The
+    environment's key, which a null hands the field back to, is guarded too."""
+    from app.core.config import settings as env
+
+    monkeypatch.setattr(env, "MAILGUN_API_KEY", "key-env")
+    fake_mailgun = _mailgun_answering(monkeypatch, 200)
+    admin = await _admin(client, db_session)
+    await _patch(
+        client,
+        admin,
+        provider="mailgun",
+        mailgun_domain="mg.x.fr",
+        mailgun_api_key="key-stored",
+        from_email="tiai@x.fr",
+    )
+    for change in (
+        {"mailgun_base_url": "https://collecteur.attaquant.example"},
+        {"mailgun_domain": "autre.example"},
+        {
+            "mailgun_base_url": "https://collecteur.attaquant.example",
+            "mailgun_api_key": None,
+        },
+    ):
+        resp = await client.post(
+            "/api/v1/settings/email/test", headers=admin, json={"email": change}
+        )
+        assert resp.status_code == 422, (change, resp.text)
+        assert resp.json()["error"]["details"]["fields"] == ["mailgun_api_key"]
+        patched = await client.patch(
+            "/api/v1/settings", headers=admin, json={"email": change}
+        )
+        assert patched.status_code == 422, (change, patched.text)
+    assert fake_mailgun == []
+
+    # The same URL written differently is not a new destination.
+    ok = await client.post(
+        "/api/v1/settings/email/test",
+        headers=admin,
+        json={"email": {"mailgun_base_url": "https://API.mailgun.net/v3/"}},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["ok"] is True, ok.text
+
+
+async def test_turning_the_certificate_check_off_needs_the_password(client, db_session):
+    admin = await _admin(client, db_session)
+    await _patch(
+        client, admin, provider="smtp", smtp_host="smtp.x.fr", smtp_password="pw"
+    )
+    off = await client.patch(
+        "/api/v1/settings", headers=admin, json={"email": {"smtp_verify_tls": False}}
+    )
+    assert off.status_code == 422
+    # Back on, or a change of login, moves nothing.
+    await _patch(client, admin, smtp_verify_tls=False, smtp_password="pw")
+    await _patch(client, admin, smtp_verify_tls=True)
+    await _patch(client, admin, smtp_user="autre@x.fr")
 
 
 async def test_test_send_reports_an_smtp_refusal_in_words(

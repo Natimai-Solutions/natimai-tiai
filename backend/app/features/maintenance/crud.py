@@ -211,14 +211,21 @@ async def session_items(
 
 
 async def item_counts(
-    session: AsyncSession, maintenance_ids: list[uuid.UUID]
+    session: AsyncSession, maintenance_ids: list[uuid.UUID], where: Any = None
 ) -> dict[uuid.UUID, int]:
+    """Postes per visit. ``where`` (a clause on Machine) counts only those the
+    caller may see."""
     if not maintenance_ids:
         return {}
+    stmt = select(col(Intervention.maintenance_id), func.count())
+    if where is not None:
+        stmt = stmt.join(
+            Machine, col(Machine.id) == col(Intervention.machine_id)
+        ).where(where)
     rows = await session.exec(
-        select(col(Intervention.maintenance_id), func.count())
-        .where(col(Intervention.maintenance_id).in_(maintenance_ids))
-        .group_by(col(Intervention.maintenance_id))
+        stmt.where(col(Intervention.maintenance_id).in_(maintenance_ids)).group_by(
+            col(Intervention.maintenance_id)
+        )
     )
     counts = dict.fromkeys(maintenance_ids, 0)
     for mid, n in rows.all():
