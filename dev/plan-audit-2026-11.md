@@ -1,6 +1,6 @@
 # Audit de novembre 2026 (sécurité, bugs, UI/UX) : plan de travail
 
-> **Statut : audit livré le 2026-11-10. Priorités 0, 1 et 2 (T01 à T33) corrigées le 2026-11-11 (§6) ; priorité 3 à faire.** L'audit porte sur le commit `fc5c507` (`main`, après la PR #102 du déploiement logiciel). Il a retenu **102 constats vérifiés**, regroupés en **43 tâches** classées en quatre priorités (§3) : 5 immédiates, 17 à court terme, 11 à moyen terme et 10 de fond. Chaque tâche est aussi reportée dans le document de travail du chantier qu'elle touche (§4), dans le même ordre.
+> **Statut : audit livré le 2026-11-10. Les 43 tâches (T01 à T43) corrigées le 2026-11-11 (§6). Écart restant : les sauvegardes ne sont pas chiffrées (T40, droits 600 et documentation).** L'audit porte sur le commit `fc5c507` (`main`, après la PR #102 du déploiement logiciel). Il a retenu **102 constats vérifiés**, regroupés en **43 tâches** classées en quatre priorités (§3) : 5 immédiates, 17 à court terme, 11 à moyen terme et 10 de fond. Chaque tâche est aussi reportée dans le document de travail du chantier qu'elle touche (§4), dans le même ordre.
 >
 > **Objectif :** corriger d'abord ce qui permet une exécution de code sur les postes, une escalade de droits ou une fuite hors périmètre, puis ce qui fausse des données ou bloque une fonction, et enfin le confort d'usage.
 >
