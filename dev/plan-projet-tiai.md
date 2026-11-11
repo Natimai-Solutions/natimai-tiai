@@ -690,7 +690,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
   - Utilisateurs : revenir à la page précédente quand la dernière page se vide.
   - `PATCH` des comptes, groupes et salles : renvoyer 422 au lieu de 500 sur un champ obligatoire envoyé à `null`.
 - [ ] **T42** · *P3 fond* — Page Logiciels et filtre par logiciel ([B20](plan-audit-2026-11.md#b20), [U08](plan-audit-2026-11.md#u08), [U09](plan-audit-2026-11.md#u09)), suivi dans `plan-inventaire.md`
-- [ ] **T43** · *P3 fond* — **Console : finitions visuelles et accessibilité** ([U07](plan-audit-2026-11.md#u07), [U10](plan-audit-2026-11.md#u10), [U11](plan-audit-2026-11.md#u11), [U12](plan-audit-2026-11.md#u12), [U15](plan-audit-2026-11.md#u15), [U17](plan-audit-2026-11.md#u17), [U25](plan-audit-2026-11.md#u25), [U27](plan-audit-2026-11.md#u27), [U28](plan-audit-2026-11.md#u28), [U29](plan-audit-2026-11.md#u29), [U30](plan-audit-2026-11.md#u30))
+- [x] **T43** · *P3 fond* — **Console : finitions visuelles et accessibilité** ([U07](plan-audit-2026-11.md#u07), [U10](plan-audit-2026-11.md#u10), [U11](plan-audit-2026-11.md#u11), [U12](plan-audit-2026-11.md#u12), [U15](plan-audit-2026-11.md#u15), [U17](plan-audit-2026-11.md#u17), [U25](plan-audit-2026-11.md#u25), [U27](plan-audit-2026-11.md#u27), [U28](plan-audit-2026-11.md#u28), [U29](plan-audit-2026-11.md#u29), [U30](plan-audit-2026-11.md#u30))
   Plusieurs finitions :
   - Tableau de bord : n'afficher l'état vide qu'une fois les données chargées.
   - Retour arrière : restaurer la position de défilement.

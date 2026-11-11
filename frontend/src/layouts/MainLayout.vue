@@ -7,7 +7,8 @@
           <q-icon name="shield" class="q-mr-sm" />
           Tia'i — Console
         </q-toolbar-title>
-        <div v-if="auth.user" class="text-caption q-mr-sm">{{ auth.user.email }}</div>
+        <!-- Not on a phone: it pushed the title down to « Tia'i … » (U29). -->
+        <div v-if="auth.user" class="text-caption q-mr-sm gt-xs">{{ auth.user.email }}</div>
         <q-btn
           flat
           dense

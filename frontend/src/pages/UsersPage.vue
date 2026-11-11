@@ -151,6 +151,7 @@
               v-model="form.email"
               type="email"
               label="E-mail"
+              autocomplete="off"
               outlined
               dense
               autofocus
@@ -196,6 +197,7 @@
               v-if="!editing"
               v-model="form.password"
               type="password"
+              autocomplete="new-password"
               label="Mot de passe"
               outlined
               dense
@@ -230,6 +232,7 @@
                 v-if="resetMode === 'manual'"
                 v-model="resetPassword"
                 type="password"
+                autocomplete="new-password"
                 label="Nouveau mot de passe"
                 outlined
                 dense

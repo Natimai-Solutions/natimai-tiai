@@ -113,8 +113,8 @@
               </q-item-section>
               <q-item-section side>{{ formatDateTime(m.last_seen) }}</q-item-section>
             </q-item>
-            <q-item v-if="!outdated.length">
-              <q-item-section class="text-muted">Aucun poste non à jour.</q-item-section>
+            <q-item v-if="outdatedLoaded && !outdated.length">
+              <q-item-section class="text-muted">Tous les postes sont à jour.</q-item-section>
             </q-item>
           </q-list>
         </q-card>
@@ -142,7 +142,7 @@
               </q-item-section>
               <q-item-section side>{{ formatDateTime(t.detected_at) }}</q-item-section>
             </q-item>
-            <q-item v-if="!threats.length">
+            <q-item v-if="threatsLoaded && !threats.length">
               <q-item-section class="text-muted">Aucune menace active.</q-item-section>
             </q-item>
           </q-list>
@@ -167,6 +167,10 @@ const stats = ref<StatsOverview | null>(null);
 const outdated = ref<Machine[]>([]);
 const threats = ref<Threat[]>([]);
 const loading = ref(false);
+// The empty messages say something only once their list has loaded: before
+// that, or after a failure, « aucune menace » would be a claim (audit U07).
+const outdatedLoaded = ref(false);
+const threatsLoaded = ref(false);
 
 interface Kpi {
   label: string;
@@ -377,7 +381,9 @@ async function fetchAll() {
   ]);
   stats.value = s;
   outdated.value = mergeOutdated(av.items, wuBehind.items);
+  outdatedLoaded.value = true;
   if (t) threats.value = t.items;
+  threatsLoaded.value = t !== null;
 }
 
 // The dashboard is a wall screen as much as a page: left open, it has to keep

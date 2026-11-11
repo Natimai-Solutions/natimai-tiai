@@ -895,7 +895,8 @@ function confirmRevoke() {
     message:
       'Le poste sera coupé du serveur et ne pourra pas revenir — même avec le secret du parc — ' +
       'tant que le ré-enrôlement ne sera pas autorisé depuis cette page. Continuer ?',
-    cancel: true,
+    cancel: { flat: true, noCaps: true, label: 'Annuler' },
+    ok: { unelevated: true, noCaps: true, label: 'Révoquer', color: 'negative' },
     persistent: true,
   }).onOk(() => {
     void doRevoke();
@@ -918,7 +919,8 @@ function confirmAllowReenroll() {
     message:
       "L'ancien token reste invalide ; le poste reviendra de lui-même à sa prochaine tentative " +
       "d'enrôlement, dans les minutes qui suivent s'il est allumé. Continuer ?",
-    cancel: true,
+    cancel: { flat: true, noCaps: true, label: 'Annuler' },
+    ok: { unelevated: true, noCaps: true, label: 'Autoriser' },
     persistent: true,
   }).onOk(() => {
     void doAllowReenroll();

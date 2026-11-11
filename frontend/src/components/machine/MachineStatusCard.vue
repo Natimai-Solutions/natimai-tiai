@@ -4,7 +4,12 @@
     <q-card-section class="row q-col-gutter-md">
       <div class="col-6 col-sm-4 col-md">
         <div class="text-caption text-muted">Antivirus</div>
-        <q-badge :color="protectionColor(machine.is_up_to_date)" class="q-mt-xs">
+        <!-- The badge speaks of the product it names: grey « Non relevé »,
+             red « Aucun » — the protection state is the line below (U28). -->
+        <q-badge
+          :color="antivirusColor(machine.av_product_name, machine.av_product_enabled)"
+          class="q-mt-xs"
+        >
           {{ antivirusLabel(machine.av_product_name) }}
         </q-badge>
         <div class="text-caption q-mt-xs">{{ protectionLabel(machine.is_up_to_date) }}</div>
@@ -109,7 +114,7 @@ import {
   onlineColor,
   onlineIcon,
   onlineLabel,
-  protectionColor,
+  antivirusColor,
   protectionLabel,
   sessionColor,
   sessionLabel,

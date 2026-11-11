@@ -427,7 +427,9 @@
                 :disable="!canWrite"
               />
               <div class="text-caption text-muted">
-                Non seulement pour un relais interne à certificat privé · valeur du serveur :
+                À ne désactiver que pour un relais interne à certificat privé : sans vérification,
+                une interception du trafic SMTP (et du mot de passe) passe inaperçue · valeur du
+                serveur :
                 {{ settings.email.env.smtp_verify_tls ? 'oui' : 'non' }}
               </div>
             </div>
@@ -963,6 +965,23 @@ onMounted(load);
 .env-key {
   width: 30%;
   white-space: nowrap;
+}
+/* Phone: the long keys no longer squeeze the description into a sliver —
+   each line stacks, key and value above, description below (audit U27). */
+@media (max-width: 599px) {
+  .env-table tr,
+  .env-table td {
+    display: block;
+    width: 100%;
+  }
+  .env-key {
+    white-space: normal;
+    word-break: break-all;
+    padding-bottom: 0;
+  }
+  .env-value {
+    padding-top: 0;
+  }
 }
 .env-value {
   width: 20%;
