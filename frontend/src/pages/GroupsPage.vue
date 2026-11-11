@@ -205,6 +205,8 @@
                   use-input
                   new-value-mode="add-unique"
                   hint="Tels que les agents les déclarent ; saisie libre possible"
+                  @input-value="locationTyping = $event"
+                  @blur="commitTypedLocation"
                 />
                 <q-select
                   v-model="form.scope.buildings"
@@ -373,7 +375,43 @@ function openEdit(group: Group) {
   formOpen.value = true;
 }
 
+// What is typed in « Emplacements » and not yet a chip: Quasar keeps it only
+// on Entrée, and drops it when the field loses focus — the group would then
+// be saved with no restriction at all (audit U02).
+const locationTyping = ref('');
+
+function commitTypedLocation() {
+  const typed = locationTyping.value.trim();
+  locationTyping.value = '';
+  if (typed && !form.scope.locations.includes(typed)) {
+    form.scope.locations = [...form.scope.locations, typed];
+  }
+}
+
+/** Saving a group that reaches the whole parc is said, then confirmed. */
+function confirmWholeParc(): Promise<boolean> {
+  const restrictedBefore = editing.value ? editing.value.scope !== null : true;
+  if (editing.value?.is_admin || scopeOrNull(form.scope) !== null || !restrictedBefore) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    $q.dialog({
+      title: 'Tout le parc',
+      message:
+        'Aucun emplacement, bâtiment ni salle n’est choisi : les membres de ce groupe ' +
+        'verront tous les postes et pourront y exercer ses droits. Enregistrer ainsi ?',
+      cancel: { flat: true, noCaps: true, label: 'Revenir au formulaire' },
+      ok: { unelevated: true, noCaps: true, label: 'Enregistrer pour tout le parc' },
+      persistent: true,
+    })
+      .onOk(() => resolve(true))
+      .onCancel(() => resolve(false));
+  });
+}
+
 async function submitForm() {
+  commitTypedLocation();
+  if (!(await confirmWholeParc())) return;
   saving.value = true;
   try {
     if (editing.value) {

@@ -167,7 +167,7 @@ Pertes de saisie, confirmations manquantes, cas secondaires de périmètre, et p
   Valider le texte en cours de saisie à la perte du focus et avant l'enregistrement, et demander confirmation avant d'enregistrer un groupe qui s'ouvrirait à tout le parc (`GroupsPage.vue:197`).
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T27 — Afficher les messages d'erreur utiles du backend** ([U03](plan-audit-2026-11.md#u03))
+- [x] **T27 — Afficher les messages d'erreur utiles du backend** ([U03](plan-audit-2026-11.md#u03))
   Pour les codes dont le message est rédigé pour l'utilisateur (`package.invalid` en tête), afficher le détail. Pour une erreur de validation, nommer le champ fautif (`errors.ts:90`).
   *Document de travail :* `plan-projet-tiai.md`
 
@@ -327,6 +327,7 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T23 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le ciblage revient à « Un emplacement » à chaque ouverture. « Tout le parc » et toute désinstallation passent par une confirmation qui annonce le nombre de postes. Une installation que ni la méthode B (signature) ni la méthode A (exécutable d'éditeur, sans fichier chargeable à côté, mêmes règles que l'agent depuis T02) ne couvre est refusée : bouton désactivé dans le dialogue, 409 `package.not_ready` côté serveur. La désinstallation n'est pas bloquée : `msiexec /x {code}` passe en méthode A. |
 | T24 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Les actions secondaires (dépôt, retrait d'un fichier, signature, retrait du paquet) ne mettent à jour que les champs que le lecteur n'a pas modifiés ; un indicateur « Modifications non enregistrées » et une confirmation en quittant la page signalent la saisie en cours. Dépôt : un fichier par requête (progression globale), taille vérifiée avant l'envoi contre le plafond par défaut de 2 Gio, bouton Annuler (`AbortController`), 413 du proxy traduit. Caddy passe à `2GiB`. Nouveau code `package.file.not_found`. |
 | T25 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nouvelle route `GET /commands/package-summary?package_id=` (`command:read`, filtrée par périmètre) : le dernier déploiement de chaque poste, compté par statut et par action. La fiche paquet l'affiche en puces au-dessus d'un tableau paginé côté serveur (25, 50 ou 100 lignes). Une puce filtre le tableau par statut ; le filtre porte sur tout l'historique, la puce sur le dernier déploiement de chaque poste. |
+| T27 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le libellé du code reste en tête, complété : par le message du serveur pour `package.invalid` ; par le champ fautif et sa raison pour `request.validation_error` (premier champ de `details.errors`, nommé en français pour les plus courants) ; par la liste des problèmes pour `package.not_ready`. La fiche paquet valide aussi côté client le nom, l'identifiant winget, les arguments exigés par msiexec et les codes de sortie, avec les règles du serveur. |
 
 ## 7. Détail des constats
 

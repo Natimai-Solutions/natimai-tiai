@@ -51,7 +51,14 @@
           <q-card-section class="text-subtitle1">Définition</q-card-section>
           <q-form @submit="save">
             <q-card-section class="q-gutter-sm">
-              <q-input v-model="form.name" label="Nom" outlined dense :readonly="!canWrite" />
+              <q-input
+                v-model="form.name"
+                label="Nom"
+                outlined
+                dense
+                :rules="[rules.name]"
+                :readonly="!canWrite"
+              />
               <q-input
                 v-model="form.version"
                 label="Version"
@@ -65,6 +72,7 @@
                   label="Identifiant winget"
                   outlined
                   dense
+                  :rules="[rules.wingetId]"
                   :readonly="!canWrite"
                 />
                 <q-input
@@ -90,6 +98,7 @@
                   label="Arguments d'installation"
                   outlined
                   dense
+                  :rules="[(v: string) => rules.msiexecArgs(form.install_run, v)]"
                   :readonly="!canWrite"
                   hint='Ex. -s -f1"{dir}\ClientPRONOTE.iss" — {dir} = dossier des fichiers sur le poste'
                 />
@@ -107,6 +116,7 @@
                   label="Arguments de désinstallation"
                   outlined
                   dense
+                  :rules="[(v: string) => rules.msiexecArgs(form.uninstall_run, v)]"
                   :readonly="!canWrite"
                   hint="Avec msiexec : /x {code produit} /qn"
                 />
@@ -115,6 +125,7 @@
                   label="Codes de sortie acceptés"
                   outlined
                   dense
+                  :rules="[rules.successCodes]"
                   :readonly="!canWrite"
                   hint="Séparés par des virgules. 3010 et 1641 = redémarrage requis."
                 />
@@ -140,7 +151,7 @@
               <span v-if="pkg.signed" class="text-caption text-muted q-mr-md">
                 Modifier la ligne de commande annule la signature.
               </span>
-              <span v-if="dirty" class="text-caption text-warning q-mr-md">
+              <span v-if="dirty" class="text-caption text-warn q-mr-md">
                 Modifications non enregistrées
               </span>
               <q-btn type="submit" color="primary" no-caps label="Enregistrer" :loading="saving" />
@@ -590,6 +601,25 @@ function toggleStatusFilter(status: string) {
   commandPagination.value = { ...commandPagination.value, page: 1 };
   void loadCommands();
 }
+
+// What the server would refuse, said under the field before sending
+// (audit U03) — the same rules as backend/app/api/routes/packages.py.
+const rules = {
+  name: (v: string) => !!v.trim() || 'Nom requis',
+  wingetId: (v: string) =>
+    /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(v.trim()) ||
+    'Identifiant winget invalide (ex. Mozilla.Firefox)',
+  msiexecArgs: (run: string | null, v: string) =>
+    run !== 'msiexec' ||
+    splitArgs(v).length > 0 ||
+    'Avec msiexec, indiquer les arguments (ex. /i "{dir}\\app.msi" /qn)',
+  successCodes: (v: string) => {
+    const parts = v.split(/[,;\s]+/).filter(Boolean);
+    if (!parts.length) return 'Au moins un code (ex. 0, 3010, 1641)';
+    if (parts.length > 32) return '32 codes au plus';
+    return parts.every((p) => /^-?\d+$/.test(p)) || 'Des nombres entiers, séparés par des virgules';
+  },
+};
 
 function notifyError(e: unknown, fallback: string) {
   $q.notify({ type: 'negative', message: apiErrorMessage(e, fallback) });

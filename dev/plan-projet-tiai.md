@@ -651,7 +651,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [ ] **T24** · *P2 moyen terme* — Fiche paquet : saisie préservée, dépôt contrôlé, messages justes ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36)), suivi dans `plan-deploiement-logiciel.md`
 - [ ] **T25** · *P2 moyen terme* — Fiche paquet : pagination et bilan des déploiements ([B14](plan-audit-2026-11.md#b14)), suivi dans `plan-deploiement-logiciel.md`
 - [ ] **T26** · *P2 moyen terme* — Groupes : ne plus perdre un emplacement saisi sans Entrée ([U02](plan-audit-2026-11.md#u02)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T27** · *P2 moyen terme* — **Afficher les messages d'erreur utiles du backend** ([U03](plan-audit-2026-11.md#u03))
+- [x] **T27** · *P2 moyen terme* — **Afficher les messages d'erreur utiles du backend** ([U03](plan-audit-2026-11.md#u03))
   Pour les codes dont le message est rédigé pour l'utilisateur (`package.invalid` en tête), afficher le détail. Pour une erreur de validation, nommer le champ fautif (`errors.ts:90`).
 - [ ] **T28** · *P2 moyen terme* — **Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
   Pour chaque carte de réglages : champ requis, entier, dans les bornes du serveur, erreur affichée sous le champ et bouton Enregistrer désactivé tant qu'elle persiste. Ne plus convertir un champ vide en 0 (`SettingsPage.vue:844`).
