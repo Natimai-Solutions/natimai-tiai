@@ -173,5 +173,5 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T11** · *P1 court terme* — **Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
   Ajouter `order_by(created_at, id)` à la sélection du heartbeat (`agent.py:815`), avec un test : « installer les MAJ » puis « redémarrer » doivent être remises dans cet ordre.
 
-- [ ] **T15** · *P1 court terme* — **Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
+- [x] **T15** · *P1 court terme* — **Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
   Ajouter `'inventory'` à `groupOrder` (`frontend/src/services/commands.ts:324`), avec un test qui vérifie que chaque action du catalogue apparaît dans un groupe.

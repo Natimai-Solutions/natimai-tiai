@@ -645,13 +645,13 @@ L'audit du 2026-11-10 (`plan-audit-2026-11.md`) a relevé dans ce chantier des d
 
 Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
 
-- [ ] **T12** · *P1 court terme* — **Export Excel : neutraliser les caractères de contrôle** ([S11](plan-audit-2026-11.md#s11))
+- [x] **T12** · *P1 court terme* — **Export Excel : neutraliser les caractères de contrôle** ([S11](plan-audit-2026-11.md#s11))
   Dans `xlsx_response`, retirer les caractères refusés par openpyxl (`ILLEGAL_CHARACTERS_RE`), et idéalement dès la réception du heartbeat, dans `bound_text`.
 
-- [ ] **T15** · *P1 court terme* — **Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
+- [x] **T15** · *P1 court terme* — **Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
   Ajouter `'inventory'` à `groupOrder` (`frontend/src/services/commands.ts:324`), avec un test qui vérifie que chaque action du catalogue apparaît dans un groupe.
 
-- [ ] **T19** · *P1 court terme* — **Carte « Disque presque plein » : respecter le seuil réglé** ([B01](plan-audit-2026-11.md#b01))
+- [x] **T19** · *P1 court terme* — **Carte « Disque presque plein » : respecter le seuil réglé** ([B01](plan-audit-2026-11.md#b01))
   Accepter tout seuil de 1 à 99 dans `machineFiltersFromQuery` (`machineListFilters.ts:314`) et l'afficher dans la puce de filtre.
 
 - [ ] **T36** · *P3 fond* — **Données déclarées par l'agent : placement en salle et catalogue logiciel** ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21))

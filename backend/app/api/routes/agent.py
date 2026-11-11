@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import col, select
 from starlette.background import BackgroundTask
 
@@ -50,6 +51,7 @@ from app.features.wol import relay as wol_relay
 from app.features.wol.packet import normalize_mac
 
 security_log = logging.getLogger("app.security")
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -774,7 +776,21 @@ async def heartbeat(
             machine.ad_ou = directory.ou
             machine.ad_ou_dn = directory.ou_dn
             machine.ad_location = directory.ad_location
-            await room_crud.place_from_directory(session, machine, settings.ROOM_SOURCE)
+            # In a savepoint: whatever the directory says, a placement that
+            # fails must not fail the heartbeat — the Defender state, the
+            # threats and the commands ride the same request (audit S07).
+            try:
+                async with session.begin_nested():
+                    await room_crud.place_from_directory(
+                        session, machine, settings.ROOM_SOURCE
+                    )
+            except SQLAlchemyError:
+                logger.exception(
+                    "directory placement failed for machine %s", machine.id
+                )
+                # The rollback of the savepoint may have expired the row: read
+                # it again now, not lazily later (no implicit I/O in async).
+                await session.refresh(machine)
 
     if payload.fingerprint is not None:
         fp = payload.fingerprint

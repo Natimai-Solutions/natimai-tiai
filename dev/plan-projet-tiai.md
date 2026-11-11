@@ -643,9 +643,9 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [ ] **T19** · *P1 court terme* — Carte « Disque presque plein » : respecter le seuil réglé ([B01](plan-audit-2026-11.md#b01)), suivi dans `plan-inventaire.md`
 - [ ] **T20** · *P1 court terme* — **Liste et fiche des postes : signaler les échecs de chargement** ([B04](plan-audit-2026-11.md#b04), [U01](plan-audit-2026-11.md#u01))
   Distinguer le rafraîchissement automatique, qui reste silencieux, du chargement demandé : sur ce dernier, notifier l'erreur et vider ou griser les lignes périmées. Sur la fiche, afficher un état de chargement ou d'erreur quand on passe au poste précédent ou suivant.
-- [ ] **T21** · *P1 court terme* — **`useAutoRefresh` : plus de relance après le démontage** ([B11](plan-audit-2026-11.md#b11))
+- [x] **T21** · *P1 court terme* — **`useAutoRefresh` : plus de relance après le démontage** ([B11](plan-audit-2026-11.md#b11))
   Ajouter un drapeau `disposed` et ne relancer le minuteur que s'il est faux. Couvrir le cas dans le test du composable.
-- [ ] **T22** · *P1 court terme* — **Fusion de postes : conserver `first_seen` et les réglages de maintenance** ([B03](plan-audit-2026-11.md#b03))
+- [x] **T22** · *P1 court terme* — **Fusion de postes : conserver `first_seen` et les réglages de maintenance** ([B03](plan-audit-2026-11.md#b03))
   Dans `merge_into`, garder le plus ancien `first_seen` et reprendre le cycle et le responsable de maintenance quand la cible n'en a pas. Ajouter un test.
 - [ ] **T23** · *P2 moyen terme* — Déploiement : confirmation et refus des paquets inexécutables ([U04](plan-audit-2026-11.md#u04), [B30](plan-audit-2026-11.md#b30)), suivi dans `plan-deploiement-logiciel.md`
 - [ ] **T24** · *P2 moyen terme* — Fiche paquet : saisie préservée, dépôt contrôlé, messages justes ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36)), suivi dans `plan-deploiement-logiciel.md`

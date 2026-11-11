@@ -965,6 +965,43 @@ async def test_merge_reassigns_history_and_clears_flag(client, db_session):
     assert cmds_b.json()["total"] == 1
 
 
+async def test_merge_keeps_first_seen_and_maintenance_settings(client, db_session):
+    """Audit B03: the kept record inherits the older first_seen, and the
+    cycle and owner of the duplicate when it has none."""
+    import uuid as _uuid
+
+    from sqlmodel import select
+
+    from app.features.base import utcnow
+    from app.features.machine.models import Machine
+    from app.features.user import crud as user_crud
+
+    headers = await _admin_headers(client, db_session)
+    owner = await user_crud.get_by_email(db_session, "admin@test.local")
+    assert owner is not None
+    owner_id = owner.id
+    a = await _enroll(client, "m-old", fingerprint={"smbios_uuid": "SMB-FS"})
+    b = await _enroll(client, "m-new", fingerprint={"smbios_uuid": "SMB-FS"})
+    a_id, b_id = _uuid.UUID(a["machine_id"]), _uuid.UUID(b["machine_id"])
+    long_ago = utcnow() - timedelta(days=400)
+    old = (await db_session.exec(select(Machine).where(Machine.id == a_id))).one()
+    old.first_seen = long_ago
+    old.maintenance_cycle_days = 90
+    old.maintenance_owner_id = owner_id
+    db_session.add(old)
+    await db_session.commit()
+
+    merged = await client.post(
+        f"/api/v1/machines/{b_id}/merge", headers=headers, json={"source_id": str(a_id)}
+    )
+    assert merged.status_code == 200, merged.text
+    db_session.expire_all()
+    kept = (await db_session.exec(select(Machine).where(Machine.id == b_id))).one()
+    assert abs((kept.first_seen - long_ago).total_seconds()) < 1
+    assert kept.maintenance_cycle_days == 90
+    assert kept.maintenance_owner_id == owner_id
+
+
 async def test_merge_dedups_colliding_threats(client, db_session):
     headers = await _admin_headers(client, db_session)
     a = await _enroll(client, "mt-a", fingerprint={"smbios_uuid": "SMB-MT"})

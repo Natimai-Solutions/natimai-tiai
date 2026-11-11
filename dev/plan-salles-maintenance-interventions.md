@@ -716,7 +716,7 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T04** · *P0 immédiate* — **Séance de maintenance : filtrer ses postes par périmètre** ([S06](plan-audit-2026-11.md#s06))
   Passer `scope` à `_session_out` dans le détail d'une séance (`backend/app/api/routes/maintenance.py:594`). Ajouter un test avec une séance à cheval sur deux sites.
 
-- [ ] **T13** · *P1 court terme* — **Placement par l'annuaire : borner le nom de salle à la colonne** ([S07](plan-audit-2026-11.md#s07))
+- [x] **T13** · *P1 court terme* — **Placement par l'annuaire : borner le nom de salle à la colonne** ([S07](plan-audit-2026-11.md#s07))
   Tronquer le nom en tenant compte du suffixe dans `room_for_key` (`room/crud.py:287`), aligner les bornes de `ad_location` et de `ou` sur la colonne, et isoler l'échec du placement pour qu'il ne fasse plus échouer le heartbeat en 500.
 
 - [ ] **T16** · *P1 court terme* — **Échéance de maintenance : la recalculer depuis le journal** ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17))

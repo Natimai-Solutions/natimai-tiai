@@ -258,6 +258,10 @@ def directory_key(machine: Machine, source: str) -> tuple[str, str] | None:
     return None
 
 
+# rooms.name is a VARCHAR(100).
+ROOM_NAME_MAX = 100
+
+
 async def room_for_key(session: AsyncSession, key: str, name: str) -> tuple[Room, bool]:
     """The room the directory names by ``key``, created if missing.
 
@@ -279,10 +283,14 @@ async def room_for_key(session: AsyncSession, key: str, name: str) -> tuple[Room
         session.add(loose)
         await session.flush()
         return loose, False
+    # The directory allows far longer than the column (an AD « location » of
+    # 125 characters is ordinary): cut, the suffix included (audit S07).
+    name = name.strip()[:ROOM_NAME_MAX].strip() or key[:ROOM_NAME_MAX]
     candidate = name
     n = 2
     while await room_by_name(session, None, candidate) is not None:
-        candidate = f"{name} ({n})"
+        suffix = f" ({n})"
+        candidate = name[: ROOM_NAME_MAX - len(suffix)].rstrip() + suffix
         n += 1
     room = Room(name=candidate, ad_key=key)
     session.add(room)

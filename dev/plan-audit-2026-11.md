@@ -103,11 +103,11 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   Ajouter `order_by(created_at, id)` à la sélection du heartbeat (`agent.py:815`), avec un test : « installer les MAJ » puis « redémarrer » doivent être remises dans cet ordre.
   *Document de travail :* `plan-commandes-distantes.md`, `plan-phase2-windows-update.md`
 
-- [ ] **T12 — Export Excel : neutraliser les caractères de contrôle** ([S11](plan-audit-2026-11.md#s11))
+- [x] **T12 — Export Excel : neutraliser les caractères de contrôle** ([S11](plan-audit-2026-11.md#s11))
   Dans `xlsx_response`, retirer les caractères refusés par openpyxl (`ILLEGAL_CHARACTERS_RE`), et idéalement dès la réception du heartbeat, dans `bound_text`.
   *Document de travail :* `plan-inventaire.md`
 
-- [ ] **T13 — Placement par l'annuaire : borner le nom de salle à la colonne** ([S07](plan-audit-2026-11.md#s07))
+- [x] **T13 — Placement par l'annuaire : borner le nom de salle à la colonne** ([S07](plan-audit-2026-11.md#s07))
   Tronquer le nom en tenant compte du suffixe dans `room_for_key` (`room/crud.py:287`), aligner les bornes de `ad_location` et de `ou` sur la colonne, et isoler l'échec du placement pour qu'il ne fasse plus échouer le heartbeat en 500.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
@@ -115,7 +115,7 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   Ne charger les menaces et les commandes que si l'utilisateur a le droit de les lire, et charger les données annexes avec `Promise.allSettled` (`MachineDetailPage.vue:750`, `DashboardPage.vue`).
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T15 — Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
+- [x] **T15 — Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
   Ajouter `'inventory'` à `groupOrder` (`frontend/src/services/commands.ts:324`), avec un test qui vérifie que chaque action du catalogue apparaît dans un groupe.
   *Document de travail :* `plan-inventaire.md`, `plan-commandes-distantes.md`
 
@@ -131,7 +131,7 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   Détecter la collision avant la suppression (`rooms.py:451`) et renvoyer un 409 qui liste les salles concernées, ou les renommer avec un suffixe comme le fait `room_for_key`.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T19 — Carte « Disque presque plein » : respecter le seuil réglé** ([B01](plan-audit-2026-11.md#b01))
+- [x] **T19 — Carte « Disque presque plein » : respecter le seuil réglé** ([B01](plan-audit-2026-11.md#b01))
   Accepter tout seuil de 1 à 99 dans `machineFiltersFromQuery` (`machineListFilters.ts:314`) et l'afficher dans la puce de filtre.
   *Document de travail :* `plan-inventaire.md`
 
@@ -139,11 +139,11 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   Distinguer le rafraîchissement automatique, qui reste silencieux, du chargement demandé : sur ce dernier, notifier l'erreur et vider ou griser les lignes périmées. Sur la fiche, afficher un état de chargement ou d'erreur quand on passe au poste précédent ou suivant.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T21 — `useAutoRefresh` : plus de relance après le démontage** ([B11](plan-audit-2026-11.md#b11))
+- [x] **T21 — `useAutoRefresh` : plus de relance après le démontage** ([B11](plan-audit-2026-11.md#b11))
   Ajouter un drapeau `disposed` et ne relancer le minuteur que s'il est faux. Couvrir le cas dans le test du composable.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T22 — Fusion de postes : conserver `first_seen` et les réglages de maintenance** ([B03](plan-audit-2026-11.md#b03))
+- [x] **T22 — Fusion de postes : conserver `first_seen` et les réglages de maintenance** ([B03](plan-audit-2026-11.md#b03))
   Dans `merge_into`, garder le plus ancien `first_seen` et reprendre le cycle et le responsable de maintenance quand la cible n'en a pas. Ajouter un test.
   *Document de travail :* `plan-projet-tiai.md`
 
@@ -313,6 +313,12 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T09 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le téléchargement est servi d'après les fichiers enregistrés sur la commande ouverte, plus d'après le paquet courant. Un fichier stocké est conservé tant qu'un paquet le nomme ou qu'une commande ouverte (en attente, remise ou en cours) le liste. Le worker n'a pas le volume des paquets : la purge tourne côté API, après chaque dépôt ou retrait, après un dépôt en échec, au verdict d'un déploiement et au démarrage ; elle retire aussi les `.upload-*` de plus de 24 h. La suppression d'un paquet entier n'existe toujours pas (seul le retrait) : rien à purger de ce côté. |
 | T10 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Règle retenue : **expiration, jamais de relivraison** (relivrer un `reboot` après un redémarrage de l'agent bouclerait). Le worker passe toutes les 5 min en `failed` « sans réponse du poste » les commandes `delivered` depuis plus de `COMMAND_UNANSWERED_HOURS` (24 h par défaut, nouvelle variable) et les `running` démarrées depuis plus longtemps ; un verdict tardif l'emporte. Côté agent : file en mémoire portée de 16 à 256, et au-delà un `failed` « file pleine » ; à l'arrêt, chaque commande en attente reçoit un `failed` ; un type inconnu reçoit un `failed` qui nomme la version de l'agent. Ces verdicts passent par `queue.Queue`, rejouée au prochain contact. |
 | T11 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
+| T12 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Fait dans `xlsx_response` seulement (`ILLEGAL_CHARACTERS_RE`) : `bound_text` n'est pas touché, ses valeurs étant comparées telles que rapportées (nom d'hôte, empreinte). |
+| T13 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nom coupé à 100 caractères, suffixe « (n) » compris ; la clé (`ad_key`, 500) garde la valeur entière. Le placement tourne dans un savepoint : un échec est journalisé et n'empêche plus le heartbeat. Les bornes `ad_location` (200) et `ou_dn` (500) tenaient déjà dans `ad_key`. |
+| T15 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme ; le test qui figeait l'ordre sans `inventory` est corrigé. |
+| T19 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Tout entier de 1 à 99 est accepté depuis l'URL ; le menu du filtre ajoute le seuil en cours quand il n'est pas l'un des deux proposés, et la puce affiche « Moins de N % libres ». |
+| T21 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
+| T22 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme : le plus ancien `first_seen`, le cycle et le responsable du doublon quand la fiche gardée n'en a pas. |
 
 ## 7. Détail des constats
 

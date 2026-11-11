@@ -211,6 +211,46 @@ async def test_location_mode_files_by_the_attribute(client, db_session, room_sou
     assert (await _machine(client, headers, b))["room_id"] is None
 
 
+async def test_a_long_location_is_cut_to_a_room_name(client, db_session, room_source):
+    """Audit S07: AD allows 1024 characters, the room name 100 — the heartbeat
+    must not fail, and two long names sharing their first 100 characters get
+    two rooms whose suffixed names still fit."""
+    room_source("ad_location")
+    headers = await _admin(client, db_session)
+    long_a = "Bâtiment administratif Nord — 2e étage — " * 4 + "salle 214"
+    long_b = "Bâtiment administratif Nord — 2e étage — " * 4 + "salle 215"
+    a = await _enroll(client, "pc-a", hostname="A")
+    b = await _enroll(client, "pc-b", hostname="B")
+    await _report(client, a, _dir(location=long_a))
+    await _report(client, b, _dir(location=long_b))
+    rooms = (await client.get("/api/v1/rooms", headers=headers)).json()
+    names = sorted(r["name"] for r in rooms)
+    assert len(names) == 2 and all(len(n) <= 100 for n in names)
+    assert sum(n.endswith(" (2)") for n in names) == 1
+    assert {r["ad_key"] for r in rooms} == {long_a[:200], long_b[:200]}
+
+
+async def test_a_failed_placement_does_not_fail_the_heartbeat(
+    client, db_session, room_source, monkeypatch
+):
+    """Whatever goes wrong while filing the poste, the rest of the heartbeat
+    (its commands, its threats) goes through."""
+    from sqlalchemy import text
+
+    from app.features.room import crud as room_crud
+
+    async def broken(session, machine, source):
+        await session.exec(text("SELECT 1/0"))
+
+    monkeypatch.setattr(room_crud, "place_from_directory", broken)
+    room_source("ad_ou")
+    headers = await _admin(client, db_session)
+    a = await _enroll(client, "pc-a", hostname="A")
+    await _report(client, a, _dir())
+    machine = await _machine(client, headers, a)
+    assert machine["room_id"] is None
+
+
 # --- Lock and re-sync ---------------------------------------------------------
 
 
