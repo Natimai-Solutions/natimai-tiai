@@ -20,6 +20,8 @@ Chaque lot de constats est ensuite passé par un vérificateur chargé de les r�
 
 Les auditeurs n'ont pas pu lancer la suite de tests backend, faute de PostgreSQL disponible : les comportements ont été vérifiés par lecture du code.
 
+**Contre-vérification du 2026-11-11.** Les 102 constats ont été confrontés une seconde fois au code par des relecteurs indépendants, chargés de les réfuter. Aucun n'est réfuté. 32 contenaient un détail inexact (numéro de ligne, chiffre, exemple de scénario ou portée), corrigé depuis dans ce document. S01 a été reproduit par un test Go sur une copie de l'agent, et les constats UI/UX ont été rejoués sur la console construite, avec une API simulée. Deux recommandations ont changé, celles de S22 et de S31, et avec elles les tâches T37 et T40. Restent non testés : le rendu des séquences de contrôle dans une console Windows (S25), la lecture de `2GB` par Caddy (B31, U16) et le comportement des gestionnaires de mots de passe (U15).
+
 ## 2. Synthèse
 
 | Angle | Élevée | Moyenne | Faible | Info | Total |
@@ -94,7 +96,7 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
   *Document de travail :* `plan-deploiement-logiciel.md`
 
 - [ ] **T10 — Cycle de vie des commandes remises : relivraison, expiration, pertes côté agent** ([B10](plan-audit-2026-11.md#b10), [B15](plan-audit-2026-11.md#b15), [B16](plan-audit-2026-11.md#b16), [B34](plan-audit-2026-11.md#b34))
-  Choisir une règle unique : soit le serveur relivre les commandes « Transmise » sans verdict après un délai (l'agent est déjà idempotent par identifiant), soit le worker les expire. Côté agent, ne jamais jeter une commande acceptée : file pleine, arrêt du service ou type inconnu donnent un résultat `failed` explicite, rejoué par `queue.Queue`.
+  Choisir une règle unique : soit le serveur relivre les commandes « Transmise » sans verdict après un délai (l'agent est déjà idempotent par identifiant), soit le worker les expire. La même règle doit fermer les « En cours » trop anciennes, que rien ne purge aujourd'hui. Côté agent, ne jamais jeter une commande acceptée : file pleine, arrêt du service ou type inconnu donnent un résultat `failed` explicite, rejoué par `queue.Queue`.
   *Document de travail :* `plan-commandes-distantes.md`
 
 - [ ] **T11 — Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
@@ -219,7 +221,7 @@ Durcissements de fond, infrastructure et finitions. Se traitent par lots, fichie
   *Document de travail :* `plan-salles-maintenance-interventions.md`, `plan-inventaire.md`
 
 - [ ] **T37 — Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))
-  Refuser `http://` sauf option de développement, et ne plus suivre les redirections. Borner les corps d'erreur lus, faire tourner le journal à chaud, et borner les téléchargements à la taille annoncée. Distinguer un `token.dat` illisible d'un `token.dat` absent. Allonger le délai entre deux tentatives quand l'enrôlement attend une approbation, et ne l'auditer qu'une fois.
+  N'accepter `http://` que sur option explicite, en corrigeant `DEPLOYMENT.md` qui le présente aujourd'hui comme accepté, et ne plus suivre les redirections. Borner les corps d'erreur lus, faire tourner le journal à chaud, et borner les téléchargements à la taille annoncée. Distinguer un `token.dat` illisible d'un `token.dat` absent. Allonger le délai entre deux tentatives quand l'enrôlement attend une approbation, et ne l'auditer qu'une fois.
   *Document de travail :* `plan-projet-tiai.md`, `plan-deploiement-logiciel.md`
 
 - [ ] **T38 — Script de signature : neutraliser les caractères de contrôle** ([S25](plan-audit-2026-11.md#s25))
@@ -236,7 +238,7 @@ Durcissements de fond, infrastructure et finitions. Se traitent par lots, fichie
   - `X-Forwarded-For` : ne le lire que depuis des proxys de confiance, et n'exposer le port de développement que sur `127.0.0.1`.
   - Actions GitHub : les épingler par SHA, avec des permissions minimales.
   - `GIST_SECRET` : le sortir de l'`env` des jobs.
-  - nginx : passer en 1.28, et ajouter le frontend au scan Trivy.
+  - nginx : passer à la branche stable courante (`stable-alpine`, 1.30 à ce jour ; la 1.28 n'est déjà plus reconstruite), et ajouter le frontend au scan Trivy.
   - Conteneurs backend et worker : exécution sans root, `cap_drop` et `no-new-privileges`.
   - `index.html` : le servir en `no-cache`.
   - OpenAPI : le couper hors environnement local.
@@ -290,6 +292,7 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 - **T10 touche le protocole des deux côtés.** Sur un parc à versions mixtes, un agent ancien ne saura pas rendre un verdict `failed` pour une commande qu'il a jetée. La règle côté serveur (relivraison ou expiration) doit donc suffire seule, et le côté agent n'est qu'un raccourci.
 - **T16 demande une migration de données.** Il faut recalculer une fois `last_maintenance_at` pour tout le parc à partir du journal, en vérifiant au préalable combien de postes changeraient d'échéance.
 - **T03 et T32 peuvent refuser des opérations qui passaient jusqu'ici** à un administrateur délégué. Il faut l'annoncer dans les notes de version, avec le message d'erreur précis.
+- **T37 change un mode documenté.** `DEPLOYMENT.md` présente `http://` comme accepté par l'agent et l'emploie dans l'exemple du port direct. Les postes installés ainsi cesseront de s'enrôler si l'option explicite n'est pas posée avant la mise à jour de l'agent : il faut corriger la documentation et prévenir dans les notes de version.
 - **T06 change le comportement visible du verrouillage.** Le README et la page Utilisateurs décrivent le verrouillage actuel : il faut les mettre à jour en même temps.
 - **Tests backend :** l'audit n'a pas pu lancer la suite sur PostgreSQL. Chaque correction backend doit passer la CI avec la base, en particulier `test_api_scope.py` pour T03, T04 et T32.
 
@@ -314,7 +317,7 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | [S10](#s10) | Moyenne | Exfiltration du mot de passe SMTP ou de la clé API Mailgun stockés, via l'« e-mail de test » ou un PATCH qui ne change que l'hôte ou l'URL |
 | [S11](#s11) | Moyenne | Export Excel (parc et logiciels) cassé en 500 par un caractère de contrôle venu d'un agent |
 | [S12](#s12) | Faible | Énumération des comptes via le 423 « compte verrouillé » malgré le faux hachage |
-| [S13](#s13) | Faible | Compteur d'échecs de connexion sujet aux mises à jour perdues : le verrouillage par compte se contourne en rafale |
+| [S13](#s13) | Faible | Compteur d'échecs de connexion sujet aux mises à jour perdues : le verrouillage par compte est très affaibli en rafale |
 | [S14](#s14) | Faible | Demande de réinitialisation : n'importe qui peut invalider le lien en cours d'un utilisateur et inonder sa boîte, la limite étant par IP et non par compte |
 | [S15](#s15) | Faible | Changement d'adresse e-mail par un administrateur sans invalidation des liens de réinitialisation en attente |
 | [S16](#s16) | Faible | Un compte limité à un bâtiment ou à une salle peut déplacer ce lieu vers un autre site et retirer des postes du périmètre des autres équipes |
@@ -370,11 +373,11 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | [B30](#b30) | Faible | Le dialogue de déploiement permet d'envoyer un paquet qu'il déclare lui-même inexécutable |
 | [B31](#b31) | Faible | Plafond Caddy (2 GB décimaux, par requête) plus strict que le backend (2 Gio, par fichier) : 413 inattendu au dépôt |
 | [B32](#b32) | Faible | Échec transitoire de lecture de token.dat : réenrôlement bloqué en attente d'approbation, poste hors ligne alors que son jeton est valide |
-| [B33](#b33) | Faible | Poste en attente d'approbation : chaque tentative d'enrôlement écrit une entrée d'audit (≈ 288/jour/poste) |
-| [B34](#b34) | Faible | Type de commande inconnu ignoré sans résultat : commande « transmise » indéfiniment sur un parc à versions mixtes |
+| [B33](#b33) | Faible | Poste en attente d'approbation : chaque tentative d'enrôlement écrit une entrée d'audit (≈ 384/jour/poste) |
+| [B34](#b34) | Faible | Type de commande inconnu ignoré sans résultat : commande « transmise » sans verdict sur un parc à versions mixtes |
 | [B35](#b35) | Faible | Le choix du responsable de maintenance dépend de check:read |
 | [B36](#b36) | Faible | Supprimer un fichier absent d'un paquet affiche « Paquet introuvable » |
-| [U01](#u01) | Moyenne | Fiche poste : passer au poste précédent/suivant en échec laisse une page vide sans message d'erreur |
+| [U01](#u01) | Moyenne | Fiche poste : passer au poste précédent/suivant en échec laisse une page vide sans message d'erreur durable |
 | [U02](#u02) | Moyenne | Groupes : un emplacement saisi sans appuyer sur Entrée est perdu en silence, et le groupe s'ouvre à tout le parc |
 | [U03](#u03) | Moyenne | Le message d'erreur précis du backend est remplacé par un libellé générique (« Paquet invalide », « Requête invalide ») |
 | [U04](#u04) | Moyenne | Désinstaller sur tout le parc en un clic : aucune confirmation, et le périmètre « Tout le parc » est conservé d'une ouverture à l'autre |
@@ -398,8 +401,8 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | [U22](#u22) | Faible | Échéances peu lisibles : date passée affichée comme « prochaine échéance », à la seconde, sans durée de retard |
 | [U23](#u23) | Faible | Sur téléphone, le bouton « Clore » des vérifications est hors écran dans un tableau à défilement horizontal |
 | [U24](#u24) | Faible | Salle de plus de 200 postes : liste et séance de maintenance tronquées sans avertissement |
-| [U25](#u25) | Faible | Liste des postes : la mise en page par défaut fait 2 904 px de large, et les colonnes de supervision (Antivirus, MAJ Windows, Session, Vu le) sont hors écran en 1440 px |
-| [U26](#u26) | Faible | « Mes tâches » : la colonne Consignes est écrasée à 116 px et le bouton « Clore » est coupé en 1440 px |
+| [U25](#u25) | Faible | Liste des postes : la mise en page par défaut fait plus de 2 200 px de large, et les colonnes de supervision (Antivirus, MAJ Windows, Session, Vu le) sont hors écran en 1440 px |
+| [U26](#u26) | Faible | « Mes tâches » : dès que le libellé de lieu est long, la colonne Consignes est écrasée à 116 px et le bouton « Clore » est coupé en 1440 px |
 | [U27](#u27) | Faible | Paramètres › Réglages du serveur : en mobile, les clés en `nowrap` réduisent la description à une colonne étroite et tronquée |
 | [U28](#u28) | Faible | Badge antivirus vert alors que le libellé dit « Non relevé » (ou « Aucun ») |
 | [U29](#u29) | Faible | En mobile, le titre « Tia'i — Console » est tronqué en « Tia'i … » par l'adresse e-mail affichée en permanence |
@@ -447,7 +450,7 @@ for _, f := range manifest.Files {
 code, err := env.Run(ctx, exe, ExpandArgs(step.Args, dir), dir)
 ```
 
-**Scénario.** Prérequis : le serveur est compromis, ou un utilisateur détient package:write et risky_command:execute, et la GPO approuve « INDEX EDUCATION SAS ». On crée un paquet `files` avec l'installateur Pronote authentique, signé et validé par WinVerifyTrust, plus un fichier `version.dll` malveillant. Le paquet est déployé : l'installateur, lancé en SYSTEM depuis C:\ProgramData\Tiai\packages\<id>, charge `version.dll` depuis son propre répertoire. Résultat : du code arbitraire s'exécute en SYSTEM sur tous les postes ciblés, ce que la méthode A est censée empêcher.
+**Scénario.** Prérequis : le serveur est compromis, ou un utilisateur détient package:write, command:execute et risky_command:execute, et la GPO approuve « INDEX EDUCATION SAS ». On crée un paquet `files` avec l'installateur Pronote authentique, signé et validé par WinVerifyTrust, plus un fichier `version.dll` malveillant. Le paquet est déployé : l'installateur, lancé en SYSTEM depuis C:\ProgramData\Tiai\packages\<id>, charge `version.dll` depuis son propre répertoire. Résultat : du code arbitraire s'exécute en SYSTEM sur tous les postes ciblés, ce que la méthode A est censée empêcher.
 
 **Recommandation.** En méthode A, ne télécharger que le fichier lancé (refuser tout manifeste non signé qui contient d'autres fichiers), ou au minimum refuser les extensions chargeables (.dll, .ocx, .cpl, .sys, .manifest, .local, .config). Purger le répertoire du paquet (os.RemoveAll) avant chaque exécution, pas seulement après un succès. Envisager de lancer l'exécutable depuis un répertoire qui ne contient que lui. Mettre à jour la documentation du risque résiduel de la méthode A.
 
@@ -457,7 +460,7 @@ code, err := env.Run(ctx, exe, ExpandArgs(step.Args, dir), dir)
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/features/user/crud.py:105`
 
-Le verrouillage par compte se déclenche après LOGIN_MAX_FAILED_ATTEMPTS (5) échecs, sans authentification préalable. Pendant le verrouillage, même le bon mot de passe est refusé, car le test locked_until passe avant la vérification du mot de passe. Le compteur ne décroît jamais avec le temps ; seul un succès le remet à zéro. Le budget par IP (10 tentatives / 300 s, ratelimit.py:216) dépasse largement ce qu'il faut pour reverrouiller un compte toutes les 15 minutes (LOGIN_LOCKOUT_MINUTES). Dès qu'une adresse de console est connue (par exemple admin@natimai.local), n'importe quel poste du LAN peut garder le compte fermé indéfiniment, et le reset par lien ou par administrateur est annulé dès le cycle suivant.
+Le verrouillage par compte se déclenche après LOGIN_MAX_FAILED_ATTEMPTS (5) échecs, sans authentification préalable. Pendant le verrouillage, même le bon mot de passe est refusé, car le test locked_until passe avant la vérification du mot de passe. Le compteur ne décroît jamais avec le temps ; seul un succès le remet à zéro. Le budget par IP (10 tentatives / 300 s, ratelimit.py:68) dépasse largement ce qu'il faut pour reverrouiller un compte toutes les 15 minutes (LOGIN_LOCKOUT_MINUTES). Dès qu'une adresse de console est connue (par exemple admin@natimai.local), n'importe quel poste du LAN peut garder le compte fermé indéfiniment, et le reset par lien ou par administrateur est annulé dès le cycle suivant.
 
 ```
 if user.locked_until is not None and user.locked_until > now:
@@ -555,7 +558,7 @@ if source == "ad_location":
     await session.flush()
 ```
 
-**Scénario.** ROOM_SOURCE=ad_location. Dans AD, l'objet ordinateur porte location="Bâtiment administratif Nord — 2e étage — aile Est — Salle de réunion du conseil pédagogique 214" (105 caractères ; AD accepte 1024). L'agent joint l'inventaire, le heartbeat renvoie 500, et l'agent garde le bloc en attente puis le renvoie à chaque tick (heavyHeartbeatTimeout, cache non acquitté). Le poste paraît hors ligne indéfiniment et ne reçoit plus aucune commande. De plus, POST /rooms/sync (sync_from_directory) échoue pour tout le parc à cause de ce seul poste.
+**Scénario.** ROOM_SOURCE=ad_location. Dans AD, l'objet ordinateur porte location="Bâtiment administratif Nord — 2e étage — aile Est — Salle de réunion du conseil pédagogique et des professeurs principaux 214" (125 caractères ; AD accepte 1024). L'agent joint l'inventaire, le heartbeat renvoie 500, et l'agent garde le bloc en attente puis le renvoie à chaque tick (heavyHeartbeatTimeout, cache non acquitté). Le poste paraît hors ligne indéfiniment et ne reçoit plus aucune commande. De plus, si la valeur a été enregistrée avant le passage en ad_location (sous manual ou ad_ou, où elle ne sert pas de nom de salle), POST /rooms/sync-directory (sync_from_directory) échoue pour tout le parc à cause de ce seul poste.
 
 **Recommandation.** Tronquer le nom de la salle à 100 caractères en tenant compte du suffixe (par exemple name[:100-len(suffix)]) dans room_for_key. Aligner TEXT_MAX de `ad_location` et de `ou` sur la colonne, ou séparer la clé (500) du nom affiché. Encapsuler place_from_directory dans un savepoint (session.begin_nested) pour qu'un échec de placement ne fasse jamais échouer le heartbeat. Ajouter un test avec une valeur de 101 à 200 caractères.
 
@@ -610,7 +613,7 @@ session.add(
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/settings_routes.py:557` · aussi : `backend/app/api/routes/settings_routes.py:559`
 
-Le code et la documentation de la page garantissent que les deux secrets ne sont jamais renvoyés (EmailSettingsOut ne donne que *_set). Pourtant, l'envoi de test fusionne les valeurs non enregistrées du formulaire avec les secrets déjà stockés, ou ceux de l'environnement, via StoredEmailSettings.merged et resolve. Un détenteur de settings:write peut donc pointer smtp_host ou mailgun_base_url vers un serveur qu'il contrôle : le serveur envoie alors le secret qu'on ne lui montre jamais. Côté Mailgun, il part en Basic Auth « api:<clé> ». Côté SMTP, il part via AUTH PLAIN, avec smtp_security=none. Le même mécanisme sert d'outil de SSRF ou de scan de ports interne. describe_error distingue « connexion refusée », « délai dépassé » et « TLS », et renvoie jusqu'à 200 caractères du corps de réponse HTTP (probe.py, ligne 189). La même chose arrive à chaque envoi après un PATCH qui ne change que l'hôte, puisque le secret stocké est conservé. Le droit settings:write peut être accordé à des groupes autres qu'administrateur (permissions.py, lignes 82-83).
+Le code et la documentation de la page garantissent que les deux secrets ne sont jamais renvoyés (EmailSettingsOut ne donne que *_set). Pourtant, l'envoi de test fusionne les valeurs non enregistrées du formulaire avec les secrets déjà stockés, ou ceux de l'environnement, via StoredEmailSettings.merged et resolve. Un détenteur de settings:write peut donc pointer smtp_host ou mailgun_base_url vers un serveur qu'il contrôle : le serveur envoie alors le secret qu'on ne lui montre jamais. Côté Mailgun, il part en Basic Auth « api:<clé> ». Côté SMTP, il part via AUTH PLAIN, avec smtp_security=none. Le même mécanisme sert d'outil de SSRF ou de scan de ports interne. describe_error distingue « connexion refusée », « délai dépassé » et « TLS », et renvoie jusqu'à 200 caractères du corps de réponse HTTP (probe.py, ligne 100). La même chose arrive à chaque envoi après un PATCH qui ne change que l'hôte, puisque le secret stocké est conservé. Le droit settings:write peut être accordé à des groupes autres qu'administrateur (permissions.py, lignes 82-83).
 
 ```
 stored = await mail.load_stored(session)
@@ -632,7 +635,7 @@ stored = await mail.load_stored(session)
 
 #### S11 — Export Excel (parc et logiciels) cassé en 500 par un caractère de contrôle venu d'un agent
 
-**Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/xlsx_export.py:128`
+**Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/xlsx_export.py:64`
 
 openpyxl refuse les caractères de contrôle XML \x00-\x08, \x0b, \x0c et \x0e-\x1f : il lève IllegalCharacterError à l'affectation de la cellule. Or les chaînes envoyées par l'agent ne sont que tronquées, jamais filtrées. C'est le cas de bound_text dans agent.py (hostname, domain, session username, os_version) et de _bounded dans inventory/schemas.py (noms, éditeurs et versions des logiciels). Une seule valeur contenant un tel caractère fait échouer toute l'exportation XLSX du parc ou du catalogue, pour tous les utilisateurs du périmètre. L'export CSV, lui, passe. Vérifié : xlsx_response('a.xlsx', ['a'], [['abc\x01def']]) lève openpyxl.utils.exceptions.IllegalCharacterError.
 
@@ -648,7 +651,7 @@ def bound_text(value: str | None, limit: int = TEXT_MAX) -> str | None:
     return value[:limit]
 ```
 
-**Scénario.** Un poste (agent compromis ou bogué, ou une clé de registre Uninstall dont le DisplayName contient \u0001) envoie dans son heartbeat "hostname": "PC-12\u0001" ou un logiciel nommé "Outil\u0001". GET /machines/export.xlsx et GET /software/export.xlsx répondent alors 500 pour toute la console, tant que la ligne existe, sans indiquer quelle donnée est fautive.
+**Scénario.** Un poste (agent compromis ou bogué, ou une clé de registre Uninstall dont le DisplayName contient \u0001) envoie dans son heartbeat "hostname": "PC-12\u0001" ou un logiciel nommé "Outil\u0001". GET /machines/export.xlsx et GET /software/export.xlsx répondent alors 500 pour tout export qui inclut cette ligne (et, pour le parc, la colonne fautive), tant qu'elle existe, sans indiquer quelle donnée est fautive.
 
 **Recommandation.** Dans xlsx_response, nettoyer chaque chaîne avec openpyxl.cell.cell.ILLEGAL_CHARACTERS_RE.sub('', value) avant de l'ajouter. Idéalement, retirer aussi les caractères de contrôle à l'ingestion (bound_text et _bounded) pour protéger l'affichage et les e-mails.
 
@@ -675,7 +678,7 @@ raise AppError(
 
 <a id="s13"></a>
 
-#### S13 — Compteur d'échecs de connexion sujet aux mises à jour perdues : le verrouillage par compte se contourne en rafale
+#### S13 — Compteur d'échecs de connexion sujet aux mises à jour perdues : le verrouillage par compte est très affaibli en rafale
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `backend/app/features/user/crud.py:108`
 
@@ -689,7 +692,7 @@ user = await get_by_email(session, email)
         session.add(user)
 ```
 
-**Scénario.** Un attaquant contrôle 20 adresses du LAN (plusieurs postes, ou des alias IPv6). Il envoie 10 tentatives simultanées depuis chaque adresse, soit 200 requêtes lancées ensemble. Les SELECT précèdent les commits, si bien que le compteur ne monte que de quelques unités : 200 mots de passe sont testés sans jamais atteindre le seuil de 5.
+**Scénario.** Un attaquant contrôle 20 adresses du LAN (plusieurs postes, ou des alias IPv6). Il envoie 10 tentatives simultanées depuis chaque adresse, soit 200 requêtes lancées ensemble. Les SELECT précèdent les commits, si bien que le compteur ne monte que d'une unité par vague. Le pool de connexions (POSTGRES_POOL_SIZE 20 + POSTGRES_MAX_OVERFLOW 10) borne chaque vague à une trentaine de requêtes : le verrouillage tombe après environ 120 à 150 essais au lieu de 5 (estimation par lecture du code, non mesurée).
 
 **Recommandation.** Incrémenter de façon atomique en base (UPDATE users SET failed_login_attempts = failed_login_attempts + 1 ... RETURNING), ou relire la ligne en with_for_update avant de vérifier.
 
@@ -790,7 +793,7 @@ assignee = await _require_assignee(session, payload.assigned_to_id)
             select(Machine).where(col(Machine.id).in_(payload.machine_ids)),
 ```
 
-**Scénario.** Un administrateur, ou un technicien non restreint, sélectionne 40 postes de Papeete dans POST /api/v1/checks/bulk et choisit par erreur dans /checks/assignable-users un technicien limité à Taravao. Le technicien reçoit un courriel qui liste les 40 noms d'hôte et les consignes, puis tombe sur des 404 en ouvrant les fiches. La tâche n'apparaît pas non plus dans sa liste filtrée.
+**Scénario.** Un administrateur, ou un technicien non restreint, sélectionne 40 postes de Papeete dans POST /api/v1/checks/bulk et choisit par erreur dans /checks/assignable-users un technicien limité à Taravao. Le technicien reçoit un courriel qui nomme 10 de ces postes (plafond NOTIFICATION_MAX_ITEMS) avec les consignes, suivis de « … et 30 autre(s) », puis tombe sur des 404 en ouvrant les fiches. La tâche n'apparaît pas non plus dans sa liste filtrée.
 
 **Recommandation.** Dans create_check, create_checks_bulk et update_check, refuser un destinataire dont le périmètre (user_crud.user_scope) ne couvre pas tous les postes, ou qui n'a pas check:read. Filtrer aussi /checks/assignable-users selon ces critères.
 
@@ -859,7 +862,7 @@ stmt = pg_insert(Software).values(rows)
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `agent/internal/config/config.go:252`
 
-Load vérifie seulement que APIBaseURL n'est pas vide. Le schéma n'est jamais contrôlé : client.do envoie X-Enrollment-Secret et `Authorization: Bearer` à c.baseURL+path quel qu'il soit. Le bloc `http://` du Caddyfile redirige en 301, mais la requête et ses en-têtes sont déjà partis en clair. Le client Go suit ensuite le 301 en GET et renvoie l'en-tête personnalisé X-Enrollment-Secret, qui ne fait pas partie des en-têtes sensibles qu'il retire.
+Load vérifie seulement que APIBaseURL n'est pas vide. Le schéma n'est jamais contrôlé : client.do envoie X-Enrollment-Secret et `Authorization: Bearer` à c.baseURL+path quel qu'il soit. Le bloc `http://` du Caddyfile redirige en 301, mais la requête et ses en-têtes sont déjà partis en clair. Le client Go suit ensuite le 301 en GET et renvoie l'en-tête personnalisé X-Enrollment-Secret, qui ne fait pas partie des en-têtes sensibles qu'il retire. `http://` est toutefois un mode documenté : DEPLOYMENT.md le donne comme accepté (l. 896) et l'emploie dans l'exemple du port direct `http://192.168.1.50:8800` (l. 1016). Derrière Caddy, le POST d'enrôlement redirigé devient un GET qui échoue : l'agent n'obtient jamais de token, et seul le secret de flotte fuit, à chaque tentative. Le token ne part en clair que si `http://` atteint réellement le backend (port direct), ou si un agent déjà enrôlé est repointé vers `http://`.
 
 ```
 if cfg.APIBaseURL == "" {
@@ -870,7 +873,7 @@ if cfg.APIBaseURL == "" {
 
 **Scénario.** Un administrateur déploie le MSI avec APIBASEURL=http://tiai.natimai.local (oubli du « s » ou copie d'un ancien exemple). Chaque poste envoie EnrollmentSecret en clair sur le LAN à chaque tentative, avec un back-off jusqu'à 5 min. N'importe quel poste du même segment peut le capturer, puis enrôler des machines.
 
-**Recommandation.** Refuser au chargement un schéma autre que https, sauf option explicite AllowInsecureHTTP réservée au développement. Désactiver le suivi des redirections (CheckRedirect qui renvoie http.ErrUseLastResponse) pour les appels de l'API agent.
+**Recommandation.** Ne plus accepter `http://` par défaut : exiger une option explicite (AllowInsecureHTTP) pour les installations qui visent le port direct, et journaliser un avertissement à chaque démarrage dans ce mode. Corriger DEPLOYMENT.md (l. 896 et 1016) dans le même changement, sans quoi les installations qui suivent la documentation cessent de s'enrôler. Désactiver le suivi des redirections (CheckRedirect qui renvoie http.ErrUseLastResponse) pour les appels de l'API agent.
 
 <a id="s23"></a>
 
@@ -887,7 +890,7 @@ if resp.StatusCode >= 300 {
 			&StatusError{StatusCode: resp.StatusCode, Body: string(b)})
 ```
 
-**Scénario.** Un portail captif, un proxy (avec proxy_url=environment) ou un équilibreur renvoie une page HTML de 50 Ko avec un 407 ou un 503 pendant une panne de plusieurs semaines. Le journal reçoit environ 50 Ko × 288 = 14 Mo par jour. Après un mois, agent.log dépasse 400 Mo, bien au-delà des 5 Mio prévus par maxLogSize, et aucune rotation n'a lieu tant que le service n'est pas redémarré.
+**Scénario.** Un équilibreur ou un reverse proxy placé devant le serveur (ou, avec une ApiBaseURL en `http://`, un portail captif ou un proxy) renvoie une page HTML de 50 Ko avec un 407 ou un 503 pendant une panne de plusieurs semaines. Le journal reçoit environ 50 Ko × 288 = 14 Mo par jour. Après un mois, agent.log dépasse 400 Mo, bien au-delà des 5 Mio prévus par maxLogSize, et aucune rotation n'a lieu tant que le service n'est pas redémarré. Avec une URL en https, un portail captif ou un 407 de proxy échouent avant toute réponse HTTP (erreur de transport, sans corps) : la croissance se limite alors à quelques centaines d'octets par échec, toujours sans rotation.
 
 **Recommandation.** Lire le corps d'erreur avec io.LimitReader(resp.Body, 4096) comme dans FetchPackageFile, et le tronquer dans le message. Faire vérifier la taille du fichier par l'écrivain du journal à chaque écriture, ou périodiquement, et faire la rotation à chaud.
 
@@ -924,7 +927,7 @@ return "$($Step.run) $($parts -join ' ')".Trim()
 Write-Host "Installation    : $(Format-Step $doc.install)"
 ```
 
-**Scénario.** Un utilisateur package:write, sans clé de signature, prépare un paquet dont `install_args` vaut `["/S", "/LOADINF={dir}\\evil.inf", "\u001b[1A\u001b[2KInstallation    : setup.exe /S"]`. L'administrateur qui détient la clé lance Sign-TiaiPackage.ps1 : la console n'affiche que `setup.exe /S`. Il confirme, et les postes exécutent en SYSTEM la commande cachée, cette fois sous la signature de confiance de la méthode B.
+**Scénario.** Un utilisateur package:write, sans clé de signature, prépare un paquet dont `install_args` vaut `["/S", "/LOADINF={dir}\\evil.inf", "\u001b[2K\u001b[GInstallation\u001b[4C:\u001b[1Csetup.exe\u001b[1C/S"]` (aucun espace : les déplacements de curseur en tiennent lieu, sinon l'argument serait mis entre guillemets). L'administrateur qui détient la clé lance Sign-TiaiPackage.ps1 : la console n'affiche que `setup.exe /S`. Cette charge n'a pas été rejouée sur une console Windows, et le manifeste ouvert dans un éditeur montre la séquence `\u001b` en clair. Il confirme, et les postes exécutent en SYSTEM la commande cachée, cette fois sous la signature de confiance de la méthode B.
 
 **Recommandation.** Dans le script, refuser (ou afficher échappés, par exemple en `\u001b`) tout caractère de contrôle (< 0x20, 0x7F, U+009B) dans name, version, run et args avant de demander la confirmation. Côté serveur, rejeter ces caractères dans `_check_args` et dans les champs name et version.
 
@@ -1051,7 +1054,7 @@ FROM nginx:1.27-alpine AS runner
 
 **Scénario.** Une CVE de nginx core ou d'openssl d'Alpine corrigée en 1.28/1.29 reste présente indéfiniment dans ghcr.io/…/tiai-frontend publié à chaque release. La CI reste verte parce que l'image n'est pas analysée. L'exposition est atténuée par Caddy devant, mais reste réelle pour le conteneur.
 
-**Recommandation.** Passer à nginx:1.28-alpine (stable) ou nginxinc/nginx-unprivileged, et ajouter le frontend à la matrice du job Trivy.
+**Recommandation.** Passer à nginx:stable-alpine ou à la branche stable courante (1.30 au 2026-11-10 ; le tag 1.28-alpine n'est lui-même plus reconstruit depuis mars 2026), ou à nginxinc/nginx-unprivileged. Ajouter l'écosystème `docker` à Dependabot pour suivre les branches, et le frontend à la matrice du job Trivy.
 
 <a id="s32"></a>
 
@@ -1101,7 +1104,7 @@ SECRET_MIN_LENGTHS = {
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/nginx.conf:16`
 
-Constat fonctionnel lié au déploiement, pas de sécurité. Seuls les assets reçoivent `expires 1y; immutable` ; index.html (location / via try_files) part sans Cache-Control, avec un simple Last-Modified, ce qui laisse le navigateur appliquer une fraîcheur heuristique d'environ 10 % de l'âge du fichier. Après une montée de version, un navigateur peut garder l'ancien index.html, qui pointe vers des chunks hachés absents de la nouvelle image. Les 19 routes en import() échouent alors en 404 (la location regex des .js n'a pas de fallback), et rien n'intercepte l'erreur (aucun router.onError ni vite:preloadError dans src/). Par ailleurs, favicon.ico et les autres fichiers non hachés sont marqués immutables pour un an.
+Constat fonctionnel lié au déploiement, pas de sécurité. Seuls les assets reçoivent `expires 1y; immutable` ; index.html (location / via try_files) part sans Cache-Control, avec un simple Last-Modified, ce qui laisse le navigateur appliquer une fraîcheur heuristique d'environ 10 % de l'âge du fichier. Après une montée de version, un navigateur peut garder l'ancien index.html, qui pointe vers des chunks hachés absents de la nouvelle image. Les 19 routes en import() échouent alors en 404 (la location regex des .js n'a pas de fallback), et rien n'intercepte l'erreur (aucun router.onError ni vite:preloadError dans src/). Par ailleurs, la règle `immutable` d'un an vise des extensions et non le dossier /assets/ : elle s'appliquerait à tout fichier non haché servi à la racine. Le dépôt n'en contient pas aujourd'hui (le `favicon.ico` référencé par index.html n'existe pas).
 
 ```
 location ~* \.(js|css|woff2?|ttf|eot|svg|png|jpg|ico)$ {
@@ -1123,7 +1126,7 @@ location ~* \.(js|css|woff2?|ttf|eot|svg|png|jpg|ico)$ {
 
 **Sévérité :** Info · **Statut :** vérifié · **Emplacement :** `backend/app/features/wol/packet.py:105`
 
-En mode serveur (sans relais), `emit_wake` envoie WOL_PACKET_COUNT datagrammes vers `broadcast_for(machine.ip_address, machine.ip_prefix_length)`. Ces deux valeurs viennent du heartbeat. Le validateur n'accepte qu'une IP littérale, publique ou non, et un masque de 1 à 128. Le commentaire du validateur dit exclure /0 pour ne pas obtenir 255.255.255.255, mais /1 sur une adresse ≥ 128.0.0.0 donne exactement cette adresse. /32 produit un unicast vers n'importe quel hôte, et /8 un broadcast dirigé vers tout un 10.0.0.0/8, que deploy/wol/enable-directed-broadcast.sh (bc_forwarding=1 sur all) laisse ensuite sortir de l'hôte.
+En mode serveur (sans relais), `emit_wake` envoie WOL_PACKET_COUNT datagrammes vers `broadcast_for(machine.ip_address, machine.ip_prefix_length)`. Ces deux valeurs viennent du heartbeat. Le validateur n'accepte qu'une IP littérale, publique ou non, et un masque de 1 à 128. Le commentaire du validateur dit exclure /0 pour ne pas obtenir 255.255.255.255, mais /1 sur une adresse ≥ 128.0.0.0 donne exactement cette adresse. /32 produit un unicast vers n'importe quel hôte, et /8 un broadcast dirigé vers tout un 10.0.0.0/8, que deploy/wol/enable-directed-broadcast.sh (bc_forwarding=1 sur all) laisse ensuite sortir de l'hôte. Cela suppose WOL_BROADCAST_ADDRESSES vide (valeur par défaut ; sinon les valeurs déclarées sont ignorées) et le relais désactivé.
 
 ```
 interface = ipaddress.ip_interface(f"{ip}/{prefixlen}")
@@ -1132,7 +1135,7 @@ interface = ipaddress.ip_interface(f"{ip}/{prefixlen}")
 # vérifié : destinations_for('200.1.2.3', reported_prefixlen=1) -> ['255.255.255.255'] ; ('8.8.8.8', 32) -> ['8.8.8.8'] ; ('10.9.9.9', 8) -> ['10.255.255.255']
 ```
 
-**Scénario.** Un agent compromis déclare ip_address=10.9.9.9 et ip_prefix_length=8. Lors d'un « Réveiller la salle », le serveur diffuse ses paquets magiques sur 10.255.255.255 au lieu du sous-réseau du poste. Avec 8.8.8.8/32, le serveur envoie de l'UDP/9 vers un hôte Internet choisi par l'attaquant. La console affiche malgré tout « Paquet magique émis ».
+**Scénario.** Un agent compromis déclare ip_address=10.9.9.9 et ip_prefix_length=8. Lors d'un « Réveiller la salle », le serveur diffuse ses paquets magiques sur 10.255.255.255 au lieu du sous-réseau du poste. Avec 8.8.8.8/32, le serveur envoie de l'UDP/9 vers un hôte Internet choisi par l'attaquant. La console affiche malgré tout « Paquet magique émis », en nommant toutefois la destination (« … sur 10.255.255.255:9 »).
 
 **Recommandation.** Côté serveur, n'accepter que des adresses privées ou appartenant à une liste de réseaux configurée (WOL_ALLOWED_NETWORKS). Borner le masque IPv4 rapporté à une plage plausible (/16 à /30). Ne jamais dériver 255.255.255.255 et refuser les adresses non RFC1918. Dans le script de bc_forwarding, limiter le réglage à l'interface LAN plutôt qu'à « all ».
 
@@ -1213,7 +1216,7 @@ if source.last_seen > target.last_seen:
     await session.delete(source)   # first_seen, maintenance_cycle_days, maintenance_owner_id de la source perdus
 ```
 
-**Scénario.** Un PC est réimagé et réapparaît sous un nouvel enregistrement, créé il y a 2 jours. L'ancien enregistrement, connu depuis un an, avait été exclu de la maintenance (cycle 0) et confié à un technicien. Après la fusion vers le nouvel enregistrement, le poste réapparaît « En retard » dans le cycle de maintenance, sans propriétaire. Sa colonne « Allumé (7 j) » affiche « depuis 2 j » alors que les compteurs fusionnés contiennent 35 h, et son histogramme sur 28 jours montre 26 jours hachurés.
+**Scénario.** Un PC est réimagé et réapparaît sous un nouvel enregistrement, créé il y a 2 jours. L'ancien enregistrement, connu depuis un an, avait été exclu de la maintenance (cycle 0) et confié à un technicien. Après la fusion vers le nouvel enregistrement, le poste revient dans le cycle de maintenance alors qu'il en était exclu, sans responsable. Si l'ancien enregistrement n'avait pas de date de maintenance, l'échéance part d'un first_seen de 2 jours : elle est repoussée, pas avancée. Sa colonne « Allumé (7 j) » affiche « depuis 2 j » alors que les compteurs fusionnés contiennent 35 h, et son histogramme sur 28 jours montre 26 jours hachurés.
 
 **Recommandation.** Dans merge_into, appliquer target.first_seen = min(source.first_seen, target.first_seen). Reprendre maintenance_cycle_days et maintenance_owner_id quand la cible n'en a pas. Ajouter un test de fusion couvrant usage_hours et l'échéance de maintenance.
 
@@ -1312,9 +1315,9 @@ UniqueConstraint("building_id", "name", name="uq_rooms_building_name", postgresq
 
 #### B08 — Responsable par défaut supprimé ou désactivé : ses postes n'apparaissent plus dans aucun filtre « Les miennes » ou « À prendre »
 
-**Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/features/maintenance/crud.py:68` · aussi : `backend/app/api/routes/settings_routes.py:483`, `backend/app/api/routes/checks.py:583`
+**Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/features/maintenance/crud.py:68` · aussi : `backend/app/api/routes/settings_routes.py:483`, `backend/app/api/routes/checks.py:370`
 
-Le responsable par défaut du parc est un UUID en texte dans app_settings, sans clé étrangère. La suppression d'un compte (users.py, delete_user) ne le nettoie pas. La désactivation d'un compte ne réaffecte ni les maintenance_owner_id des salles et postes, ni les vérifications assignées (assigned_to_id). resolve() renvoie donc un owner_id non NULL qui ne correspond à aucun compte actif. _ref() l'affiche comme « sans responsable », mais le filtre « none » l'exclut parce que owner_id n'est pas NULL.
+Le responsable par défaut du parc est un UUID en texte dans app_settings, sans clé étrangère. La suppression d'un compte (users.py, delete_user) ne le nettoie pas. La désactivation d'un compte ne réaffecte ni les maintenance_owner_id des salles et postes, ni les vérifications assignées (assigned_to_id). resolve() renvoie donc un owner_id non NULL qui ne correspond à aucun compte actif. Pour un compte supprimé, _ref() l'affiche comme « sans responsable », mais le filtre « none » l'exclut parce que owner_id n'est pas NULL. Un compte seulement désactivé reste affiché sous son nom (user_names ne filtre pas is_active) : ses postes restent attribués à quelqu'un qui ne se connecte plus. La suppression ne laisse en suspens que le réglage global : machines.maintenance_owner_id et machine_checks.assigned_to_id sont en ON DELETE SET NULL.
 
 ```
 if unowned and res.owner_id is not None:
@@ -1325,7 +1328,7 @@ owner, owner_origin = policy.owner_id, Origin.GLOBAL
 owner_id=uuid.UUID(owner) if isinstance(owner, str) and owner else None
 ```
 
-**Scénario.** L'administrateur règle le responsable par défaut sur Paul, puis supprime le compte de Paul. Sur « Mes tâches », chaque salle qui hérite du parc s'affiche « sans responsable » dans « Toutes », mais l'onglet « À prendre » (owner=none) est vide et personne ne la voit dans « Les miennes ». Les maintenances en retard ne sont plus prises par personne. Même chose pour une vérification assignée à un compte désactivé : elle n'est plus dans « À prendre ».
+**Scénario.** L'administrateur règle le responsable par défaut sur Paul, puis supprime le compte de Paul. Sur « Mes tâches », chaque salle qui hérite du parc s'affiche « sans responsable » dans « Toutes », mais l'onglet « À prendre » (owner=none) est vide et personne ne la voit dans « Les miennes ». Les maintenances en retard ne sont plus prises par personne. Une vérification assignée à un compte désactivé reste, elle, à son nom et n'apparaît pas dans « À prendre ».
 
 **Recommandation.** Ignorer dans resolve() les responsables absents ou inactifs, ce qui les traite comme « sans responsable », ou effacer KEY_OWNER à la suppression du compte. Lors de la désactivation, proposer ou effectuer la réaffectation des salles, postes et vérifications. Faire concorder le filtre 'none' avec ce que _ref affiche.
 
@@ -1361,7 +1364,7 @@ entry.total += 1
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/agent.py:815`
 
-Le heartbeat ne remet que les commandes PENDING et les passe aussitôt à DELIVERED (l. 815-829). Rien ne remet ensuite une DELIVERED en file : mark_expired et expire_stale_commands ne touchent que PENDING (crud.py l. 315-319, worker.py l. 72-77). Aucune tâche ne ferme non plus une DELIVERED ou une RUNNING trop ancienne. L'agent, lui, part du principe inverse. En cas de file pleine, il « oublie » la commande « so a later heartbeat can re-offer it ». À l'arrêt, il abandonne sa file en mémoire (« the server re-offers them at the next start »). Un type inconnu (agent ancien qui reçoit package_install ou wake_on_lan) est ignoré sans renvoyer de résultat. Dans tous ces cas, la ligne reste « Transmise » pour toujours. Une commande coupée par l'extinction du poste reste « En cours » pour toujours, et purge_before ne supprime même pas les RUNNING (PURGEABLE_STATUSES).
+Le heartbeat ne remet que les commandes PENDING et les passe aussitôt à DELIVERED (l. 815-829). Rien ne remet ensuite une DELIVERED en file : mark_expired et expire_stale_commands ne touchent que PENDING (command/crud.py l. 113-131, worker.py l. 68-77). Aucune tâche ne ferme non plus une DELIVERED ou une RUNNING trop ancienne. L'agent, lui, part du principe inverse. En cas de file pleine, il « oublie » la commande « so a later heartbeat can re-offer it ». À l'arrêt, il abandonne sa file en mémoire (« the server re-offers them at the next start »). Un type inconnu (agent ancien qui reçoit package_install, ou wake_on_lan en tant que relais) est ignoré sans renvoyer de résultat. Dans tous ces cas, la ligne reste « Transmise » sans verdict jusqu'à sa purge, après COMMAND_RETENTION_DAYS (365 jours par défaut). Une commande coupée par l'extinction du poste reste « En cours » pour toujours : purge_before ne supprime pas les RUNNING (PURGEABLE_STATUSES). Ne balayer que les PENDING est un choix commenté côté serveur (command/crud.py l. 35-41 et 134-138) ; le défaut est la contradiction avec ce que l'agent suppose.
 
 ```
 backend/app/api/routes/agent.py:815-829
@@ -1379,7 +1382,7 @@ agent/internal/agent/agent.go:524-530
 		a.release(cmd.ID)
 ```
 
-**Scénario.** Un samedi, une salle est éteinte. L'administrateur y déploie 20 paquets (une ligne par paquet, la dédup ne regroupe rien). Le lundi, chaque poste reçoit les 20 commandes dans un seul heartbeat. Le worker en exécute une, le canal en garde 16, les 3 dernières sont abandonnées. Elles restent « Transmise » pour toujours sur la page du paquet et du poste, sans erreur et sans relance. Autre cas : un wu_install est interrompu par l'extinction du poste en fin de cours, et la ligne affiche « En cours » indéfiniment.
+**Scénario.** Un samedi, une salle est éteinte. L'administrateur y déploie 20 paquets (une ligne par paquet, la dédup ne regroupe rien). Le lundi, chaque poste reçoit les 20 commandes dans un seul heartbeat. Le worker en exécute une, le canal en garde 16, les 3 dernières sont abandonnées. Elles restent « Transmise » jusqu'à la purge, un an plus tard, sur la page du paquet et du poste, sans erreur et sans relance. Autre cas : un wu_install est interrompu par l'extinction du poste en fin de cours, et la ligne affiche « En cours » indéfiniment.
 
 **Recommandation.** Choisir une règle et l'appliquer des deux côtés. Option 1 : le serveur relivre les DELIVERED sans verdict après un délai (par exemple delivered_at + N heartbeats, avec l'idempotence par id déjà présente dans accept()). Option 2 : le worker passe en FAILED/EXPIRED (« sans réponse du poste ») les DELIVERED/RUNNING dont expires_at ou une durée maximale par type est dépassée. Dans les deux cas, corriger les commentaires de l'agent et faire envoyer un `failed` pour un type inconnu.
 
@@ -1489,7 +1492,7 @@ PackageDetailPage.vue:313-320
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `agent/internal/agent/agent.go:523`
 
-Le serveur passe chaque commande remise au statut DELIVERED au moment où il la renvoie dans la réponse au heartbeat. Ensuite, il ne remet en circulation que les commandes PENDING (agent.py:818). Côté agent, `accept` jette la commande quand le canal de 16 places est plein. Il la retire de la table de dédoublonnage en supposant qu'« un heartbeat ultérieur la reproposera », mais ce n'est jamais le cas. La commande reste donc DELIVERED pour toujours : pas d'exécution, pas de résultat, pas de passage à EXPIRED (mark_expired ne traite que les PENDING). En plus, `machines_with_open_command` empêche de la relancer sur ce poste jusqu'à son expires_at.
+Le serveur passe chaque commande remise au statut DELIVERED au moment où il la renvoie dans la réponse au heartbeat. Ensuite, il ne remet en circulation que les commandes PENDING (agent.py:818). Côté agent, `accept` jette la commande quand le canal de 16 places est plein. Il la retire de la table de dédoublonnage en supposant qu'« un heartbeat ultérieur la reproposera », mais ce n'est jamais le cas. La commande reste donc DELIVERED jusqu'à la purge (365 jours par défaut) : pas d'exécution, pas de résultat, pas de passage à EXPIRED (mark_expired ne traite que les PENDING). En plus, `machines_with_open_command` empêche de la relancer sur ce poste jusqu'à son expires_at.
 
 ```
 select {
@@ -1502,7 +1505,7 @@ select {
 // serveur, agent.py:818 :  .where(Command.status == CommandStatus.PENDING)  puis  cmd.status = CommandStatus.DELIVERED
 ```
 
-**Scénario.** Un administrateur déploie le lot de rentrée (20 paquets, donc 20 commandes package_install par poste) sur une salle éteinte pendant le week-end. Au premier heartbeat du lundi, le serveur renvoie les 20 commandes et les passe toutes à DELIVERED. Le worker en prend une, 16 entrent dans le canal et les 3 restantes sont jetées avec le message « deferring ». Ces 3 logiciels ne sont jamais installés, la console affiche « transmise » indéfiniment, et tout nouveau déploiement de ces paquets sur ces postes est ignoré comme doublon jusqu'à l'expiration. Le même cas se produit si une analyse complète de plusieurs heures occupe le worker pendant que des commandes de maintenance s'accumulent.
+**Scénario.** Un administrateur déploie le lot de rentrée (20 paquets, donc 20 commandes package_install par poste) sur une salle éteinte pendant le week-end. Au premier heartbeat du lundi, le serveur renvoie les 20 commandes et les passe toutes à DELIVERED. Le worker en prend une, 16 entrent dans le canal et les 3 restantes sont jetées avec le message « deferring ». Ces 3 logiciels ne sont jamais installés, la console affiche « transmise » jusqu'à la purge, et tout nouveau déploiement de ces paquets sur ces postes est ignoré comme doublon jusqu'à l'expiration. Le même cas se produit si une analyse complète de plusieurs heures occupe le worker pendant que des commandes de maintenance s'accumulent.
 
 **Recommandation.** Ne jamais jeter une commande déjà acceptée par le serveur. Trois options : rendre la file locale non bornée ou persistante (sur le modèle de queue.Queue), poster un résultat `failed` explicite (« file pleine, à relancer »), ou limiter côté serveur le nombre de commandes remises par heartbeat (LIMIT 16 sur la requête) pour que le reste reste PENDING et soit remis plus tard. Il faut aussi corriger le commentaire, qui décrit un comportement serveur qui n'existe pas.
 
@@ -1524,7 +1527,7 @@ case <-ctx.Done():
 // doc : "commands still waiting are abandoned ... — the server re-offers them at the next start."
 ```
 
-**Scénario.** Un poste exécute un full_scan (jusqu'à 8 h), avec wu_install et sfc_scan en attente derrière lui. L'utilisateur éteint le poste le soir, ou le MSI de mise à jour redémarre le service. Le full_scan est rapporté comme interrompu, mais wu_install et sfc_scan restent « transmise » indéfiniment dans la console, et les relancer est refusé comme doublon tant que leur TTL court.
+**Scénario.** Un poste exécute un full_scan (jusqu'à 8 h), avec wu_install et sfc_scan en attente derrière lui. L'utilisateur éteint le poste le soir, ou le MSI de mise à jour redémarre le service. Le full_scan est rapporté comme interrompu, mais wu_install et sfc_scan restent « transmise » jusqu'à la purge (365 jours par défaut) dans la console, et les relancer est refusé comme doublon tant que leur TTL court.
 
 **Recommandation.** Au moment de l'arrêt, vider le canal et enregistrer pour chaque commande non exécutée un résultat `failed` (« interrompue par l'arrêt de l'agent, à relancer ») dans queue.Queue, qui sera rejoué au prochain contact. Autre option : persister les identifiants acceptés et les reprendre au démarrage. Côté serveur, on peut aussi expirer les DELIVERED sans résultat au-delà d'expires_at.
 
@@ -1615,7 +1618,7 @@ const search = ref('');
 
 #### B21 — « Une seule vérification ouverte par poste » : en concurrence, erreur 500 à la création et double écriture au journal à la clôture
 
-**Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/checks.py:384`
+**Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/checks.py:235` · aussi : `backend/app/api/routes/checks.py:308`, `backend/app/api/routes/checks.py:477`
 
 create_check et create_checks_bulk vérifient l'unicité en lisant d'abord la base, puis insèrent. Seul l'index partiel uq_machine_checks_open protège en cas de concurrence, et l'IntegrityError qu'il lève n'est pas traduite en 409 : elle aboutit au gestionnaire générique, qui renvoie 500. En bulk, une seule collision annule tout le lot. close_check lit closed_at sans verrou (pas de with_for_update) : deux clôtures simultanées passent toutes les deux et ajoutent chacune une intervention « Vérification ». La dernière écrase aussi closed_by et closing_note.
 
@@ -1659,7 +1662,7 @@ form.location = props.room?.location ?? null;
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/services/session.ts:131`
 
-Quand le refresh échoue, le gestionnaire 401 appelle onSessionLost puis relance l'erreur d'origine vers chaque appelant. Un jeton d'accès expiré, ou émis avant un changement de mot de passe, ou appartenant à un compte désactivé, est refusé par _authenticate avec le code auth.credentials.invalid. Le front traduit ce code par « Identifiants invalides ». Les pages (UsersPage, AuditPage, SettingsPage, GroupsPage…) attrapent l'erreur et affichent ce toast global, qui reste visible sur la page de connexion. L'utilisateur n'a pourtant saisi aucun identifiant.
+Quand le refresh échoue, le gestionnaire 401 appelle onSessionLost puis relance l'erreur d'origine vers chaque appelant. Un jeton d'accès expiré, ou appartenant à un compte désactivé, est refusé par _authenticate avec le code auth.credentials.invalid. Après un changement de mot de passe, tant que le jeton d'accès n'a pas expiré, la session révoquée répond en revanche auth.session.invalid, déjà libellé « Votre session a pris fin ». Le front traduit ce code par « Identifiants invalides ». Les pages (UsersPage, AuditPage, SettingsPage, GroupsPage…) attrapent l'erreur et affichent ce toast global, qui reste visible sur la page de connexion. L'utilisateur n'a pourtant saisi aucun identifiant.
 
 ```
 session.ts l.128-133 :
@@ -1669,7 +1672,7 @@ deps.py l.121-122 : except InvalidTokenError:
 errors.ts l.18 : 'auth.credentials.invalid': 'Identifiants invalides',
 ```
 
-**Scénario.** Un opérateur laisse l'onglet Journal d'audit ouvert plus de 7 jours (REFRESH_TOKEN_EXPIRE_DAYS), ou un administrateur réinitialise son mot de passe. Il change ensuite un filtre. Le jeton d'accès a expiré, donc 401 auth.credentials.invalid, puis le refresh renvoie aussi 401. La console redirige vers /login et affiche « Identifiants invalides » (plusieurs fois si plusieurs requêtes étaient en cours), comme si le mot de passe saisi était faux.
+**Scénario.** Un opérateur laisse l'onglet Journal d'audit ouvert plus de 7 jours (REFRESH_TOKEN_EXPIRE_DAYS). Il change ensuite un filtre. Le jeton d'accès a expiré, donc 401 auth.credentials.invalid, puis le refresh renvoie aussi 401. La console redirige vers /login et affiche « Identifiants invalides » (plusieurs fois si plusieurs requêtes étaient en cours), comme si le mot de passe saisi était faux.
 
 **Recommandation.** Après onSessionLost, rejeter avec une erreur marquée « session terminée » (par exemple un code auth.session.invalid synthétique, ou un flag que apiErrorMessage reconnaît), ou supprimer les toasts pour ce cas et afficher un seul message « Votre session a pris fin » sur la page de connexion.
 
@@ -1717,7 +1720,7 @@ backend : audit.record(..., action="package.retire", resource_type="package", ..
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/UsersPage.vue:395`
 
-reload() recharge la page en cours sans vérifier qu'elle existe encore. AuditPage gère ce cas (repli sur la dernière page si items est vide alors que total > 0), mais UsersPage ne le fait pas. Après la suppression (ou le changement de taille de page) qui vide la dernière page, le tableau affiche « aucune donnée » alors que des comptes existent.
+reload() recharge la page en cours sans vérifier qu'elle existe encore. AuditPage gère ce cas (repli sur la dernière page si items est vide alors que total > 0), mais UsersPage ne le fait pas. Après la suppression qui vide la dernière page, le tableau affiche « aucune donnée » alors que des comptes existent.
 
 ```
 UsersPage.vue l.394-397 :
@@ -1737,7 +1740,7 @@ UsersPage.vue l.394-397 :
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/users.py:337` · aussi : `backend/app/api/routes/rooms.py:571`
 
-UserUpdate accepte email, is_active et email_preference à null, et GroupUpdate accepte name à null. Les routes appliquent tout ce qui est présent dans model_dump(exclude_unset=True) par setattr. Une valeur null sur une colonne NOT NULL fait échouer le flush (IntegrityError), d'où une 500 au lieu d'une 422. Pour is_active=null, `not fields["is_active"]` vaut True : la requête suit en plus le chemin « désactivation » (refus sur soi-même, revoke_all) avant d'échouer.
+UserUpdate accepte email, is_active et email_preference à null, et GroupUpdate accepte name à null. Les routes appliquent tout ce qui est présent dans model_dump(exclude_unset=True) par setattr. Une valeur null sur une colonne NOT NULL fait échouer le flush (IntegrityError), d'où une 500 au lieu d'une 422. Pour email=null, et pour le nom d'une salle (rooms.py, _clean_name), la 500 vient plus tôt, d'une AttributeError : normalize_email et _clean_name appellent une méthode de chaîne sur None. Pour is_active=null, `not fields["is_active"]` vaut True : la requête suit en plus le chemin « désactivation » (refus sur soi-même, revoke_all) avant d'échouer.
 
 ```
 users.py l.111 : email: Email | None = None
@@ -1746,7 +1749,7 @@ l.355-358 : for name, value in fields.items(): ... setattr(user, name, stored)
 groups.py l.118 : name: str | None = Field(default=None, min_length=1, max_length=100)
 ```
 
-**Scénario.** Un client API ou un script envoie PATCH /users/<id> {"email": null}, ou PATCH /groups/<id> {"name": null}. Le serveur répond 500 internal.server_error, la console affiche « Erreur interne du serveur » et le journal applicatif reçoit une trace d'IntegrityError.
+**Scénario.** Un client API ou un script envoie PATCH /users/<id> {"email": null}, ou PATCH /groups/<id> {"name": null}. Le serveur répond 500 internal.server_error, la console affiche « Erreur interne du serveur » et le journal applicatif reçoit une trace d'IntegrityError (AttributeError pour email).
 
 **Recommandation.** Refuser null sur ces champs avec un validateur Pydantic (model_validator qui rejette None pour email, is_active, email_preference et name), ou les typer sans None en gardant exclude_unset pour le caractère partiel.
 
@@ -1791,7 +1794,7 @@ for command, target in (await session.exec(stmt)).all():
         command.status = CommandStatus.DELIVERED.value
 ```
 
-**Scénario.** WOL_RELAY_ENABLED est actif sur un parc mono-domaine sans `location`. Un poste encore en agent ancien heartbeate le premier et capte le réveil d'une salle. Aucun paquet magique n'est émis, l'admin voit « déjà transmis » à chaque essai, et le réveil n'aboutit jamais.
+**Scénario.** WOL_RELAY_ENABLED est actif sur un parc mono-domaine sans `location`. Un poste encore en agent ancien heartbeate le premier et capte le réveil d'une salle. Aucun paquet magique n'est émis, l'admin voit « déjà transmis » à chaque essai, et le réveil n'aboutit pas tant que ce poste capte les demandes : chaque ligne expire après WOL_RELAY_TTL_MINUTES (10 par défaut), puis un nouveau clic relance la même course.
 
 **Recommandation.** Exclure de claim_wakes les relais dont agent_version est inférieure à la version qui gère wake_on_lan. En complément, remettre en PENDING avec relay_machine_id=NULL une ligne DELIVERED sans verdict après un court délai (par exemple 2 heartbeats), pour qu'un autre relais la reprenne.
 
@@ -1862,11 +1865,11 @@ raw, err := os.ReadFile(tokenPath(dir))
 
 <a id="b33"></a>
 
-#### B33 — Poste en attente d'approbation : chaque tentative d'enrôlement écrit une entrée d'audit (≈ 288/jour/poste)
+#### B33 — Poste en attente d'approbation : chaque tentative d'enrôlement écrit une entrée d'audit (≈ 384/jour/poste)
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `backend/app/api/routes/agent.py:556`
 
-L'agent ne fait pas la différence entre « réenrôlement en attente d'approbation » ou « machine révoquée » (403 définitifs) et une panne réseau. Il réessaie au rythme du backoff, plafonné à backoff_max_seconds (300 s). Côté serveur, chaque tentative refusée pour approbation écrit et committe une ligne d'audit `machine.reenroll_requested` et un warning dans le journal de sécurité, et réécrit reenroll_requested_at/ip. Aucun dédoublonnage n'existe (audit.record ajoute toujours une ligne). C'est pourtant le cas nominal d'un poste réinstallé.
+L'agent ne fait pas la différence entre « réenrôlement en attente d'approbation » ou « machine révoquée » (403 définitifs) et une panne réseau. Il réessaie au rythme du backoff, plafonné à backoff_max_seconds (300 s) et tiré au hasard entre la moitié et la totalité du palier (jitterBackoff) : une tentative toutes les 150 à 300 s, soit 288 par jour au minimum et environ 384 en moyenne. Côté serveur, chaque tentative refusée pour approbation écrit et committe une ligne d'audit `machine.reenroll_requested` et un warning dans le journal de sécurité, et réécrit reenroll_requested_at/ip. Aucun dédoublonnage n'existe (audit.record ajoute toujours une ligne). C'est pourtant le cas nominal d'un poste réinstallé.
 
 ```
 machine.reenroll_requested_at = utcnow()
@@ -1880,13 +1883,13 @@ machine.reenroll_requested_at = utcnow()
 // agent.go:214-217 : tick en erreur → nextBackoff plafonné à BackoffMaxSeconds (300 s par défaut)
 ```
 
-**Scénario.** Une salle de 30 postes est réimagée le vendredi soir, l'approbation n'a lieu que le lundi. Cela fait 30 × 288 ≈ 8 600 entrées d'audit par jour, soit environ 25 000 sur le week-end, toutes identiques. Elles noient les actions administratives dans la page Audit et l'export, et l'horodatage de la demande ne reflète plus la première tentative.
+**Scénario.** Une salle de 30 postes est réimagée le vendredi soir, l'approbation n'a lieu que le lundi. Cela fait 30 × 384 ≈ 11 500 entrées d'audit par jour, soit près de 30 000 sur le week-end, toutes identiques (moins si les postes sortent par une même adresse : enroll_limiter plafonne à 30 tentatives par 300 s et par IP). Elles noient les actions administratives dans la page Audit et l'export, et l'horodatage de la demande ne reflète plus la première tentative.
 
 **Recommandation.** Côté agent, reconnaître les codes MACHINE_ENROLLMENT_APPROVAL_REQUIRED et MACHINE_ENROLLMENT_REVOKED (corps du 403) et passer à un backoff long (par exemple 30–60 min). Côté serveur, n'auditer et ne mettre à jour reenroll_requested_at que si aucune demande n'est déjà en cours, ou si la précédente date de plus de N heures.
 
 <a id="b34"></a>
 
-#### B34 — Type de commande inconnu ignoré sans résultat : commande « transmise » indéfiniment sur un parc à versions mixtes
+#### B34 — Type de commande inconnu ignoré sans résultat : commande « transmise » sans verdict sur un parc à versions mixtes
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `agent/internal/agent/agent.go:566`
 
@@ -1900,7 +1903,7 @@ run, long, ok := a.resolve(cmd)
 	}
 ```
 
-**Scénario.** Après la migration 0029, un administrateur lance package_install sur une salle où une partie des postes a encore un agent antérieur au déploiement logiciel. Sur ces postes, la commande reste « transmise » sans fin, sans le message « agent trop ancien » qui permettrait à l'administrateur de comprendre et de mettre l'agent à jour.
+**Scénario.** Après la migration 0029, un administrateur lance package_install sur une salle où une partie des postes a encore un agent antérieur au déploiement logiciel. Sur ces postes, la commande reste « transmise » jusqu'à la purge annuelle, sans le message « agent trop ancien » qui permettrait à l'administrateur de comprendre et de mettre l'agent à jour.
 
 **Recommandation.** Poster un résultat `failed` explicite, par exemple « type de commande non pris en charge par l'agent vX.Y, mettre l'agent à jour » via a.refuse(ctx, cmd, err), plutôt qu'un simple retour silencieux. On peut aussi éviter côté serveur de remettre un type à un agent dont agent_version est trop ancienne.
 
@@ -1910,7 +1913,7 @@ run, long, ok := a.resolve(cmd)
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/maintenance/MaintenanceSettingsDialog.vue:98`
 
-La liste des responsables possibles vient de GET /checks/assignable-users, qui exige check:read. Elle est utilisée dans le dialogue de maintenance (salle ou poste, maintenance:write) et dans la page Paramètres (SettingsPage.vue:799, settings:write). Un compte qui a ces droits sans check:read reçoit un 403. Le menu « Responsable » reste vide, ou affiche un UUID brut pour la valeur existante. Dans la page Paramètres, l'appel se trouve dans le même try que le chargement : il déclenche une notification « Chargement impossible ».
+La liste des responsables possibles vient de GET /checks/assignable-users, qui exige check:read. Elle est utilisée dans le dialogue de maintenance (salle ou poste, maintenance:write) et dans la page Paramètres (SettingsPage.vue:799, settings:write). Un compte qui a ces droits sans check:read reçoit un 403. Le menu « Responsable » reste vide, ou affiche un UUID brut pour la valeur existante. Dans la page Paramètres, l'appel se trouve dans le même try que le chargement : il déclenche la notification « Vous n'avez pas la permission requise », que le dialogue de maintenance affiche lui aussi.
 
 ```
 ownerOptions.value = (await listAssignableUsers()).map((u) => ({ label: u.name, value: u.id }));
@@ -1943,11 +1946,11 @@ raise AppError(
 
 <a id="u01"></a>
 
-#### U01 — Fiche poste : passer au poste précédent/suivant en échec laisse une page vide sans message d'erreur
+#### U01 — Fiche poste : passer au poste précédent/suivant en échec laisse une page vide sans message d'erreur durable
 
 **Sévérité :** Moyenne · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/MachineDetailPage.vue:197`
 
-Quand on change de poste avec les flèches, le watcher de props.id remet `machine` à null puis relance load(). Si le chargement échoue, `lastRefreshedAt` contient encore la date du poste précédent : la condition `lastError && !lastRefreshedAt` est fausse et le bandeau n'apparaît pas. Il ne reste que le titre générique « Poste » et « Actualisé à HH:MM:SS », une heure qui appartient au poste précédent. Aucun onglet, aucune carte, aucune explication. Même sans erreur, la page reste vide pendant le chargement : le seul indicateur est le petit spinner du bouton Actualiser.
+Quand on change de poste avec les flèches, le watcher de props.id remet `machine` à null puis relance load(). Si le chargement échoue, `lastRefreshedAt` contient encore la date du poste précédent : la condition `lastError && !lastRefreshedAt` est fausse et le bandeau n'apparaît pas. Il ne reste que le titre générique « Poste » et « Actualisé à HH:MM:SS », une heure qui appartient au poste précédent. Aucun onglet, aucune carte, et pour seule explication un toast passager : celui du journal des interventions (« Poste introuvable » ou « Historique indisponible »), que seuls voient les comptes dotés d'intervention:read. Même sans erreur, la page reste vide pendant le chargement : le seul indicateur est le petit spinner du bouton Actualiser.
 
 ```
 watch(
@@ -2102,7 +2105,7 @@ Les listes « Postes à mettre à jour » et « Menaces actives » affichent leu
 
 #### U08 — Filtre « logiciel » anonyme, et invisible quand le panneau de filtres est ouvert
 
-**Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/utils/machineListFilters.ts:495`
+**Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/utils/machineListFilters.ts:494`
 
 Quand on arrive sur la liste depuis le catalogue (« 148 poste(s) ») ou depuis la fiche (bouton « Voir les postes qui l'ont »), la seule trace du filtre `software_id` est la puce générique « Postes portant un logiciel ». Elle ne dit ni le nom ni la version. Ces puces ne s'affichent en plus que quand le panneau est replié (`v-if="!filtersOpen && chips.length"`), et le panneau n'a aucun contrôle pour ce filtre. Une fois le panneau ouvert, la liste est réduite sans que rien ne dise pourquoi. C'est précisément ce que le commentaire du composant veut éviter (« A folded filter must never narrow the list silently »).
 
@@ -2124,7 +2127,7 @@ if (f.softwareId != null) {
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/SoftwarePage.vue:67`
 
-Le libellé vide du tableau est le même dans trois cas différents : parc jamais inventorié, recherche sans correspondance, échec du chargement. En cas d'échec, load() envoie une notification qui disparaît après quelques secondes, puis le tableau affiche durablement « Aucun logiciel inventorié pour l'instant. ». La page n'utilise pas LoadErrorBanner, contrairement aux autres pages du périmètre.
+Le libellé vide du tableau est le même dans trois cas différents : parc jamais inventorié, recherche sans correspondance, échec du chargement. En cas d'échec, load() envoie une notification qui disparaît après quelques secondes, puis le tableau affiche durablement « Aucun logiciel inventorié pour l'instant. ». La page n'utilise pas LoadErrorBanner, contrairement au tableau de bord, à la liste et à la fiche des postes, et à la fiche d'un paquet.
 
 ```
 no-data-label="Aucun logiciel inventorié pour l'instant."
@@ -2166,7 +2169,7 @@ La carte du dialogue fixe `min-width: 560px; max-width: 90vw`. En CSS, quand min
 <q-card style="min-width: 560px; max-width: 90vw">
 ```
 
-**Scénario.** Un technicien ouvre la fiche sur un smartphone (375 px) et clique « Fusionner (1) ». Le dialogue dépasse de 185 px à droite, et l'UUID du poste supprimé ainsi que le bouton d'action sont coupés.
+**Scénario.** Un technicien ouvre la fiche sur un smartphone (375 px) et clique « Fusionner (1) ». Le dialogue, centré, dépasse d'environ 92 px de chaque côté : le début du nom et de l'UUID est coupé à gauche, le bouton d'action à droite, et la partie gauche ne s'atteint pas par défilement. CommandOutputDialog.vue:3 a le même défaut (`min-width: 480px`).
 
 **Recommandation.** Remplacer par `width: 560px; max-width: 95vw`, comme dans les autres dialogues du dépôt (par exemple MachineHistoryCard : `width: 520px; max-width: 95vw`).
 
@@ -2214,7 +2217,7 @@ Le dialogue de réinitialisation n'est pas `persistent`, et @hide remet resetRes
 
 #### U14 — Saisie de maintenance : les notes par poste sont perdues si le dialogue se ferme par Échap ou par un clic à côté
 
-**Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/maintenance/MaintenanceSessionDialog.vue:104` · aussi : `frontend/src/components/maintenance/MaintenanceSessionDialog.vue:5`
+**Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/maintenance/MaintenanceSessionDialog.vue:131` · aussi : `frontend/src/components/maintenance/MaintenanceSessionDialog.vue:5`
 
 Ce dialogue est un long formulaire : une date, une observation générale, puis une case et une note par poste de la salle. Il n'est pas persistent : Échap ou un clic sur le fond le ferment sans confirmation. En plus, le watcher réinitialise tout à chaque ouverture (note, date, lignes toutes cochées, notes vides). Rien de ce qui a été saisi n'est conservé.
 
@@ -2230,7 +2233,7 @@ watch(
     rows.value = props.machines.map((m) => ({ ... done: true, note: '' }));
 ```
 
-**Scénario.** Un technicien remplit des observations pour 25 postes d'une salle et décoche 3 postes absents. Il appuie sur Échap pour fermer une liste ouverte, ou clique hors de la carte : le dialogue se ferme. À la réouverture, toutes les notes ont disparu et les 25 postes sont de nouveau cochés.
+**Scénario.** Un technicien remplit des observations pour 25 postes d'une salle et décoche 3 postes absents. Il appuie sur Échap par réflexe, ou clique hors de la carte : le dialogue se ferme. À la réouverture, toutes les notes ont disparu et les 25 postes sont de nouveau cochés.
 
 **Recommandation.** Passer le dialogue en `persistent`, ou intercepter la fermeture (@before-hide ou bouton Annuler) avec une confirmation dès qu'une note est saisie ou qu'une case a été modifiée. Ne réinitialiser le formulaire qu'après un enregistrement réussi ou une annulation confirmée.
 
@@ -2326,9 +2329,9 @@ Pour les vérifications, le menu de ligne propose « Me l'affecter » et « Réa
 
 #### U19 — Le badge « Mes tâches » ne compte que les vérifications et n'est pas mis à jour après une clôture
 
-**Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/layouts/MainLayout.vue:98`
+**Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/layouts/MainLayout.vue:102`
 
-Le compteur du menu ne prend en compte que les vérifications ouvertes qui me sont affectées. Les maintenances en retard dont je suis responsable n'y figurent pas. Il n'est recalculé qu'au changement de route : clore une vérification depuis la page Mes tâches, qui ne change pas de route, laisse le compteur à l'ancienne valeur.
+Le compteur du menu ne prend en compte que les vérifications ouvertes qui me sont affectées. Les maintenances en retard dont je suis responsable n'y figurent pas. Il n'est recalculé qu'au changement de route ou de compte : clore une vérification depuis la page Mes tâches, qui ne change pas de route, laisse le compteur à l'ancienne valeur.
 
 ```
 async function countMyTasks() {
@@ -2348,7 +2351,7 @@ watch(() => router.currentRoute.value.fullPath, () => void countMyTasks());
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/components/maintenance/MaintenanceSessionDialog.vue:63`
 
-L'observation par poste est désactivée dès que la case est décochée, et seuls les postes cochés sont envoyés. Le commentaire du composant prévoit pourtant de décocher les postes absents ou éteints, mais la raison de l'absence ne peut être saisie que dans la note générale. Elle n'apparaît alors pas dans l'historique du poste concerné. Si le technicien saisit une note puis décoche le poste, la note disparaît sans avertissement.
+L'observation par poste est désactivée dès que la case est décochée, et seuls les postes cochés sont envoyés. Le commentaire du composant prévoit pourtant de décocher les postes absents ou éteints, mais la raison de l'absence ne peut être saisie que dans la note générale. Elle n'apparaît alors pas dans l'historique du poste concerné. Si le technicien saisit une note puis décoche le poste, la note reste affichée dans le champ grisé mais n'est pas envoyée, sans avertissement.
 
 ```
 <q-input v-model="row.note" ... :disable="!row.done" />
@@ -2438,11 +2441,11 @@ const sessionMachines = computed(() => machines.value.map((m) => ({ ... })));
 
 <a id="u25"></a>
 
-#### U25 — Liste des postes : la mise en page par défaut fait 2 904 px de large, et les colonnes de supervision (Antivirus, MAJ Windows, Session, Vu le) sont hors écran en 1440 px
+#### U25 — Liste des postes : la mise en page par défaut fait plus de 2 200 px de large, et les colonnes de supervision (Antivirus, MAJ Windows, Session, Vu le) sont hors écran en 1440 px
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `frontend/src/components/machines-list/MachinesTable.vue:2`
 
-La mise en page par défaut affiche les 15 colonnes du catalogue, dans l'ordre suivant : Nom, Domaine, Emplacement, Bâtiment, Salle, Maintenance, IP, OS, Agent, Antivirus, MAJ Windows, Session, Modèle, Disque, Vu le. Mesuré dans le navigateur, le tableau fait 2 904 px de large. Sur un écran de bureau de 1440 px, seules Nom, Domaine, Emplacement et une partie de Bâtiment sont visibles (1 092 px utiles). Les colonnes qui servent au suivi quotidien (Antivirus, MAJ Windows, Session, Vu le) sont à plus de 1 800 px à droite et ne s'atteignent que par un défilement horizontal interne au tableau, sans indice visuel. Même en 1920 px, à peine la moitié du tableau est visible. En 390 px, seule la colonne Nom apparaît. La colonne Nom elle-même s'élargit à 398 px dès qu'un nom d'hôte est long.
+La mise en page par défaut affiche les 15 colonnes du catalogue, dans l'ordre suivant : Nom, Domaine, Emplacement, Bâtiment, Salle, Maintenance, IP, OS, Agent, Antivirus, MAJ Windows, Session, Modèle, Disque, Vu le. Mesuré dans le navigateur, le tableau fait de 2 234 à 2 904 px de large selon les données (noms d'OS, de domaine et de modèle). Sur un écran de bureau de 1440 px, seules les premières colonnes sont visibles (1 092 px utiles) : de Nom à une partie de Bâtiment avec des valeurs longues, jusqu'à Adresse IP avec des valeurs courtes. Les colonnes qui servent au suivi quotidien (Antivirus, MAJ Windows, Session, Vu le) commencent au mieux 270 px au-delà du bord visible, et jusqu'à plus de 1 800 px, et ne s'atteignent que par un défilement horizontal interne au tableau, sans indice visuel. Même en 1920 px, de la moitié à 70 % du tableau est visible, et MAJ Windows, Session et Vu le restent en partie ou totalement hors écran. En 390 px, seule la colonne Nom apparaît. La colonne Nom elle-même s'élargit à 398 px dès qu'un nom d'hôte est long.
 
 ```
 export const DEFAULT_MACHINE_COLUMNS: MachineColumnKey[] = MACHINE_COLUMN_KEYS.filter(
@@ -2450,17 +2453,17 @@ export const DEFAULT_MACHINE_COLUMNS: MachineColumnKey[] = MACHINE_COLUMN_KEYS.f
 );  // utils/machineColumns.ts:48 — mesure Playwright à 1440px : {"sw":2904,"cw":1092}
 ```
 
-**Scénario.** Un administrateur ouvre /machines sur un écran 1440×900 pour voir quels postes ont un antivirus périmé. L'écran (capture machines-desk.png) ne montre ni le badge antivirus, ni la date du dernier contact, ni la session : il faut faire défiler le tableau de près de 2 000 px vers la droite, ligne d'en-tête comprise. En mobile (machines-mob.png), seul le nom est visible et le nom long « PC-LYCEE-B204-003-POSTE-PROFESSEUR-PRINCIPAL » est coupé sans points de suspension.
+**Scénario.** Un administrateur ouvre /machines sur un écran 1440×900 pour voir quels postes ont un antivirus périmé. L'écran (capture machines-desk.png) ne montre ni le badge antivirus, ni la date du dernier contact, ni la session : il faut faire défiler le tableau de plusieurs centaines à près de 2 000 px vers la droite, ligne d'en-tête comprise. En mobile (machines-mob.png), seul le nom est visible et le nom long « PC-LYCEE-B204-003-POSTE-PROFESSEUR-PRINCIPAL » est coupé sans points de suspension.
 
 **Recommandation.** Réduire la mise en page par défaut à un jeu court centré sur la supervision, par exemple Nom, Salle, Antivirus, MAJ Windows, Session, Vu le. Laisser Domaine, Emplacement, OS, Modèle et IP au choix via « Colonnes ». Rendre la première colonne collante (sticky) et limiter sa largeur avec text-overflow: ellipsis. En petit écran (`$q.screen.lt.md`), passer le QTable en mode `grid` avec une carte par poste.
 
 <a id="u26"></a>
 
-#### U26 — « Mes tâches » : la colonne Consignes est écrasée à 116 px et le bouton « Clore » est coupé en 1440 px
+#### U26 — « Mes tâches » : dès que le libellé de lieu est long, la colonne Consignes est écrasée à 116 px et le bouton « Clore » est coupé en 1440 px
 
 **Sévérité :** Faible · **Statut :** plausible (dépend du contexte) · **Emplacement :** `frontend/src/pages/TasksPage.vue:57`
 
-Les cellules d'un QTable sont en `white-space: nowrap` par défaut. La colonne Poste, qui contient le nom et le libellé « Bâtiment › Salle · Emplacement », ne se replie donc pas et prend 556 px. Seule la cellule Consignes passe en `pre-line`, avec un simple `max-width: 420px` sans largeur minimale. Le navigateur la réduit donc à 116 px. Une consigne de 180 caractères tient alors sur 13 lignes : chaque ligne du tableau fait environ 270 px de haut, et 6 tâches occupent toute la hauteur de la page. Le tableau dépasse aussi sa boîte (1 146 px de contenu pour 1 090 px visibles), si bien que le bouton « Clore » (x = 1349→1433) dépasse le bord droit du tableau (1415) et apparaît tronqué en « CLO ».
+Les cellules d'un QTable sont en `white-space: nowrap` par défaut. La colonne Poste, qui contient le nom et le libellé « Bâtiment › Salle · Emplacement », ne se replie donc pas : elle prend 556 px avec un libellé de lieu d'environ 85 caractères, contre 227 px avec un libellé court, cas où la mise en page reste saine en 1440 px. En 390 px, le défaut se reproduit avec des données ordinaires. Seule la cellule Consignes passe en `pre-line`, avec un simple `max-width: 420px` sans largeur minimale. Le navigateur la réduit donc à 116 px. Une consigne de 180 caractères tient alors sur 13 lignes : chaque ligne du tableau fait environ 270 px de haut, et 6 tâches occupent toute la hauteur de la page. Le tableau dépasse aussi sa boîte (1 146 px de contenu pour 1 090 px visibles), si bien que le bouton « Clore » (x = 1349→1433) dépasse le bord droit du tableau (1415) et apparaît tronqué en « CLO ».
 
 ```
 <q-td :props="props" style="white-space: pre-line; max-width: 420px">
@@ -2479,7 +2482,7 @@ Les cellules d'un QTable sont en `white-space: nowrap` par défaut. La colonne P
 
 **Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/pages/SettingsPage.vue:916`
 
-La cellule `.env-key` est en `white-space: nowrap` et contient des clés en police à chasse fixe comme `MAINTENANCE_REMINDER_WEEKDAY` ou `ENROLLMENT_REENROLL_REQUIRES_APPROVAL`. En 390 px, la clé occupe presque toute la largeur. La description, dans un tableau `wrap-cells`, se replie alors sur 60 à 80 px, un ou deux mots par ligne, et ses derniers caractères sont coupés au bord (« le token d'un », « Cycle pa »). La page Paramètres atteint 10 643 px de haut en mobile, contre 5 342 px en bureau.
+La cellule `.env-key` est en `white-space: nowrap` et contient des clés en police à chasse fixe comme `MAINTENANCE_REMINDER_WEEKDAY` ou `ENROLLMENT_REENROLL_REQUIRES_APPROVAL`. En 390 px, la clé occupe presque toute la largeur. La description, dans un tableau `wrap-cells`, se replie alors sur 60 à 110 px selon le groupe de réglages, un ou deux mots par ligne, et ses derniers caractères sont coupés au bord (« le token d'un », « Cycle pa ») ; dans les groupes aux clés les plus longues, elle passe presque entièrement derrière un défilement horizontal. La page Paramètres atteint 10 643 px de haut en mobile, contre 5 342 px en bureau.
 
 ```
 .env-key {
@@ -2515,7 +2518,7 @@ La couleur du badge vient de l'état global `is_up_to_date` (protectionColor), a
 
 #### U29 — En mobile, le titre « Tia'i — Console » est tronqué en « Tia'i … » par l'adresse e-mail affichée en permanence
 
-**Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/layouts/MainLayout.vue:9`
+**Sévérité :** Faible · **Statut :** vérifié · **Emplacement :** `frontend/src/layouts/MainLayout.vue:10`
 
 L'adresse e-mail de l'utilisateur est toujours affichée dans la barre d'en-tête, quelle que soit la largeur. En 390 px, elle prend la place du q-toolbar-title, qui se réduit à « Tia'i … » sur toutes les pages (voir les captures *-mob.png). Une adresse plus longue (prenom.nom@etablissement.example) ne laisserait plus que l'icône.
 

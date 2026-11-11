@@ -668,7 +668,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
   Pour le relais : exiger un emplacement validé côté serveur, borner le masque et n'accepter que des réseaux privés ou une liste configurée. Exclure les agents trop anciens pour relayer, et remettre en attente un réveil remis sans verdict.
 - [ ] **T36** · *P3 fond* — Données déclarées par l'agent : placement en salle et catalogue logiciel ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21)), suivi dans `plan-salles-maintenance-interventions.md`
 - [ ] **T37** · *P3 fond* — **Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))
-  Refuser `http://` sauf option de développement, et ne plus suivre les redirections. Borner les corps d'erreur lus, faire tourner le journal à chaud, et borner les téléchargements à la taille annoncée. Distinguer un `token.dat` illisible d'un `token.dat` absent. Allonger le délai entre deux tentatives quand l'enrôlement attend une approbation, et ne l'auditer qu'une fois.
+  N'accepter `http://` que sur option explicite, en corrigeant `DEPLOYMENT.md` qui le présente aujourd'hui comme accepté, et ne plus suivre les redirections. Borner les corps d'erreur lus, faire tourner le journal à chaud, et borner les téléchargements à la taille annoncée. Distinguer un `token.dat` illisible d'un `token.dat` absent. Allonger le délai entre deux tentatives quand l'enrôlement attend une approbation, et ne l'auditer qu'une fois.
 - [ ] **T38** · *P3 fond* — Script de signature : neutraliser les caractères de contrôle ([S25](plan-audit-2026-11.md#s25)), suivi dans `plan-deploiement-logiciel.md`
 - [ ] **T39** · *P3 fond* — **Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
   Factoriser `_escape_like` et l'appliquer à toutes les recherches par sous-chaîne : logiciels, postes et comptes.
@@ -678,7 +678,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
   - `X-Forwarded-For` : ne le lire que depuis des proxys de confiance, et n'exposer le port de développement que sur `127.0.0.1`.
   - Actions GitHub : les épingler par SHA, avec des permissions minimales.
   - `GIST_SECRET` : le sortir de l'`env` des jobs.
-  - nginx : passer en 1.28, et ajouter le frontend au scan Trivy.
+  - nginx : passer à la branche stable courante (`stable-alpine`, 1.30 à ce jour ; la 1.28 n'est déjà plus reconstruite), et ajouter le frontend au scan Trivy.
   - Conteneurs backend et worker : exécution sans root, `cap_drop` et `no-new-privileges`.
   - `index.html` : le servir en `no-cache`.
   - OpenAPI : le couper hors environnement local.
