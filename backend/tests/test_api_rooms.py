@@ -112,6 +112,34 @@ async def test_deleting_a_building_keeps_its_rooms_and_their_site(client, db_ses
     assert after["effective_location"] == "Lycée de Taravao"
 
 
+async def test_deleting_a_building_renames_a_room_whose_name_is_taken(
+    client, db_session
+):
+    """Audit B07: two buildings with a « Salle 101 » each; deleting both used
+    to fail on the second with a 500."""
+    admin = await _admin(client, db_session)
+    a = await _building(client, admin, "Bâtiment A")
+    b = await _building(client, admin, "Bâtiment B")
+    await _room(client, admin, "Salle 101", building_id=a["id"])
+    await _room(client, admin, "Salle 101", building_id=b["id"])
+    assert (
+        await client.delete(f"/api/v1/buildings/{a['id']}", headers=admin)
+    ).status_code == 204
+    resp = await client.delete(f"/api/v1/buildings/{b['id']}", headers=admin)
+    assert resp.status_code == 204, resp.text
+    names = sorted(
+        r["name"] for r in (await client.get("/api/v1/rooms", headers=admin)).json()
+    )
+    assert names == ["Salle 101", "Salle 101 (Bâtiment B)"]
+    log = (await client.get("/api/v1/audit", headers=admin)).json()["items"]
+    deleted = next(
+        e
+        for e in log
+        if e["action"] == "building.delete" and e["details"]["name"] == "Bâtiment B"
+    )
+    assert deleted["details"]["renamed"] == ["Salle 101 → Salle 101 (Bâtiment B)"]
+
+
 async def test_room_name_is_unique_per_building(client, db_session):
     admin = await _admin(client, db_session)
     b = await _building(client, admin, "Bâtiment B")

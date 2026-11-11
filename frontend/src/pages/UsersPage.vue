@@ -511,6 +511,10 @@ async function toggleActive(user: ConsoleUser) {
     $q.notify({
       type: 'positive',
       message: user.is_active ? 'Compte désactivé' : 'Compte réactivé',
+      // What a deactivated owner leaves behind is nobody's until it comes back.
+      caption: user.is_active
+        ? 'Ses salles, postes et vérifications passent dans « À prendre » tant que le compte reste désactivé.'
+        : undefined,
     });
     await reload();
   } catch (e) {

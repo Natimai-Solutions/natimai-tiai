@@ -445,17 +445,24 @@ async def delete_building(
     scope: CurrentScope,
 ) -> None:
     """Delete a building. Its rooms stay, building-less, and keep the site they
-    inherited from it."""
+    inherited from it; one whose name is already taken outside any building
+    is renamed after the building."""
     building = await _require_building(session, building_id, scope)
     _reject_out_of_scope(_building_writable(building, scope))
-    await crud.detach_building(session, building)
+    renamed = await crud.detach_building(session, building)
     audit.record(
         session,
         actor=current.email,
         action="building.delete",
         resource_type="building",
         resource_id=str(building.id),
-        details={"name": building.name, "location": building.location},
+        details={
+            "name": building.name,
+            "location": building.location,
+            # Rooms renamed so as not to collide with one already outside any
+            # building.
+            **({"renamed": [f"{a} → {b}" for a, b in renamed]} if renamed else {}),
+        },
     )
     await session.delete(building)
     await session.commit()

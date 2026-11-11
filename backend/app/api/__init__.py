@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.routes.agent import router as agent_router
 from app.api.routes.audit import router as audit_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.checks import assignable_router as checks_assignable_router
 from app.api.routes.checks import machine_router as machine_checks_router
 from app.api.routes.checks import router as checks_router
 from app.api.routes.commands import router as commands_router
@@ -30,6 +31,7 @@ api_router.include_router(rooms_router)
 api_router.include_router(machine_interventions_router)
 api_router.include_router(interventions_router)
 api_router.include_router(machine_checks_router)
+api_router.include_router(checks_assignable_router)
 api_router.include_router(checks_router)
 api_router.include_router(maintenance_router)
 api_router.include_router(room_maintenance_router)

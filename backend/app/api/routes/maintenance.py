@@ -23,7 +23,12 @@ from app.features.intervention.models import Intervention
 from app.features.machine.models import Machine
 from app.features.maintenance import crud
 from app.features.maintenance.models import Maintenance
-from app.features.maintenance.policy import MaintenanceState, Origin, Resolved
+from app.features.maintenance.policy import (
+    MaintenanceState,
+    Origin,
+    Resolved,
+    available,
+)
 from app.features.room import crud as room_crud
 from app.features.room.models import Room
 from app.features.setting import crud as setting_crud
@@ -274,7 +279,10 @@ async def update_machine_maintenance(
     machine = await _require_machine(session, machine_id, scope)
     fields = payload.model_dump(exclude_unset=True)
     if "maintenance_owner_id" in fields:
-        await _require_owner(session, fields["maintenance_owner_id"])
+        # Re-sending the current owner, deactivated since, is not choosing
+        # them: the form must still save its other fields (audit B08).
+        if fields["maintenance_owner_id"] != machine.maintenance_owner_id:
+            await _require_owner(session, fields["maintenance_owner_id"])
         machine.maintenance_owner_id = fields["maintenance_owner_id"]
     if "maintenance_cycle_days" in fields:
         machine.maintenance_cycle_days = fields["maintenance_cycle_days"]
@@ -304,7 +312,7 @@ async def room_maintenance(
     policy = await setting_crud.maintenance_policy(session)
     effective_owner = (
         room.maintenance_owner_id
-        if room.maintenance_owner_id is not None
+        if available(room.maintenance_owner_id, policy)
         else policy.owner_id
     )
     names = await setting_crud.user_names(
@@ -335,7 +343,8 @@ async def update_room_maintenance(
     room = await _require_room(session, room_id, scope)
     fields = payload.model_dump(exclude_unset=True)
     if "maintenance_owner_id" in fields:
-        await _require_owner(session, fields["maintenance_owner_id"])
+        if fields["maintenance_owner_id"] != room.maintenance_owner_id:
+            await _require_owner(session, fields["maintenance_owner_id"])
         room.maintenance_owner_id = fields["maintenance_owner_id"]
     if "maintenance_cycle_days" in fields:
         room.maintenance_cycle_days = fields["maintenance_cycle_days"]

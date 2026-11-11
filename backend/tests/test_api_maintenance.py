@@ -191,6 +191,101 @@ async def test_due_list_groups_by_room_and_filters_by_owner(client, db_session):
     del a, c, d
 
 
+async def test_a_deactivated_owner_counts_as_none(client, db_session):
+    """Audit B08, B35: the postes and requests of an account deactivated
+    since go under « À prendre », the forms that still name it can be saved,
+    and who may set an owner may list the candidates."""
+    from app.features.user import crud as user_crud
+    from tests.scope_helpers import group
+
+    admin, _ = await _admin(client, db_session)
+    tech, tech_id = await _tech(client, db_session)
+    room = await _room(client, admin, "B12")
+    a = await _machine(db_session, "A", first_seen_days_ago=100, room_id=room)
+    r = await client.patch(
+        f"/api/v1/rooms/{room}/maintenance",
+        headers=admin,
+        json={"maintenance_owner_id": tech_id},
+    )
+    assert r.status_code == 200, r.text
+    settings_resp = await client.patch(
+        "/api/v1/settings",
+        headers=admin,
+        json={"maintenance_default_owner_id": tech_id},
+    )
+    assert settings_resp.status_code == 200, settings_resp.text
+    check = await client.post(
+        f"/api/v1/machines/{a}/check", headers=admin, json={"assigned_to_id": tech_id}
+    )
+    assert check.status_code == 201, check.text
+
+    marie = await user_crud.get_by_email(db_session, "tech@test.local")
+    assert marie is not None
+    marie.is_active = False
+    db_session.add(marie)
+    await db_session.commit()
+
+    nobody = (
+        await client.get(
+            "/api/v1/maintenance/due", headers=admin, params={"owner": "none"}
+        )
+    ).json()
+    assert [r["name"] for r in nobody["rooms"]] == ["B12"]
+    to_take = (
+        await client.get(
+            "/api/v1/checks", headers=admin, params={"assigned_to": "none"}
+        )
+    ).json()
+    assert to_take["total"] == 1
+
+    # The forms that still carry her save their other fields.
+    r = await client.patch(
+        f"/api/v1/rooms/{room}/maintenance",
+        headers=admin,
+        json={"maintenance_owner_id": tech_id, "maintenance_cycle_days": 60},
+    )
+    assert r.status_code == 200, r.text
+    r = await client.patch(
+        "/api/v1/settings",
+        headers=admin,
+        json={
+            "maintenance_default_owner_id": tech_id,
+            "maintenance_default_cycle_days": 120,
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = await client.patch(
+        f"/api/v1/checks/{check.json()['id']}",
+        headers=admin,
+        json={"assigned_to_id": tech_id, "instructions": "Écran qui scintille"},
+    )
+    assert r.status_code == 200, r.text
+    # Choosing her anew is still refused.
+    r = await client.patch(
+        f"/api/v1/machines/{a}/maintenance",
+        headers=admin,
+        json={"maintenance_owner_id": tech_id},
+    )
+    assert r.status_code == 404
+
+    # maintenance:write without check:read lists the candidates.
+    g = await group(
+        db_session,
+        "Maintenance seule",
+        ["machine:read", "maintenance:read", "maintenance:write", "room:read"],
+        None,
+    )
+    upkeep, _ = await _user(client, db_session, "upkeep@test.local", [g.id])
+    listed = await client.get("/api/v1/checks/assignable-users", headers=upkeep)
+    assert listed.status_code == 200, listed.text
+    # Someone holding none of the three still cannot.
+    bare = await group(db_session, "Rien", ["machine:read"], None)
+    nothing, _ = await _user(client, db_session, "bare@test.local", [bare.id])
+    assert (
+        await client.get("/api/v1/checks/assignable-users", headers=nothing)
+    ).status_code == 403
+
+
 async def test_recording_a_visit_writes_the_journal_and_moves_the_cycle(
     client, db_session
 ):

@@ -478,7 +478,10 @@ async def update_settings(
         )
     if "maintenance_default_owner_id" in fields:
         owner_id = fields["maintenance_default_owner_id"]
-        if owner_id is not None:
+        stored = (await crud.get_all(session)).get(crud.KEY_OWNER)
+        # The card sends every field: re-sending an owner deactivated since
+        # must not keep the cycle from being saved (audit B08).
+        if owner_id is not None and str(owner_id) != stored:
             owner = await session.get(User, owner_id)
             if owner is None or not owner.is_active:
                 raise AppError(

@@ -13,7 +13,13 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlmodel import col, select
 
-from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
+from app.api.deps import (
+    CurrentScope,
+    CurrentUser,
+    SessionDep,
+    require_any_permission,
+    require_permission,
+)
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
@@ -38,6 +44,19 @@ _WRITE = Depends(require_permission(Resource.CHECK, Action.WRITE))
 
 machine_router = APIRouter(prefix="/machines", tags=["checks"], dependencies=[_READ])
 router = APIRouter(prefix="/checks", tags=["checks"], dependencies=[_READ])
+assignable_router = APIRouter(
+    prefix="/checks",
+    tags=["checks"],
+    dependencies=[
+        Depends(
+            require_any_permission(
+                (Resource.CHECK, Action.READ),
+                (Resource.MAINTENANCE, Action.WRITE),
+                (Resource.SETTINGS, Action.WRITE),
+            )
+        )
+    ],
+)
 
 
 class UserRef(BaseModel):
@@ -291,11 +310,12 @@ async def list_machine_checks(
 # --- The lists and the tasks --------------------------------------------------
 
 
-@router.get("/assignable-users", response_model=list[UserRef])
+@assignable_router.get("/assignable-users", response_model=list[UserRef])
 async def assignable_users(session: SessionDep) -> list[UserRef]:
     """Active accounts, id and name only: who a task can be given to, without
-    opening the accounts page to everyone who may assign. Declared before
-    ``/{check_id}``."""
+    opening the accounts page to everyone who may assign. Also who may own a
+    maintenance — so open to whoever sets one, not only to check:read (audit
+    B35). Registered before ``router``, whose ``/{check_id}`` would take it."""
     rows = await session.exec(
         select(User).where(col(User.is_active).is_(True)).order_by(col(User.email))
     )
@@ -431,9 +451,10 @@ async def update_check(
     fields = payload.model_dump(exclude_unset=True)
     new_assignee: User | None = None
     if "assigned_to_id" in fields:
-        new_assignee = await _require_assignee(session, fields["assigned_to_id"])
-        if fields["assigned_to_id"] == row.assigned_to_id:
-            new_assignee = None  # unchanged: nothing new to tell them
+        # Unchanged is not a choice: a request whose assignee was deactivated
+        # since can still be reworded (audit B08).
+        if fields["assigned_to_id"] != row.assigned_to_id:
+            new_assignee = await _require_assignee(session, fields["assigned_to_id"])
         row.assigned_to_id = fields["assigned_to_id"]
     if "instructions" in fields:
         row.instructions = _clean(fields["instructions"])

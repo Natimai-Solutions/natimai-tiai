@@ -14,7 +14,12 @@ from app.features.intervention import crud as intervention_crud
 from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
 from app.features.maintenance.models import Maintenance
-from app.features.maintenance.policy import MaintenanceState, Resolved, resolve
+from app.features.maintenance.policy import (
+    MaintenanceState,
+    Resolved,
+    available,
+    resolve,
+)
 from app.features.room.models import Building, Room
 from app.features.setting.crud import MaintenancePolicy
 
@@ -76,7 +81,7 @@ def group_due(
         if entry is None:
             room_owner = (
                 room.maintenance_owner_id
-                if room.maintenance_owner_id is not None
+                if available(room.maintenance_owner_id, policy)
                 else policy.owner_id
             )
             room_cycle = (

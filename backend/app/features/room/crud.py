@@ -228,14 +228,44 @@ async def set_room(
     return result.rowcount
 
 
-async def detach_building(session: AsyncSession, building: Building) -> None:
+async def detach_building(
+    session: AsyncSession, building: Building
+) -> list[tuple[str, str]]:
     """Before a building is deleted: its rooms keep the site they inherited,
-    copied down, rather than losing it with the building. Does not commit."""
+    copied down, rather than losing it with the building.
+
+    Out of their building, their names must also be unique among the rooms
+    that have none: one that collides is renamed after its building —
+    « Salle 101 (Bâtiment A) », then numbered — rather than failing the
+    deletion (audit B07). Returns the renames. Flushes, does not commit."""
     await session.exec(
         update(Room)
         .where(col(Room.building_id) == building.id, col(Room.location).is_(None))
         .values(location=building.location, updated_at=utcnow())
     )
+    renamed: list[tuple[str, str]] = []
+    rooms = (
+        await session.exec(select(Room).where(col(Room.building_id) == building.id))
+    ).all()
+    for room in rooms:
+        if await room_by_name(session, None, room.name) is None:
+            continue
+        base = f"{room.name} ({building.name})"
+        candidate = base[:ROOM_NAME_MAX]
+        n = 2
+        while (
+            await room_by_name(session, None, candidate) is not None
+            or await room_by_name(session, building.id, candidate) is not None
+        ):
+            suffix = f" ({n})"
+            candidate = base[: ROOM_NAME_MAX - len(suffix)].rstrip() + suffix
+            n += 1
+        renamed.append((room.name, candidate))
+        room.name = candidate
+        room.updated_at = utcnow()
+        session.add(room)
+        await session.flush()
+    return renamed
 
 
 # --- Directory-driven placement (ROOM_SOURCE) -------------------------------
