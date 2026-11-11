@@ -55,11 +55,11 @@ Les faiblesses se concentrent sur cinq sujets :
 
 Exécution de code en SYSTEM sur les postes si le serveur est compromis, escalade de périmètre, fuite hors périmètre, exfiltration de secrets. À traiter avant toute nouvelle fonctionnalité.
 
-- [ ] **T01 — Agent : n'accepter qu'un UUID comme identifiant de paquet** ([S01](plan-audit-2026-11.md#s01))
+- [x] **T01 — Agent : n'accepter qu'un UUID comme identifiant de paquet** ([S01](plan-audit-2026-11.md#s01))
   Dans `agent/internal/deploy/executor.go`, refuser tout `pkg.ID` qui n'est pas un UUID canonique avant `MkdirAll`. En défense en profondeur, vérifier par `filepath.Rel` que le répertoire de travail reste sous `PackagesDir` avant d'écrire et avant `RemoveAll`. Ajouter un test avec un identifiant contenant `..`.
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T02 — Méthode A : plus de fichier chargeable non signé à côté de l'exécutable** ([S02](plan-audit-2026-11.md#s02))
+- [x] **T02 — Méthode A : plus de fichier chargeable non signé à côté de l'exécutable** ([S02](plan-audit-2026-11.md#s02))
   En méthode A, ne télécharger que le fichier lancé : refuser un manifeste non signé qui en nomme d'autres, ou au minimum refuser les extensions chargeables (`.dll`, `.ocx`, `.cpl`, `.sys`, `.manifest`, `.local`, `.config`). Purger le répertoire du paquet avant chaque exécution.
   *Document de travail :* `plan-deploiement-logiciel.md`
 
@@ -299,6 +299,11 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 ## 6. Écarts constatés à l'implémentation
 
 *À compléter tâche par tâche, au fil des corrections : date, PR, et écart éventuel par rapport à la recommandation.*
+
+| Tâche | Date | Branche | Écart ou précision |
+|---|---|---|---|
+| T01 | 2026-11-11 | `claude/sweet-cray-xhpetg` | UUID canonique en minuscules exigé dès l'entrée d'`executeFiles` (avant tout décodage), puis `PackageDir` vérifie par `filepath.Rel` que le dossier est l'enfant direct de `PackagesDir`. |
+| T02 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Option « au minimum » retenue, élargie : le cas Pronote (`.exe` + `.iss`) reste possible en méthode A. Liste refusée plus large que celle de la recommandation (autres `.exe`, `.msi`/`.msp`/`.mst`, scripts, `.mui`, `.tlb`, `.inf`, `.lnk`…). Plutôt qu'une purge totale, qui casserait la reprise des gros téléchargements, l'agent retire avant chaque exécution tout ce que le manifeste ne nomme pas ; les fichiers nommés sont revérifiés par empreinte. La désinstallation `msiexec /x {code}` en méthode A ne télécharge plus aucun fichier. Guide `deploy/packages/README.md` mis à jour. |
 
 ## 7. Détail des constats
 

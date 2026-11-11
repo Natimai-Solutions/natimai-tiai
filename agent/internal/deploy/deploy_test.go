@@ -19,6 +19,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -404,13 +405,18 @@ func (e *fakeEnv) Run(_ context.Context, exe string, args []string, _ string) (i
 func (e *fakeEnv) WingetPath() (string, error) { return "/winget/winget.exe", nil }
 func (e *fakeEnv) MsiExecPath() string         { return "/sys/msiexec.exe" }
 
+const (
+	pronoteID = "0f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b"
+	signedID  = "11111111-2222-4333-8444-555555555555"
+)
+
 func pronote(t *testing.T, env *fakeEnv) *models.PackageDelivery {
 	env.files = map[string][]byte{
 		"Install_PRNclient.exe": signedPE(t, "INDEX EDUCATION SAS"),
 		"ClientPRONOTE.iss":     []byte("[InstallShield Silent]"),
 	}
-	raw := manifestFor(t, "p1", env.files, &Step{Run: "Install_PRNclient.exe", Args: []string{"-s", "-f1{dir}/ClientPRONOTE.iss"}})
-	return &models.PackageDelivery{ID: "p1", Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+	raw := manifestFor(t, pronoteID, env.files, &Step{Run: "Install_PRNclient.exe", Args: []string{"-s", "-f1{dir}/ClientPRONOTE.iss"}})
+	return &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
 }
 
 func TestExecuteNothingWithoutAGPO(t *testing.T) {
@@ -456,9 +462,9 @@ func TestExecuteMethodA(t *testing.T) {
 func TestExecuteMethodB(t *testing.T) {
 	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}}
 	env.files = map[string][]byte{"setup.exe": []byte("unsigned installer"), "app.msi": []byte("msi")}
-	raw := manifestFor(t, "p2", env.files, &Step{Run: MsiExec, Args: []string{"/i", "{dir}/app.msi", "/qn"}})
+	raw := manifestFor(t, signedID, env.files, &Step{Run: MsiExec, Args: []string{"/i", "{dir}/app.msi", "/qn"}})
 	sig, cert, der := signRSA(t, raw)
-	pkg := &models.PackageDelivery{ID: "p2", Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw),
+	pkg := &models.PackageDelivery{ID: signedID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw),
 		Signature: sig, SignatureAlgorithm: "rsa-pkcs1-sha256", Certificate: cert}
 	res, err := Execute(context.Background(), env, Policy{Signers: []string{thumb(der)}}, "package_install", pkg)
 	if err != nil {
@@ -485,5 +491,99 @@ func TestExecuteWinget(t *testing.T) {
 	}
 	if !strings.HasPrefix(env.ran[0], "winget.exe uninstall --id Mozilla.Firefox --exact") {
 		t.Errorf("ran = %v", env.ran)
+	}
+}
+
+func TestExecuteRefusesAPackageIDThatIsAPath(t *testing.T) {
+	root := t.TempDir()
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: filepath.Join(root, "data")}, trusted: true}
+	env.files = map[string][]byte{"setup.exe": signedPE(t, "INDEX EDUCATION SAS")}
+	for _, id := range []string{`..\..\..\Windows\System32`, "../../escape", "..", "", "P1",
+		"0F1E2D3C-4B5A-4987-8A6B-5C4D3E2F1A0B", pronoteID + "/..", pronoteID + "\\x"} {
+		raw := manifestFor(t, id, env.files, &Step{Run: "setup.exe"})
+		pkg := &models.PackageDelivery{ID: id, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+		if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"INDEX EDUCATION SAS"}}, "package_install", pkg); err == nil {
+			t.Errorf("id %q accepted", id)
+		}
+	}
+	if len(env.ran) != 0 {
+		t.Errorf("ran = %v", env.ran)
+	}
+	// Nothing was written anywhere: not even the packages folder.
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Errorf("written under root: %v", entries)
+	}
+	if _, err := PackageDir("/x", "../y"); err == nil {
+		t.Error("PackageDir accepted a path")
+	}
+	if dir, err := PackageDir("/x", pronoteID); err != nil || dir != filepath.Join("/x", pronoteID) {
+		t.Errorf("PackageDir = %q, %v", dir, err)
+	}
+}
+
+func TestMethodARefusesLoadableFilesNextToTheExecutable(t *testing.T) {
+	for _, extra := range []string{"version.dll", "VERSION.DLL", "setup.exe.manifest", "setup.exe.local",
+		"setup.exe.config", "helper.exe", "app.msi", "patch.mst", "run.cmd", "x.ocx", "x.cpl"} {
+		env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true}
+		env.files = map[string][]byte{"setup.exe": signedPE(t, "INDEX EDUCATION SAS"), extra: []byte("MZ")}
+		raw := manifestFor(t, pronoteID, env.files, &Step{Run: "setup.exe"})
+		pkg := &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+		if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"INDEX EDUCATION SAS"}}, "package_install", pkg); err == nil {
+			t.Errorf("%s accepted next to the executable", extra)
+		}
+		if len(env.ran) != 0 {
+			t.Errorf("%s: ran = %v", extra, env.ran)
+		}
+		if _, err := os.Stat(filepath.Join(env.PackagesDir(), pronoteID, extra)); err == nil {
+			t.Errorf("%s was downloaded", extra)
+		}
+	}
+	// Data files stay allowed (the Pronote case: an .iss answer file).
+	if err := MethodAFiles([]FileRef{{Name: "setup.exe"}, {Name: "answers.iss"}, {Name: "data.cab"}, {Name: "conf.ini"}}, "setup.exe"); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestMethodAUninstallByProductCodeFetchesNothing(t *testing.T) {
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}}
+	env.files = map[string][]byte{"app.msi": []byte("msi")}
+	m := Manifest{Format: "tiai-package-1", PackageID: pronoteID, Name: "App", Version: "1",
+		Files:     []FileRef{{Name: "app.msi", SHA256: sha(env.files["app.msi"]), Size: 3}},
+		Install:   &Step{Run: MsiExec, Args: []string{"/i", "{dir}/app.msi"}},
+		Uninstall: &Step{Run: MsiExec, Args: []string{"/x", "{01234567-89AB-CDEF-0123-456789ABCDEF}"}}}
+	raw, _ := json.Marshal(m)
+	pkg := &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+	if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"X"}}, "package_uninstall", pkg); err != nil {
+		t.Fatal(err)
+	}
+	if len(env.ran) != 1 || !strings.HasPrefix(env.ran[0], "msiexec.exe /x {01234567") {
+		t.Errorf("ran = %v", env.ran)
+	}
+}
+
+func TestExecutePrunesWhatAnEarlierAttemptLeft(t *testing.T) {
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true, code: 1}
+	pkg := pronote(t, env)
+	dir := filepath.Join(env.PackagesDir(), pronoteID)
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"version.dll", filepath.Join("sub", "x.dll")} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("planted"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The run fails (code 1): the folder is kept, but the planted files went
+	// before anything ran.
+	if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"INDEX EDUCATION SAS"}}, "package_install", pkg); err == nil {
+		t.Fatal("exit code 1 accepted")
+	}
+	entries, _ := os.ReadDir(dir)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 2 || slices.Contains(names, "version.dll") || slices.Contains(names, "sub") {
+		t.Errorf("left in the folder: %v", names)
 	}
 }

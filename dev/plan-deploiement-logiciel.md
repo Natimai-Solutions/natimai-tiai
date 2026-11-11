@@ -207,10 +207,10 @@ L'audit du 2026-11-10 (`plan-audit-2026-11.md`) a trouvé dans ce chantier les d
 
 Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
 
-- [ ] **T01** · *P0 immédiate* — **Agent : n'accepter qu'un UUID comme identifiant de paquet** ([S01](plan-audit-2026-11.md#s01))
+- [x] **T01** · *P0 immédiate* — **Agent : n'accepter qu'un UUID comme identifiant de paquet** ([S01](plan-audit-2026-11.md#s01))
   Dans `agent/internal/deploy/executor.go`, refuser tout `pkg.ID` qui n'est pas un UUID canonique avant `MkdirAll`. En défense en profondeur, vérifier par `filepath.Rel` que le répertoire de travail reste sous `PackagesDir` avant d'écrire et avant `RemoveAll`. Ajouter un test avec un identifiant contenant `..`.
 
-- [ ] **T02** · *P0 immédiate* — **Méthode A : plus de fichier chargeable non signé à côté de l'exécutable** ([S02](plan-audit-2026-11.md#s02))
+- [x] **T02** · *P0 immédiate* — **Méthode A : plus de fichier chargeable non signé à côté de l'exécutable** ([S02](plan-audit-2026-11.md#s02))
   En méthode A, ne télécharger que le fichier lancé : refuser un manifeste non signé qui en nomme d'autres, ou au minimum refuser les extensions chargeables (`.dll`, `.ocx`, `.cpl`, `.sys`, `.manifest`, `.local`, `.config`). Purger le répertoire du paquet avant chaque exécution.
 
 - [ ] **T08** · *P1 court terme* — **Figer le contenu d'un paquet à la mise en file** ([S08](plan-audit-2026-11.md#s08))
