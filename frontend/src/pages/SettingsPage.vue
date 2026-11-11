@@ -14,6 +14,8 @@
       <q-card-section v-if="settings" class="q-gutter-md">
         <q-input
           v-model.number="form.cycle"
+          :error="fieldErrors.cycle !== null"
+          :error-message="fieldErrors.cycle ?? ''"
           type="number"
           min="0"
           max="3650"
@@ -38,6 +40,8 @@
         />
         <q-input
           v-model.number="form.dueSoon"
+          :error="fieldErrors.dueSoon !== null"
+          :error-message="fieldErrors.dueSoon ?? ''"
           type="number"
           min="0"
           max="365"
@@ -50,7 +54,13 @@
         />
       </q-card-section>
       <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
-        <q-btn color="primary" label="Enregistrer" :loading="saving" @click="save" />
+        <q-btn
+          color="primary"
+          label="Enregistrer"
+          :loading="saving"
+          :disable="maintenanceInvalid"
+          @click="save"
+        />
       </q-card-actions>
     </q-card>
 
@@ -130,6 +140,8 @@
       <q-card-section v-if="settings" class="q-gutter-md">
         <q-input
           v-model.number="fleetForm.signatureMaxAgeDays"
+          :error="fieldErrors.signatureMaxAgeDays !== null"
+          :error-message="fieldErrors.signatureMaxAgeDays ?? ''"
           type="number"
           min="0"
           max="365"
@@ -142,6 +154,8 @@
         />
         <q-input
           v-model.number="fleetForm.inactiveAfterDays"
+          :error="fieldErrors.inactiveAfterDays !== null"
+          :error-message="fieldErrors.inactiveAfterDays ?? ''"
           type="number"
           min="1"
           max="3650"
@@ -154,6 +168,8 @@
         />
         <q-input
           v-model.number="fleetForm.lowDiskFreePercent"
+          :error="fieldErrors.lowDiskFreePercent !== null"
+          :error-message="fieldErrors.lowDiskFreePercent ?? ''"
           type="number"
           min="1"
           max="99"
@@ -166,6 +182,8 @@
         />
         <q-input
           v-model.number="fleetForm.hardwareAgingYears"
+          :error="fieldErrors.hardwareAgingYears !== null"
+          :error-message="fieldErrors.hardwareAgingYears ?? ''"
           type="number"
           min="1"
           max="30"
@@ -190,6 +208,8 @@
         />
         <q-input
           v-model.number="fleetForm.commandDefaultTtlMinutes"
+          :error="fieldErrors.commandDefaultTtlMinutes !== null"
+          :error-message="fieldErrors.commandDefaultTtlMinutes ?? ''"
           type="number"
           min="1"
           :max="60 * 24 * 30"
@@ -206,7 +226,7 @@
           color="primary"
           label="Enregistrer"
           :loading="savingFleet"
-          :disable="!agentVersionValid"
+          :disable="!agentVersionValid || fleetInvalid"
           @click="saveFleet"
         />
       </q-card-actions>
@@ -622,6 +642,7 @@ import {
   testRecipientError,
   type EmailForm,
 } from 'src/utils/emailSettings';
+import { intFieldError } from 'src/utils/numberField';
 import { usageSettingsError } from 'src/utils/usageFilter';
 import {
   WEEKDAYS_FR,
@@ -667,6 +688,31 @@ const fleetForm = reactive({
   agentExpectedVersion: '',
   commandDefaultTtlMinutes: 60,
 });
+// The bounds of the server (SettingsUpdate in settings_routes.py), checked
+// before sending: an emptied field is not a 0 (audit U06).
+const fieldErrors = computed(() => ({
+  cycle: intFieldError(form.cycle, 0, 3650),
+  dueSoon: intFieldError(form.dueSoon, 0, 365),
+  signatureMaxAgeDays: intFieldError(fleetForm.signatureMaxAgeDays, 0, 365),
+  inactiveAfterDays: intFieldError(fleetForm.inactiveAfterDays, 1, 3650),
+  lowDiskFreePercent: intFieldError(fleetForm.lowDiskFreePercent, 1, 99),
+  hardwareAgingYears: intFieldError(fleetForm.hardwareAgingYears, 1, 30),
+  commandDefaultTtlMinutes: intFieldError(fleetForm.commandDefaultTtlMinutes, 1, 60 * 24 * 30),
+}));
+const maintenanceInvalid = computed(
+  () => fieldErrors.value.cycle !== null || fieldErrors.value.dueSoon !== null,
+);
+const fleetInvalid = computed(() =>
+  (
+    [
+      'signatureMaxAgeDays',
+      'inactiveAfterDays',
+      'lowDiskFreePercent',
+      'hardwareAgingYears',
+      'commandDefaultTtlMinutes',
+    ] as const
+  ).some((k) => fieldErrors.value[k] !== null),
+);
 const agentVersionValid = computed(() => isAgentVersion(fleetForm.agentExpectedVersion ?? ''));
 
 function fillFleetForm(s: ConsoleSettings) {
@@ -803,12 +849,13 @@ async function load() {
 }
 
 async function save() {
+  if (maintenanceInvalid.value) return;
   saving.value = true;
   try {
     settings.value = await updateSettings({
-      maintenance_default_cycle_days: form.cycle,
+      maintenance_default_cycle_days: Number(form.cycle),
       maintenance_default_owner_id: form.ownerId,
-      maintenance_due_soon_days: form.dueSoon,
+      maintenance_due_soon_days: Number(form.dueSoon),
     });
     $q.notify({ type: 'positive', message: 'Paramètres enregistrés' });
   } catch (e) {
@@ -837,7 +884,7 @@ async function saveUsage() {
 }
 
 async function saveFleet() {
-  if (!agentVersionValid.value) return;
+  if (!agentVersionValid.value || fleetInvalid.value) return;
   savingFleet.value = true;
   try {
     settings.value = await updateSettings({

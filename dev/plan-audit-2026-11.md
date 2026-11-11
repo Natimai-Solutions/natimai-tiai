@@ -163,7 +163,7 @@ Pertes de saisie, confirmations manquantes, cas secondaires de périmètre, et p
   Brancher la pagination côté serveur et afficher un décompte par statut du dernier déploiement (`PackageDetailPage.vue:313`).
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T26 — Groupes : ne plus perdre un emplacement saisi sans Entrée** ([U02](plan-audit-2026-11.md#u02))
+- [x] **T26 — Groupes : ne plus perdre un emplacement saisi sans Entrée** ([U02](plan-audit-2026-11.md#u02))
   Valider le texte en cours de saisie à la perte du focus et avant l'enregistrement, et demander confirmation avant d'enregistrer un groupe qui s'ouvrirait à tout le parc (`GroupsPage.vue:197`).
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
@@ -171,7 +171,7 @@ Pertes de saisie, confirmations manquantes, cas secondaires de périmètre, et p
   Pour les codes dont le message est rédigé pour l'utilisateur (`package.invalid` en tête), afficher le détail. Pour une erreur de validation, nommer le champ fautif (`errors.ts:90`).
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T28 — Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
+- [x] **T28 — Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
   Pour chaque carte de réglages : champ requis, entier, dans les bornes du serveur, erreur affichée sous le champ et bouton Enregistrer désactivé tant qu'elle persiste. Ne plus convertir un champ vide en 0 (`SettingsPage.vue:844`).
   *Document de travail :* `plan-projet-tiai.md`
 
@@ -325,9 +325,11 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 | T21 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
 | T22 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme : le plus ancien `first_seen`, le cycle et le responsable du doublon quand la fiche gardée n'en a pas. |
 | T23 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le ciblage revient à « Un emplacement » à chaque ouverture. « Tout le parc » et toute désinstallation passent par une confirmation qui annonce le nombre de postes. Une installation que ni la méthode B (signature) ni la méthode A (exécutable d'éditeur, sans fichier chargeable à côté, mêmes règles que l'agent depuis T02) ne couvre est refusée : bouton désactivé dans le dialogue, 409 `package.not_ready` côté serveur. La désinstallation n'est pas bloquée : `msiexec /x {code}` passe en méthode A. |
-| T24 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Les actions secondaires (dépôt, retrait d'un fichier, signature, retrait du paquet) ne mettent à jour que les champs que le lecteur n'a pas modifiés ; un indicateur « Modifications non enregistrées » et une confirmation en quittant la page signalent la saisie en cours. Dépôt : un fichier par requête (progression globale), taille vérifiée avant l'envoi contre le plafond par défaut de 2 Gio, bouton Annuler (`AbortController`), 413 du proxy traduit. Caddy passe à `2GiB`. Nouveau code `package.file.not_found`. |
+| T24 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Les actions secondaires (dépôt, retrait d'un fichier, signature, retrait du paquet) ne mettent à jour que les champs que le lecteur n'a pas modifiés ; un indicateur « Modifications non enregistrées » et une confirmation en quittant la page signalent la saisie en cours. Dépôt : un fichier par requête (progression globale), taille vérifiée avant l'envoi contre le plafond par défaut de 2 Gio, bouton Annuler (`AbortController`), 413 du proxy traduit. Caddy passe à `2GiB`. Nouveau code `package.file.not_found`. Vérifié dans un navigateur : des arguments tapés sans enregistrer survivent au dépôt d'un fichier. |
 | T25 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nouvelle route `GET /commands/package-summary?package_id=` (`command:read`, filtrée par périmètre) : le dernier déploiement de chaque poste, compté par statut et par action. La fiche paquet l'affiche en puces au-dessus d'un tableau paginé côté serveur (25, 50 ou 100 lignes). Une puce filtre le tableau par statut ; le filtre porte sur tout l'historique, la puce sur le dernier déploiement de chaque poste. |
+| T26 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le texte tapé dans « Emplacements » est validé à la perte du focus et avant l'enregistrement (avec `input-debounce` à 0 : l'anti-rebond par défaut de 500 ms perdait une saisie suivie d'un clic rapide). Enregistrer un groupe sans aucun périmètre demande confirmation, à la création ou quand le groupe était restreint. Vérifié dans un navigateur. |
 | T27 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le libellé du code reste en tête, complété : par le message du serveur pour `package.invalid` ; par le champ fautif et sa raison pour `request.validation_error` (premier champ de `details.errors`, nommé en français pour les plus courants) ; par la liste des problèmes pour `package.not_ready`. La fiche paquet valide aussi côté client le nom, l'identifiant winget, les arguments exigés par msiexec et les codes de sortie, avec les règles du serveur. |
+| T28 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nouvelle fonction `intFieldError` : champ requis, entier, dans les bornes de `SettingsUpdate`. Appliquée aux cartes Maintenance et Supervision du parc : erreur sous le champ, bouton Enregistrer désactivé tant qu'elle persiste ; un champ vidé n'est plus envoyé comme 0. Les cartes Utilisation et E-mail avaient déjà leurs contrôles. Vérifié dans un navigateur. |
 
 ## 7. Détail des constats
 

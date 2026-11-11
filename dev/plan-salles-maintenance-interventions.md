@@ -728,7 +728,7 @@ Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'en
 - [x] **T18** · *P1 court terme* — **Suppression d'un bâtiment : gérer les noms de salle en collision** ([B07](plan-audit-2026-11.md#b07))
   Détecter la collision avant la suppression (`rooms.py:451`) et renvoyer un 409 qui liste les salles concernées, ou les renommer avec un suffixe comme le fait `room_for_key`.
 
-- [ ] **T26** · *P2 moyen terme* — **Groupes : ne plus perdre un emplacement saisi sans Entrée** ([U02](plan-audit-2026-11.md#u02))
+- [x] **T26** · *P2 moyen terme* — **Groupes : ne plus perdre un emplacement saisi sans Entrée** ([U02](plan-audit-2026-11.md#u02))
   Valider le texte en cours de saisie à la perte du focus et avant l'enregistrement, et demander confirmation avant d'enregistrer un groupe qui s'ouvrirait à tout le parc (`GroupsPage.vue:197`).
 
 - [ ] **T29** · *P2 moyen terme* — **Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))

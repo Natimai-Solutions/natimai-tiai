@@ -653,7 +653,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [ ] **T26** · *P2 moyen terme* — Groupes : ne plus perdre un emplacement saisi sans Entrée ([U02](plan-audit-2026-11.md#u02)), suivi dans `plan-salles-maintenance-interventions.md`
 - [x] **T27** · *P2 moyen terme* — **Afficher les messages d'erreur utiles du backend** ([U03](plan-audit-2026-11.md#u03))
   Pour les codes dont le message est rédigé pour l'utilisateur (`package.invalid` en tête), afficher le détail. Pour une erreur de validation, nommer le champ fautif (`errors.ts:90`).
-- [ ] **T28** · *P2 moyen terme* — **Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
+- [x] **T28** · *P2 moyen terme* — **Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
   Pour chaque carte de réglages : champ requis, entier, dans les bornes du serveur, erreur affichée sous le champ et bouton Enregistrer désactivé tant qu'elle persiste. Ne plus convertir un champ vide en 0 (`SettingsPage.vue:844`).
 - [ ] **T29** · *P2 moyen terme* — **Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
   Rendre persistants la séance de maintenance de salle, avec une confirmation si la saisie a été modifiée, et le dialogue qui affiche une seule fois le mot de passe réinitialisé.

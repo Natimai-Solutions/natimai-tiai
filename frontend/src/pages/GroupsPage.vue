@@ -205,6 +205,7 @@
                   use-input
                   new-value-mode="add-unique"
                   hint="Tels que les agents les déclarent ; saisie libre possible"
+                  :input-debounce="0"
                   @input-value="locationTyping = $event"
                   @blur="commitTypedLocation"
                 />
