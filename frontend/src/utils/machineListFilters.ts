@@ -210,6 +210,23 @@ export const DISK_OPTIONS: FilterOption<number | null>[] = [
   { label: 'Moins de 20 % libres', value: 20 },
 ];
 
+/** The chip and menu label of a free-space threshold, whatever its value. */
+export function diskFreeLabel(percent: number): string {
+  return `Moins de ${percent} % libres`;
+}
+
+/**
+ * The menu's choices, plus the threshold in use when it is none of them —
+ * the dashboard's card links with the threshold set in Paramètres, which can
+ * be any value from 1 to 99 (audit B01).
+ */
+export function diskOptionsFor(current: number | null): FilterOption<number | null>[] {
+  if (current == null || DISK_OPTIONS.some((o) => o.value === current)) return DISK_OPTIONS;
+  return [...DISK_OPTIONS, { label: diskFreeLabel(current), value: current }].sort(
+    (a, b) => (a.value ?? -1) - (b.value ?? -1),
+  );
+}
+
 /**
  * The dropdowns filled from the fleet (and from the rooms the console holds):
  * what a parc contains is data, not a list the console can know in advance.
@@ -311,7 +328,8 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
     chassis: kind && CHASSIS_TYPES.some((c) => c.value === kind) ? kind : null,
     ramOp: ramMin !== null ? 'min' : ramMax !== null ? 'max' : null,
     ramGb: ramMin ?? ramMax,
-    diskFree: DISK_OPTIONS.some((o) => o.value === below) ? below : null,
+    // Any whole percentage the settings accept, not only the menu's two.
+    diskFree: Number.isInteger(below) && below >= 1 && below <= 99 ? below : null,
     usageBelow: queryFloat(q.usage_hours_below),
     usageAbove: queryFloat(q.usage_hours_above),
     usageDays: days !== null && days <= USAGE_MAX_DAYS ? days : null,
@@ -482,7 +500,7 @@ export function machineFilterChips(
   if (f.diskFree != null) {
     chips.push({
       key: 'disk',
-      label: DISK_OPTIONS.find((o) => o.value === f.diskFree)?.label ?? 'Espace disque',
+      label: diskFreeLabel(f.diskFree),
     });
   }
   const bounds = usageBoundsOf(f);

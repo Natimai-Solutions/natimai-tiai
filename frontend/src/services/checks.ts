@@ -99,8 +99,12 @@ export async function closeCheck(
 }
 
 /** Active accounts, id and name only: who a task can be given to. */
-export async function listAssignableUsers(): Promise<UserRef[]> {
-  const { data } = await api.get<UserRef[]>('/checks/assignable-users');
+/** Who a task can be given to; for one poste, only who can see it. */
+export async function listAssignableUsers(machineId?: string): Promise<UserRef[]> {
+  const { data } = await api.get<UserRef[]>(
+    '/checks/assignable-users',
+    machineId ? { params: { machine_id: machineId } } : undefined,
+  );
   return data;
 }
 

@@ -2,6 +2,7 @@
   <q-table
     v-model:selected="selected"
     v-model:pagination="pagination"
+    class="machines-table"
     :rows="rows"
     :columns="columns"
     row-key="id"

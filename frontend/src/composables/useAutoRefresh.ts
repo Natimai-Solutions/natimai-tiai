@@ -79,6 +79,9 @@ export function useAutoRefresh(
   const doc = typeof document === 'undefined' ? null : document;
 
   let timer: ReturnType<typeof setInterval> | null = null;
+  // Set by stop(): a refreshNow() still awaiting its request when the page
+  // goes away must not start a timer nobody will ever clear (audit B11).
+  let disposed = false;
   // A tick fell while the tab was hidden. Drives the catch-up on return, and is
   // the reason this is a flag rather than a comparison against
   // lastRefreshedAt: a page hidden before its first refresh has no timestamp
@@ -130,7 +133,7 @@ export function useAutoRefresh(
   }
 
   function startTimer(): void {
-    if (timer === null) timer = setInterval(tick, intervalMs);
+    if (!disposed && timer === null) timer = setInterval(tick, intervalMs);
   }
 
   function stopTimer(): void {
@@ -141,6 +144,7 @@ export function useAutoRefresh(
   }
 
   function stop(): void {
+    disposed = true;
     stopTimer();
     doc?.removeEventListener('visibilitychange', onVisibilityChange);
   }

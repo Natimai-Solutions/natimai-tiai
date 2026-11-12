@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Column, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
@@ -190,4 +191,13 @@ class Command(SQLModel, table=True):
         sa_column=Column(
             ForeignKey("packages.id", ondelete="SET NULL"), nullable=True, index=True
         ),
+    )
+    # The package as it was when the deployment was queued (audit T08, T09):
+    # a digest of everything the poste would run, compared at delivery so that
+    # a package changed since — by whoever holds package:write — is not what
+    # gets run; and the SHA-256 of its files, which stay downloadable (and on
+    # disk) while the command is open, whatever happens to the package.
+    package_digest: str | None = Field(default=None, max_length=64)
+    package_files: list[str] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
     )

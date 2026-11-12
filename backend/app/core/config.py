@@ -124,6 +124,14 @@ class Settings(BaseSettings):
     # route so that a mistyped `.env` refuses to boot instead of failing every
     # queueing call.
     COMMAND_DEFAULT_TTL_MINUTES: int = Field(default=60, ge=1, le=60 * 24 * 30)
+    # How long a command handed to an agent may go without a verdict before
+    # the worker closes it as failed (« sans réponse du poste »): an agent
+    # stopped, updated or switched off mid-command, or an older agent that
+    # dropped it. The server never hands a command out twice — a reboot
+    # replayed after a restart would loop — so this is what ends it. From the
+    # start of the command when the agent announced one, else its delivery. A
+    # verdict arriving later still wins.
+    COMMAND_UNANSWERED_HOURS: int = Field(default=24, ge=1, le=24 * 30)
     # How long the command history is kept, in days, before the daily purge
     # drops it. Only rows that are over: succeeded, failed, expired — and
     # delivered ones that never got a result, whose agent has had the whole
@@ -465,6 +473,30 @@ class Settings(BaseSettings):
     # heartbeat's head start. Slightly above the agent's 60 s poll so that
     # head start is a full cycle. Zero disables the preference.
     WOL_RELAY_SUBNET_GRACE_SECONDS: int = Field(default=90, ge=0)
+    # Who may relay (audit S19, B29): an agent is taken on its word for its
+    # site and its address, so a poste enrolled minutes ago, one whose
+    # identity is to be confirmed, or one too old to know the command, is
+    # not handed the wakes of a site.
+    WOL_RELAY_MIN_AGE_MINUTES: int = Field(default=60, ge=0, le=60 * 24 * 30)
+    WOL_RELAY_MIN_AGENT_VERSION: str = "1.0.0"
+    # A claimed wake with no verdict after this long goes back to the queue,
+    # for another relay to take (the claiming poste switched off, or dropped
+    # it). Within the wake's own TTL.
+    WOL_RELAY_CLAIM_TIMEOUT_SECONDS: int = Field(default=180, ge=30, le=3600)
+    # The subnets a wake may be broadcast on when the server emits it itself
+    # (CIDR list). Empty: the private ranges (RFC 1918). An address reported
+    # by an agent outside them is not a destination (audit S35).
+    # Who may tell the API the client's address (X-Forwarded-For), besides
+    # loopback: CIDR networks, and host names resolved in the compose network
+    # (Caddy's service). Anyone else's header is ignored (audit S28).
+    TRUSTED_PROXIES: Annotated[list[str] | str, BeforeValidator(parse_list)] = []
+    TRUSTED_PROXY_HOSTS: Annotated[list[str] | str, BeforeValidator(parse_list)] = [
+        "caddy"
+    ]
+    # The OpenAPI schema and its pages (/docs, /redoc): a map of every route
+    # and field, served only in local development unless asked (audit S36).
+    EXPOSE_OPENAPI: bool = False
+    WOL_ALLOWED_NETWORKS: Annotated[list[str] | str, BeforeValidator(parse_list)] = []
 
     @model_validator(mode="after")
     def _usage_thresholds_hold_together(self) -> Self:
@@ -512,6 +544,17 @@ class Settings(BaseSettings):
                     f"{name} is empty or still a 'changeme' placeholder; refusing "
                     f"to start in {self.ENVIRONMENT} (see deploy/.env.example)"
                 )
+        # The first administrator is created from it without going through
+        # the console's password rule (audit S33).
+        if (
+            self.FIRST_ADMIN_PASSWORD is not None
+            and len(self.FIRST_ADMIN_PASSWORD) < self.PASSWORD_MIN_LENGTH
+        ):
+            raise ValueError(
+                f"FIRST_ADMIN_PASSWORD must be at least {self.PASSWORD_MIN_LENGTH} "
+                f"characters (PASSWORD_MIN_LENGTH); refusing to start in "
+                f"{self.ENVIRONMENT}"
+            )
         for name, minimum in SECRET_MIN_LENGTHS.items():
             secret: str | None = getattr(self, name)
             if secret is not None and len(secret) < minimum:

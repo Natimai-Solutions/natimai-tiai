@@ -158,3 +158,20 @@ Deux prédictions se sont vérifiées telles quelles et méritent d'être notée
 La validation en `LocalSystem` des huit commandes qui exigent l'élévation (§5). Une seule porte un vrai risque résiduel : **`sfc_scan` est la dernière branche d'encodage du catalogue à n'avoir jamais vu d'octets réels** — son UTF-16 est documenté et testé sur fixture, mais pas mesuré comme les trois autres, et c'est précisément la mesure qui a démenti le plan pour les autres outils. Le repli est en place (`looksUTF16LE` vérifie avant de décoder, donc une surprise dégrade vers du texte lisible plutôt que vers des idéogrammes), mais la vérification reste à faire.
 
 Pour le reste, ce sont les chemins nominaux de commandes dont le chemin d'échec, la livraison et la remontée sont déjà éprouvés.
+
+---
+
+## 9. Suites de l'audit 2026-11 : reste à faire
+
+L'audit du 2026-11-10 (`plan-audit-2026-11.md`) montre que le « `delivered` éternel » désamorcé le 2026-08-19 n'est réglé qu'à moitié. L'agent compte sur une relivraison que le serveur ne fait pas, et il peut perdre une commande acceptée sans rendre de verdict.
+
+Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
+
+- [x] **T10** · *P1 court terme* — **Cycle de vie des commandes remises : relivraison, expiration, pertes côté agent** ([B10](plan-audit-2026-11.md#b10), [B15](plan-audit-2026-11.md#b15), [B16](plan-audit-2026-11.md#b16), [B34](plan-audit-2026-11.md#b34))
+  Choisir une règle unique : soit le serveur relivre les commandes « Transmise » sans verdict après un délai (l'agent est déjà idempotent par identifiant), soit le worker les expire. La même règle doit fermer les « En cours » trop anciennes, que rien ne purge aujourd'hui. Côté agent, ne jamais jeter une commande acceptée : file pleine, arrêt du service ou type inconnu donnent un résultat `failed` explicite, rejoué par `queue.Queue`.
+
+- [x] **T11** · *P1 court terme* — **Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
+  Ajouter `order_by(created_at, id)` à la sélection du heartbeat (`agent.py:815`), avec un test : « installer les MAJ » puis « redémarrer » doivent être remises dans cet ordre.
+
+- [x] **T15** · *P1 court terme* — **Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
+  Ajouter `'inventory'` à `groupOrder` (`frontend/src/services/commands.ts:324`), avec un test qui vérifie que chaque action du catalogue apparaît dans un groupe.

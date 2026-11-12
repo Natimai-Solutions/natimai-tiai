@@ -229,6 +229,27 @@ async def get_current_authority(
 CurrentAuthority = Annotated[Authority, Depends(get_current_authority)]
 
 
+def require_any_permission(
+    *pairs: tuple[Resource, Action],
+) -> Callable[..., Awaitable[User]]:
+    """A dependency that lets through anyone holding at least one of ``pairs``:
+    for a read several pages need, each under its own permission."""
+
+    async def checker(user: CurrentUser, permissions: CurrentPermissions) -> User:
+        if any(has_permission(permissions, r.value, a.value) for r, a in pairs):
+            return user
+        wanted = " | ".join(f"{r.value}:{a.value}" for r, a in pairs)
+        security_log.warning("permission denied: %s asked for %s", user.email, wanted)
+        raise AppError(
+            code=ErrorCode.AUTH_PERMISSION_DENIED,
+            status_code=403,
+            message=f"Missing permission: {wanted}",
+            details={"resource": pairs[0][0].value, "action": pairs[0][1].value},
+        )
+
+    return checker
+
+
 def require_permission(
     resource: Resource, action: Action
 ) -> Callable[..., Awaitable[User]]:

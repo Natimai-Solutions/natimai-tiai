@@ -123,10 +123,16 @@ describe('command catalogue', () => {
     expect(commandActionGroups().map((s) => s.group)).toEqual([
       'defender',
       'windows_update',
+      'inventory',
       'power',
       'maintenance',
       'diagnostic',
     ]);
+  });
+
+  it('puts every action of the catalogue in some menu section', () => {
+    const listed = commandActionGroups().flatMap((s) => s.actions.map((a) => a.type));
+    expect(listed.sort()).toEqual(commandActions.map((a) => a.type).sort());
   });
 
   it('drops the diagnostic section from the bulk menu', () => {
@@ -134,6 +140,7 @@ describe('command catalogue', () => {
     expect(groups.map((s) => s.group)).toEqual([
       'defender',
       'windows_update',
+      'inventory',
       'power',
       'maintenance',
     ]);

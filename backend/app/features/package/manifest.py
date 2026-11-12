@@ -10,6 +10,7 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.features.package.models import Package, PackageFile
 
@@ -67,6 +68,34 @@ def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
             )
         )
     return out
+
+
+# What the agent refuses next to the executable under method A (agent
+# deploy.loadableExt, audit S02): Windows could load or run it from there.
+LOADABLE_EXTENSIONS = frozenset(
+    ".dll .ocx .cpl .sys .drv .ax .acm .ime .tsp .mui .tlb .winmd .manifest "
+    ".local .config .exe .com .scr .pif .msi .msp .mst .msu .appx .msix .bat "
+    ".cmd .ps1 .psm1 .vbs .vbe .js .jse .wsf .wsh .hta .lnk .inf .jar".split()
+)
+
+
+def runnable_somewhere(package: Package, files: Sequence[PackageFile]) -> bool:
+    """Whether some poste could run this ``files`` package's installation:
+    signed by the administrator (method B), or launched by an .exe whose
+    publisher was read at upload with nothing loadable beside it (method A).
+    Neither, and every poste will refuse it (audit B30)."""
+    if package.signature is not None:
+        return True
+    run = package.install_run or ""
+    if not run.lower().endswith(".exe"):
+        return False
+    run_file = next((f for f in files if f.name == run), None)
+    if run_file is None or not run_file.publisher_name:
+        return False
+    return not any(
+        f.name != run and Path(f.name.lower()).suffix in LOADABLE_EXTENSIONS
+        for f in files
+    )
 
 
 def build(package: Package, files: Sequence[PackageFile]) -> bytes:

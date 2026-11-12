@@ -460,3 +460,230 @@ async def test_an_msi_is_installed_through_msiexec(client, db_session, store):
     assert body["problems"] == []
     # Not a signed executable: only method B can carry it.
     assert body["publisher_name"] is None
+
+    # And until it is signed, no poste would run it: refused up front rather
+    # than queued for every poste to fail (audit B30).
+    machine_id, _ = await _enroll(client, "poste-msi")
+    refused = await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={
+            "type": "package_install",
+            "machine_ids": [machine_id],
+            "package_id": package["id"],
+        },
+    )
+    assert refused.status_code == 409, refused.text
+    assert "Signez le paquet" in refused.json()["error"]["details"]["problems"][0]
+
+
+async def test_method_a_refuses_a_loadable_file_beside_the_installer(
+    client, db_session, store
+):
+    """The agent would refuse it (audit S02): the server says so first."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    machine_id, _ = await _enroll(client, "poste-dll")
+    up = await client.post(
+        f"/api/v1/packages/{package['id']}/files",
+        headers=admin,
+        files=[("files", ("version.dll", b"MZ"))],
+    )
+    assert up.status_code == 200, up.text
+    refused = await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={
+            "type": "package_install",
+            "machine_ids": [machine_id],
+            "package_id": package["id"],
+        },
+    )
+    assert refused.status_code == 409, refused.text
+
+
+# --- audit T08, T09 ---------------------------------------------------------------
+
+
+async def _deploy(client, admin, package_id, machine_id):
+    resp = await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={
+            "type": "package_install",
+            "machine_ids": [machine_id],
+            "package_id": package_id,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    return resp
+
+
+async def _command(client, admin, machine_id):
+    resp = await client.get(
+        "/api/v1/commands", headers=admin, params={"machine_id": machine_id}
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["items"][0]
+
+
+async def test_a_package_changed_after_queueing_is_not_delivered(
+    client, db_session, store
+):
+    """Audit S08: what was approved is what runs, or nothing."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    machine_id, agent = await _enroll(client, "poste-1")
+    await _deploy(client, admin, package["id"], machine_id)
+
+    # Someone holding package:write changes the command line afterwards.
+    changed = await client.patch(
+        f"/api/v1/packages/{package['id']}",
+        headers=admin,
+        json={"install_args": ["/evil"]},
+    )
+    assert changed.status_code == 200, changed.text
+
+    hb = await client.post(
+        "/api/v1/agent/heartbeat", headers=agent, json={"agent_version": "test"}
+    )
+    assert hb.json()["commands"] == []
+    cmd = await _command(client, admin, machine_id)
+    assert cmd["status"] == "failed"
+    assert "modifié après la mise en file" in cmd["error"]
+
+    # Queued again, the new version goes out.
+    await _deploy(client, admin, package["id"], machine_id)
+    hb = await client.post(
+        "/api/v1/agent/heartbeat", headers=agent, json={"agent_version": "test"}
+    )
+    (command,) = hb.json()["commands"]
+    manifest = json.loads(base64.b64decode(command["package"]["manifest"]))
+    assert manifest["install"]["args"] == ["/evil"]
+
+
+async def test_a_replaced_file_stays_for_the_deployment_that_has_it(
+    client, db_session, store
+):
+    """Audit B13 and S09: the file a delivered deployment names is served and
+    kept on disk until that deployment is over, then removed."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    machine_id, agent = await _enroll(client, "poste-1")
+    await _deploy(client, admin, package["id"], machine_id)
+    hb = await client.post(
+        "/api/v1/agent/heartbeat", headers=agent, json={"agent_version": "test"}
+    )
+    (command,) = hb.json()["commands"]
+    old = next(
+        f for f in command["package"]["files"] if f["name"] == "ClientPRONOTE.iss"
+    )
+
+    replaced = await client.post(
+        f"/api/v1/packages/{package['id']}/files",
+        headers=admin,
+        files=[("files", ("ClientPRONOTE.iss", b"[InstallShield Silent]\nv2\n"))],
+    )
+    assert replaced.status_code == 200, replaced.text
+    assert (store / old["sha256"]).exists()
+
+    url = f"/api/v1/agent/packages/{package['id']}/files/{old['sha256']}"
+    got = await client.get(url, headers=agent)
+    assert got.status_code == 200, got.text
+    assert got.content == b"[InstallShield Silent]\n"
+
+    done = await client.post(
+        f"/api/v1/agent/commands/{command['id']}/result",
+        headers=agent,
+        json={"status": "succeeded", "output": "ok"},
+    )
+    assert done.status_code == 200, done.text
+    # Over: the replaced file is no longer wanted, and goes.
+    assert not (store / old["sha256"]).exists()
+    # The current files stay.
+    current = await client.get(f"/api/v1/packages/{package['id']}", headers=admin)
+    for f in current.json()["files"]:
+        assert (store / f["sha256"]).exists()
+
+
+async def test_a_removed_file_and_a_failed_upload_leave_nothing_behind(
+    client, db_session, store
+):
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    iss = next(f for f in package["files"] if f["name"] == "ClientPRONOTE.iss")
+    removed = await client.delete(
+        f"/api/v1/packages/{package['id']}/files/ClientPRONOTE.iss", headers=admin
+    )
+    assert removed.status_code == 200, removed.text
+    assert not (store / iss["sha256"]).exists()
+
+    # Two files, the second refused by name: the first one stored goes too.
+    before = {p.name for p in store.iterdir()}
+    failed = await client.post(
+        f"/api/v1/packages/{package['id']}/files",
+        headers=admin,
+        files=[
+            ("files", ("ok.ini", b"stored first, then orphaned")),
+            ("files", ("con.txt", b"x")),
+        ],
+    )
+    assert failed.status_code == 422, failed.text
+    assert {p.name for p in store.iterdir()} == before
+
+
+async def test_removing_a_file_already_gone_names_the_file(client, db_session, store):
+    """Audit B36: the package exists — it is the file that is missing."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    url = f"/api/v1/packages/{package['id']}/files/ClientPRONOTE.iss"
+    assert (await client.delete(url, headers=admin)).status_code == 200
+    again = await client.delete(url, headers=admin)
+    assert again.status_code == 404
+    assert again.json()["error"]["code"] == "package.file.not_found"
+
+
+async def test_the_summary_counts_each_postes_latest_deployment(
+    client, db_session, store
+):
+    """Audit B14: the tally reads every poste, not the first page of rows."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    agents = []
+    for i in range(3):
+        machine_id, agent = await _enroll(client, f"poste-{i}")
+        agents.append(agent)
+        await _deploy(client, admin, package["id"], machine_id)
+    # Poste 0 answers: succeeded. The others are still waiting.
+    hb = await client.post(
+        "/api/v1/agent/heartbeat", headers=agents[0], json={"agent_version": "t"}
+    )
+    (command,) = hb.json()["commands"]
+    await client.post(
+        f"/api/v1/agent/commands/{command['id']}/result",
+        headers=agents[0],
+        json={"status": "succeeded"},
+    )
+    summary = await client.get(
+        "/api/v1/commands/package-summary",
+        headers=admin,
+        params={"package_id": package["id"]},
+    )
+    assert summary.status_code == 200, summary.text
+    body = summary.json()
+    assert body["postes"] == 3
+    assert body["by_status"] == {"succeeded": 1, "pending": 2}
+    assert body["by_action"] == {"package_install": 3}
+
+
+async def test_control_characters_are_refused(client, db_session):
+    """Audit S25: nothing that could rewrite what the signer reads."""
+    admin = await _admin(client, db_session)
+    for body in (
+        {"kind": "files", "name": "App\x1b[1A\x1b[2KPronote"},
+        {"kind": "files", "name": "App", "version": "1\r2"},
+        {"kind": "files", "name": "App", "install_args": ["-s", "\x1b[2Kevil"]},
+        {"kind": "files", "name": "App", "install_args": ["\x9b2K"]},
+    ):
+        resp = await client.post("/api/v1/packages", headers=admin, json=body)
+        assert resp.status_code == 422, (body, resp.text)

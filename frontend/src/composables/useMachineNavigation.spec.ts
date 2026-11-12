@@ -12,11 +12,11 @@ vi.mock('boot/axios', () => ({
 }));
 
 import { api } from 'boot/axios';
-import { useMachineNavigation } from './useMachineNavigation';
+import { resetMachineNavigation, useMachineNavigation } from './useMachineNavigation';
 
 /**
- * The composable walks a search by asking the server for single-row pages at
- * rank-1 and rank+1, so every test here drives it through the axios mock and a
+ * The composable walks a search by reading it in blocks of 50 rows, frozen
+ * for the session, so every test here drives it through the axios mock and a
  * real (memory) router — the two things it actually talks to.
  */
 
@@ -36,14 +36,22 @@ function machine(id: string) {
   return { id, machine_uuid: `uuid-${id}`, hostname: id.toUpperCase() };
 }
 
-/** Answer /machines with one row, keyed by the requested page. */
-function respondWith(rowsByPage: Record<number, unknown>, total: number) {
+/**
+ * Answer /machines from a search of `total` rows: the ones given by rank, and
+ * a filler for every other rank.
+ */
+function respondWith(rowsByRank: Record<number, unknown>, total: number) {
   // `config` must be typed as axios sees it (parameters are contravariant),
   // so the page is narrowed from `params` rather than declared on the way in.
   vi.mocked(api.get).mockImplementation((_url: string, config?: AxiosRequestConfig) => {
-    const page = (config?.params as { page?: number } | undefined)?.page ?? 1;
-    const row = rowsByPage[page];
-    return Promise.resolve({ data: { items: row ? [row] : [], total, page, page_size: 1 } });
+    const params = config?.params as { page?: number; page_size?: number } | undefined;
+    const page = params?.page ?? 1;
+    const size = params?.page_size ?? 50;
+    const items = [];
+    for (let r = (page - 1) * size; r < Math.min(page * size, total); r++) {
+      items.push(rowsByRank[r] ?? machine(`r${r}`));
+    }
+    return Promise.resolve({ data: { items, total, page, page_size: size } });
   });
 }
 
@@ -68,6 +76,7 @@ async function mount(router: ReturnType<typeof makeRouter>, path: string) {
 describe('useMachineNavigation', () => {
   beforeEach(() => {
     vi.mocked(api.get).mockReset();
+    resetMachineNavigation();
   });
 
   it('stays silent when the fiche was not opened from a search', async () => {
@@ -80,8 +89,7 @@ describe('useMachineNavigation', () => {
   });
 
   it('resolves both neighbours and the position in the search', async () => {
-    // rank 5 → asks for page 5 (rank 4) and page 7 (rank 6), page_size 1.
-    respondWith({ 5: machine('prev'), 7: machine('next') }, 340);
+    respondWith({ 4: machine('prev'), 5: machine('abc'), 6: machine('next') }, 340);
     const router = makeRouter();
     const { nav } = await mount(router, '/machines/abc?status=outdated&i=5');
     await vi.waitUntil(() => nav.total.value !== null);
@@ -92,15 +100,15 @@ describe('useMachineNavigation', () => {
   });
 
   it('carries the search filters into every neighbour lookup', async () => {
-    respondWith({ 2: machine('next') }, 2);
+    respondWith({ 0: machine('abc'), 1: machine('next') }, 2);
     const router = makeRouter();
     const { nav } = await mount(router, '/machines/abc?status=outdated&search=pc&i=0');
     await vi.waitUntil(() => nav.total.value !== null);
 
-    // rank 0 has no previous, so exactly one request goes out — for rank 1.
+    // One block holds the poste and both neighbours: one request.
     expect(api.get).toHaveBeenCalledTimes(1);
     expect(api.get).toHaveBeenCalledWith('/machines', {
-      params: { status: 'outdated', search: 'pc', page: 2, page_size: 1 },
+      params: { status: 'outdated', search: 'pc', page: 1, page_size: 50 },
     });
   });
 
@@ -117,7 +125,7 @@ describe('useMachineNavigation', () => {
   it('returns to the page that actually holds the poste, not the one opened from', async () => {
     // Opened from page 1 (no `page` in the URL), then walked to rank 59.
     // With the default page size of 50 that poste sits on page 2.
-    respondWith({ 59: machine('prev'), 61: machine('next') }, 340);
+    respondWith({ 58: machine('prev'), 59: machine('abc'), 60: machine('next') }, 340);
     const router = makeRouter();
     const { nav } = await mount(router, '/machines/abc?status=outdated&i=59');
     await vi.waitUntil(() => nav.total.value !== null);
@@ -126,7 +134,7 @@ describe('useMachineNavigation', () => {
   });
 
   it('leaves page 1 out of the return query, as the list itself does', async () => {
-    respondWith({ 2: machine('next') }, 10);
+    respondWith({ 0: machine('abc') }, 10);
     const router = makeRouter();
     const { nav } = await mount(router, '/machines/abc?i=0');
     await vi.waitUntil(() => nav.total.value !== null);
@@ -135,7 +143,7 @@ describe('useMachineNavigation', () => {
   });
 
   it('honours a non-default page size when computing the return page', async () => {
-    respondWith({ 25: machine('prev'), 27: machine('next') }, 100);
+    respondWith({ 25: machine('abc') }, 100);
     const router = makeRouter();
     const { nav } = await mount(router, '/machines/abc?page_size=25&i=25');
     await vi.waitUntil(() => nav.total.value !== null);
@@ -152,14 +160,16 @@ describe('useMachineNavigation', () => {
     //
     // The second resolution is left hanging so the window is observable rather
     // than a race: that is precisely the state a fast double-click lands in.
-    respondWith({ 2: machine('b') }, 10);
+    // « b » is the last row of the first block: its next neighbour sits in a
+    // block not read yet, whose request is left hanging.
+    respondWith({ 48: machine('a'), 49: machine('b') }, 100);
     const router = makeRouter();
-    const { nav } = await mount(router, '/machines/a?i=0');
+    const { nav } = await mount(router, '/machines/a?i=48');
     await vi.waitUntil(() => nav.nextMachine.value !== null);
 
     vi.mocked(api.get).mockImplementation(() => new Promise(() => {}));
 
-    nav.goNext(); // → /machines/b?i=1
+    nav.goNext(); // → /machines/b?i=49
     await vi.waitUntil(() => router.currentRoute.value.params.id === 'b');
 
     // Mid-resolution the arrows are inert, not stale.
@@ -168,6 +178,33 @@ describe('useMachineNavigation', () => {
     await nextTick();
 
     expect(router.currentRoute.value.params.id).toBe('b');
-    expect(router.currentRoute.value.query.i).toBe('1');
+    expect(router.currentRoute.value.query.i).toBe('49');
+  });
+
+  it('walks the order the reader saw, not the one of the moment (audit B18)', async () => {
+    respondWith({ 0: machine('a'), 1: machine('b'), 2: machine('c') }, 3);
+    const router = makeRouter();
+    const { nav } = await mount(router, '/machines/a?i=0');
+    await vi.waitUntil(() => nav.nextMachine.value !== null);
+    expect(nav.nextMachine.value?.id).toBe('b');
+
+    // A heartbeat later, « c » was seen last and the server's order moved.
+    respondWith({ 0: machine('c'), 1: machine('a'), 2: machine('b') }, 3);
+    nav.goNext();
+    await vi.waitUntil(() => router.currentRoute.value.params.id === 'b');
+    await vi.waitUntil(() => nav.nextMachine.value !== null);
+    expect(nav.previousMachine.value?.id).toBe('a');
+    expect(nav.nextMachine.value?.id).toBe('c');
+  });
+
+  it('finds the poste when the list it was opened from had moved', async () => {
+    // Opened as rank 0, but the order is already c, a, b.
+    respondWith({ 0: machine('c'), 1: machine('a'), 2: machine('b') }, 3);
+    const router = makeRouter();
+    const { nav } = await mount(router, '/machines/a?i=0');
+    await vi.waitUntil(() => nav.nextMachine.value !== null);
+    expect(nav.index.value).toBe(1);
+    expect(nav.previousMachine.value?.id).toBe('c');
+    expect(nav.nextMachine.value?.id).toBe('b');
   });
 });

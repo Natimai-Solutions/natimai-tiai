@@ -144,6 +144,114 @@ async def test_mark_expired_sweeps_stale_pending(client, db_session):
     assert refreshed.status == CommandStatus.EXPIRED
 
 
+async def test_commands_are_delivered_in_the_order_queued(client, db_session):
+    """Audit B28: updates, then the restart — never the other way round."""
+    from app.features.base import utcnow
+    from app.features.command.models import Command
+
+    enrolled = await _enroll(client, "m-order")
+    import uuid as _uuid
+
+    machine_id = _uuid.UUID(enrolled["machine_id"])
+    now = utcnow()
+    # Inserted in reverse, ids in reverse too: only created_at can order them.
+    ids = [_uuid.UUID(int=n) for n in (3, 2, 1)]
+    for offset, (kind, cid) in enumerate(
+        zip(["reboot", "wu_install", "wu_scan"], ids, strict=True)
+    ):
+        db_session.add(
+            Command(
+                id=cid,
+                machine_id=machine_id,
+                type=kind,
+                created_at=now - timedelta(minutes=offset),
+                expires_at=now + timedelta(hours=1),
+            )
+        )
+    await db_session.commit()
+
+    hb = await _heartbeat(client, enrolled["token"], agent_version="test")
+    assert [c["type"] for c in hb.json()["commands"]] == [
+        "wu_scan",
+        "wu_install",
+        "reboot",
+    ]
+
+
+async def test_a_delivered_command_without_verdict_is_closed(client, db_session):
+    """Audit B10: the server hands a command out once; one the agent dropped
+    (or a run cut by a shutdown) ends as failed, and a late verdict still
+    wins."""
+    import uuid as _uuid
+
+    from sqlmodel import select
+
+    from app.features.base import utcnow
+    from app.features.command import crud
+    from app.features.command.models import Command, CommandStatus
+
+    enrolled = await _enroll(client, "m-lost")
+    machine_id = _uuid.UUID(enrolled["machine_id"])
+    now = utcnow()
+    old = now - timedelta(hours=30)
+    rows = {
+        "lost": Command(
+            machine_id=machine_id,
+            type="quick_scan",
+            status=CommandStatus.DELIVERED,
+            delivered_at=old,
+            expires_at=old,
+        ),
+        "cut": Command(
+            machine_id=machine_id,
+            type="sfc_scan",
+            status=CommandStatus.RUNNING,
+            delivered_at=old,
+            started_at=old,
+            expires_at=old,
+        ),
+        "recent": Command(
+            machine_id=machine_id,
+            type="full_scan",
+            status=CommandStatus.RUNNING,
+            delivered_at=old,
+            started_at=now - timedelta(hours=2),
+            expires_at=old,
+        ),
+    }
+    ids = {k: c.id for k, c in rows.items()}
+    db_session.add_all(rows.values())
+    await db_session.commit()
+
+    assert await crud.close_unanswered(db_session, hours=24) == 2
+    await db_session.commit()
+    db_session.expire_all()
+    by_id = {
+        c.id: c
+        for c in (
+            await db_session.exec(
+                select(Command).where(Command.machine_id == machine_id)
+            )
+        ).all()
+    }
+    for key in ("lost", "cut"):
+        assert by_id[ids[key]].status == CommandStatus.FAILED
+        assert "Sans réponse du poste" in (by_id[ids[key]].error or "")
+    assert by_id[ids["recent"]].status == CommandStatus.RUNNING
+
+    late = await client.post(
+        f"/api/v1/agent/commands/{ids['lost']}/result",
+        headers={"Authorization": f"Bearer {enrolled['token']}"},
+        json={"status": "succeeded", "output": "ok"},
+    )
+    assert late.status_code == 200
+    db_session.expire_all()
+    fixed = (
+        await db_session.exec(select(Command).where(Command.id == ids["lost"]))
+    ).one()
+    assert fixed.status == CommandStatus.SUCCEEDED
+
+
 # --- Freshness + stats -----------------------------------------------------
 
 
@@ -855,6 +963,43 @@ async def test_merge_reassigns_history_and_clears_flag(client, db_session):
         f"/api/v1/commands?machine_id={b['machine_id']}", headers=headers
     )
     assert cmds_b.json()["total"] == 1
+
+
+async def test_merge_keeps_first_seen_and_maintenance_settings(client, db_session):
+    """Audit B03: the kept record inherits the older first_seen, and the
+    cycle and owner of the duplicate when it has none."""
+    import uuid as _uuid
+
+    from sqlmodel import select
+
+    from app.features.base import utcnow
+    from app.features.machine.models import Machine
+    from app.features.user import crud as user_crud
+
+    headers = await _admin_headers(client, db_session)
+    owner = await user_crud.get_by_email(db_session, "admin@test.local")
+    assert owner is not None
+    owner_id = owner.id
+    a = await _enroll(client, "m-old", fingerprint={"smbios_uuid": "SMB-FS"})
+    b = await _enroll(client, "m-new", fingerprint={"smbios_uuid": "SMB-FS"})
+    a_id, b_id = _uuid.UUID(a["machine_id"]), _uuid.UUID(b["machine_id"])
+    long_ago = utcnow() - timedelta(days=400)
+    old = (await db_session.exec(select(Machine).where(Machine.id == a_id))).one()
+    old.first_seen = long_ago
+    old.maintenance_cycle_days = 90
+    old.maintenance_owner_id = owner_id
+    db_session.add(old)
+    await db_session.commit()
+
+    merged = await client.post(
+        f"/api/v1/machines/{b_id}/merge", headers=headers, json={"source_id": str(a_id)}
+    )
+    assert merged.status_code == 200, merged.text
+    db_session.expire_all()
+    kept = (await db_session.exec(select(Machine).where(Machine.id == b_id))).one()
+    assert abs((kept.first_seen - long_ago).total_seconds()) < 1
+    assert kept.maintenance_cycle_days == 90
+    assert kept.maintenance_owner_id == owner_id
 
 
 async def test_merge_dedups_colliding_threats(client, db_session):

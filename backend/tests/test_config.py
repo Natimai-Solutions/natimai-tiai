@@ -62,6 +62,13 @@ def test_staging_is_guarded_too():
         make_settings(ENVIRONMENT="staging", SECRET_KEY="changeme")
 
 
+def test_production_refuses_a_short_first_admin_password():
+    """Audit S33: the first administrator follows PASSWORD_MIN_LENGTH too."""
+    with pytest.raises(ValidationError, match="FIRST_ADMIN_PASSWORD must be at least"):
+        make_settings(FIRST_ADMIN_PASSWORD="admin2026")
+    make_settings(FIRST_ADMIN_PASSWORD="a-long-enough-admin-password")
+
+
 def test_unset_first_admin_password_is_allowed():
     """FIRST_ADMIN_PASSWORD is optional — None must not trip the guard."""
     settings = make_settings(FIRST_ADMIN_PASSWORD=None)

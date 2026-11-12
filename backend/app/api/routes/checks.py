@@ -11,9 +11,18 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import func, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
-from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
+from app.api.deps import (
+    CurrentScope,
+    CurrentUser,
+    SessionDep,
+    require_any_permission,
+    require_permission,
+)
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
@@ -23,8 +32,9 @@ from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
 from app.features.notification import tasks as task_mail
 from app.features.room import crud as room_crud
+from app.features.user import crud as user_crud
 from app.features.user.models import User
-from app.features.user.permissions import Action, Resource
+from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import (
     Scope,
     machine_clause,
@@ -38,6 +48,19 @@ _WRITE = Depends(require_permission(Resource.CHECK, Action.WRITE))
 
 machine_router = APIRouter(prefix="/machines", tags=["checks"], dependencies=[_READ])
 router = APIRouter(prefix="/checks", tags=["checks"], dependencies=[_READ])
+assignable_router = APIRouter(
+    prefix="/checks",
+    tags=["checks"],
+    dependencies=[
+        Depends(
+            require_any_permission(
+                (Resource.CHECK, Action.READ),
+                (Resource.MAINTENANCE, Action.WRITE),
+                (Resource.SETTINGS, Action.WRITE),
+            )
+        )
+    ],
+)
 
 
 class UserRef(BaseModel):
@@ -116,6 +139,14 @@ class CheckClose(BaseModel):
     closed_at: datetime | None = None
 
 
+def _already_open() -> AppError:
+    return AppError(
+        code=ErrorCode.CHECK_ALREADY_OPEN,
+        status_code=409,
+        message="A verification is already open on this machine",
+    )
+
+
 def _clean(text: str | None) -> str | None:
     if text is None:
         return None
@@ -147,8 +178,33 @@ async def _require_check(
     return row
 
 
+async def _can_take(
+    session: SessionDep, user_id: uuid.UUID, machine_ids: list[uuid.UUID]
+) -> bool:
+    """Whether the account can see these checks: check:read, and every poste
+    within its scope. Anyone else would be mailed hostnames and instructions
+    about postes kept out of their sight (audit S18)."""
+    authority = await user_crud.user_authority(session, user_id)
+    if authority.is_admin:
+        return True
+    if not has_permission(
+        authority.permissions, Resource.CHECK.value, Action.READ.value
+    ):
+        return False
+    clause = machine_clause(authority.scope)
+    if clause is None or not machine_ids:
+        return True
+    seen = await session.scalar(
+        select(func.count())
+        .select_from(Machine)
+        .where(col(Machine.id).in_(machine_ids))
+        .where(clause)
+    )
+    return (seen or 0) == len(set(machine_ids))
+
+
 async def _require_assignee(
-    session: SessionDep, user_id: uuid.UUID | None
+    session: SessionDep, user_id: uuid.UUID | None, machine_ids: list[uuid.UUID]
 ) -> User | None:
     if user_id is None:
         return None
@@ -156,6 +212,12 @@ async def _require_assignee(
     if user is None or not user.is_active:
         raise AppError(
             code=ErrorCode.USER_NOT_FOUND, status_code=404, message="User not found"
+        )
+    if not await _can_take(session, user.id, machine_ids):
+        raise AppError(
+            code=ErrorCode.CHECK_ASSIGNEE_OUT_OF_REACH,
+            status_code=422,
+            message="This account cannot see these postes",
         )
     return user
 
@@ -238,7 +300,7 @@ async def create_check(
             status_code=409,
             message="A verification is already open on this machine",
         )
-    assignee = await _require_assignee(session, payload.assigned_to_id)
+    assignee = await _require_assignee(session, payload.assigned_to_id, [machine.id])
     row = MachineCheck(
         machine_id=machine.id,
         requested_by=current.email,
@@ -246,6 +308,13 @@ async def create_check(
         instructions=_clean(payload.instructions),
     )
     session.add(row)
+    try:
+        await session.flush()
+    except IntegrityError:
+        # Another request was opened on this poste between the check above
+        # and this insert: the partial unique index said no (audit B21).
+        await session.rollback()
+        raise _already_open() from None
     # In the same transaction as the request: no mail for a request that
     # was rolled back, and none to oneself.
     if assignee is not None and assignee.id != current.id:
@@ -291,15 +360,22 @@ async def list_machine_checks(
 # --- The lists and the tasks --------------------------------------------------
 
 
-@router.get("/assignable-users", response_model=list[UserRef])
-async def assignable_users(session: SessionDep) -> list[UserRef]:
+@assignable_router.get("/assignable-users", response_model=list[UserRef])
+async def assignable_users(
+    session: SessionDep, machine_id: uuid.UUID | None = None
+) -> list[UserRef]:
     """Active accounts, id and name only: who a task can be given to, without
-    opening the accounts page to everyone who may assign. Declared before
-    ``/{check_id}``."""
+    opening the accounts page to everyone who may assign. Also who may own a
+    maintenance — so open to whoever sets one, not only to check:read (audit
+    B35). Registered before ``router``, whose ``/{check_id}`` would take it."""
     rows = await session.exec(
         select(User).where(col(User.is_active).is_(True)).order_by(col(User.email))
     )
-    return [ref for u in rows.all() if (ref := _user_ref(u)) is not None]
+    users = list(rows.all())
+    if machine_id is not None:
+        # For a check on that poste: only who can see it (audit S18).
+        users = [u for u in users if await _can_take(session, u.id, [machine_id])]
+    return [ref for u in users if (ref := _user_ref(u)) is not None]
 
 
 @router.post(
@@ -312,7 +388,9 @@ async def create_checks_bulk(
     scope: CurrentScope,
 ) -> CheckBulkOut:
     """One request per poste of a selection, skipping those already asked."""
-    assignee = await _require_assignee(session, payload.assigned_to_id)
+    assignee = await _require_assignee(
+        session, payload.assigned_to_id, list(set(payload.machine_ids))
+    )
     found_machines = await session.exec(
         restrict(
             select(Machine).where(col(Machine.id).in_(payload.machine_ids)),
@@ -334,19 +412,31 @@ async def create_checks_bulk(
         )
     )
     open_ids = set(already.all())
-    created_machines: list[Machine] = []
-    for machine_id in machine_ids:
-        if machine_id in open_ids:
-            continue
-        session.add(
-            MachineCheck(
-                machine_id=machine_id,
-                requested_by=current.email,
-                assigned_to_id=payload.assigned_to_id,
-                instructions=_clean(payload.instructions),
+    new_rows = [
+        MachineCheck(
+            machine_id=machine_id,
+            requested_by=current.email,
+            assigned_to_id=payload.assigned_to_id,
+            instructions=_clean(payload.instructions),
+        ).model_dump()
+        for machine_id in machine_ids
+        if machine_id not in open_ids
+    ]
+    inserted: set[uuid.UUID] = set()
+    if new_rows:
+        # A request opened meanwhile on one of them is skipped, not a failure
+        # of the whole batch (audit B21): the partial unique index decides.
+        result = await session.exec(
+            pg_insert(MachineCheck)
+            .values(new_rows)
+            .on_conflict_do_nothing(
+                index_elements=[col(MachineCheck.machine_id)],
+                index_where=col(MachineCheck.closed_at).is_(None),
             )
+            .returning(col(MachineCheck.machine_id))
         )
-        created_machines.append(machines[machine_id])
+        inserted = set(result.scalars().all())
+    created_machines = [machines[m] for m in machine_ids if m in inserted]
     created = len(created_machines)
     # One mail for the whole request, not one per poste.
     if assignee is not None and assignee.id != current.id and created_machines:
@@ -431,9 +521,12 @@ async def update_check(
     fields = payload.model_dump(exclude_unset=True)
     new_assignee: User | None = None
     if "assigned_to_id" in fields:
-        new_assignee = await _require_assignee(session, fields["assigned_to_id"])
-        if fields["assigned_to_id"] == row.assigned_to_id:
-            new_assignee = None  # unchanged: nothing new to tell them
+        # Unchanged is not a choice: a request whose assignee was deactivated
+        # since can still be reworded (audit B08).
+        if fields["assigned_to_id"] != row.assigned_to_id:
+            new_assignee = await _require_assignee(
+                session, fields["assigned_to_id"], [row.machine_id]
+            )
         row.assigned_to_id = fields["assigned_to_id"]
     if "instructions" in fields:
         row.instructions = _clean(fields["instructions"])
@@ -483,22 +576,37 @@ async def close_check(
 ) -> CheckOut:
     """Close a request with what was found. Writes the poste's journal."""
     row = await _require_check(session, check_id, scope)
-    if row.closed_at is not None:
+    closed_at = payload.closed_at or utcnow()
+    note = _clean(payload.note)
+    # Closed in one statement, on the condition that it still is open: of two
+    # closings at the same time, one wins and the other is told (audit B21) —
+    # no second line in the journal.
+    won = (
+        await session.exec(
+            update(MachineCheck)
+            .where(
+                col(MachineCheck.id) == row.id, col(MachineCheck.closed_at).is_(None)
+            )
+            .values(
+                closed_at=closed_at,
+                closed_by=current.email,
+                closing_note=note,
+                updated_at=utcnow(),
+            )
+            .returning(col(MachineCheck.id))
+        )
+    ).first()
+    if won is None:
         raise AppError(
             code=ErrorCode.CHECK_CLOSED, status_code=409, message="This check is closed"
         )
-    closed_at = payload.closed_at or utcnow()
-    row.closed_at = closed_at
-    row.closed_by = current.email
-    row.closing_note = _clean(payload.note)
-    row.updated_at = utcnow()
-    session.add(row)
+    await session.refresh(row)
     session.add(
         Intervention(
             machine_id=row.machine_id,
             kind=InterventionKind.VERIFICATION.value,
             title="Vérification",
-            note=row.closing_note,
+            note=note,
             performed_by=current.email,
             performed_at=closed_at,
             check_id=row.id,

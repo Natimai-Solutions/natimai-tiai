@@ -104,3 +104,22 @@ def test_a_zero_grace_removes_the_preference(monkeypatch):
         location="Lycée de Taravao", ip_address="10.4.8.9", ip_prefix_length=24
     )
     assert may_claim(far, target, queued_at=queued, now=queued)
+
+
+# --- audit T35 ---------------------------------------------------------------
+
+
+def test_a_relay_is_trusted_only_when_settled_and_able():
+    """Audit S19, B29: a poste just enrolled, one to confirm, a revoked one,
+    or an agent older than the command, is no relay."""
+    from app.features.wol.relay import trusted_relay
+
+    now = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
+    old = now - timedelta(days=30)
+    assert trusted_relay(machine(first_seen=old, agent_version="1.1.0"), now)
+    assert trusted_relay(machine(first_seen=old, agent_version=None), now)
+    assert not trusted_relay(machine(first_seen=now - timedelta(minutes=5)), now)
+    assert not trusted_relay(machine(first_seen=old, needs_verification=True), now)
+    assert not trusted_relay(machine(first_seen=old, token_revoked=True), now)
+    assert not trusted_relay(machine(first_seen=old, agent_version="0.9.3"), now)
+    assert not trusted_relay(machine(first_seen=old, agent_version="v0.2.0"), now)

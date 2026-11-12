@@ -129,11 +129,13 @@ func doInitConfig(args []string) {
 	cfgPath := fs.String("config", config.DefaultConfigPath(), "config file path")
 	apiURL := fs.String("api-url", "https://tiai.natimai.local", "API base URL")
 	machineUUID := fs.String("machine-uuid", "", "optional identity override (else auto-resolved: SMBIOS UUID / agent UUID)")
+	insecure := fs.Bool("allow-insecure-http", false, "accept an http:// api-url (secret and token in clear)")
 	_ = fs.Parse(args)
 
 	cfg := config.DefaultConfig()
 	cfg.APIBaseURL = *apiURL
 	cfg.MachineUUID = *machineUUID
+	cfg.AllowInsecureHTTP = *insecure
 
 	if err := cfg.Save(*cfgPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)

@@ -97,7 +97,14 @@ def describe_error(exc: BaseException, policy: EmailPolicy) -> str:
                 f"Mailgun ne connaît pas le domaine {policy.mailgun_domain} ({status}) "
                 "— vérifiez le domaine et la région de l'API (EU ou US)"
             )
-        body = exc.response.text.strip()[:200]
+        # Only Mailgun's own message field: the URL may point anywhere, and
+        # a page body is not the console's to repeat (audit S10).
+        try:
+            data = exc.response.json()
+        except ValueError:
+            data = None
+        body = data.get("message") if isinstance(data, dict) else None
+        body = body.strip()[:200] if isinstance(body, str) else ""
         return f"Mailgun a répondu {status}" + (f" : {body}" if body else "")
     if isinstance(exc, httpx.TimeoutException):
         return "Mailgun n'a pas répondu dans le délai imparti"
