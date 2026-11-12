@@ -10,10 +10,16 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
+from app.features.intervention import crud as intervention_crud
 from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
 from app.features.maintenance.models import Maintenance
-from app.features.maintenance.policy import MaintenanceState, Resolved, resolve
+from app.features.maintenance.policy import (
+    MaintenanceState,
+    Resolved,
+    available,
+    resolve,
+)
 from app.features.room.models import Building, Room
 from app.features.setting.crud import MaintenancePolicy
 
@@ -75,7 +81,7 @@ def group_due(
         if entry is None:
             room_owner = (
                 room.maintenance_owner_id
-                if room.maintenance_owner_id is not None
+                if available(room.maintenance_owner_id, policy)
                 else policy.owner_id
             )
             room_cycle = (
@@ -91,10 +97,12 @@ def group_due(
             )
             rooms[room.id] = entry
         entry.total += 1
-        entry.machines.append((machine, res))
         if res.state == MaintenanceState.EXCLUDED:
+            # Counted, not listed: a poste kept out of the cycle (a server, a
+            # VM) is not one to tick in a visit (audit B09).
             entry.excluded += 1
             continue
+        entry.machines.append((machine, res))
         if res.state == MaintenanceState.OVERDUE:
             entry.overdue += 1
         elif res.state == MaintenanceState.DUE_SOON:
@@ -127,6 +135,7 @@ async def record_session(
     performed_by: str,
     performed_at: datetime,
     note: str | None,
+    skipped: dict[uuid.UUID, str] | None = None,
 ) -> Maintenance:
     """One visit: the session row, one journal entry per poste, and each
     poste's ``last_maintenance_at`` moved forward. Does not commit."""
@@ -152,15 +161,25 @@ async def record_session(
                 maintenance_id=visit.id,
             )
         )
-        # Forward only: recording a visit older than the last one known is
-        # history, not a step back on the cycle.
-        if (
-            machine.last_maintenance_at is None
-            or performed_at > machine.last_maintenance_at
-        ):
-            machine.last_maintenance_at = performed_at
-            machine.updated_at = utcnow()
-            session.add(machine)
+    # A poste left out of the visit keeps why, in its own journal — not as a
+    # maintenance, which would move its cycle (audit U20).
+    where = f" — {room.name}" if room else ""
+    for machine_id, reason in (skipped or {}).items():
+        session.add(
+            Intervention(
+                machine_id=machine_id,
+                kind=InterventionKind.OTHER.value,
+                title=f"Maintenance non faite{where}",
+                note=reason,
+                performed_by=performed_by,
+                performed_at=performed_at,
+            )
+        )
+    # From the journal, like every other change to it: a visit older than the
+    # last one known is history, not a step back on the cycle.
+    await intervention_crud.recompute_last_maintenance(
+        session, [m.id for m in machines]
+    )
     return visit
 
 
@@ -211,14 +230,21 @@ async def session_items(
 
 
 async def item_counts(
-    session: AsyncSession, maintenance_ids: list[uuid.UUID]
+    session: AsyncSession, maintenance_ids: list[uuid.UUID], where: Any = None
 ) -> dict[uuid.UUID, int]:
+    """Postes per visit. ``where`` (a clause on Machine) counts only those the
+    caller may see."""
     if not maintenance_ids:
         return {}
+    stmt = select(col(Intervention.maintenance_id), func.count())
+    if where is not None:
+        stmt = stmt.join(
+            Machine, col(Machine.id) == col(Intervention.machine_id)
+        ).where(where)
     rows = await session.exec(
-        select(col(Intervention.maintenance_id), func.count())
-        .where(col(Intervention.maintenance_id).in_(maintenance_ids))
-        .group_by(col(Intervention.maintenance_id))
+        stmt.where(col(Intervention.maintenance_id).in_(maintenance_ids)).group_by(
+            col(Intervention.maintenance_id)
+        )
     )
     counts = dict.fromkeys(maintenance_ids, 0)
     for mid, n in rows.all():

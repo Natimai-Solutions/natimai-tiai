@@ -27,7 +27,11 @@ describe('checks service', () => {
     await listChecks({ assigned_to: 'me', open: true });
     expect(api.get).toHaveBeenCalledWith('/checks', { params: { assigned_to: 'me', open: true } });
     await listAssignableUsers();
-    expect(api.get).toHaveBeenCalledWith('/checks/assignable-users');
+    expect(api.get).toHaveBeenCalledWith('/checks/assignable-users', undefined);
+    await listAssignableUsers('m-1');
+    expect(api.get).toHaveBeenLastCalledWith('/checks/assignable-users', {
+      params: { machine_id: 'm-1' },
+    });
   });
 
   it('asks, asks in bulk, reassigns and closes', async () => {

@@ -25,3 +25,14 @@ def utc_field(*, nullable: bool = False, **kwargs: Any) -> Any:
     from the ``| None`` annotation.
     """
     return Field(sa_column=Column(DateTime(timezone=True), nullable=nullable), **kwargs)
+
+
+def escape_like(value: str) -> str:
+    """``value`` as literal text in a LIKE pattern: ``%`` and ``_`` typed in a
+    search mean themselves, not « anything » (audit S26)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def contains(column: Any, text: str) -> Any:
+    """Case-insensitive substring match of ``text``, taken literally."""
+    return column.ilike(f"%{escape_like(text)}%", escape="\\")

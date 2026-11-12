@@ -104,6 +104,26 @@ export interface UnauthorizedHandlerDeps<C extends ReplayableConfig> {
 }
 
 /**
+ * The error every caller gets once the session is lost: « Votre session a
+ * pris fin », the same for each request that was in flight — and not the
+ * server's « identifiants invalides » for a token that simply expired, one
+ * toast per request (audit B23). Same shape as an API error, so that
+ * `apiErrorMessage` reads it like any other.
+ */
+export function sessionEnded(original: unknown): unknown {
+  const base = (original ?? {}) as { response?: { status?: number } };
+  return {
+    ...base,
+    sessionEnded: true,
+    response: {
+      ...(base.response ?? {}),
+      status: 401,
+      data: { error: { code: 'auth.session.invalid', message: 'Session ended' } },
+    },
+  };
+}
+
+/**
  * Build the axios response-error handler that turns « access token expired »
  * into one refresh and a replay, invisibly to the page that made the call.
  *
@@ -123,13 +143,13 @@ export function createUnauthorizedHandler<C extends ReplayableConfig>(
     }
     if (config._retriedAfterRefresh) {
       deps.onSessionLost();
-      throw error;
+      throw sessionEnded(error);
     }
     try {
       await deps.refresh();
     } catch {
       deps.onSessionLost();
-      throw error;
+      throw sessionEnded(error);
     }
     config._retriedAfterRefresh = true;
     return deps.replay(config);

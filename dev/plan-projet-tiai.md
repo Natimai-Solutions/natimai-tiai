@@ -497,7 +497,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 | M5 Durcissement | 🟢 JWT + rôles, provider Mailgun, notifications par compte (digest quotidien + alerte immédiate) via l'outbox e-mail et le worker, garde secrets prod, timing-safe enroll, en-têtes sécurité, rate-limit (login / reset / enroll), journal d'audit élargi + page console, rotation des tokens agents, rétention, sessions serveur révocables ; lot sécurité d'octobre (#88) : verrouillage des comptes, ré-enrôlement sur approbation, rôle PostgreSQL applicatif |
 | M6 Packaging & GPO | 🟢 release `.exe` + `.msi` signés, script GPO, doc d'exploitation ; en production dans deux lycées |
 | Transverse | 🟢 tests backend/frontend + ruff + mypy + CI (tous verts) |
-| Audit 2026-11 | 🔴 43 tâches à faire, dont 5 immédiates : sécurité, bugs et UI/UX, cf. `plan-audit-2026-11.md` |
+| Audit 2026-11 | **Fait le 2026-11-11 (T01 à T43)**, cf. §6 de `plan-audit-2026-11.md`. **Avant de déployer :** publier la nouvelle version de l'agent (T01, T02, T10, T37 n'ont d'effet qu'après sa mise à jour) ; sur un parc enrôlé en `http://`, poser `AllowInsecureHTTP` avant la mise à jour de l'agent (T37) ; les conteneurs backend et worker tournent sans root (T40) et le proxy de confiance est `caddy` (`TRUSTED_PROXY_HOSTS`) ; lire les notes de version de T03, T05, T06 et T36 (heartbeat limité à 30 par minute et par poste). Écart : sauvegardes non chiffrées (droits 600). |
 
 **M0 — Fondations**
 - [x] Mono-repo `/agent` `/backend` `/frontend` `/deploy`
@@ -616,63 +616,63 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] CI GitHub Actions (backend : uv + ruff + mypy + pytest avec Postgres ; frontend : prettier + vue-tsc + vitest ; agent : gofmt + vet + go test + build croisé Windows ; action de couverture épinglée par SHA)
 - [x] Contrat d'erreurs API (`AppError` + handlers, enveloppe `{error:{code,message,details}}`, catalogue `ErrorCode` reflété côté frontend `errors.ts`) — migré depuis `HTTPException` (cf. §2.14), testé (8 tests backend de contrat + 6 frontend)
 
-**Audit 2026-11 : corrections** · 🔴 à faire. Plan d'ensemble, méthode et détail des constats dans `plan-audit-2026-11.md`. Les tâches propres à un chantier y sont détaillées dans son document de travail. Celles qui ne relèvent d'aucun chantier (authentification, console, infrastructure, agent) sont détaillées ici.
+**Audit 2026-11 : corrections** · ✅ fait le 2026-11-11. Plan d'ensemble, méthode et détail des constats dans `plan-audit-2026-11.md`. Les tâches propres à un chantier y sont détaillées dans son document de travail. Celles qui ne relèvent d'aucun chantier (authentification, console, infrastructure, agent) sont détaillées ici.
 
-- [ ] **T01** · *P0 immédiate* — Agent : n'accepter qu'un UUID comme identifiant de paquet ([S01](plan-audit-2026-11.md#s01)), suivi dans `plan-deploiement-logiciel.md`
-- [ ] **T02** · *P0 immédiate* — Méthode A : plus de fichier chargeable non signé à côté de l'exécutable ([S02](plan-audit-2026-11.md#s02)), suivi dans `plan-deploiement-logiciel.md`
-- [ ] **T03** · *P0 immédiate* — Groupes : contrôler l'autorité des membres à la modification ([S05](plan-audit-2026-11.md#s05)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T04** · *P0 immédiate* — Séance de maintenance : filtrer ses postes par périmètre ([S06](plan-audit-2026-11.md#s06)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T05** · *P0 immédiate* — **Réglages e-mail : ne plus réutiliser un secret stocké vers un nouvel hôte** ([S10](plan-audit-2026-11.md#s10))
+- [x] **T01** · *P0 immédiate* — Agent : n'accepter qu'un UUID comme identifiant de paquet ([S01](plan-audit-2026-11.md#s01)), suivi dans `plan-deploiement-logiciel.md`
+- [x] **T02** · *P0 immédiate* — Méthode A : plus de fichier chargeable non signé à côté de l'exécutable ([S02](plan-audit-2026-11.md#s02)), suivi dans `plan-deploiement-logiciel.md`
+- [x] **T03** · *P0 immédiate* — Groupes : contrôler l'autorité des membres à la modification ([S05](plan-audit-2026-11.md#s05)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T04** · *P0 immédiate* — Séance de maintenance : filtrer ses postes par périmètre ([S06](plan-audit-2026-11.md#s06)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T05** · *P0 immédiate* — **Réglages e-mail : ne plus réutiliser un secret stocké vers un nouvel hôte** ([S10](plan-audit-2026-11.md#s10))
   Quand l'hôte, le port ou le mode de sécurité SMTP changent, ou l'URL ou le domaine Mailgun, exiger que le mot de passe ou la clé soient ressaisis dans la même requête, pour l'e-mail de test comme pour le `PATCH` (`settings_routes.py`).
-- [ ] **T06** · *P1 court terme* — **Verrouillage de compte : supprimer le déni de service et l'énumération** ([S03](plan-audit-2026-11.md#s03), [S12](plan-audit-2026-11.md#s12), [S13](plan-audit-2026-11.md#s13))
+- [x] **T06** · *P1 court terme* — **Verrouillage de compte : supprimer le déni de service et l'énumération** ([S03](plan-audit-2026-11.md#s03), [S12](plan-audit-2026-11.md#s12), [S13](plan-audit-2026-11.md#s13))
   Ne plus refuser le bon mot de passe pendant un verrouillage : passer à un délai progressif, ou ne verrouiller que par couple compte et adresse IP. Répondre au compte verrouillé par le même 401 générique qu'à un échec, en calculant tout de même un bcrypt. Incrémenter `failed_login_attempts` de façon atomique en base.
-- [ ] **T07** · *P1 court terme* — **`POST /auth/password` : limite de débit et bcrypt hors de la boucle** ([S04](plan-audit-2026-11.md#s04))
+- [x] **T07** · *P1 court terme* — **`POST /auth/password` : limite de débit et bcrypt hors de la boucle** ([S04](plan-audit-2026-11.md#s04))
   Ajouter un limiteur indexé par compte, compter les échecs de `current_password` et révoquer la session après N échecs. Exécuter bcrypt dans `asyncio.to_thread` sur ce chemin comme sur celui de connexion.
-- [ ] **T08** · *P1 court terme* — Figer le contenu d'un paquet à la mise en file ([S08](plan-audit-2026-11.md#s08)), suivi dans `plan-deploiement-logiciel.md`
-- [ ] **T09** · *P1 court terme* — Fichiers de paquet : plus d'orphelin, plus de déploiement cassé ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13)), suivi dans `plan-deploiement-logiciel.md`
-- [ ] **T10** · *P1 court terme* — Cycle de vie des commandes remises : relivraison, expiration, pertes côté agent ([B10](plan-audit-2026-11.md#b10), [B15](plan-audit-2026-11.md#b15), [B16](plan-audit-2026-11.md#b16), [B34](plan-audit-2026-11.md#b34)), suivi dans `plan-commandes-distantes.md`
-- [ ] **T11** · *P1 court terme* — Remettre les commandes dans l'ordre de création ([B28](plan-audit-2026-11.md#b28)), suivi dans `plan-commandes-distantes.md`
-- [ ] **T12** · *P1 court terme* — Export Excel : neutraliser les caractères de contrôle ([S11](plan-audit-2026-11.md#s11)), suivi dans `plan-inventaire.md`
-- [ ] **T13** · *P1 court terme* — Placement par l'annuaire : borner le nom de salle à la colonne ([S07](plan-audit-2026-11.md#s07)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T14** · *P1 court terme* — **Fiche poste et tableau de bord sans `threat:read` ni `command:read`** ([B02](plan-audit-2026-11.md#b02))
+- [x] **T08** · *P1 court terme* — Figer le contenu d'un paquet à la mise en file ([S08](plan-audit-2026-11.md#s08)), suivi dans `plan-deploiement-logiciel.md`
+- [x] **T09** · *P1 court terme* — Fichiers de paquet : plus d'orphelin, plus de déploiement cassé ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13)), suivi dans `plan-deploiement-logiciel.md`
+- [x] **T10** · *P1 court terme* — Cycle de vie des commandes remises : relivraison, expiration, pertes côté agent ([B10](plan-audit-2026-11.md#b10), [B15](plan-audit-2026-11.md#b15), [B16](plan-audit-2026-11.md#b16), [B34](plan-audit-2026-11.md#b34)), suivi dans `plan-commandes-distantes.md`
+- [x] **T11** · *P1 court terme* — Remettre les commandes dans l'ordre de création ([B28](plan-audit-2026-11.md#b28)), suivi dans `plan-commandes-distantes.md`
+- [x] **T12** · *P1 court terme* — Export Excel : neutraliser les caractères de contrôle ([S11](plan-audit-2026-11.md#s11)), suivi dans `plan-inventaire.md`
+- [x] **T13** · *P1 court terme* — Placement par l'annuaire : borner le nom de salle à la colonne ([S07](plan-audit-2026-11.md#s07)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T14** · *P1 court terme* — **Fiche poste et tableau de bord sans `threat:read` ni `command:read`** ([B02](plan-audit-2026-11.md#b02))
   Ne charger les menaces et les commandes que si l'utilisateur a le droit de les lire, et charger les données annexes avec `Promise.allSettled` (`MachineDetailPage.vue:750`, `DashboardPage.vue`).
-- [ ] **T15** · *P1 court terme* — Remettre « Rafraîchir l'inventaire » dans les menus ([B12](plan-audit-2026-11.md#b12)), suivi dans `plan-inventaire.md`
-- [ ] **T16** · *P1 court terme* — Échéance de maintenance : la recalculer depuis le journal ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T17** · *P1 court terme* — Responsables désactivés ou supprimés : ne plus bloquer la maintenance ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T18** · *P1 court terme* — Suppression d'un bâtiment : gérer les noms de salle en collision ([B07](plan-audit-2026-11.md#b07)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T19** · *P1 court terme* — Carte « Disque presque plein » : respecter le seuil réglé ([B01](plan-audit-2026-11.md#b01)), suivi dans `plan-inventaire.md`
-- [ ] **T20** · *P1 court terme* — **Liste et fiche des postes : signaler les échecs de chargement** ([B04](plan-audit-2026-11.md#b04), [U01](plan-audit-2026-11.md#u01))
+- [x] **T15** · *P1 court terme* — Remettre « Rafraîchir l'inventaire » dans les menus ([B12](plan-audit-2026-11.md#b12)), suivi dans `plan-inventaire.md`
+- [x] **T16** · *P1 court terme* — Échéance de maintenance : la recalculer depuis le journal ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T17** · *P1 court terme* — Responsables désactivés ou supprimés : ne plus bloquer la maintenance ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T18** · *P1 court terme* — Suppression d'un bâtiment : gérer les noms de salle en collision ([B07](plan-audit-2026-11.md#b07)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T19** · *P1 court terme* — Carte « Disque presque plein » : respecter le seuil réglé ([B01](plan-audit-2026-11.md#b01)), suivi dans `plan-inventaire.md`
+- [x] **T20** · *P1 court terme* — **Liste et fiche des postes : signaler les échecs de chargement** ([B04](plan-audit-2026-11.md#b04), [U01](plan-audit-2026-11.md#u01))
   Distinguer le rafraîchissement automatique, qui reste silencieux, du chargement demandé : sur ce dernier, notifier l'erreur et vider ou griser les lignes périmées. Sur la fiche, afficher un état de chargement ou d'erreur quand on passe au poste précédent ou suivant.
-- [ ] **T21** · *P1 court terme* — **`useAutoRefresh` : plus de relance après le démontage** ([B11](plan-audit-2026-11.md#b11))
+- [x] **T21** · *P1 court terme* — **`useAutoRefresh` : plus de relance après le démontage** ([B11](plan-audit-2026-11.md#b11))
   Ajouter un drapeau `disposed` et ne relancer le minuteur que s'il est faux. Couvrir le cas dans le test du composable.
-- [ ] **T22** · *P1 court terme* — **Fusion de postes : conserver `first_seen` et les réglages de maintenance** ([B03](plan-audit-2026-11.md#b03))
+- [x] **T22** · *P1 court terme* — **Fusion de postes : conserver `first_seen` et les réglages de maintenance** ([B03](plan-audit-2026-11.md#b03))
   Dans `merge_into`, garder le plus ancien `first_seen` et reprendre le cycle et le responsable de maintenance quand la cible n'en a pas. Ajouter un test.
-- [ ] **T23** · *P2 moyen terme* — Déploiement : confirmation et refus des paquets inexécutables ([U04](plan-audit-2026-11.md#u04), [B30](plan-audit-2026-11.md#b30)), suivi dans `plan-deploiement-logiciel.md`
-- [ ] **T24** · *P2 moyen terme* — Fiche paquet : saisie préservée, dépôt contrôlé, messages justes ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36)), suivi dans `plan-deploiement-logiciel.md`
-- [ ] **T25** · *P2 moyen terme* — Fiche paquet : pagination et bilan des déploiements ([B14](plan-audit-2026-11.md#b14)), suivi dans `plan-deploiement-logiciel.md`
-- [ ] **T26** · *P2 moyen terme* — Groupes : ne plus perdre un emplacement saisi sans Entrée ([U02](plan-audit-2026-11.md#u02)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T27** · *P2 moyen terme* — **Afficher les messages d'erreur utiles du backend** ([U03](plan-audit-2026-11.md#u03))
+- [x] **T23** · *P2 moyen terme* — Déploiement : confirmation et refus des paquets inexécutables ([U04](plan-audit-2026-11.md#u04), [B30](plan-audit-2026-11.md#b30)), suivi dans `plan-deploiement-logiciel.md`
+- [x] **T24** · *P2 moyen terme* — Fiche paquet : saisie préservée, dépôt contrôlé, messages justes ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36)), suivi dans `plan-deploiement-logiciel.md`
+- [x] **T25** · *P2 moyen terme* — Fiche paquet : pagination et bilan des déploiements ([B14](plan-audit-2026-11.md#b14)), suivi dans `plan-deploiement-logiciel.md`
+- [x] **T26** · *P2 moyen terme* — Groupes : ne plus perdre un emplacement saisi sans Entrée ([U02](plan-audit-2026-11.md#u02)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T27** · *P2 moyen terme* — **Afficher les messages d'erreur utiles du backend** ([U03](plan-audit-2026-11.md#u03))
   Pour les codes dont le message est rédigé pour l'utilisateur (`package.invalid` en tête), afficher le détail. Pour une erreur de validation, nommer le champ fautif (`errors.ts:90`).
-- [ ] **T28** · *P2 moyen terme* — **Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
+- [x] **T28** · *P2 moyen terme* — **Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
   Pour chaque carte de réglages : champ requis, entier, dans les bornes du serveur, erreur affichée sous le champ et bouton Enregistrer désactivé tant qu'elle persiste. Ne plus convertir un champ vide en 0 (`SettingsPage.vue:844`).
-- [ ] **T29** · *P2 moyen terme* — **Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
+- [x] **T29** · *P2 moyen terme* — **Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
   Rendre persistants la séance de maintenance de salle, avec une confirmation si la saisie a été modifiée, et le dialogue qui affiche une seule fois le mot de passe réinitialisé.
-- [ ] **T30** · *P2 moyen terme* — Mes tâches et séance de salle : parcours du technicien ([B09](plan-audit-2026-11.md#b09), [U18](plan-audit-2026-11.md#u18), [U19](plan-audit-2026-11.md#u19), [U20](plan-audit-2026-11.md#u20), [U21](plan-audit-2026-11.md#u21), [U22](plan-audit-2026-11.md#u22), [U23](plan-audit-2026-11.md#u23), [U24](plan-audit-2026-11.md#u24), [U26](plan-audit-2026-11.md#u26)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T31** · *P2 moyen terme* — **Liste des postes : sélection, navigation et fusion cohérentes** ([B05](plan-audit-2026-11.md#b05), [B18](plan-audit-2026-11.md#b18), [B19](plan-audit-2026-11.md#b19))
+- [x] **T30** · *P2 moyen terme* — Mes tâches et séance de salle : parcours du technicien ([B09](plan-audit-2026-11.md#b09), [U18](plan-audit-2026-11.md#u18), [U19](plan-audit-2026-11.md#u19), [U20](plan-audit-2026-11.md#u20), [U21](plan-audit-2026-11.md#u21), [U22](plan-audit-2026-11.md#u22), [U23](plan-audit-2026-11.md#u23), [U24](plan-audit-2026-11.md#u24), [U26](plan-audit-2026-11.md#u26)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T31** · *P2 moyen terme* — **Liste des postes : sélection, navigation et fusion cohérentes** ([B05](plan-audit-2026-11.md#b05), [B18](plan-audit-2026-11.md#b18), [B19](plan-audit-2026-11.md#b19))
   Vider la sélection au changement de filtre ou de page, ou montrer les postes sélectionnés masqués. Ancrer la navigation précédent/suivant sur un curseur stable. Recharger le journal des interventions après une fusion.
-- [ ] **T32** · *P2 moyen terme* — Périmètres : cas secondaires ([S16](plan-audit-2026-11.md#s16), [S17](plan-audit-2026-11.md#s17), [S18](plan-audit-2026-11.md#s18)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T33** · *P2 moyen terme* — Vérifications concurrentes et salle sortie de son bâtiment ([B21](plan-audit-2026-11.md#b21), [B22](plan-audit-2026-11.md#b22)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T34** · *P3 fond* — **Comptes : réinitialisation et compte initial** ([S14](plan-audit-2026-11.md#s14), [S15](plan-audit-2026-11.md#s15), [S33](plan-audit-2026-11.md#s33))
+- [x] **T32** · *P2 moyen terme* — Périmètres : cas secondaires ([S16](plan-audit-2026-11.md#s16), [S17](plan-audit-2026-11.md#s17), [S18](plan-audit-2026-11.md#s18)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T33** · *P2 moyen terme* — Vérifications concurrentes et salle sortie de son bâtiment ([B21](plan-audit-2026-11.md#b21), [B22](plan-audit-2026-11.md#b22)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T34** · *P3 fond* — **Comptes : réinitialisation et compte initial** ([S14](plan-audit-2026-11.md#s14), [S15](plan-audit-2026-11.md#s15), [S33](plan-audit-2026-11.md#s33))
   Limiter les demandes de réinitialisation par compte cible, sans invalider le lien en cours. Purger les liens de réinitialisation quand un administrateur change l'e-mail. Imposer `PASSWORD_MIN_LENGTH` à `FIRST_ADMIN_PASSWORD`.
-- [ ] **T35** · *P3 fond* — **Wake-on-LAN : ne plus croire l'agent sur parole** ([S19](plan-audit-2026-11.md#s19), [S35](plan-audit-2026-11.md#s35), [B29](plan-audit-2026-11.md#b29))
+- [x] **T35** · *P3 fond* — **Wake-on-LAN : ne plus croire l'agent sur parole** ([S19](plan-audit-2026-11.md#s19), [S35](plan-audit-2026-11.md#s35), [B29](plan-audit-2026-11.md#b29))
   Pour le relais : exiger un emplacement validé côté serveur, borner le masque et n'accepter que des réseaux privés ou une liste configurée. Exclure les agents trop anciens pour relayer, et remettre en attente un réveil remis sans verdict.
-- [ ] **T36** · *P3 fond* — Données déclarées par l'agent : placement en salle et catalogue logiciel ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21)), suivi dans `plan-salles-maintenance-interventions.md`
-- [ ] **T37** · *P3 fond* — **Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))
+- [x] **T36** · *P3 fond* — Données déclarées par l'agent : placement en salle et catalogue logiciel ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21)), suivi dans `plan-salles-maintenance-interventions.md`
+- [x] **T37** · *P3 fond* — **Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))
   N'accepter `http://` que sur option explicite, en corrigeant `DEPLOYMENT.md` qui le présente aujourd'hui comme accepté, et ne plus suivre les redirections. Borner les corps d'erreur lus, faire tourner le journal à chaud, et borner les téléchargements à la taille annoncée. Distinguer un `token.dat` illisible d'un `token.dat` absent. Allonger le délai entre deux tentatives quand l'enrôlement attend une approbation, et ne l'auditer qu'une fois.
-- [ ] **T38** · *P3 fond* — Script de signature : neutraliser les caractères de contrôle ([S25](plan-audit-2026-11.md#s25)), suivi dans `plan-deploiement-logiciel.md`
-- [ ] **T39** · *P3 fond* — **Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
+- [x] **T38** · *P3 fond* — Script de signature : neutraliser les caractères de contrôle ([S25](plan-audit-2026-11.md#s25)), suivi dans `plan-deploiement-logiciel.md`
+- [x] **T39** · *P3 fond* — **Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
   Factoriser `_escape_like` et l'appliquer à toutes les recherches par sous-chaîne : logiciels, postes et comptes.
-- [ ] **T40** · *P3 fond* — **Infrastructure et CI** ([S27](plan-audit-2026-11.md#s27), [S28](plan-audit-2026-11.md#s28), [S29](plan-audit-2026-11.md#s29), [S30](plan-audit-2026-11.md#s30), [S31](plan-audit-2026-11.md#s31), [S32](plan-audit-2026-11.md#s32), [S34](plan-audit-2026-11.md#s34), [S36](plan-audit-2026-11.md#s36))
+- [x] **T40** · *P3 fond* — **Infrastructure et CI** ([S27](plan-audit-2026-11.md#s27), [S28](plan-audit-2026-11.md#s28), [S29](plan-audit-2026-11.md#s29), [S30](plan-audit-2026-11.md#s30), [S31](plan-audit-2026-11.md#s31), [S32](plan-audit-2026-11.md#s32), [S34](plan-audit-2026-11.md#s34), [S36](plan-audit-2026-11.md#s36))
   Plusieurs durcissements :
   - Sauvegardes : `umask 077`, et chiffrement des dumps.
   - `X-Forwarded-For` : ne le lire que depuis des proxys de confiance, et n'exposer le port de développement que sur `127.0.0.1`.
@@ -682,15 +682,15 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
   - Conteneurs backend et worker : exécution sans root, `cap_drop` et `no-new-privileges`.
   - `index.html` : le servir en `no-cache`.
   - OpenAPI : le couper hors environnement local.
-- [ ] **T41** · *P3 fond* — **Console d'administration : finitions** ([B23](plan-audit-2026-11.md#b23), [B24](plan-audit-2026-11.md#b24), [B25](plan-audit-2026-11.md#b25), [B26](plan-audit-2026-11.md#b26), [B27](plan-audit-2026-11.md#b27))
+- [x] **T41** · *P3 fond* — **Console d'administration : finitions** ([B23](plan-audit-2026-11.md#b23), [B24](plan-audit-2026-11.md#b24), [B25](plan-audit-2026-11.md#b25), [B26](plan-audit-2026-11.md#b26), [B27](plan-audit-2026-11.md#b27))
   Plusieurs finitions :
   - Session expirée : un seul message, au lieu d'un toast « identifiants invalides » par requête.
   - Longueur minimale du mot de passe et durée de validité du lien : les lire depuis le serveur.
   - Journal d'audit : ajouter les libellés des actions sur les paquets, `user.locked` et `machine.reenroll_requested`.
   - Utilisateurs : revenir à la page précédente quand la dernière page se vide.
   - `PATCH` des comptes, groupes et salles : renvoyer 422 au lieu de 500 sur un champ obligatoire envoyé à `null`.
-- [ ] **T42** · *P3 fond* — Page Logiciels et filtre par logiciel ([B20](plan-audit-2026-11.md#b20), [U08](plan-audit-2026-11.md#u08), [U09](plan-audit-2026-11.md#u09)), suivi dans `plan-inventaire.md`
-- [ ] **T43** · *P3 fond* — **Console : finitions visuelles et accessibilité** ([U07](plan-audit-2026-11.md#u07), [U10](plan-audit-2026-11.md#u10), [U11](plan-audit-2026-11.md#u11), [U12](plan-audit-2026-11.md#u12), [U15](plan-audit-2026-11.md#u15), [U17](plan-audit-2026-11.md#u17), [U25](plan-audit-2026-11.md#u25), [U27](plan-audit-2026-11.md#u27), [U28](plan-audit-2026-11.md#u28), [U29](plan-audit-2026-11.md#u29), [U30](plan-audit-2026-11.md#u30))
+- [x] **T42** · *P3 fond* — Page Logiciels et filtre par logiciel ([B20](plan-audit-2026-11.md#b20), [U08](plan-audit-2026-11.md#u08), [U09](plan-audit-2026-11.md#u09)), suivi dans `plan-inventaire.md`
+- [x] **T43** · *P3 fond* — **Console : finitions visuelles et accessibilité** ([U07](plan-audit-2026-11.md#u07), [U10](plan-audit-2026-11.md#u10), [U11](plan-audit-2026-11.md#u11), [U12](plan-audit-2026-11.md#u12), [U15](plan-audit-2026-11.md#u15), [U17](plan-audit-2026-11.md#u17), [U25](plan-audit-2026-11.md#u25), [U27](plan-audit-2026-11.md#u27), [U28](plan-audit-2026-11.md#u28), [U29](plan-audit-2026-11.md#u29), [U30](plan-audit-2026-11.md#u30))
   Plusieurs finitions :
   - Tableau de bord : n'afficher l'état vide qu'une fois les données chargées.
   - Retour arrière : restaurer la position de défilement.
@@ -712,7 +712,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 | MVP (M0–M1) | **TLS dès le départ** (Caddy + AC interne) ; **auto-enrôlement** : secret d'enrôlement partagé → **token unique par poste** (DPAPI) ; identité = `machine_uuid` ; **auth console JWT** avec rôles `admin` / `readonly`. |
 | Durcissement (M5) | Garde-fou de ré-enrôlement + révocation de token ; journal d'audit ; moindre privilège + limitation de débit sur l'API. ✅ côté console : sessions serveur révocables (jeton d'accès court + jeton de session tournant en cookie `HttpOnly`), pas d'escalade de privilèges par la gestion des comptes, connexion à temps constant. |
 | Durcissement (exploitation) | **Rotation automatique des tokens agents** (livrée) ; rétention du journal d'audit et de l'historique des commandes. |
-| Audit 2026-11 | À faire, dans cet ordre. **Immédiat :** confiner les paquets de méthode A côté agent (T01, T02), contrôler l'escalade de périmètre par les groupes (T03), filtrer la séance de maintenance par périmètre (T04), ne plus réutiliser les secrets e-mail vers un nouvel hôte (T05). **Ensuite :** verrouillage de compte sans déni de service (T06), limite de débit sur le changement de mot de passe (T07), contenu des paquets figé à l'approbation (T08), puis les durcissements de fond (T34 à T40 : réinitialisation des mots de passe, Wake-on-LAN, agent en HTTPS seul, sauvegardes chiffrées, conteneurs sans root, actions CI épinglées). Cf. `plan-audit-2026-11.md`. |
+| Audit 2026-11 | Fait le 2026-11-11 : les 43 tâches (T01 à T43) sont corrigées, cf. `plan-audit-2026-11.md` §6. Écart : sauvegardes non chiffrées (droits 600, documenté). |
 | Plus tard | mTLS ; attestation d'identité AD à l'enrôlement ; **permissions fines par ressource/table** (lecture/écriture) au-delà des deux rôles. |
 
 Points permanents : binaire agent **signé**, validation stricte des entrées API, limitation de débit côté agent pour éviter l'effet « troupeau ».

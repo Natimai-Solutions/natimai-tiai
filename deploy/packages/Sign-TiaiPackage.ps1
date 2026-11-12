@@ -117,6 +117,28 @@ if ($doc.format -ne 'tiai-package-1') {
     throw "Ce fichier n'est pas un manifeste de paquet Tiai (format '$($doc.format)')."
 }
 
+# What is shown below is what is signed: a control character (ESC, CR, a
+# C1 code) in a name or an argument could move the cursor and erase a line,
+# and show a command other than the one the postes will run (audit S25).
+# Refused outright, before anything is displayed.
+function Assert-NoControl {
+    param([string]$Label, $Value)
+    foreach ($v in @($Value)) {
+        if ($null -ne $v -and "$v" -match '[\x00-\x1F\x7F-\x9F]') {
+            throw "Caractere de controle dans $Label : manifeste refuse, rien n'a ete signe."
+        }
+    }
+}
+Assert-NoControl 'le nom' $doc.name
+Assert-NoControl 'la version' $doc.version
+foreach ($f in $doc.files) { Assert-NoControl 'un nom de fichier' $f.name }
+foreach ($s in @($doc.install, $doc.uninstall)) {
+    if ($s) {
+        Assert-NoControl 'le fichier a lancer' $s.run
+        Assert-NoControl 'les arguments' $s.args
+    }
+}
+
 function Format-Step {
     param($Step)
     if (-not $Step) { return '(aucune)' }

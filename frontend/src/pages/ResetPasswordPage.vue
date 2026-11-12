@@ -26,7 +26,7 @@
                 dense
                 autofocus
                 autocomplete="new-password"
-                :hint="`${PASSWORD_MIN_LENGTH} caractères minimum`"
+                :hint="`${passwordMin} caractères minimum`"
                 :rules="[required, longEnough]"
               />
               <q-input
@@ -61,12 +61,14 @@
 </template>
 
 <script setup lang="ts">
+import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { confirmPasswordReset } from 'src/services/auth';
 import { apiErrorMessage } from 'src/services/errors';
-import { PASSWORD_MIN_LENGTH } from 'src/services/users';
+
+const { passwordMin } = usePasswordPolicy();
 
 const $q = useQuasar();
 const route = useRoute();
@@ -79,7 +81,7 @@ const loading = ref(false);
 
 const required = (v: string) => !!v || 'Requis';
 const longEnough = (v: string) =>
-  v.length >= PASSWORD_MIN_LENGTH || `${PASSWORD_MIN_LENGTH} caractères minimum`;
+  v.length >= passwordMin.value || `${passwordMin.value} caractères minimum`;
 const matches = (v: string) => v === password.value || 'Les mots de passe ne correspondent pas';
 
 async function onSubmit() {

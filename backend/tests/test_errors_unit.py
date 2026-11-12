@@ -104,3 +104,25 @@ def test_every_code_has_a_message_in_the_console():
     source = table.read_text(encoding="utf-8")
     missing = [c.value for c in errors.ErrorCode if f"'{c.value}'" not in source]
     assert missing == []
+
+
+def test_every_audit_action_has_a_label_in_the_console():
+    """Audit B25: an action recorded server-side is named, and filterable,
+    in the journal's page."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    actions = set()
+    for path in (root / "app").rglob("*.py"):
+        actions |= set(re.findall(r'action="([a-z_]+\.[a-z_.]+)"', path.read_text()))
+    labels = (root.parent / "frontend/src/utils/auditLabels.ts").read_text()
+    missing = sorted(a for a in actions if f"'{a}'" not in labels)
+    assert missing == []
+    resource_types = set()
+    for path in (root / "app").rglob("*.py"):
+        resource_types |= set(
+            re.findall(r'resource_type="([a-z_]+)"', path.read_text())
+        )
+    block = labels.split("AUDIT_RESOURCE_TYPE_LABELS", 1)[1].split("};", 1)[0]
+    assert sorted(t for t in resource_types if f"  {t}:" not in block) == []

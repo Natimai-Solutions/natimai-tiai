@@ -33,7 +33,11 @@ export default defineRouter(() => {
   }
 
   const router = createRouter({
-    scrollBehavior: () => ({ left: 0, top: 0 }),
+    // Back to a page: where it was (audit U10). A query change on the same
+    // page — a tab, a filter, a page of results — stays put. Anything else
+    // starts at the top.
+    scrollBehavior: (to, from, saved) =>
+      saved ?? (to.path === from.path ? false : { left: 0, top: 0 }),
     routes,
     history: createHistory(base),
   });

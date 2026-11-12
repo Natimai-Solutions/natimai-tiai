@@ -51,7 +51,7 @@
                  answers alike so the console must not leak the difference. -->
             <q-card-section class="q-pt-none text-body2">
               Si un compte existe pour <b>{{ email }}</b
-              >, un lien de réinitialisation vient d'être envoyé. Il expire dans une heure.
+              >, un lien de réinitialisation vient d'être envoyé. Il expire dans {{ resetExpiry }}.
             </q-card-section>
             <q-card-actions class="q-px-md q-pb-md">
               <q-btn
@@ -69,10 +69,13 @@
 </template>
 
 <script setup lang="ts">
+import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { ref } from 'vue';
 import { useQuasar } from 'quasar';
 import { requestPasswordReset } from 'src/services/auth';
 import { apiErrorMessage } from 'src/services/errors';
+
+const { resetExpiry } = usePasswordPolicy();
 
 const $q = useQuasar();
 

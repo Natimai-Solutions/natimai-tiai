@@ -18,11 +18,17 @@ from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permissi
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
+from app.features.intervention import crud as intervention_crud
 from app.features.intervention.models import Intervention
 from app.features.machine.models import Machine
 from app.features.maintenance import crud
 from app.features.maintenance.models import Maintenance
-from app.features.maintenance.policy import MaintenanceState, Origin, Resolved
+from app.features.maintenance.policy import (
+    MaintenanceState,
+    Origin,
+    Resolved,
+    available,
+)
 from app.features.room import crud as room_crud
 from app.features.room.models import Room
 from app.features.setting import crud as setting_crud
@@ -134,9 +140,13 @@ class SessionCreate(BaseModel):
     or off that day is simply left out."""
 
     room_id: uuid.UUID | None = None
-    performed_at: datetime | None = None
+    # Not in the future: it would push the cycle out of reach (audit B06).
+    performed_at: intervention_crud.PastDatetime | None = None
     note: str | None = Field(default=None, max_length=5000)
     items: list[SessionItemIn] = Field(min_length=1, max_length=1000)
+    # Postes left out, with why (« absent de la salle ») — written to their
+    # own journal as « Maintenance non faite », their cycle untouched.
+    skipped: list[SessionItemIn] = Field(default_factory=list, max_length=1000)
 
 
 class SessionItemOut(BaseModel):
@@ -272,7 +282,10 @@ async def update_machine_maintenance(
     machine = await _require_machine(session, machine_id, scope)
     fields = payload.model_dump(exclude_unset=True)
     if "maintenance_owner_id" in fields:
-        await _require_owner(session, fields["maintenance_owner_id"])
+        # Re-sending the current owner, deactivated since, is not choosing
+        # them: the form must still save its other fields (audit B08).
+        if fields["maintenance_owner_id"] != machine.maintenance_owner_id:
+            await _require_owner(session, fields["maintenance_owner_id"])
         machine.maintenance_owner_id = fields["maintenance_owner_id"]
     if "maintenance_cycle_days" in fields:
         machine.maintenance_cycle_days = fields["maintenance_cycle_days"]
@@ -302,7 +315,7 @@ async def room_maintenance(
     policy = await setting_crud.maintenance_policy(session)
     effective_owner = (
         room.maintenance_owner_id
-        if room.maintenance_owner_id is not None
+        if available(room.maintenance_owner_id, policy)
         else policy.owner_id
     )
     names = await setting_crud.user_names(
@@ -333,7 +346,8 @@ async def update_room_maintenance(
     room = await _require_room(session, room_id, scope)
     fields = payload.model_dump(exclude_unset=True)
     if "maintenance_owner_id" in fields:
-        await _require_owner(session, fields["maintenance_owner_id"])
+        if fields["maintenance_owner_id"] != room.maintenance_owner_id:
+            await _require_owner(session, fields["maintenance_owner_id"])
         room.maintenance_owner_id = fields["maintenance_owner_id"]
     if "maintenance_cycle_days" in fields:
         room.maintenance_cycle_days = fields["maintenance_cycle_days"]
@@ -474,7 +488,9 @@ async def _session_out(
         if with_items
         else []
     )
-    count = (await crud.item_counts(session, [visit.id]))[visit.id]
+    count = (await crud.item_counts(session, [visit.id], machine_clause(scope)))[
+        visit.id
+    ]
     return SessionOut(
         id=visit.id,
         room_id=visit.room_id,
@@ -506,11 +522,22 @@ async def record_session(
         else None
     )
     ids = [i.machine_id for i in payload.items]
+    # Only a skipped poste with something to say is written; one also done
+    # is done.
+    skipped = {
+        i.machine_id: reason
+        for i in payload.skipped
+        if (reason := _clean(i.note)) and i.machine_id not in set(ids)
+    }
+    wanted = set(ids) | set(skipped)
     found = await session.exec(
-        restrict(select(Machine).where(col(Machine.id).in_(ids)), machine_clause(scope))
+        restrict(
+            select(Machine).where(col(Machine.id).in_(wanted)), machine_clause(scope)
+        )
     )
-    machines = list(found.all())
-    if len(machines) != len(set(ids)):
+    every = list(found.all())
+    machines = [m for m in every if m.id in set(ids)]
+    if len(every) != len(wanted):
         raise AppError(
             code=ErrorCode.MACHINE_NOT_FOUND,
             status_code=404,
@@ -525,6 +552,7 @@ async def record_session(
         performed_by=current.email,
         performed_at=payload.performed_at or utcnow(),
         note=_clean(payload.note),
+        skipped=skipped,
     )
     await session.commit()
     await session.refresh(visit)
@@ -549,7 +577,9 @@ async def list_sessions(
         page_size=page_size,
         where=_visit_clause(scope),
     )
-    counts = await crud.item_counts(session, [r.id for r in rows])
+    counts = await crud.item_counts(
+        session, [r.id for r in rows], machine_clause(scope)
+    )
     return SessionList(
         items=[
             SessionOut(
@@ -591,4 +621,6 @@ async def get_session(
             status_code=404,
             message="Maintenance session not found",
         )
-    return await _session_out(session, visit, with_items=True)
+    # The visit is visible through one of its postes; the others may lie
+    # outside the caller's scope (audit S06).
+    return await _session_out(session, visit, with_items=True, scope=scope)

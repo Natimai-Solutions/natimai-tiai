@@ -3,12 +3,13 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import func, update
+from sqlalchemy import func, or_, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
 from app.features.check.models import MachineCheck
+from app.features.user.models import User
 
 
 async def open_for_machine(
@@ -49,7 +50,16 @@ async def list_checks(
     if assigned_to_id is not None:
         stmt = stmt.where(col(MachineCheck.assigned_to_id) == assigned_to_id)
     if unassigned:
-        stmt = stmt.where(col(MachineCheck.assigned_to_id).is_(None))
+        # A request given to an account deactivated since is nobody's either:
+        # it must show under « À prendre » (audit B08).
+        stmt = stmt.where(
+            or_(
+                col(MachineCheck.assigned_to_id).is_(None),
+                col(MachineCheck.assigned_to_id).in_(
+                    select(User.id).where(col(User.is_active).is_(False))
+                ),
+            )
+        )
     if machine_id is not None:
         stmt = stmt.where(col(MachineCheck.machine_id) == machine_id)
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))

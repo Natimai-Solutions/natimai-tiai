@@ -31,6 +31,7 @@
 </template>
 
 <script setup lang="ts">
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { closeCheck } from 'src/services/checks';
@@ -63,6 +64,7 @@ async function submit() {
     await closeCheck(props.check.id, { note: note.value.trim() || null });
     $q.notify({ type: 'positive', message: 'Vérification close' });
     emit('update:modelValue', false);
+    notifyTasksChanged();
     emit('closed');
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Clôture impossible') });

@@ -60,6 +60,9 @@ class MaintenancePolicy:
     cycle_days: int
     owner_id: uuid.UUID | None
     due_soon_days: int
+    # Accounts that may be named owner but are deactivated: an owner nobody
+    # can act as counts as none, and the next level's applies (audit B08).
+    inactive_owners: frozenset[uuid.UUID] = frozenset()
 
 
 async def maintenance_policy(
@@ -70,14 +73,29 @@ async def maintenance_policy(
     for a caller that resolves several policies from one round trip."""
     if values is None:
         values = await get_all(session)
+    from app.features.user.models import User
+
     cycle = values.get(KEY_CYCLE)
     due_soon = values.get(KEY_DUE_SOON)
     owner = values.get(KEY_OWNER)
+    owner_id = uuid.UUID(owner) if isinstance(owner, str) and owner else None
+    inactive = frozenset(
+        (
+            await session.exec(select(User.id).where(col(User.is_active).is_(False)))
+        ).all()
+    )
+    # The default owner is a setting, not a foreign key: a deleted account
+    # leaves it pointing at nobody.
+    if owner_id is not None and (
+        owner_id in inactive or await session.get(User, owner_id) is None
+    ):
+        owner_id = None
     return MaintenancePolicy(
         cycle_days=int(cycle)
         if isinstance(cycle, int)
         else env.MAINTENANCE_DEFAULT_CYCLE_DAYS,
-        owner_id=uuid.UUID(owner) if isinstance(owner, str) and owner else None,
+        owner_id=owner_id,
+        inactive_owners=inactive,
         due_soon_days=(
             int(due_soon)
             if isinstance(due_soon, int)

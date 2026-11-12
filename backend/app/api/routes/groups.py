@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentAuthority, CurrentUser, SessionDep, require_permission
+from app.api.fields import not_null
 from app.api.routes.users import reject_escalation, reject_lockout
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
@@ -119,6 +120,8 @@ class GroupUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     permissions: list[str] | None = None
     scope: ScopeBody | None = None
+
+    _not_null = not_null("name", "permissions")
 
 
 async def _require_group(session: SessionDep, group_id: uuid.UUID) -> Group:
@@ -323,6 +326,18 @@ async def update_group(
             actor_email=current.email,
             action="grant",
         )
+        # A member's reach is the union of all its groups: one unrestricted
+        # group elsewhere and the permissions given here apply to the whole
+        # parc. So the caller must reach every member, as PATCH /users
+        # requires (audit S05).
+        if not authority.is_admin:
+            for member_id in await crud.group_member_ids(session, group.id):
+                reject_escalation(
+                    authority,
+                    await crud.user_authority(session, member_id),
+                    actor_email=current.email,
+                    action="edit_members",
+                )
     for name, value in fields.items():
         setattr(group, name, value)
     group.updated_at = utcnow()

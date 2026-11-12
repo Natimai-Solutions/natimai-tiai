@@ -2,7 +2,15 @@
   <!-- Recording a visit: the date, a global note, and the postes done —
        each with its own note. A poste absent or off that day is unticked
        rather than lied about. -->
-  <q-dialog :model-value="modelValue" @update:model-value="(v) => emit('update:modelValue', v)">
+  <!-- Persistent: a note per poste is minutes of typing, and Échap or a
+       click beside the card must not throw it away (audit U14). -->
+  <q-dialog
+    :model-value="modelValue"
+    persistent
+    @update:model-value="(v) => emit('update:modelValue', v)"
+    @keydown.esc="cancel"
+  >
+    <!-- Échap is ours to handle: a persistent dialog only shakes. -->
     <q-card style="width: 720px; max-width: 95vw">
       <q-card-section class="text-h6"
         >Maintenance{{ roomName ? ` — ${roomName}` : '' }}</q-card-section
@@ -38,6 +46,7 @@
                   <q-checkbox
                     :model-value="allDone"
                     dense
+                    aria-label="Tout cocher ou tout décocher"
                     @update:model-value="(v) => toggleAll(v === true)"
                   />
                 </th>
@@ -47,20 +56,23 @@
             </thead>
             <tbody>
               <tr v-for="row in rows" :key="row.id">
-                <td><q-checkbox v-model="row.done" dense /></td>
+                <td>
+                  <q-checkbox v-model="row.done" dense :aria-label="`${row.hostname} : fait`" />
+                </td>
                 <td>
                   {{ row.hostname }}
                   <div v-if="row.hint" class="text-caption text-muted">{{ row.hint }}</div>
                 </td>
                 <td>
+                  <!-- Open on an unticked poste too: why it was not done is
+                       worth keeping, in its own journal (audit U20). -->
                   <q-input
                     v-model="row.note"
                     :aria-label="`Note pour ${row.hostname}`"
                     dense
                     borderless
-                    placeholder="—"
+                    :placeholder="row.done ? '—' : 'Pourquoi non fait (facultatif)'"
                     maxlength="5000"
-                    :disable="!row.done"
                   />
                 </td>
               </tr>
@@ -68,11 +80,12 @@
           </q-markup-table>
           <div class="text-caption text-muted">
             {{ doneCount }} poste(s) coché(s) : chacun reçoit une ligne « Maintenance » dans son
-            historique et repart pour un cycle.
+            historique et repart pour un cycle. Un poste décoché avec une observation reçoit une
+            ligne « Maintenance non faite », sans changer son échéance.
           </div>
         </q-card-section>
         <q-card-actions align="right" class="q-px-md q-pb-md">
-          <q-btn v-close-popup flat label="Annuler" />
+          <q-btn flat label="Annuler" @click="cancel" />
           <q-btn
             type="submit"
             color="primary"
@@ -87,6 +100,7 @@
 </template>
 
 <script setup lang="ts">
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { recordSession } from 'src/services/maintenance';
@@ -97,6 +111,8 @@ export interface SessionMachine {
   hostname: string;
   /** A line under the name: its standing, its last visit. */
   hint?: string | undefined;
+  /** Ticked when the dialog opens; true when unsaid. */
+  preselect?: boolean;
 }
 
 const props = defineProps<{
@@ -128,21 +144,58 @@ function toLocalInput(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// The form as it was filled: what « modifié » is measured from.
+let pristine = '';
+// What the form was filled for, kept until a save or a confirmed cancel: a
+// dialog reopened on the same room finds its input again.
+let filledFor: string | null = null;
+
+function snapshot(): string {
+  return JSON.stringify([note.value, performedAt.value, rows.value]);
+}
+
+function reset() {
+  note.value = '';
+  performedAt.value = toLocalInput(new Date());
+  rows.value = props.machines.map((m) => ({
+    id: m.id,
+    hostname: m.hostname,
+    hint: m.hint,
+    done: m.preselect ?? true,
+    note: '',
+  }));
+  pristine = snapshot();
+  filledFor = `${props.roomId ?? ''}|${props.machines.map((m) => m.id).join(',')}`;
+}
+
 watch(
   () => props.modelValue,
   (open) => {
     if (!open) return;
-    note.value = '';
-    performedAt.value = toLocalInput(new Date());
-    rows.value = props.machines.map((m) => ({
-      id: m.id,
-      hostname: m.hostname,
-      hint: m.hint,
-      done: true,
-      note: '',
-    }));
+    const key = `${props.roomId ?? ''}|${props.machines.map((m) => m.id).join(',')}`;
+    if (key !== filledFor) reset();
   },
 );
+
+function close() {
+  filledFor = null;
+  emit('update:modelValue', false);
+}
+
+/** Annuler, or Échap: straight away when nothing was typed, else confirmed. */
+function cancel() {
+  if (snapshot() === pristine) {
+    close();
+    return;
+  }
+  $q.dialog({
+    title: 'Abandonner la saisie ?',
+    message: 'Les notes et les postes cochés ou décochés seront perdus.',
+    cancel: { flat: true, noCaps: true, label: 'Continuer la saisie' },
+    ok: { flat: true, noCaps: true, label: 'Abandonner', color: 'negative' },
+    persistent: true,
+  }).onOk(close);
+}
 
 function toggleAll(on: boolean) {
   for (const r of rows.value) r.done = on;
@@ -158,12 +211,16 @@ async function submit() {
       items: rows.value
         .filter((r) => r.done)
         .map((r) => ({ machine_id: r.id, note: r.note.trim() || null })),
+      skipped: rows.value
+        .filter((r) => !r.done && r.note.trim())
+        .map((r) => ({ machine_id: r.id, note: r.note.trim() })),
     });
     $q.notify({
       type: 'positive',
       message: `Maintenance enregistrée sur ${doneCount.value} poste(s)`,
     });
-    emit('update:modelValue', false);
+    close();
+    notifyTasksChanged();
     emit('recorded');
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });

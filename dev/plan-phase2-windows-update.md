@@ -298,5 +298,5 @@ L'audit du 2026-11-10 (`plan-audit-2026-11.md`) touche ce chantier par un seul p
 
 Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
 
-- [ ] **T11** · *P1 court terme* — **Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
+- [x] **T11** · *P1 court terme* — **Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
   Ajouter `order_by(created_at, id)` à la sélection du heartbeat (`agent.py:815`), avec un test : « installer les MAJ » puis « redémarrer » doivent être remises dans cet ordre.

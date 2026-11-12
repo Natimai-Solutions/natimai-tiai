@@ -158,3 +158,37 @@ def test_nowhere_to_send_it_is_an_empty_list_not_a_guess():
     """
     assert destinations_for(None, configured=[], prefixlen=24) == []
     assert destinations_for("2001:db8::20", configured=[], prefixlen=64) == []
+
+
+# --- audit T35 ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("ip", "prefix", "expected"),
+    [
+        ("192.168.1.20", 24, ["192.168.1.255"]),
+        # Not a LAN mask: the configured default (24) is used instead.
+        ("10.9.9.9", 8, ["10.9.9.255"]),
+        ("10.9.9.9", 32, ["10.9.9.255"]),
+        # Not a private address: nowhere, never 255.255.255.255 nor a host.
+        ("200.1.2.3", 1, []),
+        ("8.8.8.8", 32, []),
+        ("127.0.0.1", 24, []),
+    ],
+)
+def test_a_reported_address_only_leads_to_a_private_subnet(ip, prefix, expected):
+    """Audit S35: the agent's word decides no destination outside the LAN."""
+    assert (
+        destinations_for(ip, configured=[], prefixlen=24, reported_prefixlen=prefix)
+        == expected
+    )
+
+
+def test_the_allowed_networks_replace_the_private_ranges(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "WOL_ALLOWED_NETWORKS", ["172.20.0.0/16"])
+    assert destinations_for("172.20.4.9", configured=[], prefixlen=24) == [
+        "172.20.4.255"
+    ]
+    assert destinations_for("192.168.1.9", configured=[], prefixlen=24) == []

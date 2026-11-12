@@ -8,9 +8,10 @@ carry, and re-reporting the same disk every day must not reset it.
 """
 
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, tuple_
+from sqlalchemy import delete, exists, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import SQLModel, col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -270,3 +271,16 @@ async def apply_inventory(
     # repair (see the short-circuit in the heartbeat route).
     machine.inventory_hash = report.hash or None
     machine.inventory_last_seen = now
+
+
+async def purge_orphan_software(session: AsyncSession, older_than: datetime) -> int:
+    """Drop the catalogue entries no poste has installed any more, first seen
+    before ``older_than``. The catalogue is shared and fed by every agent's
+    report: without this it only ever grows (audit S21). Commits."""
+    result = await session.exec(
+        delete(Software)
+        .where(col(Software.first_seen) < older_than)
+        .where(~exists().where(col(MachineSoftware.software_id) == col(Software.id)))
+    )
+    await session.commit()
+    return result.rowcount or 0

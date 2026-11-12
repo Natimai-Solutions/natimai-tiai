@@ -41,6 +41,24 @@ export interface ListSoftwareParams {
   page_size?: number;
 }
 
+/** One catalogue entry, to name it (the machine list's filter chip). */
+export interface SoftwareRef {
+  id: number;
+  name: string;
+  version: string;
+  publisher: string;
+}
+
+export async function getSoftware(id: number): Promise<SoftwareRef> {
+  const { data } = await api.get<SoftwareRef>(`/software/${id}`);
+  return data;
+}
+
+/** « 7-Zip 23.01 », or the name alone. */
+export function softwareLabel(s: Pick<SoftwareRef, 'name' | 'version'>): string {
+  return s.version ? `${s.name} ${s.version}` : s.name;
+}
+
 export async function listSoftware(params: ListSoftwareParams = {}): Promise<SoftwareList> {
   const { data } = await api.get<SoftwareList>('/software', { params });
   return data;

@@ -13,6 +13,7 @@ from datetime import date, datetime
 
 from fastapi import Response
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
@@ -26,6 +27,17 @@ MAX_WIDTH = 60
 
 DATETIME_FORMAT = "yyyy-mm-dd hh:mm"
 DATE_FORMAT = "yyyy-mm-dd"
+
+
+def _cell(value: object) -> object:
+    """``None`` as an empty cell; a string without the control characters
+    XML 1.0 cannot carry, which openpyxl refuses — one byte reported by an
+    agent would otherwise fail the whole export (audit S11)."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return ILLEGAL_CHARACTERS_RE.sub("", value)
+    return value
 
 
 def xlsx_response(
@@ -61,7 +73,7 @@ def xlsx_response(
 
     widths = [len(h) for h in header]
     for row in rows:
-        values = ["" if v is None else v for v in row]
+        values = [_cell(v) for v in row]
         sheet.append(values)
         for i, value in enumerate(values):
             if isinstance(value, str):

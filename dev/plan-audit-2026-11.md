@@ -1,6 +1,6 @@
 # Audit de novembre 2026 (sécurité, bugs, UI/UX) : plan de travail
 
-> **Statut : audit livré le 2026-11-10, corrections à faire.** L'audit porte sur le commit `fc5c507` (`main`, après la PR #102 du déploiement logiciel). Il a retenu **102 constats vérifiés**, regroupés en **43 tâches** classées en quatre priorités (§3) : 5 immédiates, 17 à court terme, 11 à moyen terme et 10 de fond. Chaque tâche est aussi reportée dans le document de travail du chantier qu'elle touche (§4), dans le même ordre.
+> **Statut : audit livré le 2026-11-10. Les 43 tâches (T01 à T43) corrigées le 2026-11-11 (§6). Écart restant : les sauvegardes ne sont pas chiffrées (T40, droits 600 et documentation).** L'audit porte sur le commit `fc5c507` (`main`, après la PR #102 du déploiement logiciel). Il a retenu **102 constats vérifiés**, regroupés en **43 tâches** classées en quatre priorités (§3) : 5 immédiates, 17 à court terme, 11 à moyen terme et 10 de fond. Chaque tâche est aussi reportée dans le document de travail du chantier qu'elle touche (§4), dans le même ordre.
 >
 > **Objectif :** corriger d'abord ce qui permet une exécution de code sur les postes, une escalade de droits ou une fuite hors périmètre, puis ce qui fausse des données ou bloque une fonction, et enfin le confort d'usage.
 >
@@ -55,23 +55,23 @@ Les faiblesses se concentrent sur cinq sujets :
 
 Exécution de code en SYSTEM sur les postes si le serveur est compromis, escalade de périmètre, fuite hors périmètre, exfiltration de secrets. À traiter avant toute nouvelle fonctionnalité.
 
-- [ ] **T01 — Agent : n'accepter qu'un UUID comme identifiant de paquet** ([S01](plan-audit-2026-11.md#s01))
+- [x] **T01 — Agent : n'accepter qu'un UUID comme identifiant de paquet** ([S01](plan-audit-2026-11.md#s01))
   Dans `agent/internal/deploy/executor.go`, refuser tout `pkg.ID` qui n'est pas un UUID canonique avant `MkdirAll`. En défense en profondeur, vérifier par `filepath.Rel` que le répertoire de travail reste sous `PackagesDir` avant d'écrire et avant `RemoveAll`. Ajouter un test avec un identifiant contenant `..`.
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T02 — Méthode A : plus de fichier chargeable non signé à côté de l'exécutable** ([S02](plan-audit-2026-11.md#s02))
+- [x] **T02 — Méthode A : plus de fichier chargeable non signé à côté de l'exécutable** ([S02](plan-audit-2026-11.md#s02))
   En méthode A, ne télécharger que le fichier lancé : refuser un manifeste non signé qui en nomme d'autres, ou au minimum refuser les extensions chargeables (`.dll`, `.ocx`, `.cpl`, `.sys`, `.manifest`, `.local`, `.config`). Purger le répertoire du paquet avant chaque exécution.
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T03 — Groupes : contrôler l'autorité des membres à la modification** ([S05](plan-audit-2026-11.md#s05))
+- [x] **T03 — Groupes : contrôler l'autorité des membres à la modification** ([S05](plan-audit-2026-11.md#s05))
   Dans `PATCH /groups/{id}` (`backend/app/api/routes/groups.py`), appliquer `reject_escalation` à l'autorité de chaque membre, comme le fait `PATCH /users`, ou réserver la modification des permissions aux comptes sans restriction. Ajouter à `test_api_scope.py` le cas d'un membre partagé avec un groupe sans restriction.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T04 — Séance de maintenance : filtrer ses postes par périmètre** ([S06](plan-audit-2026-11.md#s06))
+- [x] **T04 — Séance de maintenance : filtrer ses postes par périmètre** ([S06](plan-audit-2026-11.md#s06))
   Passer `scope` à `_session_out` dans le détail d'une séance (`backend/app/api/routes/maintenance.py:594`). Ajouter un test avec une séance à cheval sur deux sites.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T05 — Réglages e-mail : ne plus réutiliser un secret stocké vers un nouvel hôte** ([S10](plan-audit-2026-11.md#s10))
+- [x] **T05 — Réglages e-mail : ne plus réutiliser un secret stocké vers un nouvel hôte** ([S10](plan-audit-2026-11.md#s10))
   Quand l'hôte, le port ou le mode de sécurité SMTP changent, ou l'URL ou le domaine Mailgun, exiger que le mot de passe ou la clé soient ressaisis dans la même requête, pour l'e-mail de test comme pour le `PATCH` (`settings_routes.py`).
   *Document de travail :* `plan-projet-tiai.md`
 
@@ -79,71 +79,71 @@ Exécution de code en SYSTEM sur les postes si le serveur est compromis, escalad
 
 Déni de service sur les comptes, intégrité des déploiements et des commandes, et bugs qui faussent des données ou bloquent une fonction pour tous.
 
-- [ ] **T06 — Verrouillage de compte : supprimer le déni de service et l'énumération** ([S03](plan-audit-2026-11.md#s03), [S12](plan-audit-2026-11.md#s12), [S13](plan-audit-2026-11.md#s13))
+- [x] **T06 — Verrouillage de compte : supprimer le déni de service et l'énumération** ([S03](plan-audit-2026-11.md#s03), [S12](plan-audit-2026-11.md#s12), [S13](plan-audit-2026-11.md#s13))
   Ne plus refuser le bon mot de passe pendant un verrouillage : passer à un délai progressif, ou ne verrouiller que par couple compte et adresse IP. Répondre au compte verrouillé par le même 401 générique qu'à un échec, en calculant tout de même un bcrypt. Incrémenter `failed_login_attempts` de façon atomique en base.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T07 — `POST /auth/password` : limite de débit et bcrypt hors de la boucle** ([S04](plan-audit-2026-11.md#s04))
+- [x] **T07 — `POST /auth/password` : limite de débit et bcrypt hors de la boucle** ([S04](plan-audit-2026-11.md#s04))
   Ajouter un limiteur indexé par compte, compter les échecs de `current_password` et révoquer la session après N échecs. Exécuter bcrypt dans `asyncio.to_thread` sur ce chemin comme sur celui de connexion.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T08 — Figer le contenu d'un paquet à la mise en file** ([S08](plan-audit-2026-11.md#s08))
+- [x] **T08 — Figer le contenu d'un paquet à la mise en file** ([S08](plan-audit-2026-11.md#s08))
   Enregistrer sur la commande une empreinte du paquet approuvé (manifeste, signature, winget et version), et la passer en `failed` à la livraison si le paquet a changé depuis (`agent.py:408`).
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T09 — Fichiers de paquet : plus d'orphelin, plus de déploiement cassé** ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13))
+- [x] **T09 — Fichiers de paquet : plus d'orphelin, plus de déploiement cassé** ([S09](plan-audit-2026-11.md#s09), [B13](plan-audit-2026-11.md#b13))
   Au remplacement d'un fichier et après un dépôt multiple en échec, supprimer les fichiers stockés qui ne sont plus référencés. Ne pas supprimer un fichier qu'une commande ouverte doit encore télécharger, et servir le téléchargement à partir de l'empreinte remise (`packages.py:383`, `agent.py:998`).
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T10 — Cycle de vie des commandes remises : relivraison, expiration, pertes côté agent** ([B10](plan-audit-2026-11.md#b10), [B15](plan-audit-2026-11.md#b15), [B16](plan-audit-2026-11.md#b16), [B34](plan-audit-2026-11.md#b34))
+- [x] **T10 — Cycle de vie des commandes remises : relivraison, expiration, pertes côté agent** ([B10](plan-audit-2026-11.md#b10), [B15](plan-audit-2026-11.md#b15), [B16](plan-audit-2026-11.md#b16), [B34](plan-audit-2026-11.md#b34))
   Choisir une règle unique : soit le serveur relivre les commandes « Transmise » sans verdict après un délai (l'agent est déjà idempotent par identifiant), soit le worker les expire. La même règle doit fermer les « En cours » trop anciennes, que rien ne purge aujourd'hui. Côté agent, ne jamais jeter une commande acceptée : file pleine, arrêt du service ou type inconnu donnent un résultat `failed` explicite, rejoué par `queue.Queue`.
   *Document de travail :* `plan-commandes-distantes.md`
 
-- [ ] **T11 — Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
+- [x] **T11 — Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
   Ajouter `order_by(created_at, id)` à la sélection du heartbeat (`agent.py:815`), avec un test : « installer les MAJ » puis « redémarrer » doivent être remises dans cet ordre.
   *Document de travail :* `plan-commandes-distantes.md`, `plan-phase2-windows-update.md`
 
-- [ ] **T12 — Export Excel : neutraliser les caractères de contrôle** ([S11](plan-audit-2026-11.md#s11))
+- [x] **T12 — Export Excel : neutraliser les caractères de contrôle** ([S11](plan-audit-2026-11.md#s11))
   Dans `xlsx_response`, retirer les caractères refusés par openpyxl (`ILLEGAL_CHARACTERS_RE`), et idéalement dès la réception du heartbeat, dans `bound_text`.
   *Document de travail :* `plan-inventaire.md`
 
-- [ ] **T13 — Placement par l'annuaire : borner le nom de salle à la colonne** ([S07](plan-audit-2026-11.md#s07))
+- [x] **T13 — Placement par l'annuaire : borner le nom de salle à la colonne** ([S07](plan-audit-2026-11.md#s07))
   Tronquer le nom en tenant compte du suffixe dans `room_for_key` (`room/crud.py:287`), aligner les bornes de `ad_location` et de `ou` sur la colonne, et isoler l'échec du placement pour qu'il ne fasse plus échouer le heartbeat en 500.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T14 — Fiche poste et tableau de bord sans `threat:read` ni `command:read`** ([B02](plan-audit-2026-11.md#b02))
+- [x] **T14 — Fiche poste et tableau de bord sans `threat:read` ni `command:read`** ([B02](plan-audit-2026-11.md#b02))
   Ne charger les menaces et les commandes que si l'utilisateur a le droit de les lire, et charger les données annexes avec `Promise.allSettled` (`MachineDetailPage.vue:750`, `DashboardPage.vue`).
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T15 — Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
+- [x] **T15 — Remettre « Rafraîchir l'inventaire » dans les menus** ([B12](plan-audit-2026-11.md#b12))
   Ajouter `'inventory'` à `groupOrder` (`frontend/src/services/commands.ts:324`), avec un test qui vérifie que chaque action du catalogue apparaît dans un groupe.
   *Document de travail :* `plan-inventaire.md`, `plan-commandes-distantes.md`
 
-- [ ] **T16 — Échéance de maintenance : la recalculer depuis le journal** ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17))
+- [x] **T16 — Échéance de maintenance : la recalculer depuis le journal** ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17))
   Recalculer `last_maintenance_at` comme le maximum des `performed_at` de type maintenance à chaque création, modification ou suppression d'une intervention. Refuser côté serveur une date future, à la séance de maintenance comme dans le journal.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T17 — Responsables désactivés ou supprimés : ne plus bloquer la maintenance** ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35))
+- [x] **T17 — Responsables désactivés ou supprimés : ne plus bloquer la maintenance** ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35))
   Traiter un responsable inactif ou supprimé comme « sans responsable » dans `resolve()`, et proposer une réaffectation à la désactivation. Les `PATCH` des vérifications, du cycle et de la carte Maintenance des réglages ne doivent plus échouer en 404 tant qu'on ne change pas ce responsable. Ouvrir la liste des responsables possibles à `maintenance:write` et `settings:write`.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T18 — Suppression d'un bâtiment : gérer les noms de salle en collision** ([B07](plan-audit-2026-11.md#b07))
+- [x] **T18 — Suppression d'un bâtiment : gérer les noms de salle en collision** ([B07](plan-audit-2026-11.md#b07))
   Détecter la collision avant la suppression (`rooms.py:451`) et renvoyer un 409 qui liste les salles concernées, ou les renommer avec un suffixe comme le fait `room_for_key`.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T19 — Carte « Disque presque plein » : respecter le seuil réglé** ([B01](plan-audit-2026-11.md#b01))
+- [x] **T19 — Carte « Disque presque plein » : respecter le seuil réglé** ([B01](plan-audit-2026-11.md#b01))
   Accepter tout seuil de 1 à 99 dans `machineFiltersFromQuery` (`machineListFilters.ts:314`) et l'afficher dans la puce de filtre.
   *Document de travail :* `plan-inventaire.md`
 
-- [ ] **T20 — Liste et fiche des postes : signaler les échecs de chargement** ([B04](plan-audit-2026-11.md#b04), [U01](plan-audit-2026-11.md#u01))
+- [x] **T20 — Liste et fiche des postes : signaler les échecs de chargement** ([B04](plan-audit-2026-11.md#b04), [U01](plan-audit-2026-11.md#u01))
   Distinguer le rafraîchissement automatique, qui reste silencieux, du chargement demandé : sur ce dernier, notifier l'erreur et vider ou griser les lignes périmées. Sur la fiche, afficher un état de chargement ou d'erreur quand on passe au poste précédent ou suivant.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T21 — `useAutoRefresh` : plus de relance après le démontage** ([B11](plan-audit-2026-11.md#b11))
+- [x] **T21 — `useAutoRefresh` : plus de relance après le démontage** ([B11](plan-audit-2026-11.md#b11))
   Ajouter un drapeau `disposed` et ne relancer le minuteur que s'il est faux. Couvrir le cas dans le test du composable.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T22 — Fusion de postes : conserver `first_seen` et les réglages de maintenance** ([B03](plan-audit-2026-11.md#b03))
+- [x] **T22 — Fusion de postes : conserver `first_seen` et les réglages de maintenance** ([B03](plan-audit-2026-11.md#b03))
   Dans `merge_into`, garder le plus ancien `first_seen` et reprendre le cycle et le responsable de maintenance quand la cible n'en a pas. Ajouter un test.
   *Document de travail :* `plan-projet-tiai.md`
 
@@ -151,35 +151,35 @@ Déni de service sur les comptes, intégrité des déploiements et des commandes
 
 Pertes de saisie, confirmations manquantes, cas secondaires de périmètre, et parcours du technicien.
 
-- [ ] **T23 — Déploiement : confirmation et refus des paquets inexécutables** ([U04](plan-audit-2026-11.md#u04), [B30](plan-audit-2026-11.md#b30))
+- [x] **T23 — Déploiement : confirmation et refus des paquets inexécutables** ([U04](plan-audit-2026-11.md#u04), [B30](plan-audit-2026-11.md#b30))
   Réinitialiser le ciblage à chaque ouverture du dialogue. Demander une confirmation qui annonce le nombre de postes pour « Tout le parc » et pour toute désinstallation. Refuser, côté serveur comme dans le dialogue, un paquet de fichiers qu'aucune méthode de confiance ne couvre.
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T24 — Fiche paquet : saisie préservée, dépôt contrôlé, messages justes** ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36))
+- [x] **T24 — Fiche paquet : saisie préservée, dépôt contrôlé, messages justes** ([U05](plan-audit-2026-11.md#u05), [U16](plan-audit-2026-11.md#u16), [B31](plan-audit-2026-11.md#b31), [B36](plan-audit-2026-11.md#b36))
   Ne plus écraser le formulaire non enregistré après un dépôt, une signature ou un retrait. Vérifier la taille avant l'envoi, permettre l'annulation et traduire le 413 de Caddy. Passer le plafond Caddy à `2GiB`, et créer un code d'erreur « fichier introuvable dans ce paquet ».
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T25 — Fiche paquet : pagination et bilan des déploiements** ([B14](plan-audit-2026-11.md#b14))
+- [x] **T25 — Fiche paquet : pagination et bilan des déploiements** ([B14](plan-audit-2026-11.md#b14))
   Brancher la pagination côté serveur et afficher un décompte par statut du dernier déploiement (`PackageDetailPage.vue:313`).
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T26 — Groupes : ne plus perdre un emplacement saisi sans Entrée** ([U02](plan-audit-2026-11.md#u02))
+- [x] **T26 — Groupes : ne plus perdre un emplacement saisi sans Entrée** ([U02](plan-audit-2026-11.md#u02))
   Valider le texte en cours de saisie à la perte du focus et avant l'enregistrement, et demander confirmation avant d'enregistrer un groupe qui s'ouvrirait à tout le parc (`GroupsPage.vue:197`).
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T27 — Afficher les messages d'erreur utiles du backend** ([U03](plan-audit-2026-11.md#u03))
+- [x] **T27 — Afficher les messages d'erreur utiles du backend** ([U03](plan-audit-2026-11.md#u03))
   Pour les codes dont le message est rédigé pour l'utilisateur (`package.invalid` en tête), afficher le détail. Pour une erreur de validation, nommer le champ fautif (`errors.ts:90`).
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T28 — Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
+- [x] **T28 — Réglages : valider les seuils côté client** ([U06](plan-audit-2026-11.md#u06))
   Pour chaque carte de réglages : champ requis, entier, dans les bornes du serveur, erreur affichée sous le champ et bouton Enregistrer désactivé tant qu'elle persiste. Ne plus convertir un champ vide en 0 (`SettingsPage.vue:844`).
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T29 — Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
+- [x] **T29 — Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
   Rendre persistants la séance de maintenance de salle, avec une confirmation si la saisie a été modifiée, et le dialogue qui affiche une seule fois le mot de passe réinitialisé.
   *Document de travail :* `plan-salles-maintenance-interventions.md`, `plan-projet-tiai.md`
 
-- [ ] **T30 — Mes tâches et séance de salle : parcours du technicien** ([B09](plan-audit-2026-11.md#b09), [U18](plan-audit-2026-11.md#u18), [U19](plan-audit-2026-11.md#u19), [U20](plan-audit-2026-11.md#u20), [U21](plan-audit-2026-11.md#u21), [U22](plan-audit-2026-11.md#u22), [U23](plan-audit-2026-11.md#u23), [U24](plan-audit-2026-11.md#u24), [U26](plan-audit-2026-11.md#u26))
+- [x] **T30 — Mes tâches et séance de salle : parcours du technicien** ([B09](plan-audit-2026-11.md#b09), [U18](plan-audit-2026-11.md#u18), [U19](plan-audit-2026-11.md#u19), [U20](plan-audit-2026-11.md#u20), [U21](plan-audit-2026-11.md#u21), [U22](plan-audit-2026-11.md#u22), [U23](plan-audit-2026-11.md#u23), [U24](plan-audit-2026-11.md#u24), [U26](plan-audit-2026-11.md#u26))
   Plusieurs corrections du parcours :
   - Ne pré-cocher que les postes dus et décocher les postes exclus.
   - N'afficher dans « à faire » que les salles qui ont quelque chose à faire.
@@ -192,15 +192,15 @@ Pertes de saisie, confirmations manquantes, cas secondaires de périmètre, et p
   - Paginer les salles de plus de 200 postes.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T31 — Liste des postes : sélection, navigation et fusion cohérentes** ([B05](plan-audit-2026-11.md#b05), [B18](plan-audit-2026-11.md#b18), [B19](plan-audit-2026-11.md#b19))
+- [x] **T31 — Liste des postes : sélection, navigation et fusion cohérentes** ([B05](plan-audit-2026-11.md#b05), [B18](plan-audit-2026-11.md#b18), [B19](plan-audit-2026-11.md#b19))
   Vider la sélection au changement de filtre ou de page, ou montrer les postes sélectionnés masqués. Ancrer la navigation précédent/suivant sur un curseur stable. Recharger le journal des interventions après une fusion.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T32 — Périmètres : cas secondaires** ([S16](plan-audit-2026-11.md#s16), [S17](plan-audit-2026-11.md#s17), [S18](plan-audit-2026-11.md#s18))
+- [x] **T32 — Périmètres : cas secondaires** ([S16](plan-audit-2026-11.md#s16), [S17](plan-audit-2026-11.md#s17), [S18](plan-audit-2026-11.md#s18))
   Un compte restreint ne doit pas déplacer un bâtiment ou une salle hors de son site. Pour le journal d'audit, filtrer les entrées « poste » par périmètre, ou refuser `audit:read` à un groupe restreint. Refuser d'assigner une vérification à un compte qui ne voit pas le poste, et filtrer `/checks/assignable-users` en conséquence.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
-- [ ] **T33 — Vérifications concurrentes et salle sortie de son bâtiment** ([B21](plan-audit-2026-11.md#b21), [B22](plan-audit-2026-11.md#b22))
+- [x] **T33 — Vérifications concurrentes et salle sortie de son bâtiment** ([B21](plan-audit-2026-11.md#b21), [B22](plan-audit-2026-11.md#b22))
   Transformer en 409 la violation de `uq_machine_checks_open`, utiliser `ON CONFLICT DO NOTHING` pour la création en masse, et faire une clôture atomique. Conserver l'emplacement d'une salle qui quitte son bâtiment.
   *Document de travail :* `plan-salles-maintenance-interventions.md`
 
@@ -208,31 +208,31 @@ Pertes de saisie, confirmations manquantes, cas secondaires de périmètre, et p
 
 Durcissements de fond, infrastructure et finitions. Se traitent par lots, fichier par fichier.
 
-- [ ] **T34 — Comptes : réinitialisation et compte initial** ([S14](plan-audit-2026-11.md#s14), [S15](plan-audit-2026-11.md#s15), [S33](plan-audit-2026-11.md#s33))
+- [x] **T34 — Comptes : réinitialisation et compte initial** ([S14](plan-audit-2026-11.md#s14), [S15](plan-audit-2026-11.md#s15), [S33](plan-audit-2026-11.md#s33))
   Limiter les demandes de réinitialisation par compte cible, sans invalider le lien en cours. Purger les liens de réinitialisation quand un administrateur change l'e-mail. Imposer `PASSWORD_MIN_LENGTH` à `FIRST_ADMIN_PASSWORD`.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T35 — Wake-on-LAN : ne plus croire l'agent sur parole** ([S19](plan-audit-2026-11.md#s19), [S35](plan-audit-2026-11.md#s35), [B29](plan-audit-2026-11.md#b29))
+- [x] **T35 — Wake-on-LAN : ne plus croire l'agent sur parole** ([S19](plan-audit-2026-11.md#s19), [S35](plan-audit-2026-11.md#s35), [B29](plan-audit-2026-11.md#b29))
   Pour le relais : exiger un emplacement validé côté serveur, borner le masque et n'accepter que des réseaux privés ou une liste configurée. Exclure les agents trop anciens pour relayer, et remettre en attente un réveil remis sans verdict.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T36 — Données déclarées par l'agent : placement en salle et catalogue logiciel** ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21))
+- [x] **T36 — Données déclarées par l'agent : placement en salle et catalogue logiciel** ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21))
   Vérifier que le DN rapporté est cohérent avec la machine avant de la rattacher à une salle de l'annuaire, et ne plus adopter automatiquement une salle créée à la main. Limiter le débit du heartbeat par poste et purger les logiciels qui ne sont plus installés sur aucun poste.
   *Document de travail :* `plan-salles-maintenance-interventions.md`, `plan-inventaire.md`
 
-- [ ] **T37 — Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))
+- [x] **T37 — Agent : transport et robustesse** ([S22](plan-audit-2026-11.md#s22), [S23](plan-audit-2026-11.md#s23), [S24](plan-audit-2026-11.md#s24), [B32](plan-audit-2026-11.md#b32), [B33](plan-audit-2026-11.md#b33))
   N'accepter `http://` que sur option explicite, en corrigeant `DEPLOYMENT.md` qui le présente aujourd'hui comme accepté, et ne plus suivre les redirections. Borner les corps d'erreur lus, faire tourner le journal à chaud, et borner les téléchargements à la taille annoncée. Distinguer un `token.dat` illisible d'un `token.dat` absent. Allonger le délai entre deux tentatives quand l'enrôlement attend une approbation, et ne l'auditer qu'une fois.
   *Document de travail :* `plan-projet-tiai.md`, `plan-deploiement-logiciel.md`
 
-- [ ] **T38 — Script de signature : neutraliser les caractères de contrôle** ([S25](plan-audit-2026-11.md#s25))
+- [x] **T38 — Script de signature : neutraliser les caractères de contrôle** ([S25](plan-audit-2026-11.md#s25))
   Refuser les caractères de contrôle, ou les afficher échappés, dans le nom, la version, `run` et `args` avant la confirmation, et les rejeter aussi côté serveur.
   *Document de travail :* `plan-deploiement-logiciel.md`
 
-- [ ] **T39 — Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
+- [x] **T39 — Recherches : échapper `%` et `_`** ([S26](plan-audit-2026-11.md#s26))
   Factoriser `_escape_like` et l'appliquer à toutes les recherches par sous-chaîne : logiciels, postes et comptes.
   *Document de travail :* `plan-inventaire.md`, `plan-projet-tiai.md`
 
-- [ ] **T40 — Infrastructure et CI** ([S27](plan-audit-2026-11.md#s27), [S28](plan-audit-2026-11.md#s28), [S29](plan-audit-2026-11.md#s29), [S30](plan-audit-2026-11.md#s30), [S31](plan-audit-2026-11.md#s31), [S32](plan-audit-2026-11.md#s32), [S34](plan-audit-2026-11.md#s34), [S36](plan-audit-2026-11.md#s36))
+- [x] **T40 — Infrastructure et CI** ([S27](plan-audit-2026-11.md#s27), [S28](plan-audit-2026-11.md#s28), [S29](plan-audit-2026-11.md#s29), [S30](plan-audit-2026-11.md#s30), [S31](plan-audit-2026-11.md#s31), [S32](plan-audit-2026-11.md#s32), [S34](plan-audit-2026-11.md#s34), [S36](plan-audit-2026-11.md#s36))
   Plusieurs durcissements :
   - Sauvegardes : `umask 077`, et chiffrement des dumps.
   - `X-Forwarded-For` : ne le lire que depuis des proxys de confiance, et n'exposer le port de développement que sur `127.0.0.1`.
@@ -244,7 +244,7 @@ Durcissements de fond, infrastructure et finitions. Se traitent par lots, fichie
   - OpenAPI : le couper hors environnement local.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T41 — Console d'administration : finitions** ([B23](plan-audit-2026-11.md#b23), [B24](plan-audit-2026-11.md#b24), [B25](plan-audit-2026-11.md#b25), [B26](plan-audit-2026-11.md#b26), [B27](plan-audit-2026-11.md#b27))
+- [x] **T41 — Console d'administration : finitions** ([B23](plan-audit-2026-11.md#b23), [B24](plan-audit-2026-11.md#b24), [B25](plan-audit-2026-11.md#b25), [B26](plan-audit-2026-11.md#b26), [B27](plan-audit-2026-11.md#b27))
   Plusieurs finitions :
   - Session expirée : un seul message, au lieu d'un toast « identifiants invalides » par requête.
   - Longueur minimale du mot de passe et durée de validité du lien : les lire depuis le serveur.
@@ -253,11 +253,11 @@ Durcissements de fond, infrastructure et finitions. Se traitent par lots, fichie
   - `PATCH` des comptes, groupes et salles : renvoyer 422 au lieu de 500 sur un champ obligatoire envoyé à `null`.
   *Document de travail :* `plan-projet-tiai.md`
 
-- [ ] **T42 — Page Logiciels et filtre par logiciel** ([B20](plan-audit-2026-11.md#b20), [U08](plan-audit-2026-11.md#u08), [U09](plan-audit-2026-11.md#u09))
+- [x] **T42 — Page Logiciels et filtre par logiciel** ([B20](plan-audit-2026-11.md#b20), [U08](plan-audit-2026-11.md#u08), [U09](plan-audit-2026-11.md#u09))
   Mettre la recherche, le tri et la page dans l'URL. Afficher « Vu depuis » dans le fuseau du navigateur. Nommer le logiciel dans la puce de filtre, et distinguer « aucun résultat » d'« erreur ».
   *Document de travail :* `plan-inventaire.md`
 
-- [ ] **T43 — Console : finitions visuelles et accessibilité** ([U07](plan-audit-2026-11.md#u07), [U10](plan-audit-2026-11.md#u10), [U11](plan-audit-2026-11.md#u11), [U12](plan-audit-2026-11.md#u12), [U15](plan-audit-2026-11.md#u15), [U17](plan-audit-2026-11.md#u17), [U25](plan-audit-2026-11.md#u25), [U27](plan-audit-2026-11.md#u27), [U28](plan-audit-2026-11.md#u28), [U29](plan-audit-2026-11.md#u29), [U30](plan-audit-2026-11.md#u30))
+- [x] **T43 — Console : finitions visuelles et accessibilité** ([U07](plan-audit-2026-11.md#u07), [U10](plan-audit-2026-11.md#u10), [U11](plan-audit-2026-11.md#u11), [U12](plan-audit-2026-11.md#u12), [U15](plan-audit-2026-11.md#u15), [U17](plan-audit-2026-11.md#u17), [U25](plan-audit-2026-11.md#u25), [U27](plan-audit-2026-11.md#u27), [U28](plan-audit-2026-11.md#u28), [U29](plan-audit-2026-11.md#u29), [U30](plan-audit-2026-11.md#u30))
   Plusieurs finitions :
   - Tableau de bord : n'afficher l'état vide qu'une fois les données chargées.
   - Retour arrière : restaurer la position de défilement.
@@ -299,6 +299,52 @@ Chaque document de travail de chantier porte, dans une section « Suites de l'au
 ## 6. Écarts constatés à l'implémentation
 
 *À compléter tâche par tâche, au fil des corrections : date, PR, et écart éventuel par rapport à la recommandation.*
+
+| Tâche | Date | Branche | Écart ou précision |
+|---|---|---|---|
+| T01 | 2026-11-11 | `claude/sweet-cray-xhpetg` | UUID canonique en minuscules exigé dès l'entrée d'`executeFiles` (avant tout décodage), puis `PackageDir` vérifie par `filepath.Rel` que le dossier est l'enfant direct de `PackagesDir`. |
+| T02 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Option « au minimum » retenue, élargie : le cas Pronote (`.exe` + `.iss`) reste possible en méthode A. Liste refusée plus large que celle de la recommandation (autres `.exe`, `.msi`/`.msp`/`.mst`, scripts, `.mui`, `.tlb`, `.inf`, `.lnk`…). Plutôt qu'une purge totale, qui casserait la reprise des gros téléchargements, l'agent retire avant chaque exécution tout ce que le manifeste ne nomme pas ; les fichiers nommés sont revérifiés par empreinte. La désinstallation `msiexec /x {code}` en méthode A ne télécharge plus aucun fichier. Guide `deploy/packages/README.md` mis à jour. |
+| T03 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Quand un non-administrateur change les permissions ou le périmètre d'un groupe, chaque membre est passé à `reject_escalation` (action `edit_members`). Renommer ou décrire le groupe reste permis. Message de la console complété. |
+| T04 | 2026-11-11 | `claude/sweet-cray-xhpetg` | En plus du détail, le décompte `machine_count` (détail et liste des séances) ne compte plus que les postes du périmètre : il révélait le nombre de postes hors périmètre. |
+| T05 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nouveau code `settings.email.secret_required` (422, `details.fields`). La destination est comparée après résolution, environnement compris : un secret remis à `null` (celui du `.env`) ne compte pas comme ressaisi. Désactiver la vérification du certificat SMTP compte comme un changement de destination ; la réactiver, non. Le message du test Mailgun ne reprend plus que le champ `message` d'une réponse JSON, plus le corps brut. |
+| T06 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Option « verrouiller par couple compte et adresse IP », sous cette forme : le compte se verrouille toujours après N échecs (toutes adresses confondues, compteur incrémenté par `UPDATE … RETURNING`), mais le verrou ne refuse que les adresses qui ont échoué sur ce compte pendant la durée du verrou (mémoire en processus, comme le limiteur de débit). Le bon mot de passe saisi ailleurs ouvre la session et lève le verrou. Le 423 disparaît : verrou et échec répondent le même 401, bcrypt compris. Pas de décroissance du compteur dans le temps : un verrou ne gêne plus que les adresses fautives, ce qui rend un compteur ancien sans conséquence. Textes de `.env.example` et de la page Utilisateurs mis à jour. |
+| T07 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Limite de 5 essais par 15 min et par compte. Un mauvais mot de passe actuel compte comme un échec de connexion ; celui qui verrouille le compte révoque aussi toutes ses sessions, jeton de l'appelant compris, et s'inscrit au journal (`user.locked`, `via: password_change`). bcrypt passe par `asyncio.to_thread` partout (connexion, changement, réinitialisation, création de compte). |
+| T08 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Migration `0030` : `commands.package_digest` (SHA-256 du genre, de l'identifiant et de la version winget, du manifeste, de la signature, du certificat et des fichiers) et `commands.package_files`. À la livraison, une empreinte différente passe la commande en `failed` avec un message qui invite à relancer. Les commandes antérieures à la migration (empreinte nulle) sont livrées comme avant. |
+| T09 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le téléchargement est servi d'après les fichiers enregistrés sur la commande ouverte, plus d'après le paquet courant. Un fichier stocké est conservé tant qu'un paquet le nomme ou qu'une commande ouverte (en attente, remise ou en cours) le liste. Le worker n'a pas le volume des paquets : la purge tourne côté API, après chaque dépôt ou retrait, après un dépôt en échec, au verdict d'un déploiement et au démarrage ; elle retire aussi les `.upload-*` de plus de 24 h. La suppression d'un paquet entier n'existe toujours pas (seul le retrait) : rien à purger de ce côté. |
+| T10 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Règle retenue : **expiration, jamais de relivraison** (relivrer un `reboot` après un redémarrage de l'agent bouclerait). Le worker passe toutes les 5 min en `failed` « sans réponse du poste » les commandes `delivered` depuis plus de `COMMAND_UNANSWERED_HOURS` (24 h par défaut, nouvelle variable) et les `running` démarrées depuis plus longtemps ; un verdict tardif l'emporte. Côté agent : file en mémoire portée de 16 à 256, et au-delà un `failed` « file pleine » ; à l'arrêt, chaque commande en attente reçoit un `failed` ; un type inconnu reçoit un `failed` qui nomme la version de l'agent. Ces verdicts passent par `queue.Queue`, rejouée au prochain contact. |
+| T11 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
+| T12 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Fait dans `xlsx_response` seulement (`ILLEGAL_CHARACTERS_RE`) : `bound_text` n'est pas touché, ses valeurs étant comparées telles que rapportées (nom d'hôte, empreinte). |
+| T13 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nom coupé à 100 caractères, suffixe « (n) » compris ; la clé (`ad_key`, 500) garde la valeur entière. Le placement tourne dans un savepoint : un échec est journalisé et n'empêche plus le heartbeat. Les bornes `ad_location` (200) et `ou_dn` (500) tenaient déjà dans `ad_key`. |
+| T14 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Fiche : `Promise.allSettled`, menaces et commandes demandées seulement avec `threat:read` / `command:read` ; sans ces droits, la carte des menaces et l'onglet Commandes sont masqués. Tableau de bord : la liste des menaces actives est masquée sans `threat:read`, et son échec n'empêche plus les compteurs. Vérifié dans un navigateur avec un compte `machine:read` seul. |
+| T15 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme ; le test qui figeait l'ordre sans `inventory` est corrigé. |
+| T16 | 2026-11-11 | `claude/sweet-cray-xhpetg` | `recompute_last_maintenance` après toute création, modification ou suppression d'une entrée du journal, et à l'enregistrement d'une séance. Une date future (au-delà de 5 min de tolérance d'horloge) est refusée en 422 sur `performed_at`, pour la séance comme pour le journal. Migration `0031` : recalcul unique pour tout le parc, qui affiche le nombre de postes modifiés. |
+| T17 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Un responsable désactivé est sauté dans la résolution (poste, puis salle, puis parc) au lieu d'être traité comme une impasse ; le responsable par défaut qui ne désigne plus aucun compte, ou un compte désactivé, vaut « aucun ». Une vérification assignée à un compte désactivé apparaît dans « À prendre ». Les `PATCH` (poste, salle, réglages, vérification) ne revalident le responsable que s'il change. `/checks/assignable-users` est ouverte à `check:read`, `maintenance:write` ou `settings:write` (nouvelle dépendance `require_any_permission`). Pas de réaffectation automatique à la désactivation : un compte réactivé retrouve ses tâches ; la console le signale à la désactivation. |
+| T18 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Option « renommer » : la salle en collision devient « Salle 101 (Bâtiment B) », numérotée au besoin, et le journal d'audit liste les renommages. |
+| T19 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Tout entier de 1 à 99 est accepté depuis l'URL ; le menu du filtre ajoute le seuil en cours quand il n'est pas l'un des deux proposés, et la puce affiche « Moins de N % libres ». |
+| T20 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Liste : un chargement demandé qui échoue après un premier succès vide les lignes et la sélection et affiche le bandeau d'erreur (vérifié en coupant l'API). Fiche : bandeau quand le poste n'a pas pu être chargé (passage au poste suivant compris), indicateur de chargement tant qu'il n'est pas là, et notification quand une actualisation demandée échoue sur une fiche déjà affichée. |
+| T21 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme. |
+| T22 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Conforme : le plus ancien `first_seen`, le cycle et le responsable du doublon quand la fiche gardée n'en a pas. |
+| T23 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le ciblage revient à « Un emplacement » à chaque ouverture. « Tout le parc » et toute désinstallation passent par une confirmation qui annonce le nombre de postes. Une installation que ni la méthode B (signature) ni la méthode A (exécutable d'éditeur, sans fichier chargeable à côté, mêmes règles que l'agent depuis T02) ne couvre est refusée : bouton désactivé dans le dialogue, 409 `package.not_ready` côté serveur. La désinstallation n'est pas bloquée : `msiexec /x {code}` passe en méthode A. |
+| T24 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Les actions secondaires (dépôt, retrait d'un fichier, signature, retrait du paquet) ne mettent à jour que les champs que le lecteur n'a pas modifiés ; un indicateur « Modifications non enregistrées » et une confirmation en quittant la page signalent la saisie en cours. Dépôt : un fichier par requête (progression globale), taille vérifiée avant l'envoi contre le plafond par défaut de 2 Gio, bouton Annuler (`AbortController`), 413 du proxy traduit. Caddy passe à `2GiB`. Nouveau code `package.file.not_found`. Vérifié dans un navigateur : des arguments tapés sans enregistrer survivent au dépôt d'un fichier. |
+| T25 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nouvelle route `GET /commands/package-summary?package_id=` (`command:read`, filtrée par périmètre) : le dernier déploiement de chaque poste, compté par statut et par action. La fiche paquet l'affiche en puces au-dessus d'un tableau paginé côté serveur (25, 50 ou 100 lignes). Une puce filtre le tableau par statut ; le filtre porte sur tout l'historique, la puce sur le dernier déploiement de chaque poste. |
+| T26 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le texte tapé dans « Emplacements » est validé à la perte du focus et avant l'enregistrement (avec `input-debounce` à 0 : l'anti-rebond par défaut de 500 ms perdait une saisie suivie d'un clic rapide). Enregistrer un groupe sans aucun périmètre demande confirmation, à la création ou quand le groupe était restreint. Vérifié dans un navigateur. |
+| T27 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Le libellé du code reste en tête, complété : par le message du serveur pour `package.invalid` ; par le champ fautif et sa raison pour `request.validation_error` (premier champ de `details.errors`, nommé en français pour les plus courants) ; par la liste des problèmes pour `package.not_ready`. La fiche paquet valide aussi côté client le nom, l'identifiant winget, les arguments exigés par msiexec et les codes de sortie, avec les règles du serveur. |
+| T28 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Nouvelle fonction `intFieldError` : champ requis, entier, dans les bornes de `SettingsUpdate`. Appliquée aux cartes Maintenance et Supervision du parc : erreur sous le champ, bouton Enregistrer désactivé tant qu'elle persiste ; un champ vidé n'est plus envoyé comme 0. Les cartes Utilisation et E-mail avaient déjà leurs contrôles. Vérifié dans un navigateur. |
+| T29 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Séance de maintenance : dialogue persistant ; Annuler et Échap ferment aussitôt si rien n'a été saisi, sinon demandent confirmation (Échap écouté sur le dialogue, Quasar ne l'émettant plus en mode persistant). La saisie n'est remise à zéro qu'après un enregistrement, une annulation confirmée ou un changement de salle. Mot de passe réinitialisé : dialogue persistant tant que le mot de passe est affiché, et échec de la copie signalé. Vérifié dans un navigateur pour la séance. |
+| T30 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Les neuf points, vérifiés dans un navigateur (bureau et iPhone 13). `/maintenance/due` ne liste plus les postes exclus (comptés seulement). « À faire » ne garde que les salles en retard ou à échéance ; la séance ne pré-coche que les postes dus (fiche salle et Mes tâches), jamais un exclu. « Me l'affecter » et « Transmettre… » (dialogue de réglage de la salle) depuis Mes tâches. Badge : deux pastilles (vérifications, postes en retard de maintenance), recomptées après chaque action via `notifyTasksChanged`. Note d'un poste décoché envoyée dans `skipped` et écrite dans son journal en « Autre » intitulé « Maintenance non faite — salle », sans toucher son échéance. Libellés accessibles des cases. « en retard depuis N jours » ou « échéance le JJ/MM/AAAA ». Vérifications en cartes sur téléphone, colonne Consignes d'au moins 280 px, libellé de lieu replié. La fiche salle charge tous ses postes, page après page. |
+| T31 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Sélection vidée à chaque changement de filtre, de page, de tri ou de taille de page. Navigation : option « figer l'instantané » plutôt qu'un curseur serveur (qui demanderait une pagination par clé sur chaque colonne de tri) : la recherche est lue par blocs de 50, gelés pour la session ; si le poste ouvert n'est plus au rang indiqué, il est retrouvé dans l'instantané. L'instantané est remis à zéro à chaque retour sur la liste. La fusion recharge aussi le journal des interventions. |
+| T32 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Bâtiment et salle : un compte restreint ne change le site d'un lieu qu'entre deux sites que son périmètre couvre (403 `auth.scope.restricted` sinon), quel que soit le lieu qu'il tient par identifiant. Journal d'audit : option « filtrer », un compte restreint ne lit que les entrées sur un poste de son périmètre et ses propres actions ; `/audit/actions` reste la liste des noms d'actions. Vérifications : le destinataire doit avoir `check:read` et voir tous les postes (422, nouveau code `check.assignee.out_of_reach`), à la création, en masse et à la réaffectation ; `/checks/assignable-users?machine_id=` filtre en conséquence et le dialogue de demande l'utilise pour un poste. |
+| T33 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Création unitaire : la violation de `uq_machine_checks_open` devient un 409 `check.already_open`. Création en masse : `INSERT … ON CONFLICT DO NOTHING` sur l'index partiel, le décompte « créées / ignorées » et le courriel ne portent que sur les lignes réellement insérées. Clôture : `UPDATE … WHERE closed_at IS NULL RETURNING`, 409 pour la seconde, une seule ligne au journal. Salle sortie de son bâtiment : le serveur recopie le site du bâtiment quand aucun emplacement n'est fourni (l'effacer est une seconde modification), et le formulaire pré-remplit le site effectif. |
+| T34 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Réinitialisation : un lien encore valide émis il y a moins de 5 min est conservé, sans nouveau courriel, quelle que soit l'adresse IP qui redemande ; la réponse reste un 204. L'égalisation du temps de réponse (adresse connue ou non) n'est pas faite : l'écart vient d'écritures en base, et la limite par compte réduit déjà l'intérêt de l'énumération. Changement d'e-mail par un administrateur : liens en attente purgés, ancienne adresse notée au journal d'audit (`previous_email`). `FIRST_ADMIN_PASSWORD` doit faire au moins `PASSWORD_MIN_LENGTH` caractères hors environnement local ; `.env.example` et `DEPLOYMENT.md` le disent. |
+| T35 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Relais : exclus les postes « identité à confirmer », au token révoqué, enrôlés depuis moins de `WOL_RELAY_MIN_AGE_MINUTES` (60) ou d'agent antérieur à `WOL_RELAY_MIN_AGENT_VERSION` (1.0.0, première version qui relaie). Pas de liste d'emplacements validés côté serveur : l'emplacement reste déclaratif, ces exclusions en réduisent l'usage. Un réveil pris sans verdict après `WOL_RELAY_CLAIM_TIMEOUT_SECONDS` (180) retourne en file. Réveil direct : destination déduite seulement pour une adresse privée ou dans `WOL_ALLOWED_NETWORKS`, masque rapporté accepté de /16 à /30 (sinon le défaut) ; les adresses configurées restent prioritaires. Le script `bc_forwarding` n'est pas restreint à l'interface LAN : le noyau exige `all` et l'interface d'entrée (le pont Docker), comme l'explique le script. |
+| T36 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Placement : en mode `ad_ou`, l'OU rapportée doit contenir le DN rapporté, sinon le poste n'est pas rangé ; pas de vérification du CN contre le nom d'hôte (un nom NetBIOS tronqué à 15 caractères le rendrait faux). Un heartbeat n'adopte plus une salle créée à la main : le poste reste sans salle, sans créer de « Nom (2) », jusqu'à ce qu'un administrateur lance la resynchronisation, qui elle adopte. Création automatique plafonnée à 200 salles par heure pour tout le parc. Pas de lecture LDAP côté serveur. Heartbeat : 30 par minute et par poste (429 au-delà). Le worker purge chaque matin les logiciels qu'aucun poste n'a, vus pour la première fois il y a plus d'un jour. |
+| T37 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Agent : `http://` refusé au chargement sauf `AllowInsecureHTTP` (registre) / `allow_insecure_http` (YAML) / `init-config --allow-insecure-http`, avec un avertissement à chaque démarrage ; aucune redirection suivie ; corps d'erreur lu sur 4 Kio ; journal tourné à chaud au-delà de 5 Mio ; téléchargement borné à la taille du manifeste (taille passée au `Fetcher`, une octet de plus déclenche l'échec). B32 : option « relire » — avant de s'enrôler, l'agent relit `token.dat` et réutilise un jeton redevenu lisible ; un jeton illisible n'empêche toujours pas le démarrage du service. B33 : un 403 « en attente d'approbation » ou « révoqué » espace les tentatives à 30 min ; côté serveur, une ligne d'audit par demande (nouvelle adresse ou plus de 24 h), plus une par tentative. `DEPLOYMENT.md` corrigé, avec l'avertissement de poser l'option avant la mise à jour. |
+| T38 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Option « refuser » des deux côtés. Serveur : caractères de contrôle C0, C1 et DEL refusés (422) dans le nom, la version, les fichiers à lancer, le nom dans l'inventaire et les arguments. Script : `Assert-NoControl` vérifie nom, version, noms de fichiers, `run` et `args` avant tout affichage et refuse de signer. Le script n'a pas pu être exécuté ici (pas de PowerShell) : l'expression régulière est du .NET standard. |
+| T39 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Fonctions communes `escape_like` et `contains` (`app/features/base.py`), appliquées à toutes les recherches par sous-chaîne : postes (recherche et filtres antivirus, OS, modèle, fabricant, processeur), logiciels, comptes, journal d'audit, détection des paquets. Les deux copies locales de `_escape_like` sont retirées. La recherche par adresse MAC compare une forme hexadécimale nettoyée, sans joker possible : inchangée. |
+| T40 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Sauvegardes : `umask 077` et `chmod 600` des dumps existants ; **pas de chiffrement** dans le conteneur (l'image `postgres:16-alpine` n'a ni `gpg` ni `openssl`), la documentation exige une copie hors serveur chiffrée. `X-Forwarded-For` lu seulement d'un pair de confiance (boucle locale, `TRUSTED_PROXIES`, ou adresse résolue de `TRUSTED_PROXY_HOSTS`, `caddy` par défaut) ; port de dev publié sur `127.0.0.1` sauf `TIAI_DEV_BACKEND_BIND`. Actions GitHub épinglées par SHA (version en commentaire, Dependabot `github-actions` les suit), permissions au job ; `GIST_SECRET` remplacé dans l'`env` des jobs par un booléen. nginx 1.30 ; Trivy sur l'image frontend (nouveau job). Backend et worker : compte `tiai` (10001), l'entrypoint démarre en root pour confier le volume des paquets puis abandonne tout par `setpriv` ; compose `cap_drop: ALL` sauf CHOWN/SETUID/SETGID, `no-new-privileges` (vérifié dans un conteneur). curl retiré (lot Dependabot). `index.html` en `no-cache` (configuration nginx validée par `nginx -t`). OpenAPI et /docs coupés hors `local` sauf `EXPOSE_OPENAPI`. L'image backend complète n'a pas pu être construite ici (ghcr.io bloqué) : la CI le fera. |
+| T41 | 2026-11-11 | `claude/sweet-cray-xhpetg` | B23 : après la perte de session, chaque requête en cours reçoit une erreur synthétique `auth.session.invalid` (« Votre session a pris fin »), que Quasar regroupe en une seule notification. B24 : route publique `GET /auth/password-policy` lue une fois par `usePasswordPolicy` (formulaires de compte, d'utilisateurs, de réinitialisation, durée du lien). B25 : libellés des actions `package.*`, `user.locked`, `machine.reenroll_requested` et du type « Paquet » ; un test backend vérifie désormais que toute action et tout type enregistrés ont leur libellé dans la console. B26 : repli sur la dernière page existante. B27 : `not_null` refuse en 422 un champ obligatoire envoyé à `null` (comptes, groupes, bâtiments, salles). |
+| T42 | 2026-11-11 | `claude/sweet-cray-xhpetg` | Recherche, tri, sens, page et taille de page dans l'URL de la page Logiciels ; « Vu depuis » en date locale. Nouvelle route `GET /software/{id}` : la puce de la liste des postes dit « Logiciel : 7-Zip 23.01 » et reste visible panneau ouvert (seule puce sans contrôle dans le panneau). Tableau vide : trois libellés (catalogue vide, aucun résultat pour la recherche, échec) et bandeau d'erreur avec Réessayer. Vérifié dans un navigateur, retour arrière compris. |
+| T43 | 2026-11-11 | `claude/sweet-cray-xhpetg` | U07 : tableau de bord, messages vides affichés seulement une fois la liste chargée sans erreur ; « Tous les postes sont à jour ». U10 : la position est restaurée au retour arrière, le haut de page seulement en changeant de page. U11 : dialogue de fusion à 560 px, plafonné à 95vw. U12 : révocation et ré-enrôlement avec boutons explicites (« Révoquer » en rouge, « Autoriser »). U15 : autocomplete off/new-password dans le formulaire d'utilisateur. U17 : aide de la vérification TLS reformulée. U25 : colonnes par défaut réduites (Nom, Salle, Maintenance, Antivirus, MAJ Windows, Session, Vu le), plus de défilement horizontal à 1440 px ; case et nom collants au défilement, nom tronqué à 260 px (fond adapté au mode sombre). U27 : tableau des réglages empilé sur téléphone. U28 : badge de la carte d'état aux couleurs de la colonne Antivirus. U29 : e-mail masqué sur téléphone, titre entier. U30 : boutons sans capitales forcées. Vérifié dans un navigateur (1440 px, 700 px, iPhone 13). |
 
 ## 7. Détail des constats
 

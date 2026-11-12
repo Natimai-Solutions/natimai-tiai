@@ -113,9 +113,11 @@ def test_build_jobs_registers_the_whole_schedule():
     assert set(jobs) == {
         "outbox",
         "expire_stale_commands",
+        "close_unanswered_commands",
         "daily_digest",
         "maintenance_reminders",
         "purge_outbox",
+        "purge_software",
         "purge_usage",
         "purge_sessions",
         "purge_audit",
