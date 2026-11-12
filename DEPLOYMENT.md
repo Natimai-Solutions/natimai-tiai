@@ -607,7 +607,7 @@ ghcr.io/natimai-solutions/tiai-frontend:<version>   # console
 
 `latest` désigne la dernière version stable (jamais une `-rc`). La version que
 la stack démarre est `TIAI_VERSION` dans `deploy/.env` : **l'épingler** en
-production (`TIAI_VERSION=1.1.0`), pour qu'une mise à jour soit une décision et
+production (`TIAI_VERSION=1.2.0`), pour qu'une mise à jour soit une décision et
 pas l'effet de bord du prochain `docker compose pull`.
 
 ```bash
@@ -625,7 +625,7 @@ docker compose ps                   # tous les services « healthy » en 2 min
 
 Le backend rejoue les migrations Alembic à son démarrage.
 
-> **Montée vers la version qui introduit le rôle applicatif PostgreSQL** : créer
+> **Montée vers la v1.2.0, qui introduit le rôle applicatif PostgreSQL** : créer
 > le rôle avant l'étape 2 (§ « Rôle applicatif PostgreSQL »). Sans lui, le
 > backend refuse de démarrer.
 

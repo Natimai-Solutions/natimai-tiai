@@ -1,4 +1,4 @@
-# Tia'i v1.1.1
+# Tia'i v1.2.0
 
 Cette version réunit tout ce qui a été fusionné depuis la v1.1.0 (2 octobre 2026) :
 
