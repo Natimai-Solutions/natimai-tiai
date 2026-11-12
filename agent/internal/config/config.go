@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,6 +84,13 @@ type Config struct {
 	// HTTPS_PROXY as a system variable had every heartbeat answered with a 407
 	// by a proxy the agent was never meant to cross (api.ParseProxy).
 	ProxyURL string `yaml:"proxy_url,omitempty"`
+
+	// AllowInsecureHTTP lets ApiBaseURL be http:// — the fleet secret, then
+	// the token, would travel in clear on the LAN. Off by default (audit
+	// S22): an http:// URL is refused unless this is set, by YAML or by the
+	// registry value AllowInsecureHTTP (DWORD 1), for the deployments that
+	// knowingly target the backend's direct port.
+	AllowInsecureHTTP bool `yaml:"allow_insecure_http,omitempty"`
 
 	// Location is where the poste physically is — a site name such as
 	// "Lycée de Taravao" — reported to the server as-is. Free text, and empty
@@ -253,7 +261,31 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf(
 			`api_base_url is required: set it in %s or in HKLM\SOFTWARE\Tiai\ApiBaseURL`, path)
 	}
+	if err := checkScheme(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// checkScheme refuses an ApiBaseURL the agent would talk to in clear, unless
+// the deployment said so explicitly (AllowInsecureHTTP).
+func checkScheme(cfg *Config) error {
+	u, err := url.Parse(strings.TrimSpace(cfg.APIBaseURL))
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("api_base_url %q is not a URL", cfg.APIBaseURL)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return nil
+	case "http":
+		if cfg.AllowInsecureHTTP {
+			return nil
+		}
+		return fmt.Errorf(
+			"api_base_url %q is http://: the fleet secret and the token would travel in clear; "+
+				"use https://, or set AllowInsecureHTTP=1 (registry) / allow_insecure_http: true", cfg.APIBaseURL)
+	}
+	return fmt.Errorf("api_base_url %q: scheme must be https", cfg.APIBaseURL)
 }
 
 // Save persists the config (YAML, without the token) atomically.

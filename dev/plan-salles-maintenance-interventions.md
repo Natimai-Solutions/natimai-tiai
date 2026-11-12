@@ -7,6 +7,9 @@
 > livré** ; reste la validation du bind ADSI sur un domaine réel (§11, J3) et,
 > plus tard, la portée par emplacement (§12).
 >
+> **Audit du 2026-11-10 : deux corrections immédiates sur la portée**
+> (T03, T04), et des échéances de maintenance à fiabiliser. Voir §13.
+>
 > Branche de travail : `claude/postes-maintenance-features-85buig`, fondée sur
 > `claude/agent-location-wol-ughnse` (emplacement des postes + réveil relayé),
 > **elle-même non encore fusionnée dans `main`** — voir §10.
@@ -699,3 +702,55 @@ quand le besoin se présente ; rien dans le modèle de J1 ne s'y oppose.
 - Tests : `tests/test_api_scope.py` (21 cas, deux sites et un compte limité au
   premier, sur chaque famille de routes).
 
+---
+
+## 13. Suites de l'audit 2026-11 : reste à faire
+
+L'audit du 2026-11-10 (`plan-audit-2026-11.md`) a relevé dans ce chantier deux constats immédiats sur la portée par emplacement (§12) : l'escalade par la modification d'un groupe, et la fuite par le détail d'une séance. S'y ajoutent des échéances de maintenance faussées et plusieurs points du parcours du technicien.
+
+Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
+
+- [x] **T03** · *P0 immédiate* — **Groupes : contrôler l'autorité des membres à la modification** ([S05](plan-audit-2026-11.md#s05))
+  Dans `PATCH /groups/{id}` (`backend/app/api/routes/groups.py`), appliquer `reject_escalation` à l'autorité de chaque membre, comme le fait `PATCH /users`, ou réserver la modification des permissions aux comptes sans restriction. Ajouter à `test_api_scope.py` le cas d'un membre partagé avec un groupe sans restriction.
+
+- [x] **T04** · *P0 immédiate* — **Séance de maintenance : filtrer ses postes par périmètre** ([S06](plan-audit-2026-11.md#s06))
+  Passer `scope` à `_session_out` dans le détail d'une séance (`backend/app/api/routes/maintenance.py:594`). Ajouter un test avec une séance à cheval sur deux sites.
+
+- [x] **T13** · *P1 court terme* — **Placement par l'annuaire : borner le nom de salle à la colonne** ([S07](plan-audit-2026-11.md#s07))
+  Tronquer le nom en tenant compte du suffixe dans `room_for_key` (`room/crud.py:287`), aligner les bornes de `ad_location` et de `ou` sur la colonne, et isoler l'échec du placement pour qu'il ne fasse plus échouer le heartbeat en 500.
+
+- [x] **T16** · *P1 court terme* — **Échéance de maintenance : la recalculer depuis le journal** ([B06](plan-audit-2026-11.md#b06), [B17](plan-audit-2026-11.md#b17))
+  Recalculer `last_maintenance_at` comme le maximum des `performed_at` de type maintenance à chaque création, modification ou suppression d'une intervention. Refuser côté serveur une date future, à la séance de maintenance comme dans le journal.
+
+- [x] **T17** · *P1 court terme* — **Responsables désactivés ou supprimés : ne plus bloquer la maintenance** ([B08](plan-audit-2026-11.md#b08), [B35](plan-audit-2026-11.md#b35))
+  Traiter un responsable inactif ou supprimé comme « sans responsable » dans `resolve()`, et proposer une réaffectation à la désactivation. Les `PATCH` des vérifications, du cycle et de la carte Maintenance des réglages ne doivent plus échouer en 404 tant qu'on ne change pas ce responsable. Ouvrir la liste des responsables possibles à `maintenance:write` et `settings:write`.
+
+- [x] **T18** · *P1 court terme* — **Suppression d'un bâtiment : gérer les noms de salle en collision** ([B07](plan-audit-2026-11.md#b07))
+  Détecter la collision avant la suppression (`rooms.py:451`) et renvoyer un 409 qui liste les salles concernées, ou les renommer avec un suffixe comme le fait `room_for_key`.
+
+- [x] **T26** · *P2 moyen terme* — **Groupes : ne plus perdre un emplacement saisi sans Entrée** ([U02](plan-audit-2026-11.md#u02))
+  Valider le texte en cours de saisie à la perte du focus et avant l'enregistrement, et demander confirmation avant d'enregistrer un groupe qui s'ouvrirait à tout le parc (`GroupsPage.vue:197`).
+
+- [x] **T29** · *P2 moyen terme* — **Dialogues à saisie précieuse : persistants** ([U14](plan-audit-2026-11.md#u14), [U13](plan-audit-2026-11.md#u13))
+  Rendre persistants la séance de maintenance de salle, avec une confirmation si la saisie a été modifiée, et le dialogue qui affiche une seule fois le mot de passe réinitialisé.
+
+- [x] **T30** · *P2 moyen terme* — **Mes tâches et séance de salle : parcours du technicien** ([B09](plan-audit-2026-11.md#b09), [U18](plan-audit-2026-11.md#u18), [U19](plan-audit-2026-11.md#u19), [U20](plan-audit-2026-11.md#u20), [U21](plan-audit-2026-11.md#u21), [U22](plan-audit-2026-11.md#u22), [U23](plan-audit-2026-11.md#u23), [U24](plan-audit-2026-11.md#u24), [U26](plan-audit-2026-11.md#u26))
+  Plusieurs corrections du parcours :
+  - Ne pré-cocher que les postes dus et décocher les postes exclus.
+  - N'afficher dans « à faire » que les salles qui ont quelque chose à faire.
+  - Ajouter « Me l'affecter » et « Transmettre » depuis Mes tâches.
+  - Compter les maintenances dans le badge et rafraîchir ce badge après une action.
+  - Garder les notes des postes non faits.
+  - Ajouter des libellés accessibles aux cases à cocher.
+  - Afficher « en retard depuis N jours » et des échéances sans heure.
+  - Adapter Mes tâches au mobile et élargir la colonne Consignes.
+  - Paginer les salles de plus de 200 postes.
+
+- [x] **T32** · *P2 moyen terme* — **Périmètres : cas secondaires** ([S16](plan-audit-2026-11.md#s16), [S17](plan-audit-2026-11.md#s17), [S18](plan-audit-2026-11.md#s18))
+  Un compte restreint ne doit pas déplacer un bâtiment ou une salle hors de son site. Pour le journal d'audit, filtrer les entrées « poste » par périmètre, ou refuser `audit:read` à un groupe restreint. Refuser d'assigner une vérification à un compte qui ne voit pas le poste, et filtrer `/checks/assignable-users` en conséquence.
+
+- [x] **T33** · *P2 moyen terme* — **Vérifications concurrentes et salle sortie de son bâtiment** ([B21](plan-audit-2026-11.md#b21), [B22](plan-audit-2026-11.md#b22))
+  Transformer en 409 la violation de `uq_machine_checks_open`, utiliser `ON CONFLICT DO NOTHING` pour la création en masse, et faire une clôture atomique. Conserver l'emplacement d'une salle qui quitte son bâtiment.
+
+- [x] **T36** · *P3 fond* — **Données déclarées par l'agent : placement en salle et catalogue logiciel** ([S20](plan-audit-2026-11.md#s20), [S21](plan-audit-2026-11.md#s21))
+  Vérifier que le DN rapporté est cohérent avec la machine avant de la rattacher à une salle de l'annuaire, et ne plus adopter automatiquement une salle créée à la main. Limiter le débit du heartbeat par poste et purger les logiciels qui ne sont plus installés sur aucun poste.

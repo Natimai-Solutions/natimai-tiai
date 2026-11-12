@@ -1,6 +1,6 @@
 <template>
   <q-dialog v-model="open">
-    <q-card style="min-width: 560px; max-width: 90vw">
+    <q-card style="width: 560px; max-width: 95vw">
       <q-card-section class="text-h6">Fusionner un doublon</q-card-section>
 
       <!-- Which record is kept, said with the UUID and not only the hostname:

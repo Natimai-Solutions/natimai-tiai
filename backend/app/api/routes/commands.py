@@ -208,9 +208,20 @@ async def _deployable_package(
             message="This package is retired",
         )
     if package.kind == PackageKind.FILES:
-        problems = manifest.problems(
-            package, await package_crud.files_of(session, package.id)
-        )
+        files = await package_crud.files_of(session, package.id)
+        problems = manifest.problems(package, files)
+        if (
+            payload.type == CommandType.PACKAGE_INSTALL
+            and not problems
+            and not manifest.runnable_somewhere(package, files)
+        ):
+            problems = [
+                manifest.Problem(
+                    "untrusted",
+                    "Ni signé, ni lancé par un exécutable d'éditeur seul dans son "
+                    "dossier : aucun poste ne l'exécutera. Signez le paquet.",
+                )
+            ]
         if payload.type == CommandType.PACKAGE_UNINSTALL and not package.uninstall_run:
             problems = [
                 *problems,
@@ -275,6 +286,14 @@ async def create_commands(
             await setting_crud.fleet_policy(session)
         ).command_default_ttl_minutes
     expires_at = utcnow() + timedelta(minutes=ttl_minutes)
+    # The package as approved now: what the postes will run, or nothing
+    # (audit T08); and its files, kept for them meanwhile (T09).
+    digest: str | None = None
+    package_shas: list[str] | None = None
+    if package is not None:
+        package_files = await package_crud.files_of(session, package.id)
+        digest = package_crud.fingerprint(package, package_files)
+        package_shas = sorted({f.sha256 for f in package_files})
     created, skipped = await command_crud.create_for_machines(
         session,
         machine_ids=machine_ids,
@@ -282,6 +301,8 @@ async def create_commands(
         created_by=user.email,
         expires_at=expires_at,
         package_id=package.id if package is not None else None,
+        package_digest=digest,
+        package_files=package_shas,
     )
     target = describe_command_target(
         machine_ids=payload.machine_ids,
@@ -315,6 +336,58 @@ async def create_commands(
     await session.commit()
     return CreateCommandsResponse(
         created=created, count=len(created), skipped=len(skipped)
+    )
+
+
+class PackageSummary(BaseModel):
+    """Where a package stands on the postes: for each poste, its latest
+    command for that package, counted by status — and by action, since an
+    install followed by an uninstall leaves the poste « désinstallé »."""
+
+    postes: int
+    by_status: dict[str, int]
+    by_action: dict[str, int]
+
+
+@router.get(
+    "/package-summary",
+    response_model=PackageSummary,
+    dependencies=[Depends(require_permission(Resource.COMMAND, Action.READ))],
+)
+async def package_summary(
+    package_id: uuid.UUID, session: SessionDep, scope: CurrentScope
+) -> PackageSummary:
+    """The tally above a package's deployments (audit B14): the table pages
+    through every command, this says how the postes stand."""
+    await command_crud.mark_expired(session)
+    await session.commit()
+    latest = (
+        restrict(
+            select(Command.machine_id, Command.type, Command.status)
+            .where(col(Command.package_id) == package_id)
+            .distinct(col(Command.machine_id))
+            .order_by(
+                col(Command.machine_id),
+                col(Command.created_at).desc(),
+                col(Command.id).desc(),
+            ),
+            machine_ids_clause(scope, col(Command.machine_id)),
+        )
+    ).subquery()
+    rows = (
+        await session.exec(
+            select(latest.c.type, latest.c.status, func.count()).group_by(
+                latest.c.type, latest.c.status
+            )
+        )
+    ).all()
+    by_status: dict[str, int] = {}
+    by_action: dict[str, int] = {}
+    for kind, status, n in rows:
+        by_status[status] = by_status.get(status, 0) + n
+        by_action[kind] = by_action.get(kind, 0) + n
+    return PackageSummary(
+        postes=sum(by_status.values()), by_status=by_status, by_action=by_action
     )
 
 

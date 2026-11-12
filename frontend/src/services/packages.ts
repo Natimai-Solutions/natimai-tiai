@@ -81,10 +81,31 @@ export interface CreatePackagePayload extends PackageFields {
 /** Which way a package can reach a poste, as the console explains it. */
 export type TrustMethod = 'winget' | 'signed' | 'publisher' | 'none';
 
+// What the agent refuses beside the executable under method A: Windows could
+// load or run it from that folder (agent deploy.loadableExt, audit S02).
+const LOADABLE_EXTENSIONS = new Set(
+  (
+    '.dll .ocx .cpl .sys .drv .ax .acm .ime .tsp .mui .tlb .winmd .manifest .local .config ' +
+    '.exe .com .scr .pif .msi .msp .mst .msu .appx .msix .bat .cmd .ps1 .psm1 .vbs .vbe .js ' +
+    '.jse .wsf .wsh .hta .lnk .inf .jar'
+  ).split(' '),
+);
+
+function extension(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot < 0 ? '' : name.slice(dot).toLowerCase();
+}
+
 export function trustMethod(p: Package): TrustMethod {
   if (p.kind === 'winget') return 'winget';
   if (p.signed) return 'signed';
-  if (p.publisher_name && (p.install_run ?? '').toLowerCase().endsWith('.exe')) return 'publisher';
+  const run = p.install_run ?? '';
+  if (
+    p.publisher_name &&
+    run.toLowerCase().endsWith('.exe') &&
+    !(p.files ?? []).some((f) => f.name !== run && LOADABLE_EXTENSIONS.has(extension(f.name)))
+  )
+    return 'publisher';
   return 'none';
 }
 
@@ -172,16 +193,25 @@ export async function updatePackage(id: string, fields: PackageFields): Promise<
 }
 
 /** Upload files, reporting progress as a fraction (0–1). */
+/**
+ * The server's default bound on one file (PACKAGE_MAX_BYTES, 2 Gio), checked
+ * before sending: refused after the transfer, a large file costs minutes for
+ * nothing. A server configured lower still answers 413 with its own figure.
+ */
+export const PACKAGE_FILE_MAX_BYTES = 2 * 1024 ** 3;
+
 export async function uploadPackageFiles(
   id: string,
   files: File[],
   onProgress?: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<Package> {
   const form = new FormData();
   for (const f of files) form.append('files', f, f.name);
   const { data } = await api.post<Package>(`/packages/${id}/files`, form, {
     // An installer is hundreds of megabytes: no request timeout here.
     timeout: 0,
+    ...(signal ? { signal } : {}),
     onUploadProgress: (e) => {
       if (onProgress && e.total) onProgress(e.loaded / e.total);
     },
@@ -240,10 +270,29 @@ export async function deployPackage(
   return data;
 }
 
-/** The deployments of a package, newest first. */
-export async function listPackageCommands(id: string, page = 1): Promise<CommandList> {
+/** The deployments of a package, newest first, one page at a time. */
+export async function listPackageCommands(
+  id: string,
+  page = 1,
+  pageSize = 25,
+  status: string | null = null,
+): Promise<CommandList> {
   const { data } = await api.get<CommandList>('/commands', {
-    params: { package_id: id, page, page_size: 50 },
+    params: { package_id: id, page, page_size: pageSize, ...(status ? { status } : {}) },
+  });
+  return data;
+}
+
+/** How the postes stand: each one's latest command for the package, counted. */
+export interface PackageSummary {
+  postes: number;
+  by_status: Record<string, number>;
+  by_action: Record<string, number>;
+}
+
+export async function getPackageSummary(id: string): Promise<PackageSummary> {
+  const { data } = await api.get<PackageSummary>('/commands/package-summary', {
+    params: { package_id: id },
   });
   return data;
 }

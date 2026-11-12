@@ -70,9 +70,11 @@
   <!-- A folded filter must never narrow the list silently — the dashboard
        cards land here with one already set. Chips name the active ones, and
        removing one clears it without opening the panel. -->
-  <div v-if="!filtersOpen && chips.length" class="row items-center q-mb-sm">
+  <!-- Folded: every active filter. Open: those the panel has no control for
+       (the program a link filtered on), which would otherwise vanish (U08). -->
+  <div v-if="shownChips.length" class="row items-center q-mb-sm">
     <q-chip
-      v-for="chip in chips"
+      v-for="chip in shownChips"
       :key="chip.key"
       removable
       dense
@@ -86,7 +88,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { getSoftware, softwareLabel } from 'src/services/software';
 import MachinesFilterPanel from './MachinesFilterPanel.vue';
 import {
   clearMachineFilter,
@@ -121,8 +124,31 @@ const filtersOpen = ref(false);
 // Not in the URL, so a reload of the list's query leaves it alone.
 const usageCustom = ref(false);
 
+// The program a software filter names, read once per id (audit U08).
+const softwareName = ref<string | null>(null);
+watch(
+  () => props.modelValue.softwareId,
+  async (id) => {
+    softwareName.value = null;
+    if (id == null) return;
+    try {
+      softwareName.value = softwareLabel(await getSoftware(id));
+    } catch {
+      // The generic label stays: the chip still says why the list is short.
+    }
+  },
+  { immediate: true },
+);
+
 const chips = computed(() =>
-  machineFilterChips(props.modelValue, props.options, props.usageWindowDays),
+  machineFilterChips(props.modelValue, props.options, props.usageWindowDays).map((c) =>
+    c.key === 'software' && softwareName.value
+      ? { ...c, label: `Logiciel : ${softwareName.value}` }
+      : c,
+  ),
+);
+const shownChips = computed(() =>
+  filtersOpen.value ? chips.value.filter((c) => c.key === 'software') : chips.value,
 );
 
 function set(patch: Partial<MachineFilters>) {

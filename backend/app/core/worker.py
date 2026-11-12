@@ -79,6 +79,27 @@ async def expire_stale_commands() -> int:
         return result.rowcount or 0
 
 
+async def close_unanswered_commands() -> int:
+    """Fail the delivered or running commands left without a verdict past
+    ``COMMAND_UNANSWERED_HOURS`` (audit B10)."""
+    async with AsyncSession(engine) as session:
+        closed = await command_crud.close_unanswered(
+            session, hours=settings.COMMAND_UNANSWERED_HOURS
+        )
+        await session.commit()
+        return closed
+
+
+async def purge_software() -> int:
+    """Drop the software entries no poste has had for a day (audit S21)."""
+    from app.features.inventory import crud as inventory_crud
+
+    async with AsyncSession(engine) as session:
+        return await inventory_crud.purge_orphan_software(
+            session, utcnow() - timedelta(days=1)
+        )
+
+
 async def send_daily_digest() -> int:
     """Queue the daily fleet digest for the accounts that asked for one.
 
@@ -243,6 +264,7 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
         # Due immediately: a restart must resume mail delivery within one tick.
         Job("outbox", process_outbox, now, every(POLL_SECONDS)),
         Job("expire_stale_commands", expire_stale_commands, now, every(300)),
+        Job("close_unanswered_commands", close_unanswered_commands, now, every(300)),
         Job(
             "daily_digest",
             send_daily_digest,
@@ -258,6 +280,7 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
             params=_reminder_params(policy),
         ),
         Job("purge_outbox", purge_outbox, housekeeping(now), housekeeping),
+        Job("purge_software", purge_software, housekeeping(now), housekeeping),
         Job("purge_usage", purge_usage, housekeeping(now), housekeeping),
         Job("purge_sessions", purge_sessions, housekeeping(now), housekeeping),
         Job("purge_audit", purge_audit, housekeeping(now), housekeeping),

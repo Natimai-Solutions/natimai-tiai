@@ -104,7 +104,15 @@ export function machinePaginationToQuery(p: MachineListPagination): Record<strin
 
 /** Every column the list can show, in the catalogue's order. */
 export const MACHINE_TABLE_COLUMNS: QTableColumn<Machine>[] = [
-  { name: 'hostname', label: 'Nom', field: 'hostname', align: 'left', sortable: true },
+  {
+    name: 'hostname',
+    label: 'Nom',
+    field: 'hostname',
+    align: 'left',
+    sortable: true,
+    classes: 'machine-name-cell',
+    headerClasses: 'machine-name-cell',
+  },
   { name: 'domain', label: 'Domaine', field: 'domain', align: 'left', sortable: true },
   // Sortable, and grouping is the point: a multi-site parc is read one site at
   // a time. Empty on a parc whose agents name no site.

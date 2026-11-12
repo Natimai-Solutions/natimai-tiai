@@ -77,6 +77,15 @@ async def merge_into(
         target.last_seen = source.last_seen
     if target.room_id is None:
         target.room_id = source.room_id
+    # The poste has been known since the older of the two records — what the
+    # maintenance cycle counts from before any visit (audit B03). And its
+    # maintenance settings follow when the kept record has none of its own.
+    if source.first_seen < target.first_seen:
+        target.first_seen = source.first_seen
+    if target.maintenance_cycle_days is None:
+        target.maintenance_cycle_days = source.maintenance_cycle_days
+    if target.maintenance_owner_id is None:
+        target.maintenance_owner_id = source.maintenance_owner_id
     # The maintenance record follows the journal: the latest visit counts.
     if source.last_maintenance_at is not None and (
         target.last_maintenance_at is None

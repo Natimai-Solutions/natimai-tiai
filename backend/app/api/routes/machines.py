@@ -18,7 +18,7 @@ from app.api.xlsx_export import xlsx_response
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
-from app.features.base import utcnow
+from app.features.base import contains, utcnow
 from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
 from app.features.command.models import Command, CommandStatus, CommandType
@@ -625,16 +625,15 @@ def _search_clause(search: str) -> ColumnElement[bool]:
     console's own notation. Only added when the term reads as hex at all: a
     hostname search must not pay for a REPLACE() over the whole fleet.
     """
-    pattern = f"%{search}%"
     clauses = [
-        col(Machine.hostname).ilike(pattern),
-        col(Machine.machine_uuid).ilike(pattern),
+        contains(col(Machine.hostname), search),
+        contains(col(Machine.machine_uuid), search),
         # Searchable too: going from an address in a firewall or DHCP
         # log back to the machine is the everyday use of this field.
-        col(Machine.ip_address).ilike(pattern),
+        contains(col(Machine.ip_address), search),
         # And from a vendor name: "which postes still run the antivirus
         # we are migrating off?" is the question a mixed parc asks.
-        col(Machine.av_product_name).ilike(pattern),
+        contains(col(Machine.av_product_name), search),
     ]
     compact = search.translate(_MAC_SEARCH_STRIP)
     try:
@@ -886,24 +885,24 @@ def _filtered_machines(
         # feeds it exact names from the fleet, but a hand-typed "eset" must find
         # "ESET Endpoint Security" too — vendors rename their products between
         # versions and a parc runs several at once.
-        stmt = stmt.where(col(Machine.av_product_name).ilike(f"%{filters.antivirus}%"))
+        stmt = stmt.where(contains(col(Machine.av_product_name), filters.antivirus))
     if filters.os_version:
         # Substring like the antivirus filter, and for the same reason: the
         # dropdown feeds exact values, but "Windows 10" typed by hand must
         # gather every build of it.
-        stmt = stmt.where(col(Machine.os_version).ilike(f"%{filters.os_version}%"))
+        stmt = stmt.where(contains(col(Machine.os_version), filters.os_version))
     if filters.hw_model:
         # Substring again: "OptiPlex" has to gather the 7010 and the 7020, which
         # is how a parc is actually reasoned about.
-        stmt = stmt.where(col(Machine.hw_model).ilike(f"%{filters.hw_model}%"))
+        stmt = stmt.where(contains(col(Machine.hw_model), filters.hw_model))
     if filters.hw_manufacturer:
         stmt = stmt.where(
-            col(Machine.hw_manufacturer).ilike(f"%{filters.hw_manufacturer}%")
+            contains(col(Machine.hw_manufacturer), filters.hw_manufacturer)
         )
     if filters.cpu_model:
         # Substring like the model: "i5-8" gathers a whole generation, which is
         # the granularity a renewal plan reasons at.
-        stmt = stmt.where(col(Machine.cpu_model).ilike(f"%{filters.cpu_model}%"))
+        stmt = stmt.where(contains(col(Machine.cpu_model), filters.cpu_model))
     if filters.hw_chassis_type:
         # Equality: the agent normalises the kind to a short closed vocabulary
         # (desktop, laptop…), and "desktop" as a substring of nothing else.

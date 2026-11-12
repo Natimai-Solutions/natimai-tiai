@@ -109,6 +109,36 @@ export interface SessionPayload {
   performed_at?: string | null;
   note?: string | null;
   items: { machine_id: string; note?: string | null }[];
+  /** Postes not done, with why: written to their own journal, cycle untouched. */
+  skipped?: { machine_id: string; note: string }[];
+}
+
+/** Something to do now: overdue or due soon. */
+export function isDue(state: string | null | undefined): boolean {
+  return state === 'overdue' || state === 'due_soon';
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A deadline as a date alone, in the browser's time zone. */
+export function dueDate(value: string): string {
+  return new Date(value).toLocaleDateString('fr-FR');
+}
+
+/**
+ * A due date as the technician wants it read (audit U22): how long it has been
+ * overdue when it has passed, the day it falls due otherwise — never to the
+ * second.
+ */
+export function dueLabel(dueAt: string | null, now: Date = new Date()): string {
+  if (!dueAt) return '';
+  const due = new Date(dueAt);
+  const late = Math.floor((now.getTime() - due.getTime()) / DAY_MS);
+  if (due.getTime() <= now.getTime()) {
+    if (late < 1) return "en retard depuis aujourd'hui";
+    return `en retard depuis ${late} jour${late > 1 ? 's' : ''}`;
+  }
+  return `échéance le ${dueDate(dueAt)}`;
 }
 
 export const MAINTENANCE_STATES: Record<MaintenanceState, { label: string; color: string }> = {

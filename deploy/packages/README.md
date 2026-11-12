@@ -130,6 +130,14 @@ Recommandé dès que possible, même pour un installateur d'éditeur : la
 signature couvre **la ligne de commande et chaque fichier**, `.iss` compris.
 La méthode A, elle, ne garantit que l'installateur.
 
+En méthode A, les fichiers qui accompagnent l'installateur ne peuvent être
+que des **données** (`.iss`, `.ini`, `.xml`, `.cab`…) : l'agent refuse un
+paquet non signé qui place à côté de l'exécutable un fichier que Windows
+pourrait charger ou lancer depuis ce dossier (`.dll`, `.ocx`, `.cpl`, `.sys`,
+`.manifest`, `.local`, `.config`, autre `.exe`, `.msi`, `.mst`, script…).
+Un tel paquet doit être signé (méthode B). Avant chaque exécution, l'agent
+retire aussi du dossier du paquet tout ce que le manifeste ne nomme pas.
+
 1. Page du paquet, carte *Confiance des postes* : **Télécharger le
    manifeste**. C'est un fichier JSON lisible, qui décrit exactement ce que
    les postes exécuteront.

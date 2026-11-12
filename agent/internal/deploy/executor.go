@@ -92,6 +92,9 @@ func executeWinget(ctx context.Context, env Env, policy Policy, action string, p
 }
 
 func executeFiles(ctx context.Context, env Env, policy Policy, action string, pkg *models.PackageDelivery) (Result, error) {
+	if !ValidPackageID(pkg.ID) {
+		return Result{}, fmt.Errorf("identifiant de paquet refusé : %q", pkg.ID)
+	}
 	raw, err := base64.StdEncoding.DecodeString(pkg.Manifest)
 	if err != nil || len(raw) == 0 {
 		return Result{}, errors.New("manifeste absent ou mal encodé")
@@ -137,14 +140,36 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 		method = "A"
 	}
 
-	dir := filepath.Join(env.PackagesDir(), pkg.ID)
+	files := manifest.Files
+	if method == "A" {
+		if step.Run == MsiExec {
+			// msiexec /x {code}: the agent built the command line, no file
+			// of the package is needed.
+			files = nil
+		} else if err := MethodAFiles(files, step.Run); err != nil {
+			// The manifest is the server's word here: nothing it names
+			// besides the file that runs may be something Windows would
+			// load or run from that folder (audit S02).
+			return Result{}, err
+		}
+	}
+
+	dir, err := PackageDir(env.PackagesDir(), pkg.ID)
+	if err != nil {
+		return Result{}, err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return Result{}, fmt.Errorf("dossier du paquet : %w", err)
+	}
+	// Whatever an earlier attempt left that this manifest does not name goes
+	// before anything runs: a failed run must not leave a file for the next.
+	if err := PruneDir(dir, files); err != nil {
 		return Result{}, fmt.Errorf("dossier du paquet : %w", err)
 	}
 	// What gets downloaded is what the manifest names — by hash. Under method
 	// A an unsigned manifest names them too, but the file that runs is then
-	// checked by Windows, and the others are data it reads.
-	for _, f := range manifest.Files {
+	// checked by Windows, and the others are data it reads (MethodAFiles).
+	for _, f := range files {
 		if err := env.Download(ctx, pkg.ID, f, filepath.Join(dir, f.Name)); err != nil {
 			return Result{}, fmt.Errorf("téléchargement de %s : %w", f.Name, err)
 		}
@@ -180,7 +205,8 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	if !ok {
 		return Result{}, fmt.Errorf("%s a renvoyé le code %d (%s)", step.Run, code, trustNote)
 	}
-	// The files have done their job; a failed run keeps them for a retry.
+	// The files have done their job; a failed run keeps them for a retry
+	// (PruneDir clears anything the next manifest does not name).
 	_ = os.RemoveAll(dir)
 
 	verb := map[string]string{"install": "Installation", "uninstall": "Désinstallation"}[action]

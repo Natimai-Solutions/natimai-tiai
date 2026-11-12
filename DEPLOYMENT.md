@@ -42,16 +42,19 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 curl http://localhost:8800/health
 ```
 
-L'override publie le backend en HTTP direct sur `0.0.0.0:8800` (Caddy
+L'override publie le backend en HTTP direct sur `127.0.0.1:8800` (Caddy
 court-circuité), bascule Caddy en `tls internal` et force `ENVIRONMENT=local`,
 ce qui neutralise la garde de démarrage qui refuse les secrets `changeme`.
+Pour y brancher des postes du réseau, ajouter `TIAI_DEV_BACKEND_BIND=0.0.0.0`
+dans `.env` : ce port est en clair, et l'en-tête `X-Forwarded-For` n'y est pas
+cru (seul Caddy, ou `TRUSTED_PROXIES`, en est digne).
 
 Côté poste, récupérer `tiai-agent-windows-amd64.exe` depuis la page
 *Releases* du dépôt (ou le compiler : `go build -o tiai-agent.exe .` dans
 `agent/`), puis le pointer directement sur le port HTTP — **pas** sur Caddy :
 
 ```powershell
-.\tiai-agent.exe init-config --api-url http://192.168.1.50:8800
+.\tiai-agent.exe init-config --api-url http://192.168.1.50:8800 --allow-insecure-http
 .\tiai-agent.exe run
 ```
 
@@ -123,8 +126,9 @@ docker compose up -d
   `deploy/.env`.
 - Hors `ENVIRONMENT=local`, le backend **refuse de démarrer** si `SECRET_KEY`,
   `ENROLLMENT_SECRET`, `POSTGRES_PASSWORD` ou `FIRST_ADMIN_PASSWORD` est vide ou
-  commence encore par `changeme`, ou si `SECRET_KEY` fait moins de 32 caractères
-  ou `ENROLLMENT_SECRET` moins de 16 (`openssl rand -hex 32` en produit un).
+  commence encore par `changeme`, ou si `SECRET_KEY` fait moins de 32 caractères,
+  `ENROLLMENT_SECRET` moins de 16 (`openssl rand -hex 32` en produit un) ou
+  `FIRST_ADMIN_PASSWORD` moins de `PASSWORD_MIN_LENGTH` (12 par défaut).
   `ENVIRONMENT` absent vaut `production` : un `.env` qui l'oublie reste gardé.
 - Les postes du domaine font déjà confiance à l'AC racine : aucun import de
   certificat n'est nécessaire côté agent.
@@ -278,6 +282,7 @@ Il n'est jamais committé.
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
 | `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `COMMAND_RETENTION_DAYS` | `365` | Conservation de l'historique des commandes, en jours (0 à 3650). Chaque matin, le worker supprime les commandes **terminées** (réussies, échouées, périmées) et les commandes délivrées restées sans réponse dont le dernier événement est plus ancien. Jamais une commande en attente ou en cours. `0` = conserver indéfiniment |
+| `COMMAND_UNANSWERED_HOURS` | `24` | Une commande remise au poste, ou annoncée en cours, sans verdict au-delà de ce délai (en heures, 1 à 720) est close en **échec « sans réponse du poste »** par le worker : agent arrêté ou mis à jour, poste éteint pendant l'exécution, agent trop ancien. Le serveur ne remet jamais une commande deux fois ; un verdict qui arrive plus tard remplace celui-ci |
 | `AUDIT_RETENTION_DAYS` | `730` | Conservation du journal d'audit, en jours (0 à 3650), purgé chaque matin par le worker. `0` = conserver indéfiniment, si la politique de l'établissement l'exige |
 | `MAINTENANCE_DEFAULT_CYCLE_DAYS` | `90` | Cycle de maintenance par défaut du parc, en jours, **valeur initiale seulement** : la page Paramètres de la console peut en écrire une autre, qui prend alors le dessus. Une salle ou un poste peuvent surcharger le cycle (0 = exclu de la maintenance) et le responsable ; le plus précis gagne |
 | `MAINTENANCE_DUE_SOON_DAYS` | `14` | Fenêtre « à échéance » : un poste est signalé ce nombre de jours avant sa date. Même règle : valeur initiale, modifiable dans Paramètres |
@@ -345,11 +350,14 @@ variables ci-dessous ne décrivent que la destination du paquet.
 |---|---|---|
 | `WOL_SUBNET_PREFIXLEN` | `24` | **Repli seulement.** Le masque vient normalement du poste lui-même : son agent le lit sur la carte et le remonte avec l'adresse, ce qui est la seule source juste sur un parc où cohabitent des /16 et des /24. Ce réglage ne sert qu'aux postes dont l'agent est antérieur à cette remontée, ou dont la carte n'a pas exposé de masque |
 | `WOL_BROADCAST_ADDRESSES` | *(vide)* | Adresses de diffusion explicites, séparées par des virgules. Renseignées, elles **remplacent** l'adresse déduite et servent pour *tous* les postes — la réponse pour un serveur qui doit joindre des segments où il n'a pas d'adresse, et le seul moyen de réveiller un poste qui n'a jamais remonté d'IP |
+| `WOL_ALLOWED_NETWORKS` | *(vide)* | Réseaux (CIDR, séparés par des virgules) vers lesquels le serveur accepte de diffuser un réveil déduit de l'adresse d'un poste. Vide : les plages privées (RFC 1918). Une adresse remontée hors de ces réseaux, ou un masque hors de /16 à /30, ne sert pas de destination |
 | `WOL_PORT` | `9` | Port UDP du paquet magique. Indifférent au matériel (la carte reconnaît le motif n'importe où dans la trame) ; ne compte que pour un pare-feu sur le trajet |
 | `WOL_PACKET_COUNT` | `3` | Nombre de copies émises. Une diffusion UDP n'accuse rien et se perd sans bruit ; trois copies coûtent trois datagrammes |
 | `WOL_RELAY_ENABLED` | `false` | **Serveur distant.** À `true`, le serveur n'émet plus rien lui-même : il confie le réveil au premier poste allumé du **même emplacement** que la cible (à défaut d'emplacement, du même domaine) qui le contacte, et c'est l'agent de ce poste qui diffuse le paquet magique sur ses propres sous-réseaux. Voir le point 4 de la section « Réveil des postes » |
 | `WOL_RELAY_TTL_MINUTES` | `10` | Délai laissé à un poste relais pour prendre un réveil en attente ; passé ce délai, il expire. Court à dessein : un réveil relayé une heure plus tard rencontre un poste que quelqu'un a déjà rallumé à la main |
 | `WOL_RELAY_SUBNET_GRACE_SECONDS` | `90` | Un poste du **même sous-réseau** que la cible prend le réveil aussitôt ; un poste d'un autre VLAN du même emplacement attend ce délai — un cycle d'agent — pour laisser la priorité au mieux placé. `0` supprime la préférence |
+| `WOL_RELAY_MIN_AGE_MINUTES` | `60` | Un poste enrôlé depuis moins longtemps ne relaie pas de réveil ; un poste « identité à confirmer », au token révoqué, ou d'agent plus ancien que `WOL_RELAY_MIN_AGENT_VERSION` (`1.0.0`) non plus |
+| `WOL_RELAY_CLAIM_TIMEOUT_SECONDS` | `180` | Un réveil pris par un relais qui ne rend pas de verdict dans ce délai retourne dans la file, pour qu'un autre poste le prenne |
 
 ### Alertes e-mail et e-mails de compte
 
@@ -507,7 +515,7 @@ Côté serveur :
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `PACKAGES_DIR` | `/data/packages` | Où les fichiers des paquets sont stockés, un par empreinte SHA-256. Monté sur le volume Docker `packages` |
-| `PACKAGE_MAX_BYTES` | `2147483648` (2 Gio) | Taille maximale d'un fichier déposé. Caddy accepte 2 Go sur la seule route de dépôt : relever les deux ensemble |
+| `PACKAGE_MAX_BYTES` | `2147483648` (2 Gio) | Taille maximale d'un fichier déposé. Caddy accepte 2 Gio par requête sur la seule route de dépôt, et la console envoie un fichier par requête : relever les deux ensemble |
 | `PACKAGE_MAX_CONCURRENT_DOWNLOADS` | `20` | Téléchargements servis en même temps par le processus de l'API. Au-delà, l'agent est prié de revenir (429) sans que sa commande échoue |
 
 Le volume `packages` **n'est pas dans le dump PostgreSQL** (voir ci-dessous) :
@@ -532,6 +540,12 @@ Vérifier que ça tourne :
 docker compose logs db-backup     # « sauvegarde OK : tiai-20260825-... »
 ls -lh backups/
 ```
+
+Les dumps sont lisibles du seul propriétaire (`umask 077`, `chmod 600`) : ils
+contiennent les hachés des mots de passe et tout l'inventaire du parc. Ils ne
+sont **pas chiffrés** — l'image PostgreSQL n'embarque ni `gpg` ni `openssl` —
+d'où la consigne qui suit : la copie hors de la machine doit l'être (archive
+chiffrée, coffre de sauvegarde, `gpg --symmetric`…).
 
 **Un dump sur le serveur ne protège pas du serveur.** Copier régulièrement
 `deploy/backups/` hors de la machine (rsync, robocopy, tâche planifiée — peu
@@ -893,7 +907,8 @@ que fait le bouton, pas parce qu'il ouvre quelque chose.
 `C:\ProgramData\Tiai\config.yaml` (chemin surchargeable par `--config`) :
 
 ```yaml
-api_base_url: http://192.168.1.50:8800   # http:// accepté ; https:// exige un certificat approuvé
+api_base_url: https://tiai.lycee.local    # https:// exige un certificat approuvé
+allow_insecure_http: false                # true seulement pour viser le port HTTP direct
 enrollment_secret: <secret partagé>       # préférer le registre (voir plus bas)
 machine_uuid: ""                          # vide = résolution auto
 heartbeat_interval_seconds: 60
@@ -1013,9 +1028,18 @@ nommée.
 
 ```powershell
 New-Item -Path 'HKLM:\SOFTWARE\Tiai' -Force | Out-Null
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'ApiBaseURL' -Value 'http://192.168.1.50:8800'
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'ApiBaseURL' -Value 'https://tiai.lycee.local'
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\Tiai' -Name 'EnrollmentSecret' -Value '<secret>'
 ```
+
+**`http://` est refusé par défaut** (agent publié après la v1.1.0) : le secret de flotte, puis le
+token, passeraient en clair sur le réseau. Une installation qui vise le port
+HTTP direct du backend doit le dire explicitement, par la valeur
+`AllowInsecureHTTP` (`REG_DWORD` 1) ou `allow_insecure_http: true` dans le YAML ;
+l'agent le rappelle alors à chaque démarrage dans son journal. **À poser avant
+de mettre à jour l'agent** sur un parc installé en `http://`, sinon les postes
+cessent de joindre le serveur. L'agent ne suit plus non plus les redirections
+(le 301 de Caddy de `http://` vers `https://` répond une erreur).
 
 Les quatre valeurs `Deploy*` ouvrent le **déploiement logiciel** sur le poste.
 Elles ne se lisent **que dans le registre**, jamais dans le YAML, et sont

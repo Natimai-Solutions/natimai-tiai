@@ -2,14 +2,14 @@
   <q-page padding>
     <MachinesToolbar
       :loading="loading"
-      :last-refreshed-at="lastRefreshedAt"
+      :last-refreshed-at="stale ? null : lastRefreshedAt"
       @columns="columnsOpen = true"
       @export="exportOpen = true"
       @refresh="reload"
     />
 
     <LoadErrorBanner
-      v-if="lastError && !lastRefreshedAt"
+      v-if="lastError && (!lastRefreshedAt || stale)"
       :error="lastError"
       :loading="loading"
       @retry="reload"
@@ -99,6 +99,7 @@ import { useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { useMachineBulkActions } from 'src/composables/useMachineBulkActions';
 import { useMachineColumnLayout } from 'src/composables/useMachineColumnLayout';
 import { useMachineFleetOptions } from 'src/composables/useMachineFleetOptions';
+import { resetMachineNavigation } from 'src/composables/useMachineNavigation';
 import { commandActionGroups } from 'src/services/commands';
 import { listMachines, type ListMachinesParams, type Machine } from 'src/services/machines';
 import { useAuthStore } from 'src/stores/auth';
@@ -195,8 +196,11 @@ function buildQuery(): Record<string, string> {
 // from the dashboard, a pasted URL, a widget change and a page turn all take
 // the same path.
 function pushQuery() {
-  // A filter change starts a new search: page 1 of it, sort kept.
+  // A filter change starts a new search: page 1 of it, sort kept — and no
+  // selection carried over from the previous one, whose postes may no longer
+  // be shown (audit B05).
   pagination.value = { ...pagination.value, page: 1 };
+  selected.value = [];
   void router.replace({ query: buildQuery() });
 }
 
@@ -210,6 +214,9 @@ function onRequest(evt: {
   pagination: { sortBy?: string | null; descending?: boolean; page?: number; rowsPerPage?: number };
 }) {
   const p = evt.pagination;
+  // Another page or order shows other postes: a selection made on the rows
+  // left behind would act on postes out of sight (audit B05).
+  selected.value = [];
   pagination.value = {
     sortBy: p.sortBy ?? null,
     descending: p.descending ?? true,
@@ -301,8 +308,15 @@ const { lastRefreshedAt, lastError, refreshNow } = useAutoRefresh(fetchMachines,
   paused: () => selected.value.length > 0,
 });
 
+// The rows on screen no longer answer the query in the URL: a load the user
+// asked for (a filter, a page, « Actualiser ») failed after an earlier one had
+// succeeded (audit B04).
+const stale = ref(false);
+
 /** The user-visible load: spinner on, and the auto-refresh countdown restarts
- * so the next background tick lands a full period away. */
+ * so the next background tick lands a full period away. Unlike a background
+ * refresh, its failure is said, and the rows of the previous query go: left
+ * under the new filter's chips, they would be acted upon as if they matched. */
 async function reload() {
   loading.value = true;
   try {
@@ -310,7 +324,18 @@ async function reload() {
   } finally {
     loading.value = false;
   }
+  stale.value = lastError.value !== null && lastRefreshedAt.value !== null;
+  if (stale.value) {
+    rows.value = [];
+    selected.value = [];
+    pagination.value = { ...pagination.value, rowsNumber: 0 };
+  }
 }
+
+// A later success, background or not, brings the table back in line.
+watch(lastRefreshedAt, () => {
+  if (lastError.value === null) stale.value = false;
+});
 
 const { askOpen, placeOpen, askSelection, placeSelection, runBulk } = useMachineBulkActions({
   selected,
@@ -319,6 +344,8 @@ const { askOpen, placeOpen, askSelection, placeSelection, runBulk } = useMachine
 });
 
 onMounted(() => {
+  // Back on the list: the next fiche opened walks this list as it is now.
+  resetMachineNavigation();
   applyQuery();
   void reload();
   loadFleetOptions();

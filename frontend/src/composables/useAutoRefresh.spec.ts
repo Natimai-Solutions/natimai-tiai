@@ -189,6 +189,21 @@ describe('useAutoRefresh', () => {
     expect(doc.removeEventListener).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
   });
 
+  it('does not restart after disposal when a refreshNow was in flight', async () => {
+    // The page goes away while « Rafraîchir » waits on its request: the
+    // countdown restarted at the end must not outlive the page (audit B11).
+    let resolve: () => void = () => {};
+    const refresh = vi.fn(() => new Promise<void>((r) => (resolve = r)));
+    const { value, dispose } = inScope(() => useAutoRefresh(refresh, { intervalMs: 1000 }));
+    const pending = value.refreshNow();
+    dispose();
+    resolve();
+    await pending;
+    refresh.mockClear();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   describe('a hidden tab', () => {
     it('costs nothing, and catches up on return', async () => {
       const doc = fakeDocument();
