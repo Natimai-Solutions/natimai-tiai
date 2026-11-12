@@ -6,8 +6,19 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# The Debian security fixes published since the base image was built: the
+# image is scanned (Trivy, HIGH and CRITICAL with a fix) and a base image a
+# few weeks old is enough to fail it — zlib1g in November 2026. Nothing else
+# is installed: curl served no healthcheck nor script (audit S32).
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
+
+# The account the API and the worker run as (audit S32). The entrypoint
+# starts as root only to hand it the packages volume — which an existing
+# deployment created root-owned — then drops to it for good (setpriv).
+RUN groupadd -g 10001 tiai \
+    && useradd -u 10001 -g tiai -M -d /nonexistent -s /usr/sbin/nologin tiai \
+    && mkdir -p /data/packages && chown tiai:tiai /data/packages
 
 # uv binary (https://docs.astral.sh/uv/guides/integration/docker/)
 COPY --from=ghcr.io/astral-sh/uv:0.9.7 /uv /bin/uv

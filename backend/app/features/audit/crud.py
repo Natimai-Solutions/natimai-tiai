@@ -9,6 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.net import current_client_ip
 from app.features.audit.models import AuditEntry
+from app.features.base import contains
 
 
 def record(
@@ -53,6 +54,7 @@ async def list_entries(
     until: datetime | None = None,
     page: int = 1,
     page_size: int = 50,
+    where: Any = None,
 ) -> tuple[list[AuditEntry], int]:
     """Newest-first page of the log, optionally filtered.
 
@@ -64,7 +66,7 @@ async def list_entries(
     if action:
         filters.append(col(AuditEntry.action) == action)
     if actor:
-        filters.append(col(AuditEntry.actor).ilike(f"%{_escape_like(actor)}%"))
+        filters.append(contains(col(AuditEntry.actor), actor))
     if resource_type:
         filters.append(col(AuditEntry.resource_type) == resource_type)
     if resource_id:
@@ -73,6 +75,8 @@ async def list_entries(
         filters.append(col(AuditEntry.at) >= since)
     if until is not None:
         filters.append(col(AuditEntry.at) < until)
+    if where is not None:
+        filters.append(where)
 
     total_result = await session.exec(
         select(func.count()).select_from(AuditEntry).where(*filters)
@@ -110,8 +114,3 @@ async def purge_before(session: AsyncSession, cutoff: datetime) -> int:
     result = await session.exec(delete(AuditEntry).where(col(AuditEntry.at) < cutoff))
     await session.commit()
     return result.rowcount or 0
-
-
-def _escape_like(value: str) -> str:
-    """Make ``%`` and ``_`` typed by the user match themselves."""
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

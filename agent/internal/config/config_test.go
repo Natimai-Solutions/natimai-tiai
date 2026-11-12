@@ -427,3 +427,26 @@ func TestSaveTokenReplacesThePreviousOne(t *testing.T) {
 		t.Errorf("temporary token file left behind (stat err: %v)", err)
 	}
 }
+
+// Audit S22: http:// only on purpose.
+func TestLoadRefusesHTTPUnlessAllowed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	write := func(body string) {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("api_base_url: http://tiai.lycee.local:8000\n")
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "clear") {
+		t.Fatalf("http accepted: %v", err)
+	}
+	write("api_base_url: http://tiai.lycee.local:8000\nallow_insecure_http: true\n")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("allowed http refused: %v", err)
+	}
+	write("api_base_url: ftp://tiai.lycee.local\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("ftp accepted")
+	}
+}

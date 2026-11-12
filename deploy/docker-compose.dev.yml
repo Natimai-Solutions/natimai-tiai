@@ -13,8 +13,11 @@
 
 services:
   backend:
+    # Sur la boucle locale par défaut (audit S28) : ce port est en clair et
+    # sans Caddy devant. Pour y brancher des agents d'autres postes, poser
+    # TIAI_DEV_BACKEND_BIND=0.0.0.0 en connaissance de cause.
     ports:
-      - "${TIAI_DEV_BACKEND_PORT:-8800}:8000"
+      - "${TIAI_DEV_BACKEND_BIND:-127.0.0.1}:${TIAI_DEV_BACKEND_PORT:-8800}:8000"
     environment:
       ENVIRONMENT: local
 

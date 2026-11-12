@@ -66,10 +66,15 @@ class ErrorCode(enum.StrEnum):
     GROUP_BUILTIN_PROTECTED = "group.builtin.protected"
     GROUP_PERMISSION_UNKNOWN = "group.permission.unknown"
     GROUP_SCOPE_UNKNOWN = "group.scope.unknown"
+    # The SMTP host or the Mailgun URL changed and the stored secret would
+    # follow it: it must be typed again in the same request.
+    SETTINGS_EMAIL_SECRET_REQUIRED = "settings.email.secret_required"
     PACKAGE_NOT_FOUND = "package.not_found"
     PACKAGE_INVALID = "package.invalid"
     PACKAGE_FILE_TOO_LARGE = "package.file.too_large"
     PACKAGE_FILE_NAME_INVALID = "package.file.name_invalid"
+    # The package exists, the file named does not (any more) — audit B36.
+    PACKAGE_FILE_NOT_FOUND = "package.file.not_found"
     PACKAGE_SIGNATURE_INVALID = "package.signature.invalid"
     PACKAGE_NOT_READY = "package.not_ready"
     PACKAGE_RETIRED = "package.retired"
@@ -85,6 +90,9 @@ class ErrorCode(enum.StrEnum):
     CHECK_NOT_FOUND = "check.not_found"
     CHECK_ALREADY_OPEN = "check.already_open"
     CHECK_CLOSED = "check.closed"
+    # The account a check is given to cannot read checks, or does not see
+    # the poste (audit S18).
+    CHECK_ASSIGNEE_OUT_OF_REACH = "check.assignee.out_of_reach"
     MAINTENANCE_NOT_FOUND = "maintenance.not_found"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"

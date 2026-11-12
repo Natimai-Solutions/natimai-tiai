@@ -51,7 +51,14 @@
           <q-card-section class="text-subtitle1">Définition</q-card-section>
           <q-form @submit="save">
             <q-card-section class="q-gutter-sm">
-              <q-input v-model="form.name" label="Nom" outlined dense :readonly="!canWrite" />
+              <q-input
+                v-model="form.name"
+                label="Nom"
+                outlined
+                dense
+                :rules="[rules.name]"
+                :readonly="!canWrite"
+              />
               <q-input
                 v-model="form.version"
                 label="Version"
@@ -65,6 +72,7 @@
                   label="Identifiant winget"
                   outlined
                   dense
+                  :rules="[rules.wingetId]"
                   :readonly="!canWrite"
                 />
                 <q-input
@@ -90,6 +98,7 @@
                   label="Arguments d'installation"
                   outlined
                   dense
+                  :rules="[(v: string) => rules.msiexecArgs(form.install_run, v)]"
                   :readonly="!canWrite"
                   hint='Ex. -s -f1"{dir}\ClientPRONOTE.iss" — {dir} = dossier des fichiers sur le poste'
                 />
@@ -107,6 +116,7 @@
                   label="Arguments de désinstallation"
                   outlined
                   dense
+                  :rules="[(v: string) => rules.msiexecArgs(form.uninstall_run, v)]"
                   :readonly="!canWrite"
                   hint="Avec msiexec : /x {code produit} /qn"
                 />
@@ -115,6 +125,7 @@
                   label="Codes de sortie acceptés"
                   outlined
                   dense
+                  :rules="[rules.successCodes]"
                   :readonly="!canWrite"
                   hint="Séparés par des virgules. 3010 et 1641 = redémarrage requis."
                 />
@@ -139,6 +150,9 @@
             <q-card-actions v-if="canWrite" align="right" class="q-px-md q-pb-md">
               <span v-if="pkg.signed" class="text-caption text-muted q-mr-md">
                 Modifier la ligne de commande annule la signature.
+              </span>
+              <span v-if="dirty" class="text-caption text-warn q-mr-md">
+                Modifications non enregistrées
               </span>
               <q-btn type="submit" color="primary" no-caps label="Enregistrer" :loading="saving" />
             </q-card-actions>
@@ -181,7 +195,10 @@
               />
             </template>
           </q-card-section>
-          <q-linear-progress v-if="uploading" :value="uploadProgress" color="primary" />
+          <div v-if="uploading" class="row items-center no-wrap q-px-md q-pb-sm">
+            <q-linear-progress :value="uploadProgress" color="primary" class="col" />
+            <q-btn flat dense no-caps label="Annuler" class="q-ml-sm" @click="cancelUpload" />
+          </div>
           <q-list separator>
             <q-item v-for="f in pkg.files" :key="f.name">
               <q-item-section>
@@ -310,15 +327,39 @@
               @click="loadCommands"
             />
           </q-card-section>
+          <!-- Each poste's latest deployment, counted over all of them: the
+               table below pages, this does not (audit B14). A chip filters. -->
+          <q-card-section v-if="summary && summary.postes" class="q-pt-none">
+            <div class="text-body2 q-mb-xs">
+              {{ summary.postes }} poste{{ summary.postes > 1 ? 's' : '' }} visé{{
+                summary.postes > 1 ? 's' : ''
+              }}
+              (dernier déploiement de chacun) :
+            </div>
+            <q-chip
+              v-for="(n, status) in summary.by_status"
+              :key="status"
+              clickable
+              dense
+              :outline="statusFilter !== status"
+              :color="STATUS_COLORS[status] ?? 'grey-7'"
+              :text-color="statusFilter === status ? 'white' : undefined"
+              :aria-pressed="statusFilter === status"
+              @click="toggleStatusFilter(status)"
+            >
+              {{ STATUS_LABELS[status] ?? status }} : {{ n }}
+            </q-chip>
+          </q-card-section>
           <q-table
+            v-model:pagination="commandPagination"
             :rows="commands"
             :columns="commandColumns"
             row-key="id"
             flat
             :loading="loadingCommands"
-            :rows-per-page-options="[0]"
-            hide-pagination
-            no-data-label="Jamais déployé"
+            :rows-per-page-options="[25, 50, 100]"
+            :no-data-label="statusFilter ? 'Aucun déploiement dans cet état' : 'Jamais déployé'"
+            @request="onCommandsRequest"
           >
             <template #body-cell-machine="cell">
               <q-td :props="cell">
@@ -354,7 +395,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { onBeforeRouteLeave } from 'vue-router';
+import { isCancel } from 'axios';
 import { useQuasar, type QTableColumn } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import PackageDeployDialog from 'src/components/package/PackageDeployDialog.vue';
@@ -367,6 +410,8 @@ import {
   downloadManifest,
   formatSize,
   getPackage,
+  getPackageSummary,
+  PACKAGE_FILE_MAX_BYTES,
   joinArgs,
   listPackageCommands,
   removeSignature,
@@ -378,6 +423,7 @@ import {
   updatePackage,
   uploadPackageFiles,
   type Package,
+  type PackageSummary,
 } from 'src/services/packages';
 import { useAuthStore } from 'src/stores/auth';
 import { downloadBlob, formatDateTime } from 'src/utils/format';
@@ -448,9 +494,10 @@ const commandColumns: QTableColumn<Command>[] = [
   { name: 'result', label: 'Résultat', field: 'id', align: 'left' },
 ];
 
-function fill(p: Package) {
-  pkg.value = p;
-  Object.assign(form, {
+type PackageForm = typeof form;
+
+function formOf(p: Package): PackageForm {
+  return {
     name: p.name,
     version: p.version ?? '',
     winget_id: p.winget_id ?? '',
@@ -462,8 +509,51 @@ function fill(p: Package) {
     success_codes: p.success_codes.join(', '),
     detect_name: p.detect_name ?? '',
     notes: p.notes ?? '',
-  });
+  };
 }
+
+// The form as last filled from the server: what « modifié » is measured from.
+const saved = ref<PackageForm>({ ...form });
+const dirty = computed(() =>
+  (Object.keys(form) as (keyof PackageForm)[]).some((k) => form[k] !== saved.value[k]),
+);
+
+/** The whole form from the server: after a load or a save. */
+function fill(p: Package) {
+  pkg.value = p;
+  const next = formOf(p);
+  Object.assign(form, next);
+  saved.value = { ...next };
+}
+
+/**
+ * The package after a side action (a file, a signature, retirement): its
+ * files and signature change, the definition the reader is typing stays —
+ * only the fields left untouched follow the server (audit U05).
+ */
+function refresh(p: Package) {
+  pkg.value = p;
+  const next = formOf(p);
+  for (const k of Object.keys(next) as (keyof PackageForm)[]) {
+    if (form[k] === saved.value[k]) Object.assign(form, { [k]: next[k] });
+  }
+  saved.value = { ...next };
+}
+
+onBeforeRouteLeave(() => {
+  if (!dirty.value) return true;
+  return new Promise<boolean>((resolve) => {
+    $q.dialog({
+      title: 'Modifications non enregistrées',
+      message: 'La définition du paquet a été modifiée sans être enregistrée. Quitter la page ?',
+      cancel: { flat: true, noCaps: true, label: 'Rester' },
+      ok: { flat: true, noCaps: true, label: 'Quitter sans enregistrer', color: 'negative' },
+      persistent: true,
+    })
+      .onOk(() => resolve(true))
+      .onCancel(() => resolve(false));
+  });
+});
 
 async function load() {
   loadError.value = null;
@@ -475,16 +565,61 @@ async function load() {
   void loadCommands();
 }
 
+const summary = ref<PackageSummary | null>(null);
+const statusFilter = ref<string | null>(null);
+const commandPagination = ref({ page: 1, rowsPerPage: 25, rowsNumber: 0 });
+
 async function loadCommands() {
   loadingCommands.value = true;
+  const p = commandPagination.value;
   try {
-    commands.value = (await listPackageCommands(props.id)).items;
+    const [list, tally] = await Promise.all([
+      listPackageCommands(props.id, p.page, p.rowsPerPage, statusFilter.value),
+      getPackageSummary(props.id).catch(() => null),
+    ]);
+    commands.value = list.items;
+    commandPagination.value = { ...commandPagination.value, rowsNumber: list.total };
+    summary.value = tally;
   } catch {
     commands.value = [];
   } finally {
     loadingCommands.value = false;
   }
 }
+
+function onCommandsRequest(req: { pagination: { page: number; rowsPerPage: number } }) {
+  commandPagination.value = {
+    ...commandPagination.value,
+    page: req.pagination.page,
+    rowsPerPage: req.pagination.rowsPerPage,
+  };
+  void loadCommands();
+}
+
+function toggleStatusFilter(status: string) {
+  statusFilter.value = statusFilter.value === status ? null : status;
+  commandPagination.value = { ...commandPagination.value, page: 1 };
+  void loadCommands();
+}
+
+// What the server would refuse, said under the field before sending
+// (audit U03) — the same rules as backend/app/api/routes/packages.py.
+const rules = {
+  name: (v: string) => !!v.trim() || 'Nom requis',
+  wingetId: (v: string) =>
+    /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(v.trim()) ||
+    'Identifiant winget invalide (ex. Mozilla.Firefox)',
+  msiexecArgs: (run: string | null, v: string) =>
+    run !== 'msiexec' ||
+    splitArgs(v).length > 0 ||
+    'Avec msiexec, indiquer les arguments (ex. /i "{dir}\\app.msi" /qn)',
+  successCodes: (v: string) => {
+    const parts = v.split(/[,;\s]+/).filter(Boolean);
+    if (!parts.length) return 'Au moins un code (ex. 0, 3010, 1641)';
+    if (parts.length > 32) return '32 codes au plus';
+    return parts.every((p) => /^-?\d+$/.test(p)) || 'Des nombres entiers, séparés par des virgules';
+  },
+};
 
 function notifyError(e: unknown, fallback: string) {
   $q.notify({ type: 'negative', message: apiErrorMessage(e, fallback) });
@@ -535,30 +670,76 @@ async function save() {
   }
 }
 
+// Cancels the upload in progress; null when none is.
+let uploadAbort: AbortController | null = null;
+
+/**
+ * One request per file, in turn: the proxy bounds a request, the server a
+ * file — several large files sent together would be refused after the whole
+ * transfer (audit U16, B31). Sizes are checked before anything leaves.
+ */
 async function upload() {
   if (!pkg.value || !toUpload.value?.length) return;
+  const files = [...toUpload.value];
+  const tooBig = files.filter((f) => f.size > PACKAGE_FILE_MAX_BYTES);
+  if (tooBig.length) {
+    $q.notify({
+      type: 'negative',
+      message: `Trop volumineux : ${tooBig.map((f) => f.name).join(', ')}`,
+      caption: `Limite : ${formatSize(PACKAGE_FILE_MAX_BYTES)} par fichier.`,
+    });
+    return;
+  }
+  const total = files.reduce((n, f) => n + f.size, 0) || 1;
   uploading.value = true;
   uploadProgress.value = 0;
+  uploadAbort = new AbortController();
+  let sent = 0;
   try {
-    const updated = await uploadPackageFiles(pkg.value.id, toUpload.value, (f) => {
-      uploadProgress.value = f;
-    });
-    // The first executable dropped is, nine times out of ten, the one to run.
-    if (!updated.install_run) {
-      const exe = updated.files.find((f) => /\.(exe|msi)$/i.test(f.name));
+    for (const file of files) {
+      const updated = await uploadPackageFiles(
+        pkg.value.id,
+        [file],
+        (f) => {
+          uploadProgress.value = (sent + f * file.size) / total;
+        },
+        uploadAbort.signal,
+      );
+      sent += file.size;
+      refresh(updated);
+    }
+    // The first executable dropped is, nine times out of ten, the one to run:
+    // proposed, to be saved with the rest of the definition.
+    if (pkg.value && !form.install_run) {
+      const exe = pkg.value.files.find((f) => /\.(exe|msi)$/i.test(f.name));
       if (exe) form.install_run = exe.name;
     }
-    const keepRun = form.install_run;
-    fill(updated);
-    form.install_run = keepRun;
     toUpload.value = null;
-    $q.notify({ type: 'positive', message: 'Fichiers déposés' });
+    $q.notify({
+      type: 'positive',
+      message: files.length > 1 ? 'Fichiers déposés' : 'Fichier déposé',
+      ...(dirty.value ? { caption: 'Pensez à enregistrer la définition.' } : {}),
+    });
   } catch (e) {
-    notifyError(e, 'Dépôt impossible');
+    if (isCancel(e)) {
+      $q.notify({
+        type: 'info',
+        message: sent ? 'Dépôt interrompu : les fichiers déjà envoyés sont gardés' : 'Dépôt annulé',
+      });
+    } else {
+      notifyError(e, 'Dépôt impossible');
+    }
   } finally {
     uploading.value = false;
+    uploadAbort = null;
   }
 }
+
+function cancelUpload() {
+  uploadAbort?.abort();
+}
+
+onBeforeUnmount(cancelUpload);
 
 function removeFile(name: string) {
   if (!pkg.value) return;
@@ -571,7 +752,7 @@ function removeFile(name: string) {
   }).onOk(() => {
     void (async () => {
       try {
-        fill(await deletePackageFile(id, name));
+        refresh(await deletePackageFile(id, name));
       } catch (e) {
         notifyError(e, 'Suppression impossible');
       }
@@ -594,7 +775,7 @@ async function sendSignature(file: File | null) {
   if (!pkg.value || !file) return;
   try {
     const document: unknown = JSON.parse(await file.text());
-    fill(await attachSignature(pkg.value.id, document));
+    refresh(await attachSignature(pkg.value.id, document));
     $q.notify({ type: 'positive', message: 'Signature vérifiée et jointe au paquet' });
   } catch (e) {
     notifyError(
@@ -609,7 +790,7 @@ async function sendSignature(file: File | null) {
 async function unsign() {
   if (!pkg.value) return;
   try {
-    fill(await removeSignature(pkg.value.id));
+    refresh(await removeSignature(pkg.value.id));
   } catch (e) {
     notifyError(e, 'Opération impossible');
   }
@@ -618,7 +799,7 @@ async function unsign() {
 async function toggleRetired() {
   if (!pkg.value) return;
   try {
-    fill(
+    refresh(
       pkg.value.retired_at ? await restorePackage(pkg.value.id) : await retirePackage(pkg.value.id),
     );
   } catch (e) {

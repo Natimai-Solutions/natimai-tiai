@@ -296,7 +296,9 @@ import RoomFormDialog from 'src/components/room/RoomFormDialog.vue';
 import MaintenanceSessionDialog from 'src/components/maintenance/MaintenanceSessionDialog.vue';
 import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
 import {
+  dueDate,
   getRoomMaintenance,
+  isDue,
   listSessions,
   maintenanceStateColor,
   maintenanceStateLabel,
@@ -384,8 +386,10 @@ const sessionMachines = computed(() =>
     id: m.id,
     hostname: m.hostname ?? m.machine_uuid,
     hint: `${maintenanceStateLabel(m.maintenance_state)}${
-      m.last_maintenance_at ? ` · dernière le ${formatDateTime(m.last_maintenance_at)}` : ''
+      m.last_maintenance_at ? ` · dernière le ${dueDate(m.last_maintenance_at)}` : ''
     }`,
+    // Ticked: what is due; a poste excluded from the cycle never (audit B09).
+    preselect: isDue(m.maintenance_state),
   })),
 );
 
@@ -407,15 +411,33 @@ async function saveMaintenance(payload: MaintenanceSettingsPayload) {
   await load();
 }
 
+/**
+ * Every poste of the room, page after page: the server serves 200 at most per
+ * request, and a room beyond that was shown — and maintained — cut short,
+ * without a word (audit U24).
+ */
+async function roomMachines(): Promise<Machine[]> {
+  const out: Machine[] = [];
+  for (let page = 1; page <= 50; page++) {
+    const list = await listMachines({
+      room_id: props.id,
+      sort_by: 'hostname',
+      sort_desc: false,
+      page,
+      page_size: 200,
+    });
+    out.push(...list.items);
+    if (out.length >= list.total || list.items.length === 0) break;
+  }
+  return out;
+}
+
 async function load() {
   loading.value = true;
   try {
-    const [r, list] = await Promise.all([
-      getRoom(props.id),
-      listMachines({ room_id: props.id, sort_by: 'hostname', sort_desc: false, page_size: 200 }),
-    ]);
+    const [r, all] = await Promise.all([getRoom(props.id), roomMachines()]);
     room.value = r;
-    machines.value = list.items;
+    machines.value = all;
     void loadMaintenance();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });

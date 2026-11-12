@@ -91,7 +91,7 @@
             outlined
             dense
             autocomplete="new-password"
-            :hint="`${PASSWORD_MIN_LENGTH} caractères minimum`"
+            :hint="`${passwordMin} caractères minimum`"
             :rules="[required, longEnough]"
           />
           <q-input
@@ -174,6 +174,7 @@
 </template>
 
 <script setup lang="ts">
+import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
@@ -186,10 +187,11 @@ import {
   type EmailPreference,
 } from 'src/services/auth';
 import { apiErrorMessage } from 'src/services/errors';
-import { PASSWORD_MIN_LENGTH } from 'src/services/users';
 import { useAuthStore } from 'src/stores/auth';
 import { EMAIL_PREFERENCE_OPTIONS, formatDateTime, timeAgoLabel } from 'src/utils/format';
 import { describeUserAgent } from 'src/utils/userAgent';
+
+const { passwordMin } = usePasswordPolicy();
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -244,7 +246,7 @@ watch(
 
 const required = (v: string) => !!v || 'Requis';
 const longEnough = (v: string) =>
-  v.length >= PASSWORD_MIN_LENGTH || `${PASSWORD_MIN_LENGTH} caractères minimum`;
+  v.length >= passwordMin.value || `${passwordMin.value} caractères minimum`;
 const matches = (v: string) => v === newPassword.value || 'Les mots de passe ne correspondent pas';
 
 async function onSubmit() {

@@ -40,6 +40,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     from sqlmodel.ext.asyncio.session import AsyncSession
 
     from app.core.db import engine
+    from app.features.package import crud as package_crud
 
     await assert_not_superuser()
     try:
@@ -49,12 +50,28 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         logging.getLogger(__name__).exception(
             "Could not read the e-mail settings at startup; using the environment"
         )
+    # Package files nothing wants any more — deployments that expired or
+    # closed while nothing else triggered a sweep (audit S09). Best effort.
+    try:
+        async with AsyncSession(engine) as session:
+            await package_crud.sweep_store(session)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not sweep the package store")
     yield
 
 
+# The schema and its pages describe every route of the API: in local
+# development, or where a deployment asks for them (audit S36).
+def openapi_enabled() -> bool:
+    return settings.ENVIRONMENT == "local" or settings.EXPOSE_OPENAPI
+
+
+_openapi = openapi_enabled()
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    openapi_url=f"{settings.API_V1_STR}/openapi.json" if _openapi else None,
+    docs_url="/docs" if _openapi else None,
+    redoc_url="/redoc" if _openapi else None,
     lifespan=lifespan,
 )
 

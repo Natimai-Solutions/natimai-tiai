@@ -13,6 +13,8 @@ domain can put that frame on the wire.
 
 import ipaddress
 
+from app.core.config import settings
+
 # An EUI-48 address, and the only kind a magic packet can carry.
 MAC_LENGTH = 6
 
@@ -80,6 +82,33 @@ def magic_packet(mac: str) -> bytes:
     return _SYNC_STREAM + raw * _MAC_REPEATS
 
 
+PREFIX_MIN = 16
+PREFIX_MAX = 30
+
+
+def address_allowed(ip: str | None) -> bool:
+    """Whether a reported address may be woken from the server: in
+    ``WOL_ALLOWED_NETWORKS`` when it is set, else a private IPv4 address."""
+    if not ip:
+        return False
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if not isinstance(address, ipaddress.IPv4Address):
+        return False
+    allowed = settings.WOL_ALLOWED_NETWORKS
+    if allowed:
+        for network in allowed:
+            try:
+                if address in ipaddress.ip_network(network, strict=False):
+                    return True
+            except ValueError:
+                continue
+        return False
+    return address.is_private and not address.is_loopback and not address.is_link_local
+
+
 def broadcast_for(ip: str | None, prefixlen: int) -> str | None:
     """The broadcast address of the subnet ``ip`` sits on, or None.
 
@@ -135,6 +164,18 @@ def destinations_for(
     """
     if configured:
         return list(configured)
+    # From here the address is the agent's word: it may only lead to a private
+    # subnet (or one the deployment lists), never to a host or a broadcast
+    # elsewhere (audit S35).
+    if not address_allowed(ip):
+        return []
+    # A reported mask outside what a LAN segment is (/16 to /30) is not taken:
+    # /1 would make 255.255.255.255, /32 a unicast to any host, /8 a
+    # broadcast over a whole 10.0.0.0/8.
+    if reported_prefixlen is not None and not (
+        PREFIX_MIN <= reported_prefixlen <= PREFIX_MAX
+    ):
+        reported_prefixlen = None
     # The fallback runs when the reported mask yields nothing usable, not only
     # when none was reported: a stored value that does not fit the address
     # (an IPv6 prefix against an IPv4, say) must degrade to the default rather

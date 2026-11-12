@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DISK_OPTIONS,
+  diskOptionsFor,
   AGENT_OUTDATED,
   ROOM_NONE,
   clearMachineFilter,
@@ -115,12 +117,20 @@ describe('machineFiltersToQuery / machineFiltersFromQuery', () => {
       wu_status: 'later',
       scan_type: 'deep',
       hw_chassis_type: 'spaceship',
-      disk_free_below: '15',
+      disk_free_below: '150',
       usage_days: '365',
       software_id: '-3',
       location_mismatch: 'yes',
     });
     expect(f).toEqual(emptyMachineFilters());
+  });
+
+  it('keeps any threshold the settings accept, as the dashboard card sends it', () => {
+    expect(machineFiltersFromQuery({ disk_free_below: '15' }).diskFree).toBe(15);
+    expect(machineFiltersFromQuery({ disk_free_below: '0' }).diskFree).toBeNull();
+    expect(machineFiltersFromQuery({ disk_free_below: '7.5' }).diskFree).toBeNull();
+    expect(diskOptionsFor(15).map((o) => o.value)).toEqual([null, 10, 15, 20]);
+    expect(diskOptionsFor(10)).toBe(DISK_OPTIONS);
   });
 
   it('settles an unknown scan age on the first one offered', () => {

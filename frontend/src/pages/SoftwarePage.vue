@@ -40,6 +40,8 @@
       </div>
     </div>
 
+    <LoadErrorBanner v-if="loadError" :error="loadError" :loading="loading" @retry="load" />
+
     <q-card flat bordered>
       <q-card-section>
         <q-input
@@ -64,7 +66,7 @@
         :loading="loading"
         flat
         :rows-per-page-options="[25, 50, 100]"
-        no-data-label="Aucun logiciel inventorié pour l'instant."
+        :no-data-label="noDataLabel"
         @request="onRequest"
       >
         <!-- The count is the column the page exists for, so it is a link and not
@@ -83,7 +85,7 @@
           </q-td>
         </template>
         <template #body-cell-first_seen="props">
-          <q-td :props="props">{{ formatDate(props.value) }}</q-td>
+          <q-td :props="props">{{ localDate(props.value) }}</q-td>
         </template>
       </q-table>
     </q-card>
@@ -91,8 +93,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import {
   exportSoftware,
   listSoftware,
@@ -101,9 +105,13 @@ import {
   type SoftwareSortField,
 } from 'src/services/software';
 import { apiErrorMessage } from 'src/services/errors';
-import { downloadBlob, formatDate } from 'src/utils/format';
+import { downloadBlob } from 'src/utils/format';
+import { queryValue } from 'src/utils/machineQuery';
 
 const $q = useQuasar();
+const route = useRoute();
+const router = useRouter();
+const loadError = ref<unknown>(null);
 
 const items = ref<SoftwareEntry[]>([]);
 const loading = ref(false);
@@ -140,8 +148,55 @@ const columns: QTableColumn<SoftwareEntry>[] = [
   },
 ];
 
+const SORT_FIELDS: SoftwareSortField[] = ['name', 'version', 'publisher', 'machine_count'];
+
+/**
+ * The search, the order and the page live in the URL (audit B20): « 148
+ * postes » opens the machine list, and coming back must find the catalogue
+ * where the reader left it.
+ */
+function applyQuery() {
+  const q = route.query;
+  search.value = queryValue(q.search) ?? '';
+  const sort = queryValue(q.sort) as SoftwareSortField | null;
+  const page = Number(queryValue(q.page) ?? '1');
+  const size = Number(queryValue(q.page_size) ?? '25');
+  pagination.value = {
+    ...pagination.value,
+    sortBy: sort && SORT_FIELDS.includes(sort) ? sort : 'machine_count',
+    descending: queryValue(q.desc) !== 'false',
+    page: Number.isInteger(page) && page > 0 ? page : 1,
+    rowsPerPage: [25, 50, 100].includes(size) ? size : 25,
+  };
+}
+
+function pushQuery() {
+  const p = pagination.value;
+  const query: Record<string, string> = {};
+  if (search.value) query.search = search.value;
+  if (p.sortBy !== 'machine_count') query.sort = p.sortBy;
+  if (!p.descending) query.desc = 'false';
+  if (p.page > 1) query.page = String(p.page);
+  if (p.rowsPerPage !== 25) query.page_size = String(p.rowsPerPage);
+  void router.replace({ query });
+}
+
+/** A first-seen instant, as the day it was in the reader's time zone. */
+function localDate(value: string | null): string {
+  return value ? new Date(value).toLocaleDateString('fr-FR') : '—';
+}
+
+// Three different empty tables, three different sentences (audit U09).
+const noDataLabel = computed(() => {
+  if (loadError.value) return 'Le catalogue n’a pas pu être chargé.';
+  if (search.value) return `Aucun logiciel ne correspond à « ${search.value} ».`;
+  return "Aucun logiciel inventorié pour l'instant.";
+});
+
 async function load() {
   loading.value = true;
+  loadError.value = null;
+  pushQuery();
   try {
     const p = pagination.value;
     const data = await listSoftware({
@@ -154,7 +209,8 @@ async function load() {
     items.value = data.items;
     pagination.value = { ...pagination.value, rowsNumber: data.total };
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec du chargement') });
+    loadError.value = e;
+    items.value = [];
   } finally {
     loading.value = false;
   }
@@ -192,5 +248,8 @@ async function doExport(format: SoftwareExportFormat) {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  applyQuery();
+  void load();
+});
 </script>

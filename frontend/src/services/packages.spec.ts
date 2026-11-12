@@ -10,6 +10,7 @@ import {
   deployable,
   formatSize,
   joinArgs,
+  getPackageSummary,
   listPackageCommands,
   splitArgs,
   trustMethod,
@@ -75,6 +76,16 @@ describe('trust method', () => {
     expect(trustMethod(pkg())).toBe('none');
     // A signed MSI is not method A: only executables are.
     expect(trustMethod(pkg({ install_run: 'app.msi', publisher_name: 'X' }))).toBe('none');
+    // A DLL beside the executable: the agent refuses method A (audit S02).
+    const file = (name: string) => ({
+      name,
+      sha256: 'a'.repeat(64),
+      size: 1,
+      publisher_name: null,
+    });
+    const pronote = { publisher_name: 'INDEX EDUCATION SAS' };
+    expect(trustMethod(pkg({ ...pronote, files: [file('ClientPRONOTE.iss')] }))).toBe('publisher');
+    expect(trustMethod(pkg({ ...pronote, files: [file('VERSION.DLL')] }))).toBe('none');
   });
 
   it('deploys only what is complete and not retired', () => {
@@ -112,7 +123,19 @@ describe('deployment calls', () => {
     vi.mocked(api.get).mockResolvedValue({ data: { items: [], total: 0 } });
     await listPackageCommands('p-1');
     expect(api.get).toHaveBeenCalledWith('/commands', {
-      params: { package_id: 'p-1', page: 1, page_size: 50 },
+      params: { package_id: 'p-1', page: 1, page_size: 25 },
+    });
+    await listPackageCommands('p-1', 3, 50, 'failed');
+    expect(api.get).toHaveBeenLastCalledWith('/commands', {
+      params: { package_id: 'p-1', page: 3, page_size: 50, status: 'failed' },
+    });
+  });
+
+  it('reads the tally of a package', async () => {
+    vi.mocked(api.get).mockResolvedValue({ data: { postes: 0, by_status: {}, by_action: {} } });
+    await getPackageSummary('p-1');
+    expect(api.get).toHaveBeenLastCalledWith('/commands/package-summary', {
+      params: { package_id: 'p-1' },
     });
   });
 });

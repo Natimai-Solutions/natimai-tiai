@@ -112,6 +112,34 @@ async def test_deleting_a_building_keeps_its_rooms_and_their_site(client, db_ses
     assert after["effective_location"] == "Lycée de Taravao"
 
 
+async def test_deleting_a_building_renames_a_room_whose_name_is_taken(
+    client, db_session
+):
+    """Audit B07: two buildings with a « Salle 101 » each; deleting both used
+    to fail on the second with a 500."""
+    admin = await _admin(client, db_session)
+    a = await _building(client, admin, "Bâtiment A")
+    b = await _building(client, admin, "Bâtiment B")
+    await _room(client, admin, "Salle 101", building_id=a["id"])
+    await _room(client, admin, "Salle 101", building_id=b["id"])
+    assert (
+        await client.delete(f"/api/v1/buildings/{a['id']}", headers=admin)
+    ).status_code == 204
+    resp = await client.delete(f"/api/v1/buildings/{b['id']}", headers=admin)
+    assert resp.status_code == 204, resp.text
+    names = sorted(
+        r["name"] for r in (await client.get("/api/v1/rooms", headers=admin)).json()
+    )
+    assert names == ["Salle 101", "Salle 101 (Bâtiment B)"]
+    log = (await client.get("/api/v1/audit", headers=admin)).json()["items"]
+    deleted = next(
+        e
+        for e in log
+        if e["action"] == "building.delete" and e["details"]["name"] == "Bâtiment B"
+    )
+    assert deleted["details"]["renamed"] == ["Salle 101 → Salle 101 (Bâtiment B)"]
+
+
 async def test_room_name_is_unique_per_building(client, db_session):
     admin = await _admin(client, db_session)
     b = await _building(client, admin, "Bâtiment B")
@@ -307,3 +335,76 @@ async def test_merge_keeps_the_room_of_the_duplicate(client, db_session):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["room_name"] == "B12"
+
+
+async def test_a_room_leaving_its_building_keeps_its_site(client, db_session):
+    """Audit B22: as deleting the building does."""
+    admin = await _admin(client, db_session)
+    b = await _building(client, admin, "Bât A", location="Lycée A")
+    room = await _room(client, admin, "Salle 1", building_id=b["id"])
+    out = await client.patch(
+        f"/api/v1/rooms/{room['id']}", headers=admin, json={"building_id": None}
+    )
+    assert out.status_code == 200, out.text
+    assert out.json()["location"] == "Lycée A"
+
+
+async def test_concurrent_checks_and_closings_do_not_collide(
+    client, db_session, monkeypatch
+):
+    """Audit B21: a second request on a poste is a 409, a batch skips the
+    poste asked meanwhile, and a second closing writes no second line."""
+    from sqlmodel import col, select
+
+    from app.features.check.models import MachineCheck
+    from app.features.intervention.models import Intervention
+
+    admin = await _admin(client, db_session)
+    m = await _machine(db_session, "PC-1")
+    first = await client.post(f"/api/v1/machines/{m}/check", headers=admin, json={})
+    assert first.status_code == 201, first.text
+    # The pre-check passes when the other request is not committed yet: the
+    # index is the last word. Simulated by removing the pre-check's sight.
+    from app.features.check import crud as check_crud
+
+    async def blind(session, machine_id):
+        return None
+
+    monkeypatch.setattr(check_crud, "open_for_machine", blind)
+    second = await client.post(f"/api/v1/machines/{m}/check", headers=admin, json={})
+    monkeypatch.undo()
+    assert second.status_code == 409, second.text
+    assert second.json()["error"]["code"] == "check.already_open"
+
+    m2 = await _machine(db_session, "PC-2")
+    bulk = await client.post(
+        "/api/v1/checks/bulk",
+        headers=admin,
+        json={"machine_ids": [m, m2]},
+    )
+    assert bulk.status_code == 201, bulk.text
+    assert bulk.json() == {"created": 1, "skipped": 1}
+
+    check_id = first.json()["id"]
+    closed = await client.post(
+        f"/api/v1/checks/{check_id}/close", headers=admin, json={"note": "ok"}
+    )
+    assert closed.status_code == 200, closed.text
+    again = await client.post(
+        f"/api/v1/checks/{check_id}/close", headers=admin, json={"note": "ok"}
+    )
+    assert again.status_code == 409
+    lines = (
+        await db_session.exec(
+            select(Intervention).where(
+                col(Intervention.check_id) == uuid.UUID(check_id)
+            )
+        )
+    ).all()
+    assert len(lines) == 1
+    rows = (
+        await db_session.exec(
+            select(MachineCheck).where(col(MachineCheck.machine_id) == uuid.UUID(m))
+        )
+    ).all()
+    assert len(rows) == 1

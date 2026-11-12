@@ -7,6 +7,8 @@ vi.mock('boot/axios', () => ({
 import { api } from 'boot/axios';
 import {
   cycleLabel,
+  dueLabel,
+  isDue,
   getDue,
   maintenanceStateLabel,
   recordSession,
@@ -60,5 +62,27 @@ describe('labels', () => {
   it('says where a cycle comes from, and when it excludes', () => {
     expect(cycleLabel(90, 'room')).toBe('90 jours (hérité de la salle)');
     expect(cycleLabel(0, 'machine')).toBe('exclu de la maintenance (propre au poste)');
+  });
+});
+
+describe('due dates (audit U22)', () => {
+  const now = new Date('2026-11-11T12:00:00Z');
+
+  it('says how long a passed date has been overdue', () => {
+    expect(dueLabel('2026-11-01T12:00:00Z', now)).toBe('en retard depuis 10 jours');
+    expect(dueLabel('2026-11-10T11:00:00Z', now)).toBe('en retard depuis 1 jour');
+    expect(dueLabel('2026-11-11T08:00:00Z', now)).toBe("en retard depuis aujourd'hui");
+  });
+
+  it('gives a future date as a day, without the time', () => {
+    expect(dueLabel('2026-12-24T12:00:00Z', now)).toMatch(/^échéance le \d{2}\/\d{2}\/2026$/);
+    expect(dueLabel(null, now)).toBe('');
+  });
+
+  it('counts overdue and due soon as to do', () => {
+    expect(isDue('overdue')).toBe(true);
+    expect(isDue('due_soon')).toBe(true);
+    expect(isDue('ok')).toBe(false);
+    expect(isDue('excluded')).toBe(false);
   });
 });

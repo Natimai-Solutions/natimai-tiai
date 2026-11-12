@@ -31,6 +31,16 @@ def test_neutralize_turns_none_into_an_empty_cell():
     assert neutralize(None) == ""
 
 
+def test_xlsx_drops_control_characters_instead_of_failing():
+    """Audit S11: one control character reported by an agent (a software
+    publisher, a hostname) must not turn the whole export into a 500."""
+    resp = xlsx_response("t.xlsx", ["Nom"], [["Contoso\x00\x1bLtd\x07"], ["ok\tlà"]])
+    sheet = load_workbook(io.BytesIO(resp.body)).active
+    assert sheet is not None
+    assert sheet["A2"].value == "ContosoLtd"
+    assert sheet["A3"].value == "ok\tlà"
+
+
 def test_xlsx_writes_a_formula_looking_string_as_text():
     """openpyxl would store ``=...`` as a formula; the cell must stay text."""
     resp = xlsx_response("t.xlsx", ["Nom", "N"], [[FORMULA, 3]])

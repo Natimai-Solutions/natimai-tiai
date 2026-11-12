@@ -54,6 +54,8 @@ const props = defineProps<{
   /** Editing an existing request; null when asking a new one. */
   check: Check | null;
   subtitle?: string | undefined;
+  /** The poste, when there is one: only who can see it is offered. */
+  machineId?: string | undefined;
   /** What to do with the form: the caller knows the poste(s). */
   save: (payload: CheckPayload) => Promise<void>;
 }>();
@@ -76,7 +78,9 @@ watch(
 
 async function loadUsers() {
   try {
-    userOptions.value = (await listAssignableUsers()).map((u) => ({ label: u.name, value: u.id }));
+    userOptions.value = (await listAssignableUsers(props.check?.machine_id ?? props.machineId)).map(
+      (u) => ({ label: u.name, value: u.id }),
+    );
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Comptes indisponibles') });
   }

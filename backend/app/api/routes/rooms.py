@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import col, select
 
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
+from app.api.fields import not_null
 from app.api.routes.agent import clean_location
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
@@ -73,6 +74,8 @@ class BuildingUpdate(BaseModel):
     location: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
 
+    _not_null = not_null("name")
+
 
 class BuildingRef(BaseModel):
     id: uuid.UUID
@@ -125,6 +128,8 @@ class RoomUpdate(BaseModel):
     building_id: uuid.UUID | None = None
     location: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
+
+    _not_null = not_null("name")
 
 
 class RoomConfigOut(BaseModel):
@@ -185,6 +190,24 @@ def _building_writable(building: Building, scope: Scope | None) -> bool:
         or building.id in scope.buildings
         or (building.location is not None and building.location in scope.locations)
     )
+
+
+def _site_move_allowed(scope: Scope | None, old: str | None, new: str | None) -> bool:
+    """Whether a confined account may move a place from site ``old`` to site
+    ``new``: only between sites it covers. A building or room it holds by id
+    would otherwise carry its postes into another team's site, out of its
+    own (audit S16)."""
+    if scope is None or old == new:
+        return True
+    return old in scope.locations and new in scope.locations
+
+
+async def _room_site(session: SessionDep, room: Room) -> str | None:
+    """Where a room is: its building's site, or its own."""
+    if room.building_id is not None:
+        building = await session.get(Building, room.building_id)
+        return building.location if building else None
+    return room.location
 
 
 async def _room_writable(
@@ -419,6 +442,7 @@ async def update_building(
     location = fields.get("location", building.location)
     if name != building.name or location != building.location:
         await _reject_building_name_taken(session, location, name, exclude=building.id)
+    _reject_out_of_scope(_site_move_allowed(scope, building.location, location))
     for key, value in fields.items():
         setattr(building, key, value)
     _reject_out_of_scope(_building_writable(building, scope))
@@ -445,17 +469,24 @@ async def delete_building(
     scope: CurrentScope,
 ) -> None:
     """Delete a building. Its rooms stay, building-less, and keep the site they
-    inherited from it."""
+    inherited from it; one whose name is already taken outside any building
+    is renamed after the building."""
     building = await _require_building(session, building_id, scope)
     _reject_out_of_scope(_building_writable(building, scope))
-    await crud.detach_building(session, building)
+    renamed = await crud.detach_building(session, building)
     audit.record(
         session,
         actor=current.email,
         action="building.delete",
         resource_type="building",
         resource_id=str(building.id),
-        details={"name": building.name, "location": building.location},
+        details={
+            "name": building.name,
+            "location": building.location,
+            # Rooms renamed so as not to collide with one already outside any
+            # building.
+            **({"renamed": [f"{a} → {b}" for a, b in renamed]} if renamed else {}),
+        },
     )
     await session.delete(building)
     await session.commit()
@@ -577,12 +608,27 @@ async def update_room(
     building_id = fields.get("building_id", room.building_id)
     if name != room.name or building_id != room.building_id:
         await _reject_room_name_taken(session, building_id, name, exclude=room.id)
+    site_before = await _room_site(session, room)
+    if (
+        "building_id" in fields
+        and fields["building_id"] is None
+        and room.building_id is not None
+        and fields.get("location") is None
+    ):
+        # Out of its building, a room keeps the site it had through it — as
+        # deleting the building does (``detach_building``) — rather than
+        # losing it, and with it the site the console compares postes to
+        # (audit B22). Clearing it is a second, explicit change.
+        fields["location"] = site_before
     for key, value in fields.items():
         setattr(room, key, value)
     if room.building_id is not None:
         # A room in a building is where its building is; a site of its own
         # would only be a second answer.
         room.location = None
+    _reject_out_of_scope(
+        _site_move_allowed(scope, site_before, await _room_site(session, room))
+    )
     room.updated_at = utcnow()
     session.add(room)
     _reject_out_of_scope(await _room_writable(session, room.id, scope))

@@ -6,10 +6,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import AwareDatetime, BaseModel
+from sqlalchemy import String, and_, cast, or_
+from sqlmodel import col, select
 
-from app.api.deps import SessionDep, require_permission
+from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.features.audit import crud
+from app.features.audit.models import AuditEntry
+from app.features.machine.models import Machine
 from app.features.user.permissions import Action, Resource
+from app.features.user.scope import Scope, machine_clause, restrict
 
 router = APIRouter(
     prefix="/audit",
@@ -42,9 +47,28 @@ class AuditList(BaseModel):
     page_size: int
 
 
+def _scope_clause(scope: Scope | None, email: str) -> Any:
+    """What a confined account may read of the log (audit S17): the entries
+    about a poste it sees, and its own actions. The rest — accounts, groups,
+    settings, bulk actions across the parc, postes elsewhere — names what its
+    scope exists to keep out of its sight. None for the unrestricted."""
+    if scope is None:
+        return None
+    visible = restrict(select(cast(col(Machine.id), String)), machine_clause(scope))
+    return or_(
+        and_(
+            col(AuditEntry.resource_type) == "machine",
+            col(AuditEntry.resource_id).in_(visible),
+        ),
+        col(AuditEntry.actor) == email,
+    )
+
+
 @router.get("", response_model=AuditList)
 async def list_audit(
     session: SessionDep,
+    current: CurrentUser,
+    scope: CurrentScope,
     action: str | None = None,
     actor: str | None = Query(None, max_length=320),
     resource_type: str | None = None,
@@ -73,6 +97,7 @@ async def list_audit(
         until=until,
         page=page,
         page_size=page_size,
+        where=_scope_clause(scope, current.email),
     )
     return AuditList(
         items=[AuditEntryOut.model_validate(e) for e in entries],

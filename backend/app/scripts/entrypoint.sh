@@ -5,6 +5,17 @@
 #   migrate  run Alembic migrations and exit
 set -euo pipefail
 
+# Started as root (the image's default): give the packages volume to the
+# service account, then run everything below as that account, without any
+# capability left (audit S32). A container started with `user:` skips this.
+if [ "$(id -u)" = "0" ] && id tiai >/dev/null 2>&1; then
+  packages="${PACKAGES_DIR:-/data/packages}"
+  if [ -d "$packages" ] && [ "$(stat -c %u "$packages")" != "$(id -u tiai)" ]; then
+    chown -R tiai:tiai "$packages"
+  fi
+  exec setpriv --reuid=tiai --regid=tiai --init-groups --inh-caps=-all bash "$0" "$@"
+fi
+
 mode="${1:-api}"
 
 case "$mode" in

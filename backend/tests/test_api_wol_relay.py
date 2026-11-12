@@ -73,6 +73,8 @@ def relay_mode(monkeypatch):
 
     monkeypatch.setattr(settings, "WOL_RELAY_ENABLED", True)
     monkeypatch.setattr(settings, "WOL_RELAY_SUBNET_GRACE_SECONDS", 90)
+    # The postes of these tests are all enrolled a second ago.
+    monkeypatch.setattr(settings, "WOL_RELAY_MIN_AGE_MINUTES", 0)
 
     # The server must not emit anything itself in this mode: a datagram from
     # a remote host reaches nothing, and reporting it would be a lie.
@@ -183,6 +185,52 @@ async def test_another_vlan_of_the_site_claims_once_the_grace_has_run(
     handed = (await _heartbeat(client, site["far"]["token"]))["commands"]
     assert [c["type"] for c in handed] == ["wake_on_lan"]
     assert handed[0]["target_mac"] == "AA:BB:CC:DD:EE:FF"
+
+
+async def test_a_claim_left_unanswered_goes_back_to_the_queue(
+    client, db_session, relay_mode, site, monkeypatch
+):
+    """Audit B29: a relay that took the wake and said nothing (switched off,
+    an agent that dropped it) does not keep it; another one takes it."""
+    import uuid as _uuid
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from app.core.config import settings
+    from app.features.base import utcnow
+    from app.features.command.models import Command
+
+    headers = await _admin_headers(client, db_session)
+    await _wake(client, headers, site["target"]["machine_id"])
+    handed = (await _heartbeat(client, site["near"]["token"]))["commands"]
+    assert len(handed) == 1
+    await db_session.exec(
+        update(Command)
+        .where(Command.id == _uuid.UUID(handed[0]["id"]))
+        .values(delivered_at=utcnow() - timedelta(minutes=5))
+    )
+    await db_session.commit()
+    monkeypatch.setattr(settings, "WOL_RELAY_SUBNET_GRACE_SECONDS", 0)
+    again = (await _heartbeat(client, site["far"]["token"]))["commands"]
+    assert [c["id"] for c in again] == [handed[0]["id"]]
+
+
+async def test_a_fresh_or_old_agent_does_not_relay(
+    client, db_session, relay_mode, site, monkeypatch
+):
+    """Audit S19, B29: enrolled minutes ago, or older than the command."""
+    from app.core.config import settings
+
+    headers = await _admin_headers(client, db_session)
+    await _wake(client, headers, site["target"]["machine_id"])
+    monkeypatch.setattr(settings, "WOL_RELAY_MIN_AGE_MINUTES", 60)
+    assert (await _heartbeat(client, site["near"]["token"]))["commands"] == []
+    monkeypatch.setattr(settings, "WOL_RELAY_MIN_AGE_MINUTES", 0)
+    old = await _heartbeat(client, site["near"]["token"], agent_version="0.9.0")
+    assert old["commands"] == []
+    ok = await _heartbeat(client, site["near"]["token"], agent_version="1.1.0")
+    assert [c["type"] for c in ok["commands"]] == ["wake_on_lan"]
 
 
 async def test_the_domain_stands_in_for_a_missing_location(

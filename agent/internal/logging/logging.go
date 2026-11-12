@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -34,17 +35,19 @@ func Setup(dir, level string) func() {
 		log.Printf("logging: create dir, stderr only: %v", err)
 		return func() {}
 	}
-	f, err := os.OpenFile(
-		filepath.Join(dir, logFileName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640,
-	)
+	f, err := openLog(dir)
 	if err != nil {
 		log.Printf("logging: open log file, stderr only: %v", err)
 		return func() {}
 	}
+	rf := &rotatingFile{dir: dir, f: f}
+	if info, err := f.Stat(); err == nil {
+		rf.size = info.Size()
+	}
 
 	// File first: MultiWriter stops at the first failing writer, and under the
 	// SCM os.Stderr is an invalid handle — it must not block the file write.
-	log.SetOutput(io.MultiWriter(f, os.Stderr))
+	log.SetOutput(io.MultiWriter(rf, os.Stderr))
 
 	// A panic does not go through the log package: the runtime writes the
 	// goroutine dump straight to stderr, and under the SCM stderr is nowhere.
@@ -58,8 +61,67 @@ func Setup(dir, level string) func() {
 	return func() {
 		_ = debug.SetCrashOutput(nil, debug.CrashOptions{})
 		log.SetOutput(os.Stderr)
-		_ = f.Close()
+		rf.close()
 	}
+}
+
+func openLog(dir string) (*os.File, error) {
+	return os.OpenFile(
+		filepath.Join(dir, logFileName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640,
+	)
+}
+
+// rotatingFile is agent.log, rotated while the service runs (audit S23): a
+// poste never restarted, failing a request every five minutes, must not grow
+// its log without bound on the system volume. Same rule as at startup:
+// beyond maxLogSize, agent.log becomes agent.log.old and a new one starts.
+type rotatingFile struct {
+	mu   sync.Mutex
+	dir  string
+	f    *os.File
+	size int64
+}
+
+func (r *rotatingFile) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.size+int64(len(p)) > maxLogSize {
+		r.rotateLocked()
+	}
+	n, err := r.f.Write(p)
+	r.size += int64(n)
+	return n, err
+}
+
+func (r *rotatingFile) rotateLocked() {
+	_ = r.f.Close()
+	// Unconditional, unlike the startup check: the line about to be written
+	// is what crosses the bound.
+	path := filepath.Join(r.dir, logFileName)
+	_ = os.Remove(path + ".old")
+	_ = os.Rename(path, path+".old")
+	f, err := openLog(r.dir)
+	if err != nil {
+		// Reopen what is there rather than lose the log: the next write
+		// tries again.
+		f, err = openLog(r.dir)
+		if err != nil {
+			return
+		}
+	}
+	r.f = f
+	r.size = 0
+	if info, err := f.Stat(); err == nil {
+		r.size = info.Size()
+	}
+	// The crash dump follows the file it belongs to.
+	_ = debug.SetCrashOutput(f, debug.CrashOptions{})
+}
+
+func (r *rotatingFile) close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_ = r.f.Close()
 }
 
 // SetLevel gates Debugf on level, after Setup has already opened the file.
