@@ -53,8 +53,8 @@ test("le journal d'audit montre une action d'administration", async ({ page, req
 
   await page.goto(`/machines/${machineId}`);
   await page.getByRole('button', { name: 'Révoquer le token' }).click();
-  // Quasar's confirmation dialog: its accept button is « OK ».
-  await page.getByRole('dialog').getByRole('button', { name: 'OK' }).click();
+  // The confirmation names its action (audit U12), not a bare « OK ».
+  await page.getByRole('dialog').getByRole('button', { name: 'Révoquer', exact: true }).click();
   await expect(page.getByText('Token révoqué')).toBeVisible();
 
   await page.goto('/audit?action=machine.revoke_token');
