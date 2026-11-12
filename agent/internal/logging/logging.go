@@ -94,6 +94,10 @@ func (r *rotatingFile) Write(p []byte) (int, error) {
 }
 
 func (r *rotatingFile) rotateLocked() {
+	// SetCrashOutput holds its own handle on the file: under Windows an open
+	// file cannot be renamed, so it lets go first, or the rename fails and
+	// the log never rotates.
+	_ = debug.SetCrashOutput(nil, debug.CrashOptions{})
 	_ = r.f.Close()
 	// Unconditional, unlike the startup check: the line about to be written
 	// is what crosses the bound.
