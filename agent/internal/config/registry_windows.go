@@ -49,6 +49,9 @@ func applyRegistryOverrides(cfg *Config) {
 		on := v != 0
 		cfg.ReportSessionUsername = &on
 	}
+	if v, _, err := k.GetIntegerValue("AllowInsecureHTTP"); err == nil {
+		cfg.AllowInsecureHTTP = v != 0
+	}
 	if v, _, err := k.GetIntegerValue("HeartbeatIntervalSeconds"); err == nil && v > 0 {
 		cfg.HeartbeatIntervalSeconds = int(v)
 	}

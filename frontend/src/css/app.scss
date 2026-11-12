@@ -20,6 +20,37 @@
   }
 }
 
+// One case for every button (audit U30): as written in the label, never the
+// all-caps Quasar defaults to — which left « Logiciel » next to « FUSIONNER ».
+.q-btn {
+  text-transform: none;
+}
+
+// The machine list: the name column stays in sight while the others scroll
+// sideways, and a long name is cut rather than widening it (audit U25).
+.machines-table {
+  td.q-table--col-auto-width,
+  th.q-table--col-auto-width {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--q-machines-sticky-bg, #fff);
+  }
+  td.machine-name-cell,
+  th.machine-name-cell {
+    position: sticky;
+    left: var(--machines-select-width, 72px);
+    z-index: 1;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: var(--q-machines-sticky-bg, #fff);
+  }
+}
+.body--dark .machines-table {
+  --q-machines-sticky-bg: var(--q-dark);
+}
+
 // A name in a table that opens its fiche. The row stays clickable for the
 // mouse; the link is what Tab reaches and what opens in a new tab.
 .row-link {

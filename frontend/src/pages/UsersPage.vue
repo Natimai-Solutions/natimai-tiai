@@ -63,7 +63,8 @@
             Verrouillé
             <q-tooltip>
               Trop d’échecs de connexion — jusqu’à {{ formatDateTime(props.row.locked_until) }}.
-              Réinitialiser le mot de passe lève le verrou.
+              Seules les adresses qui ont échoué sont refusées : le bon mot de passe saisi depuis un
+              autre poste ouvre la session. Réinitialiser le mot de passe lève le verrou.
             </q-tooltip>
           </q-badge>
         </q-td>
@@ -150,6 +151,7 @@
               v-model="form.email"
               type="email"
               label="E-mail"
+              autocomplete="off"
               outlined
               dense
               autofocus
@@ -195,10 +197,11 @@
               v-if="!editing"
               v-model="form.password"
               type="password"
+              autocomplete="new-password"
               label="Mot de passe"
               outlined
               dense
-              :hint="`${PASSWORD_MIN_LENGTH} caractères minimum`"
+              :hint="`${passwordMin} caractères minimum`"
               :rules="[required, longEnough]"
             />
           </q-card-section>
@@ -212,7 +215,9 @@
     </q-dialog>
 
     <!-- Réinitialisation : mot de passe généré ou choisi, affiché une seule fois. -->
-    <q-dialog v-model="resetOpen" @hide="resetResult = null">
+    <!-- Persistent once the password is shown: it is applied already and
+         shown only here, so only « Fermer » may take it away (audit U13). -->
+    <q-dialog v-model="resetOpen" :persistent="resetResult !== null" @hide="resetResult = null">
       <q-card style="width: 460px; max-width: 90vw">
         <q-card-section class="text-h6">Réinitialiser le mot de passe</q-card-section>
         <q-card-section class="q-pt-none text-body2 text-muted">
@@ -227,10 +232,11 @@
                 v-if="resetMode === 'manual'"
                 v-model="resetPassword"
                 type="password"
+                autocomplete="new-password"
                 label="Nouveau mot de passe"
                 outlined
                 dense
-                :hint="`${PASSWORD_MIN_LENGTH} caractères minimum`"
+                :hint="`${passwordMin} caractères minimum`"
                 :rules="[required, longEnough]"
               />
               <q-banner dense class="surface-orange">
@@ -282,6 +288,7 @@
 </template>
 
 <script setup lang="ts">
+import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { escapeHtml } from 'src/utils/html';
 import { onMounted, reactive, ref } from 'vue';
 import { copyToClipboard, useQuasar, type QTableColumn } from 'quasar';
@@ -289,7 +296,6 @@ import {
   createUser,
   deleteUser,
   listUsers,
-  PASSWORD_MIN_LENGTH,
   resetUserPassword,
   updateUser,
   type ConsoleUser,
@@ -299,6 +305,8 @@ import { apiErrorMessage } from 'src/services/errors';
 import type { EmailPreference } from 'src/services/auth';
 import { useAuthStore } from 'src/stores/auth';
 import { EMAIL_PREFERENCE_OPTIONS, emailPreferenceLabel, formatDateTime } from 'src/utils/format';
+
+const { passwordMin } = usePasswordPolicy();
 
 /** Locked now — `locked_until` stays set after it has passed, until the next login. */
 function isLocked(user: ConsoleUser): boolean {
@@ -370,7 +378,7 @@ const columns: QTableColumn<ConsoleUser>[] = [
 
 const required = (v: string) => !!v || 'Requis';
 const longEnough = (v: string) =>
-  v.length >= PASSWORD_MIN_LENGTH || `${PASSWORD_MIN_LENGTH} caractères minimum`;
+  v.length >= passwordMin.value || `${passwordMin.value} caractères minimum`;
 
 function isSelf(user: ConsoleUser) {
   return user.id === auth.user?.id;
@@ -393,6 +401,17 @@ async function reload() {
     if (search.value) params.search = search.value;
     const data = await listUsers(params);
     if (id !== requestId) return;
+    if (!data.items.length && data.total > 0 && p.page > 1) {
+      // The last account of the last page went (a deletion): fall back on
+      // the last page that still exists, as the journal does (audit B26).
+      pagination.value = {
+        ...pagination.value,
+        page: Math.ceil(data.total / p.rowsPerPage),
+        rowsNumber: data.total,
+      };
+      void reload();
+      return;
+    }
     rows.value = data.items;
     pagination.value = { ...pagination.value, rowsNumber: data.total };
   } catch (e) {
@@ -500,17 +519,31 @@ async function submitReset() {
 
 async function copyResult() {
   if (!resetResult.value) return;
-  await copyToClipboard(resetResult.value);
-  $q.notify({ type: 'positive', message: 'Copié' });
+  try {
+    await copyToClipboard(resetResult.value);
+    $q.notify({ type: 'positive', message: 'Copié' });
+  } catch {
+    $q.notify({
+      type: 'negative',
+      message: 'Copie impossible : sélectionnez le mot de passe et copiez-le à la main',
+    });
+  }
 }
 
 async function toggleActive(user: ConsoleUser) {
   try {
     await updateUser(user.id, { is_active: !user.is_active });
-    $q.notify({
-      type: 'positive',
-      message: user.is_active ? 'Compte désactivé' : 'Compte réactivé',
-    });
+    $q.notify(
+      user.is_active
+        ? {
+            type: 'positive',
+            message: 'Compte désactivé',
+            // What a deactivated owner leaves behind is nobody's until it comes back.
+            caption:
+              'Ses salles, postes et vérifications passent dans « À prendre » tant que le compte reste désactivé.',
+          }
+        : { type: 'positive', message: 'Compte réactivé' },
+    );
     await reload();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Modification impossible') });

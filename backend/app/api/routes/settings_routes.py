@@ -478,7 +478,10 @@ async def update_settings(
         )
     if "maintenance_default_owner_id" in fields:
         owner_id = fields["maintenance_default_owner_id"]
-        if owner_id is not None:
+        stored = (await crud.get_all(session)).get(crud.KEY_OWNER)
+        # The card sends every field: re-sending an owner deactivated since
+        # must not keep the cycle from being saved (audit B08).
+        if owner_id is not None and str(owner_id) != stored:
             owner = await session.get(User, owner_id)
             if owner is None or not owner.is_active:
                 raise AppError(
@@ -496,6 +499,9 @@ async def update_settings(
         k: (str(v) if v is not None else None) for k, v in fields.items()
     }
     if payload.email is not None:
+        _reject_secret_redirect(
+            await mail.load_stored(session), payload.email.changes()
+        )
         # The audit line names each e-mail field changed, and for a secret
         # only that it was — never the value, which would otherwise sit in
         # clear in a table every auditor can read.
@@ -514,6 +520,21 @@ async def update_settings(
     return await _out(session)
 
 
+def _reject_secret_redirect(
+    stored: mail.StoredEmailSettings, changes: dict[str, Any]
+) -> None:
+    """Refuse to send a stored secret to a destination it was not typed for
+    (``email_policy.secrets_to_retype``)."""
+    missing = mail.secrets_to_retype(stored, changes)
+    if missing:
+        raise AppError(
+            code=ErrorCode.SETTINGS_EMAIL_SECRET_REQUIRED,
+            status_code=422,
+            message="The server changed: type the password or API key again",
+            details={"fields": missing},
+        )
+
+
 # --- Test send ----------------------------------------------------------------
 
 
@@ -521,7 +542,9 @@ class EmailTestIn(BaseModel):
     """A test send. ``to`` defaults to the caller's own address. ``email``
     carries the card's unsaved values, applied over what is stored exactly as
     a patch would apply them — so a server can be tried before it is saved,
-    and a stored password need not be typed again to try a new port."""
+    and a stored password need not be typed again to try a new sender. It
+    must be, though, to try a new server: a stored secret never leaves for a
+    destination it was not typed for (``_reject_secret_redirect``)."""
 
     to: Email | None = None
     email: EmailSettingsIn | None = None
@@ -556,6 +579,7 @@ async def send_test_email(
     """
     stored = await mail.load_stored(session)
     unsaved = payload.email.changes() if payload.email is not None else {}
+    _reject_secret_redirect(stored, unsaved)
     policy = mail.resolve(stored.merged(unsaved))
     to = payload.to or current.email
     result = await probe.send_test(policy, to)

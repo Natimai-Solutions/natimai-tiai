@@ -361,3 +361,22 @@ async def test_unread_encryption_is_not_counted_as_unencrypted(client, db_sessio
 
     resp = await client.get("/api/v1/stats/overview", headers=headers)
     assert resp.json()["machines_unencrypted"] == 0
+
+
+async def test_one_catalogue_entry_is_named(client, db_session):
+    """Audit U08: the machine list's filter chip says which program."""
+    from app.features.inventory.models import Software
+
+    headers = await _admin_headers(client, db_session)
+    entry = Software(name="7-Zip", version="23.01", publisher="Igor Pavlov")
+    db_session.add(entry)
+    await db_session.commit()
+    await db_session.refresh(entry)
+    resp = await client.get(f"/api/v1/software/{entry.id}", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "7-Zip" and resp.json()["version"] == "23.01"
+    assert (
+        await client.get("/api/v1/software/999999", headers=headers)
+    ).status_code == 404
+    export = await client.get("/api/v1/software/export.csv", headers=headers)
+    assert export.status_code == 200

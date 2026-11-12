@@ -289,3 +289,14 @@ Elles portent toute la sûreté de la commande :
   réinitialisation jette est le magasin, pas la vérité. Les mises à jour qui
   manquaient manquent toujours, et les deux horodatages viennent des résultats
   Automatic Updates dans le registre, que la commande ne touche pas.
+
+---
+
+## 9. Suites de l'audit 2026-11 : reste à faire
+
+L'audit du 2026-11-10 (`plan-audit-2026-11.md`) touche ce chantier par un seul point : l'ordre de remise des commandes. « Installer les MAJ » puis « redémarrer », mis en file l'un après l'autre, peuvent être remis à l'envers.
+
+Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
+
+- [x] **T11** · *P1 court terme* — **Remettre les commandes dans l'ordre de création** ([B28](plan-audit-2026-11.md#b28))
+  Ajouter `order_by(created_at, id)` à la sélection du heartbeat (`agent.py:815`), avec un test : « installer les MAJ » puis « redémarrer » doivent être remises dans cet ordre.

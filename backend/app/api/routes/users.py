@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from app.api.deps import CurrentAuthority, CurrentUser, SessionDep, require_permission
-from app.api.fields import Email, Password
+from app.api.fields import Email, Password, not_null
 from app.core import security
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
@@ -113,6 +113,8 @@ class UserUpdate(BaseModel):
     group_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None
     email_preference: EmailPreference | None = None
+
+    _not_null = not_null("email", "is_active", "email_preference")
 
 
 class PasswordReset(BaseModel):
@@ -346,8 +348,14 @@ async def update_user(
             actor_email=current.email,
             action="grant",
         )
-    if "email" in fields and fields["email"] != user.email:
+    email_changed = "email" in fields and fields["email"] != user.email
+    previous_email = user.email
+    if email_changed:
         await _reject_email_taken(session, fields["email"], exclude=user.id)
+        # A link mailed to the old address must not outlive it: the address
+        # is often changed because the old box is no longer its owner's
+        # (audit S15).
+        await crud.purge_reset_tokens(session, user.id)
 
     group_ids = fields.pop("group_ids", None)
     for name, value in fields.items():
@@ -370,6 +378,7 @@ async def update_user(
         details={
             "email": user.email,
             "fields": sorted(fields),
+            **({"previous_email": previous_email} if email_changed else {}),
             **(
                 {"group_ids": [str(g) for g in group_ids]}
                 if group_ids is not None

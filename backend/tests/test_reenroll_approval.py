@@ -51,6 +51,22 @@ async def test_second_enrollment_of_a_live_identity_is_held(client, db_session):
     assert held[0]["ip"]
 
 
+async def test_a_held_request_is_audited_once_not_per_retry(client, db_session):
+    """Audit B33: an agent waiting for approval asks every few minutes; the
+    log says it once."""
+    headers = await _admin_headers(client, db_session)
+    await _enroll(client, "m-retry", hostname="PC-R")
+    for _ in range(3):
+        resp = await _enroll_raw(client, "m-retry", hostname="PC-R")
+        assert resp.status_code == 403
+    held = [
+        e
+        for e in await _audit(client, headers)
+        if e["action"] == "machine.reenroll_requested"
+    ]
+    assert len(held) == 1
+
+
 async def test_allowing_the_request_lets_the_poste_back_with_a_new_token(
     client, db_session
 ):

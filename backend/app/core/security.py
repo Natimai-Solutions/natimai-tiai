@@ -5,6 +5,7 @@ Only the SHA-256 hash of a random token is ever stored server-side — agent
 token, refresh token, reset link alike; the clear value leaves the server once.
 """
 
+import asyncio
 import hashlib
 import hmac
 import secrets
@@ -92,6 +93,23 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         # Row holds something that isn't a bcrypt hash (truncated column, hand-
         # edited value). That is a failed login, not a 500 on the login route.
         return False
+
+
+# bcrypt at cost 12 is ~250 ms of CPU. The API is one async process: run on
+# the event loop, every check would stall the console and the heartbeats of
+# the whole parc for that long (audit S04). The routes use these.
+
+
+async def hash_password(password: str) -> str:
+    return await asyncio.to_thread(get_password_hash, password)
+
+
+async def check_password(plain_password: str, hashed_password: str) -> bool:
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
+
+
+async def burn_password_check_async(plain_password: str) -> None:
+    await asyncio.to_thread(burn_password_check, plain_password)
 
 
 def generate_password() -> str:

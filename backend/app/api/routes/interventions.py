@@ -63,9 +63,9 @@ class InterventionCreate(BaseModel):
     kind: InterventionKind
     title: str | None = Field(default=None, max_length=200)
     note: str | None = Field(default=None, max_length=5000)
-    # Omitted = now. Any instant is accepted, past included: a journal can be
-    # started from before the console existed.
-    performed_at: datetime | None = None
+    # Omitted = now. Any past instant is accepted: a journal can be started
+    # from before the console existed. Not a future one (audit B06).
+    performed_at: crud.PastDatetime | None = None
 
 
 class InterventionUpdate(BaseModel):
@@ -74,7 +74,7 @@ class InterventionUpdate(BaseModel):
     kind: InterventionKind | None = None
     title: str | None = Field(default=None, max_length=200)
     note: str | None = Field(default=None, max_length=5000)
-    performed_at: datetime | None = None
+    performed_at: crud.PastDatetime | None = None
 
 
 def _clean(text: str | None) -> str | None:
@@ -158,6 +158,8 @@ async def create_intervention(
         updated_at=now,
     )
     session.add(row)
+    # A maintenance entered by hand counts towards the cycle (audit B17).
+    await crud.recompute_last_maintenance(session, [machine.id])
     await session.commit()
     await session.refresh(row)
     return InterventionOut.model_validate(row)
@@ -200,6 +202,8 @@ async def update_intervention(
                 "fields": sorted(fields),
             },
         )
+    # Redated, or turned into (or out of) a maintenance: the cycle follows.
+    await crud.recompute_last_maintenance(session, [row.machine_id])
     await session.commit()
     await session.refresh(row)
     return InterventionOut.model_validate(row)
@@ -227,5 +231,8 @@ async def delete_intervention(
             "performed_at": row.performed_at.isoformat(),
         },
     )
+    machine_id = row.machine_id
     await session.delete(row)
+    # A deleted visit no longer counts: the due date goes back (audit B06).
+    await crud.recompute_last_maintenance(session, [machine_id])
     await session.commit()

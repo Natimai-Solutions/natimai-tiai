@@ -35,8 +35,53 @@
       flat
       bordered
       no-data-label="Rien à faire."
+      :grid="$q.screen.lt.sm"
       @row-click="(_evt, row) => goMachine(row)"
     >
+      <!-- On a phone, a card per check with « Clore » in sight, rather than
+           a table to scroll sideways (audit U23). -->
+      <template #item="props">
+        <div class="col-12 q-pa-xs">
+          <q-card flat bordered>
+            <q-card-section class="q-pb-xs">
+              <router-link
+                :to="{ name: 'machine-detail', params: { id: props.row.machine_id } }"
+                class="row-link text-weight-medium"
+              >
+                {{ props.row.machine?.hostname ?? 'Poste' }}
+              </router-link>
+              <div class="text-caption text-muted">{{ placeLabel(props.row.machine) }}</div>
+              <div class="q-mt-xs" style="white-space: pre-line">
+                {{ props.row.instructions || '—' }}
+              </div>
+              <div class="text-caption text-muted q-mt-xs">
+                {{ props.row.assigned_to ? props.row.assigned_to.name : 'à prendre' }} ·
+                {{ timeAgoLabel(props.row.created_at) }}
+              </div>
+            </q-card-section>
+            <q-card-actions v-if="canWrite" align="right">
+              <q-btn
+                v-if="!props.row.assigned_to || props.row.assigned_to.id !== auth.user?.id"
+                flat
+                dense
+                no-caps
+                label="Me l'affecter"
+                @click="takeOver(props.row)"
+              />
+              <q-btn flat dense no-caps label="Modifier" @click="openEdit(props.row)" />
+              <q-btn
+                unelevated
+                dense
+                no-caps
+                color="primary"
+                icon="task_alt"
+                label="Clore"
+                @click="openClose(props.row)"
+              />
+            </q-card-actions>
+          </q-card>
+        </div>
+      </template>
       <template #body-cell-machine="props">
         <q-td :props="props">
           <div>
@@ -48,13 +93,13 @@
               {{ props.row.machine?.hostname ?? 'Poste' }}
             </router-link>
           </div>
-          <div class="text-caption text-muted">
+          <div class="text-caption text-muted" style="white-space: normal; max-width: 280px">
             {{ placeLabel(props.row.machine) }}
           </div>
         </q-td>
       </template>
       <template #body-cell-instructions="props">
-        <q-td :props="props" style="white-space: pre-line; max-width: 420px">
+        <q-td :props="props" style="white-space: pre-line; min-width: 280px; max-width: 420px">
           {{ props.value || '—' }}
         </q-td>
       </template>
@@ -115,9 +160,9 @@
           {{ due.overdue }} en retard · {{ due.due_soon }} à échéance
         </div>
       </div>
-      <q-list v-if="due && (due.rooms.length || due.machines.length)" bordered separator>
+      <q-list v-if="due && (dueRooms.length || due.machines.length)" bordered separator>
         <q-expansion-item
-          v-for="r in due.rooms"
+          v-for="r in dueRooms"
           :key="r.id"
           :label="r.name"
           group="rooms"
@@ -132,7 +177,7 @@
               <q-item-label caption>
                 {{ r.total }} poste(s) · cycle {{ r.cycle_days }} jours ·
                 {{ r.owner ? r.owner.name : 'sans responsable' }}
-                {{ r.next_due_at ? ` · prochaine échéance ${formatDateTime(r.next_due_at)}` : '' }}
+                {{ r.next_due_at ? ` · ${dueLabel(r.next_due_at)}` : '' }}
               </q-item-label>
             </q-item-section>
             <q-item-section side>
@@ -151,6 +196,29 @@
             <q-card-section class="q-pt-none">
               <div class="row q-mb-sm">
                 <q-space />
+                <!-- Taking a room, or handing it on, from here as for a
+                     check (audit U18). -->
+                <template v-if="canMaintain">
+                  <q-btn
+                    v-if="r.owner?.id !== auth.user?.id"
+                    flat
+                    dense
+                    no-caps
+                    icon="person"
+                    label="Me l'affecter"
+                    class="q-mr-sm"
+                    @click="takeRoom(r)"
+                  />
+                  <q-btn
+                    flat
+                    dense
+                    no-caps
+                    icon="forward"
+                    label="Transmettre…"
+                    class="q-mr-sm"
+                    @click="openHandOver(r)"
+                  />
+                </template>
                 <q-btn
                   flat
                   dense
@@ -204,6 +272,14 @@
       <div v-else-if="due" class="text-muted">Rien à faire.</div>
     </div>
 
+    <MaintenanceSettingsDialog
+      v-model="handOverOpen"
+      :subject="handOverRoom?.name ?? ''"
+      :cycle-days="handOverSettings?.maintenance_cycle_days ?? null"
+      :owner-id="handOverSettings?.maintenance_owner?.id ?? null"
+      inherit-hint="Vide : le responsable par défaut du parc"
+      :save="saveHandOver"
+    />
     <MaintenanceSessionDialog
       v-model="sessionOpen"
       :room-id="sessionRoom?.id ?? null"
@@ -229,10 +305,18 @@ import { useQuasar, type QTableColumn } from 'quasar';
 import CheckCloseDialog from 'src/components/check/CheckCloseDialog.vue';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
 import MaintenanceSessionDialog from 'src/components/maintenance/MaintenanceSessionDialog.vue';
+import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import {
+  dueLabel,
   getDue,
+  getRoomMaintenance,
+  isDue,
   maintenanceStateColor,
   maintenanceStateLabel,
+  updateRoomMaintenance,
+  type MaintenanceSettingsPayload,
+  type RoomMaintenance,
   type Due,
   type DueMachine,
   type DueRoom,
@@ -246,7 +330,7 @@ import {
 } from 'src/services/checks';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
-import { formatDateTime, timeAgoLabel } from 'src/utils/format';
+import { timeAgoLabel } from 'src/utils/format';
 
 const $q = useQuasar();
 const router = useRouter();
@@ -293,12 +377,53 @@ const sessionMachines = computed(() =>
     id: m.id,
     hostname: m.hostname ?? m.id,
     hint: stateWithDate(m),
+    // Ticked: what is due. A poste up to date is there to tick by hand.
+    preselect: isDue(m.state),
   })),
+);
+
+// « À faire » lists what has something to do; a room all up to date is in
+// « Salles » (audit B09).
+const dueRooms = computed(() =>
+  (due.value?.rooms ?? []).filter((r) => r.overdue > 0 || r.due_soon > 0),
 );
 
 function stateWithDate(m: DueMachine): string {
   const label = maintenanceStateLabel(m.state);
-  return m.due_at ? `${label} · ${formatDateTime(m.due_at)}` : label;
+  if (!m.due_at) return label;
+  return isDue(m.state) ? `${label} · ${dueLabel(m.due_at)}` : label;
+}
+
+async function takeRoom(r: DueRoom) {
+  if (!auth.user) return;
+  try {
+    await updateRoomMaintenance(r.id, { maintenance_owner_id: auth.user.id });
+    $q.notify({ type: 'positive', message: `Salle ${r.name} affectée à vous` });
+    notifyTasksChanged();
+    await reload();
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
+  }
+}
+
+const handOverOpen = ref(false);
+const handOverRoom = ref<DueRoom | null>(null);
+const handOverSettings = ref<RoomMaintenance | null>(null);
+async function openHandOver(r: DueRoom) {
+  try {
+    handOverSettings.value = await getRoomMaintenance(r.id);
+    handOverRoom.value = r;
+    handOverOpen.value = true;
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Salle indisponible') });
+  }
+}
+async function saveHandOver(payload: MaintenanceSettingsPayload) {
+  if (!handOverRoom.value) return;
+  await updateRoomMaintenance(handOverRoom.value.id, payload);
+  $q.notify({ type: 'positive', message: 'Salle transmise' });
+  notifyTasksChanged();
+  await reload();
 }
 
 function openSession(r: DueRoom) {
@@ -355,6 +480,7 @@ async function saveEdit(payload: CheckPayload) {
   if (!editing.value) return;
   await updateCheck(editing.value.id, payload);
   $q.notify({ type: 'positive', message: 'Demande mise à jour' });
+  notifyTasksChanged();
   await reload();
 }
 async function takeOver(check: Check) {
@@ -362,6 +488,7 @@ async function takeOver(check: Check) {
   try {
     await updateCheck(check.id, { assigned_to_id: auth.user.id });
     $q.notify({ type: 'positive', message: 'Vérification affectée à vous' });
+    notifyTasksChanged();
     await reload();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });

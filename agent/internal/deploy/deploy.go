@@ -31,6 +31,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -85,12 +87,85 @@ var (
 	sha256Hex      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	wingetID       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+\-]{0,127}$`)
 	wingetVersion  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}$`)
+	packageID      = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	productCode    = regexp.MustCompile(`^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$`)
 	errNotEnabled  = errors.New("déploiement non activé sur ce poste (aucune clé Deploy* posée par GPO)")
 	errNoMsiInMode = errors.New("méthode A : msiexec n'est accepté que pour désinstaller un code produit")
 )
 
 const cryptoSHA256 = crypto.SHA256
+
+// ValidPackageID tells whether id is a canonical UUID, the only form the
+// server gives a package. Anything else could be a path (audit S01).
+func ValidPackageID(id string) bool {
+	return packageID.MatchString(id)
+}
+
+// PackageDir is the folder a package is unpacked in, refused unless it sits
+// right under root.
+func PackageDir(root, id string) (string, error) {
+	if !ValidPackageID(id) {
+		return "", fmt.Errorf("identifiant de paquet refusé : %q", id)
+	}
+	dir := filepath.Join(root, id)
+	rel, err := filepath.Rel(root, dir)
+	if err != nil || rel != id {
+		return "", fmt.Errorf("identifiant de paquet refusé : %q", id)
+	}
+	return dir, nil
+}
+
+// PruneDir removes from dir every entry the manifest does not name. The files
+// it names stay: Download checks their hash before anything runs.
+func PruneDir(dir string, files []FileRef) error {
+	keep := map[string]bool{}
+	for _, f := range files {
+		keep[strings.ToLower(f.Name)] = true
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if keep[strings.ToLower(e.Name())] && e.Type().IsRegular() {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// loadableExt lists what Windows may load or run on its own from the folder
+// an installer starts in: DLL search order, side-by-side manifests and
+// redirection, .NET configuration, Windows Installer databases and scripts.
+var loadableExt = map[string]bool{
+	".dll": true, ".ocx": true, ".cpl": true, ".sys": true, ".drv": true,
+	".ax": true, ".acm": true, ".ime": true, ".tsp": true, ".mui": true,
+	".tlb": true, ".winmd": true, ".manifest": true, ".local": true,
+	".config": true, ".exe": true, ".com": true, ".scr": true, ".pif": true,
+	".msi": true, ".msp": true, ".mst": true, ".msu": true, ".appx": true,
+	".msix": true, ".bat": true, ".cmd": true, ".ps1": true, ".psm1": true,
+	".vbs": true, ".vbe": true, ".js": true, ".jse": true, ".wsf": true,
+	".wsh": true, ".hta": true, ".lnk": true, ".inf": true, ".jar": true,
+}
+
+// MethodAFiles refuses, under method A, an unsigned manifest that puts next
+// to the signed file anything Windows could load or run from there: an
+// approved installer would pick up a planted version.dll (audit S02). Data
+// files (.iss, .ini, .xml, .cab…) stay allowed.
+func MethodAFiles(files []FileRef, run string) error {
+	for _, f := range files {
+		if run != MsiExec && strings.EqualFold(f.Name, run) {
+			continue
+		}
+		if loadableExt[strings.ToLower(filepath.Ext(f.Name))] {
+			return fmt.Errorf("méthode A : %q ne peut pas accompagner l'exécutable (fichier que Windows pourrait charger ou lancer) — signez le paquet (méthode B)", f.Name)
+		}
+	}
+	return nil
+}
 
 // ValidFileName mirrors the server's rule: a bare file name, nothing a
 // Windows path would read as a directory, a device or a stream.

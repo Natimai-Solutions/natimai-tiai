@@ -3,13 +3,14 @@
 import base64
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from ipaddress import ip_address
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import col, select
 from starlette.background import BackgroundTask
 
@@ -50,6 +51,7 @@ from app.features.wol import relay as wol_relay
 from app.features.wol.packet import normalize_mac
 
 security_log = logging.getLogger("app.security")
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -407,9 +409,11 @@ CommandOut.model_rebuild()
 
 async def _package_deliveries(
     session: SessionDep, package_ids: set[uuid.UUID]
-) -> dict[uuid.UUID, PackageDelivery]:
+) -> tuple[dict[uuid.UUID, PackageDelivery], dict[uuid.UUID, str]]:
+    """The packages as handed to the agent, and the fingerprint of each as it
+    stands (``package_crud.fingerprint``)."""
     if not package_ids:
-        return {}
+        return {}, {}
     packages = (
         await session.exec(select(Package).where(col(Package.id).in_(package_ids)))
     ).all()
@@ -418,6 +422,7 @@ async def _package_deliveries(
     def b64(value: bytes | None) -> str | None:
         return base64.b64encode(value).decode("ascii") if value is not None else None
 
+    digests = {p.id: package_crud.fingerprint(p, files[p.id]) for p in packages}
     return {
         p.id: PackageDelivery(
             id=p.id,
@@ -435,7 +440,7 @@ async def _package_deliveries(
             ],
         )
         for p in packages
-    }
+    }, digests
 
 
 class HeartbeatResponse(BaseModel):
@@ -553,20 +558,29 @@ async def enroll(
             # identity over and lock the real poste out; the request waits for
             # an administrator instead, and the live token keeps working.
             ip = client_ip(request)
-            machine.reenroll_requested_at = utcnow()
-            machine.reenroll_requested_ip = ip
-            audit.record(
-                session,
-                actor="agent",
-                action="machine.reenroll_requested",
-                resource_type="machine",
-                resource_id=str(machine.id),
-                details={
-                    "hostname": payload.hostname,
-                    "machine_uuid": payload.machine_uuid,
-                },
+            # One audit line per request, not per retry: an agent waiting
+            # for approval asks again every few minutes (audit B33). A new
+            # line when the asking address changes, or after a day.
+            already = (
+                machine.reenroll_requested_at is not None
+                and machine.reenroll_requested_ip == ip
+                and utcnow() - machine.reenroll_requested_at < timedelta(hours=24)
             )
-            await session.commit()
+            if not already:
+                machine.reenroll_requested_at = utcnow()
+                machine.reenroll_requested_ip = ip
+                audit.record(
+                    session,
+                    actor="agent",
+                    action="machine.reenroll_requested",
+                    resource_type="machine",
+                    resource_id=str(machine.id),
+                    details={
+                        "hostname": payload.hostname,
+                        "machine_uuid": payload.machine_uuid,
+                    },
+                )
+                await session.commit()
             security_log.warning(
                 "re-enrollment of %s from %s held for approval (live token exists)",
                 payload.machine_uuid,
@@ -655,6 +669,9 @@ async def heartbeat(
     session: SessionDep,
 ) -> HeartbeatResponse:
     """Upsert Defender state, then return this machine's pending commands."""
+    ratelimit.check_account(
+        ratelimit.heartbeat_limiter, str(machine.id), "agent.heartbeat"
+    )
     if payload.hostname is not None:
         machine.hostname = payload.hostname
     if payload.domain is not None:
@@ -771,7 +788,21 @@ async def heartbeat(
             machine.ad_ou = directory.ou
             machine.ad_ou_dn = directory.ou_dn
             machine.ad_location = directory.ad_location
-            await room_crud.place_from_directory(session, machine, settings.ROOM_SOURCE)
+            # In a savepoint: whatever the directory says, a placement that
+            # fails must not fail the heartbeat — the Defender state, the
+            # threats and the commands ride the same request (audit S07).
+            try:
+                async with session.begin_nested():
+                    await room_crud.place_from_directory(
+                        session, machine, settings.ROOM_SOURCE, from_agent=True
+                    )
+            except SQLAlchemyError:
+                logger.exception(
+                    "directory placement failed for machine %s", machine.id
+                )
+                # The rollback of the savepoint may have expired the row: read
+                # it again now, not lazily later (no implicit I/O in async).
+                await session.refresh(machine)
 
     if payload.fingerprint is not None:
         fp = payload.fingerprint
@@ -822,6 +853,10 @@ async def heartbeat(
         # one waiting for a relay — or, since this poste is evidently on, one
         # that has just succeeded (below).
         .where(col(Command.type) != CommandType.WAKE_ON_LAN.value)
+        # In the order they were queued: the agent runs them in the order
+        # received, and « installer les MAJ » then « redémarrer » must not
+        # arrive the other way round (audit B28).
+        .order_by(col(Command.created_at), col(Command.id))
     )
     pending = rows.all()
     for cmd in pending:
@@ -830,27 +865,40 @@ async def heartbeat(
 
     # Build the payload before commit: expire_on_commit would otherwise trigger
     # a sync refresh on attribute access — MissingGreenlet under asyncio.
-    deliveries = await _package_deliveries(
+    deliveries, digests = await _package_deliveries(
         session, {c.package_id for c in pending if c.package_id is not None}
     )
-    commands = [
-        CommandOut(
-            id=c.id,
-            type=c.type,
-            package=deliveries.get(c.package_id) if c.package_id else None,
-        )
-        for c in pending
-        # A deployment whose package was deleted cannot be run: it is closed
-        # below rather than handed out empty.
-        if c.package_id is None
-        or c.package_id in deliveries
-        or c.type not in PACKAGE_COMMAND_TYPES
-    ]
+
+    def refusal(c: Command) -> str | None:
+        """Why a deployment cannot go out: its package was deleted, or it
+        changed since the deployment was queued — what was approved is not
+        what would run (audit S08)."""
+        if c.type not in PACKAGE_COMMAND_TYPES:
+            return None
+        if c.package_id not in deliveries:
+            return "Paquet supprimé avant l'exécution"
+        if c.package_digest is not None and c.package_digest != digests[c.package_id]:
+            return (
+                "Paquet modifié après la mise en file (fichiers, ligne de commande "
+                "ou signature) : relancez le déploiement pour envoyer la nouvelle version"
+            )
+        return None
+
+    commands: list[CommandOut] = []
     for c in pending:
-        if c.type in PACKAGE_COMMAND_TYPES and c.package_id not in deliveries:
+        reason = refusal(c)
+        if reason is not None:
             c.status = CommandStatus.FAILED
-            c.error = "Paquet supprimé avant l'exécution"
+            c.error = reason
             c.finished_at = now
+            continue
+        commands.append(
+            CommandOut(
+                id=c.id,
+                type=c.type,
+                package=deliveries.get(c.package_id) if c.package_id else None,
+            )
+        )
 
     if settings.WOL_RELAY_ENABLED:
         # This poste is awake, whatever woke it: the wakes queued for it are
@@ -944,7 +992,12 @@ async def command_result(
         if cmd.error:
             cmd.error = f"Relayé par {who} — {cmd.error}"
     cmd.finished_at = utcnow()
+    held_files = bool(cmd.package_files)
     await session.commit()
+    if held_files:
+        # The files it held may have been replaced in the package meanwhile:
+        # once the last deployment using them is over, they go (audit S09).
+        await package_crud.sweep_store(session)
     return {"status": "ok"}
 
 
@@ -980,9 +1033,9 @@ async def download_package_file(
     not_found = AppError(
         code=ErrorCode.PACKAGE_NOT_FOUND, status_code=404, message="Not found"
     )
-    open_command = (
+    open_commands = (
         await session.exec(
-            select(Command.id)
+            select(Command.package_files)
             .where(col(Command.machine_id) == machine.id)
             .where(col(Command.package_id) == package_id)
             .where(
@@ -990,22 +1043,30 @@ async def download_package_file(
                     [CommandStatus.DELIVERED.value, CommandStatus.RUNNING.value]
                 )
             )
-            .limit(1)
         )
-    ).first()
-    if open_command is None:
+    ).all()
+    if not open_commands:
         raise not_found
-    row = (
-        await session.exec(
-            select(PackageFile)
-            .where(col(PackageFile.package_id) == package_id)
-            .where(col(PackageFile.sha256) == sha256)
-            .limit(1)
-        )
-    ).first()
-    if row is None:
-        raise not_found
-    path = package_storage.path_for(row.sha256)
+    # What the deployment was queued with is what it downloads, even if the
+    # package has changed since (audit B13). A command queued before the
+    # snapshot existed falls back on the package as it stands.
+    name = sha256
+    if not any(shas is not None and sha256 in shas for shas in open_commands):
+        row = (
+            await session.exec(
+                select(PackageFile)
+                .where(col(PackageFile.package_id) == package_id)
+                .where(col(PackageFile.sha256) == sha256)
+                .limit(1)
+            )
+        ).first()
+        if row is None or not any(shas is None for shas in open_commands):
+            raise not_found
+        name = row.name
+    try:
+        path = package_storage.path_for(sha256)
+    except ValueError:
+        raise not_found from None
     if not path.exists():
         raise not_found
     if _downloads_in_flight >= settings.PACKAGE_MAX_CONCURRENT_DOWNLOADS:
@@ -1019,6 +1080,6 @@ async def download_package_file(
     return FileResponse(
         path,
         media_type="application/octet-stream",
-        filename=row.name,
+        filename=name,
         background=BackgroundTask(_release_download),
     )

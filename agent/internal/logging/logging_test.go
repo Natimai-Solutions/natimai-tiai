@@ -67,3 +67,33 @@ func TestRotateOversizedLog(t *testing.T) {
 		t.Fatalf("fresh log still holds old content: %q", got)
 	}
 }
+
+// Audit S23: the log rotates while the service runs, not only at startup.
+func TestTheLogRotatesWhileRunning(t *testing.T) {
+	dir := t.TempDir()
+	old := maxLogSize
+	maxLogSize = 200
+	defer func() { maxLogSize = old }()
+
+	closeLog := Setup(dir, "INFO")
+	for i := 0; i < 20; i++ {
+		log.Printf("line %02d of a log that keeps growing", i)
+	}
+	closeLog()
+
+	path := filepath.Join(dir, logFileName)
+	cur, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev, err := os.Stat(path + ".old")
+	if err != nil {
+		t.Fatalf("no agent.log.old: %v", err)
+	}
+	if cur.Size() > maxLogSize || prev.Size() > maxLogSize {
+		t.Errorf("sizes %d and %d, bound %d", cur.Size(), prev.Size(), maxLogSize)
+	}
+	if !strings.Contains(readLog(t, dir), "line 19") {
+		t.Error("the last line is missing")
+	}
+}

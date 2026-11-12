@@ -321,9 +321,12 @@ export interface CommandActionGroup {
   actions: CommandAction[];
 }
 
+// Every group of the catalogue must be here: a group left out vanishes from
+// every menu, its actions with it (audit B12, « Rafraîchir l'inventaire »).
 const groupOrder: CommandGroup[] = [
   'defender',
   'windows_update',
+  'inventory',
   'power',
   'maintenance',
   'diagnostic',

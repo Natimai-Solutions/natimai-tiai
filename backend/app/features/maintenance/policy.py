@@ -52,6 +52,13 @@ class Resolved:
     state: MaintenanceState
 
 
+def available(owner_id: uuid.UUID | None, policy: MaintenancePolicy) -> bool:
+    """Whether ``owner_id`` is an owner someone can act as: set, and not a
+    deactivated account — which counts as no owner, so that the next level
+    applies and its postes show under « À prendre » (audit B08)."""
+    return owner_id is not None and owner_id not in policy.inactive_owners
+
+
 def resolve(
     machine: Machine, room: Room | None, policy: MaintenancePolicy, now: datetime
 ) -> Resolved:
@@ -63,9 +70,9 @@ def resolve(
         cycle, cycle_origin = policy.cycle_days, Origin.GLOBAL
 
     owner: uuid.UUID | None
-    if machine.maintenance_owner_id is not None:
+    if available(machine.maintenance_owner_id, policy):
         owner, owner_origin = machine.maintenance_owner_id, Origin.MACHINE
-    elif room is not None and room.maintenance_owner_id is not None:
+    elif room is not None and available(room.maintenance_owner_id, policy):
         owner, owner_origin = room.maintenance_owner_id, Origin.ROOM
     else:
         owner, owner_origin = policy.owner_id, Origin.GLOBAL

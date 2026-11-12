@@ -17,6 +17,12 @@ import { DEFAULT_PAGE_SIZE, machineListParamsFromQuery, queryValue } from 'src/u
  * With no `i` in the URL — a fiche opened from the dashboard, a bookmark, a
  * merge redirect — there is no search to walk and everything here is null: the
  * arrows simply do not render.
+ *
+ * The order is frozen at first read (audit B18): the list's default sort is
+ * the last contact, which every heartbeat changes, so the poste at rank i+1
+ * a minute later is not the one that followed. The ranks are read in blocks
+ * of BLOCK rows, kept for the session, and the walk goes through that
+ * snapshot — the order the reader saw, not the order of the moment.
  */
 export interface MachineNavigation {
   /** True when the fiche was opened from a list query, i.e. arrows apply. */
@@ -33,6 +39,24 @@ export interface MachineNavigation {
   backQuery: Ref<Record<string, string>>;
   goPrevious: () => void;
   goNext: () => void;
+}
+
+const BLOCK = 50;
+
+interface Snapshot {
+  rows: Map<number, Machine>;
+  blocks: Map<number, Promise<void>>;
+  total: number;
+}
+
+// One snapshot per search, for the life of the tab: walking back and forth
+// must see the same order. Bounded, a console session opens a few searches.
+const snapshots = new Map<string, Snapshot>();
+const MAX_SNAPSHOTS = 20;
+
+/** Forget every frozen order (tests; a new search is a new key anyway). */
+export function resetMachineNavigation(): void {
+  snapshots.clear();
 }
 
 export function useMachineNavigation(): MachineNavigation {
@@ -83,15 +107,47 @@ export function useMachineNavigation(): MachineNavigation {
     return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_PAGE_SIZE;
   }
 
-  /** Fetch the row at absolute rank `rank`, or null past either end. */
-  async function rowAt(rank: number): Promise<{ machine: Machine | null; total: number }> {
-    if (rank < 0) return { machine: null, total: total.value ?? 0 };
-    const data = await listMachines({
-      ...machineListParamsFromQuery(route.query),
-      page: rank + 1,
-      page_size: 1,
-    });
-    return { machine: data.items[0] ?? null, total: data.total };
+  function snapshot(): Snapshot {
+    const params = machineListParamsFromQuery(route.query);
+    const key = JSON.stringify(Object.entries(params).sort(([a], [b]) => a.localeCompare(b)));
+    let snap = snapshots.get(key);
+    if (!snap) {
+      if (snapshots.size >= MAX_SNAPSHOTS) {
+        const oldest = snapshots.keys().next().value;
+        if (oldest !== undefined) snapshots.delete(oldest);
+      }
+      snap = { rows: new Map(), blocks: new Map(), total: 0 };
+      snapshots.set(key, snap);
+    }
+    return snap;
+  }
+
+  /** Read the block holding `rank`, once per snapshot. */
+  function loadBlock(snap: Snapshot, rank: number): Promise<void> {
+    const b = Math.floor(rank / BLOCK);
+    let pending = snap.blocks.get(b);
+    if (!pending) {
+      pending = listMachines({
+        ...machineListParamsFromQuery(route.query),
+        page: b + 1,
+        page_size: BLOCK,
+      }).then((data) => {
+        snap.total = data.total;
+        data.items.forEach((m, i) => {
+          if (!snap.rows.has(b * BLOCK + i)) snap.rows.set(b * BLOCK + i, m);
+        });
+      });
+      pending.catch(() => snap.blocks.delete(b));
+      snap.blocks.set(b, pending);
+    }
+    return pending;
+  }
+
+  /** The row at absolute rank `rank` in the frozen order, or null past either end. */
+  async function rowAt(snap: Snapshot, rank: number): Promise<Machine | null> {
+    if (rank < 0) return null;
+    await loadBlock(snap, rank);
+    return snap.rows.get(rank) ?? null;
   }
 
   // Which resolution is the current one. Two round trips separate a click on ▶
@@ -117,15 +173,27 @@ export function useMachineNavigation(): MachineNavigation {
     // thing. The buttons simply sit disabled for the round trip.
     previousMachine.value = null;
     nextMachine.value = null;
+    const snap = snapshot();
     try {
-      const [before, after] = await Promise.all([rowAt(rank - 1), rowAt(rank + 1)]);
+      let at = rank;
+      const here = await rowAt(snap, rank);
+      const current = String(route.params.id ?? '');
+      if (here && current && here.id !== current) {
+        // Opened from a list read before the order moved: find the poste in
+        // the snapshot, and walk from where it really is.
+        for (const [r, m] of snap.rows) {
+          if (m.id === current) {
+            at = r;
+            break;
+          }
+        }
+      }
+      const [before, after] = await Promise.all([rowAt(snap, at - 1), rowAt(snap, at + 1)]);
       if (id !== resolutionId) return;
-      previousMachine.value = before.machine;
-      nextMachine.value = after.machine;
-      // Read off `after`, which is always a real request and therefore always
-      // carries the search's true total — even asked for a page past the last
-      // result. `before` makes no request at rank 0.
-      total.value = after.total;
+      index.value = at;
+      previousMachine.value = before;
+      nextMachine.value = after;
+      total.value = snap.total;
     } catch {
       // Neighbours are a convenience: a failed lookup hides the arrows rather
       // than putting an error over a fiche that loaded perfectly well.

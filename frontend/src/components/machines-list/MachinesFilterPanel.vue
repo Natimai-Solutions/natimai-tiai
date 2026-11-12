@@ -328,7 +328,7 @@
         <q-select
           aria-label="Espace libre du disque système"
           :model-value="modelValue.diskFree"
-          :options="DISK_OPTIONS"
+          :options="diskOptionsFor(modelValue.diskFree)"
           emit-value
           map-options
           dense
@@ -346,7 +346,7 @@
 import { computed } from 'vue';
 import {
   CHECK_OPTIONS,
-  DISK_OPTIONS,
+  diskOptionsFor,
   MAINTENANCE_OPTIONS,
   MISMATCH_OPTIONS,
   RAM_OP_OPTIONS,

@@ -57,8 +57,10 @@
 			method POST
 			path_regexp ^/api/v1/packages/[0-9a-fA-F-]+/files$
 		}
+		# 2GiB, the backend's PACKAGE_MAX_BYTES (2 Gio per file); the console
+		# sends one file per request. « 2GB » would be 2·10^9 bytes, less.
 		request_body @package_upload {
-			max_size 2GB
+			max_size 2GiB
 		}
 		@not_package_upload {
 			not {

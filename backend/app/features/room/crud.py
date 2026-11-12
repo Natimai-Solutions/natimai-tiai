@@ -1,8 +1,10 @@
 """Buildings and rooms: lookups the routes and the machine list share."""
 
+import logging
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import func, update
@@ -12,6 +14,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.room.models import Building, Room
+
+logger = logging.getLogger(__name__)
 
 
 def effective_location(room: Room | None, building: Building | None) -> str | None:
@@ -228,14 +232,44 @@ async def set_room(
     return result.rowcount
 
 
-async def detach_building(session: AsyncSession, building: Building) -> None:
+async def detach_building(
+    session: AsyncSession, building: Building
+) -> list[tuple[str, str]]:
     """Before a building is deleted: its rooms keep the site they inherited,
-    copied down, rather than losing it with the building. Does not commit."""
+    copied down, rather than losing it with the building.
+
+    Out of their building, their names must also be unique among the rooms
+    that have none: one that collides is renamed after its building —
+    « Salle 101 (Bâtiment A) », then numbered — rather than failing the
+    deletion (audit B07). Returns the renames. Flushes, does not commit."""
     await session.exec(
         update(Room)
         .where(col(Room.building_id) == building.id, col(Room.location).is_(None))
         .values(location=building.location, updated_at=utcnow())
     )
+    renamed: list[tuple[str, str]] = []
+    rooms = (
+        await session.exec(select(Room).where(col(Room.building_id) == building.id))
+    ).all()
+    for room in rooms:
+        if await room_by_name(session, None, room.name) is None:
+            continue
+        base = f"{room.name} ({building.name})"
+        candidate = base[:ROOM_NAME_MAX]
+        n = 2
+        while (
+            await room_by_name(session, None, candidate) is not None
+            or await room_by_name(session, building.id, candidate) is not None
+        ):
+            suffix = f" ({n})"
+            candidate = base[: ROOM_NAME_MAX - len(suffix)].rstrip() + suffix
+            n += 1
+        renamed.append((room.name, candidate))
+        room.name = candidate
+        room.updated_at = utcnow()
+        session.add(room)
+        await session.flush()
+    return renamed
 
 
 # --- Directory-driven placement (ROOM_SOURCE) -------------------------------
@@ -258,7 +292,19 @@ def directory_key(machine: Machine, source: str) -> tuple[str, str] | None:
     return None
 
 
-async def room_for_key(session: AsyncSession, key: str, name: str) -> tuple[Room, bool]:
+# rooms.name is a VARCHAR(100).
+ROOM_NAME_MAX = 100
+
+
+# Rooms an agent's report may create in an hour, all postes together: a parc
+# turning its directory on creates its rooms once; a token sending a new OU
+# on every heartbeat must not fill the Salles page (audit S20).
+AUTO_ROOMS_PER_HOUR = 200
+
+
+async def room_for_key(
+    session: AsyncSession, key: str, name: str, *, adopt: bool = True
+) -> tuple[Room | None, bool]:
     """The room the directory names by ``key``, created if missing.
 
     Creation adopts a room of the same name that was made by hand and sits in
@@ -274,15 +320,35 @@ async def room_for_key(session: AsyncSession, key: str, name: str) -> tuple[Room
         return room, False
     loose = await room_by_name(session, None, name)
     if loose is not None and loose.ad_key is None:
+        if not adopt:
+            # A room made by hand is the console's: one agent's report does
+            # not take it over (audit S20), and creating « Nom (2) » beside it
+            # would only split the room. Left unfiled until an administrator
+            # re-syncs from the directory, which does adopt it.
+            return None, False
         loose.ad_key = key
         loose.updated_at = utcnow()
         session.add(loose)
         await session.flush()
         return loose, False
+    # The directory allows far longer than the column (an AD « location » of
+    # 125 characters is ordinary): cut, the suffix included (audit S07).
+    name = name.strip()[:ROOM_NAME_MAX].strip() or key[:ROOM_NAME_MAX]
+    if not adopt:
+        recent = await session.scalar(
+            select(func.count())
+            .select_from(Room)
+            .where(col(Room.ad_key).is_not(None))
+            .where(col(Room.created_at) > utcnow() - timedelta(hours=1))
+        )
+        if (recent or 0) >= AUTO_ROOMS_PER_HOUR:
+            logger.warning("directory: room creation capped, %r not created", name)
+            return None, False
     candidate = name
     n = 2
     while await room_by_name(session, None, candidate) is not None:
-        candidate = f"{name} ({n})"
+        suffix = f" ({n})"
+        candidate = name[: ROOM_NAME_MAX - len(suffix)].rstrip() + suffix
         n += 1
     room = Room(name=candidate, ad_key=key)
     session.add(room)
@@ -290,13 +356,36 @@ async def room_for_key(session: AsyncSession, key: str, name: str) -> tuple[Room
     return room, True
 
 
+def reported_dn_consistent(machine: Machine) -> bool:
+    """Whether the OU an agent reports is the one its own DN sits in — the
+    least the server can check of what it is told (audit S20)."""
+    dn = (machine.ad_distinguished_name or "").strip().lower()
+    ou_dn = (machine.ad_ou_dn or "").strip().lower()
+    return bool(dn and ou_dn) and dn.endswith("," + ou_dn)
+
+
 async def place_from_directory(
-    session: AsyncSession, machine: Machine, source: str
+    session: AsyncSession, machine: Machine, source: str, *, from_agent: bool = False
 ) -> bool:
     """File ``machine`` where the directory says, under ``source``. Returns
     whether a room was created on the way. A no-op in manual mode. Does not
-    commit."""
+    commit.
+
+    ``from_agent``: the reading arrives in a heartbeat, the agent's word —
+    an OU that its DN does not sit in is not taken, a room made by hand is
+    not adopted, and the rooms created per hour are bounded (audit S20)."""
     if source == "manual":
+        return False
+    if (
+        from_agent
+        and source == "ad_ou"
+        and machine.ad_ou_dn
+        and not reported_dn_consistent(machine)
+    ):
+        logger.warning(
+            "directory: machine %s reports an OU its DN is not in, not filed",
+            machine.id,
+        )
         return False
     key = directory_key(machine, source)
     if key is None:
@@ -305,7 +394,9 @@ async def place_from_directory(
             machine.updated_at = utcnow()
             session.add(machine)
         return False
-    room, created = await room_for_key(session, *key)
+    room, created = await room_for_key(session, *key, adopt=not from_agent)
+    if room is None:
+        return False
     if machine.room_id != room.id:
         machine.room_id = room.id
         machine.updated_at = utcnow()
