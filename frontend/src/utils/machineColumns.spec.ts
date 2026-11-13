@@ -65,6 +65,24 @@ describe('optional columns', () => {
     expect(DEFAULT_MACHINE_COLUMNS).not.toContain('usage');
   });
 
+  // They had dropped out of the default layout (T43), and with them the agent
+  // version a deployment is followed by.
+  it('shows the inventory columns by default, agent version included', () => {
+    for (const key of [
+      'domain',
+      'location',
+      'building',
+      'ip_address',
+      'os_version',
+      'agent',
+      'model',
+      'disk',
+    ] as const) {
+      expect(DEFAULT_MACHINE_COLUMNS).toContain(key);
+    }
+    expect(OPTIONAL_MACHINE_COLUMNS).toEqual(['usage']);
+  });
+
   it('keeps a stored layout that added it', () => {
     expect(resolveMachineColumns(['hostname', 'usage', 'room'])).toEqual([
       'hostname',

@@ -23,6 +23,11 @@ describe('MACHINE_TABLE_COLUMNS', () => {
     );
   });
 
+  // « Colonnes » lists the columns by these labels: the version has to say so.
+  it('names the agent column after its version', () => {
+    expect(MACHINE_COLUMN_LABELS.agent).toBe("Version de l'agent");
+  });
+
   it('sorts only through fields the API knows', () => {
     for (const column of MACHINE_TABLE_COLUMNS.filter((c) => c.sortable)) {
       const field = SORT_FIELD_BY_COLUMN[column.name];

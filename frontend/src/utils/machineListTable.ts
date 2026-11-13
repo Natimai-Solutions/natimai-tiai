@@ -158,7 +158,15 @@ export const MACHINE_TABLE_COLUMNS: QTableColumn<Machine>[] = [
   // version" — is asked of the parc, not of one poste. Sortable as a version
   // (server-side, "0.10.0" after "0.9.0"): ascending puts the stragglers on
   // top, which is the morning-after-a-deployment reading.
-  { name: 'agent', label: 'Agent', field: 'agent_version', align: 'left', sortable: true },
+  // « Version de l'agent », not « Agent »: under that bare word, nobody looking
+  // for the version in « Colonnes » recognised it.
+  {
+    name: 'agent',
+    label: "Version de l'agent",
+    field: 'agent_version',
+    align: 'left',
+    sortable: true,
+  },
   // name ≠ field like the session column below: the cell renders the product and
   // its state together, while `field` keeps a sensible sort key. Sortable because
   // grouping a mixed parc by product is exactly what this column is for.
