@@ -13,6 +13,7 @@ import {
   getPackageSummary,
   listPackageCommands,
   splitArgs,
+  stepTrust,
   trustMethod,
   type Package,
 } from './packages';
@@ -86,6 +87,65 @@ describe('trust method', () => {
     const pronote = { publisher_name: 'INDEX EDUCATION SAS' };
     expect(trustMethod(pkg({ ...pronote, files: [file('ClientPRONOTE.iss')] }))).toBe('publisher');
     expect(trustMethod(pkg({ ...pronote, files: [file('VERSION.DLL')] }))).toBe('none');
+  });
+
+  it('applies the agent rule to an uninstall too (audit T23, U04)', () => {
+    const file = (name: string, publisher_name: string | null = null) => ({
+      name,
+      sha256: 'a'.repeat(64),
+      size: 1,
+      publisher_name,
+    });
+    const code = '{6C2A1A7B-0D5E-4F1C-9E4B-3B1C2D3E4F50}';
+    const msiexec = (args: string[]) =>
+      pkg({ uninstall_run: 'msiexec', uninstall_args: args, files: [file('app.msi')] });
+    // Method A runs msiexec /x {product code}, unsigned, without any file.
+    expect(stepTrust(msiexec(['/x', code, '/qn']), 'uninstall')).toBe('product_code');
+    // Not an MSI path, not a code with anything around it.
+    expect(stepTrust(msiexec(['/x', '{dir}\\app.msi']), 'uninstall')).toBe('none');
+    expect(stepTrust(msiexec([`/x${code}`]), 'uninstall')).toBe('none');
+    // Signed, everything goes (method B).
+    expect(stepTrust({ ...msiexec(['/x', '{dir}\\app.msi']), signed: true }, 'uninstall')).toBe(
+      'signed',
+    );
+    // An uninstaller .exe: its own publisher counts, not the installer's.
+    const exe = (publisher: string | null) =>
+      pkg({
+        publisher_name: 'INDEX EDUCATION SAS',
+        uninstall_run: 'uninst.exe',
+        files: [
+          file('Install_PRNclient.exe', 'INDEX EDUCATION SAS'),
+          file('uninst.exe', publisher),
+        ],
+      });
+    expect(stepTrust(exe(null), 'uninstall')).toBe('none');
+    // Both executables are loadable beside each other: method A refuses.
+    expect(stepTrust(exe('INDEX EDUCATION SAS'), 'uninstall')).toBe('none');
+    const alone = pkg({
+      uninstall_run: 'uninst.exe',
+      files: [file('uninst.exe', 'INDEX'), file('uninst.ini')],
+    });
+    expect(stepTrust(alone, 'uninstall')).toBe('publisher');
+    expect(stepTrust({ ...alone, uninstall_run: 'uninst.ini' }, 'uninstall')).toBe('none');
+    // The install rule does not take a product code: the agent would turn it
+    // into an uninstall.
+    expect(
+      trustMethod(pkg({ install_run: 'msiexec', install_args: ['/x', code], publisher_name: 'X' })),
+    ).toBe('none');
+  });
+
+  it('counts the newer loadable extensions (audit T02)', () => {
+    const file = (name: string) => ({
+      name,
+      sha256: 'a'.repeat(64),
+      size: 1,
+      publisher_name: null,
+    });
+    for (const ext of ['.bpl', '.pyd', '.xll', '.node', '.rll', '.wsc', '.sct']) {
+      expect(
+        trustMethod(pkg({ publisher_name: 'INDEX EDUCATION SAS', files: [file(`x${ext}`)] })),
+      ).toBe('none');
+    }
   });
 
   it('deploys only what is complete and not retired', () => {

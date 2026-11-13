@@ -57,10 +57,13 @@
 			method POST
 			path_regexp ^/api/v1/packages/[0-9a-fA-F-]+/files$
 		}
-		# 2GiB, the backend's PACKAGE_MAX_BYTES (2 Gio per file); the console
-		# sends one file per request. « 2GB » would be 2·10^9 bytes, less.
+		# A little above the backend's PACKAGE_MAX_BYTES (2 Gio per file; the
+		# console sends one file per request): Caddy bounds the whole
+		# multipart body, headers of the parts included, so at exactly 2GiB a
+		# file the console accepted would get Caddy's bare 413 instead of the
+		# API's own, which names the limit. « 2GB » would be 2·10^9 bytes, less.
 		request_body @package_upload {
-			max_size 2GiB
+			max_size 2050MiB
 		}
 		@not_package_upload {
 			not {

@@ -409,11 +409,11 @@ CommandOut.model_rebuild()
 
 async def _package_deliveries(
     session: SessionDep, package_ids: set[uuid.UUID]
-) -> tuple[dict[uuid.UUID, PackageDelivery], dict[uuid.UUID, str]]:
-    """The packages as handed to the agent, and the fingerprint of each as it
-    stands (``package_crud.fingerprint``)."""
+) -> tuple[dict[uuid.UUID, PackageDelivery], dict[uuid.UUID, str], set[uuid.UUID]]:
+    """The packages as handed to the agent, the fingerprint of each as it
+    stands (``package_crud.fingerprint``), and those retired meanwhile."""
     if not package_ids:
-        return {}, {}
+        return {}, {}, set()
     packages = (
         await session.exec(select(Package).where(col(Package.id).in_(package_ids)))
     ).all()
@@ -423,7 +423,8 @@ async def _package_deliveries(
         return base64.b64encode(value).decode("ascii") if value is not None else None
 
     digests = {p.id: package_crud.fingerprint(p, files[p.id]) for p in packages}
-    return {
+    retired = {p.id for p in packages if p.retired_at is not None}
+    deliveries = {
         p.id: PackageDelivery(
             id=p.id,
             kind=p.kind,
@@ -440,7 +441,8 @@ async def _package_deliveries(
             ],
         )
         for p in packages
-    }, digests
+    }
+    return deliveries, digests, retired
 
 
 class HeartbeatResponse(BaseModel):
@@ -865,18 +867,22 @@ async def heartbeat(
 
     # Build the payload before commit: expire_on_commit would otherwise trigger
     # a sync refresh on attribute access — MissingGreenlet under asyncio.
-    deliveries, digests = await _package_deliveries(
+    deliveries, digests, retired = await _package_deliveries(
         session, {c.package_id for c in pending if c.package_id is not None}
     )
 
     def refusal(c: Command) -> str | None:
         """Why a deployment cannot go out: its package was deleted, or it
         changed since the deployment was queued — what was approved is not
-        what would run (audit S08)."""
+        what would run (audit S08) — or, for an installation, it was retired
+        meanwhile: retiring says "install this nowhere any more". An
+        uninstall of a retired package still goes, as it may be queued."""
         if c.type not in PACKAGE_COMMAND_TYPES:
             return None
         if c.package_id not in deliveries:
             return "Paquet supprimé avant l'exécution"
+        if c.type == CommandType.PACKAGE_INSTALL and c.package_id in retired:
+            return "Paquet retiré après la mise en file : installation annulée"
         if c.package_digest is not None and c.package_digest != digests[c.package_id]:
             return (
                 "Paquet modifié après la mise en file (fichiers, ligne de commande "

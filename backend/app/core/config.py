@@ -150,10 +150,13 @@ class Settings(BaseSettings):
     # Escape hatch, not a tuning knob: the per-endpoint budgets live with the
     # limiters (app.core.ratelimit). Off only for a deployment whose operators
     # all arrive from one shared address (VPN, proxy) and lock each other out.
+    # It does not turn off the account lock below.
     RATE_LIMIT_ENABLED: bool = True
-    # Consecutive failed logins before an account is locked, and for how long.
-    # The rate limiter caps one address; this caps one account, whatever the
-    # number of addresses trying it.
+    # Failed logins (each within LOGIN_LOCKOUT_MINUTES of the previous one)
+    # before an account is locked, and for how long. The lock shuts out the
+    # addresses that failed on the account, or, once more than twice this many
+    # addresses have, every address but those that opened it recently
+    # (app.core.ratelimit.FailureMemory).
     LOGIN_MAX_FAILED_ATTEMPTS: int = Field(default=5, ge=1, le=100)
     LOGIN_LOCKOUT_MINUTES: int = Field(default=15, ge=1, le=24 * 60)
 
@@ -456,7 +459,7 @@ class Settings(BaseSettings):
     # Software deployment (dev/plan-deploiement-logiciel.md). Where uploaded
     # package files are kept — one file per SHA-256 — and the largest file
     # accepted. The Caddy route that receives them is sized to match
-    # (deploy/Caddyfile, 2 GB).
+    # (deploy/Caddyfile: 2050 MiB, just above 2 GiB, so this bound answers).
     PACKAGES_DIR: str = "/data/packages"
     PACKAGE_MAX_BYTES: int = Field(default=2 * 1024**3, ge=1024**2, le=8 * 1024**3)
     # Package downloads served at once by one API process; beyond it agents
@@ -483,9 +486,6 @@ class Settings(BaseSettings):
     # for another relay to take (the claiming poste switched off, or dropped
     # it). Within the wake's own TTL.
     WOL_RELAY_CLAIM_TIMEOUT_SECONDS: int = Field(default=180, ge=30, le=3600)
-    # The subnets a wake may be broadcast on when the server emits it itself
-    # (CIDR list). Empty: the private ranges (RFC 1918). An address reported
-    # by an agent outside them is not a destination (audit S35).
     # Who may tell the API the client's address (X-Forwarded-For), besides
     # loopback: CIDR networks, and host names resolved in the compose network
     # (Caddy's service). Anyone else's header is ignored (audit S28).
@@ -496,6 +496,9 @@ class Settings(BaseSettings):
     # The OpenAPI schema and its pages (/docs, /redoc): a map of every route
     # and field, served only in local development unless asked (audit S36).
     EXPOSE_OPENAPI: bool = False
+    # The subnets a wake may be broadcast on when the server emits it itself
+    # (CIDR list). Empty: the private ranges (RFC 1918). An address reported
+    # by an agent outside them is not a destination (audit S35).
     WOL_ALLOWED_NETWORKS: Annotated[list[str] | str, BeforeValidator(parse_list)] = []
 
     @model_validator(mode="after")

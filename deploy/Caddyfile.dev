@@ -46,7 +46,7 @@
 			path_regexp ^/api/v1/packages/[0-9a-fA-F-]+/files$
 		}
 		request_body @package_upload {
-			max_size 2GB
+			max_size 2050MiB
 		}
 		@not_package_upload {
 			not {

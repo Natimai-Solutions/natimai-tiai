@@ -687,3 +687,373 @@ async def test_control_characters_are_refused(client, db_session):
     ):
         resp = await client.post("/api/v1/packages", headers=admin, json=body)
         assert resp.status_code == 422, (body, resp.text)
+
+
+# --- audit 2026-11 verification: T08, T09, T38, T23, T02 ---------------------------
+
+
+async def test_a_package_retired_after_queueing_is_not_installed(
+    client, db_session, store
+):
+    """Audit T08: retiring says "install this nowhere any more" — an install
+    queued before is cancelled at delivery; an uninstall still goes out."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    patched = await client.patch(
+        f"/api/v1/packages/{package['id']}",
+        headers=admin,
+        json={"uninstall_run": "Install_PRNclient.exe", "uninstall_args": ["/u"]},
+    )
+    assert patched.status_code == 200, patched.text
+    machine_id, agent = await _enroll(client, "poste-1")
+    await _deploy(client, admin, package["id"], machine_id)
+    queued = await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={
+            "type": "package_uninstall",
+            "machine_ids": [machine_id],
+            "package_id": package["id"],
+        },
+    )
+    assert queued.status_code == 200, queued.text
+
+    retired = await client.post(
+        f"/api/v1/packages/{package['id']}/retire", headers=admin
+    )
+    assert retired.status_code == 200, retired.text
+
+    hb = await client.post(
+        "/api/v1/agent/heartbeat", headers=agent, json={"agent_version": "test"}
+    )
+    assert [c["type"] for c in hb.json()["commands"]] == ["package_uninstall"]
+    listed = await client.get(
+        "/api/v1/commands", headers=admin, params={"machine_id": machine_id}
+    )
+    install = next(c for c in listed.json()["items"] if c["type"] == "package_install")
+    assert install["status"] == "failed"
+    assert install["error"] == (
+        "Paquet retiré après la mise en file : installation annulée"
+    )
+
+    # Queued after the retirement, an uninstall is still delivered.
+    (delivered,) = hb.json()["commands"]
+    await client.post(
+        f"/api/v1/agent/commands/{delivered['id']}/result",
+        headers=agent,
+        json={"status": "succeeded"},
+    )
+    again = await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={
+            "type": "package_uninstall",
+            "machine_ids": [machine_id],
+            "package_id": package["id"],
+        },
+    )
+    assert again.status_code == 200, again.text
+    hb = await client.post(
+        "/api/v1/agent/heartbeat", headers=agent, json={"agent_version": "test"}
+    )
+    assert [c["type"] for c in hb.json()["commands"]] == ["package_uninstall"]
+
+
+def test_a_pinned_file_is_seen_by_a_sweep_that_started_before():
+    """Audit T09: an upload that pinned, committed and unpinned while a sweep
+    was asking the database still shows to that sweep."""
+    from app.features.package import storage
+
+    sha = "ab" * 32
+    mark = storage.pin_mark()
+    assert not storage.pinned_since(sha, mark)
+    storage.pin(sha)
+    storage.pin(sha)
+    storage.unpin(sha)
+    assert storage.pinned_since(sha, mark)
+    storage.unpin(sha)
+    # Released since the mark: a sweep that looked before must not delete.
+    assert storage.pinned_since(sha, mark)
+    # A sweep starting now sees nothing held.
+    assert not storage.pinned_since(sha, storage.pin_mark())
+
+
+async def test_the_sweep_keeps_a_pinned_file(client, db_session, store):
+    """Audit T09, forced interleaving: pinned, the orphan stays; released, it
+    goes."""
+    from app.features.package import crud, storage
+
+    admin = await _admin(client, db_session)
+    await _pronote(client, admin)
+    sha = "cd" * 32
+    (store / sha).write_bytes(b"stored, not committed yet")
+    storage.pin(sha)
+    try:
+        assert await crud.sweep_store(db_session) == 0
+        assert (store / sha).exists()
+    finally:
+        storage.unpin(sha)
+    assert await crud.sweep_store(db_session) == 1
+    assert not (store / sha).exists()
+
+
+def _sweep_before_commit(monkeypatch, engine):
+    """Run a sweep from another session between the upload's save and its
+    commit — what an agent's verdict or another admin's upload would do."""
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.features.package import crud
+
+    original = crud.refresh_manifest
+    swept: list[int] = []
+
+    async def racing(session, package):
+        async with AsyncSession(engine) as other:
+            swept.append(await crud.sweep_store(other))
+        return await original(session, package)
+
+    monkeypatch.setattr(crud, "refresh_manifest", racing)
+    return swept
+
+
+async def test_a_sweep_during_an_upload_keeps_the_file(
+    client, db_session, store, engine, monkeypatch
+):
+    """Audit T09: the upload answers 200 and the file it named is there to
+    download — new content, and content whose blob was already in the store
+    unreferenced."""
+    import hashlib
+
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    orphan = b"[Setup]\nleft by a removed package file\n"
+    orphan_sha = hashlib.sha256(orphan).hexdigest()
+    (store / orphan_sha).write_bytes(orphan)
+
+    from app.features.package import crud
+
+    original = crud.refresh_manifest
+    swept = _sweep_before_commit(monkeypatch, engine)
+    up = await client.post(
+        f"/api/v1/packages/{package['id']}/files",
+        headers=admin,
+        files=[
+            ("files", ("new.ini", b"[Options]\nfresh\n")),
+            ("files", ("reused.ini", orphan)),
+        ],
+    )
+    assert up.status_code == 200, up.text
+    assert swept == [0]
+    monkeypatch.setattr(crud, "refresh_manifest", original)
+
+    machine_id, agent = await _enroll(client, "poste-1")
+    await _deploy(client, admin, package["id"], machine_id)
+    hb = await client.post(
+        "/api/v1/agent/heartbeat", headers=agent, json={"agent_version": "test"}
+    )
+    (command,) = hb.json()["commands"]
+    files = {f["name"]: f["sha256"] for f in command["package"]["files"]}
+    for name, content in (("new.ini", b"[Options]\nfresh\n"), ("reused.ini", orphan)):
+        got = await client.get(
+            f"/api/v1/agent/packages/{package['id']}/files/{files[name]}",
+            headers=agent,
+        )
+        assert got.status_code == 200, (name, got.text)
+        assert got.content == content
+
+
+async def test_a_database_error_in_the_sweep_does_not_fail_the_upload(
+    client, db_session, store, monkeypatch
+):
+    """The sweep runs after the upload committed: a database error there is
+    logged, not answered 500 for a stored file."""
+    from sqlalchemy.exc import OperationalError
+
+    from app.features.package import crud
+
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+
+    async def broken(session, sha256):
+        raise OperationalError("SELECT 1", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(crud, "sha_in_use", broken)
+    up = await client.post(
+        f"/api/v1/packages/{package['id']}/files",
+        headers=admin,
+        files=[("files", ("extra.ini", b"[x]\n"))],
+    )
+    assert up.status_code == 200, up.text
+    assert "extra.ini" in {f["name"] for f in up.json()["files"]}
+
+
+async def test_the_sweep_deletes_nothing_beside_an_empty_catalogue(
+    db_session, store, caplog
+):
+    """Packages are retired, never deleted: files in the store and no package
+    at all means the wrong database, not orphans."""
+    import logging
+
+    from app.features.package import crud
+
+    store.mkdir(parents=True, exist_ok=True)
+    sha = "ef" * 32
+    (store / sha).write_bytes(b"an installer")
+    with caplog.at_level(logging.WARNING, logger="app.features.package.crud"):
+        assert await crud.sweep_store(db_session) == 0
+    assert (store / sha).exists()
+    assert "no package in the database" in caplog.text
+
+
+def test_a_file_name_cannot_end_with_a_newline():
+    """Audit T38: "$" after re.match accepts one trailing LF."""
+    from app.features.package import manifest
+
+    assert manifest.valid_file_name("setup.exe")
+    for name in ("setup.exe\n", "con\n", "setup\n.exe", "\nsetup.exe"):
+        assert not manifest.valid_file_name(name), repr(name)
+    # The store's own names, from the download URL, likewise.
+    from app.features.package import storage
+
+    with pytest.raises(ValueError):
+        storage.path_for("a" * 64 + "\n")
+
+
+async def test_an_uploaded_file_name_with_a_newline_is_refused(
+    client, db_session, store
+):
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    # A bare LF inside the quoted file name: the multipart parser keeps it.
+    boundary = "tiai-boundary"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="files"; filename="evil.txt\n"\r\n'
+        "Content-Type: application/octet-stream\r\n\r\n"
+        "x\r\n"
+        f"--{boundary}--\r\n"
+    ).encode()
+    resp = await client.post(
+        f"/api/v1/packages/{package['id']}/files",
+        headers={**admin, "Content-Type": f"multipart/form-data; boundary={boundary}"},
+        content=body,
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == "package.file.name_invalid"
+
+
+async def test_winget_identifiers_cannot_end_with_a_newline(client, db_session):
+    from app.api.routes import packages
+
+    admin = await _admin(client, db_session)
+    resp = await client.post(
+        "/api/v1/packages",
+        headers=admin,
+        json={"kind": "winget", "name": "Firefox", "winget_id": "Mozilla.Firefox\n"},
+    )
+    assert resp.status_code == 422, resp.text
+    # The version is stripped before it is checked; the pattern holds anyway.
+    assert packages.WINGET_VERSION.fullmatch("128.0")
+    assert not packages.WINGET_VERSION.fullmatch("128.0\n")
+
+
+async def test_bidi_controls_and_separators_are_refused(client, db_session):
+    """Audit T38: they reorder or break what the signer reads, as control
+    characters do."""
+    admin = await _admin(client, db_session)
+    for body in (
+        {"kind": "files", "name": "App‮gnp.exe"},
+        {"kind": "files", "name": "App", "version": "1.0⁦"},
+        {"kind": "files", "name": "App", "detect_name": "App⁩"},
+        {"kind": "files", "name": "App", "install_run": "setup‪.exe"},
+        {"kind": "files", "name": "App", "uninstall_run": "un‭.exe"},
+        {"kind": "files", "name": "App", "install_args": ["-s", "a b"]},
+        {"kind": "files", "name": "App", "uninstall_args": [" "]},
+    ):
+        resp = await client.post("/api/v1/packages", headers=admin, json=body)
+        assert resp.status_code == 422, (body, resp.text)
+
+
+async def _uninstall(client, admin, package_id, machine_id):
+    return await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={
+            "type": "package_uninstall",
+            "machine_ids": [machine_id],
+            "package_id": package_id,
+        },
+    )
+
+
+async def test_an_uninstall_no_poste_would_run_is_refused(client, db_session, store):
+    """Audit T23 (U04, B30): the agent's rule — signed (B), an .exe of an
+    approved publisher alone of its kind (A), or msiexec with a product code
+    (A, rebuilt as /x {code}) — is applied before queueing."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    machine_id, _ = await _enroll(client, "poste-1")
+    url = f"/api/v1/packages/{package['id']}"
+
+    # msiexec with an MSI path: method A takes only a product code.
+    await client.patch(
+        url,
+        headers=admin,
+        json={"uninstall_run": "msiexec", "uninstall_args": ["/x", "{dir}\\a.msi"]},
+    )
+    refused = await _uninstall(client, admin, package["id"], machine_id)
+    assert refused.status_code == 409, refused.text
+    error = refused.json()["error"]
+    assert error["code"] == "package.not_ready"
+    assert "aucun poste ne l'exécutera" in error["details"]["problems"][0]
+
+    # A data file of the package, not an executable.
+    await client.patch(
+        url,
+        headers=admin,
+        json={"uninstall_run": "ClientPRONOTE.iss", "uninstall_args": []},
+    )
+    refused = await _uninstall(client, admin, package["id"], machine_id)
+    assert refused.status_code == 409, refused.text
+
+    # msiexec /x {product code}: method A runs it.
+    await client.patch(
+        url,
+        headers=admin,
+        json={
+            "uninstall_run": "msiexec",
+            "uninstall_args": ["/x", "{6C2A1A7B-0D5E-4F1C-9E4B-3B1C2D3E4F50}", "/qn"],
+        },
+    )
+    accepted = await _uninstall(client, admin, package["id"], machine_id)
+    assert accepted.status_code == 200, accepted.text
+
+
+def test_the_loadable_extensions_match_the_agent_and_the_console():
+    """Audit T02: one list in three languages — the agent's (what it refuses),
+    the server's and the console's (what they predict it refuses)."""
+    import re
+    from pathlib import Path
+
+    from app.features.package import manifest
+
+    repo = Path(__file__).resolve().parents[2]
+    agent_go = repo / "agent" / "internal" / "deploy" / "deploy.go"
+    console_ts = repo / "frontend" / "src" / "services" / "packages.ts"
+    if not agent_go.exists() or not console_ts.exists():
+        pytest.skip("agent or frontend sources not in this checkout")
+
+    go = agent_go.read_text(encoding="utf-8")
+    block = re.search(r"var loadableExt = map\[string\]bool\{(.*?)\n\}", go, re.S)
+    assert block, "loadableExt not found in deploy.go"
+    agent = set(re.findall(r'"(\.[a-z0-9]+)":\s*true', block.group(1)))
+
+    ts = console_ts.read_text(encoding="utf-8")
+    block = re.search(r"const LOADABLE_EXTENSIONS = new Set\((.*?)\);", ts, re.S)
+    assert block, "LOADABLE_EXTENSIONS not found in packages.ts"
+    console = set(" ".join(re.findall(r"'([^']*)'", block.group(1))).split())
+
+    assert set(manifest.LOADABLE_EXTENSIONS) == console
+    assert set(manifest.LOADABLE_EXTENSIONS) == agent, sorted(
+        agent ^ set(manifest.LOADABLE_EXTENSIONS)
+    )
