@@ -92,41 +92,92 @@ _ALL = (
 
 
 class FailureMemory:
-    """When each (account, address) pair last failed a login.
+    """When each (account, address) pair last failed a login, and which
+    addresses last opened each account.
 
     What a locked account is guarded by (audit S03): the lock refuses the
     addresses that failed on the account recently, not the account itself —
     so anyone can no longer keep an administrator out by failing five times
     from a poste, while the addresses doing the guessing stay shut out.
+
+    That alone gives one guess per address during a lock, which a botnet or
+    an IPv6 prefix multiplies at will. So when more distinct addresses than
+    ``besieged_after`` have failed on an account within the window, the lock
+    turns account-wide again, except for the addresses that opened the
+    account recently — its owner's usual postes (``known``).
+
+    In process memory, like the rate limiter: the stack runs one API process
+    (``entrypoint.sh``). A restart forgets it; the lock itself is in the
+    database.
     """
+
+    # How long an address that opened an account stays its owner's.
+    KNOWN_SECONDS = 30 * 24 * 3600
+    _MAX_KEYS = 4096
+    _MAX_KNOWN = 8192
 
     def __init__(self) -> None:
         self._last: dict[tuple[str, str], float] = {}
+        self._known: dict[tuple[str, str], float] = {}
+
+    @staticmethod
+    def _window() -> float:
+        return settings.LOGIN_LOCKOUT_MINUTES * 60
 
     def note(self, account: str, ip: str) -> None:
         now = time.monotonic()
         self._last[(account, ip)] = now
-        if len(self._last) > 4096:
-            horizon = now - settings.LOGIN_LOCKOUT_MINUTES * 60
+        if len(self._last) > self._MAX_KEYS:
+            horizon = now - self._window()
             for key, at in list(self._last.items()):
                 if at <= horizon:
                     del self._last[key]
 
     def failed_recently(self, account: str, ip: str) -> bool:
         at = self._last.get((account, ip))
-        return at is not None and (
-            time.monotonic() - at < settings.LOGIN_LOCKOUT_MINUTES * 60
+        return at is not None and time.monotonic() - at < self._window()
+
+    def failing_addresses(self, account: str) -> int:
+        """How many distinct addresses failed on ``account`` in the window."""
+        horizon = time.monotonic() - self._window()
+        return sum(
+            1 for (acc, _), at in self._last.items() if acc == account and at > horizon
         )
 
+    def besieged(self, account: str) -> bool:
+        """Whether more addresses than one person uses have been guessing."""
+        return self.failing_addresses(account) >= besieged_after()
+
+    def succeeded(self, account: str, ip: str) -> None:
+        """``ip`` opened ``account``: it stays welcome through a siege."""
+        self._known.pop((account, ip), None)
+        self._known[(account, ip)] = time.monotonic()
+        if len(self._known) > self._MAX_KNOWN:
+            # Insertion order is age order: drop the oldest.
+            for key in list(self._known)[: len(self._known) - self._MAX_KNOWN]:
+                del self._known[key]
+
+    def known(self, account: str, ip: str) -> bool:
+        at = self._known.get((account, ip))
+        return at is not None and time.monotonic() - at < self.KNOWN_SECONDS
+
     def forget(self, account: str, ip: str | None = None) -> None:
-        """Forget ``ip`` on ``account``, or every address when ``ip`` is None
-        (a new password: what was guessed before no longer matters)."""
+        """Forget ``ip``'s failures on ``account``, or every address's when
+        ``ip`` is None (a new password: what was guessed before no longer
+        matters)."""
         for key in list(self._last):
             if key[0] == account and (ip is None or key[1] == ip):
                 del self._last[key]
 
     def reset(self) -> None:
         self._last.clear()
+        self._known.clear()
+
+
+def besieged_after() -> int:
+    """Distinct failing addresses that turn a lock account-wide: twice the
+    lock threshold, so that a person failing from a few postes never does."""
+    return 2 * settings.LOGIN_MAX_FAILED_ATTEMPTS
 
 
 login_failures = FailureMemory()

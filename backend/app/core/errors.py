@@ -29,8 +29,6 @@ class ErrorCode(enum.StrEnum):
     AUTH_CREDENTIALS_INVALID = "auth.credentials.invalid"
     AUTH_REQUIRED = "auth.required"
     AUTH_PERMISSION_DENIED = "auth.permission.denied"
-    # Too many failed logins in a row: the account waits LOGIN_LOCKOUT_MINUTES.
-    AUTH_ACCOUNT_LOCKED = "auth.account.locked"
     # Refused because it would hand out, or reach, more than the caller holds:
     # a permission they lack, the administrators' group, or an account that is
     # more powerful than they are.

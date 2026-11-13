@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, func, or_, update
+from sqlalchemy import case, delete, func, or_, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -94,10 +94,14 @@ async def authenticate(
     deactivated account is checked against a dummy hash, so how long the answer
     takes says nothing about which addresses have an account.
 
-    LOGIN_MAX_FAILED_ATTEMPTS failures, from wherever, lock the account for
+    LOGIN_MAX_FAILED_ATTEMPTS failures, from wherever, each within
+    LOGIN_LOCKOUT_MINUTES of the previous one, lock the account for
     LOGIN_LOCKOUT_MINUTES. The lock shuts out the addresses that failed on it
     recently, not the account (audit S03): the right password from another
-    address still opens it, so failing on purpose keeps nobody out. Raises
+    address still opens it, so failing on purpose keeps nobody out. Unless
+    the guessing comes from many addresses (``FailureMemory.besieged``): the
+    lock then shuts out every address but those that opened the account
+    recently, so spreading the guesses buys no more of them. Raises
     ``AccountLockedError`` on the failure that locks it (to audit) and on an
     attempt refused by the lock (to log); the route answers both like any
     failure (audit S12). The counter moves in the database, so concurrent
@@ -109,10 +113,14 @@ async def authenticate(
         return None
     now = utcnow()
     account = str(user.id)
+    failures = ratelimit.login_failures
     if (
         user.locked_until is not None
         and user.locked_until > now
-        and ratelimit.login_failures.failed_recently(account, ip)
+        and (
+            failures.failed_recently(account, ip)
+            or (failures.besieged(account) and not failures.known(account, ip))
+        )
     ):
         await security.burn_password_check_async(password)
         raise AccountLockedError(user, user.locked_until, just_locked=False)
@@ -121,9 +129,11 @@ async def authenticate(
         if until is not None:
             raise AccountLockedError(user, until, just_locked=True)
         return None
-    ratelimit.login_failures.forget(account, ip)
+    failures.forget(account, ip)
+    failures.succeeded(account, ip)
     if user.failed_login_attempts or user.locked_until is not None:
         user.failed_login_attempts = 0
+        user.last_failed_login_at = None
         user.locked_until = None
         session.add(user)
     return user
@@ -133,19 +143,30 @@ async def record_failure(session: AsyncSession, user: User, ip: str) -> datetime
     """Count a wrong password for ``user`` from ``ip``, in the database so
     that concurrent failures all count (audit S13). Returns the end of the
     lock when this failure set it — of concurrent ones past the threshold,
-    exactly one does. Does not commit."""
+    exactly one does. A failure more than LOGIN_LOCKOUT_MINUTES after the
+    previous one counts as the first: old failures do not add up. Does not
+    commit."""
     ratelimit.login_failures.note(str(user.id), ip)
+    now = utcnow()
+    stale = now - timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
+    last = col(User.last_failed_login_at)
     failures = (
         await session.exec(
             update(User)
             .where(col(User.id) == user.id)
-            .values(failed_login_attempts=col(User.failed_login_attempts) + 1)
+            .values(
+                failed_login_attempts=case(
+                    (or_(last.is_(None), last < stale), 1),
+                    else_=col(User.failed_login_attempts) + 1,
+                ),
+                last_failed_login_at=now,
+            )
             .returning(col(User.failed_login_attempts))
         )
     ).scalar_one()
     if failures < settings.LOGIN_MAX_FAILED_ATTEMPTS:
         return None
-    until = utcnow() + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
+    until = now + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
     locked = (
         await session.exec(
             update(User)
