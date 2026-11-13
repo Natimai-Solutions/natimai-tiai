@@ -26,7 +26,9 @@ gère naturellement les postes éteints.
 
 ![Fiche d'un poste, onglet Historique : maintenance et journal des interventions](images/FichePosteHistorique.png)
 
-![Groupes de droits composés dans la console](images/Groupes.png)
+![Groupes de droits, dont un limité à un bâtiment](images/Groupes.png)
+
+![Un paquet winget et le suivi de son déploiement sur une salle](images/Paquet.png)
 
 ## Fonctionnalités
 
@@ -118,6 +120,13 @@ gère naturellement les postes éteints.
   défaut, et tout le reste de la fiche à ajouter ou retirer, à la manière d'un
   export Odoo. Collecté une fois par jour, et **envoyé seulement quand quelque
   chose a changé**.
+- **Déploiement de logiciels** — installer ou désinstaller un logiciel sur un
+  poste, une sélection, une salle ou tout le parc, avec le suivi poste par poste.
+  Trois méthodes, chacune fermée tant qu'une GPO ne l'ouvre pas sur le poste :
+  winget (liste d'identifiants autorisés en option), paquet signé par
+  l'administrateur hors du serveur, ou exécutable d'un éditeur approuvé.
+  L'agent vérifie l'empreinte de chaque fichier et la signature avant de lancer
+  quoi que ce soit ; voir `deploy/packages/README.md`.
 - **Déploiement sans friction** — un binaire unique poussé par GPO,
   auto-enrôlement des postes, HTTPS de bout en bout.
 
