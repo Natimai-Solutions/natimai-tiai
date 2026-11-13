@@ -64,7 +64,8 @@
             <q-tooltip>
               Trop d’échecs de connexion — jusqu’à {{ formatDateTime(props.row.locked_until) }}.
               Seules les adresses qui ont échoué sont refusées : le bon mot de passe saisi depuis un
-              autre poste ouvre la session. Réinitialiser le mot de passe lève le verrou.
+              autre poste ouvre la session (depuis un poste habituel du compte seulement, si les
+              essais viennent de nombreuses adresses). Réinitialiser le mot de passe lève le verrou.
             </q-tooltip>
           </q-badge>
         </q-td>
@@ -216,8 +217,14 @@
 
     <!-- Réinitialisation : mot de passe généré ou choisi, affiché une seule fois. -->
     <!-- Persistent once the password is shown: it is applied already and
-         shown only here, so only « Fermer » may take it away (audit U13). -->
-    <q-dialog v-model="resetOpen" :persistent="resetResult !== null" @hide="resetResult = null">
+         shown only here, so only « Fermer » may take it away (audit U13).
+         Persistent while the request is in flight too: the server may have
+         applied a generated password that nobody would ever see. -->
+    <q-dialog
+      v-model="resetOpen"
+      :persistent="resetting || resetResult !== null"
+      @hide="resetResult = null"
+    >
       <q-card style="width: 460px; max-width: 90vw">
         <q-card-section class="text-h6">Réinitialiser le mot de passe</q-card-section>
         <q-card-section class="q-pt-none text-body2 text-muted">
@@ -246,8 +253,8 @@
             </q-card-section>
 
             <q-card-actions align="right" class="q-px-md q-pb-md">
-              <q-btn v-close-popup flat label="Annuler" />
-              <q-btn type="submit" color="primary" label="Réinitialiser" :loading="saving" />
+              <q-btn v-close-popup flat label="Annuler" :disable="resetting" />
+              <q-btn type="submit" color="primary" label="Réinitialiser" :loading="resetting" />
             </q-card-actions>
           </q-form>
         </template>
@@ -358,6 +365,8 @@ const resetTarget = ref<ConsoleUser | null>(null);
 const resetMode = ref<'generate' | 'manual'>('generate');
 const resetPassword = ref('');
 const resetResult = ref<string | null>(null);
+// Its own flag, not the user form's `saving`: it also holds the dialog open.
+const resetting = ref(false);
 
 const resetModes = [
   { label: 'Générer un mot de passe', value: 'generate' },
@@ -503,17 +512,21 @@ function openReset(user: ConsoleUser) {
 }
 
 async function submitReset() {
-  if (!resetTarget.value) return;
-  saving.value = true;
+  if (!resetTarget.value || resetting.value) return;
+  resetting.value = true;
   try {
-    resetResult.value = await resetUserPassword(
+    const password = await resetUserPassword(
       resetTarget.value.id,
       resetMode.value === 'manual' ? resetPassword.value : undefined,
     );
+    // Shown whatever happened to the dialog meanwhile: the server has applied
+    // it, and this is the only place it can be read (audit U13).
+    resetResult.value = password;
+    resetOpen.value = true;
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Réinitialisation impossible') });
   } finally {
-    saving.value = false;
+    resetting.value = false;
   }
 }
 

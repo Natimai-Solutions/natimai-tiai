@@ -93,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
@@ -170,7 +170,8 @@ function applyQuery() {
   };
 }
 
-function pushQuery() {
+/** The page's state as the URL writes it, defaults left out. */
+function buildQuery(): Record<string, string> {
   const p = pagination.value;
   const query: Record<string, string> = {};
   if (search.value) query.search = search.value;
@@ -178,8 +179,24 @@ function pushQuery() {
   if (!p.descending) query.desc = 'false';
   if (p.page > 1) query.page = String(p.page);
   if (p.rowsPerPage !== 25) query.page_size = String(p.rowsPerPage);
-  void router.replace({ query });
+  return query;
 }
+
+function pushQuery() {
+  void router.replace({ query: buildQuery() });
+}
+
+// The URL changed from outside the page — the drawer's « Logiciels » link, or
+// Back — and the search, order or page with it: the page follows (audit T42).
+// Its own writes come back here too, and change nothing.
+watch(
+  () => route.query,
+  () => {
+    const before = JSON.stringify(buildQuery());
+    applyQuery();
+    if (JSON.stringify(buildQuery()) !== before) void load();
+  },
+);
 
 /** A first-seen instant, as the day it was in the reader's time zone. */
 function localDate(value: string | null): string {
@@ -193,7 +210,12 @@ const noDataLabel = computed(() => {
   return "Aucun logiciel inventorié pour l'instant.";
 });
 
+// Which load is the current one: a search typed while the previous one is in
+// the air must not have the older answer written over its own.
+let requestId = 0;
+
 async function load() {
+  const id = ++requestId;
   loading.value = true;
   loadError.value = null;
   pushQuery();
@@ -206,13 +228,26 @@ async function load() {
       page: p.page,
       page_size: p.rowsPerPage,
     });
+    if (id !== requestId) return;
+    if (!data.items.length && data.total > 0 && p.page > 1) {
+      // A page past the end — a URL kept from a bigger catalogue: the last
+      // page that exists, rather than « aucun logiciel » over a total of 120.
+      pagination.value = {
+        ...pagination.value,
+        page: Math.ceil(data.total / p.rowsPerPage),
+        rowsNumber: data.total,
+      };
+      void load();
+      return;
+    }
     items.value = data.items;
     pagination.value = { ...pagination.value, rowsNumber: data.total };
   } catch (e) {
+    if (id !== requestId) return;
     loadError.value = e;
     items.value = [];
   } finally {
-    loading.value = false;
+    if (id === requestId) loading.value = false;
   }
 }
 

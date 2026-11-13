@@ -464,6 +464,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { useMachineNavigation } from 'src/composables/useMachineNavigation';
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import CommandOutputDialog from 'src/components/machine/CommandOutputDialog.vue';
 import MachineAntivirusCard from 'src/components/machine/MachineAntivirusCard.vue';
 import MachineCommandsCard from 'src/components/machine/MachineCommandsCard.vue';
@@ -548,6 +549,12 @@ const threats = ref<Threat[]>([]);
 // whichever page the history table is on.
 const activeThreats = ref(0);
 
+// The poste needs machine:read alone; its threats and its commands each ask
+// for their own permission, and a group may grant machine:read without them
+// (audit B02). What the account may not read is not asked for.
+const canReadThreats = computed(() => auth.can('threat', 'read'));
+const canReadCommands = computed(() => auth.can('command', 'read'));
+
 /**
  * The open tab, kept in the URL so a link to « the Windows Update tab of this
  * poste » is a link, and so a reload comes back where the reader was. The
@@ -556,9 +563,12 @@ const activeThreats = ref(0);
 const tab = computed<MachineTab>({
   get: () => {
     const raw = queryValue(route.query.tab);
-    return raw && (MACHINE_TABS as readonly string[]).includes(raw)
-      ? (raw as MachineTab)
-      : DEFAULT_MACHINE_TAB;
+    if (!raw || !(MACHINE_TABS as readonly string[]).includes(raw)) return DEFAULT_MACHINE_TAB;
+    // A link to the commands tab opened by an account that may not read them:
+    // the tab is not rendered, and selecting it would leave an empty panel
+    // under no selected tab (audit T14).
+    if (raw === 'commands' && !canReadCommands.value) return DEFAULT_MACHINE_TAB;
+    return raw as MachineTab;
   },
   set: (value) => {
     const query = { ...route.query };
@@ -637,14 +647,18 @@ const openCheckAsCheck = computed<Check | null>(() => {
     machine: null,
   };
 });
+// A check asked for or handed to somebody changes what « Mes tâches » counts:
+// the menu badge reads again (audit U19).
 async function askCheck(payload: CheckPayload) {
   await createCheck(props.id, payload);
+  notifyTasksChanged();
   $q.notify({ type: 'positive', message: 'Vérification demandée' });
   await load();
 }
 async function editCheck(payload: CheckPayload) {
   if (!machine.value?.open_check) return;
   await updateCheck(machine.value.open_check.id, payload);
+  notifyTasksChanged();
   $q.notify({ type: 'positive', message: 'Demande mise à jour' });
   await load();
 }
@@ -751,33 +765,34 @@ function showDetail(cmd: Command, kind: 'output' | 'error') {
 // numbers back over whatever the reader has since asked for.
 let requestId = 0;
 
-// The poste needs machine:read alone; its threats and its commands each ask
-// for their own permission, and a group may grant machine:read without them
-// (audit B02). What the account may not read is not asked for.
-const canReadThreats = computed(() => auth.can('threat', 'read'));
-const canReadCommands = computed(() => auth.can('command', 'read'));
-
 async function fetchAll() {
   const id = ++requestId;
+  // The poste this request is for. The counter alone is not enough: a walk to
+  // the next poste waits out the fetch already in flight (refreshNow), and that
+  // fetch, still the latest one when it answers, would write the poste being
+  // left into a fiche whose URL already names the next one (audit T20).
+  const machineId = props.id;
   const tp = threatPagination.value;
   const cp = commandPagination.value;
   const noPage = Promise.resolve(null);
   // The poste decides whether the page can show; the lists beside it only
   // fill their own card — one of them failing must not blank the fiche.
   const [m, t, active, c] = await Promise.allSettled([
-    getMachine(props.id),
+    getMachine(machineId),
     canReadThreats.value
-      ? listThreats({ machine_id: props.id, page: tp.page, page_size: tp.rowsPerPage })
+      ? listThreats({ machine_id: machineId, page: tp.page, page_size: tp.rowsPerPage })
       : noPage,
     // One row is enough: only the total is read.
     canReadThreats.value
-      ? listThreats({ machine_id: props.id, status: 'active', page: 1, page_size: 1 })
+      ? listThreats({ machine_id: machineId, status: 'active', page: 1, page_size: 1 })
       : noPage,
     canReadCommands.value
-      ? listCommands({ machine_id: props.id, page: cp.page, page_size: cp.rowsPerPage })
+      ? listCommands({ machine_id: machineId, page: cp.page, page_size: cp.rowsPerPage })
       : noPage,
   ]);
-  if (id !== requestId) return;
+  // Dropped without a word: the walk that changed the id has its own load
+  // queued behind this one, and that load decides what the page shows.
+  if (id !== requestId || machineId !== props.id) return;
   if (m.status === 'rejected') throw m.reason;
   machine.value = m.value;
   if (t.status === 'fulfilled' && t.value) {

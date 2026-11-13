@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils';
-import { QIcon, QLinearProgress, QTable } from 'quasar';
+import { QBadge, QIcon, QLinearProgress, QTable } from 'quasar';
 import { describe, expect, it } from 'vitest';
 import MachinesTable from './MachinesTable.vue';
 import type { Machine } from 'src/services/machines';
@@ -101,5 +101,36 @@ describe('MachinesTable', () => {
     wrapper.findComponent(QTable).vm.$emit('request', request);
 
     expect(wrapper.emitted('request')).toEqual([[request]]);
+  });
+
+  // Audit U28: the column took its colour from Defender's state alone, so a
+  // poste with no Security Center product read « Non relevé » in green.
+  it('colours the antivirus badge as the fiche does, never green without a product', () => {
+    const badge = (overrides: Partial<Machine>) =>
+      mountTable([row(overrides)])
+        .findAllComponents(QBadge)
+        .find((b) => /Non relevé|Aucun|Windows Defender/.test(b.text()))!;
+
+    expect(badge({ av_product_name: null, is_up_to_date: true }).props('color')).toBe('grey-6');
+    expect(badge({ av_product_name: '', is_up_to_date: true }).props('color')).toBe('negative');
+    expect(badge({ is_up_to_date: true }).props('color')).toBe('positive');
+    expect(badge({ is_up_to_date: false }).props('color')).toBe('negative');
+  });
+
+  // Audit U25: the sticky name cell is capped at 260 px; only the name is cut,
+  // the icons after it stay outside the ellipsis.
+  it('cuts a long name, not the icons after it', () => {
+    const wrapper = mountTable([
+      row({ hostname: 'X'.repeat(80), check_open: true, needs_verification: true }),
+    ]);
+    const cell = wrapper.find('.machine-name');
+
+    expect(cell.find('.machine-name__text').text()).toBe('X'.repeat(80));
+    expect(cell.find('.machine-name__text').attributes('title')).toBe('X'.repeat(80));
+    // Material icons render their name as the element's text.
+    const icons = cell.findAll('.q-icon').map((i) => i.text());
+    expect(icons).toEqual(expect.arrayContaining(['fact_check', 'warning']));
+    // Siblings of the name, not inside it.
+    expect(cell.find('.machine-name__text .q-icon').exists()).toBe(false);
   });
 });

@@ -1,6 +1,15 @@
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { QBtn, QChip, QInput, QSelect, QToggle } from 'quasar';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// The software chip names its program from the server; offline by default,
+// as the rest of these tests expect.
+vi.mock('src/services/software', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('src/services/software')>()),
+  getSoftware: vi.fn(() => Promise.reject(new Error('offline'))),
+}));
+
+import { getSoftware, type SoftwareRef } from 'src/services/software';
 import MachinesFiltersBar from './MachinesFiltersBar.vue';
 import {
   STATUS_OPTIONS,
@@ -150,6 +159,40 @@ describe('MachinesFiltersBar', () => {
       usageSelect(wrapper).vm.$emit('update:modelValue', null);
 
       expect(emitted(wrapper)).toEqual([emptyMachineFilters()]);
+    });
+  });
+
+  describe('software', () => {
+    const chipLabels = (wrapper: ReturnType<typeof mountBar>) =>
+      wrapper.findAllComponents(QChip).map((c) => c.find('.q-chip__content').text());
+
+    it('names the program on the chip', async () => {
+      vi.mocked(getSoftware).mockResolvedValueOnce({
+        id: 7,
+        name: '7-Zip',
+        version: '23.01',
+      } as SoftwareRef);
+      const wrapper = mountBar({ softwareId: 7 });
+      await flushPromises();
+
+      expect(chipLabels(wrapper)).toContain('Logiciel : 7-Zip 23.01');
+    });
+
+    // Audit T42: the answer for a program left behind must not name the next one.
+    it('ignores the name of a program no longer filtered on', async () => {
+      const pending: Record<number, (s: SoftwareRef) => void> = {};
+      vi.mocked(getSoftware).mockImplementation(
+        (id) => new Promise((resolve) => (pending[id] = resolve)),
+      );
+      const wrapper = mountBar({ softwareId: 7 });
+      await wrapper.setProps({ modelValue: { ...emptyMachineFilters(), softwareId: 8 } });
+      pending[8]!({ id: 8, name: 'Firefox', version: '140' } as SoftwareRef);
+      await flushPromises();
+      pending[7]!({ id: 7, name: '7-Zip', version: '23.01' } as SoftwareRef);
+      await flushPromises();
+
+      expect(chipLabels(wrapper)).toContain('Logiciel : Firefox 140');
+      expect(chipLabels(wrapper).join(' ')).not.toContain('7-Zip');
     });
   });
 });
