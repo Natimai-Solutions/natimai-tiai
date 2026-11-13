@@ -647,6 +647,28 @@ une fois au démarrage, mot de passe caviardé ; une valeur invalide est
 journalisée et l'agent se connecte en direct plutôt que de refuser de démarrer
 (`api.ParseProxy`).
 
+## HTTPS et redirections
+
+- **`http://` refusé par défaut** (audit S22, agent publié après la v1.1.0).
+  Le secret d'enrôlement, puis le token du poste, passeraient en clair : une
+  `api_base_url` en `http://` fait refuser le démarrage
+  (`api_base_url "…" is http://: … use https://, or set AllowInsecureHTTP=1`).
+  Un schéma autre que `http`/`https` est refusé dans tous les cas
+  ([`config.checkScheme`](internal/config/config.go)).
+- **L'option.** Viser le port HTTP direct du backend (mode A de
+  [DEPLOYMENT.md](../DEPLOYMENT.md), réseau de test) se déclare explicitement :
+  `allow_insecure_http: true` (YAML), `AllowInsecureHTTP` = 1 (registre,
+  `REG_DWORD`, prime sur le YAML) ou `init-config --allow-insecure-http`, qui
+  l'écrit dans le YAML. L'agent le rappelle alors dans son journal à chaque
+  démarrage. Sur un parc déjà installé en `http://`, poser la valeur **avant**
+  de mettre à jour l'agent, sinon les postes cessent de joindre le serveur.
+- **Aucune redirection suivie.** Le client HTTP de Go renverrait l'en-tête
+  `X-Enrollment-Secret` vers la cible d'une redirection : l'agent n'en suit
+  aucune, et un 3xx est traité comme une réponse en échec
+  ([`internal/api/client.go`](internal/api/client.go)). Conséquence pratique :
+  `http://<serveur>` (port 80 de Caddy, qui redirige en 301 vers `https://`)
+  ne fonctionne pas ; viser directement `https://<serveur>`.
+
 ## Identité & sécurité
 
 - Ancre = **SMBIOS/System UUID** (`Win32_ComputerSystemProduct.UUID`), repli sur un

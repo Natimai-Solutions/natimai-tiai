@@ -704,11 +704,11 @@ quand le besoin se présente ; rien dans le modèle de J1 ne s'y oppose.
 
 ---
 
-## 13. Suites de l'audit 2026-11 : reste à faire
+## 13. Suites de l'audit 2026-11
 
-L'audit du 2026-11-10 (`plan-audit-2026-11.md`) a relevé dans ce chantier deux constats immédiats sur la portée par emplacement (§12) : l'escalade par la modification d'un groupe, et la fuite par le détail d'une séance. S'y ajoutent des échéances de maintenance faussées et plusieurs points du parcours du technicien.
+L'audit du 2026-11-10 (`plan-audit-2026-11.md`) avait relevé dans ce chantier deux constats immédiats sur la portée par emplacement (§12) : l'escalade par la modification d'un groupe, et la fuite par le détail d'une séance. S'y ajoutaient des échéances de maintenance faussées et plusieurs points du parcours du technicien. Les tâches ci-dessous sont corrigées depuis le 2026-11-11. Une seconde passe de vérification, le 2026-11-13, a relevé des écarts résiduels, suivis dans `plan-audit-2026-11.md` §6.
 
-Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
+Tâches dans l'ordre de priorité, avec la numérotation `Txx` du plan d'ensemble, reprise dans les commits et les PR.
 
 - [x] **T03** · *P0 immédiate* — **Groupes : contrôler l'autorité des membres à la modification** ([S05](plan-audit-2026-11.md#s05))
   Dans `PATCH /groups/{id}` (`backend/app/api/routes/groups.py`), appliquer `reject_escalation` à l'autorité de chaque membre, comme le fait `PATCH /users`, ou réserver la modification des permissions aux comptes sans restriction. Ajouter à `test_api_scope.py` le cas d'un membre partagé avec un groupe sans restriction.

@@ -58,6 +58,14 @@ Côté poste, récupérer `tiai-agent-windows-amd64.exe` depuis la page
 .\tiai-agent.exe run
 ```
 
+`--allow-insecure-http` est indispensable : sans lui, l'agent refuse de
+démarrer sur une URL en `http://` (cf. § « Paramètres de l'agent Windows »).
+
+Ce port fait circuler en clair tout ce qu'échangent agents et serveur, **secret
+d'enrôlement compris** (l'agent l'envoie en en-tête à chaque enrôlement) : un
+`ENROLLMENT_SECRET` qui a servi dans ce mode est à tenir pour divulgué et doit
+être **changé avant la production** (cf. § « Générer les secrets »).
+
 **À savoir** : la console n'est pas exposée en HTTP (le service `frontend` n'est
 joignable qu'à travers Caddy en 443) — pour une console sans TLS, utiliser le
 serveur de dev Quasar. Et `ENVIRONMENT=local` renvoie les détails internes des
@@ -113,6 +121,8 @@ la prod, pour valider la CSP dès le dev.
 ```bash
 cd deploy
 cp .env.example .env         # ENVIRONMENT=production + vrais secrets
+chmod 600 .env               # tous les secrets du serveur : propriétaire seul
+mkdir -p backups && chmod 700 backups   # dumps non chiffrés (§ « Sauvegardes »)
 # déposer deploy/certs/tiai.crt et deploy/certs/tiai.key
 docker compose up -d
 ```
@@ -124,6 +134,10 @@ docker compose up -d
   certificat.
 - `deploy/certs/` est monté en lecture seule et ignoré par git, comme
   `deploy/.env`.
+- `deploy/.env` (secrets) et `deploy/backups/` (dumps de la base, non chiffrés)
+  sont réservés au propriétaire : `chmod 600 .env`, `chmod 700 backups`. Le
+  service `db-backup` resserre aussi le dossier et ses dumps à chaque démarrage,
+  mais seulement une fois lancé — et rien ne protège le `.env` à sa place.
 - Hors `ENVIRONMENT=local`, le backend **refuse de démarrer** si `SECRET_KEY`,
   `ENROLLMENT_SECRET`, `POSTGRES_PASSWORD` ou `FIRST_ADMIN_PASSWORD` est vide ou
   commence encore par `changeme`, ou si `SECRET_KEY` fait moins de 32 caractères,
@@ -250,6 +264,7 @@ Il n'est jamais committé.
 | `TIAI_SERVER_ALIASES` | *(vide)* | Autres noms sous lesquels la console est tapée (nom court, IP), séparés par des espaces ; chacun est redirigé vers `TIAI_SERVER_NAME`. En HTTPS, l'alias doit être dans les SAN du certificat |
 | `TIAI_VERSION` | `latest` | Version des images `tiai-backend` et `tiai-frontend` tirées de ghcr.io — à épingler en production (cf. § « Mettre à jour le serveur ») |
 | `TIAI_DEV_BACKEND_PORT` | `8800` | Port hôte du backend en HTTP direct (override de dev uniquement) |
+| `TIAI_DEV_BACKEND_BIND` | `127.0.0.1` | Adresse hôte sur laquelle ce port est publié (override de dev uniquement). `0.0.0.0` l'ouvre aux postes du réseau, en clair (cf. § « Mode A ») |
 | `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/` (cf. § « Sauvegardes et restauration ») |
 
 ### Backend
@@ -268,9 +283,12 @@ Il n'est jamais committé.
 | `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste — 16 caractères minimum hors `local` |
 | `ENROLLMENT_SECRET_PREVIOUS` | *(vide)* | Ancien secret, encore accepté pendant une rotation (cf. « Enrôlement : approbation et rotation du secret ») |
 | `ENROLLMENT_REENROLL_REQUIRES_APPROVAL` | `true` | Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur |
-| `LOGIN_MAX_FAILED_ATTEMPTS` / `LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Verrouillage d'un compte après N échecs de connexion consécutifs, pour cette durée. Une réinitialisation du mot de passe le lève |
+| `LOGIN_MAX_FAILED_ATTEMPTS` / `LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Verrouillage d'un compte après N échecs de connexion espacés de moins de cette durée, pour cette durée (voir *Verrouillage des comptes*). Une connexion réussie ou une réinitialisation du mot de passe le lève |
 | `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
+| `TRUSTED_PROXIES` | *(vide)* | Réseaux (CIDR, séparés par des virgules) dont l'en-tête `X-Forwarded-For` est cru, en plus de la boucle locale et de `TRUSTED_PROXY_HOSTS` ; l'adresse retenue est alors l'entrée la plus à droite de l'en-tête. Pour tout autre pair, l'en-tête est ignoré et l'adresse du client — limitation de débit, journal d'audit — est celle de la connexion. À renseigner seulement si un autre proxy que le Caddy de la stack joint directement le backend |
+| `TRUSTED_PROXY_HOSTS` | `caddy` | Noms d'hôte dont l'en-tête `X-Forwarded-For` est cru, séparés par des virgules, résolus dans le réseau Compose (au plus une fois par minute). Un nom qui ne se résout pas (hors Docker) n'accorde rien. Le défaut désigne le service Caddy de la stack |
+| `EXPOSE_OPENAPI` | `false` | Sert le schéma OpenAPI (`/api/v1/openapi.json`) et ses pages `/docs` et `/redoc` hors `ENVIRONMENT=local`, où ils le sont toujours. Derrière Caddy, seul `/api/*` atteint le backend : seul le schéma JSON devient joignable, les pages ne le sont que sur le port direct de l'override de dev. Le schéma décrit chaque route et chaque champ : laisser à `false` en production |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | Compte d'administration (superutilisateur) : initialisation du volume, sauvegardes |
 | `POSTGRES_APP_USER` / `POSTGRES_APP_PASSWORD` | `tiai_app` / — | Rôle applicatif du backend et du worker, sans superutilisateur (cf. § « Rôle applicatif PostgreSQL »). Le compose les passe au backend comme `POSTGRES_USER` / `POSTGRES_PASSWORD` |
@@ -322,13 +340,32 @@ comptes ne diffèrent que par la casse de leur adresse, en les nommant : renomme
 ou supprimer l'un des deux (page Utilisateurs de la version précédente, ou en
 base), puis relancer.
 
-Après `LOGIN_MAX_FAILED_ATTEMPTS` échecs consécutifs (5), un compte est
-**verrouillé** `LOGIN_LOCKOUT_MINUTES` minutes (15) : la limitation de débit
-plafonne une adresse, le verrouillage plafonne un compte, quel que soit le
-nombre d'adresses qui l'essaient. La page Utilisateurs affiche « Verrouillé » ;
-une réinitialisation du mot de passe par un administrateur lève le verrou. Le
-verrouillage et la réinitialisation figurent au journal d'audit, chaque entrée
-avec l'adresse source de la requête.
+**Verrouillage des comptes.** Après `LOGIN_MAX_FAILED_ATTEMPTS` échecs (5),
+chacun à moins de `LOGIN_LOCKOUT_MINUTES` minutes (15) du précédent, un compte
+est **verrouillé** pour `LOGIN_LOCKOUT_MINUTES` minutes. Un échec plus ancien ne
+compte plus : quelques fautes de frappe étalées sur la semaine ne verrouillent
+pas. Le verrou ne ferme le compte qu'aux **adresses qui ont échoué dessus**
+pendant cette durée : le bon mot de passe saisi depuis un autre poste ouvre la
+session et lève le verrou, si bien qu'échouer exprès ne bloque pas un
+administrateur. Si les essais viennent de nombreuses adresses (deux fois
+`LOGIN_MAX_FAILED_ATTEMPTS`, soit 10 adresses distinctes pendant la durée du
+verrou), le verrou s'étend à toutes les adresses sauf celles qui ont ouvert ce
+compte dans les 30 derniers jours : répartir les essais sur un réseau entier
+n'en donne pas davantage. Pendant un verrou, la console répond le même 401
+qu'à un mauvais mot de passe : la réponse ne dit pas quels comptes existent.
+
+Ces adresses sont gardées en mémoire du processus de l'API (un seul, cf.
+`entrypoint.sh`) : un redémarrage les oublie, le verrou lui-même reste en base.
+Deux limites découlent de l'adresse : des opérateurs qui sortent tous par la
+**même adresse** (NAT, VPN, proxy absent de `TRUSTED_PROXIES`) partagent aussi
+le verrou de l'adresse fautive ; et derrière un proxy non déclaré, toutes les
+requêtes semblent venir de lui. Déclarer le proxy (`TRUSTED_PROXIES`,
+`TRUSTED_PROXY_HOSTS`) avant tout.
+
+La page Utilisateurs affiche « Verrouillé » ; une réinitialisation du mot de
+passe par un administrateur lève le verrou. Le verrouillage et la
+réinitialisation figurent au journal d'audit, chaque entrée avec l'adresse
+source de la requête.
 
 Pour **déconnecter tout le monde** d'un coup (clé `SECRET_KEY` divulguée, poste
 compromis), changer `SECRET_KEY` puis fermer toutes les sessions :
@@ -356,7 +393,8 @@ variables ci-dessous ne décrivent que la destination du paquet.
 | `WOL_RELAY_ENABLED` | `false` | **Serveur distant.** À `true`, le serveur n'émet plus rien lui-même : il confie le réveil au premier poste allumé du **même emplacement** que la cible (à défaut d'emplacement, du même domaine) qui le contacte, et c'est l'agent de ce poste qui diffuse le paquet magique sur ses propres sous-réseaux. Voir le point 4 de la section « Réveil des postes » |
 | `WOL_RELAY_TTL_MINUTES` | `10` | Délai laissé à un poste relais pour prendre un réveil en attente ; passé ce délai, il expire. Court à dessein : un réveil relayé une heure plus tard rencontre un poste que quelqu'un a déjà rallumé à la main |
 | `WOL_RELAY_SUBNET_GRACE_SECONDS` | `90` | Un poste du **même sous-réseau** que la cible prend le réveil aussitôt ; un poste d'un autre VLAN du même emplacement attend ce délai — un cycle d'agent — pour laisser la priorité au mieux placé. `0` supprime la préférence |
-| `WOL_RELAY_MIN_AGE_MINUTES` | `60` | Un poste enrôlé depuis moins longtemps ne relaie pas de réveil ; un poste « identité à confirmer », au token révoqué, ou d'agent plus ancien que `WOL_RELAY_MIN_AGENT_VERSION` (`1.0.0`) non plus |
+| `WOL_RELAY_MIN_AGE_MINUTES` | `60` | Un poste enrôlé depuis moins longtemps ne relaie pas de réveil ; un poste « identité à confirmer », au token révoqué, ou d'agent plus ancien que `WOL_RELAY_MIN_AGENT_VERSION` non plus |
+| `WOL_RELAY_MIN_AGENT_VERSION` | `1.0.0` | Version d'agent minimale d'un poste relais : un agent plus ancien, qui garderait le réveil sans savoir l'émettre, n'en reçoit aucun. Comparée champ par champ (`1.10.0` > `1.9.0`), une pré-version (`1.0.0-dev.…`) passant sous la version qu'elle précède ; un poste qui ne remonte pas de version lisible n'est pas écarté par ce critère |
 | `WOL_RELAY_CLAIM_TIMEOUT_SECONDS` | `180` | Un réveil pris par un relais qui ne rend pas de verdict dans ce délai retourne dans la file, pour qu'un autre poste le prenne |
 
 ### Alertes e-mail et e-mails de compte
@@ -538,18 +576,22 @@ Vérifier que ça tourne :
 
 ```bash
 docker compose logs db-backup     # « sauvegarde OK : tiai-20260825-... »
-ls -lh backups/
+sudo ls -lh backups/              # dumps en -rw------- (root), dossier en drwx------
 ```
 
-Les dumps sont lisibles du seul propriétaire (`umask 077`, `chmod 600`) : ils
-contiennent les hachés des mots de passe et tout l'inventaire du parc. Ils ne
-sont **pas chiffrés** — l'image PostgreSQL n'embarque ni `gpg` ni `openssl` —
-d'où la consigne qui suit : la copie hors de la machine doit l'être (archive
-chiffrée, coffre de sauvegarde, `gpg --symmetric`…).
+Les dumps sont lisibles du seul propriétaire (`umask 077`, `chmod 600`), et le
+dossier `deploy/backups/` est ramené en `700` à chaque démarrage du service :
+ils contiennent les hachés des mots de passe et tout l'inventaire du parc. Les
+commandes de dump manuel ci-dessous posent elles aussi `umask 077` — un `sh -c`
+lancé par `docker compose exec` n'hérite pas de celui du script de sauvegarde.
+Les dumps ne sont **pas chiffrés** — l'image PostgreSQL n'embarque ni `gpg` ni
+`openssl` ; c'est un écart assumé, d'où la consigne qui suit : la copie hors de
+la machine **doit l'être** (archive chiffrée, coffre de sauvegarde,
+`gpg --symmetric`…).
 
 **Un dump sur le serveur ne protège pas du serveur.** Copier régulièrement
-`deploy/backups/` hors de la machine (rsync, robocopy, tâche planifiée — peu
-importe le moyen, l'important est qu'il existe). Pour pouvoir reconstruire le
+`deploy/backups/` hors de la machine, sous forme chiffrée (rsync, robocopy,
+tâche planifiée — peu importe le moyen, l'important est qu'il existe). Pour pouvoir reconstruire le
 serveur de zéro, trois choses doivent exister ailleurs :
 
 1. un dump récent de `deploy/backups/` ;
@@ -584,7 +626,7 @@ Un dump manuel avant une opération risquée :
 
 ```bash
 docker compose exec db-backup sh -c \
-  'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" \
+  'umask 077 && PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" \
    -d "$POSTGRES_DB" -Fc -f /backups/tiai-avant-operation.dump'
 ```
 
@@ -615,7 +657,7 @@ cd deploy
 # 1. Un dump juste avant : `up -d` ne recrée que les services dont l'image
 #    change, donc db-backup ne refait pas le sien à cette occasion.
 docker compose exec db-backup sh -c \
-  'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" \
+  'umask 077 && PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" \
    -d "$POSTGRES_DB" -Fc -f /backups/tiai-avant-mise-a-jour.dump'
 # 2. Changer TIAI_VERSION dans .env, puis :
 docker compose pull                 # télécharge les images de cette version
@@ -991,6 +1033,7 @@ le secret d'enrôlement, plutôt qu'en clair dans le YAML.
 | Valeur registre | Type | Équivalent YAML |
 |---|---|---|
 | `ApiBaseURL` | `REG_SZ` | `api_base_url` |
+| `AllowInsecureHTTP` | `REG_DWORD` | `allow_insecure_http` (`1` accepte une `ApiBaseURL` en `http://` ; cf. plus bas) |
 | `EnrollmentSecret` | `REG_SZ` | `enrollment_secret` |
 | `MachineUUID` | `REG_SZ` | `machine_uuid` |
 | `LogLevel` | `REG_SZ` | `log_level` |
@@ -1050,7 +1093,7 @@ la façon de les poser sont décrits dans
 ### Commandes
 
 ```powershell
-.\tiai-agent.exe init-config --api-url <url> [--machine-uuid <uuid>] [--config <chemin>]
+.\tiai-agent.exe init-config --api-url <url> [--allow-insecure-http] [--machine-uuid <uuid>] [--config <chemin>]
 .\tiai-agent.exe run [--config <chemin>]   # premier plan (Ctrl+C), ou sous le SCM
 .\tiai-agent.exe install [--config <chemin>]  # + DACL SYSTEM/Administrateurs sur la clé et le dossier
 .\tiai-agent.exe repair [--config <chemin>]   # réapplique démarrage auto + relance sur échec + DACL
@@ -1231,7 +1274,9 @@ chaque compte (page « Mon compte »).
 | Symptôme | Cause probable | Correctif |
 |---|---|---|
 | `curl` HTTPS renvoie un code `000` | Certificat auto-signé non approuvé | `curl -k`, ou importer la racine Caddy |
-| L'agent journalise une erreur TLS x509 | Auto-signé, que le client de l'agent refuse | Basculer sur `http://...:8800`, ou importer la racine Caddy |
+| L'agent journalise une erreur TLS x509 | Auto-signé, que le client de l'agent refuse | Importer la racine Caddy ; à défaut, viser le port HTTP direct `http://...:8800` **avec** `AllowInsecureHTTP` = 1 (registre) ou `--allow-insecure-http` à `init-config` — sans l'option, l'agent refuse de démarrer |
+| L'agent refuse de démarrer : `api_base_url "http://..." is http://` | Agent publié après la v1.1.0 : une URL en `http://` est refusée sauf déclaration explicite | Passer en `https://`, ou poser `AllowInsecureHTTP` = 1 (registre) / `allow_insecure_http: true` (YAML) en connaissance de cause (cf. § « Surcharge par le registre (GPO) ») |
+| L'agent échoue sur `http://<serveur>` (port 80, sans `:8800`), réponse 301 | Caddy redirige `http://` vers `https://`, et l'agent ne suit aucune redirection | Viser directement `https://<TIAI_SERVER_NAME>` |
 | `https://<ip>` ne répond pas / mauvais certificat | Le site Caddy est lié à un nom d'hôte ; `http://<ip>` redirige, `https://<ip>` n'a pas de certificat | Taper le nom (`TIAI_SERVER_NAME`, ou un alias déclaré), résolu par le DNS ou le fichier `hosts` |
 | Le nom court (`http://tiai`) donne une page blanche ou une erreur, le nom complet marche | Stack antérieure à la redirection des autres hôtes, ou nom court non résolu | Mettre à jour la stack ; vérifier `nslookup tiai` depuis un poste ; pour `https://tiai`, déclarer l'alias dans `TIAI_SERVER_ALIASES` et le mettre dans les SAN du certificat |
 | La console boucle en redirections (*too many redirects*) sur un hôte Docker derrière un proxy | Compose injecte le proxy de `~/.docker/config.json` dans les conteneurs, et une version antérieure de Caddy l'empruntait pour joindre backend et frontend | Mettre à jour la stack (cf. § « Hôte Docker derrière un proxy ») ; `config.json` peut rester en place |

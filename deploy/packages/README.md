@@ -134,9 +134,17 @@ En méthode A, les fichiers qui accompagnent l'installateur ne peuvent être
 que des **données** (`.iss`, `.ini`, `.xml`, `.cab`…) : l'agent refuse un
 paquet non signé qui place à côté de l'exécutable un fichier que Windows
 pourrait charger ou lancer depuis ce dossier (`.dll`, `.ocx`, `.cpl`, `.sys`,
-`.manifest`, `.local`, `.config`, autre `.exe`, `.msi`, `.mst`, script…).
-Un tel paquet doit être signé (méthode B). Avant chaque exécution, l'agent
-retire aussi du dossier du paquet tout ce que le manifeste ne nomme pas.
+`.manifest`, `.local`, `.config`, autre `.exe`, `.msi`, `.mst`, script, et les
+modules que le moteur d'un installateur charge par leur nom : `.bpl`, `.pyd`,
+`.xll`, `.node`, `.rll`, `.wsc`, `.sct`…). Un tel paquet doit être signé
+(méthode B). Avant chaque exécution, l'agent retire aussi du dossier du paquet
+tout ce que le manifeste ne nomme pas.
+
+Ces règles de la méthode A — fichiers chargeables refusés, dossier nettoyé,
+désinstallation limitée à `msiexec /x {code produit}` — sont appliquées **par
+l'agent du poste** : elles ne protègent un poste qu'une fois son agent mis à
+jour vers une version qui les connaît (v1.2.0 ou ultérieure). Diffuser l'agent
+à jour sur le parc avant de s'appuyer sur la méthode A.
 
 1. Page du paquet, carte *Confiance des postes* : **Télécharger le
    manifeste**. C'est un fichier JSON lisible, qui décrit exactement ce que
