@@ -11,7 +11,7 @@ import { documentTitle } from 'src/utils/format';
 
 import { refreshSession } from 'boot/axios';
 import { ensureSession, getAccessToken } from 'src/services/session';
-import { readCachedPermissions } from 'src/stores/auth';
+import { readCachedPermissions, useAuthStore } from 'src/stores/auth';
 import { hashUrlToHistory } from 'src/utils/legacyUrl';
 
 export default defineRouter(() => {
@@ -49,6 +49,9 @@ export default defineRouter(() => {
     if (to.meta.requiresAuth && !(await ensureSession(refreshSession))) {
       return { name: 'login', query: { redirect: to.fullPath } };
     }
+    // A session restored by that refresh has no profile yet: load it before
+    // the page, which reads its permissions as it loads.
+    if (to.meta.requiresAuth) await useAuthStore().ensureProfile();
     // Opening /login directly with a live session lands on the dashboard; the
     // refresh is only tried on that first navigation — once the console runs,
     // reaching /login means the session has just ended.

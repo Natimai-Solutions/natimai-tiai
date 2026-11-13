@@ -73,6 +73,22 @@ export const useAuthStore = defineStore('auth', {
       localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(this.user.permissions));
     },
     /**
+     * Load the profile when it is not yet: after a reload, the router's silent
+     * refresh puts a token back but no profile. The guard awaits this before
+     * rendering a page, so that a page testing `can()` while it loads sees the
+     * real permissions — not the empty set of a profile still on its way,
+     * which made the dashboard skip its threat list for good. Never throws: a
+     * failed fetch leaves the page to show its own error.
+     */
+    async ensureProfile() {
+      if (this.user) return;
+      try {
+        await this.fetchMe();
+      } catch {
+        // The page's own requests report the outage.
+      }
+    },
+    /**
      * Store console preferences on the account. Merged key by key server-side
      * (a `null` removes a key), and the profile is refreshed from the answer
      * so every page reads the same document.

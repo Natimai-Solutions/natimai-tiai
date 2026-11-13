@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMAIL_PREFERENCE_OPTIONS,
+  antivirusBadgeColor,
   antivirusColor,
   antivirusLabel,
   antivirusStatusLabel,
@@ -190,6 +191,20 @@ describe('antivirusColor', () => {
 
   it('marks a running product as healthy', () => {
     expect(antivirusColor('ESET Endpoint Security', true)).toBe('positive');
+  });
+});
+
+describe('antivirusBadgeColor', () => {
+  it('speaks of the product while it is unknown or missing (U28)', () => {
+    expect(antivirusBadgeColor(null, true)).toBe('grey-6');
+    expect(antivirusBadgeColor('', true)).toBe('negative');
+  });
+
+  // The fiche said « Non à jour » under a green badge.
+  it('takes the protection state for a named product, as the list does', () => {
+    expect(antivirusBadgeColor('Windows Defender', false)).toBe('negative');
+    expect(antivirusBadgeColor('Windows Defender', true)).toBe('positive');
+    expect(antivirusBadgeColor('Windows Defender', null)).toBe('grey-6');
   });
 });
 
