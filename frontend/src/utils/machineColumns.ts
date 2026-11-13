@@ -42,20 +42,13 @@ export const MANDATORY_MACHINE_COLUMN: MachineColumnKey = 'hostname';
  * list. Hours on over a week is a question asked for a renewal or an energy
  * review, not every morning.
  */
-export const OPTIONAL_MACHINE_COLUMNS: readonly MachineColumnKey[] = [
-  'usage',
-  // The inventory's columns: on offer, out of the default layout. Fifteen
-  // columns made the list 2 200 px wide, and the supervision ones — the reason
-  // to open it — ran off a desktop screen (audit U25).
-  'domain',
-  'location',
-  'building',
-  'ip_address',
-  'os_version',
-  'agent',
-  'model',
-  'disk',
-];
+//
+// Only « Utilisation » is set aside. The inventory's columns (domain, site,
+// building, IP, OS, agent version, model, disk) were moved out of the default
+// for audit U25 and put back at the operators' request: they read them every
+// day — the agent version above all, during a deployment. A wide list scrolls
+// sideways instead, with the selection and the name pinned (app.scss).
+export const OPTIONAL_MACHINE_COLUMNS: readonly MachineColumnKey[] = ['usage'];
 
 /** The default layout: the catalogue in its order, the optional columns aside. */
 export const DEFAULT_MACHINE_COLUMNS: MachineColumnKey[] = MACHINE_COLUMN_KEYS.filter(
