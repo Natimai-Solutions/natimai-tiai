@@ -8,9 +8,12 @@ package queue
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,13 +46,27 @@ func New(dir string, maxItems int) (*Queue, error) {
 	return &Queue{dir: dir, maxItems: maxItems}, nil
 }
 
+// safeCommandID is what a command id must look like to name a file here: the
+// server's ids are UUIDs, and anything carrying a separator or a dot could put
+// the file outside the queue directory (the class of audit S01). The agent
+// already refuses such a command on arrival; this is the second lock.
+var safeCommandID = regexp.MustCompile(`^[0-9A-Za-z-]{1,64}$`)
+
 // Enqueue appends an item, dropping the oldest when the queue is full.
 func (q *Queue) Enqueue(item Item) error {
+	if !safeCommandID.MatchString(item.CommandID) {
+		return fmt.Errorf("queue: command id %q refused (not a plain token)", item.CommandID)
+	}
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	if files, _ := q.listFiles(); len(files) >= q.maxItems {
-		_ = os.Remove(files[0]) // drop oldest
+		// Said, with the command it concerns: that verdict will never reach
+		// the server, which expires the command on its own clock instead.
+		log.Printf("queue: full (%d items), dropping the oldest verdict, for command %s",
+			q.maxItems, commandIDOf(files[0]))
+		_ = os.Remove(files[0])
 	}
 
 	if item.CreatedAt.IsZero() {
@@ -106,6 +123,16 @@ func (q *Queue) Depth() int {
 	defer q.mu.Unlock()
 	files, _ := q.listFiles()
 	return len(files)
+}
+
+// commandIDOf reads the command id back from an item's file name,
+// <timestamp>_<id>.json.
+func commandIDOf(path string) string {
+	name := strings.TrimSuffix(filepath.Base(path), ".json")
+	if _, id, ok := strings.Cut(name, "_"); ok {
+		return id
+	}
+	return name
 }
 
 func (q *Queue) listFiles() ([]string, error) {

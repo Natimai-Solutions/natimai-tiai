@@ -30,9 +30,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -139,7 +141,9 @@ func PruneDir(dir string, files []FileRef) error {
 
 // loadableExt lists what Windows may load or run on its own from the folder
 // an installer starts in: DLL search order, side-by-side manifests and
-// redirection, .NET configuration, Windows Installer databases and scripts.
+// redirection, .NET configuration, Windows Installer databases and scripts,
+// and the modules an installer's runtime loads by name: Delphi packages,
+// Python, Node and Excel add-ins, resource DLLs, scriptlets.
 var loadableExt = map[string]bool{
 	".dll": true, ".ocx": true, ".cpl": true, ".sys": true, ".drv": true,
 	".ax": true, ".acm": true, ".ime": true, ".tsp": true, ".mui": true,
@@ -149,14 +153,29 @@ var loadableExt = map[string]bool{
 	".msix": true, ".bat": true, ".cmd": true, ".ps1": true, ".psm1": true,
 	".vbs": true, ".vbe": true, ".js": true, ".jse": true, ".wsf": true,
 	".wsh": true, ".hta": true, ".lnk": true, ".inf": true, ".jar": true,
+	".bpl": true, ".pyd": true, ".xll": true, ".node": true, ".rll": true,
+	".wsc": true, ".sct": true,
 }
+
+// maxMethodABytes caps what an unsigned (method A) manifest may announce in
+// all: its sizes are the server's word, and they are what the download is
+// bounded by (audit S24). The server's own ceiling for one file
+// (PACKAGE_MAX_BYTES, 8 GiB at most) — a method A package is one installer
+// and its data files. A signed manifest (method B) carries the
+// administrator's sizes and is not capped here.
+const maxMethodABytes int64 = 8 << 30
 
 // MethodAFiles refuses, under method A, an unsigned manifest that puts next
 // to the signed file anything Windows could load or run from there: an
 // approved installer would pick up a planted version.dll (audit S02). Data
 // files (.iss, .ini, .xml, .cab…) stay allowed.
 func MethodAFiles(files []FileRef, run string) error {
+	var total int64
 	for _, f := range files {
+		total += f.Size
+		if f.Size > maxMethodABytes || total > maxMethodABytes {
+			return fmt.Errorf("méthode A : le manifeste annonce plus de %d Gio à télécharger — signez le paquet (méthode B)", maxMethodABytes>>30)
+		}
 		if run != MsiExec && strings.EqualFold(f.Name, run) {
 			continue
 		}
@@ -175,10 +194,24 @@ func ValidFileName(name string) bool {
 }
 
 // ParseManifest decodes and checks a manifest for package id.
+//
+// The keys are checked first, exactly: encoding/json matches them without
+// regard to case, Unicode folding included ("inſtall" reads as install), and
+// keeps the last of two duplicates' fields merged into the first. What the
+// agent runs must be what the signing script showed the administrator, and
+// PowerShell's ConvertFrom-Json reads neither the same way.
 func ParseManifest(raw []byte, packageID string) (*Manifest, error) {
-	var m Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
+	if err := checkKeys(raw, reflect.TypeFor[Manifest]()); err != nil {
 		return nil, fmt.Errorf("manifeste illisible : %w", err)
+	}
+	var m Manifest
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&m); err != nil {
+		return nil, fmt.Errorf("manifeste illisible : %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, errors.New("manifeste illisible : données après le document")
 	}
 	if m.Format != manifestFormat {
 		return nil, fmt.Errorf("format de manifeste inconnu %q", m.Format)
@@ -216,6 +249,94 @@ func ParseManifest(raw []byte, packageID string) (*Manifest, error) {
 		m.SuccessCodes = []int64{0, 3010, 1641}
 	}
 	return &m, nil
+}
+
+// checkKeys walks a JSON document against the type it will be decoded into
+// and refuses, at every level, a key that is not exactly (case included) one
+// of the struct's json names, and a key given twice. Value types are left to
+// the decoder that follows.
+func checkKeys(raw []byte, t reflect.Type) error {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	if err := walkKeys(dec, t, "$"); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("données après le document")
+	}
+	return nil
+}
+
+func walkKeys(dec *json.Decoder, t reflect.Type, at string) error {
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil // a scalar: its type is the decoder's business
+	}
+	switch delim {
+	case '{':
+		var fields map[string]reflect.Type
+		if t != nil && t.Kind() == reflect.Struct {
+			fields = jsonFields(t)
+		}
+		seen := map[string]bool{}
+		for dec.More() {
+			ktok, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, _ := ktok.(string)
+			if seen[key] {
+				return fmt.Errorf("clé %q en double dans %s", key, at)
+			}
+			seen[key] = true
+			ft, known := fields[key]
+			if !known {
+				return fmt.Errorf("clé %q inattendue dans %s", key, at)
+			}
+			if err := walkKeys(dec, ft, at+"."+key); err != nil {
+				return err
+			}
+		}
+	case '[':
+		var elem reflect.Type
+		if t != nil && (t.Kind() == reflect.Slice || t.Kind() == reflect.Array) {
+			elem = t.Elem()
+		}
+		for i := 0; dec.More(); i++ {
+			if err := walkKeys(dec, elem, fmt.Sprintf("%s[%d]", at, i)); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = dec.Token() // the closing delimiter
+	return err
+}
+
+// jsonFields maps a struct's json names, as its tags spell them, to their
+// types.
+func jsonFields(t reflect.Type) map[string]reflect.Type {
+	out := map[string]reflect.Type{}
+	for i := range t.NumField() {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		out[name] = f.Type
+	}
+	return out
 }
 
 // NormalizeThumbprint upper-cases a thumbprint and drops the separators

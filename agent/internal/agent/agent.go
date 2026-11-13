@@ -16,6 +16,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -74,7 +75,18 @@ type Agent struct {
 	commands chan models.Command
 	mu       sync.Mutex
 	running  map[string]struct{} // command ids queued or executing
-	wg       sync.WaitGroup
+	// Set under mu by the worker when it stops taking commands. accept checks
+	// it, and sends, under the same lock: a command the poll loop accepts after
+	// the worker has drained its backlog would otherwise sit in the channel
+	// with no verdict at all (audit B16).
+	stopped bool
+	wg      sync.WaitGroup
+
+	// The token the server last answered 401 to. Read back from token.dat when
+	// ClearToken could not delete the file, it must not be taken for a token
+	// that became readable again (ensureEnrolled): the poste would heartbeat
+	// with it, get the same 401, and never re-enroll. Polling loop only.
+	rejectedToken string
 
 	// Security Center read failures are permanent on a host without one (a
 	// Windows Server SKU has no root\SecurityCenter2), so the first is logged and
@@ -284,11 +296,15 @@ func isUnauthorized(err error) bool {
 	return errors.As(err, &se) && se.StatusCode == http.StatusUnauthorized
 }
 
-// dropToken forgets the per-machine token, in memory and on disk.
+// dropToken forgets the per-machine token, in memory and on disk, and
+// remembers it was refused in case the file outlives it.
 func (a *Agent) dropToken() {
+	if a.cfg.AuthToken != "" {
+		a.rejectedToken = a.cfg.AuthToken
+	}
 	a.cfg.AuthToken = ""
 	a.client.SetToken("")
-	if err := config.ClearToken(filepath.Dir(a.cfgPath)); err != nil {
+	if err := clearToken(filepath.Dir(a.cfgPath)); err != nil {
 		log.Printf("agent: clear stored token: %v", err)
 	}
 }
@@ -301,8 +317,14 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	// Read again before enrolling: a token.dat locked for a moment at startup
 	// (an antivirus scanning it) read as « none », and enrolling with the
 	// fleet secret then waits for an approval the poste does not need — its
-	// token is valid (audit B32).
-	if token, _ := config.LoadToken(filepath.Dir(a.cfgPath)); token != "" {
+	// token is valid (audit B32). Unless it is the very token the server just
+	// refused, left on disk by a ClearToken that failed: enrolling then
+	// overwrites it, as it did before the reread existed.
+	switch token, _ := loadToken(filepath.Dir(a.cfgPath)); {
+	case token == "":
+	case token == a.rejectedToken:
+		log.Printf("agent: stored token is the one the server refused, enrolling again")
+	default:
 		log.Printf("agent: stored token readable again, using it")
 		a.cfg.AuthToken = token
 		a.client.SetToken(token)
@@ -323,7 +345,7 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	}
 	a.cfg.AuthToken = resp.Token
 	a.client.SetToken(resp.Token)
-	if err := config.SaveToken(filepath.Dir(a.cfgPath), resp.Token); err != nil {
+	if err := saveToken(filepath.Dir(a.cfgPath), resp.Token); err != nil {
 		return fmt.Errorf("persist token: %w", err)
 	}
 	log.Printf("agent: enrolled as machine %s", resp.MachineID)
@@ -546,22 +568,55 @@ func (a *Agent) logAVError(err error) {
 	log.Printf("agent: security center: %v (further failures logged at debug level)", err)
 }
 
+// commandID is the only form the server gives a command id: a UUID (the
+// server writes them lowercase; either case is accepted, neither can carry a
+// separator).
+var commandID = regexp.MustCompile(
+	`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
+
+// validCommandID tells whether id is a UUID. Anything else is refused on
+// arrival: the id names a file of the local queue and a path of the API, and
+// a string like "../../x" would leave both (same class as audit S01).
+func validCommandID(id string) bool {
+	return commandID.MatchString(id)
+}
+
 // accept hands a command to the worker without blocking the polling loop.
 // Duplicates are dropped: a relayed wake, or a command an older server
 // offered again, must not run twice.
 func (a *Agent) accept(cmd models.Command) {
+	if !validCommandID(cmd.ID) {
+		// No verdict: there is no id it could safely be posted or queued
+		// under. The server expires the command on its own.
+		log.Printf("agent: refusing %q: command id %q is not a UUID", cmd.Type, cmd.ID)
+		return
+	}
 	a.mu.Lock()
 	if _, dup := a.running[cmd.ID]; dup {
 		a.mu.Unlock()
 		logging.Debugf("agent: %s (id %s) already in flight, ignoring", cmd.Type, cmd.ID)
 		return
 	}
+	if a.stopped {
+		// The worker has drained its backlog and left (the service stops):
+		// nothing would ever take this one out of the channel.
+		a.mu.Unlock()
+		log.Printf("agent: stopping, %s (id %s) not run", cmd.Type, cmd.ID)
+		a.failLater(cmd, abandonedOnStop)
+		return
+	}
 	a.running[cmd.ID] = struct{}{}
-	a.mu.Unlock()
-
+	// Sent under the lock the worker takes to stop: either the command is in
+	// the channel before the worker drains it, or accept sees stopped above.
+	var queued bool
 	select {
 	case a.commands <- cmd:
+		queued = true
 	default:
+	}
+	a.mu.Unlock()
+
+	if !queued {
 		// Backlog full. The server will not offer it again: say so, through
 		// the local queue (replayed at the next poll), rather than leave it
 		// "transmise" for ever.
@@ -600,10 +655,12 @@ func (a *Agent) worker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			a.stop()
 			a.abandonBacklog()
 			return
 		case cmd := <-a.commands:
 			if ctx.Err() != nil {
+				a.stop()
 				a.abandon(cmd)
 				a.abandonBacklog()
 				return
@@ -612,6 +669,15 @@ func (a *Agent) worker(ctx context.Context) {
 			a.release(cmd.ID)
 		}
 	}
+}
+
+// stop closes the worker to new commands. Taken before the backlog is
+// drained: whatever accept sent before is in the channel, whatever it accepts
+// after is answered there (accept).
+func (a *Agent) stop() {
+	a.mu.Lock()
+	a.stopped = true
+	a.mu.Unlock()
 }
 
 const abandonedOnStop = "interrompue par l'arrêt de l'agent avant d'avoir commencé : à relancer"
@@ -798,10 +864,10 @@ func (a *Agent) runPowerAction(
 
 // refuse closes a command the agent declined to run, without running it.
 //
-// A `failed` and not a silent drop: the command would otherwise sit in the
-// server's queue being re-offered on every heartbeat until it expired, and the
-// administrator who triggered it would watch "transmise" for an hour with no
-// idea the poste had decided otherwise.
+// A `failed` and not a silent drop: the server hands a command out once and
+// never re-offers it, so without a verdict it would stay "transmise" until the
+// server expires it (COMMAND_UNANSWERED_HOURS), and the administrator who
+// triggered it would have no idea the poste had decided otherwise.
 func (a *Agent) refuse(ctx context.Context, cmd models.Command, reason error) {
 	log.Printf("agent: refusing %s (id %s): %v", cmd.Type, cmd.ID, reason)
 	res := models.CommandResult{Status: "failed", Error: reason.Error()}
@@ -829,7 +895,9 @@ func (a *Agent) reportRunning(ctx context.Context, cmd models.Command) {
 }
 
 // flushQueue replays queued command results oldest-first, stopping at the first
-// delivery failure (the server is still down — retry next poll).
+// delivery failure that a later poll may not see (the server is down, busy, or
+// does not take our token right now). A verdict the server refused for good is
+// dropped instead, or it would hold back every verdict queued behind it.
 func (a *Agent) flushQueue(ctx context.Context) {
 	for {
 		item, path, err := a.queue.Peek()
@@ -841,14 +909,38 @@ func (a *Agent) flushQueue(ctx context.Context) {
 			return
 		}
 		if err := a.client.PostResult(ctx, item.CommandID, item.Result); err != nil {
-			return
+			if !refusedForGood(err) {
+				return
+			}
+			log.Printf("agent: queued result for command %s refused by the server, dropping it: %v",
+				item.CommandID, err)
+		} else {
+			log.Printf("agent: delivered queued result for command %s", item.CommandID)
 		}
-		log.Printf("agent: delivered queued result for command %s", item.CommandID)
 		if err := a.queue.Remove(path); err != nil {
 			log.Printf("agent: queue remove: %v", err)
 			return
 		}
 	}
+}
+
+// refusedForGood reports whether err is the server's answer that this request
+// will never be accepted as it stands: a 4xx, except those that say "not now"
+// or "not with this token" — 401 and 403 (a token being renewed, a poste
+// waiting for approval), 408 and 429 (a server too busy to read it) — and
+// 404: the server answers 200 for a command it no longer knows, so a 404 is
+// a misrouted proxy, not a verdict to throw away.
+func refusedForGood(err error) bool {
+	var se *api.StatusError
+	if !errors.As(err, &se) || se.StatusCode < 400 || se.StatusCode >= 500 {
+		return false
+	}
+	switch se.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
+		http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return false
+	}
+	return true
 }
 
 // nextBackoff doubles the wait up to a cap.

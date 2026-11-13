@@ -166,6 +166,153 @@ func TestParseManifestChecksTheRunFileAndThePackage(t *testing.T) {
 	}
 }
 
+// backendManifest is a manifest as the server writes it
+// (backend/app/features/package/manifest.py build): keys sorted, two-space
+// indent, non-ASCII left as is, a trailing newline, an uninstall by product
+// code and every optional key present.
+const backendManifest = `{
+  "files": [
+    {
+      "name": "ClientPRONOTE.iss",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+      "size": 22
+    },
+    {
+      "name": "Install_PRNclient.exe",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+      "size": 1048576
+    }
+  ],
+  "format": "tiai-package-1",
+  "install": {
+    "args": [
+      "-s",
+      "-f1{dir}\\ClientPRONOTE.iss"
+    ],
+    "run": "Install_PRNclient.exe"
+  },
+  "name": "Client PRONOTE é",
+  "package_id": "0f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+  "success_codes": [
+    0,
+    3010
+  ],
+  "uninstall": {
+    "args": [
+      "/x",
+      "{01234567-89AB-CDEF-0123-456789ABCDEF}"
+    ],
+    "run": "msiexec"
+  },
+  "version": "2026.2.8"
+}
+`
+
+// What the server produces must keep parsing once keys are checked strictly:
+// the full form above, and the one with neither step (null) and no args.
+func TestParseManifestAcceptsWhatTheServerWrites(t *testing.T) {
+	m, err := ParseManifest([]byte(backendManifest), pronoteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Install == nil || len(m.Install.Args) != 2 || m.Uninstall == nil || m.Uninstall.Run != MsiExec ||
+		len(m.Files) != 2 || m.Files[1].Size != 1048576 || len(m.SuccessCodes) != 2 || m.Name != "Client PRONOTE é" {
+		t.Errorf("decoded %+v", m)
+	}
+	bare := strings.NewReplacer(
+		`"uninstall": {
+    "args": [
+      "/x",
+      "{01234567-89AB-CDEF-0123-456789ABCDEF}"
+    ],
+    "run": "msiexec"
+  }`, `"uninstall": null`,
+		`"args": [
+      "-s",
+      "-f1{dir}\\ClientPRONOTE.iss"
+    ],`, `"args": [],`,
+		`"success_codes": [
+    0,
+    3010
+  ],`, `"success_codes": [],`).Replace(backendManifest)
+	if bare == backendManifest {
+		t.Fatal("replacements did not apply")
+	}
+	m, err = ParseManifest([]byte(bare), pronoteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Uninstall != nil || len(m.Install.Args) != 0 || len(m.SuccessCodes) != 3 {
+		t.Errorf("decoded %+v", m)
+	}
+}
+
+// encoding/json reads keys without regard to case, Unicode folding included,
+// and merges duplicates; PowerShell's ConvertFrom-Json, in the signing script,
+// shows the last object. Every such manifest is refused before decoding, so
+// the agent cannot run what the administrator was not shown.
+func TestParseManifestRefusesAmbiguousKeys(t *testing.T) {
+	const files = `"files":[{"name":"setup.exe","sha256":"` + "0000000000000000000000000000000000000000000000000000000000000002" + `","size":1}]`
+	head := `{"format":"tiai-package-1","package_id":"p",` + files
+	for name, doc := range map[string]string{
+		"duplicate step":   head + `,"install":{"run":"setup.exe","args":["/HIDDEN"]},"install":{"run":"setup.exe"}}`,
+		"duplicate nested": head + `,"install":{"run":"setup.exe","args":["/S"],"args":[]}}`,
+		"duplicate in a file": `{"format":"tiai-package-1","package_id":"p","files":[{"name":"x.exe","name":"setup.exe","sha256":"` +
+			"0000000000000000000000000000000000000000000000000000000000000002" + `","size":1}],"install":{"run":"setup.exe"}}`,
+		"duplicate top-level scalar":    head + `,"package_id":"p","install":{"run":"setup.exe"}}`,
+		"folded top-level key (long s)": head + `,"inſtall":{"run":"setup.exe","args":["/HIDDEN"]}}`,
+		"folded nested key (long s)":    head + `,"install":{"run":"setup.exe","argſ":["/HIDDEN"]}}`,
+		"other case":                    head + `,"Install":{"run":"setup.exe"}}`,
+		"unknown top-level key":         head + `,"install":{"run":"setup.exe"},"postinstall":{"run":"setup.exe"}}`,
+		"unknown nested key":            head + `,"install":{"run":"setup.exe","shell":true}}`,
+		"trailing document":             head + `,"install":{"run":"setup.exe"}}{"install":{"run":"x"}}`,
+	} {
+		if _, err := ParseManifest([]byte(doc), "p"); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// The same document without the ambiguity parses: the refusals above are
+	// about the keys, nothing else.
+	if _, err := ParseManifest([]byte(head+`,"install":{"run":"setup.exe","args":["/S"]}}`), "p"); err != nil {
+		t.Errorf("plain manifest refused: %v", err)
+	}
+}
+
+// An unsigned manifest's sizes are the server's word and bound the download:
+// beyond the server's own ceiling, method A refuses before fetching anything
+// (audit S24).
+func TestMethodACapsTheAnnouncedSize(t *testing.T) {
+	const gib = int64(1) << 30
+	if err := MethodAFiles([]FileRef{{Name: "setup.exe", Size: 8 * gib}}, "setup.exe"); err != nil {
+		t.Errorf("an 8 GiB installer refused: %v", err)
+	}
+	for _, files := range [][]FileRef{
+		{{Name: "setup.exe", Size: 8*gib + 1}},
+		{{Name: "setup.exe", Size: 5 * gib}, {Name: "data.cab", Size: 5 * gib}},
+		{{Name: "setup.exe", Size: 1}, {Name: "data.cab", Size: 1<<63 - 1}},
+	} {
+		if err := MethodAFiles(files, "setup.exe"); err == nil {
+			t.Errorf("%v accepted", files)
+		}
+	}
+
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true}
+	env.files = map[string][]byte{"setup.exe": signedPE(t, "INDEX EDUCATION SAS")}
+	m := Manifest{Format: "tiai-package-1", PackageID: pronoteID, Install: &Step{Run: "setup.exe"},
+		Files: []FileRef{{Name: "setup.exe", SHA256: sha(env.files["setup.exe"]), Size: 1 << 40}}}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg := &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+	if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"INDEX EDUCATION SAS"}}, "package_install", pkg); err == nil {
+		t.Error("a 1 TiB manifest went through")
+	}
+	if _, err := os.Stat(filepath.Join(env.PackagesDir(), pronoteID, "setup.exe")); err == nil {
+		t.Error("downloaded despite the cap")
+	}
+}
+
 // --- method B -------------------------------------------------------------------
 
 func signRSA(t *testing.T, m []byte) (sig, cert string, der []byte) {
@@ -523,7 +670,8 @@ func TestExecuteRefusesAPackageIDThatIsAPath(t *testing.T) {
 
 func TestMethodARefusesLoadableFilesNextToTheExecutable(t *testing.T) {
 	for _, extra := range []string{"version.dll", "VERSION.DLL", "setup.exe.manifest", "setup.exe.local",
-		"setup.exe.config", "helper.exe", "app.msi", "patch.mst", "run.cmd", "x.ocx", "x.cpl"} {
+		"setup.exe.config", "helper.exe", "app.msi", "patch.mst", "run.cmd", "x.ocx", "x.cpl",
+		"rtl290.bpl", "_ssl.pyd", "addin.xll", "binding.node", "res.rll", "x.wsc", "x.sct", "X.SCT"} {
 		env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true}
 		env.files = map[string][]byte{"setup.exe": signedPE(t, "INDEX EDUCATION SAS"), extra: []byte("MZ")}
 		raw := manifestFor(t, pronoteID, env.files, &Step{Run: "setup.exe"})
