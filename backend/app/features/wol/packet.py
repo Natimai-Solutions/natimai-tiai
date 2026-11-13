@@ -86,9 +86,37 @@ PREFIX_MIN = 16
 PREFIX_MAX = 30
 
 
+# The private ranges of RFC 1918, exactly. Not ``ipaddress``'s ``is_private``,
+# which also takes 0.0.0.0/8, 192.0.2.0/24, 198.18.0.0/15, 240.0.0.0/4 and
+# 255.255.255.255 itself: an agent reporting 255.255.255.200/24 would have the
+# server broadcast to 255.255.255.255 (audit T35).
+_RFC1918 = (
+    ipaddress.IPv4Network("10.0.0.0/8"),
+    ipaddress.IPv4Network("172.16.0.0/12"),
+    ipaddress.IPv4Network("192.168.0.0/16"),
+)
+
+
+def _allowed_networks() -> list[ipaddress.IPv4Network]:
+    """``WOL_ALLOWED_NETWORKS`` when set (unreadable entries skipped), else
+    the RFC 1918 ranges."""
+    configured = settings.WOL_ALLOWED_NETWORKS
+    if not configured:
+        return list(_RFC1918)
+    networks: list[ipaddress.IPv4Network] = []
+    for entry in configured:
+        try:
+            network = ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            continue
+        if isinstance(network, ipaddress.IPv4Network):
+            networks.append(network)
+    return networks
+
+
 def address_allowed(ip: str | None) -> bool:
     """Whether a reported address may be woken from the server: in
-    ``WOL_ALLOWED_NETWORKS`` when it is set, else a private IPv4 address."""
+    ``WOL_ALLOWED_NETWORKS`` when it is set, else in RFC 1918."""
     if not ip:
         return False
     try:
@@ -97,16 +125,23 @@ def address_allowed(ip: str | None) -> bool:
         return False
     if not isinstance(address, ipaddress.IPv4Address):
         return False
-    allowed = settings.WOL_ALLOWED_NETWORKS
-    if allowed:
-        for network in allowed:
-            try:
-                if address in ipaddress.ip_network(network, strict=False):
-                    return True
-            except ValueError:
-                continue
+    return any(address in network for network in _allowed_networks())
+
+
+def subnet_allowed(ip: str | None, prefixlen: int) -> bool:
+    """Whether the whole subnet ``ip``/``prefixlen`` lies inside one allowed
+    network — not only the address: with 10.4.7.0/24 allowed, a poste
+    reporting 10.4.7.5/16 would otherwise have the server broadcast over
+    10.4.0.0/16 (audit T35)."""
+    if not ip:
         return False
-    return address.is_private and not address.is_loopback and not address.is_link_local
+    try:
+        interface = ipaddress.ip_interface(f"{ip}/{prefixlen}")
+    except ValueError:
+        return False
+    if not isinstance(interface, ipaddress.IPv4Interface):
+        return False
+    return any(interface.network.subnet_of(n) for n in _allowed_networks())
 
 
 def broadcast_for(ip: str | None, prefixlen: int) -> str | None:
@@ -180,8 +215,10 @@ def destinations_for(
     # when none was reported: a stored value that does not fit the address
     # (an IPv6 prefix against an IPv4, say) must degrade to the default rather
     # than cost the poste its wake.
+    # A subnet reaching beyond the allowed networks is not taken either: the
+    # default prefix is tried instead, and nothing when it does not fit.
     for candidate in (reported_prefixlen, prefixlen):
-        if candidate is None:
+        if candidate is None or not subnet_allowed(ip, candidate):
             continue
         derived = broadcast_for(ip, candidate)
         if derived:

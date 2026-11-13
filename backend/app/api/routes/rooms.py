@@ -26,7 +26,7 @@ from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.maintenance import crud as maintenance_crud
-from app.features.maintenance.policy import MaintenanceState
+from app.features.maintenance.policy import MaintenanceState, available
 from app.features.room import crud
 from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
@@ -335,9 +335,11 @@ async def _rooms_out(
     names = await setting_crud.user_names(session, owner_ids)
 
     def effective_owner_name(r: Room) -> str | None:
+        # The resolution of maintenance/policy.py: a deactivated room owner
+        # counts as none, and the parc's default applies (audit B08).
         owner = (
             r.maintenance_owner_id
-            if r.maintenance_owner_id is not None
+            if available(r.maintenance_owner_id, policy)
             else policy.owner_id
         )
         return names.get(owner) if owner is not None else None

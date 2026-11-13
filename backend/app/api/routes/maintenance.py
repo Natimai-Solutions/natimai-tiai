@@ -32,8 +32,9 @@ from app.features.maintenance.policy import (
 from app.features.room import crud as room_crud
 from app.features.room.models import Room
 from app.features.setting import crud as setting_crud
+from app.features.user import crud as user_crud
 from app.features.user.models import User
-from app.features.user.permissions import Action, Resource
+from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import (
     Scope,
     machine_clause,
@@ -214,13 +215,67 @@ async def _require_room(
     return room
 
 
-async def _require_owner(session: SessionDep, owner_id: uuid.UUID | None) -> None:
+async def _owner_reaches(
+    session: SessionDep,
+    user_id: uuid.UUID,
+    *,
+    machine_id: uuid.UUID | None = None,
+    room_id: uuid.UUID | None = None,
+) -> bool:
+    """Whether the account can own this poste's or this room's maintenance:
+    read the maintenance lists and record a visit, and see the poste — for a
+    room, the room itself, which means seeing every poste filed in it. The
+    rule of checks' ``_can_take``: an owner is mailed the hostnames of what
+    they own, and must not be handed postes kept out of their sight (audit
+    S18, T32)."""
+    authority = await user_crud.user_authority(session, user_id)
+    if authority.is_admin:
+        return True
+    for action in (Action.READ, Action.WRITE):
+        if not has_permission(
+            authority.permissions, Resource.MAINTENANCE.value, action.value
+        ):
+            return False
+    if machine_id is not None:
+        clause = machine_clause(authority.scope)
+        if clause is None:
+            return True
+        found = await session.exec(
+            select(col(Machine.id)).where(col(Machine.id) == machine_id).where(clause)
+        )
+        return found.first() is not None
+    if room_id is not None:
+        clause = room_clause(authority.scope)
+        if clause is None:
+            return True
+        found_room = await session.exec(
+            select(col(Room.id)).where(col(Room.id) == room_id).where(clause)
+        )
+        return found_room.first() is not None
+    return True
+
+
+async def _require_owner(
+    session: SessionDep,
+    owner_id: uuid.UUID | None,
+    *,
+    machine_id: uuid.UUID | None = None,
+    room_id: uuid.UUID | None = None,
+) -> None:
     if owner_id is None:
         return
     user = await session.get(User, owner_id)
     if user is None or not user.is_active:
         raise AppError(
             code=ErrorCode.USER_NOT_FOUND, status_code=404, message="User not found"
+        )
+    if not await _owner_reaches(
+        session, user.id, machine_id=machine_id, room_id=room_id
+    ):
+        raise AppError(
+            code=ErrorCode.MAINTENANCE_OWNER_OUT_OF_REACH,
+            status_code=422,
+            message="This account cannot own the maintenance of these postes",
         )
 
 
@@ -285,7 +340,9 @@ async def update_machine_maintenance(
         # Re-sending the current owner, deactivated since, is not choosing
         # them: the form must still save its other fields (audit B08).
         if fields["maintenance_owner_id"] != machine.maintenance_owner_id:
-            await _require_owner(session, fields["maintenance_owner_id"])
+            await _require_owner(
+                session, fields["maintenance_owner_id"], machine_id=machine.id
+            )
         machine.maintenance_owner_id = fields["maintenance_owner_id"]
     if "maintenance_cycle_days" in fields:
         machine.maintenance_cycle_days = fields["maintenance_cycle_days"]
@@ -347,7 +404,9 @@ async def update_room_maintenance(
     fields = payload.model_dump(exclude_unset=True)
     if "maintenance_owner_id" in fields:
         if fields["maintenance_owner_id"] != room.maintenance_owner_id:
-            await _require_owner(session, fields["maintenance_owner_id"])
+            await _require_owner(
+                session, fields["maintenance_owner_id"], room_id=room.id
+            )
         room.maintenance_owner_id = fields["maintenance_owner_id"]
     if "maintenance_cycle_days" in fields:
         room.maintenance_cycle_days = fields["maintenance_cycle_days"]

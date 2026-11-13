@@ -31,6 +31,7 @@ class RateLimiter:
         self.max_attempts = max_attempts
         self.window = window_seconds
         self._hits: dict[str, deque[float]] = {}
+        self._last_sweep = float("-inf")
 
     def allow(self, key: str) -> bool:
         """Record one attempt for ``key``; False when the window is full."""
@@ -43,8 +44,12 @@ class RateLimiter:
             return False
         hits.append(now)
         # An attacker cycling through source addresses must cost memory for a
-        # window at most, not for the life of the process.
-        if len(self._hits) > 1024:
+        # window at most, not for the life of the process. At most one sweep
+        # per window: above the threshold with keys all still live (a parc of
+        # more than 1,024 postes heartbeating), a sweep frees nothing, and
+        # running it on every call would make each call walk the whole table.
+        if len(self._hits) > 1024 and now - self._last_sweep >= self.window:
+            self._last_sweep = now
             self._sweep(window_start)
         return True
 
@@ -57,6 +62,46 @@ class RateLimiter:
 
     def reset(self) -> None:
         self._hits.clear()
+        self._last_sweep = float("-inf")
+
+
+class Quota:
+    """A budget of units per key over a sliding window: ``take`` grants what
+    is left of it, possibly less than asked. Where a limiter counts requests,
+    this counts what they create — the software catalogue entries a poste
+    adds, say, whatever the number of heartbeats they ride (audit S21)."""
+
+    def __init__(self, units: int, window_seconds: float) -> None:
+        self.units = units
+        self.window = window_seconds
+        self._taken: dict[str, deque[tuple[float, int]]] = {}
+        self._last_sweep = float("-inf")
+
+    def _used(self, key: str, window_start: float) -> int:
+        taken = self._taken.get(key)
+        if taken is None:
+            return 0
+        while taken and taken[0][0] <= window_start:
+            taken.popleft()
+        return sum(n for _, n in taken)
+
+    def take(self, key: str, wanted: int) -> int:
+        """Grant up to ``wanted`` units to ``key`` and return how many."""
+        now = time.monotonic()
+        window_start = now - self.window
+        granted = max(0, min(wanted, self.units - self._used(key, window_start)))
+        if granted:
+            self._taken.setdefault(key, deque()).append((now, granted))
+        if len(self._taken) > 1024 and now - self._last_sweep >= self.window:
+            self._last_sweep = now
+            for k in list(self._taken):
+                if not self._used(k, window_start):
+                    del self._taken[k]
+        return granted
+
+    def reset(self) -> None:
+        self._taken.clear()
+        self._last_sweep = float("-inf")
 
 
 # One limiter per guarded surface, so hammering /enroll never locks the
@@ -77,10 +122,21 @@ enroll_limiter = RateLimiter(max_attempts=30, window_seconds=300)
 # stolen access token is the threat, and it works from anywhere (audit S04).
 password_change_limiter = RateLimiter(max_attempts=5, window_seconds=900)
 
-# Heartbeat: keyed on the poste. An agent polls once a minute, a few more
-# times around a command or a retry; a token in a loop — filling the software
-# catalogue, filing itself in rooms — is cut here (audit S21).
-heartbeat_limiter = RateLimiter(max_attempts=30, window_seconds=60)
+# Heartbeat: keyed on the poste. The agent polls every
+# heartbeat_interval_seconds (60 by default), once more at a service restart,
+# and backs off (doubling from that interval) after a failure: a legitimate
+# poste sends one or two a minute. Twelve — one per five seconds on average —
+# leaves room for an interval lowered to ten seconds plus a restart, and cuts
+# a token in a loop (filling the software catalogue, filing itself in rooms)
+# to about one request per five seconds (audit S21).
+heartbeat_limiter = RateLimiter(max_attempts=12, window_seconds=60)
+
+# New software catalogue entries one poste may create per day. A first
+# inventory names at most MAX_SOFTWARE (2,000) entries, and on a parc whose
+# catalogue already exists nearly all of them are known; a token in a loop
+# used to add 2,000 new names per heartbeat (audit S21). Same in-process
+# trade-off as the limiters above.
+software_quota = Quota(units=2000, window_seconds=24 * 3600)
 
 _ALL = (
     login_limiter,
@@ -187,6 +243,7 @@ def reset_all() -> None:
     """Forget every recorded attempt (tests)."""
     for limiter in _ALL:
         limiter.reset()
+    software_quota.reset()
     login_failures.reset()
 
 

@@ -70,11 +70,25 @@ def client_ip(request: Request) -> str:
     override's published port anyone could write it, and dodge the rate
     limits or sign the audit log with any address (audit S28). Otherwise the
     socket peer is the client itself.
+
+    Every ``X-Forwarded-For`` line counts, joined in order — a client that
+    sends its own line ahead of the proxy's must not have the first one read
+    — and empty entries are skipped (a header ending in a comma named the
+    client ''). From the right, entries that are proxies of ours are passed
+    over (a chain of them); with nothing else left, the socket peer it is.
     """
     peer = request.client.host if request.client else None
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded and trusted_proxy(peer):
-        return forwarded.rsplit(",", 1)[-1].strip()
+    if not trusted_proxy(peer):
+        return peer or "unknown"
+    entries = [
+        entry.strip()
+        for line in request.headers.getlist("x-forwarded-for")
+        for entry in line.split(",")
+    ]
+    entries = [e for e in entries if e]
+    for entry in reversed(entries):
+        if not trusted_proxy(entry):
+            return entry
     return peer or "unknown"
 
 

@@ -114,7 +114,7 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
     email_preference: EmailPreference | None = None
 
-    _not_null = not_null("email", "is_active", "email_preference")
+    _not_null = not_null("email", "is_active", "email_preference", "group_ids")
 
 
 class PasswordReset(BaseModel):

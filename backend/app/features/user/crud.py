@@ -249,30 +249,55 @@ async def delete_user(session: AsyncSession, user: User) -> None:
 # A link mailed less than this long ago is left alone: a second request,
 # from whoever, neither voids it nor sends another mail (audit S14).
 RESET_REQUEST_COOLDOWN = timedelta(minutes=5)
+# Links alive at once for one account. A request never voids a link still
+# valid — the one its owner may be opening — so the requests of whoever
+# knows the address are capped here instead (audit S14, T34).
+RESET_LIVE_LINKS_MAX = 3
 
 
-async def recent_reset_token(session: AsyncSession, user: User) -> bool:
-    """Whether a link still usable was issued within the cooldown."""
+async def reset_request_allowed(session: AsyncSession, user: User) -> bool:
+    """Whether a new link may be issued and mailed to ``user`` now: none
+    issued within the cooldown, fewer than ``RESET_LIVE_LINKS_MAX`` still
+    usable.
+
+    Locks the account's row first, for the rest of the transaction: two
+    requests for one account at the same instant are answered one after the
+    other, the second seeing the link the first issued — the check and the
+    insert are not atomic otherwise (audit T34). The caller ends the
+    transaction (a commit, or the session closing) to release it.
+    """
+    await session.exec(select(User.id).where(col(User.id) == user.id).with_for_update())
     now = utcnow()
     found = await session.exec(
-        select(PasswordResetToken.id)
+        select(PasswordResetToken.created_at)
         .where(col(PasswordResetToken.user_id) == user.id)
         .where(col(PasswordResetToken.used_at).is_(None))
         .where(col(PasswordResetToken.expires_at) > now)
-        .where(col(PasswordResetToken.created_at) > now - RESET_REQUEST_COOLDOWN)
-        .limit(1)
     )
-    return found.first() is not None
+    live = list(found.all())
+    if len(live) >= RESET_LIVE_LINKS_MAX:
+        return False
+    return all(created <= now - RESET_REQUEST_COOLDOWN for created in live)
 
 
 async def create_reset_token(session: AsyncSession, user: User) -> str:
     """Issue a single-use reset token, returning the clear value (mailed once).
 
-    Any previous token for the user is dropped, so the newest link is the only
-    one that works. The route calls ``recent_reset_token`` first.
+    The links still valid are kept: a request — anyone may make one — must
+    not void the link the account's owner is about to open (audit S14). The
+    spent ones (used, expired) are dropped. Redeeming any link voids the
+    others (``consume_reset_token``). The route calls
+    ``reset_request_allowed`` first.
     """
     await session.exec(
-        delete(PasswordResetToken).where(col(PasswordResetToken.user_id) == user.id)
+        delete(PasswordResetToken)
+        .where(col(PasswordResetToken.user_id) == user.id)
+        .where(
+            or_(
+                col(PasswordResetToken.used_at).is_not(None),
+                col(PasswordResetToken.expires_at) <= utcnow(),
+            )
+        )
     )
     token = security.generate_token()
     session.add(
@@ -309,6 +334,13 @@ async def consume_reset_token(session: AsyncSession, token: str) -> User | None:
 
     row.used_at = utcnow()
     session.add(row)
+    # The other links of the account die with this one: the password they
+    # would reset has just been chosen.
+    await session.exec(
+        delete(PasswordResetToken)
+        .where(col(PasswordResetToken.user_id) == user.id)
+        .where(col(PasswordResetToken.id) != row.id)
+    )
     return user
 
 

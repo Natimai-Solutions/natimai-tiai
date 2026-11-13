@@ -518,29 +518,102 @@ async def test_reset_confirm_rejects_an_expired_token(client, db_session):
     assert _code(resp) == "password.reset_token.invalid"
 
 
-async def test_issuing_a_new_reset_token_drops_the_previous_one(client, db_session):
+async def test_a_new_link_keeps_the_previous_one_until_one_is_redeemed(
+    client, db_session
+):
+    """Audit S14 (T34): a request more than five minutes after the first
+    issues a second link without voiding the first; redeeming either voids
+    the other."""
+    from datetime import timedelta
+
+    from sqlalchemy import update
+    from sqlmodel import select
+
+    from app.features.base import utcnow
     from app.features.user import crud
+    from app.features.user.models import PasswordResetToken
 
     user = await crud.create_user(db_session, email="twice@test.local", password=STRONG)
     first = await crud.create_reset_token(db_session, user)
     await db_session.commit()
-    # The commit expired the instance; reload it before handing it back to the
-    # crud layer, whose attribute access would otherwise lazy-load in async.
-    await db_session.refresh(user)
-    second = await crud.create_reset_token(db_session, user)
+    await db_session.exec(
+        update(PasswordResetToken).values(created_at=utcnow() - timedelta(minutes=6))
+    )
     await db_session.commit()
 
-    stale = await client.post(
-        "/api/v1/auth/password-reset/confirm",
-        json={"token": first, "new_password": "whatever-passphrase"},
+    resp = await client.post(
+        "/api/v1/auth/password-reset/request", json={"email": "twice@test.local"}
     )
-    assert stale.status_code == 400
+    assert resp.status_code == 204
+    db_session.expire_all()
+    assert len((await db_session.exec(select(PasswordResetToken))).all()) == 2
 
     ok = await client.post(
         "/api/v1/auth/password-reset/confirm",
-        json={"token": second, "new_password": "whatever-passphrase"},
+        json={"token": first, "new_password": "whatever-passphrase"},
     )
-    assert ok.status_code == 204
+    assert ok.status_code == 204, ok.text
+    db_session.expire_all()
+    rows = (await db_session.exec(select(PasswordResetToken))).all()
+    # Only the redeemed one is left, spent.
+    assert len(rows) == 1 and rows[0].used_at is not None
+
+
+async def test_reset_links_alive_at_once_are_capped(client, db_session):
+    """Audit S14 (T34): three links still valid, a fourth request sends
+    nothing and voids nothing."""
+    from datetime import timedelta
+
+    from sqlalchemy import update
+    from sqlmodel import select
+
+    from app.features.base import utcnow
+    from app.features.user import crud
+    from app.features.user.models import PasswordResetToken
+
+    user = await crud.create_user(db_session, email="cap@test.local", password=STRONG)
+    for _ in range(crud.RESET_LIVE_LINKS_MAX):
+        await db_session.refresh(user)
+        await crud.create_reset_token(db_session, user)
+        await db_session.commit()
+    await db_session.exec(
+        update(PasswordResetToken).values(created_at=utcnow() - timedelta(hours=1))
+    )
+    await db_session.commit()
+    before = {r.token_hash for r in (await db_session.exec(select(PasswordResetToken)))}
+
+    resp = await client.post(
+        "/api/v1/auth/password-reset/request", json={"email": "cap@test.local"}
+    )
+    assert resp.status_code == 204
+    db_session.expire_all()
+    after = {r.token_hash for r in (await db_session.exec(select(PasswordResetToken)))}
+    assert after == before
+
+
+async def test_concurrent_reset_requests_issue_one_link(client, db_session):
+    """Audit S14 (T34): four requests at the same instant used to leave two
+    links (and two mails): the account's row serialises them."""
+    import asyncio
+
+    from sqlmodel import select
+
+    from app.features.user import crud
+    from app.features.user.models import PasswordResetToken
+
+    await crud.create_user(db_session, email="race@test.local", password=STRONG)
+
+    async def ask(i):
+        return await client.post(
+            "/api/v1/auth/password-reset/request",
+            json={"email": "race@test.local"},
+            headers={"X-Forwarded-For": f"10.0.1.{i}"},
+        )
+
+    answers = await asyncio.gather(*(ask(i) for i in range(4)))
+    assert [r.status_code for r in answers] == [204] * 4
+    db_session.expire_all()
+    assert len((await db_session.exec(select(PasswordResetToken))).all()) == 1
 
 
 # --- Unit tests (no database) ----------------------------------------------
@@ -744,13 +817,43 @@ async def test_a_required_field_sent_as_null_is_a_422(client, db_session):
         "/api/v1/auth/login", data={"username": "boss@test.local", "password": STRONG}
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-    for body in ({"email": None}, {"is_active": None}, {"email_preference": None}):
+    for body in (
+        {"email": None},
+        {"is_active": None},
+        {"email_preference": None},
+        # Used to reach the groups check as None: a TypeError, a 500 (T41).
+        {"group_ids": None},
+    ):
         resp = await client.patch(
             f"/api/v1/users/{target_id}", headers=headers, json=body
         )
         assert resp.status_code == 422, (body, resp.text)
     groups = (await client.get("/api/v1/groups", headers=headers)).json()
+    for body in ({"name": None}, {"permissions": None}):
+        resp = await client.patch(
+            f"/api/v1/groups/{groups[0]['id']}", headers=headers, json=body
+        )
+        assert resp.status_code == 422, (body, resp.text)
+    building = await client.post(
+        "/api/v1/buildings", headers=headers, json={"name": "Bât. A"}
+    )
+    assert building.status_code == 201, building.text
     resp = await client.patch(
-        f"/api/v1/groups/{groups[0]['id']}", headers=headers, json={"name": None}
+        f"/api/v1/buildings/{building.json()['id']}",
+        headers=headers,
+        json={"name": None},
     )
     assert resp.status_code == 422, resp.text
+    room = await client.post("/api/v1/rooms", headers=headers, json={"name": "B12"})
+    assert room.status_code == 201, room.text
+    resp = await client.patch(
+        f"/api/v1/rooms/{room.json()['id']}", headers=headers, json={"name": None}
+    )
+    assert resp.status_code == 422, resp.text
+    # Where null means something, it is still accepted: out of its building.
+    resp = await client.patch(
+        f"/api/v1/rooms/{room.json()['id']}",
+        headers=headers,
+        json={"building_id": None},
+    )
+    assert resp.status_code == 200, resp.text
