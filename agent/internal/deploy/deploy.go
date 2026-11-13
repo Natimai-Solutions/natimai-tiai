@@ -46,6 +46,18 @@ type Policy struct {
 	Publishers  []string // Authenticode signer names
 	Winget      bool
 	WingetAllow []string // identifiers, or prefixes ending in "*"
+	// MethodAMaxGB caps what a method A manifest may announce, in GiB
+	// (registry DeployMethodAMaxGB). 0 or less: DefaultMethodAMaxGB.
+	MethodAMaxGB int
+}
+
+// MethodAMaxBytes is the cap MethodAFiles applies under this policy.
+func (p Policy) MethodAMaxBytes() int64 {
+	gb := p.MethodAMaxGB
+	if gb <= 0 {
+		gb = DefaultMethodAMaxGB
+	}
+	return int64(gb) << 30
 }
 
 // Enabled tells whether any deployment is possible at all on this poste.
@@ -157,24 +169,24 @@ var loadableExt = map[string]bool{
 	".wsc": true, ".sct": true,
 }
 
-// maxMethodABytes caps what an unsigned (method A) manifest may announce in
-// all: its sizes are the server's word, and they are what the download is
-// bounded by (audit S24). The server's own ceiling for one file
+// DefaultMethodAMaxGB caps what an unsigned (method A) manifest may announce
+// in all, in GiB: its sizes are the server's word, and they are what the
+// download is bounded by (audit S24). The server's own ceiling for one file
 // (PACKAGE_MAX_BYTES, 8 GiB at most) — a method A package is one installer
-// and its data files. A signed manifest (method B) carries the
-// administrator's sizes and is not capped here.
-const maxMethodABytes int64 = 8 << 30
+// and its data files. The GPO value DeployMethodAMaxGB replaces it. A signed
+// manifest (method B) carries the administrator's sizes and is not capped.
+const DefaultMethodAMaxGB = 8
 
 // MethodAFiles refuses, under method A, an unsigned manifest that puts next
 // to the signed file anything Windows could load or run from there: an
 // approved installer would pick up a planted version.dll (audit S02). Data
 // files (.iss, .ini, .xml, .cab…) stay allowed.
-func MethodAFiles(files []FileRef, run string) error {
+func MethodAFiles(files []FileRef, run string, maxBytes int64) error {
 	var total int64
 	for _, f := range files {
 		total += f.Size
-		if f.Size > maxMethodABytes || total > maxMethodABytes {
-			return fmt.Errorf("méthode A : le manifeste annonce plus de %d Gio à télécharger — signez le paquet (méthode B)", maxMethodABytes>>30)
+		if f.Size > maxBytes || total > maxBytes {
+			return fmt.Errorf("méthode A : le manifeste annonce plus de %d Gio à télécharger — signez le paquet (méthode B)", maxBytes>>30)
 		}
 		if run != MsiExec && strings.EqualFold(f.Name, run) {
 			continue

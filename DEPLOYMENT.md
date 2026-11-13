@@ -279,11 +279,15 @@ Il n'est jamais committé.
 | `FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` | — | Compte admin créé au démarrage s'il n'existe pas |
 | `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée à tout mot de passe |
 | `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié » |
+| `PASSWORD_RESET_COOLDOWN_MINUTES` / `PASSWORD_RESET_MAX_LIVE_LINKS` | `5` / `3` | « Mot de passe oublié » : pas de nouveau courriel pour un compte dans ce délai (0 à 60 min) après le précédent, et au plus ce nombre de liens valides à la fois (1 à 10). Une demande n'annule jamais un lien encore valide ; utiliser un lien annule les autres |
 | `CONSOLE_BASE_URL` | `https://<TIAI_SERVER_NAME>` | URL publique de la console, dans les liens des e-mails (réinitialisation, fiche d'un poste). À renseigner seulement si la console est jointe sous une autre URL (autre port, proxy devant Caddy). Si ni elle ni `TIAI_SERVER_NAME` n'est connue, aucun e-mail de réinitialisation n'est envoyé |
 | `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste — 16 caractères minimum hors `local` |
 | `ENROLLMENT_SECRET_PREVIOUS` | *(vide)* | Ancien secret, encore accepté pendant une rotation (cf. « Enrôlement : approbation et rotation du secret ») |
 | `ENROLLMENT_REENROLL_REQUIRES_APPROVAL` | `true` | Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur |
 | `LOGIN_MAX_FAILED_ATTEMPTS` / `LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Verrouillage d'un compte après N échecs de connexion espacés de moins de cette durée, pour cette durée (voir *Verrouillage des comptes*). Une connexion réussie ou une réinitialisation du mot de passe le lève |
+| `LOGIN_SIEGE_ADDRESSES` / `LOGIN_KNOWN_ADDRESS_DAYS` | `10` / `30` | Pendant un verrou, au-delà de ce nombre d'adresses distinctes en échec sur le compte (2 à 1 000), seules les adresses qui ont ouvert ce compte depuis ce nombre de jours (1 à 365) restent admises (voir *Verrouillage des comptes*) |
+| `AGENT_HEARTBEAT_MAX_PER_MINUTE` | `12` | Heartbeats acceptés par poste et par minute (2 à 600) ; au-delà, 429. L'agent en envoie un par `heartbeat_interval_seconds` (60 s par défaut), plus un au redémarrage : relever cette limite si l'intervalle est abaissé sous 10 s |
+| `SOFTWARE_NEW_ENTRIES_PER_DAY` | `2000` | Nouveaux logiciels qu'un poste peut ajouter au catalogue par 24 h (100 à 1 000 000) ; les logiciels déjà connus ne comptent pas. En dessous de 2 000 (le plus qu'un inventaire transporte), le premier inventaire d'un poste sur un catalogue vide peut demander plus d'une journée |
 | `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
 | `TRUSTED_PROXIES` | *(vide)* | Réseaux (CIDR, séparés par des virgules) dont l'en-tête `X-Forwarded-For` est cru, en plus de la boucle locale et de `TRUSTED_PROXY_HOSTS` ; l'adresse retenue est alors l'entrée la plus à droite de l'en-tête. Pour tout autre pair, l'en-tête est ignoré et l'adresse du client — limitation de débit, journal d'audit — est celle de la connexion. À renseigner seulement si un autre proxy que le Caddy de la stack joint directement le backend |
@@ -347,10 +351,10 @@ compte plus : quelques fautes de frappe étalées sur la semaine ne verrouillent
 pas. Le verrou ne ferme le compte qu'aux **adresses qui ont échoué dessus**
 pendant cette durée : le bon mot de passe saisi depuis un autre poste ouvre la
 session et lève le verrou, si bien qu'échouer exprès ne bloque pas un
-administrateur. Si les essais viennent de nombreuses adresses (deux fois
-`LOGIN_MAX_FAILED_ATTEMPTS`, soit 10 adresses distinctes pendant la durée du
-verrou), le verrou s'étend à toutes les adresses sauf celles qui ont ouvert ce
-compte dans les 30 derniers jours : répartir les essais sur un réseau entier
+administrateur. Si les essais viennent de nombreuses adresses
+(`LOGIN_SIEGE_ADDRESSES`, 10 adresses distinctes pendant la durée du verrou),
+le verrou s'étend à toutes les adresses sauf celles qui ont ouvert ce compte
+depuis `LOGIN_KNOWN_ADDRESS_DAYS` jours (30) : répartir les essais sur un réseau entier
 n'en donne pas davantage. Pendant un verrou, la console répond le même 401
 qu'à un mauvais mot de passe : la réponse ne dit pas quels comptes existent.
 
@@ -1050,6 +1054,7 @@ le secret d'enrôlement, plutôt qu'en clair dans le YAML.
 | `DeployWingetAllow` | `REG_MULTI_SZ` | — (registre seulement) |
 | `DeploySigners` | `REG_MULTI_SZ` | — (registre seulement) |
 | `DeployPublishers` | `REG_MULTI_SZ` | — (registre seulement) |
+| `DeployMethodAMaxGB` | `REG_DWORD` | — (registre seulement) |
 
 Pour les intervalles, `0` est ignoré et signifie « laisser le défaut ». Une
 `ProxyURL` vide est ignorée de même : pour annuler par GPO un proxy qu'un YAML

@@ -458,4 +458,7 @@ type DeployTrust struct {
 	Publishers  []string
 	Winget      bool
 	WingetAllow []string
+	// MethodAMaxGB caps, in GiB, what an unsigned (method A) manifest may
+	// announce in all (DeployMethodAMaxGB). 0: the agent's default.
+	MethodAMaxGB int
 }

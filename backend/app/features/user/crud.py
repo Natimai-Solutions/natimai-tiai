@@ -246,19 +246,17 @@ async def delete_user(session: AsyncSession, user: User) -> None:
 # --- Password reset tokens --------------------------------------------------
 
 
-# A link mailed less than this long ago is left alone: a second request,
-# from whoever, neither voids it nor sends another mail (audit S14).
-RESET_REQUEST_COOLDOWN = timedelta(minutes=5)
-# Links alive at once for one account. A request never voids a link still
-# valid — the one its owner may be opening — so the requests of whoever
-# knows the address are capped here instead (audit S14, T34).
-RESET_LIVE_LINKS_MAX = 3
+# A link mailed less than PASSWORD_RESET_COOLDOWN_MINUTES ago is left alone:
+# a second request, from whoever, neither voids it nor sends another mail. And
+# since a request never voids a link still valid — the one its owner may be
+# opening — the links alive at once are capped too, at
+# PASSWORD_RESET_MAX_LIVE_LINKS (audit S14, T34).
 
 
 async def reset_request_allowed(session: AsyncSession, user: User) -> bool:
     """Whether a new link may be issued and mailed to ``user`` now: none
-    issued within the cooldown, fewer than ``RESET_LIVE_LINKS_MAX`` still
-    usable.
+    issued within the cooldown, fewer than PASSWORD_RESET_MAX_LIVE_LINKS
+    still usable.
 
     Locks the account's row first, for the rest of the transaction: two
     requests for one account at the same instant are answered one after the
@@ -275,9 +273,10 @@ async def reset_request_allowed(session: AsyncSession, user: User) -> bool:
         .where(col(PasswordResetToken.expires_at) > now)
     )
     live = list(found.all())
-    if len(live) >= RESET_LIVE_LINKS_MAX:
+    if len(live) >= settings.PASSWORD_RESET_MAX_LIVE_LINKS:
         return False
-    return all(created <= now - RESET_REQUEST_COOLDOWN for created in live)
+    cooldown = timedelta(minutes=settings.PASSWORD_RESET_COOLDOWN_MINUTES)
+    return all(created <= now - cooldown for created in live)
 
 
 async def create_reset_token(session: AsyncSession, user: User) -> str:

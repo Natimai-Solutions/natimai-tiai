@@ -159,6 +159,24 @@ class Settings(BaseSettings):
     # (app.core.ratelimit.FailureMemory).
     LOGIN_MAX_FAILED_ATTEMPTS: int = Field(default=5, ge=1, le=100)
     LOGIN_LOCKOUT_MINUTES: int = Field(default=15, ge=1, le=24 * 60)
+    # Distinct addresses failing on one account during a lock past which the
+    # lock turns account-wide, except for the addresses that opened the
+    # account within LOGIN_KNOWN_ADDRESS_DAYS (audit S03, second pass).
+    LOGIN_SIEGE_ADDRESSES: int = Field(default=10, ge=2, le=1000)
+    LOGIN_KNOWN_ADDRESS_DAYS: int = Field(default=30, ge=1, le=365)
+    # « Mot de passe oublié » (audit S14): no new mail for an account within
+    # this many minutes of the last one, and at most this many links alive at
+    # once. A request never voids a link still valid.
+    PASSWORD_RESET_COOLDOWN_MINUTES: int = Field(default=5, ge=0, le=60)
+    PASSWORD_RESET_MAX_LIVE_LINKS: int = Field(default=3, ge=1, le=10)
+    # Heartbeats one poste may send per minute (429 beyond). The agent sends
+    # one per heartbeat_interval_seconds (60 by default), plus one at a
+    # restart (audit S21).
+    AGENT_HEARTBEAT_MAX_PER_MINUTE: int = Field(default=12, ge=2, le=600)
+    # New software catalogue entries one poste may create per 24 hours. Below
+    # 2,000 (the most one inventory carries), a poste's first inventory may
+    # take more than a day to be complete on a fresh catalogue (audit S21).
+    SOFTWARE_NEW_ENTRIES_PER_DAY: int = Field(default=2000, ge=100, le=1_000_000)
 
     # --- CORS ---
     BACKEND_CORS_ORIGINS: Annotated[

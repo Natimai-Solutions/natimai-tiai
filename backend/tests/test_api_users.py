@@ -567,12 +567,13 @@ async def test_reset_links_alive_at_once_are_capped(client, db_session):
     from sqlalchemy import update
     from sqlmodel import select
 
+    from app.core.config import settings
     from app.features.base import utcnow
     from app.features.user import crud
     from app.features.user.models import PasswordResetToken
 
     user = await crud.create_user(db_session, email="cap@test.local", password=STRONG)
-    for _ in range(crud.RESET_LIVE_LINKS_MAX):
+    for _ in range(settings.PASSWORD_RESET_MAX_LIVE_LINKS):
         await db_session.refresh(user)
         await crud.create_reset_token(db_session, user)
         await db_session.commit()

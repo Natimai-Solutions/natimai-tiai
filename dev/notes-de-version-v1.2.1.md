@@ -23,8 +23,8 @@ Les correctifs de l'agent (file locale, jeton refusé, manifeste strict, extensi
 
 - **Verrouillage de compte.**
   - Un échec de connexion de plus de 15 minutes (`LOGIN_LOCKOUT_MINUTES`) ne compte plus : quelques fautes de frappe étalées dans la semaine ne verrouillent plus.
-  - Si les essais viennent de 10 adresses ou plus pendant un verrou, seules les adresses qui ont ouvert ce compte dans les 30 derniers jours restent admises. Un titulaire qui se connecte de son poste habituel n'est pas gêné.
-- **Mot de passe oublié.** Une nouvelle demande n'annule plus le lien déjà reçu. Au plus un courriel par compte toutes les 5 minutes et 3 liens valides à la fois. Utiliser l'un des liens annule les autres.
+  - Si les essais viennent de 10 adresses ou plus pendant un verrou (`LOGIN_SIEGE_ADDRESSES`), seules les adresses qui ont ouvert ce compte dans les 30 derniers jours (`LOGIN_KNOWN_ADDRESS_DAYS`) restent admises. Un titulaire qui se connecte de son poste habituel n'est pas gêné.
+- **Mot de passe oublié.** Une nouvelle demande n'annule plus le lien déjà reçu. Au plus un courriel par compte toutes les 5 minutes et 3 liens valides à la fois (`PASSWORD_RESET_COOLDOWN_MINUTES`, `PASSWORD_RESET_MAX_LIVE_LINKS`). Utiliser l'un des liens annule les autres.
 - **Paramètres e-mail.** Remettre le mot de passe SMTP ou la clé Mailgun à la valeur du `.env` est refusé tant que la console pointe vers un autre serveur que celui du `.env`.
 - **Déploiement logiciel.**
   - Une installation dont le paquet a été retiré après la mise en file passe en échec au lieu de partir. Une désinstallation part toujours.
@@ -39,8 +39,8 @@ Les correctifs de l'agent (file locale, jeton refusé, manifeste strict, extensi
   - Sans `WOL_ALLOWED_NETWORKS`, le réveil direct ne vise que les plages RFC 1918 (10/8, 172.16/12, 192.168/16). Le sous-réseau déduit de l'adresse et du masque d'un poste doit tenir entièrement dans un réseau autorisé ; sinon le préfixe par défaut est essayé, sinon le poste n'a pas de destination.
   - Un agent qui ne déclare pas de version lisible ne sert plus de relais, et la console ne compte que les relais de confiance.
   - Un relais qui a laissé expirer un réveil ne le reçoit plus.
-- **Fréquence des contacts.** Un poste est limité à 12 contacts par minute (30 auparavant). L'agent en fait un par minute par défaut.
-- **Catalogue logiciel.** Un poste ne peut ajouter que 2 000 logiciels nouveaux au catalogue par 24 heures. Un premier inventaire complet tient dans ce budget ; les logiciels déjà connus ne comptent pas.
+- **Fréquence des contacts.** Un poste est limité à 12 contacts par minute (30 auparavant ; `AGENT_HEARTBEAT_MAX_PER_MINUTE`). L'agent en fait un par minute par défaut.
+- **Catalogue logiciel.** Un poste ne peut ajouter que 2 000 logiciels nouveaux au catalogue par 24 heures (`SOFTWARE_NEW_ENTRIES_PER_DAY`). Un premier inventaire complet tient dans ce budget ; les logiciels déjà connus ne comptent pas.
 - **Console.**
   - Liste des postes : la sélection est vidée dès que la liste change (filtre, page, lien « Postes » du menu, retour).
   - Fiche : la navigation précédent/suivant ne répète plus un poste et n'affiche plus de voisins faux.
@@ -52,11 +52,26 @@ Les correctifs de l'agent (file locale, jeton refusé, manifeste strict, extensi
 
 - Une commande dont l'identifiant n'est pas un UUID est refusée. Cet identifiant nommait un fichier de la file locale : un serveur compromis pouvait écrire hors du dossier.
 - Le manifeste d'un paquet est refusé s'il contient une clé en double, inconnue, ou écrite avec une autre casse ou un caractère Unicode voisin (« inſtall »). L'agent exécute donc exactement ce que le script de signature a montré.
-- En méthode A, un manifeste qui annonce plus de 8 Gio est refusé avant tout téléchargement.
+- En méthode A, un manifeste qui annonce plus de 8 Gio est refusé avant tout téléchargement. La valeur de registre `DeployMethodAMaxGB` (`REG_DWORD`, en Gio, sous `HKLM\SOFTWARE\Tiai`) la remplace.
 - Un jeton refusé par le serveur et resté sur le disque n'est plus relu en boucle : l'agent se réenrôle.
 - Un verdict de commande refusé définitivement par le serveur ne bloque plus ceux qui suivent dans la file locale.
 
 ---
+
+## Nouvelles variables d'environnement
+
+Toutes facultatives : leur valeur par défaut est celle décrite plus haut.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `LOGIN_SIEGE_ADDRESSES` | `10` | Adresses en échec au-delà desquelles un verrou s'étend à toutes les adresses non habituelles |
+| `LOGIN_KNOWN_ADDRESS_DAYS` | `30` | Durée pendant laquelle une adresse qui a ouvert un compte reste admise pendant un tel verrou |
+| `PASSWORD_RESET_COOLDOWN_MINUTES` | `5` | Délai minimal entre deux courriels de réinitialisation d'un compte |
+| `PASSWORD_RESET_MAX_LIVE_LINKS` | `3` | Liens de réinitialisation valides à la fois pour un compte |
+| `AGENT_HEARTBEAT_MAX_PER_MINUTE` | `12` | Heartbeats acceptés par poste et par minute |
+| `SOFTWARE_NEW_ENTRIES_PER_DAY` | `2000` | Nouveaux logiciels qu'un poste peut ajouter au catalogue par 24 h |
+
+Clé de registre de l'agent : `DeployMethodAMaxGB` (`REG_DWORD`), voir plus haut.
 
 ## Écart connu
 

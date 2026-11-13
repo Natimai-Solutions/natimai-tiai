@@ -999,10 +999,11 @@ func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.Pack
 
 	trust := config.DeployKeys()
 	policy := deploy.Policy{
-		Signers:     trust.Signers,
-		Publishers:  trust.Publishers,
-		Winget:      trust.Winget,
-		WingetAllow: trust.WingetAllow,
+		Signers:      trust.Signers,
+		Publishers:   trust.Publishers,
+		Winget:       trust.Winget,
+		WingetAllow:  trust.WingetAllow,
+		MethodAMaxGB: trust.MethodAMaxGB,
 	}
 	env := &deploy.SystemEnv{Fetcher: a.client, DataDir: config.DefaultConfigDir()}
 	res, err := deploy.Execute(ctx, env, policy, cmdType, pkg)

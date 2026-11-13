@@ -29,6 +29,7 @@ Nouveau → Élément Registre**, ruche `HKEY_LOCAL_MACHINE`, clé `SOFTWARE\Tia
 | `DeployWingetAllow` | `REG_MULTI_SZ` | *Facultatif.* Les seuls identifiants winget autorisés, un par ligne : `Mozilla.Firefox`, ou un préfixe terminé par `*` (`Mozilla.*`). Absente : tout le dépôt winget est autorisé. |
 | `DeploySigners` | `REG_MULTI_SZ` | Méthode B : l'**empreinte SHA-256** de chaque certificat dont la signature est acceptée, une par ligne (voir § 2). |
 | `DeployPublishers` | `REG_MULTI_SZ` | Méthode A : le **nom du signataire** de chaque éditeur approuvé, une par ligne, tel que l'onglet *Signatures numériques* de l'installateur l'affiche (ex. `INDEX EDUCATION SAS`). |
+| `DeployMethodAMaxGB` | `REG_DWORD` | *Facultatif.* Méthode A : taille totale, en Gio, qu'un manifeste non signé peut annoncer (8 par défaut, de 1 à 1 024). Au-delà, l'agent refuse avant tout téléchargement ; un paquet plus gros se signe (méthode B). |
 
 L'agent relit ces valeurs à chaque commande : une GPO appliquée (`gpupdate`)
 prend effet au déploiement suivant, sans redémarrer le service.

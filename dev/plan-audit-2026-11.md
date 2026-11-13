@@ -382,6 +382,8 @@ Sept relecteurs indépendants ont confronté au code les 43 tâches et les décl
 
 Tests manquants ajoutés : specs de pages pour T14, T20, T26, T29, T30, T31, T42, et dialogues de séance de maintenance (U14) et de déploiement (T23).
 
+Les valeurs retenues sont réglables : `LOGIN_SIEGE_ADDRESSES` (10), `LOGIN_KNOWN_ADDRESS_DAYS` (30), `PASSWORD_RESET_COOLDOWN_MINUTES` (5), `PASSWORD_RESET_MAX_LIVE_LINKS` (3), `AGENT_HEARTBEAT_MAX_PER_MINUTE` (12) et `SOFTWARE_NEW_ENTRIES_PER_DAY` (2 000) côté serveur, bornées au démarrage ; `DeployMethodAMaxGB` (8 Gio) dans le registre des postes.
+
 ### 6.2 Limites acceptées après la seconde passe
 
 - **Sauvegardes non chiffrées** (T40) : l'image `postgres:16-alpine` n'a ni `gpg` ni `openssl` ; la documentation exige une copie hors serveur chiffrée.

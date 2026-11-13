@@ -125,18 +125,22 @@ password_change_limiter = RateLimiter(max_attempts=5, window_seconds=900)
 # Heartbeat: keyed on the poste. The agent polls every
 # heartbeat_interval_seconds (60 by default), once more at a service restart,
 # and backs off (doubling from that interval) after a failure: a legitimate
-# poste sends one or two a minute. Twelve — one per five seconds on average —
-# leaves room for an interval lowered to ten seconds plus a restart, and cuts
-# a token in a loop (filling the software catalogue, filing itself in rooms)
-# to about one request per five seconds (audit S21).
-heartbeat_limiter = RateLimiter(max_attempts=12, window_seconds=60)
+# poste sends one or two a minute. AGENT_HEARTBEAT_MAX_PER_MINUTE (12, one per
+# five seconds on average) leaves room for an interval lowered to ten seconds
+# plus a restart, and cuts a token in a loop (filling the software catalogue,
+# filing itself in rooms) to about one request per five seconds (audit S21).
+heartbeat_limiter = RateLimiter(
+    max_attempts=settings.AGENT_HEARTBEAT_MAX_PER_MINUTE, window_seconds=60
+)
 
-# New software catalogue entries one poste may create per day. A first
-# inventory names at most MAX_SOFTWARE (2,000) entries, and on a parc whose
-# catalogue already exists nearly all of them are known; a token in a loop
-# used to add 2,000 new names per heartbeat (audit S21). Same in-process
-# trade-off as the limiters above.
-software_quota = Quota(units=2000, window_seconds=24 * 3600)
+# New software catalogue entries one poste may create per day
+# (SOFTWARE_NEW_ENTRIES_PER_DAY). A first inventory names at most MAX_SOFTWARE
+# (2,000) entries, and on a parc whose catalogue already exists nearly all of
+# them are known; a token in a loop used to add 2,000 new names per heartbeat
+# (audit S21). Same in-process trade-off as the limiters above.
+software_quota = Quota(
+    units=settings.SOFTWARE_NEW_ENTRIES_PER_DAY, window_seconds=24 * 3600
+)
 
 _ALL = (
     login_limiter,
@@ -167,8 +171,6 @@ class FailureMemory:
     database.
     """
 
-    # How long an address that opened an account stays its owner's.
-    KNOWN_SECONDS = 30 * 24 * 3600
     _MAX_KEYS = 4096
     _MAX_KNOWN = 8192
 
@@ -214,8 +216,10 @@ class FailureMemory:
                 del self._known[key]
 
     def known(self, account: str, ip: str) -> bool:
+        # How long an address that opened an account stays its owner's.
         at = self._known.get((account, ip))
-        return at is not None and time.monotonic() - at < self.KNOWN_SECONDS
+        days = settings.LOGIN_KNOWN_ADDRESS_DAYS
+        return at is not None and time.monotonic() - at < days * 24 * 3600
 
     def forget(self, account: str, ip: str | None = None) -> None:
         """Forget ``ip``'s failures on ``account``, or every address's when
@@ -231,9 +235,10 @@ class FailureMemory:
 
 
 def besieged_after() -> int:
-    """Distinct failing addresses that turn a lock account-wide: twice the
-    lock threshold, so that a person failing from a few postes never does."""
-    return 2 * settings.LOGIN_MAX_FAILED_ATTEMPTS
+    """Distinct failing addresses that turn a lock account-wide
+    (LOGIN_SIEGE_ADDRESSES, 10 by default): more than one person failing from
+    a few postes ever reaches."""
+    return settings.LOGIN_SIEGE_ADDRESSES
 
 
 login_failures = FailureMemory()

@@ -283,7 +283,11 @@ func TestParseManifestRefusesAmbiguousKeys(t *testing.T) {
 // (audit S24).
 func TestMethodACapsTheAnnouncedSize(t *testing.T) {
 	const gib = int64(1) << 30
-	if err := MethodAFiles([]FileRef{{Name: "setup.exe", Size: 8 * gib}}, "setup.exe"); err != nil {
+	limit := Policy{}.MethodAMaxBytes()
+	if limit != 8*gib {
+		t.Fatalf("default cap %d, want 8 GiB", limit)
+	}
+	if err := MethodAFiles([]FileRef{{Name: "setup.exe", Size: 8 * gib}}, "setup.exe", limit); err != nil {
 		t.Errorf("an 8 GiB installer refused: %v", err)
 	}
 	for _, files := range [][]FileRef{
@@ -291,9 +295,18 @@ func TestMethodACapsTheAnnouncedSize(t *testing.T) {
 		{{Name: "setup.exe", Size: 5 * gib}, {Name: "data.cab", Size: 5 * gib}},
 		{{Name: "setup.exe", Size: 1}, {Name: "data.cab", Size: 1<<63 - 1}},
 	} {
-		if err := MethodAFiles(files, "setup.exe"); err == nil {
+		if err := MethodAFiles(files, "setup.exe", limit); err == nil {
 			t.Errorf("%v accepted", files)
 		}
+	}
+	// The GPO value DeployMethodAMaxGB replaces the default, either way.
+	small := Policy{MethodAMaxGB: 2}.MethodAMaxBytes()
+	if err := MethodAFiles([]FileRef{{Name: "setup.exe", Size: 3 * gib}}, "setup.exe", small); err == nil {
+		t.Error("3 GiB accepted under a 2 GiB cap")
+	}
+	large := Policy{MethodAMaxGB: 16}.MethodAMaxBytes()
+	if err := MethodAFiles([]FileRef{{Name: "setup.exe", Size: 12 * gib}}, "setup.exe", large); err != nil {
+		t.Errorf("12 GiB refused under a 16 GiB cap: %v", err)
 	}
 
 	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true}
@@ -687,7 +700,7 @@ func TestMethodARefusesLoadableFilesNextToTheExecutable(t *testing.T) {
 		}
 	}
 	// Data files stay allowed (the Pronote case: an .iss answer file).
-	if err := MethodAFiles([]FileRef{{Name: "setup.exe"}, {Name: "answers.iss"}, {Name: "data.cab"}, {Name: "conf.ini"}}, "setup.exe"); err != nil {
+	if err := MethodAFiles([]FileRef{{Name: "setup.exe"}, {Name: "answers.iss"}, {Name: "data.cab"}, {Name: "conf.ini"}}, "setup.exe", Policy{}.MethodAMaxBytes()); err != nil {
 		t.Error(err)
 	}
 }
