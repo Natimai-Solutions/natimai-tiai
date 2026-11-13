@@ -4,10 +4,10 @@
     <q-card-section class="row q-col-gutter-md">
       <div class="col-6 col-sm-4 col-md">
         <div class="text-caption text-muted">Antivirus</div>
-        <!-- The badge speaks of the product it names: grey « Non relevé »,
-             red « Aucun » — the protection state is the line below (U28). -->
+        <!-- Grey « Non relevé », red « Aucun » (U28); a named product takes
+             the protection state's colour, as in the machine list. -->
         <q-badge
-          :color="antivirusColor(machine.av_product_name, machine.av_product_enabled)"
+          :color="antivirusBadgeColor(machine.av_product_name, machine.is_up_to_date)"
           class="q-mt-xs"
         >
           {{ antivirusLabel(machine.av_product_name) }}
@@ -114,7 +114,7 @@ import {
   onlineColor,
   onlineIcon,
   onlineLabel,
-  antivirusColor,
+  antivirusBadgeColor,
   protectionLabel,
   sessionColor,
   sessionLabel,

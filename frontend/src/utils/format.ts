@@ -112,6 +112,21 @@ export function antivirusColor(
 }
 
 /**
+ * Colour of the fiche's antivirus badge, the same as the machine list's
+ * column: grey or red while the product itself is unknown or missing (the
+ * badge then reads « Non relevé » or « Aucun », audit U28), and otherwise the
+ * protection state — a named antivirus whose signatures are stale is red,
+ * never green.
+ */
+export function antivirusBadgeColor(
+  name: string | null | undefined,
+  isUpToDate: boolean | null | undefined,
+): string {
+  if (name === null || name === undefined || name === '') return antivirusColor(name, null);
+  return protectionColor(isUpToDate);
+}
+
+/**
  * Sentence describing the registered antivirus, for the tooltip and the detail
  * card. The signature clause is dropped when the product reports no freshness
  * bit — vendors fill it in unevenly, and inventing "à jour" would be a claim the
