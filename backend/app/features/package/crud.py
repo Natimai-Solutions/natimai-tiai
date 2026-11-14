@@ -9,6 +9,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -144,14 +145,43 @@ async def sweep_store(session: AsyncSession) -> int:
     """Delete the stored files nothing wants any more (audit S09): replaced or
     removed files once no open deployment needs them, uploads of a request
     that failed halfway. Returns how many went. Never raises: a full or
-    read-only volume must not fail the request that triggered the sweep."""
+    read-only volume, or a database error, must not fail the request that
+    triggered the sweep — which has committed by then.
+
+    A file an upload in progress holds is kept (``storage.pin``, audit T09).
+    And nothing goes when the database knows no package at all: packages are
+    retired, never deleted, so a store full of files beside an empty catalogue
+    means the wrong or an emptied database, not orphans."""
     removed = 0
     try:
-        for sha in storage.stored_shas():
-            if not await sha_in_use(session, sha):
-                storage.remove_unreferenced(sha)
-                removed += 1
+        shas = storage.stored_shas()
+        if shas and (await session.exec(select(Package.id).limit(1))).first() is None:
+            logger.warning(
+                "package store sweep skipped: %d stored file(s) but no package in "
+                "the database (wrong or empty database?) — nothing deleted",
+                len(shas),
+            )
+            return 0
+        for sha in shas:
+            mark = storage.pin_mark()
+            if storage.pinned_since(sha, mark):
+                continue
+            if await sha_in_use(session, sha):
+                continue
+            # No await from this check to the deletion: an upload cannot pin
+            # in between, and one that pinned (or committed and unpinned)
+            # while the database was being asked shows here.
+            if storage.pinned_since(sha, mark):
+                continue
+            storage.remove_unreferenced(sha)
+            removed += 1
         removed += storage.remove_stale_uploads()
     except OSError:
         logger.exception("package store sweep failed")
+    except SQLAlchemyError:
+        logger.exception("package store sweep failed")
+        try:
+            await session.rollback()
+        except SQLAlchemyError:
+            logger.exception("rollback after the package store sweep failed")
     return removed

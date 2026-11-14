@@ -160,7 +160,7 @@
           {{ due.overdue }} en retard · {{ due.due_soon }} à échéance
         </div>
       </div>
-      <q-list v-if="due && (dueRooms.length || due.machines.length)" bordered separator>
+      <q-list v-if="due && (dueRooms.length || dueMachines.length)" bordered separator>
         <q-expansion-item
           v-for="r in dueRooms"
           :key="r.id"
@@ -253,7 +253,7 @@
           </q-card>
         </q-expansion-item>
         <q-item
-          v-for="m in due.machines"
+          v-for="m in dueMachines"
           :key="m.id"
           clickable
           :to="{ name: 'machine-detail', params: { id: m.id } }"
@@ -387,6 +387,10 @@ const sessionMachines = computed(() =>
 const dueRooms = computed(() =>
   (due.value?.rooms ?? []).filter((r) => r.overdue > 0 || r.due_soon > 0),
 );
+// The same rule for the postes in no room: the server sends them all, those
+// up to date included, and an owner whose postes are all up to date must read
+// « Rien à faire », not a list of « À jour » (audit B09).
+const dueMachines = computed(() => (due.value?.machines ?? []).filter((m) => isDue(m.state)));
 
 function stateWithDate(m: DueMachine): string {
   const label = maintenanceStateLabel(m.state);

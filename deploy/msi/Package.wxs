@@ -86,6 +86,11 @@
     <!-- Emplacement du poste, texte libre ("Lycée de Taravao") : ce par quoi la
          console filtre le parc, et ce qui désigne un relais Wake-on-LAN. -->
     <Property Id="LOCATION" Secure="yes" />
+    <!-- 1 ou 0 (DWORD). 1 = accepter une APIBASEURL en http:// : sans lui,
+         l'agent refuse de démarrer sur une URL http:// (secret d'enrôlement
+         puis token y passeraient en clair). Réservé au port HTTP direct d'un
+         réseau de test ; absent, l'agent garde son défaut (refus). -->
+    <Property Id="ALLOWINSECUREHTTP" Secure="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Tiai" />
@@ -222,6 +227,12 @@
                  Permanent="yes" Condition="LOCATION">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="Location"
                        Type="string" Value="[LOCATION]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegAllowInsecureHttp" Guid="9A01017C-4EEF-4568-990F-FEC87F3E43A2"
+                 Permanent="yes" Condition="ALLOWINSECUREHTTP">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="AllowInsecureHTTP"
+                       Type="integer" Value="[ALLOWINSECUREHTTP]" KeyPath="yes" />
       </Component>
 
     </ComponentGroup>

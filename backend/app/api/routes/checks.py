@@ -28,6 +28,7 @@ from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.check import crud
 from app.features.check.models import MachineCheck
+from app.features.intervention import crud as intervention_crud
 from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
 from app.features.notification import tasks as task_mail
@@ -135,8 +136,9 @@ class CheckUpdate(BaseModel):
 class CheckClose(BaseModel):
     note: str | None = Field(default=None, max_length=5000)
     # Omitted = now. Backdatable like an intervention: the check happened
-    # yesterday, the note is typed today.
-    closed_at: datetime | None = None
+    # yesterday, the note is typed today. Not in the future: it becomes a
+    # journal line, which can later be turned into a maintenance (audit B06).
+    closed_at: intervention_crud.PastDatetime | None = None
 
 
 def _already_open() -> AppError:
@@ -362,12 +364,20 @@ async def list_machine_checks(
 
 @assignable_router.get("/assignable-users", response_model=list[UserRef])
 async def assignable_users(
-    session: SessionDep, machine_id: uuid.UUID | None = None
+    session: SessionDep, scope: CurrentScope, machine_id: uuid.UUID | None = None
 ) -> list[UserRef]:
     """Active accounts, id and name only: who a task can be given to, without
     opening the accounts page to everyone who may assign. Also who may own a
     maintenance — so open to whoever sets one, not only to check:read (audit
     B35). Registered before ``router``, whose ``/{check_id}`` would take it."""
+    if machine_id is not None and not await machine_visible(session, machine_id, scope):
+        # A poste out of the caller's own reach: who could take it is not
+        # theirs to learn (audit T32).
+        raise AppError(
+            code=ErrorCode.MACHINE_NOT_FOUND,
+            status_code=404,
+            message="Machine not found",
+        )
     rows = await session.exec(
         select(User).where(col(User.is_active).is_(True)).order_by(col(User.email))
     )

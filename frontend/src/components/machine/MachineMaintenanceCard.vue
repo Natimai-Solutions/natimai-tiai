@@ -30,7 +30,7 @@
             {{ maintenanceStateLabel(info.resolved.state) }}
           </q-badge>
           <span v-if="info.resolved.due_at" class="q-ml-sm">
-            due le {{ formatDateTime(info.resolved.due_at) }}
+            due le {{ dueDate(info.resolved.due_at) }}
           </span>
         </div>
       </div>
@@ -87,9 +87,11 @@ import { onMounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import MaintenanceSessionDialog from 'src/components/maintenance/MaintenanceSessionDialog.vue';
 import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { apiErrorMessage } from 'src/services/errors';
 import {
   cycleLabel,
+  dueDate,
   getMachineMaintenance,
   maintenanceStateColor,
   maintenanceStateLabel,
@@ -118,6 +120,9 @@ async function load() {
 
 async function saveSettings(payload: MaintenanceSettingsPayload) {
   info.value = await updateMachineMaintenance(props.machineId, payload);
+  // Another owner or cycle moves the poste in or out of somebody's « Mes
+  // tâches »: the menu badge reads again (audit U19).
+  notifyTasksChanged();
   $q.notify({ type: 'positive', message: 'Réglages de maintenance enregistrés' });
   emit('changed');
 }

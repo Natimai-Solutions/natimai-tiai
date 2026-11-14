@@ -639,11 +639,11 @@ Phase 2.
 
 ---
 
-## 12. Suites de l'audit 2026-11 : reste à faire
+## 12. Suites de l'audit 2026-11
 
-L'audit du 2026-11-10 (`plan-audit-2026-11.md`) a relevé dans ce chantier des défauts d'export, de filtre et de recherche, et un catalogue logiciel dont la croissance n'est pas bornée.
+L'audit du 2026-11-10 (`plan-audit-2026-11.md`) avait relevé dans ce chantier des défauts d'export, de filtre et de recherche, et un catalogue logiciel dont la croissance n'était pas bornée. Les tâches ci-dessous sont corrigées depuis le 2026-11-11. Une seconde passe de vérification, le 2026-11-13, a relevé des écarts résiduels, suivis dans `plan-audit-2026-11.md` §6.
 
-Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
+Tâches dans l'ordre de priorité, avec la numérotation `Txx` du plan d'ensemble, reprise dans les commits et les PR.
 
 - [x] **T12** · *P1 court terme* — **Export Excel : neutraliser les caractères de contrôle** ([S11](plan-audit-2026-11.md#s11))
   Dans `xlsx_response`, retirer les caractères refusés par openpyxl (`ILLEGAL_CHARACTERS_RE`), et idéalement dès la réception du heartbeat, dans `bound_text`.

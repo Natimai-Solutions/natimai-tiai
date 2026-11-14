@@ -174,3 +174,93 @@ func TestHeartbeatWireFormatForRotation(t *testing.T) {
 		t.Errorf("request body %s does not announce %s", gotBody, want)
 	}
 }
+
+// enrollServer counts enrollments and answers them with status, handing out
+// token "fresh" on success.
+func enrollServer(t *testing.T, status int) (*httptest.Server, func() int) {
+	t.Helper()
+	var mu sync.Mutex
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/agent/enroll" {
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+		mu.Lock()
+		n++
+		mu.Unlock()
+		w.WriteHeader(status)
+		if status == http.StatusOK {
+			_, _ = w.Write([]byte(`{"machine_id":"m1","token":"fresh"}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return n
+	}
+}
+
+// stubTokenFile replaces the reads and removals of token.dat for one test.
+func stubTokenFile(t *testing.T, load func(string) (string, error), clear func(string) error) {
+	t.Helper()
+	origLoad, origClear := loadToken, clearToken
+	t.Cleanup(func() { loadToken, clearToken = origLoad, origClear })
+	loadToken, clearToken = load, clear
+}
+
+// Audit B32: a token.dat unreadable at start-up, readable at the next attempt,
+// is used as it is — no enrollment, which would wait for an approval the
+// poste does not need.
+func TestEnsureEnrolledReusesATokenThatBecameReadable(t *testing.T) {
+	srv, enrolls := enrollServer(t, http.StatusServiceUnavailable)
+	a := rotationAgent(t, srv.URL)
+	a.cfg.AuthToken = ""
+	a.client.SetToken("")
+	onDisk := ""
+	stubTokenFile(t, func(string) (string, error) { return onDisk, nil }, func(string) error { return nil })
+	stubSave(t, func(string, string) error { t.Error("nothing to save"); return nil })
+
+	if err := a.ensureEnrolled(context.Background()); err == nil {
+		t.Fatal("enrolled against a server answering 503")
+	}
+	onDisk = "valid"
+	if err := a.ensureEnrolled(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := enrolls(); n != 1 {
+		t.Errorf("%d enrollment(s), want only the first attempt", n)
+	}
+	if a.cfg.AuthToken != "valid" || a.client.Token() != "valid" {
+		t.Errorf("token cfg=%q client=%q, want the one read back", a.cfg.AuthToken, a.client.Token())
+	}
+}
+
+// The B32 reread must not resurrect the token the server just refused: when
+// ClearToken could not delete token.dat, the poste enrolls again and
+// overwrites it, instead of heartbeating with a dead token for ever.
+func TestEnsureEnrolledDoesNotReuseTheRefusedToken(t *testing.T) {
+	srv, enrolls := enrollServer(t, http.StatusOK)
+	a := rotationAgent(t, srv.URL)
+	a.cfg.AuthToken = "dead"
+	a.client.SetToken("dead")
+	onDisk := "dead"
+	stubTokenFile(t, func(string) (string, error) { return onDisk, nil },
+		func(string) error { return errors.New("access denied") })
+	stubSave(t, func(_ string, token string) error { onDisk = token; return nil })
+
+	a.dropToken() // what tick does on a 401; the file stays
+
+	for range 2 {
+		if err := a.ensureEnrolled(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := enrolls(); n != 1 {
+		t.Errorf("%d enrollment(s), want one", n)
+	}
+	if a.cfg.AuthToken != "fresh" || a.client.Token() != "fresh" || onDisk != "fresh" {
+		t.Errorf("token cfg=%q client=%q disk=%q, want the enrolled one everywhere",
+			a.cfg.AuthToken, a.client.Token(), onDisk)
+	}
+}

@@ -125,6 +125,7 @@ import {
   type Intervention,
   type InterventionKind,
 } from 'src/services/interventions';
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { apiErrorMessage } from 'src/services/errors';
 import { formatDateTime } from 'src/utils/format';
 
@@ -202,6 +203,9 @@ async function submit() {
       $q.notify({ type: 'positive', message: 'Intervention enregistrée' });
     }
     formOpen.value = false;
+    // A maintenance line moves the poste's due date, and with it « Mes
+    // tâches »: the menu badge reads again (audit U19).
+    notifyTasksChanged();
     emit('changed');
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
@@ -221,6 +225,7 @@ function confirmDelete(item: Intervention) {
       try {
         await deleteIntervention(item.id);
         $q.notify({ type: 'positive', message: 'Intervention supprimée' });
+        notifyTasksChanged();
         emit('changed');
       } catch (e) {
         $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Suppression impossible') });

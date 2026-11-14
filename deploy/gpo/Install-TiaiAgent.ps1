@@ -60,6 +60,14 @@
     defaut (activee). Donnee personnelle : voir la section "Session utilisateur"
     du README agent.
 
+.PARAMETER AllowInsecureHttp
+    Accepte une ApiBaseUrl en http:// ('true' / 'false'), ecrit en DWORD dans
+    HKLM\SOFTWARE\Tiai\AllowInsecureHTTP. Sans lui, un agent recent refuse de
+    demarrer sur une URL http:// : le secret d'enrolement puis le token
+    passeraient en clair. Reserve au port HTTP direct d'un reseau de test.
+    Laisse vide, la valeur registre n'est pas touchee et l'agent applique son
+    defaut (refus) ; 'false' retire une autorisation posee auparavant.
+
 .EXAMPLE
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\natimai.local\NETLOGON\Tiai\Install-TiaiAgent.ps1 -SourceExe \\natimai.local\NETLOGON\Tiai\tiai-agent.exe -ApiBaseUrl https://tiai.natimai.local
 
@@ -84,6 +92,8 @@ param(
     # ("ne pas remonter le nom"), donc l'idiome -gt 0 des intervalles ne
     # s'applique pas -- il faut pouvoir distinguer "false" de "non precise".
     [ValidateSet('', 'true', 'false')][string] $ReportSessionUsername = '',
+    # Meme sentinelle : 'false' doit pouvoir retirer une autorisation posee.
+    [ValidateSet('', 'true', 'false')][string] $AllowInsecureHttp = '',
     [string] $Location = '',
     [switch] $ClearLocation,
     [string] $InstallDir = "$env:ProgramFiles\Tiai",
@@ -222,6 +232,10 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($ReportSessionUsername)) {
         $reportName = if ($ReportSessionUsername -eq 'true') { 1 } else { 0 }
         Set-ItemProperty -Path $RegPath -Name 'ReportSessionUsername' -Value $reportName -Type DWord
+    }
+    if (-not [string]::IsNullOrWhiteSpace($AllowInsecureHttp)) {
+        $allowHttp = if ($AllowInsecureHttp -eq 'true') { 1 } else { 0 }
+        Set-ItemProperty -Path $RegPath -Name 'AllowInsecureHTTP' -Value $allowHttp -Type DWord
     }
     # L'emplacement : presence de la valeur = elle compte, vide = retire. D'ou
     # le switch explicite pour l'effacer, plutot que d'ecrire une chaine vide

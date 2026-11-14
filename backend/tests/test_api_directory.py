@@ -5,6 +5,8 @@ locked, and the re-sync from stored readings.
 DB-backed: requires TIAI_TEST_DATABASE_URL.
 """
 
+import uuid
+
 import pytest
 
 STRONG = "correct-horse-battery"
@@ -228,6 +230,54 @@ async def test_a_heartbeat_loop_is_cut_per_poste(client, db_session, monkeypatch
     assert other.status_code == 200
 
 
+async def test_a_poste_creates_a_bounded_number_of_catalogue_entries(
+    client, db_session, monkeypatch
+):
+    """Audit S21: the new catalogue entries one poste may create per day are
+    budgeted, whatever the number of heartbeats; known entries cost nothing,
+    and a cut-short inventory does not store its hash (sent again, it is
+    applied again)."""
+    from sqlmodel import func, select
+
+    from app.core import ratelimit
+    from app.features.inventory.models import Software
+    from app.features.machine.models import Machine
+
+    monkeypatch.setattr(ratelimit.software_quota, "units", 3)
+    a = await _enroll(client, "pc-a", hostname="A")
+    b = await _enroll(client, "pc-b", hostname="B")
+
+    async def send(enrolled, names, hash_):
+        resp = await client.post(
+            "/api/v1/agent/heartbeat",
+            headers={"Authorization": f"Bearer {enrolled['token']}"},
+            json={
+                "inventory": {
+                    "hash": hash_,
+                    "software": [{"name": n, "version": "1"} for n in names],
+                }
+            },
+        )
+        assert resp.status_code == 200, resp.text
+
+    async def catalogue():
+        return await db_session.scalar(select(func.count()).select_from(Software))
+
+    await send(a, ["s1", "s2", "s3", "s4", "s5"], "h1")
+    assert await catalogue() == 3
+    machine = await db_session.get(Machine, uuid.UUID(a["machine_id"]))
+    assert machine.inventory_hash is None
+    # The budget is spent: another hash, other names, nothing new.
+    await send(a, [f"x{i}" for i in range(50)], "h2")
+    assert await catalogue() == 3
+    # Another poste: the known entries are free, the rest on its own budget.
+    await send(b, ["s1", "s2", "s3", "s4", "s5"], "h1")
+    assert await catalogue() == 5
+    other = await db_session.get(Machine, uuid.UUID(b["machine_id"]))
+    await db_session.refresh(other)
+    assert other.inventory_hash == "h1"
+
+
 async def test_software_nobody_has_is_purged(client, db_session):
     from datetime import timedelta
 
@@ -370,3 +420,91 @@ async def test_sync_refiles_the_parc_from_stored_readings(
     room_source("manual")
     resp = await client.post("/api/v1/rooms/sync-directory", headers=headers)
     assert resp.json() == {"placed": 0, "unplaced": 0, "rooms_created": 0}
+
+
+_HONEST = "OU=B12,OU=Postes,DC=lycee,DC=local"
+_FORGED = "OU=invente"
+
+
+@pytest.mark.parametrize("forged_first", [True, False])
+async def test_sync_adopts_a_manual_room_for_the_majority_key_only(
+    client, db_session, room_source, forged_first
+):
+    """Audit S20 (T36): one forged reading naming « B12 » under an invented
+    OU does not capture the room made by hand, whatever the row order: the
+    key most postes report adopts it, the forged one gets « B12 (2) »."""
+    room_source("manual")
+    headers = await _admin(client, db_session)
+    resp = await client.post("/api/v1/rooms", headers=headers, json={"name": "B12"})
+    loose_id = resp.json()["id"]
+
+    async def forged():
+        f = await _enroll(client, "pc-forged", hostname="F")
+        await _report(client, f, _dir(ou="B12", ou_dn=_FORGED))
+        return f
+
+    f = await forged() if forged_first else None
+    honest = []
+    for i in range(3):
+        h = await _enroll(client, f"pc-h{i}", hostname=f"H{i}")
+        await _report(client, h, _dir(ou="B12", ou_dn=_HONEST))
+        honest.append(h)
+    if f is None:
+        f = await forged()
+
+    room_source("ad_ou")
+    synced = await client.post("/api/v1/rooms/sync-directory", headers=headers)
+    assert synced.status_code == 200, synced.text
+    for h in honest:
+        assert (await _machine(client, headers, h))["room_id"] == loose_id
+    rooms = {
+        r["id"]: r for r in (await client.get("/api/v1/rooms", headers=headers)).json()
+    }
+    assert rooms[loose_id]["ad_key"] == _HONEST
+    forged_room = (await _machine(client, headers, f))["room_id"]
+    assert forged_room != loose_id
+    assert rooms[forged_room]["name"] == "B12 (2)"
+
+
+async def test_sync_adopts_nothing_on_a_tie(client, db_session, room_source):
+    room_source("manual")
+    headers = await _admin(client, db_session)
+    resp = await client.post("/api/v1/rooms", headers=headers, json={"name": "B12"})
+    loose_id = resp.json()["id"]
+    f = await _enroll(client, "pc-forged", hostname="F")
+    await _report(client, f, _dir(ou="B12", ou_dn=_FORGED))
+    h = await _enroll(client, "pc-honest", hostname="H")
+    await _report(client, h, _dir(ou="B12", ou_dn=_HONEST))
+
+    room_source("ad_ou")
+    synced = await client.post("/api/v1/rooms/sync-directory", headers=headers)
+    assert synced.status_code == 200, synced.text
+    rooms = (await client.get("/api/v1/rooms", headers=headers)).json()
+    assert [(r["id"], r["ad_key"]) for r in rooms] == [(loose_id, None)]
+    assert (await _machine(client, headers, f))["room_id"] is None
+    assert (await _machine(client, headers, h))["room_id"] is None
+
+
+async def test_sync_applies_the_dn_rule_of_the_heartbeat(
+    client, db_session, room_source
+):
+    """Audit S20 (T36): a stored OU the poste's DN is not in is not filed by
+    the re-sync either."""
+    room_source("manual")
+    headers = await _admin(client, db_session)
+    a = await _enroll(client, "pc-a", hostname="A")
+    await _report(
+        client,
+        a,
+        {
+            "distinguished_name": "CN=PC,OU=Ailleurs,DC=lycee,DC=local",
+            "ou": "Salle B12",
+            "ou_dn": "OU=Salle B12,OU=Postes,DC=lycee,DC=local",
+        },
+    )
+    room_source("ad_ou")
+    synced = await client.post("/api/v1/rooms/sync-directory", headers=headers)
+    assert synced.status_code == 200, synced.text
+    assert synced.json()["placed"] == 0
+    assert (await _machine(client, headers, a))["room_id"] is None
+    assert (await client.get("/api/v1/rooms", headers=headers)).json() == []

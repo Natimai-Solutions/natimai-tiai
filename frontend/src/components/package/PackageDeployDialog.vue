@@ -55,7 +55,7 @@
         </div>
 
         <q-banner v-if="chosen" dense class="surface-blue">
-          {{ trustSentence(chosen) }}
+          {{ trustSentence(chosen, action) }}
         </q-banner>
       </q-card-section>
 
@@ -66,7 +66,7 @@
           no-caps
           :color="action === 'uninstall' ? 'negative' : 'primary'"
           :label="okLabel"
-          :disable="!ready"
+          :disable="!ready || busy"
           :loading="sending"
           @click="send"
         />
@@ -85,7 +85,9 @@ import {
   deployable,
   deployPackage,
   listPackages,
-  trustMethod,
+  publisherOf,
+  stepTrust,
+  type DeployAction,
   type DeployTarget,
   type Package,
 } from 'src/services/packages';
@@ -109,6 +111,10 @@ const scope = ref<'all' | 'location'>('location');
 const location = ref<string | null>(null);
 const locations = ref<string[]>([]);
 const sending = ref(false);
+// From the first click to the answer, the confirmation included: a second
+// click while the number of postes is being counted would otherwise open a
+// second confirmation over the first (audit U04).
+const busy = ref(false);
 
 const fixedPackage = computed(() => props.package ?? null);
 const chosen = computed<Package | null>(
@@ -124,8 +130,9 @@ const canUninstall = computed(
 );
 const ready = computed(() => {
   if (!chosen.value || (action.value === 'install' && !deployable(chosen.value))) return false;
-  // The dialog says no poste will run it: it does not send it either (audit B30).
-  if (action.value === 'install' && trustMethod(chosen.value) === 'none') return false;
+  // The dialog says no poste will run it: it does not send it either (audit
+  // B30) — an uninstall no more than an install (U04).
+  if (stepTrust(chosen.value, action.value) === 'none') return false;
   if (action.value === 'uninstall' && !canUninstall.value) return false;
   if (!props.machineIds?.length && scope.value === 'location' && !location.value) return false;
   return true;
@@ -139,16 +146,22 @@ const okLabel = computed(() => {
     : `${verb} sur ${location.value ?? '…'}`;
 });
 
-function trustSentence(p: Package): string {
-  switch (trustMethod(p)) {
+function trustSentence(p: Package, step: DeployAction): string {
+  switch (stepTrust(p, step)) {
     case 'winget':
-      return 'Paquet winget : seuls les postes où la GPO active winget (DeployWinget) l’installeront.';
+      return step === 'install'
+        ? 'Paquet winget : seuls les postes où la GPO active winget (DeployWinget) l’installeront.'
+        : 'Paquet winget : seuls les postes où la GPO active winget (DeployWinget) le désinstalleront.';
     case 'signed':
       return 'Paquet signé : seuls les postes dont la GPO approuve ce certificat (DeploySigners) l’exécuteront.';
     case 'publisher':
-      return `Non signé par l’administrateur : seuls les postes dont la GPO approuve l’éditeur « ${p.publisher_name} » (DeployPublishers) l’exécuteront.`;
+      return `Non signé par l’administrateur : seuls les postes dont la GPO approuve l’éditeur « ${publisherOf(p, step) ?? ''} » (DeployPublishers) l’exécuteront.`;
+    case 'product_code':
+      return 'Désinstallation par code produit (msiexec /x) : seuls les postes dont la GPO approuve au moins un éditeur (DeployPublishers) l’exécuteront.';
     default:
-      return 'Ni signé, ni lancé par un exécutable d’éditeur : aucun poste ne l’exécutera. Signez le paquet avant de le déployer.';
+      return step === 'install'
+        ? 'Ni signé, ni lancé par un exécutable d’éditeur : aucun poste ne l’exécutera. Signez le paquet avant de le déployer.'
+        : 'Désinstallation ni signée, ni lancée par un exécutable d’éditeur, ni par « msiexec /x {code produit} » : aucun poste ne l’exécutera. Signez le paquet avant de le déployer.';
   }
 }
 
@@ -225,15 +238,16 @@ async function confirmed(): Promise<boolean> {
 }
 
 async function send() {
-  if (!chosen.value) return;
-  const target: DeployTarget = props.machineIds?.length
-    ? { machine_ids: props.machineIds }
-    : scope.value === 'all'
-      ? { target_all: true }
-      : { target_location: location.value ?? '' };
-  if (!(await confirmed())) return;
-  sending.value = true;
+  if (!chosen.value || busy.value) return;
+  busy.value = true;
   try {
+    const target: DeployTarget = props.machineIds?.length
+      ? { machine_ids: props.machineIds }
+      : scope.value === 'all'
+        ? { target_all: true }
+        : { target_location: location.value ?? '' };
+    if (!(await confirmed())) return;
+    sending.value = true;
     const res = await deployPackage(chosen.value.id, action.value, target);
     $q.notify(bulkSendNotification(res));
     emit('update:modelValue', false);
@@ -242,6 +256,7 @@ async function send() {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Envoi impossible') });
   } finally {
     sending.value = false;
+    busy.value = false;
   }
 }
 </script>

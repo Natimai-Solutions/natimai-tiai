@@ -3,11 +3,14 @@ outside local development (audit S36)."""
 
 from types import SimpleNamespace
 
+from starlette.datastructures import Headers
+
 from app.core import net
 
 
-def _request(peer: str, forwarded: str | None = None):
-    headers = {"x-forwarded-for": forwarded} if forwarded else {}
+def _request(peer: str, *forwarded: str):
+    """A request from ``peer`` carrying one X-Forwarded-For line per value."""
+    headers = Headers(raw=[(b"x-forwarded-for", f.encode()) for f in forwarded])
     return SimpleNamespace(client=SimpleNamespace(host=peer), headers=headers)
 
 
@@ -33,6 +36,31 @@ def test_the_proxy_is_found_by_name(monkeypatch):
     monkeypatch.setattr(net, "_proxy_addresses", lambda host: frozenset({"172.18.0.9"}))
     assert net.client_ip(_request("172.18.0.9", "192.168.1.40")) == "192.168.1.40"
     assert net.client_ip(_request("172.18.0.10", "192.168.1.40")) == "172.18.0.10"
+
+
+def test_every_forwarded_line_counts_in_order(monkeypatch):
+    """T40: two header lines — the client's own first, the proxy's last —
+    read as one list; the first line used to win."""
+    monkeypatch.setattr(net.settings, "TRUSTED_PROXIES", ["172.18.0.0/16"])
+    monkeypatch.setattr(net.settings, "TRUSTED_PROXY_HOSTS", [])
+    request = _request("172.18.0.5", "6.6.6.6", "1.2.3.4, 192.168.1.20")
+    assert net.client_ip(request) == "192.168.1.20"
+
+
+def test_empty_forwarded_entries_are_skipped(monkeypatch):
+    """T40: a trusted header ending in a comma named the client ''."""
+    monkeypatch.setattr(net.settings, "TRUSTED_PROXIES", ["172.18.0.0/16"])
+    monkeypatch.setattr(net.settings, "TRUSTED_PROXY_HOSTS", [])
+    assert net.client_ip(_request("172.18.0.5", "192.168.1.20,")) == "192.168.1.20"
+    assert net.client_ip(_request("172.18.0.5", " , ,")) == "172.18.0.5"
+    assert net.client_ip(_request("172.18.0.5", "")) == "172.18.0.5"
+
+
+def test_our_own_proxies_in_the_chain_are_passed_over(monkeypatch):
+    monkeypatch.setattr(net.settings, "TRUSTED_PROXIES", ["172.18.0.0/16"])
+    monkeypatch.setattr(net.settings, "TRUSTED_PROXY_HOSTS", [])
+    request = _request("172.18.0.5", "6.6.6.6, 192.168.1.20, 172.18.0.7")
+    assert net.client_ip(request) == "192.168.1.20"
 
 
 def test_openapi_is_off_outside_local(monkeypatch):

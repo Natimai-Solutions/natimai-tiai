@@ -192,3 +192,51 @@ def test_the_allowed_networks_replace_the_private_ranges(monkeypatch):
         "172.20.4.255"
     ]
     assert destinations_for("192.168.1.9", configured=[], prefixlen=24) == []
+
+
+@pytest.mark.parametrize(
+    "ip",
+    [
+        # Private for ``ipaddress``, not for RFC 1918.
+        "255.255.255.200",
+        "240.9.9.9",
+        "192.0.2.9",
+        "0.1.2.3",
+        "198.18.0.9",
+        "100.64.0.9",
+    ],
+)
+def test_only_rfc1918_is_private_by_default(ip):
+    """Audit T35: /24 around 255.255.255.200 is 255.255.255.255."""
+    assert (
+        destinations_for(ip, configured=[], prefixlen=24, reported_prefixlen=24) == []
+    )
+
+
+def test_the_whole_subnet_must_lie_in_an_allowed_network(monkeypatch):
+    """Audit T35: the derived subnet, not only the address, must be allowed;
+    a wider reported mask falls back to the default prefix if that fits."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "WOL_ALLOWED_NETWORKS", ["10.4.7.0/24"])
+    assert destinations_for(
+        "10.4.7.5", configured=[], prefixlen=24, reported_prefixlen=16
+    ) == ["10.4.7.255"]
+    # Neither the reported /16 nor a default /22 fits inside the /24.
+    assert (
+        destinations_for("10.4.7.5", configured=[], prefixlen=22, reported_prefixlen=16)
+        == []
+    )
+    # A narrower reported mask inside the allowed network is kept.
+    assert destinations_for(
+        "10.4.7.5", configured=[], prefixlen=24, reported_prefixlen=26
+    ) == ["10.4.7.63"]
+
+
+def test_a_default_prefix_reaching_out_of_the_private_ranges_is_refused():
+    """A configured default of /8 around 172.20.1.1 is 172.0.0.0/8, which
+    reaches beyond 172.16.0.0/12: no destination. A /16 inside it is fine."""
+    assert destinations_for("172.20.1.1", configured=[], prefixlen=8) == []
+    assert destinations_for(
+        "172.31.9.9", configured=[], prefixlen=8, reported_prefixlen=16
+    ) == ["172.31.255.255"]

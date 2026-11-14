@@ -569,7 +569,12 @@ const summary = ref<PackageSummary | null>(null);
 const statusFilter = ref<string | null>(null);
 const commandPagination = ref({ page: 1, rowsPerPage: 25, rowsNumber: 0 });
 
+// Which fetch is the current one: two quick toggles of a status chip must not
+// have the first answer, arriving last, shown under the second filter.
+let commandsRequestId = 0;
+
 async function loadCommands() {
+  const id = ++commandsRequestId;
   loadingCommands.value = true;
   const p = commandPagination.value;
   try {
@@ -577,13 +582,15 @@ async function loadCommands() {
       listPackageCommands(props.id, p.page, p.rowsPerPage, statusFilter.value),
       getPackageSummary(props.id).catch(() => null),
     ]);
+    if (id !== commandsRequestId) return;
     commands.value = list.items;
     commandPagination.value = { ...commandPagination.value, rowsNumber: list.total };
     summary.value = tally;
   } catch {
+    if (id !== commandsRequestId) return;
     commands.value = [];
   } finally {
-    loadingCommands.value = false;
+    if (id === commandsRequestId) loadingCommands.value = false;
   }
 }
 

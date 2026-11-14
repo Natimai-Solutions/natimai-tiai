@@ -8,6 +8,7 @@ business — this module only knows how to lay a header and rows out.
 """
 
 import io
+import re
 from collections.abc import Iterable, Sequence
 from datetime import date, datetime
 
@@ -29,14 +30,21 @@ DATETIME_FORMAT = "yyyy-mm-dd hh:mm"
 DATE_FORMAT = "yyyy-mm-dd"
 
 
+# What XML 1.0 cannot carry and openpyxl's own pattern lets through: the two
+# non-characters U+FFFE and U+FFFF, and lone surrogates. Written, they make a
+# workbook that openpyxl itself — and Excel — cannot open again (audit S11).
+_XML_ILLEGAL_RE = re.compile("[\ud800-\udfff\ufffe\uffff]")
+
+
 def _cell(value: object) -> object:
-    """``None`` as an empty cell; a string without the control characters
-    XML 1.0 cannot carry, which openpyxl refuses — one byte reported by an
-    agent would otherwise fail the whole export (audit S11)."""
+    """``None`` as an empty cell; a string without the characters XML 1.0
+    cannot carry, which openpyxl refuses or writes into a broken file — one
+    character reported by an agent would otherwise fail the whole export
+    (audit S11)."""
     if value is None:
         return ""
     if isinstance(value, str):
-        return ILLEGAL_CHARACTERS_RE.sub("", value)
+        return _XML_ILLEGAL_RE.sub("", ILLEGAL_CHARACTERS_RE.sub("", value))
     return value
 
 

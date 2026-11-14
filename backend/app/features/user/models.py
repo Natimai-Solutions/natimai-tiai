@@ -82,9 +82,12 @@ class User(SQLModel, table=True):
     # a second, stateless line: an access token issued before the instant is
     # refused even if its session row were somehow still live (app.api.deps).
     password_changed_at: datetime | None = utc_field(default=None, nullable=True)
-    # Consecutive failed logins, reset by a successful one. Reaching
+    # Failed logins, reset by a successful one. Reaching
     # LOGIN_MAX_FAILED_ATTEMPTS sets ``locked_until`` and starts over at zero.
+    # A failure more than LOGIN_LOCKOUT_MINUTES after the previous one starts
+    # the count over too: old failures do not add up to a lock.
     failed_login_attempts: int = Field(default=0)
+    last_failed_login_at: datetime | None = utc_field(default=None, nullable=True)
     locked_until: datetime | None = utc_field(default=None, nullable=True)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)

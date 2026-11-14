@@ -201,11 +201,11 @@ ailleurs :
 
 ---
 
-## 9. Suites de l'audit 2026-11 : reste à faire
+## 9. Suites de l'audit 2026-11
 
-L'audit du 2026-11-10 (`plan-audit-2026-11.md`) a trouvé dans ce chantier les deux seuls constats de sévérité élevée. **T01 et T02 passent avant toute autre évolution du déploiement logiciel.** En attendant que les agents corrigés soient en place, n'activer `DeployPublishers` (méthode A) sur aucun nouveau poste.
+L'audit du 2026-11-10 (`plan-audit-2026-11.md`) avait trouvé dans ce chantier les deux seuls constats de sévérité élevée, T01 et T02, traités avant toute autre évolution du déploiement logiciel. Toutes les tâches ci-dessous sont corrigées depuis le 2026-11-11. Les protections côté poste n'agissent qu'une fois l'agent mis à jour : `DeployPublishers` (méthode A) ne s'active que sur un poste dont l'agent l'est. Une seconde passe de vérification, le 2026-11-13, a relevé des écarts résiduels, suivis dans `plan-audit-2026-11.md` §6.
 
-Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
+Tâches dans l'ordre de priorité, avec la numérotation `Txx` du plan d'ensemble, reprise dans les commits et les PR.
 
 - [x] **T01** · *P0 immédiate* — **Agent : n'accepter qu'un UUID comme identifiant de paquet** ([S01](plan-audit-2026-11.md#s01))
   Dans `agent/internal/deploy/executor.go`, refuser tout `pkg.ID` qui n'est pas un UUID canonique avant `MkdirAll`. En défense en profondeur, vérifier par `filepath.Rel` que le répertoire de travail reste sous `PackagesDir` avant d'écrire et avant `RemoveAll`. Ajouter un test avec un identifiant contenant `..`.

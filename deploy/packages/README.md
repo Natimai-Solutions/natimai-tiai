@@ -29,6 +29,7 @@ Nouveau → Élément Registre**, ruche `HKEY_LOCAL_MACHINE`, clé `SOFTWARE\Tia
 | `DeployWingetAllow` | `REG_MULTI_SZ` | *Facultatif.* Les seuls identifiants winget autorisés, un par ligne : `Mozilla.Firefox`, ou un préfixe terminé par `*` (`Mozilla.*`). Absente : tout le dépôt winget est autorisé. |
 | `DeploySigners` | `REG_MULTI_SZ` | Méthode B : l'**empreinte SHA-256** de chaque certificat dont la signature est acceptée, une par ligne (voir § 2). |
 | `DeployPublishers` | `REG_MULTI_SZ` | Méthode A : le **nom du signataire** de chaque éditeur approuvé, une par ligne, tel que l'onglet *Signatures numériques* de l'installateur l'affiche (ex. `INDEX EDUCATION SAS`). |
+| `DeployMethodAMaxGB` | `REG_DWORD` | *Facultatif.* Méthode A : taille totale, en Gio, qu'un manifeste non signé peut annoncer (8 par défaut, de 1 à 1 024). Au-delà, l'agent refuse avant tout téléchargement ; un paquet plus gros se signe (méthode B). |
 
 L'agent relit ces valeurs à chaque commande : une GPO appliquée (`gpupdate`)
 prend effet au déploiement suivant, sans redémarrer le service.
@@ -134,9 +135,17 @@ En méthode A, les fichiers qui accompagnent l'installateur ne peuvent être
 que des **données** (`.iss`, `.ini`, `.xml`, `.cab`…) : l'agent refuse un
 paquet non signé qui place à côté de l'exécutable un fichier que Windows
 pourrait charger ou lancer depuis ce dossier (`.dll`, `.ocx`, `.cpl`, `.sys`,
-`.manifest`, `.local`, `.config`, autre `.exe`, `.msi`, `.mst`, script…).
-Un tel paquet doit être signé (méthode B). Avant chaque exécution, l'agent
-retire aussi du dossier du paquet tout ce que le manifeste ne nomme pas.
+`.manifest`, `.local`, `.config`, autre `.exe`, `.msi`, `.mst`, script, et les
+modules que le moteur d'un installateur charge par leur nom : `.bpl`, `.pyd`,
+`.xll`, `.node`, `.rll`, `.wsc`, `.sct`…). Un tel paquet doit être signé
+(méthode B). Avant chaque exécution, l'agent retire aussi du dossier du paquet
+tout ce que le manifeste ne nomme pas.
+
+Ces règles de la méthode A — fichiers chargeables refusés, dossier nettoyé,
+désinstallation limitée à `msiexec /x {code produit}` — sont appliquées **par
+l'agent du poste** : elles ne protègent un poste qu'une fois son agent mis à
+jour vers une version qui les connaît (v1.2.0 ou ultérieure). Diffuser l'agent
+à jour sur le parc avant de s'appuyer sur la méthode A.
 
 1. Page du paquet, carte *Confiance des postes* : **Télécharger le
    manifeste**. C'est un fichier JSON lisible, qui décrit exactement ce que

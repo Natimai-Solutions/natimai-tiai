@@ -1,7 +1,8 @@
 # Mises à jour de dépendances automatisées.
 #
-# Le dépôt a trois écosystèmes verrouillés (uv.lock, package-lock.json, go.sum)
-# plus les actions de la CI — chacun a son bloc ci-dessous. Dependabot ouvre une
+# Le dépôt a trois écosystèmes verrouillés (uv.lock, package-lock.json, go.sum),
+# les actions de la CI et les images de conteneur (Dockerfile, compose) —
+# chacun a son bloc ci-dessous. Dependabot ouvre une
 # PR par groupe, que la CI valide comme n'importe quelle autre.
 #
 # Les mises à jour de sécurité (Dependabot alerts) ignorent `schedule` et
@@ -75,6 +76,51 @@ updates:
     groups:
       agent-modules:
         patterns: ["*"]
+
+  # ── Images de base des Dockerfile (backend, console) ──────────────────────
+  # python, node et nginx : les correctifs de sécurité de ces images arrivent
+  # par leurs étiquettes, que rien d'autre ne fait avancer (audit S31). Le job
+  # `images` de la CI construit les deux images de chaque PR.
+  - package-ecosystem: docker
+    directories: [/backend, /frontend]
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Paris
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(images)"
+    groups:
+      # Majeures non groupées, une PR chacune — voir le commentaire du backend.
+      images-mineures:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # ── Images tierces de la stack (deploy/docker-compose.yml) ─────────────────
+  # postgres (db et db-backup) et caddy. Les images tiai-* suivent TIAI_VERSION
+  # et ne sont pas concernées.
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Paris
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(deploy)"
+    groups:
+      deploy-mineures:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # Une majeure de PostgreSQL change le format du répertoire de données :
+      # le nouveau serveur refuse de démarrer sur le volume existant sans
+      # pg_upgrade ou dump/restauration. C'est une opération de maintenance
+      # à planifier, pas une PR de dépendance.
+      - dependency-name: "postgres"
+        update-types: [version-update:semver-major]
 
   # ── Actions GitHub (ci.yml, release.yml) ───────────────────────────────────
   - package-ecosystem: github-actions

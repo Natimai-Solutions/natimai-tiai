@@ -213,6 +213,8 @@ commande, sans rien d'autre à installer sur la machine.
 ```bash
 cd deploy
 cp .env.example .env        # renseigner les secrets et TIAI_VERSION, placer le certificat dans deploy/certs/
+chmod 600 .env              # les secrets du serveur, lisibles du seul propriétaire
+mkdir -p backups && chmod 700 backups   # dumps quotidiens de la base, non chiffrés
 docker compose up -d        # db + backend + worker + console + caddy
 ```
 

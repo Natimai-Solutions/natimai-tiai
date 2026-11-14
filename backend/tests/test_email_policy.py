@@ -123,7 +123,11 @@ def test_an_unreadable_secret_is_absent_and_flagged(env_without_mail, monkeypatc
 
     assert stored.unreadable == frozenset({"mailgun_api_key"})
     assert "mailgun_api_key" not in stored.secrets
-    # Absent, so the environment's key applies — never a crash, never garbage.
+    # Absent, so the environment's key applies — never a crash, never garbage —
+    # provided it goes where the environment sends it (audit S10): typed for
+    # the .env's domain, not for one the console chose.
+    assert mail.resolve(stored).mailgun_api_key is None
+    monkeypatch.setattr(settings, "MAILGUN_DOMAIN", "mg.lycee.fr")
     assert mail.resolve(stored).mailgun_api_key == "key-from-env"
 
 

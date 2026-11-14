@@ -214,7 +214,29 @@ def resolve(stored: StoredEmailSettings, environment: Settings = env) -> EmailPo
     The environment's sender keeps its own fallbacks (``MAILGUN_FROM_*``, then
     the project name), so a ``.env`` written before SMTP existed still
     resolves to the address it always did.
+
+    One exception to « field by field »: a secret of the environment only
+    goes to the environment's own destination (audit S10). Once the console
+    has moved the server it would reach, it resolves to none — the console
+    must type its own — whatever path led there, a settings row written
+    before this rule included.
     """
+    policy = _resolve_fields(stored, environment)
+    home: EmailPolicy | None = None
+    for secret, fields in _SECRET_DESTINATION.items():
+        if secret in stored.secrets or not getattr(policy, secret):
+            continue
+        home = home or _resolve_fields(StoredEmailSettings(), environment)
+        if _destination_moved(fields, home, policy):
+            if secret == "smtp_password":
+                policy = dataclasses.replace(policy, smtp_password=None)
+            else:
+                policy = dataclasses.replace(policy, mailgun_api_key=None)
+    return policy
+
+
+def _resolve_fields(stored: StoredEmailSettings, environment: Settings) -> EmailPolicy:
+    """``resolve`` without the binding of the environment's secrets."""
     v = stored.values
     s = stored.secrets
     return EmailPolicy(
@@ -252,6 +274,25 @@ def _same_place(value: str) -> str:
     return value.strip().lower().rstrip("/")
 
 
+def _destination_moved(
+    fields: tuple[str, ...], old: EmailPolicy, new: EmailPolicy
+) -> bool:
+    """Whether ``new`` sends a secret elsewhere than ``old`` would."""
+    for name in fields:
+        before, after = getattr(old, name), getattr(new, name)
+        if name == "smtp_verify_tls":
+            # Turning the certificate check off lets anyone on the path be
+            # the server; turning it back on moves nothing.
+            moved = bool(before) and not after
+        elif isinstance(before, str) and isinstance(after, str):
+            moved = _same_place(before) != _same_place(after)
+        else:
+            moved = before != after
+        if moved:
+            return True
+    return False
+
+
 def secrets_to_retype(
     stored: StoredEmailSettings,
     changes: Mapping[str, Any],
@@ -265,24 +306,31 @@ def secrets_to_retype(
     of the Mailgun key (API URL, domain) changes — as resolved, environment
     included — the secret must be typed again in the same request. A secret
     sent as null (back to the environment's) does not count as typed.
+
+    The environment's secret is bound to the environment's destination, not
+    to the previous one: handing the field back to the ``.env`` (null) while
+    the console points elsewhere would otherwise send it there in two steps
+    — a dummy password typed with the new server, then null — while moving
+    the console back to the environment's server needs nothing typed.
     """
-    before = resolve(stored, environment)
-    after = resolve(stored.merged(changes), environment)
+    merged = stored.merged(changes)
+    before = _resolve_fields(stored, environment)
+    after = _resolve_fields(merged, environment)
+    home = _resolve_fields(StoredEmailSettings(), environment)
     out: list[str] = []
     for secret, fields in _SECRET_DESTINATION.items():
         if isinstance(changes.get(secret), str) or not getattr(after, secret):
             continue
-        for name in fields:
-            old, new = getattr(before, name), getattr(after, name)
-            if name == "smtp_verify_tls":
-                moved = bool(old) and not new
-            elif isinstance(old, str) and isinstance(new, str):
-                moved = _same_place(old) != _same_place(new)
-            else:
-                moved = old != new
-            if moved:
+        if secret in merged.secrets:
+            # The console's own secret: bound to where it was typed for.
+            if _destination_moved(fields, before, after):
                 out.append(secret)
-                break
+        elif secret in changes or any(name in changes for name in fields):
+            # The environment's: bound to the environment's destination.
+            # Unrelated fields do not ask for it (``resolve`` withholds it
+            # from a foreign server anyway).
+            if _destination_moved(fields, home, after):
+                out.append(secret)
     return out
 
 

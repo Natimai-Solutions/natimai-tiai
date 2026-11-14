@@ -56,7 +56,7 @@ Ajouter une dépendance : `uv add <pkg>` (ou `uv add --dev <pkg>` pour le groupe
 
 **Console** (auth : JWT utilisateur adossé à une session serveur, cf. *Sessions de la console*)
 - `POST /api/v1/auth/login` — email + mot de passe (OAuth2 password) : ouvre une session, renvoie le jeton d'accès et pose le jeton de session en cookie.
-  423 `auth.account.locked` après 5 échecs consécutifs (15 min).
+  Après 5 échecs espacés de moins de 15 min, le compte est verrouillé 15 min pour les adresses qui ont échoué (pour toutes sauf ses adresses habituelles si les essais viennent de 10 adresses ou plus) ; la réponse reste le 401 `auth.credentials.invalid` (cf. *Verrouillage des comptes* dans `DEPLOYMENT.md`).
 - `POST /api/v1/auth/refresh` — échange le cookie contre un nouveau jeton d'accès (et un nouveau cookie) ; `POST /api/v1/auth/logout` ferme la session courante.
 - `GET /api/v1/auth/sessions`, `DELETE /api/v1/auth/sessions/{id}` — les sessions ouvertes du compte, et la fermeture de l'une d'elles (audit `auth.session_revoked`).
 - `GET  /api/v1/auth/me` — utilisateur courant, ses groupes et ses permissions.

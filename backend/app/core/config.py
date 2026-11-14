@@ -150,12 +150,33 @@ class Settings(BaseSettings):
     # Escape hatch, not a tuning knob: the per-endpoint budgets live with the
     # limiters (app.core.ratelimit). Off only for a deployment whose operators
     # all arrive from one shared address (VPN, proxy) and lock each other out.
+    # It does not turn off the account lock below.
     RATE_LIMIT_ENABLED: bool = True
-    # Consecutive failed logins before an account is locked, and for how long.
-    # The rate limiter caps one address; this caps one account, whatever the
-    # number of addresses trying it.
+    # Failed logins (each within LOGIN_LOCKOUT_MINUTES of the previous one)
+    # before an account is locked, and for how long. The lock shuts out the
+    # addresses that failed on the account, or, once more than twice this many
+    # addresses have, every address but those that opened it recently
+    # (app.core.ratelimit.FailureMemory).
     LOGIN_MAX_FAILED_ATTEMPTS: int = Field(default=5, ge=1, le=100)
     LOGIN_LOCKOUT_MINUTES: int = Field(default=15, ge=1, le=24 * 60)
+    # Distinct addresses failing on one account during a lock past which the
+    # lock turns account-wide, except for the addresses that opened the
+    # account within LOGIN_KNOWN_ADDRESS_DAYS (audit S03, second pass).
+    LOGIN_SIEGE_ADDRESSES: int = Field(default=10, ge=2, le=1000)
+    LOGIN_KNOWN_ADDRESS_DAYS: int = Field(default=30, ge=1, le=365)
+    # « Mot de passe oublié » (audit S14): no new mail for an account within
+    # this many minutes of the last one, and at most this many links alive at
+    # once. A request never voids a link still valid.
+    PASSWORD_RESET_COOLDOWN_MINUTES: int = Field(default=5, ge=0, le=60)
+    PASSWORD_RESET_MAX_LIVE_LINKS: int = Field(default=3, ge=1, le=10)
+    # Heartbeats one poste may send per minute (429 beyond). The agent sends
+    # one per heartbeat_interval_seconds (60 by default), plus one at a
+    # restart (audit S21).
+    AGENT_HEARTBEAT_MAX_PER_MINUTE: int = Field(default=12, ge=2, le=600)
+    # New software catalogue entries one poste may create per 24 hours. Below
+    # 2,000 (the most one inventory carries), a poste's first inventory may
+    # take more than a day to be complete on a fresh catalogue (audit S21).
+    SOFTWARE_NEW_ENTRIES_PER_DAY: int = Field(default=2000, ge=100, le=1_000_000)
 
     # --- CORS ---
     BACKEND_CORS_ORIGINS: Annotated[
@@ -456,7 +477,7 @@ class Settings(BaseSettings):
     # Software deployment (dev/plan-deploiement-logiciel.md). Where uploaded
     # package files are kept — one file per SHA-256 — and the largest file
     # accepted. The Caddy route that receives them is sized to match
-    # (deploy/Caddyfile, 2 GB).
+    # (deploy/Caddyfile: 2050 MiB, just above 2 GiB, so this bound answers).
     PACKAGES_DIR: str = "/data/packages"
     PACKAGE_MAX_BYTES: int = Field(default=2 * 1024**3, ge=1024**2, le=8 * 1024**3)
     # Package downloads served at once by one API process; beyond it agents
@@ -483,9 +504,6 @@ class Settings(BaseSettings):
     # for another relay to take (the claiming poste switched off, or dropped
     # it). Within the wake's own TTL.
     WOL_RELAY_CLAIM_TIMEOUT_SECONDS: int = Field(default=180, ge=30, le=3600)
-    # The subnets a wake may be broadcast on when the server emits it itself
-    # (CIDR list). Empty: the private ranges (RFC 1918). An address reported
-    # by an agent outside them is not a destination (audit S35).
     # Who may tell the API the client's address (X-Forwarded-For), besides
     # loopback: CIDR networks, and host names resolved in the compose network
     # (Caddy's service). Anyone else's header is ignored (audit S28).
@@ -496,6 +514,9 @@ class Settings(BaseSettings):
     # The OpenAPI schema and its pages (/docs, /redoc): a map of every route
     # and field, served only in local development unless asked (audit S36).
     EXPOSE_OPENAPI: bool = False
+    # The subnets a wake may be broadcast on when the server emits it itself
+    # (CIDR list). Empty: the private ranges (RFC 1918). An address reported
+    # by an agent outside them is not a destination (audit S35).
     WOL_ALLOWED_NETWORKS: Annotated[list[str] | str, BeforeValidator(parse_list)] = []
 
     @model_validator(mode="after")

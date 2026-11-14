@@ -64,6 +64,15 @@ console filtre le parc par site, et le réveil Wake-on-LAN relayé sait quel pos
 voisin solliciter (DEPLOYMENT.md, « Réveil des postes », point 4). Sans le
 paramètre, la valeur registre n'est pas touchée ; `-ClearLocation` la retire.
 
+`-ApiBaseUrl` en `http://` (port HTTP direct du backend, réseau de test
+seulement) exige `-AllowInsecureHttp true` : sans lui, l'agent refuse de
+démarrer, le secret d'enrôlement puis le token passant en clair. Sans le
+paramètre, la valeur registre `AllowInsecureHTTP` n'est pas touchée ;
+`-AllowInsecureHttp false` retire une autorisation posée auparavant. Sur un
+parc installé en `http://`, ajouter le paramètre **au plus tard en même temps**
+que le binaire qui l'exige (agent publié après la v1.1.0) : le script écrit le
+registre avant de relancer le service.
+
 Activer aussi **Computer Configuration → Policies → Administrative Templates →
 System → Logon → Always wait for the network at computer startup and logon**.
 Sans ça, le premier démarrage peut partir avant que le partage soit joignable
@@ -88,7 +97,7 @@ dans `token.dat`).
    change → c'est le mécanisme de mise à jour : on remplace le fichier sur le
    partage, les postes se mettent à jour au démarrage suivant) ;
 2. écrit `HKLM\SOFTWARE\Tiai` (`ApiBaseURL`, `EnrollmentSecret`, `LogLevel`,
-   intervalles, `ReportSessionUsername`, `Location`) — **à chaque exécution**,
+   intervalles, `ReportSessionUsername`, `AllowInsecureHTTP`, `Location`) — **à chaque exécution**,
    donc un changement de GPO est repris ;
 3. restreint les ACL de `HKLM\SOFTWARE\Tiai` et de `C:\ProgramData\Tiai` à
    SYSTEM + Administrateurs : par défaut, tout utilisateur du poste pourrait y

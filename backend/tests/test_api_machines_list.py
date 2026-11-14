@@ -377,6 +377,31 @@ async def test_a_hostname_search_still_matches_hostnames_not_macs(client, db_ses
     assert [m["machine_uuid"] for m in resp.json()["items"]] == ["host-1"]
 
 
+async def test_a_mac_search_takes_hex_digits_only_and_literally(client, db_session):
+    """Audit S26 (T39): "A_1" read as hex by ``int(x, 16)`` (PEP 515), and
+    "_" is a LIKE wildcard: it matched "A?1" in any MAC."""
+    now = datetime.now(UTC)
+    await _machines(
+        db_session,
+        [
+            {
+                "machine_uuid": "wild-1",
+                "hostname": "PC-X",
+                "mac_address": "AA:B1:CC:DD:EE:FF",
+                "last_seen": now,
+            },
+        ],
+    )
+    headers = await _admin_headers(client, db_session)
+
+    for term in ("A_1", "0xAAB1", "A%25"):
+        resp = await client.get(f"/api/v1/machines?search={term}", headers=headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"] == [], term
+    resp = await client.get("/api/v1/machines?search=AAB1", headers=headers)
+    assert [m["machine_uuid"] for m in resp.json()["items"]] == ["wild-1"]
+
+
 async def test_os_filter_gathers_every_build_of_a_version(client, db_session):
     now = datetime.now(UTC)
     await _machines(

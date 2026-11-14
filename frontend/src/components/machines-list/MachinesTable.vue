@@ -15,55 +15,63 @@
   >
     <template #body-cell-hostname="props">
       <q-td :props="props">
-        <!-- Leading, so a column of dots reads as one glance down the list. -->
-        <q-icon
-          :name="onlineIcon(props.row.is_online)"
-          :color="onlineColor(props.row.is_online)"
-          size="12px"
-          class="q-mr-sm"
-        >
-          <q-tooltip>
-            {{ onlineLabel(props.row.is_online) }} — dernier contact
-            {{ timeAgoLabel(props.row.last_seen) }}
-          </q-tooltip>
-        </q-icon>
-        <!-- The row opens on click; the name is also a link, so the fiche is
-             reachable with Tab and Enter, and opens in a new tab on demand. -->
-        <router-link
-          v-if="detailRoute"
-          :to="detailRoute(props.row, props.pageIndex)"
-          class="row-link"
-          @click.stop
-        >
-          {{ props.value || props.row.machine_uuid }}
-        </router-link>
-        <template v-else>{{ props.value || props.row.machine_uuid }}</template>
-        <q-icon
-          v-if="props.row.check_open"
-          name="fact_check"
-          color="primary"
-          size="16px"
-          class="q-ml-xs"
-        >
-          <q-tooltip>
-            Vérification demandée{{
-              props.row.check_assigned_to
-                ? `, affectée à ${props.row.check_assigned_to}`
-                : ', à prendre'
-            }}
-          </q-tooltip>
-        </q-icon>
-        <q-icon
-          v-if="props.row.needs_verification"
-          name="warning"
-          color="orange"
-          size="16px"
-          class="q-ml-xs"
-        >
-          <q-tooltip
-            >Identité à confirmer — empreinte matérielle divergente (doublon possible)</q-tooltip
+        <!-- A flex row: only the name gives way to the 260 px cap of the
+             sticky column, with an ellipsis; the dot before it and the icons
+             after it stay in sight however long the name (audit U25). -->
+        <div class="machine-name">
+          <!-- Leading, so a column of dots reads as one glance down the list. -->
+          <q-icon
+            :name="onlineIcon(props.row.is_online)"
+            :color="onlineColor(props.row.is_online)"
+            size="12px"
+            class="q-mr-sm"
           >
-        </q-icon>
+            <q-tooltip>
+              {{ onlineLabel(props.row.is_online) }} — dernier contact
+              {{ timeAgoLabel(props.row.last_seen) }}
+            </q-tooltip>
+          </q-icon>
+          <!-- The row opens on click; the name is also a link, so the fiche is
+             reachable with Tab and Enter, and opens in a new tab on demand. -->
+          <router-link
+            v-if="detailRoute"
+            :to="detailRoute(props.row, props.pageIndex)"
+            class="row-link machine-name__text"
+            :title="props.value || props.row.machine_uuid"
+            @click.stop
+          >
+            {{ props.value || props.row.machine_uuid }}
+          </router-link>
+          <span v-else class="machine-name__text" :title="props.value || props.row.machine_uuid">{{
+            props.value || props.row.machine_uuid
+          }}</span>
+          <q-icon
+            v-if="props.row.check_open"
+            name="fact_check"
+            color="primary"
+            size="16px"
+            class="q-ml-xs"
+          >
+            <q-tooltip>
+              Vérification demandée{{
+                props.row.check_assigned_to
+                  ? `, affectée à ${props.row.check_assigned_to}`
+                  : ', à prendre'
+              }}
+            </q-tooltip>
+          </q-icon>
+          <q-icon
+            v-if="props.row.needs_verification"
+            name="warning"
+            color="orange"
+            size="16px"
+            class="q-ml-xs"
+          >
+            <q-tooltip
+              >Identité à confirmer — empreinte matérielle divergente (doublon possible)</q-tooltip
+            >
+          </q-icon>
+        </div>
       </q-td>
     </template>
     <template #body-cell-maintenance="props">
@@ -76,7 +84,7 @@
           <q-tooltip>
             {{
               props.row.maintenance_due_at
-                ? `Due le ${formatDateTime(props.row.maintenance_due_at)}`
+                ? `Due le ${dueDate(props.row.maintenance_due_at)}`
                 : 'Exclu de la maintenance'
             }}
             {{ props.row.maintenance_owner ? ` · ${props.row.maintenance_owner}` : '' }}
@@ -117,7 +125,7 @@
     </template>
     <template #body-cell-antivirus="props">
       <q-td :props="props">
-        <q-badge :color="protectionColor(props.row.is_up_to_date)">
+        <q-badge :color="antivirusBadgeColor(props.row.av_product_name, props.row.is_up_to_date)">
           {{
             protectionBadgeLabel(antivirusLabel(props.row.av_product_name), props.row.is_up_to_date)
           }}
@@ -210,9 +218,10 @@
 import type { QTableColumn, QTableProps } from 'quasar';
 import type { RouteLocationRaw } from 'vue-router';
 import type { Machine } from 'src/services/machines';
-import { maintenanceStateColor, maintenanceStateLabel } from 'src/services/maintenance';
+import { dueDate, maintenanceStateColor, maintenanceStateLabel } from 'src/services/maintenance';
 import { isAgentOutdated } from 'src/utils/agentVersion';
 import {
+  antivirusBadgeColor,
   antivirusLabel,
   diskColor,
   formatDateTime,
@@ -221,7 +230,6 @@ import {
   onlineIcon,
   onlineLabel,
   protectionBadgeLabel,
-  protectionColor,
   sessionColor,
   sessionLabel,
   sizeLabel,

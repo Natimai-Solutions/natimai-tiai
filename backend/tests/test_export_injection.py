@@ -41,6 +41,19 @@ def test_xlsx_drops_control_characters_instead_of_failing():
     assert sheet["A3"].value == "ok\tlà"
 
 
+def test_xlsx_drops_what_xml_cannot_carry_and_openpyxl_lets_through():
+    """Audit S11 (T12): U+FFFE, U+FFFF and lone surrogates are not in
+    openpyxl's pattern; written, the workbook would not open again."""
+    resp = xlsx_response(
+        "t.xlsx", ["Nom"], [["A\ufffeB\uffffC"], ["D\ud800E"], ["ok \U0001f600"]]
+    )
+    sheet = load_workbook(io.BytesIO(resp.body)).active
+    assert sheet is not None
+    assert sheet["A2"].value == "ABC"
+    assert sheet["A3"].value == "DE"
+    assert sheet["A4"].value == "ok \U0001f600"
+
+
 def test_xlsx_writes_a_formula_looking_string_as_text():
     """openpyxl would store ``=...`` as a formula; the cell must stay text."""
     resp = xlsx_response("t.xlsx", ["Nom", "N"], [[FORMULA, 3]])
@@ -63,3 +76,31 @@ async def test_csv_export_neutralizes_an_agent_hostname(client, db_session):
     assert resp.status_code == 200, resp.text
     cell = resp.text.lstrip("﻿").splitlines()[1]
     assert cell.startswith("\"'=HYPERLINK")
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("/api/v1/machines/export.xlsx?columns=hostname", "PC-01"),
+        ("/api/v1/software/export.xlsx", "Outil"),
+    ],
+)
+async def test_an_xlsx_export_with_a_non_character_reloads(
+    client, db_session, path, expected
+):
+    """End to end (T12): a hostname and a software name carrying U+FFFE and
+    U+FFFF, accepted by the heartbeat and PostgreSQL, export to a workbook
+    openpyxl loads again."""
+    headers = await _admin_headers(client, db_session)
+    await _poste(
+        client,
+        "exp-nonchar",
+        hostname="PC\ufffe-01\uffff",
+        software=[{"name": "Outil\uffff", "version": "1\ufffe", "publisher": "X"}],
+    )
+    resp = await client.get(path, headers=headers)
+    assert resp.status_code == 200, resp.text
+    sheet = load_workbook(io.BytesIO(resp.content)).active
+    assert sheet is not None
+    values = [c.value for row in sheet.iter_rows(min_row=2) for c in row]
+    assert expected in values

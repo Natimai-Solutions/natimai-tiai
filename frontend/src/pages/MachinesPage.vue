@@ -230,7 +230,14 @@ function onRequest(evt: {
 watch(
   () => route.query,
   () => {
+    const before = JSON.stringify(buildQuery());
     applyQuery();
+    // Whatever changed the search — a widget, a page turn, but also the
+    // drawer's « Postes » link or Back, which reach here without going through
+    // pushQuery — the selection belongs to the previous one: kept, the next
+    // bulk action would include postes no longer shown, and the auto-refresh
+    // would stay paused on it (audit B05).
+    if (JSON.stringify(buildQuery()) !== before) selected.value = [];
     void reload();
   },
 );

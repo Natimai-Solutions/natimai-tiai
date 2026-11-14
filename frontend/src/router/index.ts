@@ -13,6 +13,8 @@ import { refreshSession } from 'boot/axios';
 import { ensureSession, getAccessToken } from 'src/services/session';
 import { readCachedPermissions, useAuthStore } from 'src/stores/auth';
 import { hashUrlToHistory } from 'src/utils/legacyUrl';
+import { whenScrollable } from 'src/utils/scrollRestore';
+import { installStaleChunkReload } from 'src/utils/staleChunks';
 
 export default defineRouter(() => {
   // Read from `import.meta.env`, where app-vite 3 defines them. The former
@@ -32,12 +34,19 @@ export default defineRouter(() => {
     if (rewritten) window.history.replaceState(null, '', rewritten);
   }
 
+  // Which navigation is the latest: a position held back for one page must
+  // not land on the next (see whenScrollable).
+  let navigation = 0;
+
   const router = createRouter({
-    // Back to a page: where it was (audit U10). A query change on the same
-    // page — a tab, a filter, a page of results — stays put. Anything else
-    // starts at the top.
-    scrollBehavior: (to, from, saved) =>
-      saved ?? (to.path === from.path ? false : { left: 0, top: 0 }),
+    // Back to a page: where it was (audit U10), once its data has made it
+    // tall enough to get there. A query change on the same page — a tab, a
+    // filter, a page of results — stays put. Anything else starts at the top.
+    scrollBehavior: (to, from, saved) => {
+      const id = ++navigation;
+      if (saved) return whenScrollable(saved, { isCurrent: () => id === navigation });
+      return to.path === from.path ? false : { left: 0, top: 0 };
+    },
     routes,
     history: createHistory(base),
   });
@@ -76,6 +85,10 @@ export default defineRouter(() => {
   router.afterEach((to) => {
     document.title = documentTitle(to.meta.title as string | undefined);
   });
+
+  // A tab opened before a deployment asks for chunks the new build no longer
+  // serves: reload it, once (audit S34).
+  if (typeof window !== 'undefined') installStaleChunkReload(router);
 
   return router;
 });

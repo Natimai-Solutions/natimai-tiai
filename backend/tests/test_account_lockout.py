@@ -139,3 +139,56 @@ async def test_password_change_is_rate_limited_per_account(
         codes.append(r.status_code)
     assert codes[:5] == [400] * 5
     assert codes[5:] == [429, 429]
+
+
+async def test_guesses_spread_over_many_addresses_turn_the_lock_account_wide(
+    client, db_session
+):
+    """Audit S03, second pass: during a lock every fresh address used to get
+    one real guess, so a /24 or an IPv6 prefix bought hundreds. Past
+    ``besieged_after`` failing addresses the lock shuts out every address but
+    those that opened the account before."""
+    from app.core import ratelimit
+
+    await _operator(db_session)
+    # The owner's usual poste opened the account last week.
+    assert (await _login_from(client, "10.0.0.10")).status_code == 200
+
+    for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS):
+        await _login_from(client, "10.0.0.66", "wrong-password-here")
+    # A few more addresses: still one person's postes, the lock stays narrow.
+    assert (await _login_from(client, "10.0.1.1")).status_code == 200
+    for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS):
+        await _login_from(client, "10.0.0.66", "wrong-password-here")
+
+    for n in range(ratelimit.besieged_after() - 1):
+        await _login_from(client, f"10.9.{n}.1", "wrong-password-here")
+
+    # The right password from yet another address no longer gets a check.
+    assert (await _login_from(client, "10.9.200.1")).status_code == 401
+    # The owner's postes still open it, and that lifts the lock.
+    assert (await _login_from(client, "10.0.0.10")).status_code == 200
+    assert (await _login_from(client, "10.9.200.1")).status_code == 200
+
+
+async def test_old_failures_do_not_add_up_to_a_lock(client, db_session):
+    """Audit S03, second pass: the counter decays. Four failures long ago and
+    one typo today do not lock the owner out of their poste."""
+    from datetime import timedelta
+
+    from app.features.base import utcnow
+
+    user = await _operator(db_session)
+    for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS - 1):
+        await _login_from(client, "10.0.0.66", "wrong-password-here")
+    await db_session.refresh(user)
+    assert user.failed_login_attempts == settings.LOGIN_MAX_FAILED_ATTEMPTS - 1
+    user.last_failed_login_at = utcnow() - timedelta(days=7)
+    db_session.add(user)
+    await db_session.commit()
+
+    await _login_from(client, "10.0.0.10", "a-typo-from-the-owner")
+    await db_session.refresh(user)
+    assert user.failed_login_attempts == 1
+    assert user.locked_until is None
+    assert (await _login_from(client, "10.0.0.10")).status_code == 200

@@ -210,22 +210,27 @@ async def _deployable_package(
     if package.kind == PackageKind.FILES:
         files = await package_crud.files_of(session, package.id)
         problems = manifest.problems(package, files)
-        if (
-            payload.type == CommandType.PACKAGE_INSTALL
-            and not problems
-            and not manifest.runnable_somewhere(package, files)
+        uninstall = payload.type == CommandType.PACKAGE_UNINSTALL
+        if uninstall and not package.uninstall_run:
+            problems = [
+                *problems,
+                manifest.Problem("no_uninstall", "Pas de désinstallation définie"),
+            ]
+        # The agent's rule for the step it would run (audit B30, U04): what
+        # no poste would accept is refused here rather than queued to fail.
+        if not problems and not manifest.runnable_somewhere(
+            package, files, "uninstall" if uninstall else "install"
         ):
             problems = [
                 manifest.Problem(
                     "untrusted",
-                    "Ni signé, ni lancé par un exécutable d'éditeur seul dans son "
-                    "dossier : aucun poste ne l'exécutera. Signez le paquet.",
+                    "Désinstallation ni signée, ni lancée par un exécutable "
+                    "d'éditeur seul dans son dossier, ni « msiexec /x {code "
+                    "produit} » : aucun poste ne l'exécutera. Signez le paquet."
+                    if uninstall
+                    else "Ni signé, ni lancé par un exécutable d'éditeur seul dans "
+                    "son dossier : aucun poste ne l'exécutera. Signez le paquet.",
                 )
-            ]
-        if payload.type == CommandType.PACKAGE_UNINSTALL and not package.uninstall_run:
-            problems = [
-                *problems,
-                manifest.Problem("no_uninstall", "Pas de désinstallation définie"),
             ]
         if problems:
             raise AppError(

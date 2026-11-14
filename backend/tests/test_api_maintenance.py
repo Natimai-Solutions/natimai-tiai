@@ -191,6 +191,42 @@ async def test_due_list_groups_by_room_and_filters_by_owner(client, db_session):
     del a, c, d
 
 
+async def test_rooms_list_names_the_owner_the_policy_resolves(client, db_session):
+    """Audit B08 (T17): room owner deactivated, default owner Paul — GET
+    /rooms says Paul, like /maintenance/due and the poste's fiche."""
+    from app.features.user import crud as user_crud
+    from app.features.user.permissions import BuiltinGroup
+
+    admin, _ = await _admin(client, db_session)
+    _, marie_id = await _tech(client, db_session)
+    _, paul_id = await _user(
+        client, db_session, "paul@test.local", [BuiltinGroup.TECHNICIAN], "Paul"
+    )
+    room = await _room(client, admin, "B12")
+    m = await _machine(db_session, "A", first_seen_days_ago=100, room_id=room)
+    r = await client.patch(
+        f"/api/v1/rooms/{room}/maintenance",
+        headers=admin,
+        json={"maintenance_owner_id": marie_id},
+    )
+    assert r.status_code == 200, r.text
+    r = await client.patch(
+        "/api/v1/settings",
+        headers=admin,
+        json={"maintenance_default_owner_id": paul_id},
+    )
+    assert r.status_code == 200, r.text
+    marie = await user_crud.get_by_email(db_session, "tech@test.local")
+    assert marie is not None
+    marie.is_active = False
+    db_session.add(marie)
+    await db_session.commit()
+
+    rooms = (await client.get("/api/v1/rooms", headers=admin)).json()
+    assert rooms[0]["effective_owner_name"] == "Paul"
+    assert (await _detail(client, admin, m))["maintenance_owner"] == "Paul"
+
+
 async def test_a_deactivated_owner_counts_as_none(client, db_session):
     """Audit B08, B35: the postes and requests of an account deactivated
     since go under « À prendre », the forms that still name it can be saved,
@@ -414,6 +450,63 @@ async def test_the_cycle_follows_the_journal(client, db_session):
     # Nothing left in the journal: no last maintenance at all.
     await client.delete(f"/api/v1/interventions/{entry_id}", headers=admin)
     assert (await _detail(client, admin, a))["last_maintenance_at"] is None
+
+
+async def test_a_future_line_never_becomes_a_maintenance(client, db_session):
+    """Audit B06, B17 (T16): a check closed in the future is refused, and a
+    journal line already dated in the future cannot be turned into a
+    maintenance by changing its kind alone — the cycle would be pushed out."""
+    from app.features.intervention.models import Intervention
+
+    admin, _ = await _admin(client, db_session)
+    a = await _machine(db_session, "A", first_seen_days_ago=100)
+    future = datetime.now(UTC) + timedelta(days=400)
+
+    check = await client.post(f"/api/v1/machines/{a}/check", headers=admin, json={})
+    assert check.status_code == 201, check.text
+    refused = await client.post(
+        f"/api/v1/checks/{check.json()['id']}/close",
+        headers=admin,
+        json={"closed_at": future.isoformat()},
+    )
+    assert refused.status_code == 422
+    assert "closed_at" in refused.text
+    # Still open, nothing written in the journal.
+    journal = await client.get(f"/api/v1/machines/{a}/interventions", headers=admin)
+    assert journal.json()["total"] == 0
+
+    # A line dated in the future from before the fix (or written directly).
+    line = Intervention(
+        machine_id=uuid.UUID(a),
+        kind="verification",
+        performed_by="admin@test.local",
+        performed_at=future,
+    )
+    db_session.add(line)
+    await db_session.commit()
+    await db_session.refresh(line)
+    refused = await client.patch(
+        f"/api/v1/interventions/{line.id}",
+        headers=admin,
+        json={"kind": "maintenance"},
+    )
+    assert refused.status_code == 422
+    body = refused.json()["error"]
+    assert body["code"] == "request.validation_error"
+    assert body["details"]["errors"][0]["loc"] == ["body", "performed_at"]
+    detail = await _detail(client, admin, a)
+    assert detail["last_maintenance_at"] is None
+    assert detail["maintenance_state"] == "overdue"
+
+    # Redated to the past in the same request: accepted, the cycle follows.
+    past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    ok = await client.patch(
+        f"/api/v1/interventions/{line.id}",
+        headers=admin,
+        json={"kind": "maintenance", "performed_at": past},
+    )
+    assert ok.status_code == 200, ok.text
+    assert (await _detail(client, admin, a))["maintenance_state"] == "ok"
 
 
 async def test_list_filters_and_sorts_on_maintenance(client, db_session):

@@ -156,13 +156,16 @@
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { computed, onMounted, ref } from 'vue';
 import { type RouteLocationRaw } from 'vue-router';
+import { useQuasar } from 'quasar';
 import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { getOverview, type StatsOverview } from 'src/services/stats';
 import { listMachines, type Machine } from 'src/services/machines';
 import { listThreats, type Threat } from 'src/services/threats';
+import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime, threatSeverityLabel, threatStatusLabel } from 'src/utils/format';
 
+const $q = useQuasar();
 const stats = ref<StatsOverview | null>(null);
 const outdated = ref<Machine[]>([]);
 const threats = ref<Threat[]>([]);
@@ -370,20 +373,32 @@ const auth = useAuthStore();
 const canReadThreats = computed(() => auth.can('threat', 'read'));
 
 async function fetchAll() {
-  const [s, av, wuBehind, t] = await Promise.all([
+  const [s, av, wuBehind, t] = await Promise.allSettled([
     getOverview(),
     listMachines({ status: 'outdated', page_size: 5 }),
     listMachines({ wu_status: 'pending', page_size: 5 }),
     // The sample of threats is a side list: its failure leaves the counters.
-    canReadThreats.value
-      ? listThreats({ status: 'active', page_size: 5 }).catch(() => null)
-      : Promise.resolve(null),
+    canReadThreats.value ? listThreats({ status: 'active', page_size: 5 }) : Promise.resolve(null),
   ]);
-  stats.value = s;
-  outdated.value = mergeOutdated(av.items, wuBehind.items);
-  outdatedLoaded.value = true;
-  if (t) threats.value = t.items;
-  threatsLoaded.value = t !== null;
+  // Each list's « loaded » flag follows its *last* load, not its first: after
+  // an outage, « Tous les postes sont à jour » left over from the morning
+  // would be a claim about a parc nobody could read (audit U07).
+  if (av.status === 'fulfilled' && wuBehind.status === 'fulfilled') {
+    outdated.value = mergeOutdated(av.value.items, wuBehind.value.items);
+    outdatedLoaded.value = true;
+  } else {
+    outdatedLoaded.value = false;
+  }
+  if (t.status === 'fulfilled' && t.value) {
+    threats.value = t.value.items;
+    threatsLoaded.value = true;
+  } else {
+    threatsLoaded.value = false;
+  }
+  if (s.status === 'rejected') throw s.reason;
+  stats.value = s.value;
+  if (av.status === 'rejected') throw av.reason;
+  if (wuBehind.status === 'rejected') throw wuBehind.reason;
 }
 
 // The dashboard is a wall screen as much as a page: left open, it has to keep
@@ -401,6 +416,16 @@ async function reload() {
     await refreshNow();
   } finally {
     loading.value = false;
+  }
+  // The banner covers a page that never loaded; over figures already shown, a
+  // requested reload that fails says so rather than leaving them to pass for
+  // fresh ones (audit T20). The automatic refresh stays quiet.
+  if (lastError.value && lastRefreshedAt.value) {
+    $q.notify({
+      type: 'negative',
+      message: apiErrorMessage(lastError.value, 'Actualisation impossible'),
+      caption: 'Les informations affichées sont celles du dernier chargement réussi.',
+    });
   }
 }
 

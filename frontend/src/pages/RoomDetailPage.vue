@@ -295,6 +295,7 @@ import { useQuasar, type QTableColumn } from 'quasar';
 import RoomFormDialog from 'src/components/room/RoomFormDialog.vue';
 import MaintenanceSessionDialog from 'src/components/maintenance/MaintenanceSessionDialog.vue';
 import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import {
   dueDate,
   getRoomMaintenance,
@@ -407,6 +408,9 @@ async function loadMaintenance() {
 
 async function saveMaintenance(payload: MaintenanceSettingsPayload) {
   maintenance.value = await updateRoomMaintenance(props.id, payload);
+  // Another owner or cycle moves the room in or out of somebody's « Mes
+  // tâches »: the menu badge reads again (audit U19).
+  notifyTasksChanged();
   $q.notify({ type: 'positive', message: 'Réglages de maintenance enregistrés' });
   await load();
 }

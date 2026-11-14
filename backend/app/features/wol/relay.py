@@ -36,7 +36,6 @@ import ipaddress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, update
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -148,19 +147,21 @@ async def count_online_peers(
     Informational: the claim happens on a later heartbeat, by whichever of
     them comes first. But "zero" at queueing time is an answer the console can
     give at once — a site with nothing on has nothing to relay with — instead
-    of a wake that sits pending until it expires.
+    of a wake that sits pending until it expires. Only the postes that would
+    be handed it count (``trusted_relay``): an old agent online is no relay.
     """
     peers = peer_clause(target)
     if peers is None:
         return 0
-    count = await session.scalar(
-        select(func.count())
-        .select_from(Machine)
+    rows = await session.exec(
+        select(Machine)
         .where(peers)
         .where(col(Machine.id) != target.id)
+        .where(col(Machine.needs_verification).is_(False))
+        .where(col(Machine.token_revoked).is_(False))
         .where(online_clause(True, now, settings.OFFLINE_AFTER_SECONDS))
     )
-    return int(count or 0)
+    return sum(1 for m in rows.all() if trusted_relay(m, now))
 
 
 async def open_wake_for(
@@ -261,7 +262,9 @@ async def queue_relayed_wake(
             detail=(
                 f"Aucun poste allumé sur {site} pour relayer le réveil : le "
                 "paquet magique doit partir d'un poste du même réseau que la "
-                "cible, et aucun n'est en contact avec le serveur en ce moment."
+                "cible, et aucun poste habilité à relayer (agent à jour, inscrit "
+                "depuis assez longtemps, identité confirmée) n'est en contact "
+                "avec le serveur en ce moment."
             ),
         )
 
@@ -329,30 +332,42 @@ def trusted_relay(relay: Machine, now: datetime) -> bool:
     min_age = timedelta(minutes=settings.WOL_RELAY_MIN_AGE_MINUTES)
     if relay.first_seen is not None and now - relay.first_seen < min_age:
         return False
+    # No version, or none that reads as one ("dev"): nothing says the agent
+    # knows the command, so it is not trusted with it (audit T35).
     version = (relay.agent_version or "").strip()
-    if version and version_key(version)[0]:
-        return version_key(version) >= version_key(settings.WOL_RELAY_MIN_AGENT_VERSION)
-    return True
+    if not version or not version_key(version)[0]:
+        return False
+    return version_key(version) >= version_key(settings.WOL_RELAY_MIN_AGENT_VERSION)
 
 
 async def release_stale_claims(session: AsyncSession, now: datetime) -> int:
     """Put back in the queue the wakes a relay took and never answered for —
-    switched off, or dropped them — so that another one can (audit B29)."""
+    switched off, or dropped them — so that another one can (audit B29). The
+    relay is remembered on the row and not handed the same wake again."""
     cutoff = now - timedelta(seconds=settings.WOL_RELAY_CLAIM_TIMEOUT_SECONDS)
-    result = await session.exec(
-        update(Command)
+    rows = await session.exec(
+        select(Command)
         .where(col(Command.type) == CommandType.WAKE_ON_LAN.value)
         .where(col(Command.status) == CommandStatus.DELIVERED.value)
         .where(col(Command.relay_machine_id).is_not(None))
         .where(col(Command.delivered_at) < cutoff)
         .where(col(Command.expires_at) > now)
-        .values(
-            status=CommandStatus.PENDING.value,
-            relay_machine_id=None,
-            delivered_at=None,
-        )
+        # Two heartbeats releasing at once: each row once.
+        .with_for_update(skip_locked=True)
     )
-    return result.rowcount or 0
+    released = 0
+    for command in rows.all():
+        previous = list(command.released_relay_ids or [])
+        if str(command.relay_machine_id) not in previous:
+            previous.append(str(command.relay_machine_id))
+        command.released_relay_ids = previous
+        command.status = CommandStatus.PENDING.value
+        command.relay_machine_id = None
+        command.delivered_at = None
+        released += 1
+    if released:
+        await session.flush()
+    return released
 
 
 async def claim_wakes(
@@ -383,6 +398,9 @@ async def claim_wakes(
     )
     claimed: list[ClaimedWake] = []
     for command, target in (await session.exec(stmt)).all():
+        if str(relay.id) in (command.released_relay_ids or []):
+            # Claimed it before and never answered: another relay's turn.
+            continue
         if not may_claim(relay, target, queued_at=command.created_at, now=now):
             continue
         mac = normalize_mac(target.mac_address)

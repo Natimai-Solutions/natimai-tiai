@@ -158,3 +158,39 @@ async def test_superuser_role_is_refused_outside_local(engine, monkeypatch):
             await assert_not_superuser(engine)
     else:
         await assert_not_superuser(engine)
+
+
+TUNABLES = {
+    "LOGIN_SIEGE_ADDRESSES": (10, 1, 1001),
+    "LOGIN_KNOWN_ADDRESS_DAYS": (30, 0, 366),
+    "PASSWORD_RESET_COOLDOWN_MINUTES": (5, -1, 61),
+    "PASSWORD_RESET_MAX_LIVE_LINKS": (3, 0, 11),
+    "AGENT_HEARTBEAT_MAX_PER_MINUTE": (12, 1, 601),
+    "SOFTWARE_NEW_ENTRIES_PER_DAY": (2000, 99, 1_000_001),
+}
+
+
+@pytest.mark.parametrize("name", sorted(TUNABLES))
+def test_the_audit_limits_are_settings_with_bounds(name: str):
+    """The values chosen at the audit's second pass are settings, with their
+    default, and a value out of bounds is refused at start."""
+    default, too_low, too_high = TUNABLES[name]
+    assert getattr(make_settings(), name) == default
+    assert getattr(make_settings(**{name: default + 1}), name) == default + 1
+    for wrong in (too_low, too_high):
+        with pytest.raises(ValidationError):
+            make_settings(**{name: wrong})
+
+
+def test_the_limiters_read_their_settings(monkeypatch):
+    """The heartbeat limiter and the catalogue quota are built from the
+    settings; the lock's thresholds are read at each attempt."""
+    from app.core import ratelimit
+    from app.core.config import settings
+
+    assert ratelimit.heartbeat_limiter.max_attempts == (
+        settings.AGENT_HEARTBEAT_MAX_PER_MINUTE
+    )
+    assert ratelimit.software_quota.units == settings.SOFTWARE_NEW_ENTRIES_PER_DAY
+    monkeypatch.setattr(settings, "LOGIN_SIEGE_ADDRESSES", 4)
+    assert ratelimit.besieged_after() == 4

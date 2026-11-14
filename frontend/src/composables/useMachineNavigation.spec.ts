@@ -207,4 +207,98 @@ describe('useMachineNavigation', () => {
     expect(nav.previousMachine.value?.id).toBe('c');
     expect(nav.nextMachine.value?.id).toBe('b');
   });
+
+  describe('across blocks of 50 (audit B18)', () => {
+    /** The server answers from an ordered list of ids, as it stands now. */
+    function serve(order: string[]) {
+      vi.mocked(api.get).mockImplementation((_url: string, config?: AxiosRequestConfig) => {
+        const params = config?.params as { page?: number; page_size?: number } | undefined;
+        const page = params?.page ?? 1;
+        const size = params?.page_size ?? 50;
+        const items = order.slice((page - 1) * size, page * size).map(machine);
+        return Promise.resolve({ data: { items, total: order.length, page, page_size: size } });
+      });
+    }
+
+    async function step(
+      router: ReturnType<typeof makeRouter>,
+      nav: ReturnType<typeof useMachineNavigation>,
+      move: () => void,
+    ) {
+      const before = router.currentRoute.value.fullPath;
+      move();
+      await vi.waitUntil(() => router.currentRoute.value.fullPath !== before);
+      await vi.waitUntil(() => nav.total.value !== null);
+      return String(router.currentRoute.value.params.id);
+    }
+
+    it('never shows a poste twice when the order moved before the next block was read', async () => {
+      const t0 = Array.from({ length: 120 }, (_, i) => `m${i}`);
+      serve(t0);
+      const router = makeRouter();
+      const { nav } = await mount(router, '/machines/m48?i=48');
+      await vi.waitUntil(() => nav.nextMachine.value !== null);
+
+      // The last poste heartbeats: it goes to the top, every other one moves
+      // down a rank — m49, last of the first block, now opens the second.
+      serve(['m119', ...t0.slice(0, 119)]);
+      const seen = ['m48'];
+      for (let k = 0; k < 4; k++) seen.push(await step(router, nav, nav.goNext));
+
+      expect(seen).toEqual(['m48', 'm49', 'm50', 'm51', 'm52']);
+      expect(nav.positionLabel.value).toBe('Poste 53 sur 120');
+      expect(nav.previousMachine.value?.id).toBe('m51');
+      expect(nav.nextMachine.value?.id).toBe('m53');
+    });
+
+    it('finds the opened poste in a further block when the list had moved', async () => {
+      // The list showed « x » at rank 5; by the time the fiche opens, it is at 156.
+      const order = Array.from({ length: 300 }, (_, i) => `m${i}`);
+      order.splice(156, 0, 'x');
+      serve(order);
+      const router = makeRouter();
+      const { nav } = await mount(router, '/machines/x?i=5');
+      await vi.waitUntil(() => nav.total.value !== null);
+
+      expect(nav.positionLabel.value).toBe('Poste 157 sur 301');
+      expect(nav.previousMachine.value?.id).toBe('m155');
+      expect(nav.nextMachine.value?.id).toBe('m156');
+
+      // Next then Previous comes back to it.
+      expect(await step(router, nav, nav.goNext)).toBe('m156');
+      expect(await step(router, nav, nav.goPrevious)).toBe('x');
+    });
+
+    it('finds a poste that moved up into an earlier block', async () => {
+      const order = Array.from({ length: 200 }, (_, i) => `m${i}`);
+      order.splice(10, 0, 'x');
+      serve(order);
+      const router = makeRouter();
+      const { nav } = await mount(router, '/machines/x?i=120');
+      await vi.waitUntil(() => nav.total.value !== null);
+
+      expect(nav.index.value).toBe(10);
+      expect(nav.previousMachine.value?.id).toBe('m9');
+      expect(nav.nextMachine.value?.id).toBe('m10');
+    });
+
+    it('shows no position and no neighbours when the poste is not within reach', async () => {
+      // A search of 3,000 postes that no longer holds « x » at all.
+      serve(Array.from({ length: 3000 }, (_, i) => `m${i}`));
+      const router = makeRouter();
+      const { nav } = await mount(router, '/machines/x?i=5');
+      await vi.waitUntil(() => vi.mocked(api.get).mock.calls.length > 1);
+      await vi.waitUntil(async () => {
+        const n = vi.mocked(api.get).mock.calls.length;
+        await new Promise((r) => setTimeout(r, 20));
+        return vi.mocked(api.get).mock.calls.length === n;
+      });
+
+      expect(nav.positionLabel.value).toBe('');
+      expect(nav.previousMachine.value).toBeNull();
+      expect(nav.nextMachine.value).toBeNull();
+      // Bounded: 2,000 rows looked through after the first block, no more.
+      expect(vi.mocked(api.get).mock.calls.length).toBeLessThanOrEqual(1 + 2000 / 50);
+    });
+  });
 });

@@ -81,15 +81,30 @@ export interface CreatePackagePayload extends PackageFields {
 /** Which way a package can reach a poste, as the console explains it. */
 export type TrustMethod = 'winget' | 'signed' | 'publisher' | 'none';
 
+/**
+ * The same, for one step. `product_code`: an uninstall by
+ * `msiexec /x {code produit}`, which method A runs without any file of the
+ * package.
+ */
+export type StepTrust = TrustMethod | 'product_code';
+
+export type DeployAction = 'install' | 'uninstall';
+
 // What the agent refuses beside the executable under method A: Windows could
-// load or run it from that folder (agent deploy.loadableExt, audit S02).
+// load or run it from that folder (agent deploy.loadableExt, audit S02). The
+// backend keeps a test that this list, its own and the agent's are equal.
 const LOADABLE_EXTENSIONS = new Set(
   (
     '.dll .ocx .cpl .sys .drv .ax .acm .ime .tsp .mui .tlb .winmd .manifest .local .config ' +
     '.exe .com .scr .pif .msi .msp .mst .msu .appx .msix .bat .cmd .ps1 .psm1 .vbs .vbe .js ' +
-    '.jse .wsf .wsh .hta .lnk .inf .jar'
+    '.jse .wsf .wsh .hta .lnk .inf .jar .bpl .pyd .xll .node .rll .wsc .sct'
   ).split(' '),
 );
+
+// An MSI product code: the one argument method A lets msiexec take (agent
+// deploy.productCode).
+const PRODUCT_CODE =
+  /^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$/;
 
 function extension(name: string): string {
   const dot = name.lastIndexOf('.');
@@ -97,16 +112,37 @@ function extension(name: string): string {
 }
 
 export function trustMethod(p: Package): TrustMethod {
+  const t = stepTrust(p, 'install');
+  return t === 'product_code' ? 'none' : t;
+}
+
+/**
+ * How a poste could run the package's installation — or uninstallation: the
+ * agent's rule (deploy.go executeFiles / MethodAStep / MethodAFiles), as the
+ * server applies it before queueing (manifest.runnable_somewhere). `none`:
+ * every poste would refuse it (audit B30, U04).
+ */
+export function stepTrust(p: Package, action: DeployAction): StepTrust {
   if (p.kind === 'winget') return 'winget';
   if (p.signed) return 'signed';
-  const run = p.install_run ?? '';
+  const run = (action === 'install' ? p.install_run : p.uninstall_run) ?? '';
+  if (action === 'uninstall' && run === 'msiexec')
+    // Method A rebuilds it as /x {code} /qn /norestart: nothing else is run.
+    return p.uninstall_args.some((a) => PRODUCT_CODE.test(a)) ? 'product_code' : 'none';
   if (
-    p.publisher_name &&
+    publisherOf(p, action) &&
     run.toLowerCase().endsWith('.exe') &&
     !(p.files ?? []).some((f) => f.name !== run && LOADABLE_EXTENSIONS.has(extension(f.name)))
   )
     return 'publisher';
   return 'none';
+}
+
+/** The Authenticode signer of the file the step runs, if it is one. */
+export function publisherOf(p: Package, action: DeployAction = 'install'): string | null {
+  if (action === 'install') return p.publisher_name;
+  const run = p.uninstall_run;
+  return (p.files ?? []).find((f) => f.name === run)?.publisher_name ?? null;
 }
 
 export const trustLabels: Record<TrustMethod, string> = {
@@ -259,7 +295,7 @@ export interface DeployTarget {
 
 export async function deployPackage(
   id: string,
-  action: 'install' | 'uninstall',
+  action: DeployAction,
   target: DeployTarget,
 ): Promise<CreateCommandsResponse> {
   const { data } = await api.post<CreateCommandsResponse>('/commands', {

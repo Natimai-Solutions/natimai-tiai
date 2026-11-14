@@ -46,6 +46,25 @@
     text-overflow: ellipsis;
     background: var(--q-machines-sticky-bg, #fff);
   }
+  // Inside the name cell, only the name itself is cut: the presence dot and
+  // the check / identity icons after it stay visible (MachinesTable.vue).
+  .machine-name {
+    display: flex;
+    align-items: center;
+    // The cell's 260 px minus its own horizontal padding.
+    max-width: 228px;
+    min-width: 0;
+
+    > .q-icon {
+      flex: none;
+    }
+  }
+  .machine-name__text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 .body--dark .machines-table {
   --q-machines-sticky-bg: var(--q-dark);

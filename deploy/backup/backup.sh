@@ -18,10 +18,17 @@ KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
 # Lisibles du seul propriétaire (audit S27) : un dump contient les hachés des
-# mots de passe, les jetons des postes en empreinte, tout le parc. Les dumps
-# déjà là, écrits avant ce réglage, sont resserrés au passage.
+# mots de passe, les jetons des postes en empreinte, tout le parc. Le dossier
+# lui-même est fermé (créé par Docker, il naît en 755), et les dumps déjà là
+# sont resserrés au passage : écrits avant ce réglage, ou à la main par un
+# `docker compose exec … pg_dump` qui n'héritait pas de cet umask.
 umask 077
+chmod 700 /backups 2>/dev/null || true
 chmod 600 /backups/tiai-*.dump 2>/dev/null || true
+# Un .partial restant vient d'un dump interrompu (conteneur arrêté en cours
+# d'écriture) : jamais une sauvegarde valide, et aucun dump ne tourne encore
+# ici. Retiré, plutôt que laissé lisible et jamais purgé.
+rm -f /backups/.tiai-*.dump.partial
 
 while :; do
   stamp="$(date -u +%Y%m%d-%H%M%S)"

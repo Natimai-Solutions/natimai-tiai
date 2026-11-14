@@ -33,7 +33,9 @@ async def _enroll(client, machine_uuid: str, **body) -> dict:
     resp = await client.post(
         "/api/v1/agent/enroll",
         headers={"X-Enrollment-Secret": settings.ENROLLMENT_SECRET},
-        json={"machine_uuid": machine_uuid, **body},
+        # A version that knows the command: an agent that names none, or
+        # none that reads as one, is no relay (audit T35).
+        json={"machine_uuid": machine_uuid, "agent_version": "1.2.0", **body},
     )
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -214,6 +216,57 @@ async def test_a_claim_left_unanswered_goes_back_to_the_queue(
     monkeypatch.setattr(settings, "WOL_RELAY_SUBNET_GRACE_SECONDS", 0)
     again = (await _heartbeat(client, site["far"]["token"]))["commands"]
     assert [c["id"] for c in again] == [handed[0]["id"]]
+
+
+async def test_a_released_claim_is_not_handed_back_to_the_same_relay(
+    client, db_session, relay_mode, site, monkeypatch
+):
+    """Audit B29 (T35): the relay that dropped the wake does not take it
+    again on its next heartbeat; another poste of the site does."""
+    import uuid as _uuid
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from app.core.config import settings
+    from app.features.base import utcnow
+    from app.features.command.models import Command
+
+    headers = await _admin_headers(client, db_session)
+    await _wake(client, headers, site["target"]["machine_id"])
+    handed = (await _heartbeat(client, site["near"]["token"]))["commands"]
+    assert len(handed) == 1
+    await db_session.exec(
+        update(Command)
+        .where(Command.id == _uuid.UUID(handed[0]["id"]))
+        .values(delivered_at=utcnow() - timedelta(minutes=5))
+    )
+    await db_session.commit()
+    monkeypatch.setattr(settings, "WOL_RELAY_SUBNET_GRACE_SECONDS", 0)
+    assert (await _heartbeat(client, site["near"]["token"]))["commands"] == []
+    rows = await _commands(client, headers, site["target"]["machine_id"])
+    assert rows[0]["status"] == "pending"
+    again = (await _heartbeat(client, site["far"]["token"]))["commands"]
+    assert [c["id"] for c in again] == [handed[0]["id"]]
+
+
+@pytest.mark.parametrize("version", ["0.9.0", "dev", ""])
+async def test_only_trusted_relays_count_as_online_peers(
+    client, db_session, relay_mode, version
+):
+    """Audit T35: an old agent (or one naming no usable version) online is
+    not a poste that "can relay": the wake is refused at once."""
+    headers = await _admin_headers(client, db_session)
+    target = await _enroll(client, "m-t", location="Annexe")
+    await _heartbeat(
+        client, target["token"], location="Annexe", mac_address="AA:BB:CC:DD:EE:04"
+    )
+    peer = await _enroll(client, "m-old", location="Annexe", agent_version=version)
+    await _heartbeat(client, peer["token"], location="Annexe")
+
+    body = await _wake(client, headers, target["machine_id"])
+    assert (body["woken"], body["failed"]) == (0, 1)
+    assert "Aucun poste allumé" in body["results"][0]["detail"]
 
 
 async def test_a_fresh_or_old_agent_does_not_relay(

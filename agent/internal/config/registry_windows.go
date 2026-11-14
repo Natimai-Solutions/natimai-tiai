@@ -100,6 +100,9 @@ func readDeployKeys(k registry.Key) DeployTrust {
 	if v, _, err := k.GetIntegerValue("DeployWinget"); err == nil {
 		t.Winget = v != 0
 	}
+	if v, _, err := k.GetIntegerValue("DeployMethodAMaxGB"); err == nil && v <= 1024 {
+		t.MethodAMaxGB = int(v)
+	}
 	return t
 }
 

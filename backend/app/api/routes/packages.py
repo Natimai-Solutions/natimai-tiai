@@ -44,9 +44,10 @@ router = APIRouter(prefix="/packages", tags=["packages"], dependencies=[_READ])
 # What winget accepts as an identifier and a version, narrowed to what the
 # community repository actually uses. The agent applies the same pattern: the
 # identifier is the one argument of a winget deployment, and it must never be
-# able to read as an option.
-WINGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-]{0,127}$")
-WINGET_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}$")
+# able to read as an option. Applied with fullmatch: "$" after re.match also
+# accepts a trailing newline (audit S25).
+WINGET_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+\-]{0,127}")
+WINGET_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}")
 _MAX_ARGS = 64
 _MAX_ARG_LEN = 1024
 
@@ -63,8 +64,10 @@ def _invalid(message: str, **details: Any) -> AppError:
 # C0 and C1 controls and DEL: nothing a name, a version or an argument needs,
 # and what a terminal reads as cursor moves and line erasures — able to hide
 # the real command line from the administrator reviewing it before signing
-# (audit S25).
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# (audit S25). With them the Unicode bidirectional controls (U+202A–U+202E,
+# U+2066–U+2069), which reorder what is displayed, and the line and
+# paragraph separators U+2028/U+2029: the same trick by other means.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069\u2028\u2029]")
 
 
 def _no_control(value: str | None) -> str | None:
@@ -247,9 +250,11 @@ def _apply(package: Package, fields: dict[str, Any]) -> None:
         setattr(package, key, value)
 
     if package.kind == PackageKind.WINGET:
-        if not package.winget_id or not WINGET_ID.match(package.winget_id):
+        if not package.winget_id or not WINGET_ID.fullmatch(package.winget_id):
             raise _invalid("Identifiant winget invalide (ex. Mozilla.Firefox)")
-        if package.winget_version and not WINGET_VERSION.match(package.winget_version):
+        if package.winget_version and not WINGET_VERSION.fullmatch(
+            package.winget_version
+        ):
             raise _invalid("Version winget invalide")
         if package.install_run or package.uninstall_run:
             raise _invalid("Un paquet winget ne lance pas de fichier")
@@ -377,24 +382,31 @@ async def upload_files(
     follows."""
     package = await require_package(session, package_id)
     _require_files_kind(package)
+    # What this request stored, pinned against another request's sweep until
+    # the rows naming them are committed or rolled back (audit T09).
+    pinned: list[str] = []
     try:
-        added = await _store_uploads(session, package, files)
-    except BaseException:
-        # Files stored before the one that failed belong to nothing now: the
-        # transaction that would have named them is gone (audit S09).
-        await session.rollback()
-        await crud.sweep_store(session)
-        raise
-    await crud.refresh_manifest(session, package)
-    audit.record(
-        session,
-        actor=current.email,
-        action="package.upload",
-        resource_type="package",
-        resource_id=str(package.id),
-        details={"name": package.name, "files": added},
-    )
-    await session.commit()
+        try:
+            added = await _store_uploads(session, package, files, pinned)
+        except BaseException:
+            # Files stored before the one that failed belong to nothing now:
+            # the transaction that would have named them is gone (audit S09).
+            await session.rollback()
+            _unpin(pinned)
+            await crud.sweep_store(session)
+            raise
+        await crud.refresh_manifest(session, package)
+        audit.record(
+            session,
+            actor=current.email,
+            action="package.upload",
+            resource_type="package",
+            resource_id=str(package.id),
+            details={"name": package.name, "files": added},
+        )
+        await session.commit()
+    finally:
+        _unpin(pinned)
     # A file replaced under the same name goes once no open deployment
     # downloads it any more.
     await crud.sweep_store(session)
@@ -402,11 +414,21 @@ async def upload_files(
     return await _out(session, package, scope)
 
 
+def _unpin(pinned: list[str]) -> None:
+    for sha in pinned:
+        storage.unpin(sha)
+    pinned.clear()
+
+
 async def _store_uploads(
-    session: SessionDep, package: Package, files: list[UploadFile]
+    session: SessionDep,
+    package: Package,
+    files: list[UploadFile],
+    pinned: list[str],
 ) -> list[dict[str, Any]]:
     """Stream each upload to the store and name it in the package, replacing
-    a file of the same name. Flushed, not committed."""
+    a file of the same name. Flushed, not committed. Each stored hash is
+    appended to ``pinned``, for the caller to unpin (``storage.save``)."""
     added: list[dict[str, Any]] = []
     for upload in files:
         name = (upload.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
@@ -426,6 +448,7 @@ async def _store_uploads(
                 message="Fichier trop volumineux",
                 details={"max_bytes": settings.PACKAGE_MAX_BYTES},
             ) from None
+        pinned.append(stored.sha256)
         with stored.path.open("rb") as f:
             publisher = authenticode.signer_name(f)
         existing = await session.get(PackageFile, (package.id, name))

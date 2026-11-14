@@ -161,11 +161,11 @@ Pour le reste, ce sont les chemins nominaux de commandes dont le chemin d'échec
 
 ---
 
-## 9. Suites de l'audit 2026-11 : reste à faire
+## 9. Suites de l'audit 2026-11
 
-L'audit du 2026-11-10 (`plan-audit-2026-11.md`) montre que le « `delivered` éternel » désamorcé le 2026-08-19 n'est réglé qu'à moitié. L'agent compte sur une relivraison que le serveur ne fait pas, et il peut perdre une commande acceptée sans rendre de verdict.
+L'audit du 2026-11-10 (`plan-audit-2026-11.md`) avait montré que le « `delivered` éternel » désamorcé le 2026-08-19 n'était réglé qu'à moitié : l'agent comptait sur une relivraison que le serveur ne faisait pas, et pouvait perdre une commande acceptée sans rendre de verdict. Les tâches ci-dessous sont corrigées depuis le 2026-11-11. Une seconde passe de vérification, le 2026-11-13, a relevé des écarts résiduels, suivis dans `plan-audit-2026-11.md` §6.
 
-Tâches dans l'ordre de priorité. La numérotation `Txx` est celle du plan d'ensemble, à reprendre dans les commits et les PR. Cocher ici **et** dans `plan-audit-2026-11.md`.
+Tâches dans l'ordre de priorité, avec la numérotation `Txx` du plan d'ensemble, reprise dans les commits et les PR.
 
 - [x] **T10** · *P1 court terme* — **Cycle de vie des commandes remises : relivraison, expiration, pertes côté agent** ([B10](plan-audit-2026-11.md#b10), [B15](plan-audit-2026-11.md#b15), [B16](plan-audit-2026-11.md#b16), [B34](plan-audit-2026-11.md#b34))
   Choisir une règle unique : soit le serveur relivre les commandes « Transmise » sans verdict après un délai (l'agent est déjà idempotent par identifiant), soit le worker les expire. La même règle doit fermer les « En cours » trop anciennes, que rien ne purge aujourd'hui. Côté agent, ne jamais jeter une commande acceptée : file pleine, arrêt du service ou type inconnu donnent un résultat `failed` explicite, rejoué par `queue.Queue`.

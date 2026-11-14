@@ -12,6 +12,13 @@ import (
 // make the write fail without having to break a disk.
 var saveToken = config.SaveToken
 
+// loadToken and clearToken read and remove token.dat; variables for the same
+// reason, and because the real ones reach HKLM on Windows (the entropy).
+var (
+	loadToken  = config.LoadToken
+	clearToken = config.ClearToken
+)
+
 // adoptRotatedToken decides which token the next request carries once the
 // server has offered a new one, and stores it first.
 //

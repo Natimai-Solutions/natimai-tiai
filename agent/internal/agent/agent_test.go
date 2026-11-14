@@ -2,9 +2,16 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -202,6 +209,13 @@ func TestResolveMaintenanceAndUnknownTypes(t *testing.T) {
 	}
 }
 
+// Command ids as the server writes them: UUIDs, lowercase.
+const (
+	c1 = "3f1c2a4e-9b7d-4c1e-8a2f-0d5e6b7c8a90"
+	c2 = "3f1c2a4e-9b7d-4c1e-8a2f-0d5e6b7c8a91"
+	c3 = "3f1c2a4e-9b7d-4c1e-8a2f-0d5e6b7c8a92"
+)
+
 // The server hands a command out once: one the agent cannot take must come
 // back as `failed`, through the local queue, never be dropped (audit B15).
 func TestAFullBacklogAnswersFailed(t *testing.T) {
@@ -210,18 +224,18 @@ func TestAFullBacklogAnswersFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &Agent{queue: q, commands: make(chan models.Command, 1), running: map[string]struct{}{}}
-	a.accept(models.Command{ID: "c1", Type: "quick_scan"})
-	a.accept(models.Command{ID: "c2", Type: "quick_scan"})
+	a.accept(models.Command{ID: c1, Type: "quick_scan"})
+	a.accept(models.Command{ID: c2, Type: "quick_scan"})
 
 	item, _, err := q.Peek()
 	if err != nil || item == nil {
 		t.Fatalf("nothing queued: %v", err)
 	}
-	if item.CommandID != "c2" || item.Result.Status != "failed" || !strings.Contains(item.Result.Error, "pleine") {
+	if item.CommandID != c2 || item.Result.Status != "failed" || !strings.Contains(item.Result.Error, "pleine") {
 		t.Errorf("queued %+v", item)
 	}
 	// c2 is free to come again; c1 waits for the worker.
-	if _, held := a.running["c2"]; held {
+	if _, held := a.running[c2]; held {
 		t.Error("c2 still held")
 	}
 }
@@ -233,8 +247,8 @@ func TestStoppingAnswersTheBacklog(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &Agent{queue: q, commands: make(chan models.Command, 4), running: map[string]struct{}{}}
-	a.accept(models.Command{ID: "c1", Type: "wu_install"})
-	a.accept(models.Command{ID: "c2", Type: "sfc_scan"})
+	a.accept(models.Command{ID: c1, Type: "wu_install"})
+	a.accept(models.Command{ID: c2, Type: "sfc_scan"})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	a.wg.Add(1)
@@ -281,5 +295,219 @@ func TestAnEnrollmentOnHoldIsRecognised(t *testing.T) {
 	}
 	if enrollmentOnHold(errors.New("network down")) {
 		t.Error("a network error is not on hold")
+	}
+}
+
+// drain empties a queue, returning its items oldest first.
+func drain(t *testing.T, q *queue.Queue) []queue.Item {
+	t.Helper()
+	var out []queue.Item
+	for {
+		item, path, err := q.Peek()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item == nil {
+			return out
+		}
+		out = append(out, *item)
+		if err := q.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A command id names a file of the local queue and a path of the API: one
+// that is not a UUID is refused on arrival, never handed to the worker nor
+// queued (same class as audit S01).
+func TestAcceptRefusesACommandIDThatIsNotAUUID(t *testing.T) {
+	root := t.TempDir()
+	q, err := queue.New(filepath.Join(root, "a", "b", "queue"), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A backlog of one, already full: the path that writes to the queue.
+	a := &Agent{queue: q, commands: make(chan models.Command, 1), running: map[string]struct{}{}}
+	a.accept(models.Command{ID: c1, Type: "quick_scan"})
+	for _, id := range []string{"../../../escaped", `..\..\escaped`, "c1", "", c2 + "/x",
+		"3f1c2a4e9b7d4c1e8a2f0d5e6b7c8a90"} {
+		a.accept(models.Command{ID: id, Type: "quick_scan"})
+	}
+	if len(a.commands) != 1 || len(a.running) != 1 {
+		t.Errorf("handed on: %d in the backlog, %v held", len(a.commands), a.running)
+	}
+	if items := drain(t, q); len(items) != 0 {
+		t.Errorf("queued %+v", items)
+	}
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			t.Errorf("file written: %s", path)
+		}
+		return nil
+	})
+	// Either case of a UUID is a command id.
+	a.commands = make(chan models.Command, 2)
+	a.accept(models.Command{ID: strings.ToUpper(c3), Type: "quick_scan"})
+	if len(a.commands) != 1 {
+		t.Error("an upper-case UUID was refused")
+	}
+}
+
+// Audit B16, the residual race: the service stops between the heartbeat's
+// answer and the accept loop. The worker has drained its backlog and left; a
+// command accepted then must still get its `failed`, not sit in the channel.
+func TestACommandAcceptedAfterTheWorkerStoppedIsAnswered(t *testing.T) {
+	q, err := queue.New(t.TempDir(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{queue: q, commands: make(chan models.Command, 4), running: map[string]struct{}{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.wg.Add(1)
+	go a.worker(ctx)
+	cancel()
+	a.wg.Wait() // the worker has stopped and drained an empty backlog
+
+	a.accept(models.Command{ID: c1, Type: "quick_scan"})
+
+	if len(a.commands) != 0 {
+		t.Error("the command sits in a channel nobody reads")
+	}
+	items := drain(t, q)
+	if len(items) != 1 || items[0].CommandID != c1 || items[0].Result.Status != "failed" ||
+		!strings.Contains(items[0].Result.Error, "arrêt de l'agent") {
+		t.Errorf("queued %+v, want one failed verdict for %s", items, c1)
+	}
+	if len(a.running) != 0 {
+		t.Errorf("still held: %v", a.running)
+	}
+}
+
+// resultRecorder is a server answering every verdict with the status status
+// returns for its command id, and recording those it took.
+func resultRecorder(t *testing.T, status func(id string) int) (*httptest.Server, func() map[string]models.CommandResult) {
+	t.Helper()
+	var mu sync.Mutex
+	got := map[string]models.CommandResult{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/agent/commands/"), "/result")
+		code := status(id)
+		if code < 300 {
+			var res models.CommandResult
+			if err := json.NewDecoder(r.Body).Decode(&res); err != nil {
+				t.Errorf("decode: %v", err)
+			}
+			mu.Lock()
+			got[id] = res
+			mu.Unlock()
+		}
+		w.WriteHeader(code)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() map[string]models.CommandResult {
+		mu.Lock()
+		defer mu.Unlock()
+		return maps.Clone(got)
+	}
+}
+
+// Audit B34: a type this agent does not know is answered `failed`, naming the
+// agent version so the console says what to do — posted at once, and queued
+// when the server cannot take it.
+func TestAnUnknownTypeIsAnsweredFailedNamingTheVersion(t *testing.T) {
+	for _, up := range []bool{true, false} {
+		q, err := queue.New(t.TempDir(), 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv, got := resultRecorder(t, func(string) int {
+			if up {
+				return http.StatusOK
+			}
+			return http.StatusServiceUnavailable
+		})
+		a := &Agent{cfg: config.DefaultConfig(), queue: q, client: api.New(srv.URL, "tok", 5*time.Second, nil)}
+		a.execute(context.Background(), models.Command{ID: c1, Type: "format_c"})
+
+		var res models.CommandResult
+		if up {
+			res = got()[c1]
+			if items := drain(t, q); len(items) != 0 {
+				t.Errorf("delivered and queued: %+v", items)
+			}
+		} else {
+			items := drain(t, q)
+			if len(items) != 1 || items[0].CommandID != c1 {
+				t.Fatalf("server down: queued %+v", items)
+			}
+			res = items[0].Result
+		}
+		if res.Status != "failed" || !strings.Contains(res.Error, `"format_c"`) ||
+			!strings.Contains(res.Error, "l'agent "+Version) {
+			t.Errorf("server up=%v: verdict %+v", up, res)
+		}
+	}
+}
+
+// A verdict the server refuses for good (a 4xx other than 401, 403, 408, 429)
+// is dropped and the replay goes on; anything that may pass later stops it
+// with the queue intact.
+func TestFlushQueueSkipsAVerdictRefusedForGood(t *testing.T) {
+	for _, c := range []struct {
+		status  int
+		dropped bool
+	}{
+		{http.StatusBadRequest, true},
+		{http.StatusNotFound, false},
+		{http.StatusConflict, true},
+		{http.StatusUnprocessableEntity, true},
+		{http.StatusUnauthorized, false},
+		{http.StatusForbidden, false},
+		{http.StatusRequestTimeout, false},
+		{http.StatusTooManyRequests, false},
+		{http.StatusInternalServerError, false},
+		{http.StatusServiceUnavailable, false},
+	} {
+		t.Run(http.StatusText(c.status), func(t *testing.T) {
+			q, err := queue.New(t.TempDir(), 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{c1, c2} {
+				if err := q.Enqueue(queue.Item{CommandID: id, Result: models.CommandResult{Status: "failed"}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			srv, got := resultRecorder(t, func(id string) int {
+				if id == c1 {
+					return c.status
+				}
+				return http.StatusOK
+			})
+			a := &Agent{queue: q, client: api.New(srv.URL, "tok", 5*time.Second, nil)}
+			a.flushQueue(context.Background())
+
+			_, delivered := got()[c2]
+			if c.dropped {
+				if !delivered || q.Depth() != 0 {
+					t.Errorf("c2 delivered=%v, depth %d: the refused head blocks the queue", delivered, q.Depth())
+				}
+			} else if delivered || q.Depth() != 2 {
+				t.Errorf("c2 delivered=%v, depth %d: a verdict that may pass later was dropped", delivered, q.Depth())
+			}
+		})
+	}
+	// A network error stops the replay too.
+	q, err := queue.New(t.TempDir(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = q.Enqueue(queue.Item{CommandID: c1, Result: models.CommandResult{Status: "failed"}})
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close()
+	a := &Agent{queue: q, client: api.New(srv.URL, "tok", 5*time.Second, nil)}
+	a.flushQueue(context.Background())
+	if q.Depth() != 1 {
+		t.Error("a verdict was dropped on a network error")
 	}
 }

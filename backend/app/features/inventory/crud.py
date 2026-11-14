@@ -7,6 +7,7 @@ is excluded from every update set — it is the only historical fact these table
 carry, and re-reporting the same disk every day must not reset it.
 """
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import SQLModel, col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core import ratelimit
 from app.features.base import utcnow
 from app.features.inventory.models import (
     Disk,
@@ -28,6 +30,8 @@ from app.features.inventory.models import (
 )
 from app.features.inventory.schemas import InventoryReport
 from app.features.machine.models import Machine
+
+security_log = logging.getLogger("app.security")
 
 # Columns no upsert ever overwrites: the key it conflicted on, the machine it
 # belongs to, and the date it was first seen.
@@ -87,52 +91,78 @@ async def _replace_set(
 
 
 async def _catalogue_ids(
-    session: AsyncSession, triples: list[tuple[str, str, str]]
+    session: AsyncSession, triples: list[tuple[str, str, str]], machine_id: uuid.UUID
 ) -> dict[tuple[str, str, str], int]:
     """Ensure a catalogue row per (name, version, publisher), and return their ids.
 
     Two statements rather than one: ``ON CONFLICT DO NOTHING`` returns nothing
     for the rows that already existed, and on the second machine of a parc that
     is nearly all of them — so the ids have to be read back.
+
+    The entries the catalogue does not hold yet are created within the
+    poste's daily budget (``ratelimit.software_quota``): beyond it they are
+    left out — of the catalogue and of this poste's list — rather than let one
+    token grow the shared catalogue without bound (audit S21).
     """
     if not triples:
         return {}
+
+    async def known() -> dict[tuple[str, str, str], int]:
+        found = await session.exec(
+            select(Software).where(
+                tuple_(
+                    col(Software.name), col(Software.version), col(Software.publisher)
+                ).in_(triples)
+            )
+        )
+        return {
+            (s.name, s.version, s.publisher): s.id
+            for s in found.all()
+            if s.id is not None
+        }
+
+    ids = await known()
+    new = [t for t in triples if t not in ids]
+    if not new:
+        return ids
+    granted = ratelimit.software_quota.take(str(machine_id), len(new))
+    if granted < len(new):
+        security_log.warning(
+            "software catalogue budget exhausted for machine %s: %d new entries "
+            "left out",
+            machine_id,
+            len(new) - granted,
+        )
+    if not granted:
+        return ids
     now = utcnow()
     rows = [
         {"name": name, "version": version, "publisher": publisher, "first_seen": now}
-        for name, version, publisher in triples
+        for name, version, publisher in new[:granted]
     ]
     stmt = pg_insert(Software).values(rows)
     await session.exec(stmt.on_conflict_do_nothing(constraint="uq_software_identity"))
-    found = await session.exec(
-        select(Software).where(
-            tuple_(
-                col(Software.name), col(Software.version), col(Software.publisher)
-            ).in_(triples)
-        )
-    )
-    return {
-        (s.name, s.version, s.publisher): s.id for s in found.all() if s.id is not None
-    }
+    return await known()
 
 
 async def replace_software(
     session: AsyncSession, machine_id: uuid.UUID, reports: list[Any]
-) -> int:
-    """Make this machine's software list match what was reported.
+) -> bool:
+    """Make this machine's software list match what was reported. Returns
+    False when part of it was left out (the catalogue budget ran out).
 
     Entries without a name are dropped — the registry carries plenty, and
     "Applications et fonctionnalités" hides them for the same reason.
     """
     named = [r for r in reports if r.name]
     triples = sorted({(r.name, r.version, r.publisher) for r in named})
-    ids = await _catalogue_ids(session, triples)
+    ids = await _catalogue_ids(session, triples, machine_id)
 
     now = utcnow()
     rows: list[dict[str, Any]] = []
     for r in named:
         software_id = ids.get((r.name, r.version, r.publisher))
-        if software_id is None:  # pragma: no cover - the insert above created it
+        if software_id is None:  # beyond the catalogue budget
             continue
         rows.append(
             {
@@ -146,7 +176,7 @@ async def replace_software(
                 "last_seen": now,
             }
         )
-    return await _replace_set(
+    await _replace_set(
         session,
         MachineSoftware,
         constraint="uq_machine_software_identity",
@@ -154,6 +184,7 @@ async def replace_software(
         machine_id=machine_id,
         rows=rows,
     )
+    return len(ids) == len(triples)
 
 
 def _stamped(row: dict[str, Any], machine_id: uuid.UUID, now: Any) -> dict[str, Any]:
@@ -262,14 +293,17 @@ async def apply_inventory(
             machine_id=machine.id,
             rows=[_stamped(g.model_dump(), machine.id, now) for g in report.gpus],
         )
+    complete = True
     if report.software is not None:
-        await replace_software(session, machine.id, report.software)
+        complete = await replace_software(session, machine.id, report.software)
 
     # Written last, and only once everything above landed: the pair is what says
     # "the console's picture of this machine is this inventory, taken then". A
     # hash stored ahead of a failed write would have the next cycle skip the
     # repair (see the short-circuit in the heartbeat route).
-    machine.inventory_hash = report.hash or None
+    # Not stored when the software list was cut short: the same report sent
+    # again (an agent restart) is applied again, within the next budget.
+    machine.inventory_hash = (report.hash or None) if complete else None
     machine.inventory_last_seen = now
 
 
