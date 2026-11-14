@@ -1,7 +1,8 @@
 # Sécurité en continu (repris de natimai-paie) : secrets commis, dépendances
 # vulnérables des trois écosystèmes, image du backend, analyse statique.
 # Sur chaque PR, sur main, et chaque lundi pour les bases de vulnérabilités qui
-# évoluent sans que le dépôt change.
+# évoluent sans que le dépôt change. Chaque checkout oublie son jeton
+# (persist-credentials: false, audit S29) : aucun job ne pousse.
 name: Security
 
 on:
@@ -26,6 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           fetch-depth: 0
       # Binaire vérifié par empreinte plutôt qu'une action tierce : rien
       # d'autre que gitleaks ne tourne avec l'historique complet du dépôt.
@@ -50,6 +52,8 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       # --no-emit-project : le paquet local n'est pas sur PyPI, pip-audit ne
       # saurait pas l'auditer (et n'a pas à le faire).
@@ -64,6 +68,8 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
@@ -78,6 +84,8 @@ jobs:
         working-directory: agent
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: agent/go.mod
@@ -102,6 +110,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - run: docker build -t tiai-backend:ci ./backend
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -115,6 +125,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - run: docker build -t tiai-frontend:ci ./frontend
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -128,6 +140,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       # Règles maison (.semgrep/) : les invariants propres à Tia'i, bloquants.
       - name: Règles maison

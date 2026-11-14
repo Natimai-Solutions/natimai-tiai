@@ -616,7 +616,7 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
 - [x] CI GitHub Actions (backend : uv + ruff + mypy + pytest avec Postgres ; frontend : prettier + vue-tsc + vitest ; agent : gofmt + vet + go test + build croisé Windows ; action de couverture épinglée par SHA)
 - [x] Contrat d'erreurs API (`AppError` + handlers, enveloppe `{error:{code,message,details}}`, catalogue `ErrorCode` reflété côté frontend `errors.ts`) — migré depuis `HTTPException` (cf. §2.14), testé (8 tests backend de contrat + 6 frontend)
 
-**Audit 2026-11 : corrections** · ✅ fait le 2026-11-11. Plan d'ensemble, méthode et détail des constats dans `plan-audit-2026-11.md`. Les tâches propres à un chantier y sont détaillées dans son document de travail. Celles qui ne relèvent d'aucun chantier (authentification, console, infrastructure, agent) sont détaillées ici.
+**Audit 2026-11 : corrections** · ✅ fait le 2026-11-11. Plan d'ensemble, méthode et détail des constats dans `plan-audit-2026-11.md`. Une seconde passe de vérification, le 2026-11-13, a relevé des écarts résiduels, suivis dans `plan-audit-2026-11.md` §6. Les tâches propres à un chantier y sont détaillées dans son document de travail. Celles qui ne relèvent d'aucun chantier (authentification, console, infrastructure, agent) sont détaillées ici.
 
 - [x] **T01** · *P0 immédiate* — Agent : n'accepter qu'un UUID comme identifiant de paquet ([S01](plan-audit-2026-11.md#s01)), suivi dans `plan-deploiement-logiciel.md`
 - [x] **T02** · *P0 immédiate* — Méthode A : plus de fichier chargeable non signé à côté de l'exécutable ([S02](plan-audit-2026-11.md#s02)), suivi dans `plan-deploiement-logiciel.md`

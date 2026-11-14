@@ -31,6 +31,7 @@ class RateLimiter:
         self.max_attempts = max_attempts
         self.window = window_seconds
         self._hits: dict[str, deque[float]] = {}
+        self._last_sweep = float("-inf")
 
     def allow(self, key: str) -> bool:
         """Record one attempt for ``key``; False when the window is full."""
@@ -43,8 +44,12 @@ class RateLimiter:
             return False
         hits.append(now)
         # An attacker cycling through source addresses must cost memory for a
-        # window at most, not for the life of the process.
-        if len(self._hits) > 1024:
+        # window at most, not for the life of the process. At most one sweep
+        # per window: above the threshold with keys all still live (a parc of
+        # more than 1,024 postes heartbeating), a sweep frees nothing, and
+        # running it on every call would make each call walk the whole table.
+        if len(self._hits) > 1024 and now - self._last_sweep >= self.window:
+            self._last_sweep = now
             self._sweep(window_start)
         return True
 
@@ -57,6 +62,46 @@ class RateLimiter:
 
     def reset(self) -> None:
         self._hits.clear()
+        self._last_sweep = float("-inf")
+
+
+class Quota:
+    """A budget of units per key over a sliding window: ``take`` grants what
+    is left of it, possibly less than asked. Where a limiter counts requests,
+    this counts what they create — the software catalogue entries a poste
+    adds, say, whatever the number of heartbeats they ride (audit S21)."""
+
+    def __init__(self, units: int, window_seconds: float) -> None:
+        self.units = units
+        self.window = window_seconds
+        self._taken: dict[str, deque[tuple[float, int]]] = {}
+        self._last_sweep = float("-inf")
+
+    def _used(self, key: str, window_start: float) -> int:
+        taken = self._taken.get(key)
+        if taken is None:
+            return 0
+        while taken and taken[0][0] <= window_start:
+            taken.popleft()
+        return sum(n for _, n in taken)
+
+    def take(self, key: str, wanted: int) -> int:
+        """Grant up to ``wanted`` units to ``key`` and return how many."""
+        now = time.monotonic()
+        window_start = now - self.window
+        granted = max(0, min(wanted, self.units - self._used(key, window_start)))
+        if granted:
+            self._taken.setdefault(key, deque()).append((now, granted))
+        if len(self._taken) > 1024 and now - self._last_sweep >= self.window:
+            self._last_sweep = now
+            for k in list(self._taken):
+                if not self._used(k, window_start):
+                    del self._taken[k]
+        return granted
+
+    def reset(self) -> None:
+        self._taken.clear()
+        self._last_sweep = float("-inf")
 
 
 # One limiter per guarded surface, so hammering /enroll never locks the
@@ -77,10 +122,25 @@ enroll_limiter = RateLimiter(max_attempts=30, window_seconds=300)
 # stolen access token is the threat, and it works from anywhere (audit S04).
 password_change_limiter = RateLimiter(max_attempts=5, window_seconds=900)
 
-# Heartbeat: keyed on the poste. An agent polls once a minute, a few more
-# times around a command or a retry; a token in a loop — filling the software
-# catalogue, filing itself in rooms — is cut here (audit S21).
-heartbeat_limiter = RateLimiter(max_attempts=30, window_seconds=60)
+# Heartbeat: keyed on the poste. The agent polls every
+# heartbeat_interval_seconds (60 by default), once more at a service restart,
+# and backs off (doubling from that interval) after a failure: a legitimate
+# poste sends one or two a minute. AGENT_HEARTBEAT_MAX_PER_MINUTE (12, one per
+# five seconds on average) leaves room for an interval lowered to ten seconds
+# plus a restart, and cuts a token in a loop (filling the software catalogue,
+# filing itself in rooms) to about one request per five seconds (audit S21).
+heartbeat_limiter = RateLimiter(
+    max_attempts=settings.AGENT_HEARTBEAT_MAX_PER_MINUTE, window_seconds=60
+)
+
+# New software catalogue entries one poste may create per day
+# (SOFTWARE_NEW_ENTRIES_PER_DAY). A first inventory names at most MAX_SOFTWARE
+# (2,000) entries, and on a parc whose catalogue already exists nearly all of
+# them are known; a token in a loop used to add 2,000 new names per heartbeat
+# (audit S21). Same in-process trade-off as the limiters above.
+software_quota = Quota(
+    units=settings.SOFTWARE_NEW_ENTRIES_PER_DAY, window_seconds=24 * 3600
+)
 
 _ALL = (
     login_limiter,
@@ -92,41 +152,93 @@ _ALL = (
 
 
 class FailureMemory:
-    """When each (account, address) pair last failed a login.
+    """When each (account, address) pair last failed a login, and which
+    addresses last opened each account.
 
     What a locked account is guarded by (audit S03): the lock refuses the
     addresses that failed on the account recently, not the account itself —
     so anyone can no longer keep an administrator out by failing five times
     from a poste, while the addresses doing the guessing stay shut out.
+
+    That alone gives one guess per address during a lock, which a botnet or
+    an IPv6 prefix multiplies at will. So when more distinct addresses than
+    ``besieged_after`` have failed on an account within the window, the lock
+    turns account-wide again, except for the addresses that opened the
+    account recently — its owner's usual postes (``known``).
+
+    In process memory, like the rate limiter: the stack runs one API process
+    (``entrypoint.sh``). A restart forgets it; the lock itself is in the
+    database.
     """
+
+    _MAX_KEYS = 4096
+    _MAX_KNOWN = 8192
 
     def __init__(self) -> None:
         self._last: dict[tuple[str, str], float] = {}
+        self._known: dict[tuple[str, str], float] = {}
+
+    @staticmethod
+    def _window() -> float:
+        return settings.LOGIN_LOCKOUT_MINUTES * 60
 
     def note(self, account: str, ip: str) -> None:
         now = time.monotonic()
         self._last[(account, ip)] = now
-        if len(self._last) > 4096:
-            horizon = now - settings.LOGIN_LOCKOUT_MINUTES * 60
+        if len(self._last) > self._MAX_KEYS:
+            horizon = now - self._window()
             for key, at in list(self._last.items()):
                 if at <= horizon:
                     del self._last[key]
 
     def failed_recently(self, account: str, ip: str) -> bool:
         at = self._last.get((account, ip))
-        return at is not None and (
-            time.monotonic() - at < settings.LOGIN_LOCKOUT_MINUTES * 60
+        return at is not None and time.monotonic() - at < self._window()
+
+    def failing_addresses(self, account: str) -> int:
+        """How many distinct addresses failed on ``account`` in the window."""
+        horizon = time.monotonic() - self._window()
+        return sum(
+            1 for (acc, _), at in self._last.items() if acc == account and at > horizon
         )
 
+    def besieged(self, account: str) -> bool:
+        """Whether more addresses than one person uses have been guessing."""
+        return self.failing_addresses(account) >= besieged_after()
+
+    def succeeded(self, account: str, ip: str) -> None:
+        """``ip`` opened ``account``: it stays welcome through a siege."""
+        self._known.pop((account, ip), None)
+        self._known[(account, ip)] = time.monotonic()
+        if len(self._known) > self._MAX_KNOWN:
+            # Insertion order is age order: drop the oldest.
+            for key in list(self._known)[: len(self._known) - self._MAX_KNOWN]:
+                del self._known[key]
+
+    def known(self, account: str, ip: str) -> bool:
+        # How long an address that opened an account stays its owner's.
+        at = self._known.get((account, ip))
+        days = settings.LOGIN_KNOWN_ADDRESS_DAYS
+        return at is not None and time.monotonic() - at < days * 24 * 3600
+
     def forget(self, account: str, ip: str | None = None) -> None:
-        """Forget ``ip`` on ``account``, or every address when ``ip`` is None
-        (a new password: what was guessed before no longer matters)."""
+        """Forget ``ip``'s failures on ``account``, or every address's when
+        ``ip`` is None (a new password: what was guessed before no longer
+        matters)."""
         for key in list(self._last):
             if key[0] == account and (ip is None or key[1] == ip):
                 del self._last[key]
 
     def reset(self) -> None:
         self._last.clear()
+        self._known.clear()
+
+
+def besieged_after() -> int:
+    """Distinct failing addresses that turn a lock account-wide
+    (LOGIN_SIEGE_ADDRESSES, 10 by default): more than one person failing from
+    a few postes ever reaches."""
+    return settings.LOGIN_SIEGE_ADDRESSES
 
 
 login_failures = FailureMemory()
@@ -136,6 +248,7 @@ def reset_all() -> None:
     """Forget every recorded attempt (tests)."""
     for limiter in _ALL:
         limiter.reset()
+    software_quota.reset()
     login_failures.reset()
 
 

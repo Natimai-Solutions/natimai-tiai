@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -303,7 +304,12 @@ AUTO_ROOMS_PER_HOUR = 200
 
 
 async def room_for_key(
-    session: AsyncSession, key: str, name: str, *, adopt: bool = True
+    session: AsyncSession,
+    key: str,
+    name: str,
+    *,
+    adopt: bool = True,
+    capped: bool | None = None,
 ) -> tuple[Room | None, bool]:
     """The room the directory names by ``key``, created if missing.
 
@@ -313,7 +319,12 @@ async def room_for_key(
     as is, or suffixed when another key already holds it (two "Salle B12"
     OUs under two branches of the tree). Does not commit. Returns the room and
     whether it was created.
+
+    ``capped`` bounds the rooms created per hour (an agent's report); by
+    default, whenever ``adopt`` is off.
     """
+    if capped is None:
+        capped = not adopt
     result = await session.exec(select(Room).where(Room.ad_key == key))
     room = result.one_or_none()
     if room is not None:
@@ -334,7 +345,7 @@ async def room_for_key(
     # The directory allows far longer than the column (an AD « location » of
     # 125 characters is ordinary): cut, the suffix included (audit S07).
     name = name.strip()[:ROOM_NAME_MAX].strip() or key[:ROOM_NAME_MAX]
-    if not adopt:
+    if capped:
         recent = await session.scalar(
             select(func.count())
             .select_from(Room)
@@ -365,23 +376,26 @@ def reported_dn_consistent(machine: Machine) -> bool:
 
 
 async def place_from_directory(
-    session: AsyncSession, machine: Machine, source: str, *, from_agent: bool = False
+    session: AsyncSession,
+    machine: Machine,
+    source: str,
+    *,
+    from_agent: bool = False,
+    adopt: bool | None = None,
 ) -> bool:
     """File ``machine`` where the directory says, under ``source``. Returns
     whether a room was created on the way. A no-op in manual mode. Does not
     commit.
 
-    ``from_agent``: the reading arrives in a heartbeat, the agent's word —
-    an OU that its DN does not sit in is not taken, a room made by hand is
-    not adopted, and the rooms created per hour are bounded (audit S20)."""
+    An OU that the poste's own DN does not sit in is not taken, whoever asks:
+    the stored reading is the agent's word either way (audit S20).
+
+    ``from_agent``: the reading arrives in a heartbeat — a room made by hand
+    is not adopted, and the rooms created per hour are bounded (audit S20).
+    ``adopt`` overrides the first (the re-sync decides it per key)."""
     if source == "manual":
         return False
-    if (
-        from_agent
-        and source == "ad_ou"
-        and machine.ad_ou_dn
-        and not reported_dn_consistent(machine)
-    ):
+    if source == "ad_ou" and machine.ad_ou_dn and not reported_dn_consistent(machine):
         logger.warning(
             "directory: machine %s reports an OU its DN is not in, not filed",
             machine.id,
@@ -394,7 +408,12 @@ async def place_from_directory(
             machine.updated_at = utcnow()
             session.add(machine)
         return False
-    room, created = await room_for_key(session, *key, adopt=not from_agent)
+    room, created = await room_for_key(
+        session,
+        *key,
+        adopt=(not from_agent) if adopt is None else adopt,
+        capped=from_agent,
+    )
     if room is None:
         return False
     if machine.room_id != room.id:
@@ -402,6 +421,14 @@ async def place_from_directory(
         machine.updated_at = utcnow()
         session.add(machine)
     return created
+
+
+def _filable(machine: Machine, source: str) -> tuple[str, str] | None:
+    """The key ``machine`` would be filed by, None when it has none or when
+    its reported OU is not the one its DN sits in."""
+    if source == "ad_ou" and machine.ad_ou_dn and not reported_dn_consistent(machine):
+        return None
+    return directory_key(machine, source)
 
 
 @dataclass(frozen=True)
@@ -414,17 +441,54 @@ class SyncResult:
 async def sync_from_directory(session: AsyncSession, source: str) -> SyncResult:
     """Re-file every poste from its stored directory reading — what the console
     runs after ``ROOM_SOURCE`` changed, since the agents only send the block
-    when *their* reading changes. Does not commit."""
+    when *their* reading changes. Does not commit.
+
+    A room made by hand is adopted by the key that a strict majority of the
+    postes claiming its name report — not by whichever poste comes first: one
+    forged reading would otherwise take « B12 » and send the real postes to
+    « B12 (2) » (audit S20). On a tie no key adopts it, and the postes stay
+    where they are until the directory says something clearer."""
     if source == "manual":
         return SyncResult()
-    result = await session.exec(select(Machine))
+    machines = list((await session.exec(select(Machine))).all())
+
+    # Who claims each room made by hand, poste by poste.
+    claims: dict[uuid.UUID, Counter[tuple[str, str]]] = {}
+    for machine in machines:
+        key = _filable(machine, source)
+        if key is None:
+            continue
+        owned = await session.exec(select(Room.id).where(Room.ad_key == key[0]))
+        if owned.first() is not None:
+            continue
+        loose = await room_by_name(session, None, key[1])
+        if loose is not None and loose.ad_key is None:
+            claims.setdefault(loose.id, Counter())[key] += 1
+    adopting: set[str] = set()
+    for room_id, counter in claims.items():
+        (winner, votes), *_ = counter.most_common(1)
+        if votes * 2 > sum(counter.values()):
+            adopting.add(winner[0])
+            # Adopted before any poste is placed: the order of the rows must
+            # not decide who gets « Nom (2) ».
+            await room_for_key(session, *winner, adopt=True, capped=False)
+        else:
+            logger.warning(
+                "directory: room %s claimed by %d keys with no majority, not adopted",
+                room_id,
+                len(counter),
+            )
+
     placed = unplaced = created = 0
-    for machine in result.all():
-        if directory_key(machine, source) is None:
+    for machine in machines:
+        key = directory_key(machine, source)
+        if key is None:
             if machine.room_id is not None:
                 unplaced += 1
-        else:
+        elif _filable(machine, source) is not None:
             placed += 1
-        if await place_from_directory(session, machine, source):
+        if await place_from_directory(
+            session, machine, source, adopt=key is not None and key[0] in adopting
+        ):
             created += 1
     return SyncResult(placed=placed, unplaced=unplaced, rooms_created=created)

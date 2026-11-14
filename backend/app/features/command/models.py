@@ -184,6 +184,13 @@ class Command(SQLModel, table=True):
         default=None,
         sa_column=Column(ForeignKey("machines.id", ondelete="SET NULL"), nullable=True),
     )
+    # A ``wake_on_lan`` alone: the relays that claimed it and never answered,
+    # whose claim was released (``wol.relay.release_stale_claims``). They are
+    # not handed it again — a relay that drops wakes would otherwise take the
+    # same one back on its next heartbeat until it expired (audit B29).
+    released_relay_ids: list[str] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
     # Set on the package types alone: the package to install or remove. SET
     # NULL so that deleting a package leaves the history readable.
     package_id: uuid.UUID | None = Field(

@@ -132,7 +132,10 @@ watch(
     softwareName.value = null;
     if (id == null) return;
     try {
-      softwareName.value = softwareLabel(await getSoftware(id));
+      const found = await getSoftware(id);
+      // Another program picked meanwhile: this answer names the previous one.
+      if (props.modelValue.softwareId !== id) return;
+      softwareName.value = softwareLabel(found);
     } catch {
       // The generic label stays: the chip still says why the list is short.
     }

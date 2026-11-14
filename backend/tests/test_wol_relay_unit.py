@@ -117,7 +117,11 @@ def test_a_relay_is_trusted_only_when_settled_and_able():
     now = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
     old = now - timedelta(days=30)
     assert trusted_relay(machine(first_seen=old, agent_version="1.1.0"), now)
-    assert trusted_relay(machine(first_seen=old, agent_version=None), now)
+    # No version, or none that reads as one: nothing says it knows the
+    # command (audit T35).
+    assert not trusted_relay(machine(first_seen=old, agent_version=None), now)
+    assert not trusted_relay(machine(first_seen=old, agent_version="dev"), now)
+    assert not trusted_relay(machine(first_seen=old, agent_version="  "), now)
     assert not trusted_relay(machine(first_seen=now - timedelta(minutes=5)), now)
     assert not trusted_relay(machine(first_seen=old, needs_verification=True), now)
     assert not trusted_relay(machine(first_seen=old, token_revoked=True), now)

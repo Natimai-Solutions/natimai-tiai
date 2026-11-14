@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
@@ -177,6 +178,26 @@ async def update_intervention(
 ) -> InterventionOut:
     row = await _require_intervention(session, intervention_id, scope)
     fields = payload.model_dump(exclude_unset=True)
+    becomes_maintenance = (
+        payload.kind == InterventionKind.MAINTENANCE
+        and row.kind != InterventionKind.MAINTENANCE.value
+    )
+    if becomes_maintenance and fields.get("performed_at") is None:
+        # The date is not sent, so the request model did not check it: a
+        # line dated in the future (an old check closing, a legacy entry)
+        # turned into a maintenance would push the cycle out (audit B06).
+        try:
+            crud.not_in_the_future(row.performed_at)
+        except ValueError as exc:
+            raise RequestValidationError(
+                [
+                    {
+                        "loc": ("body", "performed_at"),
+                        "msg": f"Value error, {exc}",
+                        "type": "value_error",
+                    }
+                ]
+            ) from None
     if "kind" in fields:
         row.kind = payload.kind.value if payload.kind else row.kind
     if "title" in fields:

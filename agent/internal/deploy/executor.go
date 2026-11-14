@@ -146,7 +146,7 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 			// msiexec /x {code}: the agent built the command line, no file
 			// of the package is needed.
 			files = nil
-		} else if err := MethodAFiles(files, step.Run); err != nil {
+		} else if err := MethodAFiles(files, step.Run, policy.MethodAMaxBytes()); err != nil {
 			// The manifest is the server's word here: nothing it names
 			// besides the file that runs may be something Windows would
 			// load or run from that folder (audit S02).

@@ -651,3 +651,96 @@ async def test_a_check_goes_only_to_who_sees_the_poste(client, db_session):
         params={"machine_id": str(t.a.id)},
     )
     assert tech_a_id in {u["id"] for u in for_a.json()}
+
+
+async def test_a_maintenance_goes_only_to_who_sees_and_does_it(client, db_session):
+    """Audit S18 class (T32): a poste's or a room's maintenance owner must
+    read and record maintenance and see the poste (the room); checked when
+    the owner changes, not when the same one is sent again."""
+    from app.features.user import crud as user_crud
+    from app.features.user.permissions import BuiltinGroup
+    from tests.scope_helpers import account
+
+    t = await two_sites(client, db_session)
+    tech_a = await user_crud.get_by_email(db_session, "tech-a@test.local")
+    assert tech_a is not None
+    tech_a_id = str(tech_a.id)
+    await account(client, db_session, "ro@test.local", [BuiltinGroup.READONLY])
+    readonly = await user_crud.get_by_email(db_session, "ro@test.local")
+    assert readonly is not None
+    readonly_id = str(readonly.id)
+
+    refused = await client.patch(
+        f"/api/v1/machines/{t.b.id}/maintenance",
+        headers=t.admin,
+        json={"maintenance_owner_id": tech_a_id},
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"]["code"] == "maintenance.owner.out_of_reach"
+    # Sees everything, but cannot record a visit.
+    refused = await client.patch(
+        f"/api/v1/machines/{t.a.id}/maintenance",
+        headers=t.admin,
+        json={"maintenance_owner_id": readonly_id},
+    )
+    assert refused.status_code == 422, refused.text
+    ok = await client.patch(
+        f"/api/v1/machines/{t.a.id}/maintenance",
+        headers=t.admin,
+        json={"maintenance_owner_id": tech_a_id},
+    )
+    assert ok.status_code == 200, ok.text
+
+    rooms = {}
+    for name, site in (("Salle A", SITE_A), ("Salle B", SITE_B)):
+        resp = await client.post(
+            "/api/v1/rooms", headers=t.admin, json={"name": name, "location": site}
+        )
+        assert resp.status_code == 201, resp.text
+        rooms[site] = resp.json()["id"]
+    refused = await client.patch(
+        f"/api/v1/rooms/{rooms[SITE_B]}/maintenance",
+        headers=t.admin,
+        json={"maintenance_owner_id": tech_a_id},
+    )
+    assert refused.status_code == 422, refused.text
+    ok = await client.patch(
+        f"/api/v1/rooms/{rooms[SITE_A]}/maintenance",
+        headers=t.admin,
+        json={"maintenance_owner_id": tech_a_id},
+    )
+    assert ok.status_code == 200, ok.text
+
+    # The same owner sent again with another field is not re-checked: the
+    # account confined since must not block the form (B08).
+    from app.features.machine.models import Machine
+
+    m = await db_session.get(Machine, t.b.id)
+    m.maintenance_owner_id = uuid.UUID(tech_a_id)
+    db_session.add(m)
+    await db_session.commit()
+    again = await client.patch(
+        f"/api/v1/machines/{t.b.id}/maintenance",
+        headers=t.admin,
+        json={"maintenance_owner_id": tech_a_id, "maintenance_cycle_days": 30},
+    )
+    assert again.status_code == 200, again.text
+
+
+async def test_assignable_users_for_a_poste_out_of_the_callers_reach(
+    client, db_session
+):
+    """T32: ``machine_id`` is read within the caller's own scope."""
+    t = await two_sites(client, db_session)
+    hidden = await client.get(
+        "/api/v1/checks/assignable-users",
+        headers=t.scoped,
+        params={"machine_id": str(t.b.id)},
+    )
+    assert hidden.status_code == 404, hidden.text
+    seen = await client.get(
+        "/api/v1/checks/assignable-users",
+        headers=t.scoped,
+        params={"machine_id": str(t.a.id)},
+    )
+    assert seen.status_code == 200, seen.text

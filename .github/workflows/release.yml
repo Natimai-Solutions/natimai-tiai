@@ -59,7 +59,10 @@ concurrency:
   cancel-in-progress: false
 
 # Moindre privilège (audit S29) : lecture par défaut, et chaque droit
-# d'écriture sur le seul job qui en a besoin.
+# d'écriture sur le seul job qui en a besoin. Chaque checkout oublie son jeton
+# (persist-credentials: false) : aucun job ne pousse avec lui — la release est
+# publiée par `gh`, avec GH_TOKEN —, il ne reste donc pas dans .git/config à
+# portée des étapes suivantes.
 permissions:
   contents: read
 
@@ -72,6 +75,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -145,6 +150,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 — pour deploy/msi/Package.wxs
+        with:
+          persist-credentials: false
 
       - name: Récupérer les .exe
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -240,6 +247,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
@@ -295,6 +304,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           fetch-depth: 0 # --generate-notes a besoin de l'historique des tags
 
       # Seulement l'artefact du job Windows : il porte les .exe signés.

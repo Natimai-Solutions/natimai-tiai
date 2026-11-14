@@ -18,8 +18,6 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'auth.credentials.invalid': 'Identifiants invalides',
   'auth.required': 'Authentification requise',
   'auth.permission.denied': "Vous n'avez pas la permission requise",
-  'auth.account.locked':
-    'Compte verrouillé après trop d’essais. Réessayez plus tard ou depuis un autre poste, ou demandez à un administrateur de réinitialiser le mot de passe.',
   'auth.permission.escalation':
     'Refusé : vous ne pouvez accorder que les droits que vous détenez vous-même, sur les emplacements qui vous sont ouverts, et ne pouvez pas modifier un compte ou un groupe qui en détient davantage, ni les droits d’un groupe dont un membre en détient davantage (ni les administrateurs)',
   'auth.scope.restricted':
@@ -70,6 +68,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'check.assignee.out_of_reach':
     'Ce compte ne voit pas ce poste (ou ne lit pas les vérifications) : choisissez quelqu’un dont le périmètre le couvre',
   'maintenance.not_found': 'Séance de maintenance introuvable',
+  'maintenance.owner.out_of_reach':
+    'Ce compte ne peut pas suivre cette maintenance (droits de maintenance ou périmètre insuffisants) : choisissez quelqu’un dont le périmètre couvre ces postes',
   'room.placement.locked':
     "Les postes sont rangés par l'annuaire (ROOM_SOURCE) : le rattachement manuel est désactivé",
   'request.validation_error': 'Requête invalide',

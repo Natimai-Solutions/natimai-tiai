@@ -112,11 +112,11 @@ export function antivirusColor(
 }
 
 /**
- * Colour of the fiche's antivirus badge, the same as the machine list's
- * column: grey or red while the product itself is unknown or missing (the
- * badge then reads « Non relevé » or « Aucun », audit U28), and otherwise the
- * protection state — a named antivirus whose signatures are stale is red,
- * never green.
+ * Colour of the antivirus badge, on the fiche and in the machine list's
+ * column alike: grey or red while the product itself is unknown or missing
+ * (the badge then reads « Non relevé » or « Aucun », audit U28) — never green
+ * because Defender alone is up to date — and otherwise the protection state:
+ * a named antivirus whose signatures are stale is red, never green.
  */
 export function antivirusBadgeColor(
   name: string | null | undefined,

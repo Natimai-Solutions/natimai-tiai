@@ -1,5 +1,6 @@
 """Console-facing endpoints: list and inspect managed machines."""
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -614,6 +615,7 @@ def _sort_clause(
 # Characters a hand-typed MAC may carry between its bytes (Windows hyphenates,
 # Cisco dots) — stripped before matching against the stored colon form.
 _MAC_SEARCH_STRIP = str.maketrans("", "", ":-. ")
+_HEX = re.compile(r"[0-9A-Fa-f]+")
 
 
 def _search_clause(search: str) -> ColumnElement[bool]:
@@ -636,13 +638,12 @@ def _search_clause(search: str) -> ColumnElement[bool]:
         contains(col(Machine.av_product_name), search),
     ]
     compact = search.translate(_MAC_SEARCH_STRIP)
-    try:
-        int(compact, 16)
-    except ValueError:
-        pass
-    else:
+    # Hex digits and nothing else: ``int(x, 16)`` also takes "_" (PEP 515),
+    # "0x", a sign and spaces, and "_" is a LIKE wildcard (audit S26).
+    # Escaped all the same.
+    if _HEX.fullmatch(compact):
         clauses.append(
-            func.replace(col(Machine.mac_address), ":", "").ilike(f"%{compact}%")
+            contains(func.replace(col(Machine.mac_address), ":", ""), compact)
         )
     return or_(*clauses)
 

@@ -77,7 +77,7 @@ Le bouton « Installer un logiciel » est disponible sur un poste, une sélectio
 
 ### Console
 
-- La liste des postes s'ouvre avec moins de colonnes : Nom, Salle, Maintenance, Antivirus, MAJ Windows, Session et Vu le. Les autres restent disponibles dans « Colonnes ». La case de sélection et le nom restent visibles quand on fait défiler la liste horizontalement.
+- La liste des postes garde ses colonnes par défaut, inventaire compris (domaine, emplacement, bâtiment, IP, OS, version de l'agent, modèle, disque) ; seule « Utilisation » reste à ajouter depuis « Colonnes ». La colonne « Agent » s'appelle désormais « Version de l'agent ». Plus large que l'écran, la liste défile horizontalement, la case de sélection et le nom restant visibles.
 - Page Logiciels :
   - la recherche, le tri et la page sont conservés dans l'URL, donc au retour arrière ;
   - le filtre « Logiciel » de la liste des postes nomme le programme.
@@ -104,9 +104,9 @@ Le bouton « Installer un logiciel » est disponible sur un poste, une sélectio
   - Un mauvais mot de passe actuel compte comme un échec de connexion. S'il verrouille le compte, toutes ses sessions sont fermées.
 - **Mot de passe oublié.** Redemander un lien moins de 5 minutes après le précédent n'envoie pas de nouveau courriel ; le lien déjà reçu reste valable.
 - **Administrateurs délégués (comptes à périmètre restreint)** : certaines opérations jusqu'ici permises sont refusées, avec un message explicite.
-  - Modifier les permissions ou le périmètre d'un groupe dont on n'a pas soi-même les droits.
-  - Déplacer un bâtiment ou une salle vers un site hors de son périmètre (`auth.scope.restricted`).
-  - Affecter une vérification à un compte qui ne voit pas le poste (`check.assignee.out_of_reach`).
+  - Modifier les permissions ou le périmètre d'un groupe dont un membre détient plus de droits, ou des emplacements plus larges, que l'auteur de la modification (renommer le groupe ou changer sa description reste permis). Code `auth.permission.escalation`, message : « Refusé : vous ne pouvez accorder que les droits que vous détenez vous-même, sur les emplacements qui vous sont ouverts, et ne pouvez pas modifier un compte ou un groupe qui en détient davantage, ni les droits d’un groupe dont un membre en détient davantage (ni les administrateurs) ».
+  - Déplacer un bâtiment ou une salle vers un site hors de son périmètre. Code `auth.scope.restricted`, message : « Refusé : votre compte est limité à certains emplacements, et cette action en sort ».
+  - Affecter une vérification à un compte qui ne voit pas le poste. Code `check.assignee.out_of_reach`, message : « Ce compte ne voit pas ce poste (ou ne lit pas les vérifications) : choisissez quelqu’un dont le périmètre le couvre ».
   - Le journal d'audit n'affiche plus que les entrées sur les postes du périmètre et ses propres actions.
 - **Paramètres e-mail.** Changer l'hôte, le port, l'utilisateur ou le domaine d'envoi impose de ressaisir le mot de passe SMTP ou la clé Mailgun. Le secret enregistré n'est plus envoyé vers une nouvelle destination. Désactiver la vérification du certificat SMTP compte aussi comme un changement de destination.
 - **Commandes sans réponse.** Une commande remise ou en cours depuis plus de 24 heures (`COMMAND_UNANSWERED_HOURS`) passe en échec « sans réponse du poste ». Un verdict tardif du poste l'emporte.
@@ -123,13 +123,13 @@ Le bouton « Installer un logiciel » est disponible sur un poste, une sélectio
   - Un poste ne sert de relais qu'une fois enrôlé depuis au moins 60 minutes, avec un jeton valide et une identité confirmée.
   - Le réveil direct ne vise que des adresses privées, ou les réseaux listés dans `WOL_ALLOWED_NETWORKS`.
 - **Fréquence des contacts.** Un poste est limité à 30 contacts par minute ; au-delà, le serveur répond 429. L'agent en fait un par minute par défaut, la marge est donc large.
-- **Documentation de l'API.** L'interface OpenAPI (`/docs`) est désactivée hors environnement `local`. `EXPOSE_OPENAPI=true` la rétablit.
+- **Documentation de l'API.** Le schéma OpenAPI et ses pages `/docs` et `/redoc` ne sont plus servis hors environnement `local`. `EXPOSE_OPENAPI=true` les rétablit, mais derrière Caddy, qui ne transmet au backend que `/api/*`, seul le schéma JSON `/api/v1/openapi.json` redevient joignable.
 
 ---
 
 ## Sécurité
 
-L'audit 2026-11 a retenu 102 constats ; tous sont corrigés dans cette version. Les principaux :
+L'audit 2026-11 a retenu 102 constats ; cette version les corrige, à l'exception de l'écart connu signalé plus bas (chiffrement des sauvegardes). Les principaux :
 
 - **Agent** :
   - un identifiant de paquet qui n'est pas un UUID est refusé ;
@@ -164,7 +164,7 @@ L'audit 2026-11 a retenu 102 constats ; tous sont corrigés dans cette version. 
 | `ENROLLMENT_SECRET_PREVIOUS` | vide | Ancien secret d'enrôlement, accepté pendant une rotation |
 | `TRUSTED_PROXIES` | vide | Adresses ou réseaux de proxys de confiance en plus de Caddy |
 | `TRUSTED_PROXY_HOSTS` | `caddy` | Noms d'hôte des proxys de confiance |
-| `EXPOSE_OPENAPI` | `false` | Expose `/docs` hors environnement `local` |
+| `EXPOSE_OPENAPI` | `false` | Sert le schéma OpenAPI hors environnement `local` ; derrière Caddy, seul `/api/v1/openapi.json` est joignable |
 | `COMMAND_UNANSWERED_HOURS` | `24` | Délai avant qu'une commande sans réponse passe en échec |
 | `WOL_RELAY_MIN_AGE_MINUTES` | `60` | Ancienneté minimale d'un poste relais |
 | `WOL_RELAY_MIN_AGENT_VERSION` | `1.0.0` | Version minimale de l'agent relais |

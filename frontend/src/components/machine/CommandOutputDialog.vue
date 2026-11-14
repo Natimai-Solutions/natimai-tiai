@@ -1,6 +1,9 @@
 <template>
   <q-dialog v-model="open">
-    <q-card style="min-width: 480px; max-width: 90vw">
+    <!-- 480 px at least on a desktop, as wide as the output asks up to the
+         95vw cap — and never wider than a 375 px phone (audit U11), as the
+         merge dialog. -->
+    <q-card class="command-output-card">
       <q-card-section class="text-h6">
         {{ kind === 'error' ? "Détail de l'erreur" : 'Résultat de la commande' }}
       </q-card-section>
@@ -49,6 +52,10 @@ async function copy() {
 </script>
 
 <style scoped>
+.command-output-card {
+  min-width: min(480px, 95vw);
+  max-width: 95vw;
+}
 .command-output {
   margin: 0;
   max-height: 50vh;

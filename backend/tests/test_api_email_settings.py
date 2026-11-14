@@ -460,6 +460,100 @@ async def test_the_mailgun_key_does_not_follow_a_new_url(
     assert ok.json()["ok"] is True, ok.text
 
 
+async def test_the_environment_secret_does_not_follow_in_two_steps(
+    client, db_session, fake_smtp, monkeypatch
+):
+    """Audit S10, second pass: a dummy password typed with a new server, then
+    the field handed back to the ``.env`` (null), must not send the
+    environment's password to that server — through the test send, the
+    PATCH, or a settings row written before the rule."""
+    from app.core.config import settings as env
+    from app.features.setting import crud as setting_crud
+
+    monkeypatch.setattr(env, "SMTP_HOST", "smtp.corp.example")
+    monkeypatch.setattr(env, "SMTP_USER", "tiai@corp.example")
+    monkeypatch.setattr(env, "SMTP_PASSWORD", "ENV-SECRET-PW")
+    monkeypatch.setattr(env, "EMAIL_FROM_EMAIL", "tiai@corp.example")
+    admin = await _admin(client, db_session)
+    await _patch(
+        client,
+        admin,
+        provider="smtp",
+        smtp_host="evil.example",
+        smtp_port=25,
+        smtp_security="none",
+        smtp_password="dummy",
+    )
+
+    for json in (
+        {"email": {"smtp_password": None}},
+        {"email": {"smtp_password": None, "from_name": "Essai"}},
+    ):
+        tried = await client.post(
+            "/api/v1/settings/email/test", headers=admin, json=json
+        )
+        assert tried.status_code == 422, tried.text
+        assert tried.json()["error"]["details"]["fields"] == ["smtp_password"]
+    handed_back = await client.patch(
+        "/api/v1/settings", headers=admin, json={"email": {"smtp_password": None}}
+    )
+    assert handed_back.status_code == 422, handed_back.text
+    assert fake_smtp.instances == []
+
+    # A row left by an earlier version: the console's server, no password of
+    # its own. The environment's password stays home.
+    await setting_crud.set_value(db_session, "email.smtp_password", None, actor="x")
+    await db_session.commit()
+    sent = await client.post("/api/v1/settings/email/test", headers=admin, json={})
+    assert sent.status_code == 200, sent.text
+    assert fake_smtp.instances[-1].host == "evil.example"
+    assert fake_smtp.instances[-1].login_args == ("tiai@corp.example", "")
+
+    # Back on the environment's own server, the environment's password is
+    # used again, whatever the case of the host.
+    await _patch(
+        client,
+        admin,
+        smtp_host="SMTP.corp.example",
+        smtp_port=None,
+        smtp_security=None,
+        smtp_password=None,
+    )
+    again = await client.post("/api/v1/settings/email/test", headers=admin, json={})
+    assert again.json()["ok"] is True, again.text
+    assert fake_smtp.instances[-1].login_args == (
+        "tiai@corp.example",
+        "ENV-SECRET-PW",
+    )
+
+
+async def test_the_environment_mailgun_key_does_not_follow_in_two_steps(
+    client, db_session, monkeypatch
+):
+    from app.core.config import settings as env
+
+    monkeypatch.setattr(env, "MAILGUN_API_KEY", "ENV-MAILGUN-KEY")
+    monkeypatch.setattr(env, "MAILGUN_DOMAIN", "mg.corp.example")
+    fake_mailgun = _mailgun_answering(monkeypatch, 200)
+    admin = await _admin(client, db_session)
+    await _patch(
+        client,
+        admin,
+        provider="mailgun",
+        from_email="tiai@x.fr",
+        mailgun_base_url="https://collecteur.attaquant.example",
+        mailgun_api_key="dummy",
+    )
+    tried = await client.post(
+        "/api/v1/settings/email/test",
+        headers=admin,
+        json={"email": {"mailgun_api_key": None}},
+    )
+    assert tried.status_code == 422, tried.text
+    assert tried.json()["error"]["details"]["fields"] == ["mailgun_api_key"]
+    assert not [c for c in fake_mailgun if "url" in c]
+
+
 async def test_turning_the_certificate_check_off_needs_the_password(client, db_session):
     admin = await _admin(client, db_session)
     await _patch(

@@ -29,8 +29,6 @@ class ErrorCode(enum.StrEnum):
     AUTH_CREDENTIALS_INVALID = "auth.credentials.invalid"
     AUTH_REQUIRED = "auth.required"
     AUTH_PERMISSION_DENIED = "auth.permission.denied"
-    # Too many failed logins in a row: the account waits LOGIN_LOCKOUT_MINUTES.
-    AUTH_ACCOUNT_LOCKED = "auth.account.locked"
     # Refused because it would hand out, or reach, more than the caller holds:
     # a permission they lack, the administrators' group, or an account that is
     # more powerful than they are.
@@ -94,6 +92,9 @@ class ErrorCode(enum.StrEnum):
     # the poste (audit S18).
     CHECK_ASSIGNEE_OUT_OF_REACH = "check.assignee.out_of_reach"
     MAINTENANCE_NOT_FOUND = "maintenance.not_found"
+    # The owner given to a poste's or a room's maintenance cannot read and
+    # record maintenance, or does not see the poste or the room (audit T32).
+    MAINTENANCE_OWNER_OUT_OF_REACH = "maintenance.owner.out_of_reach"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     RATE_LIMITED = "request.rate_limited"
