@@ -15,8 +15,10 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"tiai/agent/internal/deploy"
 	"tiai/agent/internal/models"
@@ -32,8 +34,23 @@ type StatusError struct {
 	Body       string
 }
 
+// Error renders the body on one line: an error ends up in the agent's log, and
+// in a verdict, and the body is whatever answered — the server, or anything
+// that stood in for it. With its line breaks it could write lines of its own
+// there. Body itself is left as received, for whoever reads it (a code in it).
 func (e *StatusError) Error() string {
-	return fmt.Sprintf("status %d: %s", e.StatusCode, e.Body)
+	return fmt.Sprintf("status %d: %s", e.StatusCode, singleLine(e.Body))
+}
+
+// singleLine replaces every control character, and the two Unicode line
+// separators, with a space.
+func singleLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 // Client talks to the Tiai API.

@@ -462,3 +462,30 @@ type DeployTrust struct {
 	// announce in all (DeployMethodAMaxGB). 0: the agent's default.
 	MethodAMaxGB int
 }
+
+// MaxDeployMethodAMaxGB is the largest DeployMethodAMaxGB taken: 1 TiB, far
+// above any installer, and what keeps the value from overflowing once it is
+// turned into bytes.
+const MaxDeployMethodAMaxGB = 1024
+
+// deployMethodAMaxGB decides what a DeployMethodAMaxGB registry value sets:
+// the cap in GiB, or 0 — the agent's default — when there is none to take.
+// warning is the line to log when a value is there but cannot be used: an
+// administrator who set 0 to switch method A off, 2048, or a REG_SZ "16",
+// would otherwise go on believing the cap is the one they wrote.
+//
+// absent tells a value that is not set, which is no one's mistake, from every
+// other reading failure (readErr), which is: a value of another type, above
+// all.
+func deployMethodAMaxGB(v uint64, readErr error, absent bool) (gb int, warning string) {
+	const ignored = "config: DeployMethodAMaxGB ignored, method A keeps its default cap: "
+	switch {
+	case absent:
+		return 0, ""
+	case readErr != nil:
+		return 0, fmt.Sprintf(ignored+"not a number (REG_DWORD expected): %v", readErr)
+	case v < 1 || v > MaxDeployMethodAMaxGB:
+		return 0, fmt.Sprintf(ignored+"%d is outside 1 to %d (GiB)", v, MaxDeployMethodAMaxGB)
+	}
+	return int(v), ""
+}

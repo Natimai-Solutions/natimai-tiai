@@ -407,9 +407,18 @@ type PackageFileEntry struct {
 // from the next request on, which is what retires the old one server-side.
 // Until then the old token stays valid, so an agent that cannot store the new
 // one simply keeps using the old one and is offered another later.
+//
+// ResendInventory asks for the inventory block again although it has not
+// changed: the server does not hold all of what was reported (the software
+// list it kept was cut short by its catalogue budget), and an agent that only
+// sends what differs from its last report would otherwise stay silent until
+// its next restart. Absent from an older server, which reads as false. The
+// agent re-sends on its next heartbeat, with or without the software list as
+// ReportSoftware says (agent.resendInventory).
 type HeartbeatResponse struct {
-	Commands []Command `json:"commands"`
-	NewToken string    `json:"new_token,omitempty"`
+	Commands        []Command `json:"commands"`
+	NewToken        string    `json:"new_token,omitempty"`
+	ResendInventory bool      `json:"resend_inventory,omitempty"`
 }
 
 // CommandResult is posted back after executing a command.

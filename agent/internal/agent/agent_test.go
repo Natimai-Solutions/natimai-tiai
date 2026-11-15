@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -12,12 +14,14 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"tiai/agent/internal/api"
 	"tiai/agent/internal/collector"
 	"tiai/agent/internal/config"
+	"tiai/agent/internal/logging"
 	"tiai/agent/internal/models"
 	"tiai/agent/internal/queue"
 )
@@ -449,23 +453,35 @@ func TestAnUnknownTypeIsAnsweredFailedNamingTheVersion(t *testing.T) {
 	}
 }
 
-// A verdict the server refuses for good (a 4xx other than 401, 403, 408, 429)
-// is dropped and the replay goes on; anything that may pass later stops it
-// with the queue intact.
+// A verdict the server refuses for good is dropped and the replay goes on:
+// that is a 422, the one refusal its result route writes (besides the 401 of
+// a token). Every other status stops the replay with the queue intact — it
+// may pass later, or it was answered by something on the way (a proxy's 407,
+// a portal's 400, a WAF's 405…) that answers every verdict alike, and would
+// otherwise empty the whole queue in one poll.
 func TestFlushQueueSkipsAVerdictRefusedForGood(t *testing.T) {
 	for _, c := range []struct {
 		status  int
 		dropped bool
 	}{
-		{http.StatusBadRequest, true},
-		{http.StatusNotFound, false},
-		{http.StatusConflict, true},
 		{http.StatusUnprocessableEntity, true},
+		{http.StatusBadRequest, false},
 		{http.StatusUnauthorized, false},
+		{http.StatusPaymentRequired, false},
 		{http.StatusForbidden, false},
+		{http.StatusNotFound, false},
+		{http.StatusMethodNotAllowed, false},
+		{http.StatusNotAcceptable, false},
+		{http.StatusProxyAuthRequired, false},
 		{http.StatusRequestTimeout, false},
+		{http.StatusConflict, false},
+		{http.StatusGone, false},
+		{http.StatusRequestEntityTooLarge, false},
+		{http.StatusUnsupportedMediaType, false},
 		{http.StatusTooManyRequests, false},
+		{http.StatusUnavailableForLegalReasons, false},
 		{http.StatusInternalServerError, false},
+		{http.StatusBadGateway, false},
 		{http.StatusServiceUnavailable, false},
 	} {
 		t.Run(http.StatusText(c.status), func(t *testing.T) {
@@ -509,5 +525,187 @@ func TestFlushQueueSkipsAVerdictRefusedForGood(t *testing.T) {
 	a.flushQueue(context.Background())
 	if q.Depth() != 1 {
 		t.Error("a verdict was dropped on a network error")
+	}
+}
+
+// A middlebox answering every request alike — here a forward proxy's 407 —
+// must cost the queue nothing: before, one poll dropped every verdict in it.
+func TestFlushQueueKeepsEverythingBehindABlanketRefusal(t *testing.T) {
+	q, err := queue.New(t.TempDir(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{c1, c2, c3} {
+		if err := q.Enqueue(queue.Item{CommandID: id, Result: models.CommandResult{Status: "succeeded"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var blanket atomic.Int64
+	blanket.Store(http.StatusProxyAuthRequired)
+	srv, got := resultRecorder(t, func(string) int { return int(blanket.Load()) })
+	a := &Agent{queue: q, client: api.New(srv.URL, "tok", 5*time.Second, nil)}
+	a.flushQueue(context.Background())
+	if q.Depth() != 3 {
+		t.Fatalf("depth %d after a poll through a proxy answering 407, want the 3 verdicts kept", q.Depth())
+	}
+	// The proxy lets go: everything is delivered, in order, nothing was lost.
+	blanket.Store(http.StatusOK)
+	a.flushQueue(context.Background())
+	if q.Depth() != 0 || len(got()) != 3 {
+		t.Errorf("depth %d, delivered %v", q.Depth(), got())
+	}
+}
+
+// Audit B16, what keeps it closed: accept sends to the worker under the lock
+// the worker takes to stop. The seam stands at the send itself; from there the
+// test stops the worker. If the lock is held, the worker cannot get past
+// stop() before the command is in the channel, and drains it. If it is not —
+// the send moved back out of the lock — the worker is left to stop and drain
+// an empty backlog first, exactly the interleaving that used to leave a
+// command in a channel nobody reads, with no verdict.
+func TestAcceptSendsUnderTheLockTheWorkerStopsWith(t *testing.T) {
+	q, err := queue.New(t.TempDir(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{queue: q, commands: make(chan models.Command, 4), running: map[string]struct{}{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	a.beforeEnqueue = func() {
+		// accept has seen `stopped` false and is about to send.
+		locked := !a.mu.TryLock()
+		if !locked {
+			a.mu.Unlock()
+		}
+		a.wg.Add(1)
+		go a.worker(ctx) // the service stops: the worker closes and drains
+		if !locked {
+			a.wg.Wait() // nothing holds it back: it is gone before the send
+		}
+	}
+
+	a.accept(models.Command{ID: c1, Type: "quick_scan"})
+	a.wg.Wait()
+
+	if n := len(a.commands); n != 0 {
+		t.Errorf("%d command(s) sit in a channel nobody reads", n)
+	}
+	items := drain(t, q)
+	if len(items) != 1 || items[0].CommandID != c1 || items[0].Result.Status != "failed" ||
+		!strings.Contains(items[0].Result.Error, "arrêt de l'agent") {
+		t.Errorf("queued %+v, want one failed verdict for %s", items, c1)
+	}
+	if len(a.running) != 0 {
+		t.Errorf("still held: %v", a.running)
+	}
+}
+
+// captureLog collects what the agent logs during a test, without timestamps:
+// one logged line is then one line of the result, starting with its prefix.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	out, flags := log.Writer(), log.Flags()
+	t.Cleanup(func() {
+		log.SetOutput(out)
+		log.SetFlags(flags)
+		logging.SetLevel("info")
+	})
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	logging.SetLevel("debug")
+	return &buf
+}
+
+// A command type is the server's string, and it reaches the log before
+// anything has checked it: on every path that declines a command. Written
+// with %q, a line break in it stays inside the quotes — it cannot start a
+// line of its own that reads as the agent's.
+func TestACommandTypeCannotForgeALogLine(t *testing.T) {
+	const forged = "agent: first heartbeat accepted by the server"
+	evil := "quick_scan\n" + forged + "\r\n" + forged
+	newAgent := func(backlog int) *Agent {
+		q, err := queue.New(t.TempDir(), 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &Agent{cfg: config.DefaultConfig(), queue: q,
+			commands: make(chan models.Command, backlog), running: map[string]struct{}{}}
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	for name, run := range map[string]func(){
+		"already in flight": func() {
+			a := newAgent(4)
+			a.accept(models.Command{ID: c1, Type: "quick_scan"})
+			a.accept(models.Command{ID: c1, Type: evil})
+		},
+		"accepted after the worker stopped": func() {
+			a := newAgent(4)
+			a.stopped = true
+			a.accept(models.Command{ID: c1, Type: evil})
+		},
+		"backlog full": func() {
+			a := newAgent(1)
+			a.accept(models.Command{ID: c1, Type: "quick_scan"})
+			a.accept(models.Command{ID: c2, Type: evil})
+		},
+		"abandoned on stop": func() {
+			a := newAgent(4)
+			a.accept(models.Command{ID: c1, Type: evil})
+			a.wg.Add(1)
+			a.worker(cancelled)
+		},
+		"unknown type refused": func() {
+			a := newAgent(4)
+			srv, _ := resultRecorder(t, func(string) int { return http.StatusOK })
+			a.client = api.New(srv.URL, "tok", 5*time.Second, nil)
+			a.execute(context.Background(), models.Command{ID: c1, Type: evil})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			buf := captureLog(t)
+			run()
+			out := buf.String()
+			if !strings.Contains(out, "quick_scan") {
+				t.Fatalf("the path logged nothing about the command:\n%s", out)
+			}
+			for _, line := range strings.FieldsFunc(out, func(r rune) bool { return r == '\n' || r == '\r' }) {
+				if strings.HasPrefix(line, forged) {
+					t.Errorf("a command type wrote a log line of its own:\n%s", out)
+				}
+			}
+		})
+	}
+}
+
+// The same holds for the machine id an enrollment answers with: the server's
+// string, logged once, quoted.
+func TestAnEnrolledMachineIDCannotForgeALogLine(t *testing.T) {
+	const forged = "agent: token renewed by the server, stored and in use"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(models.EnrollResponse{MachineID: "m1\n" + forged, Token: "tok"})
+	}))
+	t.Cleanup(srv.Close)
+	stubSave(t, func(string, string) error { return nil })
+	a := &Agent{
+		cfg:     config.DefaultConfig(),
+		cfgPath: filepath.Join(t.TempDir(), "config.yaml"),
+		client:  api.New(srv.URL, "", 5*time.Second, nil),
+	}
+	buf := captureLog(t)
+	if err := a.ensureEnrolled(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "enrolled as machine") {
+		t.Fatalf("enrollment not logged:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, forged) {
+			t.Errorf("a machine id wrote a log line of its own:\n%s", out)
+		}
 	}
 }

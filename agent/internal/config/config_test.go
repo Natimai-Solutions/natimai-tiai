@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -448,5 +449,43 @@ func TestLoadRefusesHTTPUnlessAllowed(t *testing.T) {
 	write("api_base_url: ftp://tiai.lycee.local\n")
 	if _, err := Load(path); err == nil {
 		t.Fatal("ftp accepted")
+	}
+}
+
+// DeployMethodAMaxGB: a value that is there and cannot be used is said, once
+// per reading — an administrator who wrote 0, 2048 or a REG_SZ must not go on
+// believing the cap is theirs. A value that is simply not set says nothing.
+func TestDeployMethodAMaxGBSaysWhenAValueIsUnusable(t *testing.T) {
+	wrongType := errors.New("unexpected key value type")
+	notSet := errors.New("the system cannot find the file specified")
+	for _, c := range []struct {
+		name    string
+		value   uint64
+		readErr error
+		absent  bool
+		want    int
+		warns   bool
+	}{
+		{name: "not set", readErr: notSet, absent: true},
+		{name: "lowest", value: 1, want: 1},
+		{name: "usual", value: 16, want: 16},
+		{name: "highest", value: MaxDeployMethodAMaxGB, want: MaxDeployMethodAMaxGB},
+		{name: "zero", value: 0, warns: true},
+		{name: "above the ceiling", value: MaxDeployMethodAMaxGB + 1, warns: true},
+		{name: "a QWORD that would overflow", value: 1 << 62, warns: true},
+		{name: "wrong type", readErr: wrongType, warns: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			gb, warning := deployMethodAMaxGB(c.value, c.readErr, c.absent)
+			if gb != c.want {
+				t.Errorf("cap = %d GiB, want %d (0: the agent's default)", gb, c.want)
+			}
+			if (warning != "") != c.warns {
+				t.Errorf("warning = %q, want one: %v", warning, c.warns)
+			}
+			if c.warns && (!strings.Contains(warning, "DeployMethodAMaxGB") || strings.Contains(warning, "\n")) {
+				t.Errorf("warning %q must be one line naming the value", warning)
+			}
+		})
 	}
 }

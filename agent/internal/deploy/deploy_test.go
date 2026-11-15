@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -140,10 +141,44 @@ func signedPE(t *testing.T, signerCN string) []byte {
 // --- manifest ------------------------------------------------------------------
 
 func TestParseManifestRefusesWhatIsNotAPlainFile(t *testing.T) {
-	for _, name := range []string{`..\evil.exe`, `C:\Windows\x.exe`, "a/b.exe", "con.exe", "x.exe:stream", "trailing. "} {
+	for _, name := range []string{`..\evil.exe`, `C:\Windows\x.exe`, "a/b.exe", "con.exe", "x.exe:stream", "trailing. ",
+		"nul .cab", "con .txt", "COM1  .exe"} {
 		raw := manifestFor(t, "p", map[string][]byte{name: []byte("x")}, &Step{Run: name})
 		if _, err := ParseManifest(raw, "p"); err == nil {
 			t.Errorf("%q accepted", name)
+		}
+	}
+}
+
+// A reserved device name is one by its stem — what precedes the first dot —
+// in any case, and whatever spaces or dots trail it: Windows drops them
+// before it looks the name up, so "nul .cab" is NUL. The server applies the
+// same rule (backend/app/features/package/manifest.py, valid_file_name).
+func TestValidFileNameRefusesAReservedDeviceStem(t *testing.T) {
+	for _, name := range []string{
+		"con", "CON", "prn", "aux", "nul", "com1", "COM9", "lpt1", "LPT9", "com0", "lpt0",
+		"con.txt", "NUL.cab", "nul.tar.gz", "Aux.h", "com1.exe", "lpt1.txt",
+		// A space, or several, before the extension.
+		"nul .cab", "con .txt", "NUL  .cab", "Prn .txt", "aux .tar.gz", "com1 .exe", "LPT9 .txt",
+		// Dots and spaces mixed after the stem.
+		"nul..cab", "nul. .cab", "nul . .cab", "con ..txt", "con .a b.txt",
+		// Superscript digits, which Windows takes after COM and LPT: outside
+		// what a file name may hold at all.
+		"com¹", "COM².txt", "lpt³ .txt",
+		// Never a trailing dot or space, device or not.
+		"nul ", "nul.", "setup.exe ", "setup.exe.",
+	} {
+		if ValidFileName(name) {
+			t.Errorf("%q accepted", name)
+		}
+	}
+	for _, name := range []string{
+		"console.exe", "con1.txt", "nul-device.txt", "nulle part.txt", "con txt.cab", "auxiliary.dll",
+		"com10.txt", "lpt.txt", "com.exe", "setup con.exe", "a.nul", "x.con .txt", "data .cab",
+		"Install_PRNclient.exe", "ClientPRONOTE.iss", "prn(1).txt",
+	} {
+		if !ValidFileName(name) {
+			t.Errorf("%q refused", name)
 		}
 	}
 }
@@ -547,9 +582,23 @@ type fakeEnv struct {
 	trusted bool
 	ran     []string
 	code    int64
+	// failDownload fails the download of the named file with the given
+	// error, after writing half of it — what a dropped transfer leaves.
+	failDownload map[string]error
+	// fetched names the files actually transferred: like the real Download,
+	// a file already there and intact is not fetched again.
+	fetched []string
 }
 
 func (e *fakeEnv) Download(_ context.Context, _ string, f FileRef, dest string) error {
+	if err := e.failDownload[f.Name]; err != nil {
+		_ = os.WriteFile(dest, e.files[f.Name][:len(e.files[f.Name])/2], 0o600)
+		return err
+	}
+	if got, err := os.ReadFile(dest); err == nil && bytes.Equal(got, e.files[f.Name]) {
+		return nil
+	}
+	e.fetched = append(e.fetched, f.Name)
 	return os.WriteFile(dest, e.files[f.Name], 0o600)
 }
 func (e *fakeEnv) VerifyAuthenticode(string) (string, error) {
@@ -746,5 +795,252 @@ func TestExecutePrunesWhatAnEarlierAttemptLeft(t *testing.T) {
 	}
 	if len(names) != 2 || slices.Contains(names, "version.dll") || slices.Contains(names, "sub") {
 		t.Errorf("left in the folder: %v", names)
+	}
+}
+
+// methodAPackage is a method A package for id: a signed installer and one
+// data file, plus whatever extra names.
+func methodAPackage(t *testing.T, env *fakeEnv, id string, extra map[string][]byte) *models.PackageDelivery {
+	t.Helper()
+	env.files = map[string][]byte{
+		"setup.exe": signedPE(t, "INDEX EDUCATION SAS"),
+		"data.cab":  []byte("some data the installer reads"),
+	}
+	for name, content := range extra {
+		env.files[name] = content
+	}
+	raw := manifestFor(t, id, env.files, &Step{Run: "setup.exe", Args: []string{"/S"}})
+	return &models.PackageDelivery{ID: id, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+}
+
+// Audit S24, the residual: the cap is per manifest, and the package id is the
+// server's to choose. A method A run refused for a reason no retry lifts must
+// not leave its folder — up to the cap, per id, for as many ids as a server
+// sends. What a retry resumes stays.
+func TestMethodARefusalThatNoRetryLiftsLeavesNoFolder(t *testing.T) {
+	approved := Policy{Publishers: []string{"INDEX EDUCATION SAS"}}
+	for _, c := range []struct {
+		name string
+		// arrange tunes the environment, and may replace the package or the
+		// policy.
+		arrange func(t *testing.T, env *fakeEnv, pkg **models.PackageDelivery, policy *Policy)
+		kept    bool
+	}{
+		{"signature refused by Windows", func(_ *testing.T, env *fakeEnv, _ **models.PackageDelivery, _ *Policy) {
+			env.trusted = false
+		}, false},
+		{"publisher not approved", func(_ *testing.T, _ *fakeEnv, _ **models.PackageDelivery, policy *Policy) {
+			policy.Publishers = []string{"Someone Else"}
+		}, false},
+		{"installer not signed at all", func(t *testing.T, env *fakeEnv, pkg **models.PackageDelivery, _ *Policy) {
+			env.files = map[string][]byte{"setup.exe": []byte("MZ, and nothing a signature would be read from")}
+			raw := manifestFor(t, pronoteID, env.files, &Step{Run: "setup.exe"})
+			*pkg = &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+		}, false},
+		{"loadable file next to the installer", func(t *testing.T, env *fakeEnv, pkg **models.PackageDelivery, _ *Policy) {
+			*pkg = methodAPackage(t, env, pronoteID, map[string][]byte{"version.dll": []byte("MZ")})
+		}, false},
+		{"announced size above the cap", func(t *testing.T, env *fakeEnv, pkg **models.PackageDelivery, _ *Policy) {
+			m := Manifest{Format: "tiai-package-1", PackageID: pronoteID, Install: &Step{Run: "setup.exe"},
+				Files: []FileRef{{Name: "setup.exe", SHA256: sha(env.files["setup.exe"]), Size: 1 << 40}}}
+			raw, err := json.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			*pkg = &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+		}, false},
+		{"not an executable", func(t *testing.T, env *fakeEnv, pkg **models.PackageDelivery, _ *Policy) {
+			raw := manifestFor(t, pronoteID, env.files, &Step{Run: "data.cab"})
+			*pkg = &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+		}, false},
+		{"download refused for good", func(_ *testing.T, env *fakeEnv, _ **models.PackageDelivery, _ *Policy) {
+			env.failDownload = map[string]error{"setup.exe": errors.New("empreinte SHA-256 différente de celle du manifeste : fichier rejeté")}
+		}, false},
+		// What a retry resumes.
+		{"network dropped", func(_ *testing.T, env *fakeEnv, _ **models.PackageDelivery, _ *Policy) {
+			env.failDownload = map[string]error{"setup.exe": &RetryLater{Err: errors.New("transfert interrompu")}}
+		}, true},
+		{"service stopping mid-download", func(_ *testing.T, env *fakeEnv, _ **models.PackageDelivery, _ *Policy) {
+			env.failDownload = map[string]error{"setup.exe": context.Canceled}
+		}, true},
+		{"budget spent mid-download", func(_ *testing.T, env *fakeEnv, _ **models.PackageDelivery, _ *Policy) {
+			env.failDownload = map[string]error{"setup.exe": context.DeadlineExceeded}
+		}, true},
+		{"installer exit code not accepted", func(_ *testing.T, env *fakeEnv, _ **models.PackageDelivery, _ *Policy) {
+			env.code = 1603
+		}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true}
+			pkg := methodAPackage(t, env, pronoteID, nil)
+			policy := approved
+			c.arrange(t, env, &pkg, &policy)
+
+			// An earlier attempt left this folder, with a file in it: the
+			// refusals that come before anything is downloaded find it too.
+			dir := filepath.Join(env.PackagesDir(), pronoteID)
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "data.cab"), env.files["data.cab"], 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// Another package's folder is not this run's to remove.
+			other := filepath.Join(env.PackagesDir(), signedID)
+			if err := os.MkdirAll(other, 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := Execute(context.Background(), env, policy, "package_install", pkg); err == nil {
+				t.Fatal("the run was not refused")
+			}
+			if len(env.ran) != 0 && !c.kept {
+				t.Errorf("ran = %v", env.ran)
+			}
+			_, err := os.Stat(dir)
+			if c.kept && err != nil {
+				t.Errorf("a retry would have resumed, and the folder is gone: %v", err)
+			}
+			if !c.kept && !os.IsNotExist(err) {
+				entries, _ := os.ReadDir(dir)
+				t.Errorf("the folder outlived a refusal no retry lifts (%d file(s) in it)", len(entries))
+			}
+			if _, err := os.Stat(other); err != nil {
+				t.Errorf("another package's folder was touched: %v", err)
+			}
+		})
+	}
+}
+
+// Under method B the manifest is the administrator's: a failed run keeps its
+// folder as before, whatever the failure — the id and the sizes are not the
+// server's word there.
+func TestMethodBFailureKeepsItsFolder(t *testing.T) {
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}}
+	env.files = map[string][]byte{"setup.exe": []byte("unsigned installer"), "app.msi": []byte("msi")}
+	env.failDownload = map[string]error{"app.msi": errors.New("GET …: status 404")}
+	raw := manifestFor(t, signedID, env.files, &Step{Run: MsiExec, Args: []string{"/i", "{dir}/app.msi", "/qn"}})
+	sig, cert, der := signRSA(t, raw)
+	pkg := &models.PackageDelivery{ID: signedID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw),
+		Signature: sig, SignatureAlgorithm: "rsa-pkcs1-sha256", Certificate: cert}
+	if _, err := Execute(context.Background(), env, Policy{Signers: []string{thumb(der)}}, "package_install", pkg); err == nil {
+		t.Fatal("a failed download went through")
+	}
+	if _, err := os.Stat(filepath.Join(env.PackagesDir(), signedID)); err != nil {
+		t.Errorf("method B folder removed: %v", err)
+	}
+}
+
+// age sets the modification time of path to d before now.
+func age(t *testing.T, path string, now time.Time, d time.Duration) {
+	t.Helper()
+	when := now.Add(-d)
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Nothing else sweeps packages/: a folder no retry came back for goes after
+// seven days — and only that. Not a folder still being written to, not the
+// one in use, not what the agent did not put there.
+func TestPruneStalePackages(t *testing.T) {
+	const day = 24 * time.Hour
+	now := time.Now()
+	root := t.TempDir()
+	id := func(n int) string { return strings.Replace(pronoteID, "0f1e2d3c", "0000000"+string(rune('0'+n)), 1) }
+	folder := func(name string, dirAge, fileAge time.Duration) string {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		file := filepath.Join(dir, "setup.exe")
+		if err := os.WriteFile(file, []byte("partial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		age(t, file, now, fileAge)
+		age(t, dir, now, dirAge) // last: writing the file touched the folder
+		return dir
+	}
+
+	stale := folder(id(1), 8*day, 8*day)
+	justPast := folder(id(2), 7*day+time.Minute, 7*day+time.Minute)
+	recent := folder(id(3), 6*day, 6*day)
+	// Created long ago, its download resumed yesterday: only the file says so.
+	resumed := folder(id(4), 30*day, day)
+	inUse := folder(id(5), 30*day, 30*day)
+	notOurs := folder("logs", 30*day, 30*day)
+	upperCase := folder(strings.ToUpper(id(6)), 30*day, 30*day)
+	// A file, not a folder, under a package id.
+	strayFile := filepath.Join(root, id(7))
+	if err := os.WriteFile(strayFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	age(t, strayFile, now, 30*day)
+	// Not a direct child: a package id deeper down is nobody's package folder.
+	nested := folder(filepath.Join("logs", id(8)), 30*day, 30*day)
+	age(t, notOurs, now, 30*day)
+
+	PruneStalePackages(root, id(5), now)
+
+	for _, gone := range []string{stale, justPast} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("%s: a folder untouched for more than 7 days is still there", filepath.Base(gone))
+		}
+	}
+	for name, path := range map[string]string{
+		"touched 6 days ago": recent, "download resumed yesterday": resumed, "the package in use": inUse,
+		"a folder that is not a package id": notOurs, "an upper-case id": upperCase,
+		"a file named like a package": strayFile, "a package id that is not a direct child": nested,
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s was removed: %v", name, err)
+		}
+	}
+	// A root that does not exist yet is no error, and creates nothing.
+	missing := filepath.Join(root, "absent")
+	PruneStalePackages(missing, id(1), now)
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Error("pruning created the packages folder")
+	}
+}
+
+// The sweep runs where folders are made: each deployment that creates one
+// first clears what earlier runs left and nobody came back for.
+func TestExecuteSweepsStaleSiblingsBeforeCreatingItsFolder(t *testing.T) {
+	const day = 24 * time.Hour
+	now := time.Now()
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true, code: 1603}
+	pkg := methodAPackage(t, env, pronoteID, nil)
+
+	old := filepath.Join(env.PackagesDir(), signedID)
+	fresh := filepath.Join(env.PackagesDir(), "22222222-2222-4333-8444-555555555555")
+	own := filepath.Join(env.PackagesDir(), pronoteID)
+	for _, dir := range []string{old, fresh, own} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "data.cab"), env.files["data.cab"], 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, dir := range []string{old, own} {
+		age(t, filepath.Join(dir, "data.cab"), now, 8*day)
+		age(t, dir, now, 8*day)
+	}
+
+	// The run fails on its exit code, so its own folder is kept and seen.
+	if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"INDEX EDUCATION SAS"}}, "package_install", pkg); err == nil {
+		t.Fatal("exit code 1603 accepted")
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Error("a sibling untouched for 8 days survived a deployment")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("a recent sibling was removed: %v", err)
+	}
+	// Its own folder is as old, and is the one in use: what it held is still
+	// there to resume from — only the installer had to be fetched.
+	if len(env.fetched) != 1 || env.fetched[0] != "setup.exe" {
+		t.Errorf("fetched %v, want setup.exe alone: the folder in use was swept", env.fetched)
 	}
 }

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"log"
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
@@ -100,9 +102,14 @@ func readDeployKeys(k registry.Key) DeployTrust {
 	if v, _, err := k.GetIntegerValue("DeployWinget"); err == nil {
 		t.Winget = v != 0
 	}
-	if v, _, err := k.GetIntegerValue("DeployMethodAMaxGB"); err == nil && v <= 1024 {
-		t.MethodAMaxGB = int(v)
+	v, _, err := k.GetIntegerValue("DeployMethodAMaxGB")
+	gb, warning := deployMethodAMaxGB(v, err, errors.Is(err, registry.ErrNotExist))
+	if warning != "" {
+		// Said at each deployment, like everything DeployKeys reads: that is
+		// when the cap applies, and when the log is read.
+		log.Print(warning)
 	}
+	t.MethodAMaxGB = gb
 	return t
 }
 

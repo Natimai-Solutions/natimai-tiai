@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"tiai/agent/internal/models"
 )
@@ -112,6 +113,11 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 			"install": "installation", "uninstall": "désinstallation"}[action])
 	}
 
+	dir, err := PackageDir(env.PackagesDir(), pkg.ID)
+	if err != nil {
+		return Result{}, err
+	}
+
 	// Method B first: when it holds, the manifest is the administrator's
 	// word for every file and argument.
 	method := ""
@@ -125,6 +131,16 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 			return Result{}, verr
 		}
 	}
+	// refused closes a method A run with a refusal no retry can lift, and
+	// takes the package's folder with it. Under method A the manifest is the
+	// server's word, package id included: a folder kept for a retry that
+	// cannot succeed is up to the cap of disk per id, for as many ids as a
+	// server cares to send (audit S24). What a retry resumes is kept — see
+	// resumable, and the exit code below.
+	refused := func(err error) (Result, error) {
+		_ = os.RemoveAll(dir)
+		return Result{}, err
+	}
 	if method == "" {
 		if len(policy.Publishers) == 0 {
 			if len(policy.Signers) == 0 {
@@ -132,12 +148,12 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 			}
 			return Result{}, errors.New("paquet non signé, et aucun éditeur approuvé sur ce poste (DeployPublishers)")
 		}
+		method = "A"
 		checked, aerr := MethodAStep(*step)
 		if aerr != nil {
-			return Result{}, aerr
+			return refused(aerr)
 		}
 		step = &checked
-		method = "A"
 	}
 
 	files := manifest.Files
@@ -150,14 +166,13 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 			// The manifest is the server's word here: nothing it names
 			// besides the file that runs may be something Windows would
 			// load or run from that folder (audit S02).
-			return Result{}, err
+			return refused(err)
 		}
 	}
 
-	dir, err := PackageDir(env.PackagesDir(), pkg.ID)
-	if err != nil {
-		return Result{}, err
-	}
+	// Before this folder is made: the ones earlier runs left and nobody came
+	// back for.
+	PruneStalePackages(env.PackagesDir(), pkg.ID, time.Now())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("dossier du paquet : %w", err)
 	}
@@ -171,7 +186,11 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	// checked by Windows, and the others are data it reads (MethodAFiles).
 	for _, f := range files {
 		if err := env.Download(ctx, pkg.ID, f, filepath.Join(dir, f.Name)); err != nil {
-			return Result{}, fmt.Errorf("téléchargement de %s : %w", f.Name, err)
+			err = fmt.Errorf("téléchargement de %s : %w", f.Name, err)
+			if method == "A" && !resumable(err) {
+				return refused(err)
+			}
+			return Result{}, err
 		}
 	}
 
@@ -182,14 +201,14 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	if method == "A" && step.Run != MsiExec {
 		note, verr := env.VerifyAuthenticode(exe)
 		if verr != nil {
-			return Result{}, fmt.Errorf("signature de %s refusée par Windows : %w", step.Run, verr)
+			return refused(fmt.Errorf("signature de %s refusée par Windows : %w", step.Run, verr))
 		}
 		name, nerr := SignerName(exe)
 		if nerr != nil {
-			return Result{}, nerr
+			return refused(nerr)
 		}
 		if !PublisherApproved(name, policy.Publishers) {
-			return Result{}, fmt.Errorf("éditeur %q non approuvé sur ce poste (DeployPublishers)", name)
+			return refused(fmt.Errorf("éditeur %q non approuvé sur ce poste (DeployPublishers)", name))
 		}
 		trustNote = "éditeur approuvé : " + name
 		if note != "" {
@@ -216,4 +235,16 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 		lines = append(lines, "Redémarrage requis pour terminer.")
 	}
 	return Result{Output: strings.Join(lines, "\n"), RebootRequired: reboot}, nil
+}
+
+// resumable tells whether a failed download left something a retry picks up
+// where it stopped: the network dropped or the server was busy until the
+// attempts ran out (RetryLater), or the run was cut short — the service
+// stopping, the budget spent. Anything else is the transfer itself being
+// refused: a hash that is not the manifest's, a server sending more than it
+// announced, a file it will not serve.
+func resumable(err error) bool {
+	var later *RetryLater
+	return errors.As(err, &later) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
