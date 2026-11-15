@@ -23,14 +23,26 @@ export PGPASSWORD="$POSTGRES_PASSWORD"
 # sont resserrés au passage : écrits avant ce réglage, ou à la main par un
 # `docker compose exec … pg_dump` qui n'héritait pas de cet umask.
 umask 077
-chmod 700 /backups 2>/dev/null || true
+# Le chmod échoue là où root du conteneur n'est pas propriétaire du dossier sur
+# l'hôte (Docker en userns-remap ou sans root, NFS en root squash). Dit dans le
+# journal plutôt que tu : DEPLOYMENT.md annonce un dossier en 700, et c'est
+# alors le `chmod 700 backups` fait sur l'hôte qui le ferme. Rien n'est dit si
+# le dossier est déjà en 700.
+if ! chmod 700 /backups 2>/dev/null \
+  && [ "$(stat -c %a /backups 2>/dev/null)" != 700 ]; then
+  echo "ATTENTION : /backups n'a pas pu être fermé (chmod 700 refusé) — sur l'hôte : chmod 700 deploy/backups" >&2
+fi
 chmod 600 /backups/tiai-*.dump 2>/dev/null || true
-# Un .partial restant vient d'un dump interrompu (conteneur arrêté en cours
-# d'écriture) : jamais une sauvegarde valide, et aucun dump ne tourne encore
-# ici. Retiré, plutôt que laissé lisible et jamais purgé.
-rm -f /backups/.tiai-*.dump.partial
 
 while :; do
+  # Un .partial restant vient d'un dump interrompu (conteneur arrêté en cours
+  # d'écriture) : jamais une sauvegarde valide. Retiré, plutôt que laissé
+  # lisible et jamais purgé — mais seulement au-delà d'une heure sans
+  # écriture : plus récent, ce peut être le dump en cours d'une autre instance
+  # qui partage le dossier. `|| true` : un dossier en lecture seule ne doit
+  # pas arrêter le script (set -e), donc relancer le conteneur en boucle.
+  find /backups -maxdepth 1 -name '.tiai-*.dump.partial' -mmin +60 -delete 2>/dev/null || true
+
   stamp="$(date -u +%Y%m%d-%H%M%S)"
   tmp="/backups/.tiai-${stamp}.dump.partial"
   out="/backups/tiai-${stamp}.dump"
@@ -40,7 +52,11 @@ while :; do
   if pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$tmp"; then
     mv "$tmp" "$out"
     echo "sauvegarde OK : $(basename "$out") ($(du -h "$out" | cut -f1))"
-    find /backups -name 'tiai-*.dump' -mtime +"$KEEP_DAYS" -delete
+    # Une purge qui échoue (fichier non supprimable) est signalée sans arrêter
+    # le script : sous set -e, le conteneur redémarrerait en boucle, avec un
+    # dump de plus à chaque tour.
+    find /backups -name 'tiai-*.dump' -mtime +"$KEEP_DAYS" -delete \
+      || echo "ATTENTION : purge des dumps de plus de $KEEP_DAYS jours incomplète" >&2
   else
     rm -f "$tmp"
     echo "ECHEC de la sauvegarde $stamp — les dumps existants sont conservés" >&2

@@ -651,10 +651,19 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
 
 - **`http://` refusé par défaut** (audit S22, agent publié après la v1.1.0).
   Le secret d'enrôlement, puis le token du poste, passeraient en clair : une
-  `api_base_url` en `http://` fait refuser le démarrage
+  `api_base_url` en `http://` est une configuration inutilisable
   (`api_base_url "…" is http://: … use https://, or set AllowInsecureHTTP=1`).
   Un schéma autre que `http`/`https` est refusé dans tous les cas
   ([`config.checkScheme`](internal/config/config.go)).
+- **Ce que fait alors l'agent.** La commande `run` lancée au premier plan
+  s'arrête sur cette erreur. Le **service**, lui, ne s'arrête pas : il reste
+  « En cours d'exécution » dans le gestionnaire de services, ne contacte pas le
+  serveur, et relit sa configuration toutes les 1 à 15 minutes en écrivant
+  chaque fois `agent: cannot run yet (api_base_url … is http://…)` dans
+  `agent.log` ([`service.runAgent`](internal/service/service_windows.go)).
+  C'est donc le journal, pas l'état du service, qui dit pourquoi un poste
+  n'apparaît pas dans la console ; poser l'option ensuite le répare à l'essai
+  suivant, sans redémarrer le service.
 - **L'option.** Viser le port HTTP direct du backend (mode A de
   [DEPLOYMENT.md](../DEPLOYMENT.md), réseau de test) se déclare explicitement :
   `allow_insecure_http: true` (YAML), `AllowInsecureHTTP` = 1 (registre,
@@ -662,6 +671,8 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
   l'écrit dans le YAML. L'agent le rappelle alors dans son journal à chaque
   démarrage. Sur un parc déjà installé en `http://`, poser la valeur **avant**
   de mettre à jour l'agent, sinon les postes cessent de joindre le serveur.
+  Un agent déjà en marche ne relit la configuration qu'au démarrage du
+  service : retirer l'option ne prend effet qu'à son prochain redémarrage.
 - **Aucune redirection suivie.** Le client HTTP de Go renverrait l'en-tête
   `X-Enrollment-Secret` vers la cible d'une redirection : l'agent n'en suit
   aucune, et un 3xx est traité comme une réponse en échec

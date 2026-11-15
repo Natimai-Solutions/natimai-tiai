@@ -16,12 +16,13 @@ Elle contient six migrations de base (`0026` à `0031`). **Plusieurs étapes son
 ### Serveur
 
 1. **Faire un dump de la base**, comme décrit dans `DEPLOYMENT.md` § « Mettre à jour le serveur ». La migration `0031` recalcule la date de dernière maintenance de tout le parc. Pour revenir en arrière, il faut restaurer ce dump.
-2. **Créer le rôle applicatif PostgreSQL.**
+2. **Mettre à jour les fichiers de `deploy/` avec les images.** Le `docker-compose.yml`, le `Caddyfile`, le script de sauvegarde et le script du rôle PostgreSQL sont lus sur l'hôte, pas dans les images : les prendre au tag `v1.2.0` (`git fetch --tags && git checkout v1.2.0`), comparer le `.env` au nouveau `.env.example`, puis, après `docker compose up -d`, recréer les services dont seul un fichier monté a changé : `docker compose up -d --force-recreate caddy db-backup`. Poser aussi `chmod 600 .env` et `chmod 700 backups`. Procédure complète : `DEPLOYMENT.md` § « Mettre à jour le serveur ».
+3. **Créer le rôle applicatif PostgreSQL.**
    - Ajouter `POSTGRES_APP_PASSWORD` au `.env` ; sans lui, `docker compose up` s'arrête.
    - Sur une base existante, **avant** de changer `TIAI_VERSION`, lancer :
      `docker compose up -d db && docker compose exec db sh /docker-entrypoint-initdb.d/10-app-role.sh`.
      Sans ce rôle, le backend refuse de démarrer, car il ne tourne plus en superutilisateur.
-3. **Vérifier la longueur des secrets.** Hors environnement `local`, le serveur refuse de démarrer si l'un de ces secrets est trop court :
+4. **Vérifier la longueur des secrets.** Hors environnement `local`, le serveur refuse de démarrer si l'un de ces secrets est trop court :
 
    | Secret | Longueur minimale |
    |---|---|
@@ -30,9 +31,9 @@ Elle contient six migrations de base (`0026` à `0031`). **Plusieurs étapes son
    | `FIRST_ADMIN_PASSWORD` | 12 caractères (`PASSWORD_MIN_LENGTH`) |
 
    `ENVIRONMENT` vaut désormais `production` par défaut.
-4. **Reverse proxy.** L'API ne croit plus l'en-tête `X-Forwarded-For` que s'il vient d'un proxy de confiance : Caddy par défaut (`TRUSTED_PROXY_HOSTS=caddy`). Avec un autre proxy devant l'API, renseigner son adresse dans `TRUSTED_PROXIES`. Sinon, toutes les requêtes semblent venir du proxy : journal d'audit faux et limites de débit partagées.
-5. **Volume des paquets.** Le nouveau volume Docker `packages` n'est pas inclus dans le dump PostgreSQL : il faut le sauvegarder à part.
-6. **Conteneurs sans root.** Le backend et le worker tournent désormais sous le compte `tiai`, sans capacité. Au premier démarrage, le backend attribue le volume `packages` à ce compte. Rien n'est à faire avec le `docker-compose.yml` fourni. Une stack personnalisée doit garder les capacités `CHOWN`, `SETUID` et `SETGID`, utilisées au démarrage seulement.
+5. **Reverse proxy.** L'API ne croit plus l'en-tête `X-Forwarded-For` que s'il vient d'un proxy de confiance : Caddy par défaut (`TRUSTED_PROXY_HOSTS=caddy`). Avec un autre proxy devant l'API, renseigner son adresse dans `TRUSTED_PROXIES` — la sienne seulement, pas une plage large comme tout le réseau local, qui laisserait un client choisir l'adresse sous laquelle il apparaît. Sinon, toutes les requêtes semblent venir du proxy : journal d'audit faux et limites de débit partagées.
+6. **Volume des paquets.** Le nouveau volume Docker `packages` n'est pas inclus dans le dump PostgreSQL : il faut le sauvegarder à part.
+7. **Conteneurs sans root.** Le backend et le worker tournent désormais sous le compte `tiai`, sans capacité. Au premier démarrage, le backend attribue le volume `packages` à ce compte. Rien n'est à faire avec le `docker-compose.yml` fourni. Une stack personnalisée doit garder les capacités `CHOWN`, `SETUID` et `SETGID`, utilisées au démarrage seulement.
 
 ### Agent : mettre à jour le parc
 
@@ -40,7 +41,7 @@ Les protections côté poste (T01, T02, T10, T37) n'agissent **qu'après la mise
 
 > ⚠️ **Parc installé en `http://` (mode A sans certificat)** : l'agent refuse désormais une adresse `http://`.
 > **Avant** de diffuser la mise à jour, poser `AllowInsecureHTTP` (`REG_DWORD` = 1) sous `HKLM\SOFTWARE\Tiai` par GPO, ou `allow_insecure_http: true` dans le YAML.
-> Sans cela, les postes mis à jour cessent de contacter le serveur. Un avertissement est écrit dans le journal de l'agent à chaque démarrage tant que l'option est active.
+> Sans cela, les postes mis à jour cessent de contacter le serveur, leur service restant « En cours d'exécution » : la cause est écrite dans `agent.log` (`agent: cannot run yet (api_base_url … is http://…)`), et l'agent repart seul dès que la valeur est posée. Un avertissement est écrit dans le journal de l'agent à chaque démarrage tant que l'option est active.
 
 En attendant que tout le parc soit à jour, **n'activez pas `DeployPublishers`** (méthode A du déploiement) sur de nouveaux postes.
 
@@ -77,7 +78,7 @@ Le bouton « Installer un logiciel » est disponible sur un poste, une sélectio
 
 ### Console
 
-- La liste des postes garde ses colonnes par défaut, inventaire compris (domaine, emplacement, bâtiment, IP, OS, version de l'agent, modèle, disque) ; seule « Utilisation » reste à ajouter depuis « Colonnes ». La colonne « Agent » s'appelle désormais « Version de l'agent ». Plus large que l'écran, la liste défile horizontalement, la case de sélection et le nom restant visibles.
+- La liste des postes s'ouvre avec moins de colonnes : Nom, Salle, Maintenance, Antivirus, MAJ Windows, Session et Vu le. Les autres restent disponibles dans « Colonnes ». La case de sélection et le nom restent visibles quand on fait défiler la liste horizontalement.
 - Page Logiciels :
   - la recherche, le tri et la page sont conservés dans l'URL, donc au retour arrière ;
   - le filtre « Logiciel » de la liste des postes nomme le programme.
@@ -108,7 +109,7 @@ Le bouton « Installer un logiciel » est disponible sur un poste, une sélectio
   - Déplacer un bâtiment ou une salle vers un site hors de son périmètre. Code `auth.scope.restricted`, message : « Refusé : votre compte est limité à certains emplacements, et cette action en sort ».
   - Affecter une vérification à un compte qui ne voit pas le poste. Code `check.assignee.out_of_reach`, message : « Ce compte ne voit pas ce poste (ou ne lit pas les vérifications) : choisissez quelqu’un dont le périmètre le couvre ».
   - Le journal d'audit n'affiche plus que les entrées sur les postes du périmètre et ses propres actions.
-- **Paramètres e-mail.** Changer l'hôte, le port, l'utilisateur ou le domaine d'envoi impose de ressaisir le mot de passe SMTP ou la clé Mailgun. Le secret enregistré n'est plus envoyé vers une nouvelle destination. Désactiver la vérification du certificat SMTP compte aussi comme un changement de destination.
+- **Paramètres e-mail.** Changer la destination d'un secret impose de le ressaisir : l'hôte, le port ou le mode de sécurité du serveur SMTP pour le mot de passe SMTP ; l'adresse de l'API ou le domaine d'envoi pour la clé Mailgun. Le secret enregistré n'est plus envoyé vers une nouvelle destination. Désactiver la vérification du certificat SMTP compte aussi comme un changement de destination ; changer l'utilisateur SMTP, non.
 - **Commandes sans réponse.** Une commande remise ou en cours depuis plus de 24 heures (`COMMAND_UNANSWERED_HOURS`) passe en échec « sans réponse du poste ». Un verdict tardif du poste l'emporte.
 - **Maintenance.**
   - La date de dernière maintenance est désormais recalculée à partir du journal ; la migration `0031` la corrige une fois pour tout le parc.
@@ -121,7 +122,7 @@ Le bouton « Installer un logiciel » est disponible sur un poste, une sélectio
 - **Suppression d'un bâtiment.** Une salle dont le nom existe déjà ailleurs est renommée, par exemple « Salle 101 (Bâtiment B) », et le renommage est noté au journal d'audit.
 - **Réveil (Wake-on-LAN).**
   - Un poste ne sert de relais qu'une fois enrôlé depuis au moins 60 minutes, avec un jeton valide et une identité confirmée.
-  - Le réveil direct ne vise que des adresses privées, ou les réseaux listés dans `WOL_ALLOWED_NETWORKS`.
+  - Le réveil direct ne vise que des adresses privées. Si `WOL_ALLOWED_NETWORKS` est renseignée, sa liste **remplace** les plages privées, elle ne s'y ajoute pas : seuls les réseaux listés sont alors visés.
 - **Fréquence des contacts.** Un poste est limité à 30 contacts par minute ; au-delà, le serveur répond 429. L'agent en fait un par minute par défaut, la marge est donc large.
 - **Documentation de l'API.** Le schéma OpenAPI et ses pages `/docs` et `/redoc` ne sont plus servis hors environnement `local`. `EXPOSE_OPENAPI=true` les rétablit, mais derrière Caddy, qui ne transmet au backend que `/api/*`, seul le schéma JSON `/api/v1/openapi.json` redevient joignable.
 
@@ -169,7 +170,7 @@ L'audit 2026-11 a retenu 102 constats ; cette version les corrige, à l'exceptio
 | `WOL_RELAY_MIN_AGE_MINUTES` | `60` | Ancienneté minimale d'un poste relais |
 | `WOL_RELAY_MIN_AGENT_VERSION` | `1.0.0` | Version minimale de l'agent relais |
 | `WOL_RELAY_CLAIM_TIMEOUT_SECONDS` | `180` | Délai avant qu'un réveil pris sans réponse revienne en file |
-| `WOL_ALLOWED_NETWORKS` | vide | Réseaux publics autorisés pour le réveil direct |
+| `WOL_ALLOWED_NETWORKS` | vide | Réseaux autorisés pour le réveil direct. Vide : les plages privées. Renseignée, la liste les remplace |
 | `PACKAGE_MAX_BYTES` | 2 Gio | Taille maximale d'un fichier de paquet |
 | `PACKAGE_MAX_CONCURRENT_DOWNLOADS` | `20` | Téléchargements simultanés de paquets |
 | `TIAI_DEV_BACKEND_BIND` | `127.0.0.1` | Stack de développement seulement : adresse du port de l'API |

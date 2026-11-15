@@ -189,7 +189,9 @@ empreintes. La version est dans le tag de la release, dans le binaire
 
 - **Déploiement par script de démarrage GPO** (recommandé) : le `.exe`, voir
   [deploy/gpo/](deploy/gpo/README.md). Le script le copie, l'enregistre en
-  service et le met à jour à chaque redémarrage.
+  service et le met à jour à chaque redémarrage. Le script lui-même
+  (`deploy/gpo/Install-TiaiAgent.ps1`) n'est pas un fichier de la release : il
+  se prend dans le dépôt, au tag de la release.
 - **GPO *Software Installation*, ou installation à la main sur quelques
   postes** : le `.msi`, voir [deploy/msi/](deploy/msi/README.md).
 - **x64** sauf poste ARM (processeur Snapdragon) : dans le doute, `Paramètres →
@@ -211,6 +213,9 @@ tous les composants — base de données, serveur, console web — en une seule
 commande, sans rien d'autre à installer sur la machine.
 
 ```bash
+git clone https://github.com/Natimai-Solutions/natimai-tiai.git
+cd natimai-tiai
+git checkout v1.2.0         # le tag de la release visée, celle de TIAI_VERSION
 cd deploy
 cp .env.example .env        # renseigner les secrets et TIAI_VERSION, placer le certificat dans deploy/certs/
 chmod 600 .env              # les secrets du serveur, lisibles du seul propriétaire
@@ -220,7 +225,10 @@ docker compose up -d        # db + backend + worker + console + caddy
 
 Les images du serveur sont publiées à chaque release sur ghcr.io
 (`tiai-backend`, `tiai-frontend`), sous le même numéro de version que l'agent ;
-`TIAI_VERSION` choisit laquelle tourner. Mise à jour et retour arrière :
+`TIAI_VERSION` choisit laquelle tourner. Le dossier `deploy/` fait partie du
+serveur — le Caddyfile et le script de sauvegarde sont lus sur l'hôte, pas dans
+les images — et se prend à la même version : une mise à jour change les deux.
+Mise à jour et retour arrière :
 [DEPLOYMENT.md](DEPLOYMENT.md#mettre-à-jour-le-serveur).
 
 Une variante dev/tests lève la même stack sans certificat. L'agent, lui, se
