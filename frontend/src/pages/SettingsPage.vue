@@ -620,7 +620,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useQuasar } from 'quasar';
-import { listAssignableUsers } from 'src/services/checks';
+import { listAssignableOwners } from 'src/services/maintenance';
 import { apiErrorMessage } from 'src/services/errors';
 import {
   getSettings,
@@ -773,10 +773,11 @@ const status = computed(() =>
 );
 const smtpPasswordState = computed(() => {
   const e = settings.value?.email;
+  // A `.env` password the server holds back is not « celui du .env ».
   return secretState(
     e?.smtp_password_set ?? false,
     e?.smtp_password_unreadable ?? false,
-    e?.env.smtp_password_set ?? false,
+    (e?.env.smtp_password_set ?? false) && !e?.withheld?.includes('smtp_password'),
   );
 });
 const mailgunKeyState = computed(() => {
@@ -784,7 +785,7 @@ const mailgunKeyState = computed(() => {
   return secretState(
     e?.mailgun_api_key_set ?? false,
     e?.mailgun_api_key_unreadable ?? false,
-    e?.env.mailgun_api_key_set ?? false,
+    (e?.env.mailgun_api_key_set ?? false) && !e?.withheld?.includes('mailgun_api_key'),
   );
 });
 const providerOptions = [
@@ -844,7 +845,12 @@ async function load() {
     fillFleetForm(settings.value);
     fillScheduleForm(settings.value);
     fillEmailForm(settings.value);
-    ownerOptions.value = (await listAssignableUsers()).map((u) => ({ label: u.name, value: u.id }));
+    // Only the accounts the server accepts as default owner: maintenance
+    // rights over the whole parc.
+    ownerOptions.value = (await listAssignableOwners()).map((u) => ({
+      label: u.name,
+      value: u.id,
+    }));
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
   }

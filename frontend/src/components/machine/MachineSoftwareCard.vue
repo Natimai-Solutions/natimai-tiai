@@ -12,10 +12,17 @@
       <q-badge
         v-if="machine.software.length"
         color="grey-7"
-        :label="`${machine.software.length}`"
+        :label="`${machine.software.length}${machine.software_truncated ? '+' : ''}`"
       />
     </q-card-section>
     <q-separator />
+    <!-- The list below is not the whole of it: said, rather than left to pass
+         for a poste with few programs. -->
+    <q-banner v-if="machine.software_truncated" class="surface-orange" dense>
+      <template #avatar><q-icon name="hourglass_top" color="orange" /></template>
+      Relevé partiel : le plafond quotidien de nouveaux logiciels a été atteint ; le poste
+      complétera son relevé automatiquement.
+    </q-banner>
     <q-table
       :rows="machine.software"
       :columns="columns"

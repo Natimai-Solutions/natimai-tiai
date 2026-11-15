@@ -1,3 +1,4 @@
+import { Notify } from 'quasar';
 import type { Router } from 'vue-router';
 
 /**
@@ -7,12 +8,22 @@ import type { Router } from 'vue-router';
  * the reader reloads by hand (audit S34). The cure is that reload, done for
  * them — once: if the fresh page fails the same way, the problem is not a
  * stale tab, and reloading again would loop.
+ *
+ * A chunk also fails to load for reasons a reload makes worse: no network
+ * (the reload replaces the whole console with the browser's error page), a
+ * server restarting, a file really missing from the build. So the tab is
+ * reloaded only on proof of a new build — the server answers, and its
+ * index.html no longer names the entry script this tab runs. In every other
+ * case the console stays as it is and says the page could not be loaded.
  */
 
 /** When the last reload for a stale chunk happened, per tab. */
 export const STALE_CHUNK_RELOAD_KEY = 'tiai.staleChunkReloadAt';
 /** A second failure within this window is not a stale tab: no reload then. */
 export const STALE_CHUNK_RELOAD_GUARD_MS = 30_000;
+
+export const CHUNK_LOAD_FAILED_MESSAGE =
+  'Impossible de charger cette page (connexion ou mise à jour en cours). Réessayez.';
 
 /** The messages browsers give a dynamic import or a preload that failed. */
 const CHUNK_ERROR =
@@ -51,6 +62,74 @@ export function reloadOnceForStaleChunk(deps: ReloadDeps): boolean {
   return true;
 }
 
+/**
+ * True when `html` is this console's index.html and names another entry
+ * script than `entry`, the one this tab runs: a new build has been deployed.
+ * A page with no module script at all is not the console's index — a proxy's
+ * error page, a captive portal — and proves nothing.
+ */
+export function indexNamesAnotherBuild(html: string, entry: string): boolean {
+  return /<script\b[^>]*\btype=["']?module\b/i.test(html) && !html.includes(entry);
+}
+
+/** What the recovery needs from the browser; a spec hands over its own. */
+export interface StaleChunkEnv {
+  storage: Pick<Storage, 'getItem' | 'setItem'> | null;
+  now: () => number;
+  /** False when the browser knows it has no network. */
+  online: () => boolean;
+  /** The entry script this tab runs, as its index.html names it; null if unknown. */
+  entryScript: () => string | null;
+  /** The index.html the server serves now; null when it cannot be read. */
+  fetchIndex: () => Promise<string | null>;
+  /** The address of the page shown now. */
+  currentHref: () => string;
+  /** Load `href` as a whole new document. */
+  goTo: (href: string) => void;
+  /**
+   * Tell the reader the page could not be loaded, until they dismiss it;
+   * `retry` is its « Recharger » action. Returns what takes the message down.
+   */
+  notify: (retry: () => void) => () => void;
+  /** Where an error nobody else reports goes. */
+  logError: (error: unknown) => void;
+}
+
+/** Has the server a newer build than the one this tab runs? */
+async function buildChanged(env: StaleChunkEnv): Promise<boolean> {
+  const entry = env.entryScript();
+  // No entry script to compare with (the dev server): nothing can be proved.
+  if (!entry) return false;
+  try {
+    const html = await env.fetchIndex();
+    return html !== null && indexNamesAnotherBuild(html, entry);
+  } catch {
+    return false;
+  }
+}
+
+export type ChunkFailureOutcome = 'reloaded' | 'notified';
+
+/**
+ * A chunk of the page at `href` could not be loaded. Reload on `href` when a
+ * new build explains it; otherwise leave the console alone and say so.
+ */
+export async function recoverFromChunkFailure(
+  href: string,
+  env: StaleChunkEnv,
+  onNotified: (dismiss: () => void) => void = () => undefined,
+): Promise<ChunkFailureOutcome> {
+  if (
+    env.online() &&
+    (await buildChanged(env)) &&
+    reloadOnceForStaleChunk({ storage: env.storage, now: env.now, reload: () => env.goTo(href) })
+  ) {
+    return 'reloaded';
+  }
+  onNotified(env.notify(() => env.goTo(href)));
+  return 'notified';
+}
+
 function sessionStore(): Storage | null {
   try {
     return window.sessionStorage;
@@ -59,27 +138,112 @@ function sessionStore(): Storage | null {
   }
 }
 
+/** The browser's side of the recovery. */
+export function browserStaleChunkEnv(): StaleChunkEnv {
+  return {
+    storage: sessionStore(),
+    now: () => Date.now(),
+    // `onLine` is only trusted when it says no: true means « a network
+    // interface is up », not that the server answers — the fetch tells that.
+    online: () => typeof navigator === 'undefined' || navigator.onLine !== false,
+    entryScript: () =>
+      document.querySelector('script[type="module"][src]')?.getAttribute('src') ?? null,
+    fetchIndex: async () => {
+      const response = await fetch(`${import.meta.env.BASE_URL ?? '/'}index.html`, {
+        cache: 'no-store',
+      });
+      return response.ok ? await response.text() : null;
+    },
+    currentHref: () => window.location.href,
+    goTo: (href) => {
+      const here = new URL(window.location.href);
+      const target = new URL(href, here);
+      const sameDocument =
+        target.origin === here.origin &&
+        target.pathname === here.pathname &&
+        target.search === here.search;
+      if (target.href !== here.href) window.location.assign(target.href);
+      // The same address, or one that differs by its fragment only (hash
+      // mode): assigning it loads nothing.
+      if (sameDocument) window.location.reload();
+    },
+    notify: (retry) =>
+      Notify.create({
+        type: 'negative',
+        message: CHUNK_LOAD_FAILED_MESSAGE,
+        // Stays until dismissed: the reader may be looking elsewhere when the
+        // click on a menu entry does nothing.
+        timeout: 0,
+        // One message at a time is this module's own business (it takes the
+        // previous one down): no « 2 », « 3 » badge counting the clicks.
+        group: false,
+        actions: [
+          { label: 'Recharger', color: 'white', handler: retry },
+          { label: 'Fermer', color: 'white' },
+        ],
+      }),
+    logError: (error) => console.error(error),
+  };
+}
+
 /**
- * Listen for both ways a stale chunk shows: Vite's own preload failure, and a
- * lazy route component that failed to load during a navigation — reloaded on
- * the page the reader was going to.
+ * Listen for both ways a chunk that cannot be loaded shows: Vite's own
+ * preload failure, and a lazy route component that failed to load during a
+ * navigation. Either way the recovery targets the page the reader was going
+ * to, not the one being left.
  */
-export function installStaleChunkReload(router: Router): void {
-  window.addEventListener('vite:preloadError', (event) => {
-    const reloaded = reloadOnceForStaleChunk({
-      storage: sessionStore(),
-      now: () => Date.now(),
-      reload: () => window.location.reload(),
+export function installStaleChunkReload(
+  router: Router,
+  env: StaleChunkEnv = browserStaleChunkEnv(),
+): void {
+  // Where the navigation under way is going: Vite's event does not say.
+  let destination: string | null = null;
+  // One failed navigation raises both events, with the same error.
+  const handled = new WeakSet<object>();
+  let recovering = false;
+  let dismiss: (() => void) | null = null;
+
+  function recover(error: unknown, href: string) {
+    if (typeof error === 'object' && error !== null) {
+      if (handled.has(error)) return;
+      handled.add(error);
+    }
+    if (recovering) return;
+    recovering = true;
+    void recoverFromChunkFailure(href, env, (close) => {
+      // One message, however many clicks on the dead link.
+      dismiss?.();
+      dismiss = close;
+    }).finally(() => {
+      recovering = false;
     });
-    // Reloading: the error would only reach the console on its way out.
-    if (reloaded) event.preventDefault();
+  }
+
+  router.beforeEach((to) => {
+    destination = to.fullPath;
   });
-  router.onError((error, to) => {
+  router.afterEach((_to, _from, failure) => {
+    destination = null;
+    // A page opened after all: the message no longer describes anything.
+    if (!failure) {
+      dismiss?.();
+      dismiss = null;
+    }
+  });
+
+  window.addEventListener('vite:preloadError', (event) => {
+    const error = (event as Event & { payload?: unknown }).payload;
+    // Not prevented: the import must still fail for whoever awaits it — the
+    // router, for one, which would otherwise render a route with no component.
     if (!isChunkLoadError(error)) return;
-    reloadOnceForStaleChunk({
-      storage: sessionStore(),
-      now: () => Date.now(),
-      reload: () => window.location.assign(router.resolve(to.fullPath).href),
-    });
+    recover(error, destination ? router.resolve(destination).href : env.currentHref());
+  });
+
+  router.onError((error, to) => {
+    destination = null;
+    // Registering a listener silences vue-router's own console.error: every
+    // navigation error still has to reach the console.
+    env.logError(error);
+    if (isChunkLoadError(error)) recover(error, router.resolve(to.fullPath).href);
   });
 }

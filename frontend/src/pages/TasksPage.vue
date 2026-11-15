@@ -275,6 +275,7 @@
     <MaintenanceSettingsDialog
       v-model="handOverOpen"
       :subject="handOverRoom?.name ?? ''"
+      :room-id="handOverRoom?.id ?? null"
       :cycle-days="handOverSettings?.maintenance_cycle_days ?? null"
       :owner-id="handOverSettings?.maintenance_owner?.id ?? null"
       inherit-hint="Vide : le responsable par défaut du parc"

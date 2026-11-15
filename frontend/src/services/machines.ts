@@ -313,6 +313,12 @@ export interface MachineDetail extends Machine {
   gpus: Gpu[];
   software: InstalledSoftware[];
   /**
+   * True when the server stopped short of the poste's full software list: the
+   * daily cap on software new to the catalogue was reached. The poste sends
+   * the rest by itself on its next inventories. Absent from an older server.
+   */
+  software_truncated?: boolean;
+  /**
    * The agent version this poste is measured against: the highest one on the
    * parc, or the one pinned server-side. null on an empty parc. What turns
    * "0.4.1" into "behind 0.5.0" (see utils/agentVersion).

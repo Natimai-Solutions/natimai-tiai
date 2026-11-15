@@ -377,7 +377,8 @@ async function fetchAll() {
     getOverview(),
     listMachines({ status: 'outdated', page_size: 5 }),
     listMachines({ wu_status: 'pending', page_size: 5 }),
-    // The sample of threats is a side list: its failure leaves the counters.
+    // The sample of threats is a side list: its failure leaves the counters
+    // and the other list their fresh values — and is reported all the same.
     canReadThreats.value ? listThreats({ status: 'active', page_size: 5 }) : Promise.resolve(null),
   ]);
   // Each list's « loaded » flag follows its *last* load, not its first: after
@@ -399,6 +400,10 @@ async function fetchAll() {
   stats.value = s.value;
   if (av.status === 'rejected') throw av.reason;
   if (wuBehind.status === 'rejected') throw wuBehind.reason;
+  // Same rule for the threats as for the other list: the rows left on screen
+  // are those of an earlier load, so this refresh did not succeed — « Actualisé
+  // à » stays where it was, and a requested reload says it failed.
+  if (t.status === 'rejected') throw t.reason;
 }
 
 // The dashboard is a wall screen as much as a page: left open, it has to keep

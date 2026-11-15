@@ -197,6 +197,27 @@ export async function updateRoomMaintenance(
   return data;
 }
 
+/**
+ * Who the maintenance can be given to: the accounts the server accepts as
+ * owner of this poste, of this room or — with neither — of the parc by
+ * default. Narrower than `/checks/assignable-users`, which lists whoever may
+ * read a check and left the save to refuse most of them.
+ */
+export async function listAssignableOwners(
+  level: { machineId?: string | null | undefined; roomId?: string | null | undefined } = {},
+): Promise<UserRef[]> {
+  const params = level.machineId
+    ? { machine_id: level.machineId }
+    : level.roomId
+      ? { room_id: level.roomId }
+      : null;
+  const { data } = await api.get<UserRef[]>(
+    '/maintenance/assignable-owners',
+    params ? { params } : undefined,
+  );
+  return data;
+}
+
 /** What is due: for `owner` = 'me', 'none', an account id, or everybody when omitted. */
 export async function getDue(owner?: string): Promise<Due> {
   const { data } = await api.get<Due>('/maintenance/due', { params: owner ? { owner } : {} });

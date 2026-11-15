@@ -51,8 +51,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
-import { listAssignableUsers } from 'src/services/checks';
-import type { MaintenanceSettingsPayload } from 'src/services/maintenance';
+import { listAssignableOwners, type MaintenanceSettingsPayload } from 'src/services/maintenance';
 import { apiErrorMessage } from 'src/services/errors';
 
 const props = defineProps<{
@@ -63,6 +62,12 @@ const props = defineProps<{
   ownerId: string | null;
   /** What "inherit" resolves to, for the hint. */
   inheritHint: string;
+  /**
+   * The level being set — a poste or a room: the owner picker offers the
+   * accounts the server accepts for that one, and no other.
+   */
+  machineId?: string | null;
+  roomId?: string | null;
   save: (payload: MaintenanceSettingsPayload) => Promise<void>;
 }>();
 const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>();
@@ -95,7 +100,8 @@ watch(
 
 async function loadUsers() {
   try {
-    ownerOptions.value = (await listAssignableUsers()).map((u) => ({ label: u.name, value: u.id }));
+    const owners = await listAssignableOwners({ machineId: props.machineId, roomId: props.roomId });
+    ownerOptions.value = owners.map((u) => ({ label: u.name, value: u.id }));
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Comptes indisponibles') });
   }

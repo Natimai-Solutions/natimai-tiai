@@ -19,6 +19,10 @@ export default defineConfig({
       src: fileURLToPath(new URL('./src', import.meta.url)),
       pages: fileURLToPath(new URL('./src/pages', import.meta.url)),
       layouts: fileURLToPath(new URL('./src/layouts', import.meta.url)),
+      // The Quasar CLI's wrappers only resolve inside a Quasar build. They are
+      // identity functions, which is what stands in for them here — so a spec
+      // can load the router as the app defines it (src/router/index.spec.ts).
+      '#q-app': fileURLToPath(new URL('./src/test/qApp.ts', import.meta.url)),
     },
   },
   // Tests are self-contained: don't inherit the Quasar tsconfig preset.

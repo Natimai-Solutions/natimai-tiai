@@ -35,6 +35,7 @@ vi.mock('src/services/rooms', async (importOriginal) => ({
   unassignMachines: vi.fn(),
 }));
 
+import { tasksVersion } from 'src/composables/useTasksBadge';
 import { createChecksBulk } from 'src/services/checks';
 import { commandActions, createCommands, type CommandAction } from 'src/services/commands';
 import { wakeMachines, type Machine } from 'src/services/machines';
@@ -149,7 +150,21 @@ describe('useMachineBulkActions', () => {
     it('lets a failure reach the dialog, which says it and stays open', async () => {
       vi.mocked(createChecksBulk).mockRejectedValue(new Error('down'));
       const { askSelection } = setup();
+      const before = tasksVersion.value;
       await expect(askSelection({ assigned_to_id: null, instructions: null })).rejects.toThrow();
+      // Nothing was asked: nothing to recount.
+      expect(tasksVersion.value).toBe(before);
+    });
+
+    // Audit U19: checks handed out change what « Mes tâches » counts.
+    it('has the tasks badge read again once the checks are asked for', async () => {
+      vi.mocked(createChecksBulk).mockResolvedValue({ created: 2, skipped: 0 });
+      const { askSelection } = setup();
+      const before = tasksVersion.value;
+
+      await askSelection({ assigned_to_id: 'u-1', instructions: null });
+
+      expect(tasksVersion.value).toBe(before + 1);
     });
   });
 
@@ -177,12 +192,28 @@ describe('useMachineBulkActions', () => {
       expect(placeMachines).not.toHaveBeenCalled();
     });
 
+    // Audit U19: a poste follows its room's maintenance owner — moved, it
+    // enters or leaves somebody's « Mes tâches ».
+    it('has the tasks badge read again once postes are moved to a room, or out of theirs', async () => {
+      vi.mocked(placeMachines).mockResolvedValue({ moved: 2, mismatched: [] });
+      vi.mocked(unassignMachines).mockResolvedValue({ moved: 2, mismatched: [] });
+      const before = tasksVersion.value;
+
+      await setup().placeSelection('r-1');
+      expect(tasksVersion.value).toBe(before + 1);
+
+      await setup().placeSelection('none');
+      expect(tasksVersion.value).toBe(before + 2);
+    });
+
     it('says a refusal and keeps the dialog open on the selection', async () => {
       vi.mocked(placeMachines).mockRejectedValue(new Error('down'));
       const { selected, placeOpen, placeSelection } = setup();
       placeOpen.value = true;
+      const before = tasksVersion.value;
 
       await placeSelection('r-1');
+      expect(tasksVersion.value).toBe(before);
 
       expect(q.notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'negative' }));
       expect(placeOpen.value).toBe(true);

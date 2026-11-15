@@ -7,6 +7,7 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 vi.mock('src/services/maintenance', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/maintenance')>()),
   getDue: vi.fn(),
+  getRoomMaintenance: vi.fn(),
 }));
 vi.mock('src/services/checks', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/checks')>()),
@@ -14,7 +15,14 @@ vi.mock('src/services/checks', async (importOriginal) => ({
 }));
 
 import { listChecks } from 'src/services/checks';
-import { getDue, type Due, type DueMachine } from 'src/services/maintenance';
+import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
+import {
+  getDue,
+  getRoomMaintenance,
+  type Due,
+  type DueMachine,
+  type DueRoom,
+} from 'src/services/maintenance';
 import { useAuthStore } from 'src/stores/auth';
 import TasksPage from './TasksPage.vue';
 
@@ -34,15 +42,11 @@ function loose(id: string, state: DueMachine['state']): DueMachine {
   };
 }
 
-async function mountPage(due: Due) {
+async function mountPage(due: Due, permissions = ['check:read', 'maintenance:read']) {
   vi.mocked(getDue).mockResolvedValue(due);
   const pinia = createPinia();
   setActivePinia(pinia);
-  useAuthStore().user = {
-    id: 'me',
-    email: 'a@b.c',
-    permissions: ['check:read', 'maintenance:read'],
-  } as never;
+  useAuthStore().user = { id: 'me', email: 'a@b.c', permissions } as never;
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -89,5 +93,51 @@ describe('TasksPage — maintenances to do (audit B09)', () => {
     expect(wrapper.text()).not.toContain('PC-1');
     expect(wrapper.text()).toContain('PC-2');
     expect(wrapper.text()).toContain('PC-3');
+  });
+});
+
+describe('TasksPage — handing a room on', () => {
+  beforeEach(() => {
+    vi.mocked(listChecks).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 200 });
+    vi.mocked(getRoomMaintenance).mockResolvedValue({
+      maintenance_cycle_days: null,
+      maintenance_owner: { id: 'me', name: 'Moi' },
+      effective_cycle_days: 90,
+      effective_owner: { id: 'me', name: 'Moi' },
+    });
+  });
+
+  it('has the dialog offer the owners the server accepts for that room', async () => {
+    const room: DueRoom = {
+      id: 'r-7',
+      name: 'B12',
+      building_name: null,
+      location: null,
+      owner: { id: 'me', name: 'Moi' },
+      cycle_days: 90,
+      total: 1,
+      overdue: 1,
+      due_soon: 0,
+      excluded: 0,
+      next_due_at: '2026-12-02T01:00:00Z',
+      machines: [loose('pc-1', 'overdue')],
+    };
+    const wrapper = await mountPage({ rooms: [room], machines: [], overdue: 1, due_soon: 0 }, [
+      'check:read',
+      'maintenance:read',
+      'maintenance:write',
+    ]);
+    const dialog = () =>
+      wrapper
+        .findAllComponents(MaintenanceSettingsDialog)
+        .find((d) => d.props('inheritHint') !== undefined)!;
+    expect(dialog().props('roomId')).toBeNull();
+
+    await wrapper.find('[label="Transmettre…"]').trigger('click');
+    await flushPromises();
+
+    expect(getRoomMaintenance).toHaveBeenCalledWith('r-7');
+    expect(dialog().props('roomId')).toBe('r-7');
+    expect(dialog().props('machineId')).toBeUndefined();
   });
 });

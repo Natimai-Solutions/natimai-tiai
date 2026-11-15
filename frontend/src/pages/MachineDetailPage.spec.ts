@@ -69,8 +69,8 @@ const fail500 = {
   response: { status: 500, data: { error: { code: 'internal.server_error' } } },
 };
 
-function answer(id: string, n = 0) {
-  machineCalls[id]![n]!.resolve({ data: detail(id) });
+function answer(id: string, n = 0, over: Record<string, unknown> = {}) {
+  machineCalls[id]![n]!.resolve({ data: { ...detail(id), ...over } });
 }
 
 async function mountPage(id: string, permissions: string[], query = '') {
@@ -227,5 +227,87 @@ describe('MachineDetailPage', () => {
 
     expect(api.post).toHaveBeenCalledWith('/machines/B/check', expect.anything());
     expect(tasksVersion.value).toBe(before + 1);
+  });
+
+  // Audit U19: handing an open check to somebody else moves it from one
+  // « Mes tâches » to another.
+  it('has the tasks badge read again once the open check is edited', async () => {
+    vi.mocked(api.patch).mockResolvedValue({ data: {} });
+    const w = await mountPage('B', ['machine:read', 'check:write']);
+    answer('B', 0, {
+      open_check: {
+        id: 'c-1',
+        requested_by: 'Alice',
+        assigned_to: null,
+        instructions: null,
+        created_at: '2026-11-10T20:00:00Z',
+      },
+    });
+    await flushPromises();
+    const before = tasksVersion.value;
+
+    const edit = w.findAllComponents(CheckRequestDialog)[1]!.props('save') as (
+      payload: CheckPayload,
+    ) => Promise<void>;
+    const done = edit({ assigned_to_id: 'u-2', instructions: null });
+    await flushPromises();
+    answer('B', 1);
+    await done;
+
+    expect(api.patch).toHaveBeenCalledWith('/checks/c-1', expect.anything());
+    expect(tasksVersion.value).toBe(before + 1);
+  });
+
+  // Audit U19: a poste follows its room's maintenance owner and cycle.
+  it('has the tasks badge read again once the poste is moved to another room', async () => {
+    vi.mocked(api.post).mockReset();
+    vi.mocked(api.post).mockResolvedValue({ data: { moved: 1, mismatched: [] } });
+    const w = await mountPage('B', ['machine:read', 'room:write']);
+    answer('B');
+    await flushPromises();
+    const before = tasksVersion.value;
+
+    // « Affecter à une salle » opens the dialog on « Sans salle »…
+    await w.find('[icon="meeting_room"]').trigger('click');
+    await flushPromises();
+    // …and « Enregistrer » files the poste there.
+    await w.find('[label="Enregistrer"]').trigger('click');
+    await flushPromises();
+
+    expect(api.post).toHaveBeenCalledWith('/rooms/unassign', { machine_ids: ['B'] });
+    expect(tasksVersion.value).toBe(before + 1);
+  });
+
+  it('counts a software list the server cut short as « n+ » on its tab', async () => {
+    const software = [{ software_id: 1 }, { software_id: 2 }];
+    const w = await mountPage('B', ['machine:read']);
+    answer('B', 0, { software, software_truncated: true });
+    await flushPromises();
+    const tab = () => w.find('[name="software"]').text().replace(/\s+/g, '');
+    expect(tab()).toBe('2+');
+
+    // A complete list — or an older server, which says nothing — is counted as it is.
+    await w.setProps({ id: 'C' });
+    await flushPromises();
+    answer('C', 0, { software });
+    await flushPromises();
+    expect(tab()).toBe('2');
+  });
+
+  it('leaves the tasks badge alone when the move is refused', async () => {
+    vi.mocked(api.post).mockReset();
+    vi.mocked(api.post).mockRejectedValue(fail500);
+    const w = await mountPage('B', ['machine:read', 'room:write']);
+    answer('B');
+    await flushPromises();
+    const before = tasksVersion.value;
+
+    await w.find('[icon="meeting_room"]').trigger('click');
+    await flushPromises();
+    await w.find('[label="Enregistrer"]').trigger('click');
+    await flushPromises();
+
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(tasksVersion.value).toBe(before);
   });
 });
