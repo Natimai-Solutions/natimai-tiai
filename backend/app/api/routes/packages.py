@@ -64,10 +64,19 @@ def _invalid(message: str, **details: Any) -> AppError:
 # C0 and C1 controls and DEL: nothing a name, a version or an argument needs,
 # and what a terminal reads as cursor moves and line erasures — able to hide
 # the real command line from the administrator reviewing it before signing
-# (audit S25). With them the Unicode bidirectional controls (U+202A–U+202E,
-# U+2066–U+2069), which reorder what is displayed, and the line and
-# paragraph separators U+2028/U+2029: the same trick by other means.
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069\u2028\u2029]")
+# (audit S25). With them what Unicode offers for the same trick (audit T38):
+# the characters that reorder what is displayed — the bidirectional controls
+# U+202A–U+202E and U+2066–U+2069, the marks U+200E, U+200F and U+061C — the
+# line and paragraph separators U+2028/U+2029, and the ones that show
+# nothing at all: soft hyphen U+00AD, zero-width U+200B–U+200D, the format
+# characters U+2060–U+206F, the BOM U+FEFF, the tag characters
+# U+E0000–U+E007F. Letters written right to left stay allowed: it is the
+# invisible controls that lie, not the script. Sign-TiaiPackage.ps1 refuses
+# the same set (Assert-NoControl); a test keeps the two equal.
+_CONTROL = re.compile(
+    r"[\x00-\x1f\x7f-\x9f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff"
+    r"\U000e0000-\U000e007f]"
+)
 
 
 def _no_control(value: str | None) -> str | None:
@@ -109,6 +118,13 @@ class PackageBody(BaseModel):
     success_codes: list[int] | None = None
     detect_name: str | None = Field(default=None, max_length=200)
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def _trimmed(cls, v: Any) -> Any:
+        # Before the length check: a name of spaces — or of U+00A0, which
+        # strip() takes too — is no name, not one to store as "".
+        return v.strip() if isinstance(v, str) else v
+
     @field_validator("name", "version", "install_run", "uninstall_run", "detect_name")
     @classmethod
     def _plain(cls, v: str | None) -> str | None:
@@ -140,6 +156,9 @@ class PackageFileOut(BaseModel):
 class ProblemOut(BaseModel):
     code: str
     message: str
+    # Whether it stands in the way of an uninstallation too: the console and
+    # the command route read the same flag (``manifest.Problem``).
+    blocks_uninstall: bool
 
 
 class PackageOut(BaseModel):
@@ -165,6 +184,15 @@ class PackageOut(BaseModel):
     signed_by: str | None
     # Method A: signer of the file ``install_run`` names, if any.
     publisher_name: str | None
+    # Method A again: the files weigh more, together, than the postes
+    # download for an unsigned package (``PACKAGE_METHOD_A_MAX_GB``). Decided
+    # here so that the console does not carry the figure; the bound itself is
+    # there for the sentence that explains it.
+    method_a_too_large: bool
+    method_a_max_bytes: int
+    # The largest file an upload accepts (``PACKAGE_MAX_BYTES``): the console
+    # checks sizes against it before sending anything.
+    file_max_bytes: int
     # What stands between this package and a deployment; empty when ready.
     problems: list[ProblemOut]
     # Postes (within the caller's scope) whose inventory shows the program;
@@ -216,7 +244,15 @@ async def _out(
         signed_at=package.signed_at,
         signed_by=package.signed_by,
         publisher_name=run_file.publisher_name if run_file else None,
-        problems=[ProblemOut(code=p.code, message=p.message) for p in problems],
+        method_a_too_large=manifest.method_a_too_large(files),
+        method_a_max_bytes=manifest.method_a_max_bytes(),
+        file_max_bytes=settings.PACKAGE_MAX_BYTES,
+        problems=[
+            ProblemOut(
+                code=p.code, message=p.message, blocks_uninstall=p.blocks_uninstall
+            )
+            for p in problems
+        ],
         installed_count=await crud.installed_count(
             session, package, machine_ids_clause(scope, col(MachineSoftware.machine_id))
         ),
@@ -227,8 +263,16 @@ async def _out(
     )
 
 
-async def require_package(session: SessionDep, package_id: uuid.UUID) -> Package:
-    package = await session.get(Package, package_id)
+async def require_package(
+    session: SessionDep, package_id: uuid.UUID, *, lock: bool = False
+) -> Package:
+    """The package, or 404. ``lock=True`` is for the routes that change it:
+    its row is locked until the transaction ends (``crud.locked``)."""
+    package = (
+        await crud.locked(session, package_id)
+        if lock
+        else await session.get(Package, package_id)
+    )
     if package is None:
         raise AppError(
             code=ErrorCode.PACKAGE_NOT_FOUND,
@@ -341,7 +385,7 @@ async def update_package(
     current: CurrentUser,
     scope: CurrentScope,
 ) -> PackageOut:
-    package = await require_package(session, package_id)
+    package = await require_package(session, package_id, lock=True)
     fields = payload.model_dump(exclude_unset=True)
     _apply(package, fields)
     package.updated_at = utcnow()
@@ -377,10 +421,10 @@ async def upload_files(
     scope: CurrentScope,
     files: Annotated[list[UploadFile], File()],
 ) -> PackageOut:
-    """Add files to the package, replacing any of the same name. Streamed to
-    the store and hashed on the way; the manifest — and so the signature —
-    follows."""
-    package = await require_package(session, package_id)
+    """Add files to the package, replacing any of the same name — case aside,
+    as Windows reads names. Streamed to the store and hashed on the way; the
+    manifest — and so the signature — follows."""
+    package = await require_package(session, package_id, lock=True)
     _require_files_kind(package)
     # What this request stored, pinned against another request's sweep until
     # the rows naming them are committed or rolled back (audit T09).
@@ -428,8 +472,14 @@ async def _store_uploads(
 ) -> list[dict[str, Any]]:
     """Stream each upload to the store and name it in the package, replacing
     a file of the same name. Flushed, not committed. Each stored hash is
-    appended to ``pinned``, for the caller to unpin (``storage.save``)."""
+    appended to ``pinned``, for the caller to unpin (``storage.save``).
+
+    "The same name" is read as Windows and the agent read it, case aside
+    (audit T23): ``A.INI`` replaces ``a.ini`` — two rows would be one file on
+    the poste, and a manifest the agent refuses whole. Two spellings of one
+    name in a single request are refused: nothing says which one is meant."""
     added: list[dict[str, Any]] = []
+    spelled: dict[str, str] = {}
     for upload in files:
         name = (upload.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         if not manifest.valid_file_name(name):
@@ -438,6 +488,14 @@ async def _store_uploads(
                 status_code=422,
                 message="Nom de fichier refusé",
                 details={"name": name},
+            )
+        other = spelled.setdefault(name.lower(), name)
+        if other != name:
+            raise AppError(
+                code=ErrorCode.PACKAGE_FILE_NAME_INVALID,
+                status_code=422,
+                message="Deux fichiers de l'envoi ne diffèrent que par la casse",
+                details={"name": name, "same_as": other},
             )
         try:
             stored = await storage.save(upload, settings.PACKAGE_MAX_BYTES)
@@ -451,9 +509,16 @@ async def _store_uploads(
         pinned.append(stored.sha256)
         with stored.path.open("rb") as f:
             publisher = authenticode.signer_name(f)
-        existing = await session.get(PackageFile, (package.id, name))
-        if existing is not None:
+        replaced = await crud.files_named(session, package.id, name)
+        for existing in replaced:
+            # The step that ran the old spelling runs the new one: it is the
+            # same file, and the package must not lose its installer to a
+            # change of case.
+            for key in ("install_run", "uninstall_run"):
+                if getattr(package, key) == existing.name:
+                    setattr(package, key, name)
             await session.delete(existing)
+        if replaced:
             await session.flush()
         session.add(
             PackageFile(
@@ -479,7 +544,7 @@ async def delete_file(
     current: CurrentUser,
     scope: CurrentScope,
 ) -> PackageOut:
-    package = await require_package(session, package_id)
+    package = await require_package(session, package_id, lock=True)
     _require_files_kind(package)
     row = await session.get(PackageFile, (package.id, name))
     if row is None:
@@ -537,7 +602,7 @@ async def attach_signature(
     last change would be refused by every poste anyway, better to say so now."""
     import json
 
-    package = await require_package(session, package_id)
+    package = await require_package(session, package_id, lock=True)
     _require_files_kind(package)
     problems = manifest.problems(package, await crud.files_of(session, package.id))
     if problems:
@@ -589,7 +654,7 @@ async def remove_signature(
     current: CurrentUser,
     scope: CurrentScope,
 ) -> PackageOut:
-    package = await require_package(session, package_id)
+    package = await require_package(session, package_id, lock=True)
     package.signature = None
     package.signature_algorithm = None
     package.signer_certificate = None
@@ -618,20 +683,31 @@ async def retire_package(
     current: CurrentUser,
     scope: CurrentScope,
 ) -> PackageOut:
-    """No longer offered for deployment. Its files stay until it is deleted:
-    a poste that already received the command still needs to download them."""
-    package = await require_package(session, package_id)
-    package.retired_at = package.retired_at or utcnow()
+    """No longer offered for deployment, and installed nowhere any more: the
+    installations still waiting for their poste are cancelled here and now
+    (audit T08) — left pending, one would go out if the package came back to
+    the catalogue before that poste's next heartbeat. An installation already
+    handed to a poste runs to its end: its files stay, the package is retired,
+    never deleted. Uninstallations are untouched: taking the program off the
+    parc is what one does with a retired package."""
+    package = await require_package(session, package_id, lock=True)
+    now = utcnow()
+    package.retired_at = package.retired_at or now
     session.add(package)
+    cancelled = await crud.cancel_pending_installs(session, package.id, now)
     audit.record(
         session,
         actor=current.email,
         action="package.retire",
         resource_type="package",
         resource_id=str(package.id),
-        details={"name": package.name},
+        details={"name": package.name, "cancelled_installs": cancelled},
     )
     await session.commit()
+    if cancelled:
+        # A cancelled installation may have been the last one holding a file
+        # replaced in the package since it was queued (audit S09).
+        await crud.sweep_store(session)
     await session.refresh(package)
     return await _out(session, package, scope)
 
@@ -643,7 +719,7 @@ async def restore_package(
     current: CurrentUser,
     scope: CurrentScope,
 ) -> PackageOut:
-    package = await require_package(session, package_id)
+    package = await require_package(session, package_id, lock=True)
     package.retired_at = None
     session.add(package)
     audit.record(

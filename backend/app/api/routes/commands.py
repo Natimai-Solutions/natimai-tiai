@@ -185,6 +185,16 @@ async def _deployable_package(
     uninstall — taking a program off the parc is exactly what one does with a
     package nobody should install any more. An incomplete ``files`` package is
     refused outright: no poste could run it.
+
+    An uninstallation is refused for what the agent would refuse it for, no
+    more (``manifest.Problem.blocks_uninstall``, which the console reads from
+    the package payload): a package without an install step is uninstalled
+    all the same, as the agent would.
+
+    The package row is read under a shared lock, held until the commands are
+    committed: a change of the package or its retirement waits for them
+    (``package_crud.locked``), and so sees them — the fingerprint taken here
+    is the package's, and a retirement cancels these installations too.
     """
     if payload.type not in PACKAGE_COMMAND_TYPES:
         return None
@@ -194,7 +204,9 @@ async def _deployable_package(
             status_code=422,
             message="A deployment command names its package",
         )
-    package = await session.get(Package, payload.package_id)
+    package = await session.get(
+        Package, payload.package_id, with_for_update={"read": True}
+    )
     if package is None:
         raise AppError(
             code=ErrorCode.PACKAGE_NOT_FOUND,
@@ -211,27 +223,42 @@ async def _deployable_package(
         files = await package_crud.files_of(session, package.id)
         problems = manifest.problems(package, files)
         uninstall = payload.type == CommandType.PACKAGE_UNINSTALL
-        if uninstall and not package.uninstall_run:
-            problems = [
-                *problems,
-                manifest.Problem("no_uninstall", "Pas de désinstallation définie"),
-            ]
+        step = "uninstall" if uninstall else "install"
+        if uninstall:
+            problems = [p for p in problems if p.blocks_uninstall]
+            if not package.uninstall_run:
+                problems = [
+                    *problems,
+                    manifest.Problem("no_uninstall", "Pas de désinstallation définie"),
+                ]
         # The agent's rule for the step it would run (audit B30, U04): what
         # no poste would accept is refused here rather than queued to fail.
-        if not problems and not manifest.runnable_somewhere(
-            package, files, "uninstall" if uninstall else "install"
-        ):
-            problems = [
-                manifest.Problem(
-                    "untrusted",
-                    "Désinstallation ni signée, ni lancée par un exécutable "
-                    "d'éditeur seul dans son dossier, ni « msiexec /x {code "
-                    "produit} » : aucun poste ne l'exécutera. Signez le paquet."
-                    if uninstall
-                    else "Ni signé, ni lancé par un exécutable d'éditeur seul dans "
-                    "son dossier : aucun poste ne l'exécutera. Signez le paquet.",
-                )
-            ]
+        if not problems and not manifest.runnable_somewhere(package, files, step):
+            if manifest.runnable_somewhere(package, files, step, capped=False):
+                # Method A in every respect but the size: the agent caps what
+                # an unsigned manifest may have it download.
+                gib = manifest.method_a_max_bytes() >> 30
+                problems = [
+                    manifest.Problem(
+                        "method_a_too_large",
+                        f"Plus de {gib} Gio de fichiers : sans signature de "
+                        "l'administrateur, aucun poste ne les téléchargera "
+                        "(plafond de la méthode A). Signez le paquet.",
+                    )
+                ]
+            else:
+                problems = [
+                    manifest.Problem(
+                        "untrusted",
+                        "Désinstallation ni signée, ni lancée par un exécutable "
+                        "d'éditeur seul dans son dossier, ni « msiexec /x {code "
+                        "produit} » : aucun poste ne l'exécutera. Signez le paquet."
+                        if uninstall
+                        else "Ni signé, ni lancé par un exécutable d'éditeur seul "
+                        "dans son dossier : aucun poste ne l'exécutera. Signez le "
+                        "paquet.",
+                    )
+                ]
         if problems:
             raise AppError(
                 code=ErrorCode.PACKAGE_NOT_READY,

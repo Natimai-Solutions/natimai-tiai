@@ -483,6 +483,11 @@ class Settings(BaseSettings):
     # Package downloads served at once by one API process; beyond it agents
     # are told to retry (429 + Retry-After), without failing their command.
     PACKAGE_MAX_CONCURRENT_DOWNLOADS: int = Field(default=20, ge=1, le=500)
+    # What an unsigned package (method A) may weigh in all, in GiB, before the
+    # postes refuse to download it. Must match the fleet's DeployMethodAMaxGB
+    # (GPO, default 8): the server and the console only predict what the
+    # agent decides, and say "sign it" instead of queueing a sure failure.
+    PACKAGE_METHOD_A_MAX_GB: int = Field(default=8, ge=1, le=1024)
     # How long a relayed wake waits for a poste to claim it before expiring. Ten
     # minutes and not the general command TTL: a wake nobody relayed within ten
     # minutes is a site with nothing on, and a magic packet an hour late meets

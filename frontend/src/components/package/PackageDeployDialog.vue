@@ -54,7 +54,17 @@
           Sur {{ machineIds.length > 1 ? `${machineIds.length} postes` : 'ce poste' }}.
         </div>
 
-        <q-banner v-if="chosen" dense class="surface-blue">
+        <!-- What the server would refuse the command for, said before it is
+             sent: an uninstall is held back by fewer problems than an install. -->
+        <q-banner v-if="chosen && blocking.length" dense class="surface-orange">
+          <div class="text-weight-medium">
+            {{ action === 'install' ? 'Pas encore déployable' : 'Désinstallation impossible' }}
+          </div>
+          <ul class="q-my-xs q-pl-md">
+            <li v-for="p in blocking" :key="p.code">{{ p.message }}</li>
+          </ul>
+        </q-banner>
+        <q-banner v-else-if="chosen" dense class="surface-blue">
           {{ trustSentence(chosen, action) }}
         </q-banner>
       </q-card-section>
@@ -82,11 +92,15 @@ import { bulkSendNotification } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import { listLocations, listMachines } from 'src/services/machines';
 import {
+  blockingProblems,
   deployable,
   deployPackage,
   listPackages,
+  methodAMaxLabel,
   publisherOf,
   stepTrust,
+  tooLargeForMethodA,
+  uninstallable,
   type DeployAction,
   type DeployTarget,
   type Package,
@@ -115,25 +129,36 @@ const sending = ref(false);
 // click while the number of postes is being counted would otherwise open a
 // second confirmation over the first (audit U04).
 const busy = ref(false);
+// Which showing of the dialog a send belongs to. Closed, or closed and opened
+// again, while the postes are being counted: that send is over — it must
+// neither pop its confirmation over whatever is on screen by then, nor keep
+// the button of the next showing disabled.
+let showing = 0;
 
 const fixedPackage = computed(() => props.package ?? null);
 const chosen = computed<Package | null>(
   () => fixedPackage.value ?? packages.value.find((p) => p.id === chosenId.value) ?? null,
 );
+// What the server would accept for the action: the same rule as its command
+// route, read from the package (deployable / uninstallable).
 const packageOptions = computed(() =>
   packages.value
-    .filter(deployable)
+    .filter(action.value === 'install' ? deployable : uninstallable)
     .map((p) => ({ label: p.version ? `${p.name} ${p.version}` : p.name, value: p.id })),
 );
 const canUninstall = computed(
   () => !chosen.value || chosen.value.kind === 'winget' || !!chosen.value.uninstall_run,
 );
+const blocking = computed(() => (chosen.value ? blockingProblems(chosen.value, action.value) : []));
 const ready = computed(() => {
-  if (!chosen.value || (action.value === 'install' && !deployable(chosen.value))) return false;
+  if (!chosen.value) return false;
+  // What the server answers 409 to is not sent: an install of an incomplete
+  // or retired package, an uninstall the agent would refuse the manifest for.
+  if (action.value === 'install' ? !deployable(chosen.value) : !uninstallable(chosen.value))
+    return false;
   // The dialog says no poste will run it: it does not send it either (audit
   // B30) — an uninstall no more than an install (U04).
   if (stepTrust(chosen.value, action.value) === 'none') return false;
-  if (action.value === 'uninstall' && !canUninstall.value) return false;
   if (!props.machineIds?.length && scope.value === 'location' && !location.value) return false;
   return true;
 });
@@ -159,6 +184,8 @@ function trustSentence(p: Package, step: DeployAction): string {
     case 'product_code':
       return 'Désinstallation par code produit (msiexec /x) : seuls les postes dont la GPO approuve au moins un éditeur (DeployPublishers) l’exécuteront.';
     default:
+      if (tooLargeForMethodA(p, step))
+        return `Plus de ${methodAMaxLabel(p)} de fichiers : sans signature de l’administrateur, aucun poste ne les téléchargera (plafond de la méthode A). Signez le paquet avant de le déployer.`;
       return step === 'install'
         ? 'Ni signé, ni lancé par un exécutable d’éditeur : aucun poste ne l’exécutera. Signez le paquet avant de le déployer.'
         : 'Désinstallation ni signée, ni lancée par un exécutable d’éditeur, ni par « msiexec /x {code produit} » : aucun poste ne l’exécutera. Signez le paquet avant de le déployer.';
@@ -168,6 +195,10 @@ function trustSentence(p: Package, step: DeployAction): string {
 watch(
   () => props.modelValue,
   async (open) => {
+    // Either way, whatever send was under way belongs to the past.
+    showing++;
+    busy.value = false;
+    sending.value = false;
     if (!open) return;
     action.value = props.initialAction ?? 'install';
     chosenId.value = null;
@@ -208,10 +239,13 @@ async function targetCount(): Promise<number | null> {
  * The whole parc, or any uninstall, is confirmed with the number of postes it
  * reaches — as the bulk actions of the machine list are (audit U04).
  */
-async function confirmed(): Promise<boolean> {
+async function confirmed(mine: number): Promise<boolean> {
   const wide = !props.machineIds?.length && scope.value === 'all';
   if (!wide && action.value !== 'uninstall') return true;
   const count = await targetCount();
+  // Closed while the postes were being counted: nothing is asked, nothing
+  // is sent.
+  if (mine !== showing) return false;
   const where =
     count === null
       ? wide
@@ -239,6 +273,7 @@ async function confirmed(): Promise<boolean> {
 
 async function send() {
   if (!chosen.value || busy.value) return;
+  const mine = showing;
   busy.value = true;
   try {
     const target: DeployTarget = props.machineIds?.length
@@ -246,7 +281,7 @@ async function send() {
       : scope.value === 'all'
         ? { target_all: true }
         : { target_location: location.value ?? '' };
-    if (!(await confirmed())) return;
+    if (!(await confirmed(mine))) return;
     sending.value = true;
     const res = await deployPackage(chosen.value.id, action.value, target);
     $q.notify(bulkSendNotification(res));
@@ -255,8 +290,12 @@ async function send() {
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Envoi impossible') });
   } finally {
-    sending.value = false;
-    busy.value = false;
+    // Only for the showing this send was started in: a later one has its
+    // own state, reset when it opened.
+    if (mine === showing) {
+      sending.value = false;
+      busy.value = false;
+    }
   }
 }
 </script>

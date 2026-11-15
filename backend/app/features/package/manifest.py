@@ -12,6 +12,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.core.config import settings
+from app.features.package import storage
 from app.features.package.models import Package, PackageFile
 
 FORMAT = "tiai-package-1"
@@ -24,8 +26,12 @@ MSIEXEC = "msiexec"
 # Windows path would read as a device or a stream. Applied with fullmatch:
 # "$" after re.match also accepts a trailing newline (audit S25).
 _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._()+\-]{0,254}")
+# A device name is one whatever follows its first dot, and whatever spaces
+# sit before that dot: Windows opens "nul .cab" as NUL (audit T38). The stem —
+# the name up to its first dot — trimmed of trailing spaces, any case. The
+# agent applies the same rule (deploy.ValidFileName).
 _RESERVED = re.compile(
-    r"(con|prn|aux|nul|com\d|lpt\d)(\..*)?", re.IGNORECASE | re.DOTALL
+    r"(con|prn|aux|nul|com\d|lpt\d) *(\..*)?", re.IGNORECASE | re.DOTALL
 )
 
 
@@ -39,10 +45,38 @@ def valid_file_name(name: str) -> bool:
 
 @dataclass(frozen=True)
 class Problem:
-    """Why a package cannot be deployed yet, in the console's words."""
+    """Why a package cannot be deployed yet, in the console's words.
+
+    ``blocks_uninstall``: whether it stands in the way of an uninstallation
+    too. The agent reads the whole manifest before either step (deploy
+    ParseManifest), so most do; a missing *install* step does not."""
 
     code: str
     message: str
+    blocks_uninstall: bool = True
+
+
+def _quoted(names: Sequence[str]) -> str:
+    return ", ".join(f"« {n} »" for n in names)
+
+
+def case_duplicates(files: Sequence[PackageFile]) -> list[list[str]]:
+    """The file names that differ only by case, grouped. One file on Windows,
+    and a manifest the agent refuses whole (deploy.ParseManifest, audit T23).
+    An upload replaces such a file; rows written before that rule may remain."""
+    groups: dict[str, list[str]] = {}
+    for f in files:
+        groups.setdefault(f.name.lower(), []).append(f.name)
+    return [sorted(names) for _, names in sorted(groups.items()) if len(names) > 1]
+
+
+def by_product_code(package: Package) -> bool:
+    """Whether the uninstallation is ``msiexec`` with an MSI product code among
+    its arguments: what method A runs as ``/x {code}`` without downloading any
+    file of the package (agent deploy.MethodAStep)."""
+    return package.uninstall_run == MSIEXEC and any(
+        PRODUCT_CODE.fullmatch(a) for a in package.uninstall_args
+    )
 
 
 def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
@@ -52,7 +86,11 @@ def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
     if not files:
         out.append(Problem("no_files", "Aucun fichier déposé"))
     if not package.install_run:
-        out.append(Problem("no_install", "Fichier à lancer non choisi"))
+        # The one problem an uninstallation does not share: the agent runs
+        # the uninstall step of a manifest that has no install step.
+        out.append(
+            Problem("no_install", "Fichier à lancer non choisi", blocks_uninstall=False)
+        )
     elif package.install_run != MSIEXEC and package.install_run not in names:
         out.append(
             Problem(
@@ -68,6 +106,34 @@ def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
             Problem(
                 "uninstall_missing",
                 f"« {package.uninstall_run} » n'est pas dans le paquet",
+            )
+        )
+    duplicates = case_duplicates(files)
+    if duplicates:
+        out.append(
+            Problem(
+                "duplicate_names",
+                "Fichiers dont le nom ne diffère que par la casse (un seul "
+                "fichier sous Windows, les postes refusent le paquet) : "
+                + " ; ".join(_quoted(group) for group in duplicates)
+                + " — retirez ceux en trop",
+            )
+        )
+    # A row whose stored file is gone: every poste would get a 404 on it. Left
+    # by the store sweep of v1.2.0, which could delete a file an upload had
+    # just stored (audit T09); uploading the file again restores it.
+    lost = sorted({f.name for f in files if not storage.exists(f.sha256)})
+    if lost:
+        out.append(
+            Problem(
+                "file_missing_in_store",
+                "Fichier absent du stockage du serveur : "
+                + _quoted(lost)
+                + " — déposez-le de nouveau",
+                # Downloaded by every step but one: an unsigned package's
+                # msiexec /x {code}, which method A runs without any file.
+                blocks_uninstall=package.signature is not None
+                or not by_product_code(package),
             )
         )
     return out
@@ -90,14 +156,32 @@ PRODUCT_CODE = re.compile(
 )
 
 
+def method_a_max_bytes() -> int:
+    """What an unsigned manifest may announce in all before the postes refuse
+    it (agent deploy.MethodAFiles, registry DeployMethodAMaxGB)."""
+    return settings.PACKAGE_METHOD_A_MAX_GB << 30
+
+
+def method_a_too_large(files: Sequence[PackageFile]) -> bool:
+    """Whether the files weigh more, together, than method A downloads. A
+    signed package is not capped: its sizes are the administrator's word."""
+    return sum(f.size for f in files) > method_a_max_bytes()
+
+
 def runnable_somewhere(
-    package: Package, files: Sequence[PackageFile], action: str = "install"
+    package: Package,
+    files: Sequence[PackageFile],
+    action: str = "install",
+    *,
+    capped: bool = True,
 ) -> bool:
     """Whether some poste could run this ``files`` package's installation —
     or uninstallation, ``action="uninstall"``: signed by the administrator
     (method B), or launched by an .exe whose publisher was read at upload
-    with nothing loadable beside it (method A). Neither, and every poste will
-    refuse it (audit B30).
+    with nothing loadable beside it and no more than the method A cap to
+    download (method A). Neither, and every poste will refuse it (audit B30).
+    ``capped=False`` leaves the size out: what tells "too large for method A"
+    from "not method A at all".
 
     Method A also runs an uninstall by ``msiexec`` when one argument is a
     product code: the agent rebuilds the command line as ``/x {code} /qn
@@ -109,13 +193,15 @@ def runnable_somewhere(
     if action == "uninstall":
         run = package.uninstall_run or ""
         if run == MSIEXEC:
-            return any(PRODUCT_CODE.fullmatch(a) for a in package.uninstall_args)
+            return by_product_code(package)
     else:
         run = package.install_run or ""
     if not run.lower().endswith(".exe"):
         return False
     run_file = next((f for f in files if f.name == run), None)
     if run_file is None or not run_file.publisher_name:
+        return False
+    if capped and method_a_too_large(files):
         return False
     return not any(
         f.name != run and Path(f.name.lower()).suffix in LOADABLE_EXTENSIONS

@@ -1039,6 +1039,12 @@ async def download_package_file(
     not_found = AppError(
         code=ErrorCode.PACKAGE_NOT_FOUND, status_code=404, message="Not found"
     )
+    # Before any query: what is not a SHA-256 names no file, and a NUL in it
+    # is a value PostgreSQL refuses outright — a 500 where a 404 is due.
+    try:
+        path = package_storage.path_for(sha256)
+    except ValueError:
+        raise not_found from None
     open_commands = (
         await session.exec(
             select(Command.package_files)
@@ -1069,10 +1075,6 @@ async def download_package_file(
         if row is None or not any(shas is None for shas in open_commands):
             raise not_found
         name = row.name
-    try:
-        path = package_storage.path_for(sha256)
-    except ValueError:
-        raise not_found from None
     if not path.exists():
         raise not_found
     if _downloads_in_flight >= settings.PACKAGE_MAX_CONCURRENT_DOWNLOADS:

@@ -6,15 +6,16 @@ import json
 import logging
 import uuid
 from collections.abc import Iterable, Sequence
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import contains, utcnow
-from app.features.command.models import Command, CommandStatus
+from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.inventory.models import MachineSoftware, Software
 from app.features.package import manifest, storage
 from app.features.package.models import Package, PackageFile, PackageKind
@@ -27,6 +28,62 @@ OPEN_STATUSES = [
     CommandStatus.DELIVERED.value,
     CommandStatus.RUNNING.value,
 ]
+
+
+# What a cancelled installation says in the console (``cancel_pending_installs``).
+RETIRED_ERROR = "Paquet retiré : installation annulée"
+
+
+async def locked(session: AsyncSession, package_id: uuid.UUID) -> Package | None:
+    """The package with its row locked (``SELECT … FOR UPDATE``) until the
+    transaction ends: what every route that changes a package starts with.
+
+    Two requests changing one package at once would otherwise each rebuild
+    the manifest from the files it sees — its own, not the other's — and the
+    last commit would keep a manifest missing a file the table holds; two
+    uploads of one file name would collide on the primary key. Behind the
+    lock the second request reads what the first committed.
+
+    Read again from the database even if the session already holds the row:
+    what is locked is what is changed."""
+    rows = await session.exec(
+        select(Package)
+        .where(col(Package.id) == package_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return rows.first()
+
+
+async def files_named(
+    session: AsyncSession, package_id: uuid.UUID, name: str
+) -> list[PackageFile]:
+    """The files of the package bearing this name, case aside: the one an
+    upload replaces — several if rows written before that rule remain."""
+    rows = await session.exec(
+        select(PackageFile)
+        .where(col(PackageFile.package_id) == package_id)
+        .where(func.lower(col(PackageFile.name)) == name.lower())
+    )
+    return list(rows.all())
+
+
+async def cancel_pending_installs(
+    session: AsyncSession, package_id: uuid.UUID, now: datetime
+) -> int:
+    """Fail the installations of this package no poste has received yet, and
+    return how many (audit T08). One statement, on the status as it stands
+    when the row is reached: an installation a heartbeat is delivering at
+    that moment is left to that heartbeat, which refuses a retired package
+    itself. The caller commits."""
+    result = await session.exec(
+        update(Command)
+        .where(col(Command.package_id) == package_id)
+        .where(col(Command.type) == CommandType.PACKAGE_INSTALL.value)
+        .where(col(Command.status) == CommandStatus.PENDING.value)
+        .values(status=CommandStatus.FAILED, error=RETIRED_ERROR, finished_at=now)
+    )
+    return result.rowcount or 0
 
 
 async def files_of(session: AsyncSession, package_id: uuid.UUID) -> list[PackageFile]:

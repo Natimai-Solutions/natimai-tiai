@@ -696,7 +696,8 @@ async def test_a_package_retired_after_queueing_is_not_installed(
     client, db_session, store
 ):
     """Audit T08: retiring says "install this nowhere any more" — an install
-    queued before is cancelled at delivery; an uninstall still goes out."""
+    queued before is cancelled there and then (the delivery-time refusal
+    behind it has its own test below); an uninstall still goes out."""
     admin = await _admin(client, db_session)
     package = await _pronote(client, admin)
     patched = await client.patch(
@@ -723,18 +724,22 @@ async def test_a_package_retired_after_queueing_is_not_installed(
     )
     assert retired.status_code == 200, retired.text
 
+    # Cancelled by the retirement itself, before any poste asks.
+    listed = await client.get(
+        "/api/v1/commands", headers=admin, params={"machine_id": machine_id}
+    )
+    by_type = {c["type"]: c for c in listed.json()["items"]}
+    assert by_type["package_install"]["status"] == "failed"
+    assert by_type["package_install"]["error"] == (
+        "Paquet retiré : installation annulée"
+    )
+    assert by_type["package_install"]["finished_at"] is not None
+    assert by_type["package_uninstall"]["status"] == "pending"
+
     hb = await client.post(
         "/api/v1/agent/heartbeat", headers=agent, json={"agent_version": "test"}
     )
     assert [c["type"] for c in hb.json()["commands"]] == ["package_uninstall"]
-    listed = await client.get(
-        "/api/v1/commands", headers=admin, params={"machine_id": machine_id}
-    )
-    install = next(c for c in listed.json()["items"] if c["type"] == "package_install")
-    assert install["status"] == "failed"
-    assert install["error"] == (
-        "Paquet retiré après la mise en file : installation annulée"
-    )
 
     # Queued after the retirement, an uninstall is still delivered.
     (delivered,) = hb.json()["commands"]
@@ -866,16 +871,20 @@ async def test_a_database_error_in_the_sweep_does_not_fail_the_upload(
     client, db_session, store, monkeypatch
 ):
     """The sweep runs after the upload committed: a database error there is
-    logged, not answered 500 for a stored file."""
-    from sqlalchemy.exc import OperationalError
+    logged, not answered 500 for a stored file. A real failing statement: it
+    leaves the transaction aborted, and the answer — which reads the package
+    again on the same session — only comes if the sweep rolled it back."""
+    from sqlalchemy import text
 
     from app.features.package import crud
 
     admin = await _admin(client, db_session)
     package = await _pronote(client, admin)
+    failed: list[str] = []
 
     async def broken(session, sha256):
-        raise OperationalError("SELECT 1", {}, Exception("connection lost"))
+        failed.append(sha256)
+        await session.exec(text("select 1/0"))
 
     monkeypatch.setattr(crud, "sha_in_use", broken)
     up = await client.post(
@@ -885,6 +894,8 @@ async def test_a_database_error_in_the_sweep_does_not_fail_the_upload(
     )
     assert up.status_code == 200, up.text
     assert "extra.ini" in {f["name"] for f in up.json()["files"]}
+    # The sweep did reach the failing statement, once: it stops there.
+    assert len(failed) == 1
 
 
 async def test_the_sweep_deletes_nothing_beside_an_empty_catalogue(
