@@ -393,21 +393,37 @@ async def place_from_directory(
     ``from_agent``: the reading arrives in a heartbeat — a room made by hand
     is not adopted, and the rooms created per hour are bounded (audit S20).
     ``adopt`` overrides the first (the re-sync decides it per key)."""
+    created, _filed = await _place(
+        session, machine, source, from_agent=from_agent, adopt=adopt
+    )
+    return created
+
+
+async def _place(
+    session: AsyncSession,
+    machine: Machine,
+    source: str,
+    *,
+    from_agent: bool = False,
+    adopt: bool | None = None,
+) -> tuple[bool, bool]:
+    """``place_from_directory``, saying also whether the poste ended up filed
+    in the room its reading names: (room created, poste filed)."""
     if source == "manual":
-        return False
+        return False, False
     if source == "ad_ou" and machine.ad_ou_dn and not reported_dn_consistent(machine):
         logger.warning(
             "directory: machine %s reports an OU its DN is not in, not filed",
             machine.id,
         )
-        return False
+        return False, False
     key = directory_key(machine, source)
     if key is None:
         if machine.room_id is not None:
             machine.room_id = None
             machine.updated_at = utcnow()
             session.add(machine)
-        return False
+        return False, False
     room, created = await room_for_key(
         session,
         *key,
@@ -415,12 +431,12 @@ async def place_from_directory(
         capped=from_agent,
     )
     if room is None:
-        return False
+        return False, False
     if machine.room_id != room.id:
         machine.room_id = room.id
         machine.updated_at = utcnow()
         session.add(machine)
-    return created
+    return created, True
 
 
 def _filable(machine: Machine, source: str) -> tuple[str, str] | None:
@@ -431,11 +447,31 @@ def _filable(machine: Machine, source: str) -> tuple[str, str] | None:
     return directory_key(machine, source)
 
 
+# Room names a re-sync reports as left undecided: enough to act on, bounded
+# so that the response and the audit entry stay small on any parc.
+UNDECIDED_ROOMS_MAX = 20
+
+
 @dataclass(frozen=True)
 class SyncResult:
+    # Postes now sitting in the room their reading names.
     placed: int = 0
+    # Postes taken out of their room: the directory names none for them.
     unplaced: int = 0
     rooms_created: int = 0
+    # Postes left where they were because the room made by hand that bears
+    # their name was adopted by no key (a tie, no strict majority, no vote).
+    undecided: int = 0
+    # Those rooms, by name (``UNDECIDED_ROOMS_MAX`` at most).
+    undecided_rooms: tuple[str, ...] = ()
+
+
+def _votes(machine: Machine) -> bool:
+    """Whether a poste's reading counts when a room made by hand is to be
+    adopted: not one whose token is revoked, nor one whose identity is to be
+    confirmed — their word is the one the server has reasons to doubt. They
+    are filed like the others once the others have decided."""
+    return not machine.token_revoked and not machine.needs_verification
 
 
 async def sync_from_directory(session: AsyncSession, source: str) -> SyncResult:
@@ -447,7 +483,10 @@ async def sync_from_directory(session: AsyncSession, source: str) -> SyncResult:
     postes claiming its name report — not by whichever poste comes first: one
     forged reading would otherwise take « B12 » and send the real postes to
     « B12 (2) » (audit S20). On a tie no key adopts it, and the postes stay
-    where they are until the directory says something clearer."""
+    where they are until the directory says something clearer: they are
+    counted as ``undecided``, not as placed, and the room is named.
+
+    Only the postes in good standing vote (``_votes``)."""
     if source == "manual":
         return SyncResult()
     machines = list((await session.exec(select(Machine))).all())
@@ -456,7 +495,7 @@ async def sync_from_directory(session: AsyncSession, source: str) -> SyncResult:
     claims: dict[uuid.UUID, Counter[tuple[str, str]]] = {}
     for machine in machines:
         key = _filable(machine, source)
-        if key is None:
+        if key is None or not _votes(machine):
             continue
         owned = await session.exec(select(Room.id).where(Room.ad_key == key[0]))
         if owned.first() is not None:
@@ -479,16 +518,29 @@ async def sync_from_directory(session: AsyncSession, source: str) -> SyncResult:
                 len(counter),
             )
 
-    placed = unplaced = created = 0
+    placed = unplaced = created = undecided = 0
+    undecided_rooms: set[str] = set()
     for machine in machines:
         key = directory_key(machine, source)
-        if key is None:
-            if machine.room_id is not None:
-                unplaced += 1
-        elif _filable(machine, source) is not None:
-            placed += 1
-        if await place_from_directory(
+        if key is None and machine.room_id is not None:
+            unplaced += 1
+        room_created, filed = await _place(
             session, machine, source, adopt=key is not None and key[0] in adopting
-        ):
+        )
+        if room_created:
             created += 1
-    return SyncResult(placed=placed, unplaced=unplaced, rooms_created=created)
+        if filed:
+            placed += 1
+        elif key is not None and _filable(machine, source) is not None:
+            # A key the directory vouches for, and still no room: the one
+            # made by hand that bears its name was adopted by nobody.
+            undecided += 1
+            held = await room_by_name(session, None, key[1])
+            undecided_rooms.add(held.name if held is not None else key[1])
+    return SyncResult(
+        placed=placed,
+        unplaced=unplaced,
+        rooms_created=created,
+        undecided=undecided,
+        undecided_rooms=tuple(sorted(undecided_rooms)[:UNDECIDED_ROOMS_MAX]),
+    )

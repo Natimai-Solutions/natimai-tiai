@@ -37,6 +37,7 @@ from app.features.audit import crud as audit
 from app.features.auth_session import crud as auth_sessions
 from app.features.auth_session.models import AuthSession
 from app.features.base import utcnow
+from app.features.user import addresses as login_addresses
 from app.features.user import crud, emails
 from app.features.user.models import EmailPreference, User
 
@@ -263,6 +264,12 @@ async def refresh(
     access_token = security.create_access_token(user.id, session_id=row.id)
     if result.refresh_token is not None:
         _set_refresh_cookie(response, result.refresh_token, row.expires_at)
+    # A session in use keeps its address among the account's known ones
+    # (written at most once a day): otherwise an owner who never logs out
+    # would stop being known the day the session's ceiling makes them log in.
+    await login_addresses.note_success(
+        session, user.id, client_ip(request), utcnow(), proved=False
+    )
     await session.commit()
     return Token(access_token=access_token)
 
@@ -546,7 +553,10 @@ async def change_password(
             status_code=400,
             message="Current password is incorrect",
         )
-    await crud.set_password(session, user, payload.new_password)
+    # The owner, proved by the current password: this address stays known.
+    await crud.set_password(
+        session, user, payload.new_password, chosen_from=client_ip(request)
+    )
     await crud.purge_reset_tokens(session, user.id)
     await session.commit()
 
@@ -627,9 +637,14 @@ class PasswordResetConfirm(BaseModel):
 
 @router.post("/password-reset/confirm", status_code=204)
 async def confirm_password_reset(
-    payload: PasswordResetConfirm, session: SessionDep
+    request: Request, payload: PasswordResetConfirm, session: SessionDep
 ) -> None:
-    """Set a new password from a valid reset link. Public endpoint."""
+    """Set a new password from a valid reset link. Public endpoint.
+
+    The address the link is redeemed from becomes one of the account's known
+    ones: whoever holds the owner's mailbox is the owner, and that is the way
+    back in for an owner the lock shuts out (``addresses.shut_out``).
+    """
     user = await crud.consume_reset_token(session, payload.token)
     if user is None:
         raise AppError(
@@ -637,5 +652,7 @@ async def confirm_password_reset(
             status_code=400,
             message="This reset link is invalid or has expired",
         )
-    await crud.set_password(session, user, payload.new_password)
+    await crud.set_password(
+        session, user, payload.new_password, chosen_from=client_ip(request)
+    )
     await session.commit()

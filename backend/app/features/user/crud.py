@@ -6,10 +6,11 @@ from sqlalchemy import case, delete, func, or_, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core import ratelimit, security
+from app.core import security
 from app.core.config import settings
 from app.features.auth_session import crud as auth_sessions
 from app.features.base import contains, utcnow
+from app.features.user import addresses
 from app.features.user.models import (
     Group,
     GroupPermission,
@@ -99,9 +100,11 @@ async def authenticate(
     LOGIN_LOCKOUT_MINUTES. The lock shuts out the addresses that failed on it
     recently, not the account (audit S03): the right password from another
     address still opens it, so failing on purpose keeps nobody out. Unless
-    the guessing comes from many addresses (``FailureMemory.besieged``): the
-    lock then shuts out every address but those that opened the account
-    recently, so spreading the guesses buys no more of them. Raises
+    the guessing comes from many addresses (``addresses.shut_out``): the lock
+    then shuts out every address but those that opened the account recently,
+    so spreading the guesses buys no more of them. Which addresses failed and
+    which ones opened the account is in the database: a restart changes
+    nothing to a lock. Raises
     ``AccountLockedError`` on the failure that locks it (to audit) and on an
     attempt refused by the lock (to log); the route answers both like any
     failure (audit S12). The counter moves in the database, so concurrent
@@ -112,15 +115,10 @@ async def authenticate(
         await security.burn_password_check_async(password)
         return None
     now = utcnow()
-    account = str(user.id)
-    failures = ratelimit.login_failures
     if (
         user.locked_until is not None
         and user.locked_until > now
-        and (
-            failures.failed_recently(account, ip)
-            or (failures.besieged(account) and not failures.known(account, ip))
-        )
+        and await addresses.shut_out(session, user.id, ip, now)
     ):
         await security.burn_password_check_async(password)
         raise AccountLockedError(user, user.locked_until, just_locked=False)
@@ -129,8 +127,7 @@ async def authenticate(
         if until is not None:
             raise AccountLockedError(user, until, just_locked=True)
         return None
-    failures.forget(account, ip)
-    failures.succeeded(account, ip)
+    await addresses.note_success(session, user.id, ip, now)
     if user.failed_login_attempts or user.locked_until is not None:
         user.failed_login_attempts = 0
         user.last_failed_login_at = None
@@ -146,8 +143,8 @@ async def record_failure(session: AsyncSession, user: User, ip: str) -> datetime
     exactly one does. A failure more than LOGIN_LOCKOUT_MINUTES after the
     previous one counts as the first: old failures do not add up. Does not
     commit."""
-    ratelimit.login_failures.note(str(user.id), ip)
     now = utcnow()
+    await addresses.note_failure(session, user.id, ip, now)
     stale = now - timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
     last = col(User.last_failed_login_at)
     failures = (
@@ -211,13 +208,25 @@ async def list_users(
     return list(rows.all()), total or 0
 
 
-async def set_password(session: AsyncSession, user: User, password: str) -> None:
+async def set_password(
+    session: AsyncSession,
+    user: User,
+    password: str,
+    *,
+    chosen_from: str | None = None,
+) -> None:
     """Hash and store a new password, ending every session of the account.
 
     Whoever changes a password — the user, a reset link, an administrator —
     does it because the old one may be known to someone else, who may well be
     logged in with it: all of the account's sessions are revoked, the caller's
-    own included. Does not commit — the caller decides the transaction boundary.
+    own included, and the addresses that opened the account with the old
+    password stop counting as its owner's (``addresses.forget_known``).
+    ``chosen_from`` is the address of the owner choosing the new one — the
+    change of their own password, or a reset link redeemed — which stays (or
+    becomes) known: it is how an owner locked out by guesses spread over many
+    addresses gets back in. None for an administrator's reset. Does not
+    commit — the caller decides the transaction boundary.
     """
     user.hashed_password = await security.hash_password(password)
     user.password_changed_at = utcnow()
@@ -225,8 +234,12 @@ async def set_password(session: AsyncSession, user: User, password: str) -> None
     # A new password is also the way out of a lockout: the administrator who
     # resets it, or the owner who redeems a reset link, proved more than a guess.
     user.failed_login_attempts = 0
+    user.last_failed_login_at = None
     user.locked_until = None
-    ratelimit.login_failures.forget(str(user.id))
+    await addresses.forget_known(session, user.id, keep=chosen_from)
+    await addresses.forget_failures(session, user.id)
+    if chosen_from is not None:
+        await addresses.note_success(session, user.id, chosen_from, utcnow())
     session.add(user)
     await auth_sessions.revoke_all(session, user.id)
 
@@ -315,20 +328,39 @@ async def consume_reset_token(session: AsyncSession, token: str) -> User | None:
 
     Returns None when the token is unknown, already used, expired, or belongs to
     a deactivated account. Does not commit.
+
+    The account's row is locked first, then its tokens — the order a reset
+    request takes them in (``reset_request_allowed``). Taken the other way
+    round, a link redeemed while a request for the same account came in could
+    deadlock, and one of the two answered a 500; and a link issued by a
+    request still in flight would have outlived the password just chosen.
     """
-    result = await session.exec(
-        select(PasswordResetToken).where(
-            PasswordResetToken.token_hash == security.hash_token(token)
+    token_hash = security.hash_token(token)
+    found = await session.exec(
+        select(PasswordResetToken.user_id).where(
+            PasswordResetToken.token_hash == token_hash
         )
+    )
+    user_id = found.one_or_none()
+    if user_id is None:
+        return None
+    locked = await session.exec(
+        select(User).where(col(User.id) == user_id).with_for_update()
+    )
+    user = locked.one_or_none()
+    if user is None or not user.is_active:
+        return None
+    # Read under the lock: two redemptions of one link are answered one after
+    # the other, the second seeing it used.
+    result = await session.exec(
+        select(PasswordResetToken)
+        .where(PasswordResetToken.token_hash == token_hash)
+        .with_for_update()
     )
     row = result.one_or_none()
     if row is None or row.used_at is not None:
         return None
     if row.expires_at < utcnow():
-        return None
-
-    user = await session.get(User, row.user_id)
-    if user is None or not user.is_active:
         return None
 
     row.used_at = utcnow()

@@ -12,8 +12,9 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, exists, tuple_
+from sqlalchemy import delete, event, exists, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session, SessionTransaction
 from sqlmodel import SQLModel, col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -90,6 +91,48 @@ async def _replace_set(
     return len(deduped)
 
 
+# Where a session keeps the catalogue budget it reserved and has not
+# committed yet: (poste key, units) pairs.
+_RESERVED = "software_entries_reserved"
+
+
+def _reserve_until_commit(session: AsyncSession, machine_key: str, wanted: int) -> int:
+    """Reserve catalogue entries for this poste, charged only if the
+    session's transaction commits.
+
+    The budget is taken at once — two heartbeats in flight must not both be
+    granted the same units — and given back when the transaction ends any
+    other way than by a commit: a heartbeat that fails further down rolls
+    its catalogue rows back, and must not have paid for them.
+    """
+    granted = ratelimit.reserve_software_entries(machine_key, wanted)
+    if not granted:
+        return 0
+    sync = session.sync_session
+    held: list[tuple[str, int]] | None = sync.info.get(_RESERVED)
+    if held is None:
+        held = sync.info[_RESERVED] = []
+        reserved = held
+
+        def keep(committed: Session) -> None:
+            # A savepoint released is not the commit: only the outermost one.
+            if not committed.in_nested_transaction():
+                reserved.clear()
+
+        def give_back(_ended: Session, transaction: SessionTransaction) -> None:
+            if transaction.parent is not None:
+                return
+            for key, units in reserved:
+                ratelimit.release_software_entries(key, units)
+            reserved.clear()
+
+        # On this session alone, and gone with it.
+        event.listen(sync, "after_commit", keep)
+        event.listen(sync, "after_transaction_end", give_back)
+    held.append((machine_key, granted))
+    return granted
+
+
 async def _catalogue_ids(
     session: AsyncSession, triples: list[tuple[str, str, str]], machine_id: uuid.UUID
 ) -> dict[tuple[str, str, str], int]:
@@ -100,9 +143,11 @@ async def _catalogue_ids(
     is nearly all of them — so the ids have to be read back.
 
     The entries the catalogue does not hold yet are created within the
-    poste's daily budget (``ratelimit.software_quota``): beyond it they are
-    left out — of the catalogue and of this poste's list — rather than let one
-    token grow the shared catalogue without bound (audit S21).
+    poste's daily budget and the fleet's (``ratelimit.software_quota``,
+    ``software_fleet_quota``): beyond them they are left out — of the
+    catalogue and of this poste's list — rather than let one token, or many
+    forged ones, grow the shared catalogue without bound (audit S21). The
+    budget is spent only if the transaction commits.
     """
     if not triples:
         return {}
@@ -125,13 +170,15 @@ async def _catalogue_ids(
     new = [t for t in triples if t not in ids]
     if not new:
         return ids
-    granted = ratelimit.software_quota.take(str(machine_id), len(new))
+    granted = _reserve_until_commit(session, str(machine_id), len(new))
     if granted < len(new):
         security_log.warning(
             "software catalogue budget exhausted for machine %s: %d new entries "
-            "left out",
+            "left out (budget left: %d for the poste, %d for the fleet)",
             machine_id,
             len(new) - granted,
+            ratelimit.software_quota.remaining(str(machine_id)),
+            ratelimit.software_fleet_budget_left(),
         )
     if not granted:
         return ids
@@ -296,6 +343,9 @@ async def apply_inventory(
     complete = True
     if report.software is not None:
         complete = await replace_software(session, machine.id, report.software)
+        # Said on the poste, not only in a log: a list cut short reads like
+        # any other in the console, and nothing else would complete it.
+        machine.software_truncated_at = None if complete else now
 
     # Written last, and only once everything above landed: the pair is what says
     # "the console's picture of this machine is this inventory, taken then". A

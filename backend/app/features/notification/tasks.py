@@ -17,6 +17,7 @@ Queued through the outbox like everything else; nothing here sends.
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlmodel import col, select
@@ -27,8 +28,9 @@ from app.features.base import utcnow
 from app.features.check.models import MachineCheck
 from app.features.machine.models import Machine
 from app.features.maintenance import crud as maintenance_crud
-from app.features.maintenance.policy import MaintenanceState
+from app.features.maintenance.policy import MaintenanceState, Resolved
 from app.features.notification.outbox import queue_email
+from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
 from app.features.setting.email_policy import email_policy
 from app.features.user.models import EmailPreference, User
@@ -97,12 +99,39 @@ def send_checks_assigned(
 # --- What one person has on their plate -------------------------------------------
 
 
+@dataclass(frozen=True)
+class FleetMaintenance:
+    """The parc's maintenance, resolved once for a run that writes to many
+    people: the policy — with which owners still reach what they are named
+    on — and every poste's standing and owner."""
+
+    policy: setting_crud.MaintenancePolicy
+    resolved: list[tuple[Machine, Room | None, Building | None, Resolved]]
+
+
+async def fleet_maintenance(session: AsyncSession, now: datetime) -> FleetMaintenance:
+    policy = await setting_crud.maintenance_policy(session)
+    return FleetMaintenance(
+        policy=policy,
+        resolved=await maintenance_crud.fleet_resolved(session, policy, now),
+    )
+
+
 async def personal_block(
-    session: AsyncSession, user: User, now: datetime | None = None
+    session: AsyncSession,
+    user: User,
+    now: datetime | None = None,
+    *,
+    fleet: FleetMaintenance | None = None,
 ) -> list[str]:
     """The lines a digest ends with for this recipient: their open
     verifications, and the rooms and postes they own that are due. Empty when
-    they have nothing — a digest must not grow a section that says so."""
+    they have nothing — a digest must not grow a section that says so.
+
+    ``fleet`` is the parc's maintenance already resolved: a run that writes
+    to every recipient reads it once, not once per recipient. What a person
+    owns is what the resolution names them on — never a poste or a room they
+    no longer reach (``maintenance.reach``), whatever is stored on it."""
     now = now or utcnow()
     cap = settings.NOTIFICATION_MAX_ITEMS
     lines: list[str] = []
@@ -125,10 +154,10 @@ async def personal_block(
         if len(check_rows) > cap:
             lines.append(f"    … et {len(check_rows) - cap} autre(s)")
 
-    policy = await setting_crud.maintenance_policy(session)
-    resolved = await maintenance_crud.fleet_resolved(session, policy, now)
+    if fleet is None:
+        fleet = await fleet_maintenance(session, now)
     rooms, loose = maintenance_crud.group_due(
-        resolved, policy, owner_filter=user.id, unowned=False
+        fleet.resolved, fleet.policy, owner_filter=user.id, unowned=False
     )
     due_rooms = [r for r in rooms if r.overdue or r.due_soon]
     due_loose = [
@@ -190,11 +219,13 @@ async def send_maintenance_reminders(session: AsyncSession) -> int:
         return 0
     users = await session.exec(select(User).where(col(User.is_active).is_(True)))
     now = utcnow()
+    # Once for the run: the parc, and who reaches what.
+    fleet = await fleet_maintenance(session, now)
     queued = 0
     for user in users.all():
         if not _wants_mail(user):
             continue
-        block = await personal_block(session, user, now)
+        block = await personal_block(session, user, now, fleet=fleet)
         if not any("Maintenances dont vous êtes responsable" in line for line in block):
             continue
         date = now.strftime("%d/%m/%Y")

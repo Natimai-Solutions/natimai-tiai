@@ -192,3 +192,30 @@ class PasswordResetToken(SQLModel, table=True):
     expires_at: datetime = utc_field()
     used_at: datetime | None = utc_field(default=None, nullable=True)
     created_at: datetime = utc_field(default_factory=utcnow)
+
+
+LOGIN_ADDRESS_MAX_LENGTH = 64
+
+
+class LoginAddress(SQLModel, table=True):
+    """What one address last did on one account: failed a login, opened it.
+
+    The account lock is guarded by these (audit S03): it shuts out the
+    addresses that failed lately, and — when many have — every address but
+    those that opened the account lately. In the database rather than in the
+    process's memory, so that a restart neither lifts a lock nor forgets
+    whose postes the usual ones are.
+    """
+
+    __tablename__ = "user_login_addresses"
+
+    user_id: uuid.UUID = Field(
+        sa_column=Column(
+            ForeignKey("users.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        )
+    )
+    ip: str = Field(primary_key=True, max_length=LOGIN_ADDRESS_MAX_LENGTH)
+    last_success_at: datetime | None = utc_field(default=None, nullable=True)
+    last_failure_at: datetime | None = utc_field(default=None, nullable=True)

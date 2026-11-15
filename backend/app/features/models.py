@@ -30,6 +30,7 @@ from app.features.user.models import (  # noqa: F401
     Group,
     GroupPermission,
     GroupScope,
+    LoginAddress,
     PasswordResetToken,
     User,
     UserGroup,

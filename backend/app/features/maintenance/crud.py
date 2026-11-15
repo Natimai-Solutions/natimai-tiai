@@ -81,7 +81,7 @@ def group_due(
         if entry is None:
             room_owner = (
                 room.maintenance_owner_id
-                if available(room.maintenance_owner_id, policy)
+                if available(room.maintenance_owner_id, policy, room=room)
                 else policy.owner_id
             )
             room_cycle = (

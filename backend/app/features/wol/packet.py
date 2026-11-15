@@ -11,6 +11,7 @@ while the rest of the hardware is asleep, and only a host on the same broadcast
 domain can put that frame on the wire.
 """
 
+import enum
 import ipaddress
 
 from app.core.config import settings
@@ -98,8 +99,12 @@ _RFC1918 = (
 
 
 def _allowed_networks() -> list[ipaddress.IPv4Network]:
-    """``WOL_ALLOWED_NETWORKS`` when set (unreadable entries skipped), else
-    the RFC 1918 ranges."""
+    """``WOL_ALLOWED_NETWORKS`` when set, else the RFC 1918 ranges.
+
+    The setting is checked when the configuration loads (an entry that is not
+    an IPv4 network refuses the start), so the skip below is only a guard for
+    a value set past that check.
+    """
     configured = settings.WOL_ALLOWED_NETWORKS
     if not configured:
         return list(_RFC1918)
@@ -142,6 +147,34 @@ def subnet_allowed(ip: str | None, prefixlen: int) -> bool:
     if not isinstance(interface, ipaddress.IPv4Interface):
         return False
     return any(interface.network.subnet_of(n) for n in _allowed_networks())
+
+
+class NoDestination(enum.StrEnum):
+    """Why ``destinations_for`` found nowhere to send a poste's packet."""
+
+    # No address known for the poste, or not an IPv4 one.
+    NO_IPV4 = "no_ipv4"
+    # A valid IPv4 address, outside the networks a wake may be emitted on.
+    ADDRESS_NOT_ALLOWED = "address_not_allowed"
+    # An allowed address, on a subnet that reaches beyond those networks.
+    SUBNET_NOT_ALLOWED = "subnet_not_allowed"
+
+
+def no_destination_reason(ip: str | None) -> NoDestination:
+    """Which of the three refusals an empty ``destinations_for`` was.
+
+    Asked only once the list came back empty with no configured address, so
+    an allowed address here means every candidate subnet was refused.
+    """
+    try:
+        address = ipaddress.ip_address(ip) if ip else None
+    except ValueError:
+        address = None
+    if not isinstance(address, ipaddress.IPv4Address):
+        return NoDestination.NO_IPV4
+    if not address_allowed(ip):
+        return NoDestination.ADDRESS_NOT_ALLOWED
+    return NoDestination.SUBNET_NOT_ALLOWED
 
 
 def broadcast_for(ip: str | None, prefixlen: int) -> str | None:

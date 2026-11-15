@@ -1,6 +1,14 @@
+import ipaddress
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import AnyUrl, BeforeValidator, Field, computed_field, model_validator
+from pydantic import (
+    AnyUrl,
+    BeforeValidator,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_core import MultiHostUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -62,8 +70,8 @@ class Settings(BaseSettings):
     # Minimum length for any password set through the API (console forms and
     # admin resets alike). Not applied to crud.create_user, used by seeding.
     PASSWORD_MIN_LENGTH: int = 12
-    # Lifetime of a "forgot password" link.
-    PASSWORD_RESET_EXPIRE_MINUTES: int = 60
+    # Lifetime of a "forgot password" link, in minutes (5 minutes to a week).
+    PASSWORD_RESET_EXPIRE_MINUTES: int = Field(default=60, ge=5, le=7 * 24 * 60)
     # The name the server is reached under — the Caddy site name, and the
     # certificate's CN/SAN. Shared with Caddy through deploy/.env; the backend
     # reads it only to derive the console URL below.
@@ -154,14 +162,12 @@ class Settings(BaseSettings):
     RATE_LIMIT_ENABLED: bool = True
     # Failed logins (each within LOGIN_LOCKOUT_MINUTES of the previous one)
     # before an account is locked, and for how long. The lock shuts out the
-    # addresses that failed on the account, or, once more than twice this many
-    # addresses have, every address but those that opened it recently
-    # (app.core.ratelimit.FailureMemory).
+    # addresses that failed on the account (app.features.user.addresses).
     LOGIN_MAX_FAILED_ATTEMPTS: int = Field(default=5, ge=1, le=100)
     LOGIN_LOCKOUT_MINUTES: int = Field(default=15, ge=1, le=24 * 60)
-    # Distinct addresses failing on one account during a lock past which the
-    # lock turns account-wide, except for the addresses that opened the
-    # account within LOGIN_KNOWN_ADDRESS_DAYS (audit S03, second pass).
+    # Once this many distinct addresses have failed on one account within
+    # LOGIN_LOCKOUT_MINUTES, its lock shuts out every address but those that
+    # opened the account within LOGIN_KNOWN_ADDRESS_DAYS (audit S03).
     LOGIN_SIEGE_ADDRESSES: int = Field(default=10, ge=2, le=1000)
     LOGIN_KNOWN_ADDRESS_DAYS: int = Field(default=30, ge=1, le=365)
     # « Mot de passe oublié » (audit S14): no new mail for an account within
@@ -177,6 +183,13 @@ class Settings(BaseSettings):
     # 2,000 (the most one inventory carries), a poste's first inventory may
     # take more than a day to be complete on a fresh catalogue (audit S21).
     SOFTWARE_NEW_ENTRIES_PER_DAY: int = Field(default=2000, ge=100, le=1_000_000)
+    # New software catalogue entries all postes together may create per 24
+    # hours. The per-poste budget does not bound postes forged with the
+    # enrollment secret, each with a budget of its own; this one does. A poste
+    # is granted the smaller of what is left of its own budget and of this.
+    SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET: int = Field(
+        default=50_000, ge=1000, le=10_000_000
+    )
 
     # --- CORS ---
     BACKEND_CORS_ORIGINS: Annotated[
@@ -523,6 +536,33 @@ class Settings(BaseSettings):
     # (CIDR list). Empty: the private ranges (RFC 1918). An address reported
     # by an agent outside them is not a destination (audit S35).
     WOL_ALLOWED_NETWORKS: Annotated[list[str] | str, BeforeValidator(parse_list)] = []
+
+    @field_validator("WOL_ALLOWED_NETWORKS", mode="after")
+    @classmethod
+    def _wol_allowed_networks_are_ipv4_cidrs(
+        cls, value: list[str] | str
+    ) -> list[str] | str:
+        """Refuse to start on an entry that is not an IPv4 network.
+
+        An entry the wake cannot read was skipped, and a list made only of
+        such entries allowed nothing: every direct wake was then refused,
+        with nothing at startup to say why.
+        """
+        entries = [value] if isinstance(value, str) else value
+        for entry in entries:
+            try:
+                network = ipaddress.ip_network(entry, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"WOL_ALLOWED_NETWORKS: {entry!r} is not a network in CIDR "
+                    "notation (expected e.g. 10.4.0.0/16)"
+                ) from exc
+            if not isinstance(network, ipaddress.IPv4Network):
+                raise ValueError(
+                    f"WOL_ALLOWED_NETWORKS: {entry!r} is not an IPv4 network "
+                    "(Wake-on-LAN is broadcast over IPv4 only)"
+                )
+        return value
 
     @model_validator(mode="after")
     def _usage_thresholds_hold_together(self) -> Self:

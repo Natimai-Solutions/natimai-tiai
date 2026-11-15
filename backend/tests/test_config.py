@@ -167,6 +167,7 @@ TUNABLES = {
     "PASSWORD_RESET_MAX_LIVE_LINKS": (3, 0, 11),
     "AGENT_HEARTBEAT_MAX_PER_MINUTE": (12, 1, 601),
     "SOFTWARE_NEW_ENTRIES_PER_DAY": (2000, 99, 1_000_001),
+    "SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET": (50_000, 999, 10_000_001),
 }
 
 
@@ -192,5 +193,37 @@ def test_the_limiters_read_their_settings(monkeypatch):
         settings.AGENT_HEARTBEAT_MAX_PER_MINUTE
     )
     assert ratelimit.software_quota.units == settings.SOFTWARE_NEW_ENTRIES_PER_DAY
-    monkeypatch.setattr(settings, "LOGIN_SIEGE_ADDRESSES", 4)
-    assert ratelimit.besieged_after() == 4
+
+
+@pytest.mark.parametrize(
+    "value,entry",
+    [
+        ("10.4.0.0/16,pas-un-reseau", "pas-un-reseau"),
+        ("10.4.0.0/33", "10.4.0.0/33"),
+        (["192.168.1.0/24", "10.0.0.0/8/8"], "10.0.0.0/8/8"),
+        # Readable, but a wake is broadcast over IPv4 only.
+        ("fd00::/8", "fd00::/8"),
+    ],
+)
+def test_an_unreadable_wol_allowed_network_refuses_the_start(value, entry):
+    """A list whose entries cannot be read allowed nothing, and every direct
+    wake was refused with no word at startup: the entry is named instead."""
+    with pytest.raises(ValidationError) as caught:
+        make_settings(WOL_ALLOWED_NETWORKS=value)
+    message = str(caught.value)
+    assert "WOL_ALLOWED_NETWORKS" in message and entry in message
+
+
+def test_readable_wol_allowed_networks_are_kept():
+    assert make_settings().WOL_ALLOWED_NETWORKS == []
+    kept = make_settings(WOL_ALLOWED_NETWORKS="10.4.0.0/16, 192.168.1.7/24")
+    # Host bits are tolerated, as the wake itself reads them.
+    assert kept.WOL_ALLOWED_NETWORKS == ["10.4.0.0/16", "192.168.1.7/24"]
+
+
+def test_the_wol_allowed_networks_are_checked_from_the_environment(monkeypatch):
+    monkeypatch.setenv("WOL_ALLOWED_NETWORKS", "10.4.0.0/16,10.4.7.0/2A")
+    with pytest.raises(ValidationError, match="10.4.7.0/2A"):
+        make_settings()
+    monkeypatch.setenv("WOL_ALLOWED_NETWORKS", "10.4.0.0/16,10.4.7.0/24")
+    assert make_settings().WOL_ALLOWED_NETWORKS == ["10.4.0.0/16", "10.4.7.0/24"]

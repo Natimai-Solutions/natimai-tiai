@@ -146,6 +146,11 @@ class SyncOut(BaseModel):
     placed: int
     unplaced: int
     rooms_created: int
+    # Postes left where they were: the room made by hand bearing their name
+    # was claimed without a strict majority, so nobody was filed in it.
+    undecided: int = 0
+    # The rooms concerned, by name (20 at most).
+    undecided_rooms: list[str] = Field(default_factory=list)
 
 
 class MachineIds(BaseModel):
@@ -339,7 +344,7 @@ async def _rooms_out(
         # counts as none, and the parc's default applies (audit B08).
         owner = (
             r.maintenance_owner_id
-            if available(r.maintenance_owner_id, policy)
+            if available(r.maintenance_owner_id, policy, room=r)
             else policy.owner_id
         )
         return names.get(owner) if owner is not None else None
@@ -530,6 +535,8 @@ async def sync_directory(
             "placed": result.placed,
             "unplaced": result.unplaced,
             "rooms_created": result.rooms_created,
+            "undecided": result.undecided,
+            "undecided_rooms": list(result.undecided_rooms),
         },
     )
     await session.commit()
@@ -537,6 +544,8 @@ async def sync_directory(
         placed=result.placed,
         unplaced=result.unplaced,
         rooms_created=result.rooms_created,
+        undecided=result.undecided,
+        undecided_rooms=list(result.undecided_rooms),
     )
 
 

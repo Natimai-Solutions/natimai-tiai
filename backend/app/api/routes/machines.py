@@ -441,6 +441,9 @@ class MachineDetailOut(MachineOut):
     # Deliberately not last_seen: a poste seen a minute ago whose inventory is
     # three weeks old is an anomaly the console has to be able to show.
     inventory_last_seen: datetime | None
+    # The software list below is partial: the catalogue budget ran out while
+    # it was applied, and the rest is taken when the agent sends it again.
+    software_truncated: bool = False
     memory_modules: list[MemoryModuleOut] = []
     disks: list[DiskOut] = []
     volumes: list[VolumeOut] = []
@@ -1413,6 +1416,14 @@ async def wake_machines(
     )
     # Out of scope reads as unknown: reported like a stale id, below.
     machines = {m.id: m for m in rows.all()}
+    # Relayed: what the whole selection shares is read once — the wakes
+    # already open, then each site's relays the first time it is met — so
+    # that the cost follows the number of sites, not of postes.
+    batch = (
+        await wol_relay.open_batch(session, machines.values())
+        if settings.WOL_RELAY_ENABLED
+        else None
+    )
 
     results: list[WakeOut] = []
     for machine_id in payload.machine_ids:
@@ -1435,7 +1446,7 @@ async def wake_machines(
             # Queued for a poste of the site, or refused on the spot; either
             # way the relay module writes the history row itself.
             outcome = await wol_relay.queue_relayed_wake(
-                session, machine, created_by=user.email
+                session, machine, created_by=user.email, batch=batch
             )
             results.append(
                 WakeOut(
@@ -1553,6 +1564,7 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
         .order_by(severity_rank, col(WindowsUpdate.title))
     )
     detail = MachineDetailOut.model_validate(machine)
+    detail.software_truncated = machine.software_truncated_at is not None
     _place(detail, machine, await room_crud.placement(session, machine.room_id))
     policies = await setting_crud.policies(session)
     # The same figure as the machine's list row, over the console's window.

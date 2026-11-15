@@ -434,3 +434,306 @@ async def test_relay_mode_off_leaves_the_server_emitting(
     assert body["relayed"] is False
     assert sent == [["10.4.7.255"]]
     assert (await _heartbeat(client, site["near"]["token"]))["commands"] == []
+
+
+# --- third verification pass --------------------------------------------------
+
+
+async def _age_claim(db_session, command_id: str) -> None:
+    """Make a claim old enough to be released on the next heartbeat."""
+    import uuid as _uuid
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from app.features.base import utcnow
+    from app.features.command.models import Command
+
+    await db_session.exec(
+        update(Command)
+        .where(Command.id == _uuid.UUID(command_id))
+        .values(delivered_at=utcnow() - timedelta(minutes=5))
+    )
+    await db_session.commit()
+
+
+async def test_the_only_relay_of_a_site_takes_its_released_wake_again(
+    client, db_session, relay_mode
+):
+    """One trusted relay on the site: excluding it after a release would leave
+    the wake with no taker until its TTL, and a second click answered
+    "déjà en attente d'un poste relais"."""
+    headers = await _admin_headers(client, db_session)
+    target = await _enroll(client, "m-solo-target", location="École de Tautira")
+    await _heartbeat(
+        client,
+        target["token"],
+        location="École de Tautira",
+        ip_address="10.9.1.200",
+        ip_prefix_length=24,
+        mac_address="AA:BB:CC:DD:EE:10",
+    )
+    only = await _enroll(client, "m-solo-relay", location="École de Tautira")
+    await _heartbeat(
+        client,
+        only["token"],
+        location="École de Tautira",
+        ip_address="10.9.1.9",
+        ip_prefix_length=24,
+    )
+    from app.features.machine.models import Machine
+
+    # The target is off: it would otherwise close its own wake, and count.
+    await _switch_off(db_session, Machine, target["machine_id"])
+
+    await _wake(client, headers, target["machine_id"])
+    handed = (await _heartbeat(client, only["token"]))["commands"]
+    assert len(handed) == 1
+    await _age_claim(db_session, handed[0]["id"])
+
+    again = (await _heartbeat(client, only["token"]))["commands"]
+    assert [c["id"] for c in again] == [handed[0]["id"]]
+    rows = await _commands(client, headers, target["machine_id"])
+    assert rows[0]["status"] == "delivered"
+
+
+async def _switch_off(db_session, machine_model, machine_id: str) -> None:
+    import uuid as _uuid
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from app.features.base import utcnow
+
+    await db_session.exec(
+        update(machine_model)
+        .where(machine_model.id == _uuid.UUID(machine_id))
+        .values(last_seen=utcnow() - timedelta(hours=3))
+    )
+    await db_session.commit()
+
+
+async def test_a_released_relay_waits_only_while_another_one_could_take_the_wake(
+    client, db_session, relay_mode, site, monkeypatch
+):
+    """Two relays: the released one stays excluded while the other, never
+    released for this wake, is on; once that one has dropped it too — or is
+    off — nobody else is left and the first may claim again."""
+    from app.core.config import settings
+    from app.features.machine.models import Machine
+
+    headers = await _admin_headers(client, db_session)
+    monkeypatch.setattr(settings, "WOL_RELAY_SUBNET_GRACE_SECONDS", 0)
+    # Two relays on the site, not three.
+    await _switch_off(db_session, Machine, site["elsewhere"]["machine_id"])
+    await _switch_off(db_session, Machine, site["target"]["machine_id"])
+
+    await _wake(client, headers, site["target"]["machine_id"])
+    first = (await _heartbeat(client, site["near"]["token"]))["commands"]
+    assert len(first) == 1
+    wake_id = first[0]["id"]
+    await _age_claim(db_session, wake_id)
+
+    # "far" is on and was never handed this wake: "near" keeps out.
+    assert (await _heartbeat(client, site["near"]["token"]))["commands"] == []
+    second = (await _heartbeat(client, site["far"]["token"]))["commands"]
+    assert [c["id"] for c in second] == [wake_id]
+    await _age_claim(db_session, wake_id)
+
+    # Both have dropped it once: the next one to come takes it.
+    third = (await _heartbeat(client, site["near"]["token"]))["commands"]
+    assert [c["id"] for c in third] == [wake_id]
+
+
+async def test_a_released_relay_claims_again_when_the_other_one_went_off(
+    client, db_session, relay_mode, site, monkeypatch
+):
+    from app.core.config import settings
+    from app.features.machine.models import Machine
+
+    headers = await _admin_headers(client, db_session)
+    monkeypatch.setattr(settings, "WOL_RELAY_SUBNET_GRACE_SECONDS", 0)
+    await _switch_off(db_session, Machine, site["target"]["machine_id"])
+
+    await _wake(client, headers, site["target"]["machine_id"])
+    first = (await _heartbeat(client, site["near"]["token"]))["commands"]
+    await _age_claim(db_session, first[0]["id"])
+    assert (await _heartbeat(client, site["near"]["token"]))["commands"] == []
+
+    await _switch_off(db_session, Machine, site["far"]["machine_id"])
+    again = (await _heartbeat(client, site["near"]["token"]))["commands"]
+    assert [c["id"] for c in again] == [first[0]["id"]]
+
+
+def _mixed_parc(now):
+    """Postes of two sites and one domain, across every reason a poste is or
+    is not a relay: flags, age, version, and being on at all."""
+    import itertools
+    import uuid as _uuid
+    from datetime import timedelta
+
+    from app.features.machine.models import Machine
+
+    versions = [
+        None,
+        "",
+        "  ",
+        "dev",
+        "0.9.3",
+        "v0.2.0",
+        "1.0.0",
+        "v1.2.0",
+        "2.0.0-rc1",
+    ]
+    machines = []
+    combos = itertools.product(
+        [("Site A", None), ("Site B", "dom.local"), (None, "dom.local")],
+        versions,
+        [timedelta(days=30), timedelta(minutes=5)],  # settled, or just enrolled
+        [timedelta(seconds=30), timedelta(hours=2)],  # on, or off
+    )
+    for index, ((location, domain), version, age, silence) in enumerate(combos):
+        machines.append(
+            Machine(
+                id=_uuid.uuid4(),
+                machine_uuid=f"mixed-{index}",
+                hostname=f"PC-{index}",
+                location=location,
+                domain=domain,
+                agent_version=version,
+                first_seen=now - age,
+                last_seen=now - silence,
+                needs_verification=index % 7 == 3,
+                token_revoked=index % 11 == 5,
+            )
+        )
+    return machines
+
+
+async def test_the_sql_count_of_online_peers_matches_the_python_rule(
+    db_session, monkeypatch
+):
+    """The count is done in SQL (flags, age) and per distinct version; it must
+    say exactly what ``trusted_relay`` says of each poste, one by one."""
+    from datetime import timedelta
+
+    from app.core.config import settings
+    from app.features.base import utcnow
+    from app.features.wol import relay
+
+    monkeypatch.setattr(settings, "WOL_RELAY_MIN_AGE_MINUTES", 60)
+    monkeypatch.setattr(settings, "WOL_RELAY_MIN_AGENT_VERSION", "1.0.0")
+    now = utcnow()
+    machines = _mixed_parc(now)
+    db_session.add_all(machines)
+    await db_session.commit()
+    for machine in machines:
+        await db_session.refresh(machine)
+
+    cutoff = now - timedelta(seconds=settings.OFFLINE_AFTER_SECONDS)
+
+    def expected(target) -> int:
+        return sum(
+            1
+            for m in machines
+            if relay.shares_wire(m, target)
+            and m.last_seen >= cutoff
+            and relay.trusted_relay(m, now)
+        )
+
+    batch = relay.WakeBatch(now=now)
+    seen = set()
+    for target in machines:
+        want = expected(target)
+        seen.add(want)
+        assert await relay.count_online_peers(db_session, target, now) == want
+        assert (
+            await relay.count_online_peers(db_session, target, now, batch=batch) == want
+        )
+    # The set is mixed enough to tell the rules apart, and the batch asked
+    # once per site rather than once per poste.
+    assert len(seen) > 2 and 0 not in seen
+    assert set(batch.peers) == {
+        ("location", "Site A"),
+        ("location", "Site B"),
+        ("domain", "dom.local"),
+    }
+
+
+async def test_a_bulk_wake_costs_queries_per_site_not_per_poste(
+    client, db_session, engine, relay_mode
+):
+    """A selection of 120 postes over two sites: the statements issued by the
+    request do not grow with the selection (they were two per poste)."""
+    import uuid as _uuid
+    from datetime import timedelta
+
+    from sqlalchemy import event
+
+    from app.features.base import utcnow
+    from app.features.machine.models import Machine
+
+    headers = await _admin_headers(client, db_session)
+    now = utcnow()
+
+    def poste(name: str, site_name: str, *, on: bool) -> Machine:
+        return Machine(
+            id=_uuid.uuid4(),
+            machine_uuid=name,
+            hostname=name,
+            location=site_name,
+            agent_version="1.2.0",
+            mac_address="AA:BB:CC:00:00:01",
+            first_seen=now - timedelta(days=30),
+            last_seen=now - (timedelta(seconds=10) if on else timedelta(hours=5)),
+        )
+
+    targets = [
+        poste(f"off-{site_name}-{n}", site_name, on=False)
+        for site_name in ("Site A", "Site B")
+        for n in range(60)
+    ]
+    relays = [
+        poste(f"on-{s}-{n}", s, on=True) for s in ("Site A", "Site B") for n in range(3)
+    ]
+    ids = [str(t.id) for t in targets]
+    db_session.add_all(targets + relays)
+    await db_session.commit()
+
+    statements: list[str] = []
+
+    def count(_conn, _cursor, statement, *_rest):
+        statements.append(statement)
+
+    async def woken(selection: list[str]) -> int:
+        statements.clear()
+        body = await _wake(client, headers, *selection)
+        assert (body["woken"], body["failed"]) == (len(selection), 0)
+        assert "3 poste(s) allumé(s)" in body["results"][0]["detail"]
+        return len(statements)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", count)
+    try:
+        few = await woken(ids[:2] + ids[60:62])
+        many = await woken(ids[2:60] + ids[62:])
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", count)
+
+    assert many <= few + 2, (few, many)
+    assert many < 25
+
+
+async def test_the_same_poste_twice_in_a_selection_is_queued_once(
+    client, db_session, relay_mode, site
+):
+    """The wakes already open are read ahead for the whole selection: the
+    second mention of a poste must still find the wake the first one queued."""
+    from app.features.machine.models import Machine
+
+    headers = await _admin_headers(client, db_session)
+    await _switch_off(db_session, Machine, site["target"]["machine_id"])
+    target_id = site["target"]["machine_id"]
+    body = await _wake(client, headers, target_id, target_id)
+    assert "déjà en attente" in body["results"][1]["detail"]
+    rows = await _commands(client, headers, target_id)
+    assert [r["status"] for r in rows] == ["pending"]

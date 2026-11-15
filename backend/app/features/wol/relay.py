@@ -33,9 +33,12 @@ without a database; the queries around them are thin.
 """
 
 import ipaddress
-from dataclasses import dataclass
+import uuid
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from sqlalchemy import func, or_
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -124,6 +127,16 @@ def peer_clause(target: Machine) -> ColumnElement[bool] | None:
     return None
 
 
+def peer_key(target: Machine) -> tuple[str, str] | None:
+    """What ``peer_clause`` compares on, as a value: the name two targets
+    share when the same postes can relay for both. None like the clause."""
+    if target.location:
+        return ("location", target.location)
+    if target.domain:
+        return ("domain", target.domain)
+    return None
+
+
 def _site_label(target: Machine) -> str:
     """How the message names the set of possible relays."""
     if target.location:
@@ -139,8 +152,113 @@ class ClaimedWake:
     target_mac: str
 
 
+@dataclass
+class WakeBatch:
+    """What one request already knows, so that waking a room of thirty postes
+    — or a selection of five hundred — does not ask the same two questions
+    once per poste: who is on at this site, and is a wake already waiting.
+
+    ``peers`` holds, per peer key, the trusted postes online on the site
+    (target included when it is one of them); ``open_wakes`` the wake already
+    open for each target, None when it was not read ahead.
+    """
+
+    now: datetime
+    peers: dict[tuple[str, str], int] = field(default_factory=dict)
+    open_wakes: dict[uuid.UUID, Command] | None = None
+
+
+async def open_batch(session: AsyncSession, targets: Iterable[Machine]) -> WakeBatch:
+    """Read ahead, in one query, the wakes already open for ``targets``."""
+    now = utcnow()
+    ids = [target.id for target in targets]
+    open_wakes: dict[uuid.UUID, Command] = {}
+    if not ids:
+        return WakeBatch(now=now, open_wakes=open_wakes)
+    rows = await session.exec(
+        select(Command)
+        .where(col(Command.machine_id).in_(ids))
+        .where(col(Command.type) == CommandType.WAKE_ON_LAN.value)
+        .where(
+            col(Command.status).in_(
+                [CommandStatus.PENDING.value, CommandStatus.DELIVERED.value]
+            )
+        )
+        .where(col(Command.expires_at) > now)
+        # Oldest first, so the newest of a target's rows is the one kept.
+        .order_by(col(Command.created_at))
+    )
+    for command in rows.all():
+        open_wakes[command.machine_id] = command
+    return WakeBatch(now=now, open_wakes=open_wakes)
+
+
+def relay_version_trusted(version: str | None) -> bool:
+    """Whether an agent naming this version knows the relayed wake.
+
+    No version, or none that reads as one ("dev"): nothing says the agent
+    knows the command, so it is not trusted with it (audit T35). The one
+    statement of the version rule: ``trusted_relay`` asks it of a poste, the
+    count of online peers of each distinct version of a site.
+    """
+    text = (version or "").strip()
+    if not text or not version_key(text)[0]:
+        return False
+    return version_key(text) >= version_key(settings.WOL_RELAY_MIN_AGENT_VERSION)
+
+
+def _settled_online_clauses(now: datetime) -> list[ColumnElement[bool]]:
+    """``trusted_relay`` minus the version, and "on right now", in SQL."""
+    settled_before = now - timedelta(minutes=settings.WOL_RELAY_MIN_AGE_MINUTES)
+    return [
+        col(Machine.needs_verification).is_(False),
+        col(Machine.token_revoked).is_(False),
+        or_(
+            col(Machine.first_seen).is_(None),
+            col(Machine.first_seen) <= settled_before,
+        ),
+        online_clause(True, now, settings.OFFLINE_AFTER_SECONDS),
+    ]
+
+
+async def _count_trusted_online(
+    session: AsyncSession,
+    peers: ColumnElement[bool],
+    now: datetime,
+    *,
+    exclude_ids: Iterable[uuid.UUID] = (),
+) -> int:
+    """How many postes matching ``peers`` are on and trusted to relay.
+
+    No row is loaded: the flags and the age are filtered in SQL, and the
+    version rule — which has no honest translation into SQL — is applied to
+    the handful of distinct versions a site carries.
+    """
+    stmt = (
+        select(col(Machine.agent_version), func.count())
+        .where(peers)
+        .where(*_settled_online_clauses(now))
+        .group_by(col(Machine.agent_version))
+    )
+    excluded = list(exclude_ids)
+    if excluded:
+        stmt = stmt.where(col(Machine.id).not_in(excluded))
+    rows = await session.exec(stmt)
+    return sum(count for version, count in rows.all() if relay_version_trusted(version))
+
+
+def _is_trusted_online(machine: Machine, now: datetime) -> bool:
+    """The same test as ``_count_trusted_online``, for a poste already loaded."""
+    cutoff = now - timedelta(seconds=settings.OFFLINE_AFTER_SECONDS)
+    return machine.last_seen >= cutoff and trusted_relay(machine, now)
+
+
 async def count_online_peers(
-    session: AsyncSession, target: Machine, now: datetime
+    session: AsyncSession,
+    target: Machine,
+    now: datetime,
+    *,
+    batch: WakeBatch | None = None,
 ) -> int:
     """How many postes that could relay a wake for ``target`` are on right now.
 
@@ -149,19 +267,23 @@ async def count_online_peers(
     give at once — a site with nothing on has nothing to relay with — instead
     of a wake that sits pending until it expires. Only the postes that would
     be handed it count (``trusted_relay``): an old agent online is no relay.
+
+    With a ``batch``, the site is counted once for the request and the answer
+    reused for every target that shares its peer key; the target itself is
+    then taken out in Python, since it is the one row that differs.
     """
     peers = peer_clause(target)
-    if peers is None:
+    key = peer_key(target)
+    if peers is None or key is None:
         return 0
-    rows = await session.exec(
-        select(Machine)
-        .where(peers)
-        .where(col(Machine.id) != target.id)
-        .where(col(Machine.needs_verification).is_(False))
-        .where(col(Machine.token_revoked).is_(False))
-        .where(online_clause(True, now, settings.OFFLINE_AFTER_SECONDS))
-    )
-    return sum(1 for m in rows.all() if trusted_relay(m, now))
+    if batch is None:
+        return await _count_trusted_online(session, peers, now, exclude_ids=[target.id])
+    if key not in batch.peers:
+        batch.peers[key] = await _count_trusted_online(session, peers, batch.now)
+    count = batch.peers[key]
+    if _is_trusted_online(target, batch.now):
+        count -= 1
+    return max(count, 0)
 
 
 async def open_wake_for(
@@ -188,7 +310,11 @@ async def open_wake_for(
 
 
 async def queue_relayed_wake(
-    session: AsyncSession, target: Machine, *, created_by: str | None
+    session: AsyncSession,
+    target: Machine,
+    *,
+    created_by: str | None,
+    batch: WakeBatch | None = None,
 ) -> WakeOutcome:
     """Queue a wake for ``target`` to be relayed, and say what will happen.
 
@@ -202,8 +328,11 @@ async def queue_relayed_wake(
     on at the moment — a site where every poste is off has nothing to relay
     with, and saying so now beats a wake that expires unclaimed in ten
     minutes.
+
+    ``batch`` is what a bulk wake read ahead (``open_batch``): with it, the
+    queries here are per site rather than per poste.
     """
-    now = utcnow()
+    now = batch.now if batch is not None else utcnow()
     mac = normalize_mac(target.mac_address)
     if mac is None:
         return _closed(
@@ -233,7 +362,10 @@ async def queue_relayed_wake(
             ),
         )
 
-    already = await open_wake_for(session, target, now)
+    if batch is not None and batch.open_wakes is not None:
+        already = batch.open_wakes.get(target.id)
+    else:
+        already = await open_wake_for(session, target, now)
     if already is not None:
         # Not a new row: the one waiting is the one that will be emitted, and
         # its own history line is the record.
@@ -250,7 +382,7 @@ async def queue_relayed_wake(
             ),
         )
 
-    peers = await count_online_peers(session, target, now)
+    peers = await count_online_peers(session, target, now, batch=batch)
     site = _site_label(target)
     if peers == 0:
         return _closed(
@@ -269,16 +401,18 @@ async def queue_relayed_wake(
         )
 
     ttl = timedelta(minutes=settings.WOL_RELAY_TTL_MINUTES)
-    session.add(
-        Command(
-            machine_id=target.id,
-            type=CommandType.WAKE_ON_LAN.value,
-            status=CommandStatus.PENDING.value,
-            created_by=created_by,
-            created_at=now,
-            expires_at=now + ttl,
-        )
+    queued = Command(
+        machine_id=target.id,
+        type=CommandType.WAKE_ON_LAN.value,
+        status=CommandStatus.PENDING.value,
+        created_by=created_by,
+        created_at=now,
+        expires_at=now + ttl,
     )
+    session.add(queued)
+    if batch is not None and batch.open_wakes is not None:
+        # The same poste twice in one selection: the second finds this one.
+        batch.open_wakes[target.id] = queued
     return WakeOutcome(
         ok=True,
         detail=(
@@ -332,18 +466,14 @@ def trusted_relay(relay: Machine, now: datetime) -> bool:
     min_age = timedelta(minutes=settings.WOL_RELAY_MIN_AGE_MINUTES)
     if relay.first_seen is not None and now - relay.first_seen < min_age:
         return False
-    # No version, or none that reads as one ("dev"): nothing says the agent
-    # knows the command, so it is not trusted with it (audit T35).
-    version = (relay.agent_version or "").strip()
-    if not version or not version_key(version)[0]:
-        return False
-    return version_key(version) >= version_key(settings.WOL_RELAY_MIN_AGENT_VERSION)
+    return relay_version_trusted(relay.agent_version)
 
 
 async def release_stale_claims(session: AsyncSession, now: datetime) -> int:
     """Put back in the queue the wakes a relay took and never answered for —
     switched off, or dropped them — so that another one can (audit B29). The
-    relay is remembered on the row and not handed the same wake again."""
+    relay is remembered on the row and not handed the same wake again while
+    another poste could take it (``_another_relay_could_take``)."""
     cutoff = now - timedelta(seconds=settings.WOL_RELAY_CLAIM_TIMEOUT_SECONDS)
     rows = await session.exec(
         select(Command)
@@ -398,10 +528,13 @@ async def claim_wakes(
     )
     claimed: list[ClaimedWake] = []
     for command, target in (await session.exec(stmt)).all():
-        if str(relay.id) in (command.released_relay_ids or []):
-            # Claimed it before and never answered: another relay's turn.
-            continue
         if not may_claim(relay, target, queued_at=command.created_at, now=now):
+            continue
+        released = command.released_relay_ids or []
+        if str(relay.id) in released and await _another_relay_could_take(
+            session, relay, target, released, now
+        ):
+            # Claimed it before and never answered: another relay's turn.
             continue
         mac = normalize_mac(target.mac_address)
         if mac is None:
@@ -414,6 +547,34 @@ async def claim_wakes(
         command.delivered_at = now
         claimed.append(ClaimedWake(command=command, target_mac=mac))
     return claimed
+
+
+async def _another_relay_could_take(
+    session: AsyncSession,
+    relay: Machine,
+    target: Machine,
+    released: list[str],
+    now: datetime,
+) -> bool:
+    """Whether a trusted poste of the target's site, on right now, has not yet
+    been released for this wake.
+
+    The exclusion of a released relay is a turn given to the others, and it
+    only makes sense while there is an other: on a site with one relay — or
+    once every relay on has dropped the wake once — holding it would leave
+    the wake with no taker until its TTL, and a second click answered
+    "déjà en attente". The released relay then takes it again.
+    """
+    peers = peer_clause(target)
+    if peers is None:
+        return False
+    excluded = {relay.id, target.id}
+    for value in released:
+        try:
+            excluded.add(uuid.UUID(value))
+        except ValueError:
+            continue
+    return await _count_trusted_online(session, peers, now, exclude_ids=excluded) > 0
 
 
 async def close_wakes_for_awake_machine(
@@ -457,14 +618,18 @@ def relay_label(relay: Machine | None) -> str:
 
 __all__ = [
     "ClaimedWake",
+    "WakeBatch",
     "claim_wakes",
     "close_wakes_for_awake_machine",
     "count_online_peers",
     "may_claim",
+    "open_batch",
     "open_wake_for",
     "peer_clause",
+    "peer_key",
     "queue_relayed_wake",
     "relay_label",
+    "relay_version_trusted",
     "same_subnet",
     "shares_wire",
 ]

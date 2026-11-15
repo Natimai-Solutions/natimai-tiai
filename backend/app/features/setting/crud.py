@@ -2,7 +2,7 @@
 
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -10,6 +10,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.config import settings as env
 from app.features.base import utcnow
 from app.features.setting.models import AppSetting
+
+if TYPE_CHECKING:
+    from app.features.maintenance.reach import OwnerReach
 
 KEY_CYCLE = "maintenance.default_cycle_days"
 KEY_OWNER = "maintenance.default_owner_id"
@@ -63,6 +66,11 @@ class MaintenancePolicy:
     # Accounts that may be named owner but are deactivated: an owner nobody
     # can act as counts as none, and the next level's applies (audit B08).
     inactive_owners: frozenset[uuid.UUID] = frozenset()
+    # What the accounts named owner — of a poste, of a room — can still own:
+    # one that lost the rights, or the sight of the poste, counts as none
+    # too (``maintenance.reach``). None when it was not read: a policy built
+    # by hand, which then checks nothing.
+    reach: "OwnerReach | None" = None
 
 
 async def maintenance_policy(
@@ -73,6 +81,7 @@ async def maintenance_policy(
     for a caller that resolves several policies from one round trip."""
     if values is None:
         values = await get_all(session)
+    from app.features.maintenance.reach import named_owner_ids, owner_reach
     from app.features.user.models import User
 
     cycle = values.get(KEY_CYCLE)
@@ -90,12 +99,23 @@ async def maintenance_policy(
         owner_id in inactive or await session.get(User, owner_id) is None
     ):
         owner_id = None
+    # Read once for every account named anywhere, so that resolving the
+    # owner of each poste of the parc costs no query more.
+    named = await named_owner_ids(session)
+    if owner_id is not None:
+        named.add(owner_id)
+    reach = await owner_reach(session, named - inactive)
+    # The default owner is handed any poste: an account that no longer sees
+    # the whole parc, or lost the maintenance rights, is no default.
+    if owner_id is not None and not reach.parc(owner_id):
+        owner_id = None
     return MaintenancePolicy(
         cycle_days=int(cycle)
         if isinstance(cycle, int)
         else env.MAINTENANCE_DEFAULT_CYCLE_DAYS,
         owner_id=owner_id,
         inactive_owners=inactive,
+        reach=reach,
         due_soon_days=(
             int(due_soon)
             if isinstance(due_soon, int)

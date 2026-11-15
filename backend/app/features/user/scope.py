@@ -202,6 +202,64 @@ def building_clause(scope: Scope | None) -> Any:
     return or_(*conditions) if conditions else false()
 
 
+@dataclass(frozen=True)
+class RoomPlace:
+    """Where a room is, as the scope rules read it: its building, and its
+    effective site (``COALESCE(buildings.location, rooms.location)``)."""
+
+    building_id: uuid.UUID | None
+    site: str | None
+
+
+async def room_places(session: Any) -> dict[uuid.UUID, RoomPlace]:
+    """Every room's place, in one query: what ``room_in_scope`` and
+    ``machine_in_scope`` are asked with when many rows are to be judged
+    against many scopes — the rooms of a parc are a few hundred rows."""
+    site = func.coalesce(col(Building.location), col(Room.location))
+    rows = await session.exec(
+        select(col(Room.id), col(Room.building_id), site).outerjoin(
+            Building, col(Building.id) == col(Room.building_id)
+        )
+    )
+    return {
+        room_id: RoomPlace(building_id=building_id, site=place)
+        for room_id, building_id, place in rows.all()
+    }
+
+
+def room_in_scope(
+    scope: Scope | None, room_id: uuid.UUID, places: dict[uuid.UUID, RoomPlace]
+) -> bool:
+    """``room_clause`` for one room, without a query. A room that is not in
+    ``places`` (deleted since) is in no scope: closed, like the clause."""
+    if scope is None:
+        return True
+    place = places.get(room_id)
+    if place is None:
+        return False
+    return (
+        (place.site is not None and place.site in scope.locations)
+        or (place.building_id is not None and place.building_id in scope.buildings)
+        or room_id in scope.rooms
+    )
+
+
+def machine_in_scope(
+    scope: Scope | None,
+    *,
+    location: str | None,
+    room_id: uuid.UUID | None,
+    places: dict[uuid.UUID, RoomPlace],
+) -> bool:
+    """``machine_clause`` for one poste, without a query: the site its agent
+    reports, or its room, is in scope."""
+    if scope is None:
+        return True
+    if location is not None and location in scope.locations:
+        return True
+    return room_id is not None and room_in_scope(scope, room_id, places)
+
+
 def machine_ids_clause(scope: Scope | None, machine_id_column: Any) -> Any:
     """The predicate for a table hanging off ``machines`` (threats, commands,
     checks…): its ``machine_id`` is one of the machines in scope."""

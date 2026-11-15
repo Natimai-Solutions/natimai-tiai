@@ -12,6 +12,7 @@ from app.api.routes.interventions import machine_router as machine_interventions
 from app.api.routes.interventions import router as interventions_router
 from app.api.routes.machines import router as machines_router
 from app.api.routes.maintenance import machine_router as machine_maintenance_router
+from app.api.routes.maintenance import owners_router as maintenance_owners_router
 from app.api.routes.maintenance import room_router as room_maintenance_router
 from app.api.routes.maintenance import router as maintenance_router
 from app.api.routes.packages import router as packages_router
@@ -33,6 +34,7 @@ api_router.include_router(interventions_router)
 api_router.include_router(machine_checks_router)
 api_router.include_router(checks_assignable_router)
 api_router.include_router(checks_router)
+api_router.include_router(maintenance_owners_router)
 api_router.include_router(maintenance_router)
 api_router.include_router(room_maintenance_router)
 api_router.include_router(machine_maintenance_router)

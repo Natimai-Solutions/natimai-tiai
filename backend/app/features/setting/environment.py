@@ -243,6 +243,13 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 ),
                 _item(
                     env,
+                    "COMMAND_UNANSWERED_HOURS",
+                    "Heures laissées à un poste pour répondre d'une commande qu'il a "
+                    "reçue avant qu'elle soit close en échec « sans réponse du poste » "
+                    "(une réponse plus tardive l'emporte encore)",
+                ),
+                _item(
+                    env,
                     "COMMAND_RETENTION_DAYS",
                     "Jours de conservation de l'historique des commandes terminées "
                     "(0 = indéfiniment)",
@@ -252,6 +259,27 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "AGENT_TOKEN_ROTATE_DAYS",
                     "Âge, en jours, au-delà duquel le token d'un poste est renouvelé "
                     "(0 = jamais)",
+                ),
+                _item(
+                    env,
+                    "AGENT_HEARTBEAT_MAX_PER_MINUTE",
+                    "Battements qu'un même poste peut envoyer par minute ; au-delà, "
+                    "le serveur répond 429 (l'agent en envoie un par intervalle, "
+                    "plus un au redémarrage)",
+                ),
+                _item(
+                    env,
+                    "SOFTWARE_NEW_ENTRIES_PER_DAY",
+                    "Nouvelles entrées du catalogue logiciel qu'un même poste peut "
+                    "créer par 24 heures ; au-delà, son inventaire est signalé partiel "
+                    "et redemandé quand le budget le permet",
+                ),
+                _item(
+                    env,
+                    "SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET",
+                    "Nouvelles entrées du catalogue logiciel que tous les postes "
+                    "réunis peuvent créer par 24 heures ; un poste reçoit le plus "
+                    "petit de ce qui reste de son budget et de celui-ci",
                 ),
                 _item(
                     env,
@@ -346,6 +374,14 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "Masque de repli pour déduire l'adresse de diffusion d'un poste "
                     "dont l'agent n'a pas remonté le sien",
                 ),
+                _item(
+                    env,
+                    "WOL_ALLOWED_NETWORKS",
+                    "Réseaux (CIDR) sur lesquels le serveur peut émettre lui-même un "
+                    "réveil ; vide = les plages privées 10.0.0.0/8, 172.16.0.0/12 et "
+                    "192.168.0.0/16. Une adresse de poste hors de ces réseaux n'est "
+                    "pas une destination",
+                ),
                 _item(env, "WOL_PORT", "Port UDP du paquet magique"),
                 _item(env, "WOL_PACKET_COUNT", "Nombre de copies du paquet émises"),
                 _item(
@@ -357,6 +393,24 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "WOL_RELAY_SUBNET_GRACE_SECONDS",
                     "Avance laissée à un relais du même sous-réseau que la cible ; 0 = aucune",
+                ),
+                _item(
+                    env,
+                    "WOL_RELAY_MIN_AGE_MINUTES",
+                    "Ancienneté minimale, en minutes, d'un poste dans le parc avant "
+                    "qu'il puisse relayer un réveil",
+                ),
+                _item(
+                    env,
+                    "WOL_RELAY_MIN_AGENT_VERSION",
+                    "Version d'agent minimale d'un poste relais ; un agent plus ancien, "
+                    "ou sans version lisible, ne reçoit aucun réveil à relayer",
+                ),
+                _item(
+                    env,
+                    "WOL_RELAY_CLAIM_TIMEOUT_SECONDS",
+                    "Secondes sans réponse après lesquelles un réveil pris par un "
+                    "relais est remis en file pour un autre",
                 ),
             ],
         ),
@@ -405,14 +459,42 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 ),
                 _item(
                     env,
+                    "PASSWORD_RESET_COOLDOWN_MINUTES",
+                    "Minutes pendant lesquelles un compte ne reçoit pas de nouvel "
+                    "e-mail « mot de passe oublié » après le précédent",
+                ),
+                _item(
+                    env,
+                    "PASSWORD_RESET_MAX_LIVE_LINKS",
+                    "Nombre de liens de réinitialisation valides à la fois pour un "
+                    "même compte ; une demande n'annule jamais un lien encore valide",
+                ),
+                _item(
+                    env,
                     "LOGIN_MAX_FAILED_ATTEMPTS",
-                    "Échecs de connexion consécutifs avant qu'un compte soit verrouillé",
+                    "Échecs de connexion rapprochés (chacun à moins de "
+                    "LOGIN_LOCKOUT_MINUTES du précédent) avant qu'un compte soit "
+                    "verrouillé pour les adresses qui ont échoué",
                 ),
                 _item(
                     env,
                     "LOGIN_LOCKOUT_MINUTES",
-                    "Durée, en minutes, du verrouillage ; une réinitialisation du mot de "
+                    "Durée, en minutes, du verrouillage, et délai au-delà duquel un "
+                    "échec ancien ne compte plus ; une réinitialisation du mot de "
                     "passe le lève",
+                ),
+                _item(
+                    env,
+                    "LOGIN_SIEGE_ADDRESSES",
+                    "Nombre d'adresses distinctes en échec sur un même compte, en "
+                    "LOGIN_LOCKOUT_MINUTES, à partir duquel le verrouillage écarte "
+                    "toutes les adresses sauf celles qui ont ouvert le compte récemment",
+                ),
+                _item(
+                    env,
+                    "LOGIN_KNOWN_ADDRESS_DAYS",
+                    "Jours pendant lesquels une adresse qui a ouvert un compte reste "
+                    "connue de lui, et n'est pas écartée par ce verrouillage étendu",
                 ),
                 _item(
                     env,
@@ -423,8 +505,30 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 _item(
                     env,
                     "RATE_LIMIT_ENABLED",
-                    "Limitation des tentatives de connexion ; non = à réserver à des "
-                    "opérateurs qui arrivent tous d'une même adresse",
+                    "Limitation du débit par adresse (connexion, mot de passe oublié, "
+                    "enrôlement), par compte (changement de mot de passe) et par poste "
+                    "(battements) ; non = tout cela est levé, à réserver à des "
+                    "opérateurs qui arrivent tous d'une même adresse. Ni le "
+                    "verrouillage des comptes ni le budget du catalogue logiciel "
+                    "n'en dépendent",
+                ),
+                _item(
+                    env,
+                    "TRUSTED_PROXIES",
+                    "Réseaux (CIDR) des proxys dont l'en-tête X-Forwarded-For est cru "
+                    "pour connaître l'adresse du client, en plus de la boucle locale",
+                ),
+                _item(
+                    env,
+                    "TRUSTED_PROXY_HOSTS",
+                    "Noms d'hôte de ces proxys, résolus dans le réseau du serveur "
+                    "(le service caddy par défaut)",
+                ),
+                _item(
+                    env,
+                    "EXPOSE_OPENAPI",
+                    "oui = le schéma OpenAPI et ses pages (/docs, /redoc) sont servis "
+                    "hors développement local",
                 ),
             ],
         ),

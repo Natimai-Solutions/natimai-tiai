@@ -240,3 +240,60 @@ def test_a_default_prefix_reaching_out_of_the_private_ranges_is_refused():
     assert destinations_for(
         "172.31.9.9", configured=[], prefixlen=8, reported_prefixlen=16
     ) == ["172.31.255.255"]
+
+
+# --- third verification pass --------------------------------------------------
+
+
+async def _refusal(monkeypatch, *, ip, prefix_length=None, allowed=None) -> str:
+    from app.core.config import settings
+    from app.features.wol import sender
+
+    monkeypatch.setattr(settings, "WOL_BROADCAST_ADDRESSES", [])
+    monkeypatch.setattr(settings, "WOL_ALLOWED_NETWORKS", allowed or [])
+    monkeypatch.setattr(settings, "WOL_SUBNET_PREFIXLEN", 24)
+
+    def forbid(*_args, **_kwargs):
+        raise AssertionError("a refused wake emitted a packet")
+
+    monkeypatch.setattr(sender, "_emit", forbid)
+    outcome = await sender.wake(
+        mac="AA:BB:CC:DD:EE:FF", ip=ip, prefix_length=prefix_length
+    )
+    assert outcome.ok is False
+    return outcome.detail
+
+
+@pytest.mark.parametrize("ip", [None, "", "fe80::1", "not-an-address"])
+async def test_a_refused_wake_says_the_address_is_missing_or_not_ipv4(monkeypatch, ip):
+    detail = await _refusal(monkeypatch, ip=ip)
+    assert "absente ou n'est pas de l'IPv4" in detail
+    assert "WOL_ALLOWED_NETWORKS" not in detail
+
+
+async def test_a_refused_wake_says_the_address_is_outside_the_allowed_networks(
+    monkeypatch,
+):
+    """A valid IPv4 address is not "absente ou pas de l'IPv4"."""
+    detail = await _refusal(monkeypatch, ip="203.0.113.7", prefix_length=24)
+    assert "203.0.113.7" in detail
+    assert "hors des réseaux" in detail
+    assert "WOL_ALLOWED_NETWORKS" in detail
+    assert "192.168.0.0/16" in detail
+    assert "absente" not in detail
+
+    listed = await _refusal(
+        monkeypatch, ip="192.168.1.9", prefix_length=24, allowed=["172.20.0.0/16"]
+    )
+    assert "hors des réseaux" in listed and "172.20.0.0/16" in listed
+
+
+async def test_a_refused_wake_says_the_subnet_does_not_fit(monkeypatch):
+    """The address is allowed; the subnet around it reaches beyond."""
+    detail = await _refusal(
+        monkeypatch, ip="10.4.7.5", prefix_length=16, allowed=["10.4.7.0/25"]
+    )
+    assert "sous-réseau" in detail
+    assert "/16" in detail and "/24" in detail
+    assert "WOL_ALLOWED_NETWORKS" in detail
+    assert "hors des réseaux" not in detail and "absente" not in detail

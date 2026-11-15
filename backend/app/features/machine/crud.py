@@ -12,6 +12,7 @@ from app.features.command.models import Command
 from app.features.intervention import crud as intervention_crud
 from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
+from app.features.maintenance.reach import owner_reach
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 
@@ -84,8 +85,17 @@ async def merge_into(
         target.first_seen = source.first_seen
     if target.maintenance_cycle_days is None:
         target.maintenance_cycle_days = source.maintenance_cycle_days
-    if target.maintenance_owner_id is None:
-        target.maintenance_owner_id = source.maintenance_owner_id
+    # The owner too, if they can own the kept poste: the duplicate may have
+    # sat on another site, and its owner is not handed a poste out of sight
+    # because two records were reconciled (the rule of ``maintenance.reach``,
+    # asked once the room above is settled).
+    owner_id = source.maintenance_owner_id
+    if (
+        target.maintenance_owner_id is None
+        and owner_id is not None
+        and (await owner_reach(session, {owner_id})).machine(owner_id, target)
+    ):
+        target.maintenance_owner_id = owner_id
     # The maintenance record follows the journal: the latest visit counts.
     if source.last_maintenance_at is not None and (
         target.last_maintenance_at is None
