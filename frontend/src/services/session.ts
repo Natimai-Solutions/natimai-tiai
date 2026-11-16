@@ -49,6 +49,24 @@ export function endSession(): void {
   sessionEndListeners.forEach((listener) => listener());
 }
 
+const forbiddenListeners = new Set<() => void>();
+
+/**
+ * Be told when the server answers 403. The auth store listens to read the
+ * profile again: a 403 is how the console learns that an administrator
+ * changed this account's groups during the session (the menus then follow,
+ * without F5). Same indirection as `onSessionEnd`, for the same import cycle.
+ */
+export function onForbidden(listener: () => void): () => void {
+  forbiddenListeners.add(listener);
+  return () => forbiddenListeners.delete(listener);
+}
+
+/** Called by the axios response handler on a 403. */
+export function notifyForbidden(): void {
+  forbiddenListeners.forEach((listener) => listener());
+}
+
 /**
  * Wrap `task` so that concurrent callers share one run of it.
  *

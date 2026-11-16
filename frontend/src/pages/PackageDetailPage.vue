@@ -2,7 +2,7 @@
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
       <q-btn flat round dense icon="arrow_back" :to="{ name: 'packages' }" aria-label="Retour" />
-      <h1 class="text-h5 q-my-none col-auto">
+      <h1 class="text-h5 q-my-none col-auto break-anywhere">
         {{ pkg ? `${pkg.name}${pkg.version ? ' ' + pkg.version : ''}` : 'Paquet' }}
       </h1>
       <q-chip v-if="pkg" dense :color="trustColor" text-color="white">
@@ -50,13 +50,14 @@
       <div class="col-12 col-lg-6">
         <q-card flat bordered>
           <q-card-section class="text-subtitle1">Définition</q-card-section>
-          <q-form @submit="save">
+          <q-form ref="formRef" @submit="save">
             <q-card-section class="q-gutter-sm">
               <q-input
                 v-model="form.name"
                 label="Nom"
                 outlined
                 dense
+                :maxlength="LIMITS.name"
                 :rules="[rules.name]"
                 :readonly="!canWrite"
               />
@@ -65,6 +66,7 @@
                 label="Version"
                 outlined
                 dense
+                :maxlength="LIMITS.version"
                 :readonly="!canWrite"
               />
               <template v-if="pkg.kind === 'winget'">
@@ -73,6 +75,7 @@
                   label="Identifiant winget"
                   outlined
                   dense
+                  :maxlength="LIMITS.winget_id"
                   :rules="[rules.wingetId]"
                   :readonly="!canWrite"
                 />
@@ -81,6 +84,7 @@
                   label="Version winget (vide = la plus récente)"
                   outlined
                   dense
+                  :maxlength="LIMITS.winget_version"
                   :readonly="!canWrite"
                 />
               </template>
@@ -136,6 +140,7 @@
                 label="Nom dans l'inventaire"
                 outlined
                 dense
+                :maxlength="LIMITS.detect_name"
                 :readonly="!canWrite"
                 hint="Tel qu'il apparaît dans « Applications et fonctionnalités » ; sert à compter les postes équipés"
               />
@@ -144,6 +149,7 @@
                 label="Notes"
                 outlined
                 dense
+                :maxlength="LIMITS.notes"
                 autogrow
                 :readonly="!canWrite"
               />
@@ -162,11 +168,15 @@
       </div>
 
       <div class="col-12 col-lg-6 q-gutter-y-md">
-        <!-- Problems -->
-        <q-banner v-if="pkg.problems.length" class="surface-orange">
-          <div class="text-weight-medium">Pas encore déployable</div>
+        <!-- What every poste would refuse an installation for: the server's
+             list, the one its deployment refusal gives (problems first, then
+             why neither method B nor method A carries it). -->
+        <q-banner v-if="pkg.install_blockers.length" class="surface-orange break-anywhere">
+          <div class="text-weight-medium">
+            {{ pkg.problems.length ? 'Pas encore déployable' : 'Aucun poste ne l’installera' }}
+          </div>
           <ul class="q-my-xs q-pl-md">
-            <li v-for="p in pkg.problems" :key="p.code">{{ p.message }}</li>
+            <li v-for="m in pkg.install_blockers" :key="m">{{ m }}</li>
           </ul>
         </q-banner>
 
@@ -201,9 +211,9 @@
             <q-btn flat dense no-caps label="Annuler" class="q-ml-sm" @click="cancelUpload" />
           </div>
           <q-list separator>
-            <q-item v-for="f in pkg.files" :key="f.name">
+            <q-item v-for="f in files" :key="f.name">
               <q-item-section>
-                <q-item-label>
+                <q-item-label class="break-anywhere">
                   {{ f.name }}
                   <q-badge v-if="f.name === pkg.install_run" color="primary" class="q-ml-xs">
                     lancé
@@ -300,12 +310,22 @@
                 {{ methodAMaxLabel(pkg) }} au total, ce que les postes refusent de télécharger pour
                 un paquet non signé. Signez le paquet (méthode B).
               </template>
-              <template v-else-if="method === 'publisher' || (!pkg.signed && pkg.publisher_name)">
+              <template v-else-if="method === 'publisher'">
                 Le fichier lancé est signé par <b>{{ pkg.publisher_name }}</b
                 >. Sans signature de l'administrateur, les postes l'exécutent si la GPO liste ce nom
                 dans <code>DeployPublishers</code>.
               </template>
               <template v-else-if="pkg.signed">Inutile : le paquet est signé.</template>
+              <template v-else-if="pkg.publisher_name && besideRun.length">
+                <span class="break-anywhere">
+                  Indisponible : le fichier lancé est signé par <b>{{ pkg.publisher_name }}</b
+                  >, mais {{ quoted(besideRun) }} {{ besideRun.length > 1 ? 'sont' : 'est' }} à
+                  côté, et les postes refusent sous la méthode A tout fichier que Windows pourrait
+                  charger ou lancer (.dll, .exe, .msi, scripts…) à côté de l'exécutable. Retirez
+                  {{ besideRun.length > 1 ? 'ces fichiers' : 'ce fichier' }} du paquet, ou signez-le
+                  (méthode B).
+                </span>
+              </template>
               <template v-else>
                 Indisponible : le fichier lancé n'est pas un exécutable (.exe) signé par un éditeur.
               </template>
@@ -340,7 +360,7 @@
               {{ summary.postes }} poste{{ summary.postes > 1 ? 's' : '' }} visé{{
                 summary.postes > 1 ? 's' : ''
               }}
-              (dernier déploiement de chacun) :
+              — dernier déploiement de chacun ; un état filtre le tableau sur ces postes :
             </div>
             <q-chip
               v-for="(n, status) in summary.by_status"
@@ -356,6 +376,13 @@
               {{ STATUS_LABELS[status] ?? status }} : {{ n }}
             </q-chip>
           </q-card-section>
+          <div class="text-caption text-muted q-px-md">
+            {{
+              statusFilter
+                ? `Dernier déploiement de chaque poste, ${(STATUS_LABELS[statusFilter] ?? statusFilter).toLowerCase()}`
+                : 'Historique : tous les envois, du plus récent au plus ancien'
+            }}
+          </div>
           <q-table
             v-model:pagination="commandPagination"
             :rows="commands"
@@ -382,7 +409,11 @@
               </q-td>
             </template>
             <template #body-cell-result="cell">
-              <q-td :props="cell" style="white-space: normal; max-width: 520px">
+              <q-td
+                :props="cell"
+                class="break-anywhere"
+                style="white-space: normal; max-width: 520px"
+              >
                 {{ cell.row.error || cell.row.result_output || '' }}
               </q-td>
             </template>
@@ -404,7 +435,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import { isCancel } from 'axios';
-import { useQuasar, type QTableColumn } from 'quasar';
+import { useQuasar, type QForm, type QTableColumn } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import PackageDeployDialog from 'src/components/package/PackageDeployDialog.vue';
 import { commandTypeLabel, type Command } from 'src/services/commands';
@@ -419,10 +450,13 @@ import {
   getPackageSummary,
   joinArgs,
   listPackageCommands,
+  loadableBeside,
+  manifestFileName,
   methodAMaxLabel,
   removeSignature,
   restorePackage,
   retirePackage,
+  sortedFiles,
   splitArgs,
   tooLargeFiles,
   tooLargeForMethodA,
@@ -471,7 +505,27 @@ const canWrite = computed(() => auth.can('package', 'write'));
 const canDeploy = computed(
   () => auth.can('command', 'execute') && auth.can('risky_command', 'execute'),
 );
-const fileNames = computed(() => pkg.value?.files.map((f) => f.name) ?? []);
+// In the order a French reader looks for them (case and accents aside).
+const files = computed(() => (pkg.value ? sortedFiles(pkg.value) : []));
+const fileNames = computed(() => files.value.map((f) => f.name));
+// What stands beside the executable and keeps method A from running it.
+const besideRun = computed(() => (pkg.value ? loadableBeside(pkg.value, 'install') : []));
+const formRef = ref<QForm | null>(null);
+
+// The bounds the server holds the fields to (packages.py _LIMITS, the winget
+// patterns): typed past them, its refusal used to arrive in English.
+const LIMITS = {
+  name: 200,
+  version: 100,
+  notes: 5000,
+  detect_name: 200,
+  winget_id: 128,
+  winget_version: 64,
+};
+
+function quoted(names: string[]): string {
+  return names.map((n) => `« ${n} »`).join(', ');
+}
 const method = computed(() => (pkg.value ? trustMethod(pkg.value) : 'none'));
 const trustColor = computed(
   () =>
@@ -550,19 +604,50 @@ function refresh(p: Package) {
 }
 
 onBeforeRouteLeave(() => {
-  if (!dirty.value) return true;
+  if (!dirty.value && !uploading.value) return true;
+  // Leaving cancels an upload under way: said before, not after (the toast
+  // « Dépôt annulé » came once the files were lost).
+  const what = [
+    uploading.value
+      ? 'Un dépôt de fichiers est en cours : quitter la page l’interrompt (les fichiers déjà envoyés sont gardés).'
+      : '',
+    dirty.value ? 'La définition du paquet a été modifiée sans être enregistrée.' : '',
+  ].filter(Boolean);
   return new Promise<boolean>((resolve) => {
     $q.dialog({
-      title: 'Modifications non enregistrées',
-      message: 'La définition du paquet a été modifiée sans être enregistrée. Quitter la page ?',
+      title: uploading.value ? 'Dépôt en cours' : 'Modifications non enregistrées',
+      message: `${what.join(' ')} Quitter la page ?`,
       cancel: { flat: true, noCaps: true, label: 'Rester' },
-      ok: { flat: true, noCaps: true, label: 'Quitter sans enregistrer', color: 'negative' },
+      ok: {
+        flat: true,
+        noCaps: true,
+        label: uploading.value ? 'Quitter et interrompre' : 'Quitter sans enregistrer',
+        color: 'negative',
+      },
       persistent: true,
     })
-      .onOk(() => resolve(true))
+      .onOk(() => {
+        cancelUpload();
+        resolve(true);
+      })
       .onCancel(() => resolve(false));
   });
 });
+
+/**
+ * Closing the tab, reloading, typing another address: the browser asks
+ * before an upload under way or unsaved changes are lost (its own wording —
+ * a page cannot set it).
+ */
+function guardUnload(e: BeforeUnloadEvent) {
+  if (!uploading.value && !dirty.value) return;
+  e.preventDefault();
+  // Still what some browsers read to ask.
+  e.returnValue = '';
+}
+
+onMounted(() => window.addEventListener('beforeunload', guardUnload));
+onBeforeUnmount(() => window.removeEventListener('beforeunload', guardUnload));
 
 async function load() {
   loadError.value = null;
@@ -588,7 +673,15 @@ async function loadCommands() {
   const p = commandPagination.value;
   try {
     const [list, tally] = await Promise.all([
-      listPackageCommands(props.id, p.page, p.rowsPerPage, statusFilter.value),
+      // A state chosen in the tally lists the rows the tally counts: each
+      // poste's latest deployment, not every attempt behind it.
+      listPackageCommands(
+        props.id,
+        p.page,
+        p.rowsPerPage,
+        statusFilter.value,
+        statusFilter.value !== null,
+      ),
       getPackageSummary(props.id).catch(() => null),
     ]);
     if (id !== commandsRequestId) return;
@@ -641,8 +734,9 @@ function notifyError(e: unknown, fallback: string) {
   $q.notify({ type: 'negative', message: apiErrorMessage(e, fallback) });
 }
 
-async function save() {
-  if (!pkg.value) return;
+/** Saves the definition; whether it was saved. */
+async function save(): Promise<boolean> {
+  if (!pkg.value) return false;
   saving.value = true;
   try {
     const common = {
@@ -679,8 +773,10 @@ async function save() {
           ? 'Enregistré — le manifeste a changé : la signature est à refaire'
           : 'Enregistré',
     });
+    return true;
   } catch (e) {
     notifyError(e, 'Enregistrement impossible');
+    return false;
   } finally {
     saving.value = false;
   }
@@ -712,6 +808,9 @@ async function upload() {
   uploadProgress.value = 0;
   uploadAbort = new AbortController();
   let sent = 0;
+  // The files the server took, in order: one request each, so a refusal
+  // stops the drop there — the ones before it are kept, the rest not sent.
+  const kept: string[] = [];
   try {
     for (const file of files) {
       const updated = await uploadPackageFiles(
@@ -723,6 +822,7 @@ async function upload() {
         uploadAbort.signal,
       );
       sent += file.size;
+      kept.push(file.name);
       refresh(updated);
     }
     // The first executable dropped is, nine times out of ten, the one to run:
@@ -738,13 +838,29 @@ async function upload() {
       ...(dirty.value ? { caption: 'Pensez à enregistrer la définition.' } : {}),
     });
   } catch (e) {
+    const notSent = files.slice(kept.length).map((f) => f.name);
+    const caption =
+      files.length > 1
+        ? [
+            kept.length ? `Déposé${kept.length > 1 ? 's' : ''} : ${kept.join(', ')}.` : '',
+            `Non envoyé${notSent.length > 1 ? 's' : ''} : ${notSent.join(', ')}.`,
+          ]
+            .filter(Boolean)
+            .join(' ')
+        : undefined;
     if (isCancel(e)) {
       $q.notify({
         type: 'info',
         message: sent ? 'Dépôt interrompu : les fichiers déjà envoyés sont gardés' : 'Dépôt annulé',
+        ...(caption ? { caption } : {}),
       });
     } else {
-      notifyError(e, 'Dépôt impossible');
+      $q.notify({
+        type: 'negative',
+        message: apiErrorMessage(e, 'Dépôt impossible'),
+        ...(caption ? { caption } : {}),
+        ...(files.length > 1 ? { timeout: 10000 } : {}),
+      });
     }
   } finally {
     uploading.value = false;
@@ -781,8 +897,7 @@ async function getManifest() {
   if (!pkg.value) return;
   try {
     const blob = await downloadManifest(pkg.value.id);
-    const base = `${pkg.value.name}-${pkg.value.version ?? ''}`.replace(/[^A-Za-z0-9._-]+/g, '-');
-    downloadBlob(blob, `${base.replace(/^-+|-+$/g, '')}.tiai-manifest.json`);
+    downloadBlob(blob, manifestFileName(pkg.value));
   } catch (e) {
     notifyError(e, 'Téléchargement impossible');
   }
@@ -813,21 +928,117 @@ async function unsign() {
   }
 }
 
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n > 1 ? many : one}`;
+}
+
+function confirm(title: string, message: string, ok: string, color: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    $q.dialog({
+      title,
+      message,
+      cancel: { flat: true, noCaps: true, label: 'Annuler' },
+      ok: { unelevated: true, noCaps: true, label: ok, color },
+      persistent: true,
+    })
+      .onOk(() => resolve(true))
+      .onCancel(() => resolve(false));
+  });
+}
+
+/**
+ * Retiring cancels the installations no poste has received yet — said, with
+ * their number, before; and restoring does not bring them back — said too.
+ * The deployments card follows either way.
+ */
 async function toggleRetired() {
   if (!pkg.value) return;
-  try {
-    refresh(
-      pkg.value.retired_at ? await restorePackage(pkg.value.id) : await retirePackage(pkg.value.id),
+  const p = pkg.value;
+  if (p.retired_at) {
+    const ok = await confirm(
+      'Remettre au catalogue',
+      `« ${p.name} » pourra de nouveau être déployé. Les installations annulées lors du retrait ne sont pas relancées : redéployez le paquet sur les postes voulus.`,
+      'Remettre au catalogue',
+      'primary',
     );
+    if (!ok) return;
+    try {
+      refresh(await restorePackage(p.id));
+      $q.notify({
+        type: 'positive',
+        message: 'Paquet remis au catalogue',
+        caption: 'Les installations annulées au retrait ne sont pas relancées.',
+      });
+    } catch (e) {
+      notifyError(e, 'Opération impossible');
+    }
+    void loadCommands();
+    return;
+  }
+  // Counted now, not from the tally on screen, which may be minutes old.
+  const tally = await getPackageSummary(p.id).catch(() => summary.value);
+  if (tally) summary.value = tally;
+  const pending = tally?.pending_installs ?? null;
+  const cancelled =
+    pending === null
+      ? 'Les installations en attente (pas encore reçues par leur poste) seront annulées.'
+      : pending > 0
+        ? `${plural(pending, 'installation en attente', 'installations en attente')} (pas encore ${pending > 1 ? 'reçues' : 'reçue'} par ${pending > 1 ? 'leur poste' : 'son poste'}) ${pending > 1 ? 'seront annulées' : 'sera annulée'}.`
+        : 'Aucune installation n’est en attente.';
+  const ok = await confirm(
+    'Retirer le paquet',
+    `${cancelled} Celles déjà transmises vont à leur terme ; les désinstallations ne sont pas touchées. Le paquet ne sera plus proposé au déploiement, et le remettre au catalogue ne relancera pas les installations annulées.`,
+    'Retirer',
+    'negative',
+  );
+  if (!ok) return;
+  try {
+    refresh(await retirePackage(p.id));
+    $q.notify({
+      type: 'positive',
+      message: 'Paquet retiré',
+      ...(pending
+        ? {
+            caption: `${plural(pending, 'installation en attente annulée', 'installations en attente annulées')}.`,
+          }
+        : {}),
+    });
   } catch (e) {
     notifyError(e, 'Opération impossible');
   }
+  void loadCommands();
 }
 
-function openDeploy(action: 'install' | 'uninstall') {
+/**
+ * The deployment sends the definition as saved: with changes typed and not
+ * saved, it would deploy without them, silently. Said, and offered to save
+ * first.
+ */
+async function openDeploy(action: 'install' | 'uninstall') {
+  if (dirty.value && canWrite.value) {
+    const ok = await confirm(
+      'Modifications non enregistrées',
+      'La définition du paquet a été modifiée sans être enregistrée : le déploiement enverrait la version enregistrée, sans ces modifications.',
+      'Enregistrer puis déployer',
+      'primary',
+    );
+    if (!ok) return;
+    if ((await formRef.value?.validate()) === false) return;
+    if (!(await save())) return;
+    // Saved, the package may no longer be deployable (a file to run that
+    // is not in it): the dialog says so.
+  }
   deployAction.value = action;
   deployOpen.value = true;
 }
 
 onMounted(load);
 </script>
+
+<style scoped>
+/* A 255-character file name without a space must wrap, not widen the page. */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+</style>

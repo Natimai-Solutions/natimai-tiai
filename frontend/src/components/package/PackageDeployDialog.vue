@@ -64,6 +64,12 @@
             <li v-for="p in blocking" :key="p.code">{{ p.message }}</li>
           </ul>
         </q-banner>
+        <q-banner v-else-if="installBlockers.length" dense class="surface-orange">
+          <div class="text-weight-medium">Aucun poste ne l’installera</div>
+          <ul class="q-my-xs q-pl-md" style="overflow-wrap: anywhere">
+            <li v-for="m in installBlockers" :key="m">{{ m }}</li>
+          </ul>
+        </q-banner>
         <q-banner v-else-if="chosen" dense class="surface-blue">
           {{ trustSentence(chosen, action) }}
         </q-banner>
@@ -97,6 +103,7 @@ import {
   deployPackage,
   listPackages,
   methodAMaxLabel,
+  packageChoiceLabel,
   publisherOf,
   stepTrust,
   tooLargeForMethodA,
@@ -141,15 +148,24 @@ const chosen = computed<Package | null>(
 );
 // What the server would accept for the action: the same rule as its command
 // route, read from the package (deployable / uninstallable).
-const packageOptions = computed(() =>
-  packages.value
-    .filter(action.value === 'install' ? deployable : uninstallable)
-    .map((p) => ({ label: p.version ? `${p.name} ${p.version}` : p.name, value: p.id })),
-);
+// Two packages may bear one name and version: each then says what tells it
+// from the other (packageChoiceLabel).
+const packageOptions = computed(() => {
+  const offered = packages.value.filter(action.value === 'install' ? deployable : uninstallable);
+  return offered.map((p) => ({ label: packageChoiceLabel(p, offered), value: p.id }));
+});
 const canUninstall = computed(
   () => !chosen.value || chosen.value.kind === 'winget' || !!chosen.value.uninstall_run,
 );
 const blocking = computed(() => (chosen.value ? blockingProblems(chosen.value, action.value) : []));
+// Why no poste would install it, named by the server — the file in the way
+// included — where the dialog used to say « ni signé, ni lancé par un
+// exécutable d'éditeur » whatever the cause.
+const installBlockers = computed(() =>
+  chosen.value && action.value === 'install' && !blocking.value.length
+    ? (chosen.value.install_blockers ?? [])
+    : [],
+);
 const ready = computed(() => {
   if (!chosen.value) return false;
   // What the server answers 409 to is not sent: an install of an incomplete
@@ -159,6 +175,7 @@ const ready = computed(() => {
   // The dialog says no poste will run it: it does not send it either (audit
   // B30) — an uninstall no more than an install (U04).
   if (stepTrust(chosen.value, action.value) === 'none') return false;
+  if (installBlockers.value.length) return false;
   if (!props.machineIds?.length && scope.value === 'location' && !location.value) return false;
   return true;
 });

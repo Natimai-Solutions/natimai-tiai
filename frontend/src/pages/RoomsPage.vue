@@ -3,8 +3,10 @@
     <div class="row items-center q-col-gutter-sm q-mb-md">
       <h1 class="text-h5 q-my-none col-auto">Salles</h1>
       <q-space />
+      <!-- Each only where the account's scope lets it create: one confined
+           to rooms creates neither, one confined to buildings no building. -->
       <q-btn
-        v-if="canWrite"
+        v-if="canWrite && creation.buildings"
         flat
         color="primary"
         icon="apartment"
@@ -12,7 +14,7 @@
         @click="openBuildingForm(null)"
       />
       <q-btn
-        v-if="canWrite"
+        v-if="canWrite && creation.rooms"
         color="primary"
         icon="meeting_room"
         label="Nouvelle salle"
@@ -59,7 +61,7 @@
           hide-pagination
           flat
           bordered
-          @row-click="(_evt, row) => goRoom(row)"
+          @row-click="(_evt, row) => !selectingText() && goRoom(row)"
         >
           <template #body-cell-name="props">
             <q-td :props="props">
@@ -243,14 +245,18 @@ import {
   deleteBuilding,
   deleteRoom,
   getRoomConfig,
+  getRoomCreation,
   listBuildings,
   listRooms,
   ROOM_SOURCE_LABELS,
   syncDirectory,
   syncNotification,
+  syncPreviewMessage,
   type Building,
   type Room,
   type RoomConfig,
+  type RoomCreation,
+  type SyncResult,
 } from 'src/services/rooms';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
@@ -269,6 +275,22 @@ const locations = ref<string[]>([]);
 const loading = ref(false);
 
 const canWrite = computed(() => auth.can('room', 'write'));
+// What the scope lets create; both until the server says, which only ever
+// shows a button the server then refuses.
+const creation = ref<RoomCreation>({ rooms: true, buildings: true });
+
+async function loadCreation() {
+  try {
+    creation.value = await getRoomCreation();
+  } catch {
+    // Kept as is: the routes still refuse what the scope does not allow.
+  }
+}
+
+/** A click that ends a text selection is not a click on the row. */
+function selectingText(): boolean {
+  return (window.getSelection?.()?.toString() ?? '') !== '';
+}
 
 const config = ref<RoomConfig | null>(null);
 const syncing = ref(false);
@@ -284,8 +306,35 @@ async function loadConfig() {
   }
 }
 
+/**
+ * The re-sync, never in one click: its dry run first — how many postes leave
+ * their room, how many rooms appear — and the real run only once confirmed.
+ * A first run on a parc filed by hand used to empty it.
+ */
 async function sync() {
   syncing.value = true;
+  let preview: SyncResult;
+  try {
+    preview = await syncDirectory(true);
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Resynchronisation impossible') });
+    syncing.value = false;
+    return;
+  }
+  $q.dialog({
+    title: "Resynchroniser depuis l'annuaire",
+    message: syncPreviewMessage(preview),
+    cancel: { flat: true, label: 'Annuler' },
+    ok: { label: 'Resynchroniser', color: 'primary' },
+    persistent: true,
+  })
+    .onOk(() => void runSync())
+    .onCancel(() => {
+      syncing.value = false;
+    });
+}
+
+async function runSync() {
   try {
     const res = await syncDirectory();
     $q.notify(syncNotification(res));
@@ -406,5 +455,6 @@ onMounted(() => {
   void reload();
   void loadLocations();
   void loadConfig();
+  void loadCreation();
 });
 </script>

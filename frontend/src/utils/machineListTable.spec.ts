@@ -134,3 +134,13 @@ describe('usedRatio', () => {
     expect(usedRatio({ system_volume_total_mb: 100, system_volume_free_mb: 150 })).toBe(0);
   });
 });
+
+describe('empty cells (item 10)', () => {
+  it('show « — » in every text column, a blank value included', () => {
+    for (const name of ['domain', 'location', 'building', 'ip_address', 'os_version', 'model']) {
+      const column = MACHINE_TABLE_COLUMNS.find((c) => c.name === name)!;
+      expect(column.format?.(null, {} as never), name).toBe('—');
+      expect(column.format?.('', {} as never), name).toBe('—');
+    }
+  });
+});

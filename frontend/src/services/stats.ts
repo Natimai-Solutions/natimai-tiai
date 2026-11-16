@@ -49,6 +49,13 @@ export interface StatsOverview {
   /** The first hour ever counted; null before any. Until it is a window old,
    * the cards say the count is recent rather than calling the parc idle. */
   usage_since: string | null;
+  /**
+   * Enrolment: postes whose re-enrolment waits for an administrator, and
+   * postes whose token was revoked. Optional: an older server does not send
+   * them, and the dashboard then shows no card for them.
+   */
+  machines_reenroll_pending?: number;
+  machines_token_revoked?: number;
 }
 
 export async function getOverview(): Promise<StatsOverview> {

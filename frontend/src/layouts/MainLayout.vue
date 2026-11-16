@@ -1,5 +1,7 @@
 <template>
   <q-layout view="hHh lpR fFf">
+    <!-- First stop of the Tab key: past the toolbar and the drawer's ten links. -->
+    <a class="skip-link" href="#main-content" @click.prevent="skipToContent">Aller au contenu</a>
     <q-header elevated>
       <q-toolbar>
         <q-btn flat dense round icon="menu" aria-label="Menu" @click="drawer = !drawer" />
@@ -31,15 +33,17 @@
 
     <q-drawer v-model="drawer" show-if-above bordered>
       <q-list>
-        <q-item v-ripple clickable exact :to="{ name: 'dashboard' }">
+        <!-- The three pages of the parc need machine:read: an account without it
+             would only open 403s there (it lands on its first readable page). -->
+        <q-item v-if="canReadMachines" v-ripple clickable exact :to="{ name: 'dashboard' }">
           <q-item-section avatar><q-icon name="dashboard" /></q-item-section>
           <q-item-section>Tableau de bord</q-item-section>
         </q-item>
-        <q-item v-ripple clickable :to="{ name: 'machines' }">
+        <q-item v-if="canReadMachines" v-ripple clickable :to="{ name: 'machines' }">
           <q-item-section avatar><q-icon name="devices" /></q-item-section>
           <q-item-section>Postes</q-item-section>
         </q-item>
-        <q-item v-ripple clickable :to="{ name: 'software' }">
+        <q-item v-if="canReadMachines" v-ripple clickable :to="{ name: 'software' }">
           <q-item-section avatar><q-icon name="inventory_2" /></q-item-section>
           <q-item-section>Logiciels</q-item-section>
         </q-item>
@@ -47,7 +51,12 @@
           <q-item-section avatar><q-icon name="install_desktop" /></q-item-section>
           <q-item-section>Paquets</q-item-section>
         </q-item>
-        <q-item v-if="auth.can('check', 'read')" v-ripple clickable :to="{ name: 'tasks' }">
+        <q-item
+          v-if="auth.can('check', 'read') || auth.can('maintenance', 'read')"
+          v-ripple
+          clickable
+          :to="{ name: 'tasks' }"
+        >
           <q-item-section avatar><q-icon name="task_alt" /></q-item-section>
           <q-item-section>Mes tâches</q-item-section>
           <!-- Two counts, two colours: the checks given to me, and the postes of
@@ -87,15 +96,30 @@
     </q-drawer>
 
     <q-page-container>
-      <router-view />
+      <!-- The profile could not be read: the menus and the pages' buttons
+           depend on it, and a console silently missing half of them would
+           read as an account without rights. -->
+      <div v-if="auth.profileError && !auth.user" class="q-pa-md q-pb-none">
+        <LoadErrorBanner
+          :error="auth.profileError"
+          :loading="profileLoading"
+          fallback="Impossible de charger votre profil : les menus et les actions sont incomplets."
+          @retry="retryProfile"
+        />
+      </div>
+      <main id="main-content" ref="mainEl" tabindex="-1" class="main-content">
+        <router-view />
+      </main>
     </q-page-container>
   </q-layout>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { useAuthStore } from 'src/stores/auth';
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
+import { canOpen, firstReadablePage } from 'src/router/access';
+import { PROFILE_REFRESH_MS, useAuthStore } from 'src/stores/auth';
 import { listChecks } from 'src/services/checks';
 import { getDue } from 'src/services/maintenance';
 import { tasksVersion } from 'src/composables/useTasksBadge';
@@ -123,13 +147,52 @@ async function countMyTasks() {
   }
 }
 
+const canReadMachines = computed(() => auth.can('machine', 'read'));
+
+// The profile, read again on a retry, every few minutes and after a 403
+// (`stores/auth`): rights an administrator changed reach the menus without F5.
+const profileLoading = ref(false);
+async function retryProfile() {
+  profileLoading.value = true;
+  try {
+    await auth.fetchMe();
+  } catch {
+    // The banner stays, with the new error.
+  } finally {
+    profileLoading.value = false;
+  }
+}
+let profileTimer: ReturnType<typeof setInterval> | null = null;
+
 onMounted(() => {
   // Restore the user profile after a page reload: the router's silent refresh
-  // has put an access token back, the profile is still to fetch.
-  if (auth.isAuthenticated && !auth.user) {
-    void auth.fetchMe();
-  }
+  // has put an access token back, the profile is still to fetch. A failure is
+  // shown by the banner above, not left as an unhandled rejection.
+  if (auth.isAuthenticated && !auth.user) void retryProfile();
+  profileTimer = setInterval(() => void auth.refreshProfile(), PROFILE_REFRESH_MS);
 });
+onUnmounted(() => {
+  if (profileTimer !== null) clearInterval(profileTimer);
+});
+
+// Rights withdrawn while a page is open: leave it for the first page still
+// readable, rather than stay on one that now answers 403 to everything.
+watch(
+  () => auth.user?.permissions,
+  (permissions) => {
+    if (!permissions) return;
+    const current = router.currentRoute.value;
+    if (!canOpen(permissions, current.meta.requiresPermission)) {
+      void router.replace({ name: firstReadablePage(permissions) });
+    }
+  },
+);
+
+// « Aller au contenu »: focus moves into the page, as the link promises.
+const mainEl = ref<HTMLElement | null>(null);
+function skipToContent() {
+  mainEl.value?.focus();
+}
 watch(
   () => auth.user?.id,
   () => void countMyTasks(),

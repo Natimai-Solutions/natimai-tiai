@@ -51,8 +51,11 @@
       <template #body-cell-state="props">
         <q-td :props="props">
           <span v-if="props.row.retired_at" class="text-muted">Retiré</span>
-          <span v-else-if="props.row.problems.length" class="text-warn">
-            {{ props.row.problems[0].message }}
+          <!-- Not « Prêt » while no poste would install it: the server's
+               reasons, the first one said (an unsigned .exe, a .dll beside
+               an editor's setup.exe…). -->
+          <span v-else-if="props.row.install_blockers.length" class="text-warn break-anywhere">
+            {{ props.row.install_blockers[0] }}
           </span>
           <span v-else class="text-ok">Prêt</span>
         </q-td>
@@ -85,19 +88,23 @@
               outlined
               dense
               autofocus
+              maxlength="200"
               :rules="[(v: string) => !!v.trim() || 'Requis']"
             />
-            <q-input v-model="form.version" label="Version" outlined dense />
+            <q-input v-model="form.version" label="Version" outlined dense maxlength="100" />
+            <!-- The identifier is checked trimmed, as it is sent and as the
+                 package's page checks it. -->
             <template v-if="form.kind === 'winget'">
               <q-input
                 v-model="form.winget_id"
                 label="Identifiant winget"
                 outlined
                 dense
+                maxlength="128"
                 hint="Exact, tel que « winget search » l'affiche : Mozilla.Firefox, 7zip.7zip…"
                 :rules="[
                   (v: string) =>
-                    /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(v) || 'Identifiant invalide',
+                    /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(v.trim()) || 'Identifiant invalide',
                 ]"
               />
             </template>
@@ -202,3 +209,9 @@ async function submitCreate() {
 watch(showRetired, reload);
 onMounted(reload);
 </script>
+
+<style scoped>
+.break-anywhere {
+  overflow-wrap: anywhere;
+}
+</style>

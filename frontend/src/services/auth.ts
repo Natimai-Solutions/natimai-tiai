@@ -137,6 +137,24 @@ export async function requestPasswordReset(email: string): Promise<void> {
   await api.post('/auth/password-reset/request', { email });
 }
 
+/**
+ * Whether a reset link can still be used, asked before the form is shown
+ * (C7): `valid` (204), `invalid` (400: expired, used, or garbled), or
+ * `unknown` — an older server without the check, or no answer — in which case
+ * the form is shown and the confirmation decides.
+ */
+export async function checkPasswordResetToken(
+  token: string,
+): Promise<'valid' | 'invalid' | 'unknown'> {
+  try {
+    await api.get('/auth/password-reset/check', { params: { token } });
+    return 'valid';
+  } catch (e) {
+    const status = (e as { response?: { status?: number } } | null)?.response?.status;
+    return status === 400 ? 'invalid' : 'unknown';
+  }
+}
+
 /** Redeem a reset link and set the new password. */
 export async function confirmPasswordReset(token: string, newPassword: string): Promise<void> {
   await api.post('/auth/password-reset/confirm', {

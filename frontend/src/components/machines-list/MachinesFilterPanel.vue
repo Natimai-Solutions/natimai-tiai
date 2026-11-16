@@ -95,6 +95,7 @@
           @update:model-value="(v) => set({ location: v })"
         />
         <q-select
+          v-if="canReadRooms"
           aria-label="Bâtiment"
           :model-value="modelValue.building"
           :options="options.building"
@@ -107,6 +108,7 @@
           @update:model-value="(v) => set({ building: v })"
         />
         <q-select
+          v-if="canReadRooms"
           aria-label="Salle"
           :model-value="modelValue.room"
           :options="options.room"
@@ -119,6 +121,7 @@
           @update:model-value="(v) => set({ room: v })"
         />
         <q-select
+          v-if="canReadRooms"
           aria-label="Salle déclarée et salle déduite"
           :model-value="modelValue.mismatch"
           :options="MISMATCH_OPTIONS"
@@ -158,6 +161,19 @@
           class="col-auto"
           style="width: 220px"
           @update:model-value="(v) => set({ checkOpen: v })"
+        />
+        <!-- C2: postes asking back in, or cut off — the dashboard card lands here. -->
+        <q-select
+          aria-label="Enrôlement"
+          :model-value="modelValue.enrollment"
+          :options="ENROLLMENT_OPTIONS"
+          emit-value
+          map-options
+          dense
+          outlined
+          class="col-auto"
+          style="width: 220px"
+          @update:model-value="(v) => set({ enrollment: v })"
         />
       </div>
     </div>
@@ -285,7 +301,7 @@
         <q-select
           aria-label="Type de poste"
           :model-value="modelValue.chassis"
-          :options="options.chassis"
+          :options="optionsWithCurrent(options.chassis, modelValue.chassis, chassisLabelOf)"
           emit-value
           map-options
           dense
@@ -323,6 +339,7 @@
           class="col-auto"
           style="width: 100px"
           :disable="!modelValue.ramOp"
+          :hint="modelValue.ramOp && !isRamActive(modelValue) ? 'Saisissez une taille' : undefined"
           @update:model-value="(v) => set({ ramGb: v })"
         />
         <q-select
@@ -344,8 +361,12 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { chassisLabelOf } from 'src/composables/useMachineFleetOptions';
 import {
   CHECK_OPTIONS,
+  ENROLLMENT_OPTIONS,
+  isRamActive,
+  optionsWithCurrent,
   diskOptionsFor,
   MAINTENANCE_OPTIONS,
   MISMATCH_OPTIONS,
@@ -371,16 +392,24 @@ import {
  * and a bar wearing all of them at once buried the search. Every change is
  * emitted as a whole new set of filters, which the page writes into the URL.
  */
-const props = defineProps<{
-  modelValue: MachineFilters;
-  options: MachineFleetOptions;
-  /** The console's thresholds, once the first list response has served them. */
-  usageThresholds: UsageThresholds | null;
-  /** The usage window the server answered with, in days. */
-  usageWindowDays: number;
-  /** How many chips the active filters make. */
-  activeCount: number;
-}>();
+const props = withDefaults(
+  defineProps<{
+    modelValue: MachineFilters;
+    options: MachineFleetOptions;
+    /** The console's thresholds, once the first list response has served them. */
+    usageThresholds: UsageThresholds | null;
+    /** The usage window the server answered with, in days. */
+    usageWindowDays: number;
+    /** How many chips the active filters make. */
+    activeCount: number;
+    /**
+     * The room filters need room:read: without it their dropdowns stay empty
+     * and the server refuses their listings. Hidden then (item 4).
+     */
+    canReadRooms?: boolean;
+  }>(),
+  { canReadRooms: true },
+);
 
 const emit = defineEmits<{
   'update:modelValue': [value: MachineFilters];

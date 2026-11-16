@@ -1,17 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('boot/axios', () => ({
-  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }));
 
 import { api } from 'boot/axios';
 import {
   cycleLabel,
+  deleteSession,
   dueLabel,
   isDue,
   getDue,
   listAssignableOwners,
   maintenanceStateLabel,
+  ownerLabel,
   recordSession,
   updateMachineMaintenance,
   updateRoomMaintenance,
@@ -105,5 +107,20 @@ describe('due dates (audit U22)', () => {
     expect(isDue('due_soon')).toBe(true);
     expect(isDue('ok')).toBe(false);
     expect(isDue('excluded')).toBe(false);
+  });
+});
+
+describe('a recorded visit (item 6) and its owner labels (item 4)', () => {
+  it('deletes a visit by id', async () => {
+    vi.mocked(api.delete).mockResolvedValue({ data: undefined });
+    await deleteSession('s-1');
+    expect(api.delete).toHaveBeenCalledWith('/maintenance/s-1');
+  });
+
+  it('names a deactivated owner as such, never by id', () => {
+    expect(ownerLabel({ id: 'u', name: 'Marie', active: false })).toBe('Marie (désactivé)');
+    expect(ownerLabel({ id: 'u', name: 'Marie', active: true })).toBe('Marie');
+    expect(ownerLabel({ id: 'u', name: 'Marie' })).toBe('Marie');
+    expect(ownerLabel(null)).toBe('');
   });
 });

@@ -11,9 +11,11 @@ import {
   commandActionGroups,
   commandActions,
   commandConfirm,
+  commandRowLabel,
   commandTypeLabel,
   createCommands,
   listCommands,
+  singleSendNotification,
   type CommandType,
 } from './commands';
 
@@ -352,5 +354,48 @@ describe('commandConfirm', () => {
     expect(c.ok.label).toBe('Lancer sur 4 postes');
     expect(c.ok.color).toBe('primary');
     expect(c.message).not.toContain('session');
+  });
+});
+
+describe('revoked postes and single sends (C3, C4)', () => {
+  it('names the postes whose token is revoked in a bulk result', () => {
+    const note = bulkSendNotification({ created: ['a'], count: 1, skipped: 0, revoked: 2 });
+    expect(note.type).toBe('warning');
+    expect(note.message).toBe('1 commande(s) envoyée(s) — 2 au token révoqué, ignoré(s)');
+    const none = bulkSendNotification({ created: [], count: 0, revoked: 3 });
+    expect(none.message).toContain('3 poste(s) au token révoqué');
+  });
+
+  it('says where the command already standing on the poste is', () => {
+    const action = { label: 'Vider le cache DNS' };
+    const base = { created: [], count: 0, skipped: 1 };
+    expect(singleSendNotification(action, { ...base, reason: 'running' }).message).toBe(
+      '« Vider le cache DNS » est déjà en cours sur ce poste.',
+    );
+    expect(singleSendNotification(action, { ...base, reason: 'delivered' }).message).toBe(
+      '« Vider le cache DNS » est déjà transmise sur ce poste.',
+    );
+    // An older server says nothing: « déjà en attente », as before.
+    expect(singleSendNotification(action, base).message).toBe(
+      '« Vider le cache DNS » est déjà en attente sur ce poste.',
+    );
+    expect(singleSendNotification(action, { created: ['x'], count: 1 })).toEqual({
+      type: 'positive',
+      message: 'Commande envoyée',
+    });
+  });
+
+  it('labels a deployment row with its package (C5)', () => {
+    expect(commandRowLabel({ type: 'package_install', package_name: '7-Zip 23.01' })).toBe(
+      'Installation de logiciel — 7-Zip 23.01',
+    );
+    expect(commandRowLabel({ type: 'flush_dns' })).toBe('Vider le cache DNS');
+  });
+
+  it('confirms the driver install in a sentence of its own (item 14)', () => {
+    const action = commandActions.find((a) => a.type === 'wu_install_full')!;
+    const { message } = commandConfirm(action, 1);
+    expect(message).not.toMatch(/ci-dessus/);
+    expect(message).toContain('y compris les pilotes');
   });
 });

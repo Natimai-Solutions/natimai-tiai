@@ -24,6 +24,10 @@
       </div>
     </div>
 
+    <!-- Persistent, unlike a toast: an empty table under a search that could
+         not be run would read as « aucun compte » (item 2). -->
+    <LoadErrorBanner v-if="loadError" :error="loadError" :loading="loading" @retry="reload" />
+
     <q-table
       v-model:pagination="pagination"
       :rows="rows"
@@ -31,6 +35,8 @@
       row-key="id"
       :loading="loading"
       :rows-per-page-options="[25, 50, 100]"
+      :no-data-label="loadError ? 'Comptes non chargés.' : 'Aucun compte.'"
+      class="users-table"
       @request="onRequest"
     >
       <template #body-cell-groups="props">
@@ -92,14 +98,31 @@
             round
             icon="more_vert"
             :aria-label="`Actions pour ${props.row.email}`"
+            @click="rememberTrigger"
           >
             <q-menu>
               <q-list style="min-width: 220px">
-                <q-item v-close-popup clickable @click="openEdit(props.row)">
+                <!-- An account holding more rights than the caller: the server
+                     refuses every action on it, so none is offered (item 4). -->
+                <q-item v-if="beyondMe(props.row)" dense class="text-caption text-muted">
+                  <q-item-section avatar><q-icon name="lock" size="xs" /></q-item-section>
+                  <q-item-section>{{ MORE_RIGHTS_ACCOUNT }}</q-item-section>
+                </q-item>
+                <q-item
+                  v-close-popup
+                  clickable
+                  :disable="beyondMe(props.row)"
+                  @click="openEdit(props.row)"
+                >
                   <q-item-section avatar><q-icon name="edit" /></q-item-section>
                   <q-item-section>Modifier</q-item-section>
                 </q-item>
-                <q-item v-close-popup clickable @click="openReset(props.row)">
+                <q-item
+                  v-close-popup
+                  clickable
+                  :disable="beyondMe(props.row)"
+                  @click="openReset(props.row)"
+                >
                   <q-item-section avatar><q-icon name="lock_reset" /></q-item-section>
                   <q-item-section>Réinitialiser le mot de passe</q-item-section>
                 </q-item>
@@ -111,7 +134,7 @@
                 <q-item
                   v-close-popup
                   clickable
-                  :disable="isSelf(props.row)"
+                  :disable="isSelf(props.row) || beyondMe(props.row)"
                   @click="toggleActive(props.row)"
                 >
                   <q-item-section avatar>
@@ -125,7 +148,7 @@
                   v-close-popup
                   clickable
                   class="text-negative"
-                  :disable="isSelf(props.row)"
+                  :disable="isSelf(props.row) || beyondMe(props.row)"
                   @click="confirmDelete(props.row)"
                 >
                   <q-item-section avatar><q-icon name="delete" /></q-item-section>
@@ -140,7 +163,7 @@
 
     <!-- Création / modification : même formulaire, le mot de passe n'apparaît
          qu'à la création (ensuite c'est la réinitialisation qui s'en charge). -->
-    <q-dialog v-model="formOpen">
+    <q-dialog v-model="formOpen" @hide="restoreFocus">
       <q-card style="width: 420px; max-width: 90vw">
         <q-card-section class="text-h6">
           {{ editing ? 'Modifier le compte' : 'Nouveau compte' }}
@@ -165,7 +188,7 @@
                  rather than shown failing. -->
             <q-select
               v-model="form.group_ids"
-              :options="groupOptions"
+              :options="grantableGroupOptions"
               emit-value
               map-options
               multiple
@@ -177,7 +200,9 @@
               :hint="
                 editing !== null && isSelf(editing)
                   ? 'Vos propres groupes ne se modifient pas depuis votre compte'
-                  : 'Aucun groupe : le compte se connecte mais ne voit rien'
+                  : grantableGroupOptions.some((o) => o.disable)
+                    ? 'Grisés : les groupes qui accordent plus de droits que vous n’en détenez'
+                    : 'Aucun groupe : le compte se connecte mais ne voit rien'
               "
             />
             <!-- Only when editing: a new account starts on the default cadence
@@ -223,7 +248,7 @@
     <q-dialog
       v-model="resetOpen"
       :persistent="resetting || resetResult !== null"
-      @hide="resetResult = null"
+      @hide="onResetHide"
     >
       <q-card style="width: 460px; max-width: 90vw">
         <q-card-section class="text-h6">Réinitialiser le mot de passe</q-card-section>
@@ -297,7 +322,9 @@
 <script setup lang="ts">
 import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { escapeHtml } from 'src/utils/html';
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
+import { useFocusReturn } from 'src/composables/useFocusReturn';
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { copyToClipboard, useQuasar, type QTableColumn } from 'quasar';
 import {
   createUser,
@@ -307,7 +334,14 @@ import {
   updateUser,
   type ConsoleUser,
 } from 'src/services/users';
-import { listGroups } from 'src/services/groups';
+import { listGroups, type Group } from 'src/services/groups';
+import {
+  MORE_RIGHTS_ACCOUNT,
+  callerAuthority,
+  exceeds,
+  groupsAuthority,
+  groupsByIds,
+} from 'src/utils/authority';
 import { apiErrorMessage } from 'src/services/errors';
 import type { EmailPreference } from 'src/services/auth';
 import { useAuthStore } from 'src/stores/auth';
@@ -322,9 +356,13 @@ function isLocked(user: ConsoleUser): boolean {
 
 const $q = useQuasar();
 const auth = useAuthStore();
+// Back to the row's menu button when a dialog opened from it closes (item 12).
+const { remember: rememberTrigger, restore: restoreFocus } = useFocusReturn();
 
 const rows = ref<ConsoleUser[]>([]);
 const loading = ref(false);
+// What the last load failed with; null once one succeeds.
+const loadError = ref<unknown>(null);
 const saving = ref(false);
 const search = ref('');
 
@@ -344,14 +382,38 @@ const form = reactive({
 });
 
 // Loaded once with the page: the list is short and changes on another page.
-const groupOptions = ref<{ label: string; value: string }[]>([]);
+const groups = ref<Group[]>([]);
 async function loadGroups() {
   try {
-    groupOptions.value = (await listGroups()).map((g) => ({ label: g.name, value: g.id }));
+    groups.value = await listGroups();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Groupes indisponibles') });
   }
 }
+
+// What the caller holds, from its profile and its groups: what the server
+// would refuse is not offered (item 4). Null when it cannot be told.
+const me = computed(() => callerAuthority(auth.user, groups.value));
+
+/** Whether acting on `user` reaches rights the caller does not hold. */
+function beyondMe(user: ConsoleUser): boolean {
+  if (!me.value || isSelf(user)) return false;
+  const theirs = groupsByIds(
+    user.groups.map((g) => g.id),
+    groups.value,
+  );
+  return theirs !== null && exceeds(me.value, groupsAuthority(theirs));
+}
+
+// The groups the caller may hand out; the others are shown greyed, so the
+// form says why they cannot be picked rather than failing on « Enregistrer ».
+const grantableGroupOptions = computed(() =>
+  groups.value.map((g) => ({
+    label: g.name,
+    value: g.id,
+    disable: me.value !== null && exceeds(me.value, groupsAuthority([g])),
+  })),
+);
 
 // Label + value only: the explanatory sentences belong on « Mon compte », where
 // someone is choosing for themselves. Here an admin is reading a list.
@@ -361,6 +423,10 @@ const preferenceOptions = EMAIL_PREFERENCE_OPTIONS.map((o) => ({
 }));
 
 const resetOpen = ref(false);
+function onResetHide() {
+  resetResult.value = null;
+  restoreFocus();
+}
 const resetTarget = ref<ConsoleUser | null>(null);
 const resetMode = ref<'generate' | 'manual'>('generate');
 const resetPassword = ref('');
@@ -382,7 +448,16 @@ const columns: QTableColumn<ConsoleUser>[] = [
   // a client-side sort would only reorder the page in view.
   { name: 'email_preference', label: 'E-mails', field: 'email_preference', align: 'left' },
   { name: 'created_at', label: 'Créé le', field: 'created_at', align: 'left' },
-  { name: 'actions', label: '', field: 'id', align: 'right' },
+  // Sticky on the right: on a phone the table scrolls sideways, and the menu
+  // of each row was six columns away, out of reach (item 12).
+  {
+    name: 'actions',
+    label: '',
+    field: 'id',
+    align: 'right',
+    classes: 'users-actions-cell',
+    headerClasses: 'users-actions-cell',
+  },
 ];
 
 const required = (v: string) => !!v || 'Requis';
@@ -423,8 +498,14 @@ async function reload() {
     }
     rows.value = data.items;
     pagination.value = { ...pagination.value, rowsNumber: data.total };
+    loadError.value = null;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
+    if (id !== requestId) return;
+    // The rows of the previous search go: left under the new text, they would
+    // read as its results (item 2). The banner says why the table is empty.
+    rows.value = [];
+    pagination.value = { ...pagination.value, rowsNumber: 0 };
+    loadError.value = e;
   } finally {
     // Only the current fetch may clear the spinner: a superseded one finishing
     // first would take it down while the newer request is still running.
@@ -522,6 +603,9 @@ async function submitReset() {
     // Shown whatever happened to the dialog meanwhile: the server has applied
     // it, and this is the only place it can be read (audit U13).
     resetResult.value = password;
+    // A reset lifts the lock: the row says so now, not at the next reload (item 13).
+    const targetId = resetTarget.value?.id;
+    rows.value = rows.value.map((u) => (u.id === targetId ? { ...u, locked_until: null } : u));
     resetOpen.value = true;
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Réinitialisation impossible') });
@@ -553,7 +637,7 @@ async function toggleActive(user: ConsoleUser) {
             message: 'Compte désactivé',
             // What a deactivated owner leaves behind is nobody's until it comes back.
             caption:
-              'Ses salles, postes et vérifications passent dans « À prendre » tant que le compte reste désactivé.',
+              'Tant que le compte reste désactivé, ses vérifications passent dans « À prendre » et ses salles et postes reviennent au responsable du niveau au-dessus (la salle, puis le responsable par défaut du parc).',
           }
         : { type: 'positive', message: 'Compte réactivé' },
     );
@@ -590,3 +674,15 @@ onMounted(() => {
   void loadGroups();
 });
 </script>
+
+<style scoped>
+.users-table :deep(.users-actions-cell) {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--q-users-sticky-bg, #fff);
+}
+.body--dark .users-table {
+  --q-users-sticky-bg: var(--q-dark);
+}
+</style>

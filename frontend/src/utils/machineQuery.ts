@@ -128,7 +128,7 @@ export function queryValue(v: unknown): string | null {
  */
 export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams {
   const params: ListMachinesParams = {};
-  const search = queryValue(q.search);
+  const search = queryValue(q.search)?.trim();
   if (search) params.search = search;
   const domain = queryValue(q.domain);
   if (domain) params.domain = domain;
@@ -173,10 +173,11 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   if (manufacturer) params.hw_manufacturer = manufacturer;
   const cpu = queryValue(q.cpu_model);
   if (cpu) params.cpu_model = cpu;
+  // Any kind the fleet listing names, not only the five the console has words
+  // for: an agent reports what Windows says (« chassis-35 »), and a value the
+  // dropdown offers must filter (item 8).
   const chassis = queryValue(q.hw_chassis_type);
-  if (chassis && CHASSIS_TYPES.some((c) => c.value === chassis)) {
-    params.hw_chassis_type = chassis;
-  }
+  if (chassis) params.hw_chassis_type = chassis;
   const ramMin = queryInt(q.ram_min_gb);
   if (ramMin !== null) params.ram_min_gb = ramMin;
   const ramMax = queryInt(q.ram_max_gb);
@@ -190,6 +191,8 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   const agentVersion = queryValue(q.agent_version);
   if (agentVersion) params.agent_version = agentVersion;
   if (queryValue(q.agent_outdated) === 'true') params.agent_outdated = true;
+  const enrollment = queryValue(q.enrollment);
+  if (enrollment === 'pending' || enrollment === 'revoked') params.enrollment = enrollment;
   // Usage: a window and two bounds in hours, each dropped when it does not
   // parse or falls outside what the server takes.
   const usageDays = queryInt(q.usage_days);

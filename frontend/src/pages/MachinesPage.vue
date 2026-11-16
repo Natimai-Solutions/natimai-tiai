@@ -1,6 +1,7 @@
 <template>
   <q-page padding>
     <MachinesToolbar
+      class="no-print"
       :loading="loading"
       :last-refreshed-at="stale ? null : lastRefreshedAt"
       @columns="columnsOpen = true"
@@ -15,16 +16,22 @@
       @retry="reload"
     />
 
-    <MachinesFiltersBar
-      :model-value="filters"
-      :options="fleetOptions"
-      :usage-thresholds="usageThresholds"
-      :usage-window-days="usageWindowDays"
-      @update:model-value="onFilters"
-    />
+    <!-- A wrapper: the bar is a fragment, and a class set on it would land nowhere. -->
+    <div class="no-print">
+      <MachinesFiltersBar
+        :model-value="filters"
+        :options="fleetOptions"
+        :can-read-rooms="canReadRooms"
+        :usage-thresholds="usageThresholds"
+        :usage-window-days="usageWindowDays"
+        @update:model-value="onFilters"
+      />
+    </div>
 
     <MachinesBulkBar
+      class="no-print"
       :count="selected.length"
+      :can-reenroll="canReenroll"
       :can-place="canPlace"
       :can-check="auth.can('check', 'write')"
       :action-groups="actionGroups"
@@ -32,6 +39,7 @@
       @place="placeOpen = true"
       @ask="askOpen = true"
       @deploy="deployOpen = true"
+      @reenroll="reenrollSelection"
       @run="runBulk"
     />
 
@@ -44,6 +52,8 @@
       :agent-latest="agentLatest"
       :usage-window-days="usageWindowDays"
       :detail-route="detailRoute"
+      :selectable="selectable"
+      :low-disk-percent="lowDiskPercent"
       @request="onRequest"
       @open="goDetail"
     />
@@ -98,6 +108,7 @@ import MachinesToolbar from 'src/components/machines-list/MachinesToolbar.vue';
 import { useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { useMachineBulkActions } from 'src/composables/useMachineBulkActions';
 import { useMachineColumnLayout } from 'src/composables/useMachineColumnLayout';
+import { useFleetThresholds } from 'src/composables/useFleetThresholds';
 import { useMachineFleetOptions } from 'src/composables/useMachineFleetOptions';
 import { resetMachineNavigation } from 'src/composables/useMachineNavigation';
 import { commandActionGroups } from 'src/services/commands';
@@ -149,7 +160,12 @@ const {
   manualMode,
   loadAll: loadFleetOptions,
   loadRooms,
-} = useMachineFleetOptions();
+} = useMachineFleetOptions({
+  canReadRooms: () => auth.can('room', 'read'),
+  canPlaceRooms: () => auth.can('room', 'write'),
+});
+const canReadRooms = computed(() => auth.can('room', 'read'));
+const { lowDiskPercent } = useFleetThresholds();
 
 const { columnOrder, visibleColumns, saveColumns } = useMachineColumnLayout(usageWindowDays);
 const columnsOpen = ref(false);
@@ -175,10 +191,28 @@ const canDeploy = computed(
 const actionGroups = computed(() =>
   commandActionGroups({ bulkOnly: true, permissions: auth.permissions }),
 );
+// C2: allowing re-enrolment, from the selection.
+const canReenroll = computed(() => auth.can('machine', 'write'));
+
+// Rows are ticked for a bulk action, and only for one: an account that may do
+// nothing with a selection got checkboxes that did nothing but pause the
+// auto-refresh (item 4).
+const selectable = computed(
+  () =>
+    actionGroups.value.length > 0 ||
+    canPlace.value ||
+    auth.can('check', 'write') ||
+    canDeploy.value ||
+    canReenroll.value,
+);
 
 /** Read the filters, sort and page from the URL. */
 function applyQuery() {
-  filters.value = machineFiltersFromQuery(route.query);
+  const next = machineFiltersFromQuery(route.query);
+  // The URL carries the search trimmed; the box keeps what is being typed
+  // (« PC 0 », space included) as long as it means the same search.
+  if (filters.value.search.trim() === next.search) next.search = filters.value.search;
+  filters.value = next;
   pagination.value = machinePaginationFromQuery(route.query, pagination.value);
 }
 
@@ -344,11 +378,12 @@ watch(lastRefreshedAt, () => {
   if (lastError.value === null) stale.value = false;
 });
 
-const { askOpen, placeOpen, askSelection, placeSelection, runBulk } = useMachineBulkActions({
-  selected,
-  reload,
-  onPlaced: () => void loadRooms(),
-});
+const { askOpen, placeOpen, askSelection, placeSelection, runBulk, reenrollSelection } =
+  useMachineBulkActions({
+    selected,
+    reload,
+    onPlaced: () => void loadRooms(),
+  });
 
 onMounted(() => {
   // Back on the list: the next fiche opened walks this list as it is now.

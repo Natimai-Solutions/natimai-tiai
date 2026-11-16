@@ -95,3 +95,73 @@
     outline-offset: 2px;
   }
 }
+
+// Long unbreakable values — a 219-character hostname, a session name, a
+// version string — break where they must instead of scrolling the whole page
+// sideways (fiche header, fiche cards, history tables).
+.break-anywhere,
+.cell-wrap {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.cell-wrap {
+  white-space: normal;
+}
+
+// « Aller au contenu »: the first thing Tab reaches, shown only then.
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 3000;
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: var(--q-primary);
+  color: #fff;
+  text-decoration: none;
+
+  &:focus {
+    top: 8px;
+  }
+}
+
+// Printing the machine list: the rows, at the page's width — not the toolbar,
+// the drawer, the filters or the pagination around them.
+@media print {
+  .q-header,
+  .q-drawer,
+  .q-drawer-container,
+  .skip-link,
+  .no-print {
+    display: none !important;
+  }
+  .q-page-container {
+    padding: 0 !important;
+  }
+  .machines-table {
+    .q-table__middle {
+      overflow: visible !important;
+    }
+    table {
+      width: 100% !important;
+      table-layout: auto;
+    }
+    td,
+    th {
+      position: static !important;
+      white-space: normal !important;
+      font-size: 10px;
+      padding: 2px 4px !important;
+    }
+    .q-table__bottom,
+    td.q-table--col-auto-width,
+    th.q-table--col-auto-width {
+      display: none !important;
+    }
+  }
+}
+
+// The page's landmark, focused by « Aller au contenu »: no outline of its own.
+.main-content:focus {
+  outline: none;
+}

@@ -18,13 +18,24 @@ vi.mock('src/services/rooms', async (importOriginal) => ({
   listRooms: vi.fn(),
 }));
 // The page reads the profile again after a save; nothing to read here.
+const authState = vi.hoisted(() => {
+  const state: { user: Record<string, unknown> } = { user: { id: 'me' } };
+  return state;
+});
 vi.mock('src/stores/auth', () => ({
-  useAuthStore: () => ({ fetchMe: () => Promise.resolve(), can: () => true, user: { id: 'me' } }),
+  useAuthStore: () => ({
+    fetchMe: () => Promise.resolve(),
+    can: () => true,
+    get user() {
+      return authState.user;
+    },
+  }),
 }));
 
 import { createGroup, listGroups, updateGroup, type Group } from 'src/services/groups';
 import { listLocations } from 'src/services/machines';
 import { listBuildings, listRooms } from 'src/services/rooms';
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import GroupsPage from './GroupsPage.vue';
 
 const restricted = {
@@ -160,6 +171,86 @@ describe('GroupsPage — scope (audit T26)', () => {
     await submit();
     expect(updateGroup).toHaveBeenCalledTimes(1);
     expect(document.body.textContent).toContain('Enregistrer pour tout le parc');
+    wrapper.unmount();
+  });
+});
+
+describe('GroupsPage — item 2, item 4, C6', () => {
+  beforeEach(() => {
+    authState.user = { id: 'me' };
+    vi.mocked(listLocations).mockResolvedValue([] as never);
+    vi.mocked(listBuildings).mockResolvedValue([]);
+    vi.mocked(listRooms).mockResolvedValue([]);
+  });
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('keeps a banner with « Réessayer » when the groups cannot be read', async () => {
+    vi.mocked(listGroups).mockRejectedValueOnce({ response: { status: 500, data: {} } });
+    const { wrapper } = await mountPage();
+    expect(wrapper.findComponent(LoadErrorBanner).exists()).toBe(true);
+    expect(wrapper.text()).not.toContain('Aucun groupe');
+
+    vi.mocked(listGroups).mockResolvedValueOnce([restricted]);
+    wrapper.findComponent(LoadErrorBanner).vm.$emit('retry');
+    await flushPromises();
+    expect(wrapper.findComponent(LoadErrorBanner).exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('names the scope by the server’s labels, a deleted place as « Lieu supprimé »', async () => {
+    const labelled = {
+      ...restricted,
+      scope: { locations: [], buildings: ['b-1'], rooms: ['r-gone'] },
+      scope_labels: [
+        { kind: 'building', id: 'b-1', label: 'Bâtiment A', exists: true },
+        { kind: 'room', id: 'r-gone', label: 'r-gone', exists: false },
+      ],
+    } as Group;
+    vi.mocked(listGroups).mockResolvedValue([labelled]);
+    const { wrapper, vm } = await mountPage();
+    expect(wrapper.text()).toContain('Bâtiment A');
+    expect(wrapper.text()).toContain('Lieu supprimé');
+    expect(wrapper.text()).not.toContain('Salle supprimée');
+
+    // In the form, the deleted room is a named, removable chip — not its id.
+    vm.openEdit(labelled);
+    await flushPromises();
+    const rooms = wrapper.findAllComponents(QSelect).find((s) => s.props('label') === 'Salles')!;
+    expect(rooms.props('options')).toContainEqual({ label: 'Lieu supprimé', value: 'r-gone' });
+    wrapper.unmount();
+  });
+
+  it('ticks the read a write needs, and withholds what the caller cannot grant', async () => {
+    const managers: Group = {
+      ...wholeParc,
+      id: 'managers',
+      permissions: ['user:read', 'user:write', 'room:read', 'room:write'],
+    };
+    const admins: Group = { ...wholeParc, id: 'admins', is_admin: true };
+    vi.mocked(listGroups).mockResolvedValue([managers, admins]);
+    authState.user = {
+      id: 'me',
+      permissions: managers.permissions,
+      groups: [{ id: 'managers', name: 'managers' }],
+    };
+    const { wrapper, vm } = await mountPage();
+    const api = vm as unknown as {
+      onPermissions: (next: string[]) => void;
+      form: { permissions: string[] };
+      beyondMe: (g: Group) => boolean;
+      cannotGrant: (k: string) => boolean;
+    };
+    vm.openCreate();
+    await flushPromises();
+    api.onPermissions(['room:write']);
+    expect(api.form.permissions).toEqual(['room:read', 'room:write']);
+
+    expect(api.beyondMe(admins)).toBe(true);
+    expect(api.beyondMe(managers)).toBe(false);
+    expect(api.cannotGrant('audit:read')).toBe(true);
+    expect(api.cannotGrant('room:write')).toBe(false);
     wrapper.unmount();
   });
 });

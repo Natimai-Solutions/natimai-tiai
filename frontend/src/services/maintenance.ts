@@ -11,6 +11,8 @@ export type Origin = 'machine' | 'room' | 'global';
 export interface UserRef {
   id: string;
   name: string;
+  /** false for an account deactivated since it was named (absent: active). */
+  active?: boolean;
 }
 
 export interface Resolved {
@@ -35,6 +37,12 @@ export interface RoomMaintenance {
   maintenance_owner: UserRef | null;
   effective_cycle_days: number;
   effective_owner: UserRef | null;
+  /**
+   * Where each effective value comes from. The room's own owner, deactivated
+   * or out of reach, counts as none: the parc's default applies.
+   */
+  effective_cycle_origin?: 'room' | 'global';
+  effective_owner_origin?: 'room' | 'global';
 }
 
 export interface MaintenanceSettingsPayload {
@@ -57,7 +65,20 @@ export interface DueMachine {
 }
 
 export interface DueRoom {
+  /** The room's id. */
   id: string;
+  /**
+   * The group's own key: a room is one group for the postes following its
+   * owner and cycle, and one more per (owner, cycle) its postes override it
+   * with.
+   */
+  key?: string;
+  /**
+   * 'room': the postes following the room's owner and cycle — taking the
+   * group sets the room's owner. 'machine': postes that override them —
+   * taking the group sets those postes' own owner.
+   */
+  level?: 'room' | 'machine';
   name: string;
   building_name: string | null;
   location: string | null;
@@ -93,8 +114,11 @@ export interface MaintenanceSession {
   performed_by: string;
   performed_at: string;
   note: string | null;
+  /** The postes it still maintains: its remaining maintenance lines. */
   machine_count: number;
   items: SessionItem[];
+  /** Postes left out, with why (and lines turned since into another kind). */
+  skipped?: SessionItem[];
 }
 
 export interface SessionList {
@@ -239,4 +263,18 @@ export async function listSessions(
 export async function getSession(id: string): Promise<MaintenanceSession> {
   const { data } = await api.get<MaintenanceSession>(`/maintenance/${id}`);
   return data;
+}
+
+/**
+ * Remove a visit recorded by mistake, with every journal line it wrote; the
+ * postes' last maintenance goes back to what their journal then says.
+ */
+export async function deleteSession(id: string): Promise<void> {
+  await api.delete(`/maintenance/${id}`);
+}
+
+/** « Responsable » as a level shows it: the name, and « (désactivé) » when it is. */
+export function ownerLabel(owner: UserRef | null | undefined): string {
+  if (!owner) return '';
+  return owner.active === false ? `${owner.name} (désactivé)` : owner.name;
 }

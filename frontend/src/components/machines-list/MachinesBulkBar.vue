@@ -2,7 +2,7 @@
   <!-- Shown only when there is a selection and something the account may do
        with it: a bar of buttons that all refuse would only be noise. -->
   <div
-    v-if="count && (actionGroups.length || canPlace || canCheck || canDeploy)"
+    v-if="count && (actionGroups.length || canPlace || canCheck || canDeploy || canReenroll)"
     class="row items-center q-mb-sm"
   >
     <div class="text-caption text-muted q-mr-md">{{ count }} sélectionné(s)</div>
@@ -35,6 +35,17 @@
       label="Installer un logiciel"
       class="q-mr-sm"
       @click="emit('deploy')"
+    />
+    <!-- C2: a reinstall wave, or postes revoked by mistake — approved together. -->
+    <q-btn
+      v-if="canReenroll"
+      flat
+      dense
+      color="primary"
+      icon="key"
+      label="Autoriser le ré-enrôlement"
+      class="q-mr-sm"
+      @click="emit('reenroll')"
     />
     <q-btn-dropdown
       v-if="actionGroups.length"
@@ -77,12 +88,15 @@ defineProps<{
   actionGroups: CommandActionGroup[];
   /** Installing or removing a package: package:read and the risky commands. */
   canDeploy?: boolean;
+  /** Allowing re-enrolment: machine:write. */
+  canReenroll?: boolean;
 }>();
 
 const emit = defineEmits<{
   place: [];
   ask: [];
   deploy: [];
+  reenroll: [];
   run: [action: CommandAction];
 }>();
 </script>

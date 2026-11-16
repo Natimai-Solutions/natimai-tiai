@@ -5,10 +5,13 @@ vi.mock('boot/axios', () => ({
 }));
 
 import { api } from 'boot/axios';
+import { apiErrorMessage } from './errors';
 import {
   createRoom,
   getRoomConfig,
+  getRoomCreation,
   syncDirectory,
+  syncPreviewMessage,
   deleteBuilding,
   listRooms,
   placeMachines,
@@ -69,7 +72,55 @@ describe('room config and directory sync', () => {
     expect(await getRoomConfig()).toEqual({ source: 'ad_ou', manual: false });
     expect(api.get).toHaveBeenCalledTimes(1);
     expect(await syncDirectory()).toEqual({ placed: 3, unplaced: 1, rooms_created: 2 });
-    expect(api.post).toHaveBeenCalledWith('/rooms/sync-directory');
+    expect(api.post).toHaveBeenCalledWith('/rooms/sync-directory', undefined, undefined);
+  });
+
+  it('asks a dry run with dry_run=true (C9)', async () => {
+    vi.mocked(api.post).mockReset();
+    vi.mocked(api.post).mockResolvedValue({ data: { placed: 0 } });
+    await syncDirectory(true);
+    expect(api.post).toHaveBeenCalledWith('/rooms/sync-directory', undefined, {
+      params: { dry_run: true },
+    });
+  });
+
+  it('turns the dry run into the question asked before the real run', () => {
+    const msg = syncPreviewMessage({
+      placed: 20,
+      unplaced: 3,
+      moved_out: 7,
+      rooms_created: 2,
+      undecided: 0,
+      undecided_rooms: [],
+    });
+    expect(msg).toContain('7 poste(s) changeront de salle, 2 salle(s) seront créées.');
+    expect(msg).toContain('Dont 3 retiré(s) de toute salle.');
+    expect(msg).toContain('Lancer la resynchronisation ?');
+  });
+
+  it('reads what the scope lets create', async () => {
+    vi.mocked(api.get).mockReset();
+    vi.mocked(api.get).mockResolvedValue({ data: { rooms: true, buildings: false } });
+    expect(await getRoomCreation()).toEqual({ rooms: true, buildings: false });
+    expect(api.get).toHaveBeenCalledWith('/rooms/creation');
+  });
+});
+
+describe('room errors (C11, item 12)', () => {
+  const err = (code: string, details: Record<string, unknown>) => ({
+    response: { data: { error: { code, message: 'x', details } } },
+  });
+
+  it('names the groups whose scope holds the place', () => {
+    expect(apiErrorMessage(err('room.in_group_scope', { groups: ['Tech A', 'Profs'] }))).toBe(
+      'Le périmètre d’un groupe nomme ce lieu : retirez-le du groupe avant de le supprimer (groupe(s) : « Tech A », « Profs »)',
+    );
+  });
+
+  it('names the postes of another room in a visit', () => {
+    expect(
+      apiErrorMessage(err('maintenance.items.not_in_room', { hostnames: ['PC-1', 'PC-2'] })),
+    ).toBe('Ces postes ne sont pas dans la salle de la séance : PC-1, PC-2');
   });
 });
 
@@ -79,6 +130,25 @@ describe('roomLabel', () => {
       roomLabel({ name: 'B12', building: { id: 'b', name: 'Bâtiment B', location: null } }),
     ).toBe('Bâtiment B › B12');
     expect(roomLabel({ name: 'Réserve', building: null })).toBe('Réserve');
+  });
+
+  it('names the site when two sites have a building of that name (item 14)', async () => {
+    const b1 = { id: 'b1', name: 'Bâtiment B', location: 'Lycée A' };
+    const b2 = { id: 'b2', name: 'bâtiment b', location: 'Lycée B' };
+    const c = { id: 'c', name: 'Bâtiment C', location: 'Lycée A' };
+    const rooms = [
+      { name: 'B12', building: b1 },
+      { name: 'B12', building: b2 },
+      { name: 'C1', building: c },
+    ];
+    expect(roomLabel(rooms[0]!, rooms)).toBe('Lycée A › Bâtiment B › B12');
+    expect(roomLabel(rooms[1]!, rooms)).toBe('Lycée B › bâtiment b › B12');
+    expect(roomLabel(rooms[2]!, rooms)).toBe('Bâtiment C › C1');
+    // Without the list: what the last listRooms() taught.
+    vi.mocked(api.get).mockResolvedValue({ data: rooms });
+    await listRooms();
+    expect(roomLabel(rooms[0]!)).toBe('Lycée A › Bâtiment B › B12');
+    expect(roomLabel(rooms[2]!)).toBe('Bâtiment C › C1');
   });
 });
 

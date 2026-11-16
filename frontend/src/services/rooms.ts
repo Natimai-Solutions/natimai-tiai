@@ -69,8 +69,33 @@ export interface PlacementResult {
   mismatched: string[];
 }
 
+/**
+ * Building names held by several buildings — « Bâtiment B » on two sites —
+ * as last read: where `roomLabel` must name the site too. Learnt from every
+ * list of buildings or rooms read, so that every room picker built from
+ * `listRooms()` says it without each caller passing the whole list.
+ */
+const homonymousBuildings = new Set<string>();
+
+function learnBuildings(buildings: readonly (BuildingRef | null)[]): void {
+  // Each list read is the whole current state: a building renamed since is
+  // forgotten rather than kept as an homonym for good.
+  homonymousBuildings.clear();
+  const ids = new Map<string, Set<string>>();
+  for (const b of buildings) {
+    if (!b) continue;
+    const key = b.name.toLocaleLowerCase('fr-FR');
+    if (!ids.has(key)) ids.set(key, new Set());
+    ids.get(key)!.add(b.id);
+  }
+  for (const [name, set] of ids) {
+    if (set.size > 1) homonymousBuildings.add(name);
+  }
+}
+
 export async function listBuildings(): Promise<Building[]> {
   const { data } = await api.get<Building[]>('/buildings');
+  learnBuildings(data);
   return data;
 }
 
@@ -93,6 +118,18 @@ export async function deleteBuilding(id: string): Promise<void> {
 
 export async function listRooms(): Promise<Room[]> {
   const { data } = await api.get<Room[]>('/rooms');
+  learnBuildings(data.map((r) => r.building));
+  return data;
+}
+
+/** What the account's scope lets it create: the page hides the rest. */
+export interface RoomCreation {
+  rooms: boolean;
+  buildings: boolean;
+}
+
+export async function getRoomCreation(): Promise<RoomCreation> {
+  const { data } = await api.get<RoomCreation>('/rooms/creation');
   return data;
 }
 
@@ -159,6 +196,8 @@ export function getRoomConfig(): Promise<RoomConfig> {
 export interface SyncResult {
   placed: number;
   unplaced: number;
+  /** Postes that leave the room they were in, for another or for none. */
+  moved_out?: number;
   rooms_created: number;
   /**
    * Postes left where they were: the room made by hand that bears their name
@@ -205,10 +244,32 @@ export function syncNotification(res: SyncResult): {
   };
 }
 
-/** Re-file every poste from what its agent last said of the directory. */
-export async function syncDirectory(): Promise<SyncResult> {
-  const { data } = await api.post<SyncResult>('/rooms/sync-directory');
+/**
+ * Re-file every poste from what its agent last said of the directory. With
+ * `dryRun`, what it would do — nothing written: the console shows it and asks
+ * before the real run.
+ */
+export async function syncDirectory(dryRun = false): Promise<SyncResult> {
+  const { data } = await api.post<SyncResult>(
+    '/rooms/sync-directory',
+    undefined,
+    dryRun ? { params: { dry_run: true } } : undefined,
+  );
   return data;
+}
+
+/** The confirmation a re-sync asks, from its dry run. */
+export function syncPreviewMessage(res: SyncResult): string {
+  const moved = res.moved_out ?? 0;
+  const lines = [
+    `${moved} poste(s) changeront de salle, ${res.rooms_created} salle(s) seront créées.`,
+  ];
+  if (res.unplaced) lines.push(`Dont ${res.unplaced} retiré(s) de toute salle.`);
+  if (res.undecided) lines.push(`${res.undecided} poste(s) resteront en place (salle indécise).`);
+  lines.push(
+    "Les postes sans aucune information d'annuaire restent où ils sont. Lancer la resynchronisation ?",
+  );
+  return lines.join(' ');
 }
 
 export const ROOM_SOURCE_LABELS: Record<string, string> = {
@@ -217,9 +278,31 @@ export const ROOM_SOURCE_LABELS: Record<string, string> = {
   ad_location: "par l'attribut Emplacement de l'objet ordinateur",
 };
 
-/** "Bâtiment B › B12", or the room alone when it has no building. */
-export function roomLabel(room: Pick<Room, 'name' | 'building'>): string {
-  return room.building ? `${room.building.name} › ${room.name}` : room.name;
+/**
+ * "Bâtiment B › B12", or the room alone when it has no building — and
+ * "Lycée A › Bâtiment B › B12" when another site has a « Bâtiment B » too,
+ * which a picker listing both would otherwise show as twins. `rooms`: the
+ * list to tell apart; omitted, the buildings last read by `listRooms` or
+ * `listBuildings`.
+ */
+export function roomLabel(
+  room: Pick<Room, 'name' | 'building'>,
+  rooms?: readonly Pick<Room, 'building'>[],
+): string {
+  const b = room.building;
+  if (!b) return room.name;
+  const name = b.name.toLocaleLowerCase('fr-FR');
+  const homonymous = rooms
+    ? rooms.some(
+        (r) =>
+          r.building &&
+          r.building.id !== b.id &&
+          r.building.name.toLocaleLowerCase('fr-FR') === name,
+      )
+    : homonymousBuildings.has(name);
+  return homonymous && b.location
+    ? `${b.location} › ${b.name} › ${room.name}`
+    : `${b.name} › ${room.name}`;
 }
 
 /** The notification a placement earns: what moved, and what now disagrees. */

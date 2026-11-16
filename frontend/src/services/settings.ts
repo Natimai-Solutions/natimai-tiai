@@ -104,6 +104,12 @@ export interface EmailTestResult {
 export interface ConsoleSettings {
   maintenance_default_cycle_days: number;
   maintenance_default_owner: { id: string; name: string } | null;
+  /**
+   * The stored default owner when it no longer resolves (deactivated, rights
+   * or scope lost): named by the card rather than shown as an empty field.
+   * Absent from an older server.
+   */
+  maintenance_default_owner_unavailable?: { id: string; name: string } | null;
   maintenance_due_soon_days: number;
   /** What the environment says, for the page to show where a value came from. */
   env_default_cycle_days: number;

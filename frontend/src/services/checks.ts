@@ -9,6 +9,8 @@ import { api } from 'boot/axios';
 export interface UserRef {
   id: string;
   name: string;
+  /** false for an assignee deactivated since (absent: active). */
+  active?: boolean;
 }
 
 export interface CheckMachineRef {
@@ -58,6 +60,28 @@ export interface ListChecksParams {
 export async function listChecks(params: ListChecksParams = {}): Promise<CheckList> {
   const { data } = await api.get<CheckList>('/checks', { params });
   return data;
+}
+
+/** The server serves this many checks a page at most. */
+const CHECK_PAGE_MAX = 200;
+
+/**
+ * Every check matching `params`, page after page: a list cut at the server's
+ * 200 said « 310 » on the badge and showed 200 (the room page's rule, audit
+ * U24). Bounded, so a server that keeps answering cannot loop it forever.
+ */
+export async function listAllChecks(
+  params: Omit<ListChecksParams, 'page' | 'page_size'> = {},
+): Promise<CheckList> {
+  const items: Check[] = [];
+  let total = 0;
+  for (let page = 1; page <= 100; page++) {
+    const res = await listChecks({ ...params, page, page_size: CHECK_PAGE_MAX });
+    items.push(...res.items);
+    total = res.total;
+    if (items.length >= total || res.items.length === 0) break;
+  }
+  return { items, total, page: 1, page_size: items.length };
 }
 
 export async function listMachineChecks(

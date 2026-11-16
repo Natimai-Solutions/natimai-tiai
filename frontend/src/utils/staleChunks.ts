@@ -23,7 +23,11 @@ export const STALE_CHUNK_RELOAD_KEY = 'tiai.staleChunkReloadAt';
 export const STALE_CHUNK_RELOAD_GUARD_MS = 30_000;
 
 export const CHUNK_LOAD_FAILED_MESSAGE =
-  'Impossible de charger cette page (connexion ou mise à jour en cours). Réessayez.';
+  'Impossible de charger cette page (connexion ou mise à jour en cours). Rechargez la page.';
+
+/** Under the message when the browser is offline: what happens on its own. */
+export const CHUNK_LOAD_OFFLINE_CAPTION =
+  'Pas de connexion : la page se rechargera d’elle-même dès son retour.';
 
 /** The messages browsers give a dynamic import or a preload that failed. */
 const CHUNK_ERROR =
@@ -90,7 +94,12 @@ export interface StaleChunkEnv {
    * Tell the reader the page could not be loaded, until they dismiss it;
    * `retry` is its « Recharger » action. Returns what takes the message down.
    */
-  notify: (retry: () => void) => () => void;
+  notify: (retry: () => void, offline?: boolean) => () => void;
+  /**
+   * Call `listener` once, when the browser says it is back online. Returns
+   * what cancels the wait. Optional: a spec that does not need it leaves it out.
+   */
+  whenOnline?: (listener: () => void) => () => void;
   /** Where an error nobody else reports goes. */
   logError: (error: unknown) => void;
 }
@@ -118,15 +127,22 @@ export async function recoverFromChunkFailure(
   href: string,
   env: StaleChunkEnv,
   onNotified: (dismiss: () => void) => void = () => undefined,
+  onOffline: (cancel: () => void) => void = () => undefined,
 ): Promise<ChunkFailureOutcome> {
+  const online = env.online();
   if (
-    env.online() &&
+    online &&
     (await buildChanged(env)) &&
     reloadOnceForStaleChunk({ storage: env.storage, now: env.now, reload: () => env.goTo(href) })
   ) {
     return 'reloaded';
   }
-  onNotified(env.notify(() => env.goTo(href)));
+  // Offline: the browser keeps the failed import for the life of the
+  // document, so the page stays unreachable after the network comes back —
+  // whatever is clicked. Reloaded once, on the page asked for, as soon as the
+  // browser says it is back online.
+  if (!online && env.whenOnline) onOffline(env.whenOnline(() => env.goTo(href)));
+  onNotified(env.notify(() => env.goTo(href), !online));
   return 'notified';
 }
 
@@ -167,10 +183,15 @@ export function browserStaleChunkEnv(): StaleChunkEnv {
       // mode): assigning it loads nothing.
       if (sameDocument) window.location.reload();
     },
-    notify: (retry) =>
+    whenOnline: (listener) => {
+      window.addEventListener('online', listener, { once: true });
+      return () => window.removeEventListener('online', listener);
+    },
+    notify: (retry, offline) =>
       Notify.create({
         type: 'negative',
         message: CHUNK_LOAD_FAILED_MESSAGE,
+        ...(offline ? { caption: CHUNK_LOAD_OFFLINE_CAPTION } : {}),
         // Stays until dismissed: the reader may be looking elsewhere when the
         // click on a menu entry does nothing.
         timeout: 0,
@@ -202,6 +223,8 @@ export function installStaleChunkReload(
   const handled = new WeakSet<object>();
   let recovering = false;
   let dismiss: (() => void) | null = null;
+  // The reload waiting for the network, for the latest page asked for only.
+  let cancelOnline: (() => void) | null = null;
 
   function recover(error: unknown, href: string) {
     if (typeof error === 'object' && error !== null) {
@@ -210,11 +233,19 @@ export function installStaleChunkReload(
     }
     if (recovering) return;
     recovering = true;
-    void recoverFromChunkFailure(href, env, (close) => {
-      // One message, however many clicks on the dead link.
-      dismiss?.();
-      dismiss = close;
-    }).finally(() => {
+    void recoverFromChunkFailure(
+      href,
+      env,
+      (close) => {
+        // One message, however many clicks on the dead link.
+        dismiss?.();
+        dismiss = close;
+      },
+      (cancel) => {
+        cancelOnline?.();
+        cancelOnline = cancel;
+      },
+    ).finally(() => {
       recovering = false;
     });
   }

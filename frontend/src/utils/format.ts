@@ -1,5 +1,24 @@
 import type { EmailPreference } from 'src/services/auth';
 
+/**
+ * A number the French way — decimal comma, narrow space between thousands —
+ * with exactly `digits` decimals. The one formatter of the console: « 2.3 Gio »
+ * beside « 7,5 h » read as two different notations.
+ */
+export function frNumber(value: number, digits = 0): string {
+  return value.toLocaleString('fr-FR', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+/** A table cell's text, or « — » for nothing to show (null, undefined, blank). */
+export function dash(value: string | number | null | undefined): string {
+  if (value == null) return '—';
+  const text = String(value);
+  return text.trim() ? text : '—';
+}
+
 /** Format an ISO timestamp for display, or a dash when absent. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—';
@@ -467,9 +486,9 @@ export function sizeLabel(mb: number | null | undefined): string {
   const gib = mb / 1024;
   if (gib < 1024) {
     // One decimal below ten, none above: "3,5 Gio" is useful, "487,3 Gio" is not.
-    return `${gib < 10 ? gib.toFixed(1) : Math.round(gib)} Gio`;
+    return `${gib < 10 ? frNumber(gib, 1) : Math.round(gib)} Gio`;
   }
-  return `${(gib / 1024).toFixed(1)} Tio`;
+  return `${frNumber(gib / 1024, 1)} Tio`;
 }
 
 /** Free space as a whole percentage, or null when there is nothing to divide. */
@@ -489,11 +508,27 @@ export function freePercent(
  * crosses it and then quietly stops patching. That is the moment the bar has to
  * be red.
  */
-export function diskColor(percentFree: number | null): string {
+export function diskColor(percentFree: number | null, lowPercent?: number): string {
   if (percentFree == null) return 'grey-5';
-  if (percentFree < 10) return 'negative';
-  if (percentFree < 20) return 'orange';
+  const { critical, warning } = diskThresholds(lowPercent);
+  if (percentFree < critical) return 'negative';
+  if (percentFree < warning) return 'orange';
   return 'positive';
+}
+
+/** The parc's default « disque presque plein » threshold, as the server ships it. */
+export const DEFAULT_LOW_DISK_PERCENT = 10;
+
+/**
+ * The two disk thresholds from the parc's setting (« Paramètres » → seuil
+ * d'espace libre): red below it, orange within ten points above it — 10/20 %
+ * with the default. Read from the server rather than hard-coded, so that the
+ * fiche, the list and the dashboard card all count the same postes.
+ */
+export function diskThresholds(lowPercent?: number | null): { critical: number; warning: number } {
+  const critical =
+    typeof lowPercent === 'number' && lowPercent > 0 ? lowPercent : DEFAULT_LOW_DISK_PERCENT;
+  return { critical, warning: critical + 10 };
 }
 
 const MEDIA_TYPE_LABELS: Record<string, string> = {
@@ -573,7 +608,7 @@ export function linkSpeedLabel(mbps: number | null | undefined): string {
   if (mbps == null) return '—';
   if (mbps >= 1000) {
     const gbps = mbps / 1000;
-    return `${Number.isInteger(gbps) ? gbps : gbps.toFixed(1)} Gb/s`;
+    return `${Number.isInteger(gbps) ? gbps : frNumber(gbps, 1)} Gb/s`;
   }
   return `${mbps} Mb/s`;
 }
@@ -646,4 +681,14 @@ export function downloadBlob(blob: Blob, filename: string): void {
 /** The browser tab title for a page: « Postes — Tia'i », or the bare name. */
 export function documentTitle(page?: string | null): string {
   return page ? `${page} — Tia'i` : "Tia'i";
+}
+
+/**
+ * A threat's name as Defender reported it — or « (sans nom) » when it reported
+ * a blank one, which used to leave an empty cell that read as a rendering bug.
+ */
+export function threatNameLabel(name: string | null | undefined, fallback?: string | null): string {
+  if (name && name.trim()) return name;
+  if (fallback && fallback.trim()) return fallback;
+  return '(sans nom)';
 }

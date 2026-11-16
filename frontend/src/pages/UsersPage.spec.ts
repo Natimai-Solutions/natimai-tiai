@@ -13,7 +13,8 @@ vi.mock('src/services/groups', async (importOriginal) => ({
   listGroups: vi.fn(),
 }));
 
-import { listGroups } from 'src/services/groups';
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
+import { listGroups, type Group } from 'src/services/groups';
 import { listUsers, resetUserPassword, type ConsoleUser } from 'src/services/users';
 import { useAuthStore } from 'src/stores/auth';
 import UsersPage from './UsersPage.vue';
@@ -97,6 +98,121 @@ describe('UsersPage — password reset (audit T29, U13)', () => {
       .findAllComponents(QInput)
       .find((i) => i.props('modelValue') === 'S3cret-Generated-Pw');
     expect(shown).toBeDefined();
+    wrapper.unmount();
+  });
+});
+
+function group(id: string, over: Partial<Group> = {}): Group {
+  return {
+    id,
+    name: id,
+    description: null,
+    builtin_key: null,
+    is_admin: false,
+    permissions: [],
+    scope: null,
+    member_count: 0,
+    created_at: '',
+    updated_at: '',
+    ...over,
+  };
+}
+
+function user(id: string, over: Partial<ConsoleUser> = {}): ConsoleUser {
+  return {
+    id,
+    email: `${id}@example.org`,
+    full_name: null,
+    is_active: true,
+    email_preference: 'digest_daily',
+    groups: [],
+    locked_until: null,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    ...over,
+  };
+}
+
+describe('UsersPage — item 2, item 4, item 13', () => {
+  beforeEach(() => {
+    vi.mocked(listGroups).mockResolvedValue([]);
+  });
+
+  it('lifts the « Verrouillé » badge as soon as the password is reset', async () => {
+    const locked = user('x', { locked_until: new Date(Date.now() + 3600_000).toISOString() });
+    vi.mocked(listUsers).mockResolvedValue({ items: [locked], total: 1, page: 1, page_size: 25 });
+    vi.mocked(resetUserPassword).mockResolvedValue('S3cret-Generated-Pw');
+    const { wrapper, vm } = mountPage();
+    await flushPromises();
+    expect(wrapper.text()).toContain('Verrouillé');
+
+    vm.openReset(locked);
+    await vm.submitReset();
+    await flushPromises();
+
+    expect(listUsers).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('table').text()).not.toContain('Verrouillé');
+    wrapper.unmount();
+  });
+
+  it('clears the rows of the previous search when a search fails, and says so', async () => {
+    vi.mocked(listUsers).mockResolvedValueOnce({
+      items: [user('a')],
+      total: 1,
+      page: 1,
+      page_size: 25,
+    });
+    const { wrapper } = mountPage();
+    await flushPromises();
+    expect(wrapper.text()).toContain('a@example.org');
+
+    vi.mocked(listUsers).mockRejectedValueOnce({ response: { status: 500, data: {} } });
+    wrapper.findComponent(QInput).vm.$emit('update:modelValue', 'zz');
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain('a@example.org');
+    expect(wrapper.findComponent(LoadErrorBanner).exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('withholds the actions on an account holding more rights, and the groups beyond mine', async () => {
+    const managers = group('managers', { permissions: ['user:read', 'user:write'] });
+    const techs = group('techs', { permissions: ['command:execute'] });
+    vi.mocked(listGroups).mockResolvedValue([managers, techs]);
+    vi.mocked(listUsers).mockResolvedValue({
+      items: [
+        user('peer', { groups: [{ id: 'managers', name: 'managers' }] }),
+        user('tech', { groups: [{ id: 'techs', name: 'techs' }] }),
+      ],
+      total: 2,
+      page: 1,
+      page_size: 25,
+    });
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useAuthStore().user = {
+      id: 'me',
+      email: 'manager@example.org',
+      permissions: ['user:read', 'user:write'],
+      groups: [{ id: 'managers', name: 'managers' }],
+    } as never;
+    const wrapper = mount(UsersPage, {
+      global: { plugins: [pinia], stubs: { QPage: { template: '<div><slot /></div>' } } },
+    });
+    await flushPromises();
+    const vm = wrapper.vm as unknown as {
+      beyondMe: (u: ConsoleUser) => boolean;
+      grantableGroupOptions: { value: string; disable: boolean }[];
+    };
+
+    expect(vm.beyondMe(user('peer', { groups: [{ id: 'managers', name: 'managers' }] }))).toBe(
+      false,
+    );
+    expect(vm.beyondMe(user('tech', { groups: [{ id: 'techs', name: 'techs' }] }))).toBe(true);
+    expect(vm.grantableGroupOptions).toEqual([
+      expect.objectContaining({ value: 'managers', disable: false }),
+      expect.objectContaining({ value: 'techs', disable: true }),
+    ]);
     wrapper.unmount();
   });
 });

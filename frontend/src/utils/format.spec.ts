@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   EMAIL_PREFERENCE_OPTIONS,
   antivirusBadgeColor,
+  dash,
+  frNumber,
   antivirusColor,
   antivirusLabel,
   antivirusStatusLabel,
@@ -452,10 +454,10 @@ describe('inventory formatting', () => {
   // every other screen the reader has open will show.
   it('renders sizes in the unit a human would use', () => {
     expect(sizeLabel(512)).toBe('512 Mio');
-    expect(sizeLabel(2048)).toBe('2.0 Gio');
+    expect(sizeLabel(2048)).toBe('2,0 Gio');
     // One decimal below ten, none above: "487,3 Gio" helps nobody.
     expect(sizeLabel(486000)).toBe('475 Gio');
-    expect(sizeLabel(4 * 1024 * 1024)).toBe('4.0 Tio');
+    expect(sizeLabel(4 * 1024 * 1024)).toBe('4,0 Tio');
     expect(sizeLabel(null)).toBe('—');
   });
 
@@ -504,7 +506,7 @@ describe('inventory formatting', () => {
 
   it('quotes a link speed in the unit it is sold in', () => {
     expect(linkSpeedLabel(1000)).toBe('1 Gb/s');
-    expect(linkSpeedLabel(2500)).toBe('2.5 Gb/s');
+    expect(linkSpeedLabel(2500)).toBe('2,5 Gb/s');
     expect(linkSpeedLabel(100)).toBe('100 Mb/s');
     expect(linkSpeedLabel(null)).toBe('—');
   });
@@ -562,5 +564,29 @@ describe('documentTitle', () => {
   it('names the page, then the product', () => {
     expect(documentTitle('Postes')).toBe("Postes — Tia'i");
     expect(documentTitle(undefined)).toBe("Tia'i");
+  });
+});
+
+describe('diskColor with the parc threshold (item 9)', () => {
+  it('turns red below the configured threshold, orange within ten points of it', () => {
+    expect(diskColor(50, 51)).toBe('negative');
+    expect(diskColor(55, 51)).toBe('orange');
+    expect(diskColor(62, 51)).toBe('positive');
+    // No threshold known: the server's defaults.
+    expect(diskColor(15)).toBe('orange');
+  });
+});
+
+describe('one French number notation (item 10)', () => {
+  it('writes sizes and speeds with a decimal comma', () => {
+    expect(sizeLabel(2.3 * 1024)).toBe('2,3 Gio');
+    expect(linkSpeedLabel(2500)).toBe('2,5 Gb/s');
+    expect(frNumber(1234.5, 1)).toMatch(/^1\s234,5$/u);
+  });
+
+  it('shows « — » for an empty cell', () => {
+    expect(dash(null)).toBe('—');
+    expect(dash('  ')).toBe('—');
+    expect(dash('CORP')).toBe('CORP');
   });
 });

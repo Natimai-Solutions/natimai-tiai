@@ -23,9 +23,12 @@
       </q-card-section>
       <q-separator />
 
-      <q-card-section v-if="!usage" class="text-caption text-muted">
-        {{ failed ? "Impossible de lire l'utilisation de ce poste." : 'Chargement…' }}
+      <q-card-section v-if="!usage && failed" class="q-pa-sm">
+        <CardLoadError what="l'utilisation de ce poste" :loading="retrying" @retry="retry" />
       </q-card-section>
+      <q-card-section v-else-if="!usage" class="text-caption text-muted"
+        >Chargement…</q-card-section
+      >
 
       <template v-else>
         <!-- The figures first: the window's, which is the list's own column,
@@ -60,7 +63,7 @@
                glance. Each whole column is the hover target, not just its bar:
                a zero-hour day has no bar to point at. Days before counting
                began are hatched — not measured is not idle. -->
-          <div class="usage-plot" role="img" :aria-label="ariaLabel">
+          <div class="usage-plot" role="group" :aria-label="ariaLabel">
             <div
               v-for="tick in TICKS"
               :key="tick"
@@ -79,6 +82,7 @@
                   'usage-col--unmeasured': !bar.counted,
                 }"
                 tabindex="0"
+                :aria-label="`${bar.label} : ${bar.counted ? hoursLabel(bar.hours) : 'non mesuré'}`"
               >
                 <div
                   v-if="bar.counted && bar.hours > 0"
@@ -132,6 +136,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import CardLoadError from 'src/components/CardLoadError.vue';
 import { getMachineUsage, type MachineDetail, type MachineUsage } from 'src/services/machines';
 import { measuredDays, usageBars } from 'src/utils/usageChart';
 import { hoursLabel } from 'src/utils/usageFilter';
@@ -182,6 +187,16 @@ async function load() {
     if (id !== requestId) return;
     // A background re-read keeps what it had; only a first read shows the error.
     failed.value = usage.value === null;
+  }
+}
+
+const retrying = ref(false);
+async function retry() {
+  retrying.value = true;
+  try {
+    await load();
+  } finally {
+    retrying.value = false;
   }
 }
 

@@ -5,6 +5,7 @@
         <div class="text-h6">{{ auditActionLabel(entry.action) }}</div>
         <div class="text-caption text-muted">
           {{ formatDateTime(entry.at) }} · {{ entry.actor }}
+          <span v-if="entry.ip"> · depuis {{ entry.ip }}</span>
           <span v-if="actionIsUnknown"> · {{ entry.action }}</span>
         </div>
       </q-card-section>

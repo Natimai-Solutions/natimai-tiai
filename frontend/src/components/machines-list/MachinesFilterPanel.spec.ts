@@ -136,3 +136,44 @@ describe('MachinesFilterPanel', () => {
     expect(mountPanel().text()).toContain('sur 7 jours');
   });
 });
+
+describe('MachinesFilterPanel — item 8, item 4, C2', () => {
+  const select = (w: ReturnType<typeof mountPanel>, label: string) =>
+    w
+      .findAllComponents(QSelect)
+      .find((s) => (s.vm.$attrs as Record<string, unknown>)['aria-label'] === label);
+
+  it('shows a chassis kind the console has no word for, instead of resetting the select', () => {
+    const w = mountPanel({ chassis: 'chassis-35' });
+    const options = select(w, 'Type de poste')!.props('options') as { value: unknown }[];
+    expect(options.map((o) => o.value)).toContain('chassis-35');
+  });
+
+  it('keeps the memory box open while the bound is set and its figure emptied', () => {
+    const w = mountPanel({ ramOp: 'min', ramGb: '' });
+    const box = w.findAllComponents(QInput).find((i) => i.props('suffix') === 'Gio')!;
+    expect(box.props('disable')).toBe(false);
+  });
+
+  it('offers the enrolment filter', () => {
+    const w = mountPanel();
+    select(w, 'Enrôlement')!.vm.$emit('update:modelValue', 'pending');
+    expect(emitted(w).at(-1)!.enrollment).toBe('pending');
+  });
+
+  it('hides the room filters from an account that may not read rooms', () => {
+    const w = mount(MachinesFilterPanel, {
+      props: {
+        modelValue: emptyMachineFilters(),
+        options: initialFleetOptions(),
+        usageThresholds: null,
+        usageWindowDays: 7,
+        activeCount: 0,
+        usageCustom: false,
+        canReadRooms: false,
+      },
+    });
+    expect(select(w as never, 'Salle')).toBeUndefined();
+    expect(select(w as never, 'Bâtiment')).toBeUndefined();
+  });
+});

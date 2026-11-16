@@ -3,8 +3,10 @@
     <q-card-section class="text-subtitle1">
       Mises à jour en attente
       <div class="text-caption text-muted">
-        Relevé au dernier passage de l'agent ({{ formatDateTime(machine.wu_last_search) }}) — «
-        Rechercher les mises à jour » force un nouveau relevé.
+        Relevé au dernier passage de l'agent<template v-if="machine.wu_last_search">
+          ({{ formatDateTime(machine.wu_last_search) }})</template
+        >
+        — « Rechercher les mises à jour » force un nouveau relevé.
       </div>
     </q-card-section>
     <q-separator />

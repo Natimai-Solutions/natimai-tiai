@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getMe, type User } from 'src/services/auth';
+import { notifyForbidden, setAccessToken } from 'src/services/session';
 import { useAuthStore } from './auth';
 
 vi.mock('src/services/auth', () => ({
@@ -42,5 +43,32 @@ describe('ensureProfile', () => {
     const auth = useAuthStore();
     await expect(auth.ensureProfile()).resolves.toBeUndefined();
     expect(auth.user).toBeNull();
+  });
+});
+
+describe('rights changed during the session', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.mocked(getMe).mockReset();
+    setAccessToken('token');
+  });
+
+  it('reads the profile again on a 403, once per burst', async () => {
+    const auth = useAuthStore();
+    auth.forgetProfile();
+    vi.mocked(getMe).mockResolvedValue({ ...profile, permissions: ['room:read'] });
+    notifyForbidden();
+    notifyForbidden();
+    await vi.waitFor(() => expect(auth.can('room', 'read')).toBe(true));
+    expect(getMe).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the profile it had when the background read fails, and says so', async () => {
+    const auth = useAuthStore();
+    auth.user = profile;
+    vi.mocked(getMe).mockRejectedValue(new Error('offline'));
+    await auth.refreshProfile();
+    expect(auth.can('threat', 'read')).toBe(true);
+    expect(auth.profileError).toBeTruthy();
   });
 });

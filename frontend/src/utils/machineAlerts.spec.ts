@@ -291,3 +291,16 @@ describe('machineAlerts — agent version', () => {
     expect(keys(healthy({ agent_latest_version: null }))).toEqual([]);
   });
 });
+
+describe('machineAlerts — the parc’s disk threshold (item 9)', () => {
+  const half = { system_volume_total_mb: 100_000, system_volume_free_mb: 50_000 };
+
+  it('raises « presque plein » below the configured threshold', () => {
+    const alert = machineAlerts(healthy(half), 0, NOW, 51).find((a) => a.key === 'disk');
+    expect(alert?.level).toBe('negative');
+  });
+
+  it('keeps the 10/20 % defaults when no threshold is known', () => {
+    expect(machineAlerts(healthy(half), 0, NOW).find((a) => a.key === 'disk')).toBeUndefined();
+  });
+});

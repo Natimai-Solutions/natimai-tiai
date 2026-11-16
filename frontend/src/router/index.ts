@@ -12,6 +12,7 @@ import { documentTitle } from 'src/utils/format';
 import { refreshSession } from 'boot/axios';
 import { ensureSession, getAccessToken } from 'src/services/session';
 import { readCachedPermissions, useAuthStore } from 'src/stores/auth';
+import { canOpen, firstReadablePage, safeRedirect } from './access';
 import { hashUrlToHistory } from 'src/utils/legacyUrl';
 import { whenScrollable } from 'src/utils/scrollRestore';
 import { installStaleChunkReload } from 'src/utils/staleChunks';
@@ -61,25 +62,37 @@ export default defineRouter(() => {
     // is none yet while the session may well be alive behind its cookie. Ask
     // for a silent refresh before sending anyone to the login page.
     if (to.meta.requiresAuth && !(await ensureSession(refreshSession))) {
-      return { name: 'login', query: { redirect: to.fullPath } };
+      // Inside a running console, no session means it has just ended: the
+      // login page says so. On the first page of a tab it is a plain login.
+      const ended = from !== START_LOCATION ? { ended: '1' } : {};
+      return { name: 'login', query: { redirect: to.fullPath, ...ended } };
     }
     // A session restored by that refresh has no profile yet: load it before
     // the page, which reads its permissions as it loads.
-    if (to.meta.requiresAuth) await useAuthStore().ensureProfile();
-    // Opening /login directly with a live session lands on the dashboard; the
-    // refresh is only tried on that first navigation — once the console runs,
-    // reaching /login means the session has just ended.
+    const auth = useAuthStore();
+    if (to.meta.requiresAuth) await auth.ensureProfile();
+    // Opening /login directly with a live session goes where the link meant
+    // to (`?redirect=`), else home; the refresh is only tried on that first
+    // navigation — once the console runs, reaching /login means the session
+    // has just ended.
     if (to.name === 'login') {
       const live =
         from === START_LOCATION ? await ensureSession(refreshSession) : getAccessToken() !== null;
-      if (live) return { name: 'dashboard' };
+      if (live) return safeRedirect(to.query.redirect) ?? '/';
     }
     // Pages behind a permission. The guard only decides what to render — the
     // backend authorizes every call independently, so this cannot be bypassed
-    // for real. The cached set is what the last profile fetch wrote.
+    // for real. The profile's set when it is loaded, else what the last
+    // profile fetch cached; with neither (the profile could not be read), the
+    // page is shown and the layout says the profile is missing.
     const required = to.meta.requiresPermission;
-    if (typeof required === 'string' && !readCachedPermissions().includes(required)) {
-      return { name: 'dashboard' };
+    const permissions = auth.user?.permissions ?? readCachedPermissions();
+    const known = Boolean(auth.user) || permissions.length > 0;
+    if (known && !canOpen(permissions, required)) {
+      // The first page this account may read — « / » included, for an account
+      // without machine:read — rather than a dashboard of 403s.
+      const landing = firstReadablePage(permissions);
+      return landing === to.name ? true : { name: landing };
     }
     return true;
   });
@@ -87,7 +100,10 @@ export default defineRouter(() => {
   // One title per page: it is what a screen reader announces on navigation,
   // and what tells twelve open tabs apart. The fiches of a poste and of a room
   // replace it with their name once loaded.
-  router.afterEach((to) => {
+  router.afterEach((to, from) => {
+    // A query change on the same page — a fiche's tab, a filter, a page of
+    // results — keeps the title the page set: the poste's name, not « Poste ».
+    if (from !== START_LOCATION && to.path === from.path) return;
     document.title = documentTitle(to.meta.title as string | undefined);
   });
 

@@ -133,10 +133,9 @@ describe('machineListParamsFromQuery inventory facets', () => {
     });
   });
 
-  it('drops numbers that do not parse and kinds it does not know', () => {
+  it('drops numbers that do not parse', () => {
     expect(
       machineListParamsFromQuery({
-        hw_chassis_type: 'spaceship',
         ram_min_gb: 'lots',
         ram_max_gb: '-3',
         disk_free_below: '250',

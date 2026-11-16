@@ -16,6 +16,27 @@
             </q-banner>
           </q-card-section>
 
+          <q-card-section v-else-if="linkState === 'checking'" class="row justify-center">
+            <q-spinner size="md" color="primary" aria-label="Vérification du lien" />
+          </q-card-section>
+
+          <!-- Expired, already used or garbled: said before anything is typed,
+               with the way to a fresh link (C7). -->
+          <q-card-section v-else-if="linkState === 'invalid'" class="q-pt-none q-gutter-sm">
+            <q-banner dense class="surface-orange" role="alert">
+              <template #avatar><q-icon name="link_off" /></template>
+              Ce lien n'est plus valable : il a expiré, a déjà servi, ou a été coupé en route.
+              Demandez-en un nouveau.
+            </q-banner>
+            <q-btn
+              color="primary"
+              no-caps
+              class="full-width"
+              label="Mot de passe oublié"
+              :to="{ name: 'forgot-password' }"
+            />
+          </q-card-section>
+
           <q-form v-else @submit="onSubmit">
             <q-card-section class="q-pt-none q-gutter-md">
               <q-input
@@ -62,11 +83,11 @@
 
 <script setup lang="ts">
 import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
-import { confirmPasswordReset } from 'src/services/auth';
-import { apiErrorMessage } from 'src/services/errors';
+import { checkPasswordResetToken, confirmPasswordReset } from 'src/services/auth';
+import { apiErrorCode, apiErrorMessage } from 'src/services/errors';
 
 const { passwordMin } = usePasswordPolicy();
 
@@ -78,6 +99,13 @@ const token = computed(() => (typeof route.query.token === 'string' ? route.quer
 const password = ref('');
 const confirmation = ref('');
 const loading = ref(false);
+// Whether the link can still be used, asked as the page opens (C7).
+const linkState = ref<'checking' | 'valid' | 'invalid' | 'unknown'>('checking');
+
+onMounted(async () => {
+  if (!token.value) return;
+  linkState.value = await checkPasswordResetToken(token.value);
+});
 
 const required = (v: string) => !!v || 'Requis';
 const longEnough = (v: string) =>
@@ -91,6 +119,12 @@ async function onSubmit() {
     $q.notify({ type: 'positive', message: 'Mot de passe défini. Vous pouvez vous connecter.' });
     await router.push({ name: 'login' });
   } catch (e) {
+    // The link died while the form was open (or the check was not available):
+    // the page says so, and offers a fresh one.
+    if (apiErrorCode(e) === 'password.reset_token.invalid') {
+      linkState.value = 'invalid';
+      return;
+    }
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Réinitialisation impossible') });
   } finally {
     loading.value = false;

@@ -70,6 +70,7 @@
       :machine-id="machineId"
       :cycle-days="info?.maintenance_cycle_days ?? null"
       :owner-id="info?.maintenance_owner?.id ?? null"
+      :owner-label="ownerLabel(info?.maintenance_owner)"
       inherit-hint="Vide : hérite de la salle, puis du parc"
       :save="saveSettings"
     />
@@ -88,7 +89,7 @@ import { onMounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import MaintenanceSessionDialog from 'src/components/maintenance/MaintenanceSessionDialog.vue';
 import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
-import { notifyTasksChanged } from 'src/composables/useTasksBadge';
+import { notifyTasksChanged, tasksVersion } from 'src/composables/useTasksBadge';
 import { apiErrorMessage } from 'src/services/errors';
 import {
   cycleLabel,
@@ -97,6 +98,7 @@ import {
   maintenanceStateColor,
   maintenanceStateLabel,
   ORIGIN_LABELS,
+  ownerLabel,
   updateMachineMaintenance,
   type MachineMaintenance,
   type MaintenanceSettingsPayload,
@@ -137,6 +139,10 @@ watch(
   () => props.machineId,
   () => void load(),
 );
+// A line of the journal added, edited or deleted — a maintenance typed by
+// hand, one turned into « Autre », a visit removed — moves the due date and
+// the last maintenance shown here: every such change bumps the tasks version.
+watch(tasksVersion, () => void load());
 onMounted(load);
 defineExpose({ reload: load });
 </script>

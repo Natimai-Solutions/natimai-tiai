@@ -24,8 +24,11 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'machine.merge': 'Fusion de deux fiches poste',
   'machine.reenroll_requested': "Demande de ré-enrôlement d'un poste",
   'machine.wake_bulk': 'Réveil groupé de postes',
+  'machine.identity_confirmed': "Identité d'un poste confirmée",
+  'machine.enrollment_retried': "Enrôlement d'un poste repris (réponse perdue)",
   'maintenance.machine_settings': "Réglage de maintenance d'un poste",
   'maintenance.room_settings': "Réglage de maintenance d'une salle",
+  'maintenance.delete': "Suppression d'une visite de maintenance",
   'package.create': "Création d'un paquet",
   'package.update': "Modification d'un paquet",
   'package.upload': 'Dépôt de fichiers dans un paquet',
@@ -57,6 +60,7 @@ export const AUDIT_RESOURCE_TYPE_LABELS: Record<string, string> = {
   room: 'Salle',
   building: 'Bâtiment',
   intervention: 'Intervention',
+  maintenance: 'Maintenance',
   check: 'Vérification',
   user: 'Compte',
   group: 'Groupe',
@@ -110,6 +114,12 @@ export const AUDIT_DETAIL_KEY_LABELS: Record<string, string> = {
   woken: 'Réveils émis ou confiés',
   failed: 'Échecs',
   relayed: 'Confié à un poste relais',
+  revoked: 'Postes au jeton révoqué (écartés)',
+  room_name: 'Salle',
+  performed_by: 'Effectuée par',
+  note: 'Note',
+  hostnames: 'Postes',
+  lines: 'Lignes de visite',
 };
 
 /** A readable label for an action slug; the slug itself when unknown. */
