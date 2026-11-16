@@ -4,7 +4,9 @@ Cette version corrige les écarts trouvés par les deux passes de vérification 
 
 Elle corrige aussi les défauts relevés par la recette de solidité du 16 novembre 2026 : sept recetteurs ont éprouvé les fonctionnalités existantes sur un banc complet (serveur, console, agent Go réel), avec des requêtes concurrentes, des pannes de réseau et de messagerie, des comptes aux droits réduits et des volumes de parc réalistes. Ces corrections sont décrites au § « Recette de solidité ».
 
-Elle contient sept migrations de base (`0032` à `0038`).
+Enfin, elle reprend les limites que l'audit avait acceptées (§6.6 de `dev/plan-audit-2026-11.md`) : sauvegardes chiffrables, verrouillage des essais lents, budgets de sécurité par adresse et par session, état partagé entre processus API, navigation de la fiche calculée par le serveur. Voir § « Limites de l'audit reprises ».
+
+Elle contient neuf migrations de base (`0032` à `0040`).
 
 ---
 
@@ -25,7 +27,9 @@ Elle contient sept migrations de base (`0032` à `0038`).
 6. **`PASSWORD_RESET_EXPIRE_MINUTES`** est borné de 5 à 10 080 minutes ; une valeur hors bornes empêche le démarrage.
 7. **Autres bornes du `.env`.** Les valeurs suivantes sont désormais contrôlées au démarrage, avec les bornes de la page Paramètres ; une valeur hors bornes empêche le backend de démarrer, en la nommant : `WOL_PORT` (1 à 65 535), `WOL_PACKET_COUNT` (1 à 20), `WOL_SUBNET_PREFIXLEN` (8 à 30), `LOW_DISK_FREE_PERCENT` (1 à 99), `INACTIVE_AFTER_DAYS` (1 à 3 650), `SIGNATURE_MAX_AGE_DAYS` (0 à 365), `SMTP_TIMEOUT_SECONDS` (1 à 120), `EMAIL_MAX_ATTEMPTS` (au moins 1), `EMAIL_OUTBOX_RETENTION_DAYS` (au moins 0), `NOTIFICATION_MAX_ITEMS` (au moins 1), `POSTGRES_POOL_SIZE` (au moins 1), `POSTGRES_MAX_OVERFLOW` (au moins 0). `EMAIL_FROM_EMAIL` doit être une adresse valide et `CONSOLE_BASE_URL` une URL `http(s)` ; vides, elles restent « non renseignées ».
 8. **Groupes homonymes à la casse près.** Les noms de groupe deviennent uniques sans tenir compte de la casse. La migration `0037` renomme les doublons existants en « Nom (2) », « Nom (3) »… ; le groupe le plus ancien et les groupes intégrés gardent leur nom. Vérifier la page **Groupes** après la mise à jour.
-9. **Sauvegardes manuelles.** La purge de `backup.sh` ne retire plus que les dumps quotidiens (`tiai-AAAAMMJJ-HHMMSS.dump`). Les dumps manuels déjà présents dans `deploy/backups/` sous un autre nom sont désormais gardés indéfiniment : les supprimer à la main quand ils ne servent plus.
+9. **Image de sauvegarde construite sur place.** Le service `db-backup` est désormais construit depuis `deploy/backup/` (`postgres:16-alpine` + `age`) : à chaque mise à jour, lancer `docker compose build --pull db-backup` avant `docker compose up -d` (`DEPLOYMENT.md` § « Mettre à jour le serveur »). La première construction a besoin du registre Docker et de `dl-cdn.alpinelinux.org`.
+10. **`TRUSTED_PROXIES`.** Une entrée plus large qu'un /24 (IPv4) ou qu'un /64 (IPv6) empêche le backend de démarrer. Ne lister que les proxys ; sinon, poser `TRUSTED_PROXIES_ALLOW_WIDE=true` en connaissance de cause.
+11. **Sauvegardes manuelles.** La purge de `backup.sh` ne retire plus que les dumps quotidiens (`tiai-AAAAMMJJ-HHMMSS.dump`). Les dumps manuels déjà présents dans `deploy/backups/` sous un autre nom sont désormais gardés indéfiniment : les supprimer à la main quand ils ne servent plus.
 
 ### Agent : mettre à jour le parc
 
@@ -170,6 +174,27 @@ Chaque correction a un test qui échoue sans elle.
 
 ---
 
+## Limites de l'audit reprises (16 novembre 2026)
+
+- **Sauvegardes chiffrables.** Les dumps quotidiens peuvent être chiffrés pour une ou plusieurs clés publiques `age` (`BACKUP_ENCRYPT_RECIPIENT`, fichiers `tiai-….dump.age`). La clé privée ne va jamais sur le serveur : la perdre, c'est perdre les sauvegardes chiffrées. Génération des clés, restauration et vérification : `DEPLOYMENT.md` § « Chiffrer les sauvegardes ». Sans la variable, rien ne change.
+- **Mot de passe oublié.** La réponse arrive après le même délai quel que soit le compte. Le budget de demandes est compté par adresse : un tiers qui épuise le sien n'empêche plus le titulaire de recevoir un lien depuis son poste. Un plafond par compte (`PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS`) borne les liens venus de nombreuses adresses, sauf depuis une adresse habituelle.
+- **Essais lents.** Des échecs de connexion espacés (20 en 24 h par défaut) verrouillent le compte pour 24 h. Ce verrou n'admet que les adresses habituelles du compte et figure au journal d'audit ; le titulaire en sort comme d'un verrou ordinaire.
+- **Changer mon mot de passe.** Le budget de 5 essais du mot de passe actuel est propre à chaque session : une session qui l'épuise est fermée (journal d'audit), les autres sessions du titulaire ne sont plus touchées.
+- **Proxy de confiance.** Le serveur refuse de démarrer si `TRUSTED_PROXIES` liste un réseau plus large qu'un /24 ou un /64, sauf `TRUSTED_PROXIES_ALLOW_WIDE=true`.
+- **Plusieurs processus API.** Les fichiers d'un dépôt de paquet en cours et les budgets du catalogue logiciel sont tenus dans PostgreSQL et non plus en mémoire : ils valent pour plusieurs processus de l'API, et un redémarrage ne remet plus les budgets à zéro.
+- **Méthode A et msiexec.** Une installation qui lance `msiexec /x` ou `/uninstall` est refusée par la console, le script de signature et l'agent ; la désinstallation par code produit reste possible. Un paquet enregistré avant cette règle garde sa désinstallation, et son installation est signalée comme bloquée.
+- **Place des paquets sur les postes.** L'agent borne la place des téléchargements interrompus ou refusés (`DeployCacheMaxGB`, 16 Gio par défaut) : au démarrage du service et avant chaque téléchargement, il retire les plus anciens au-delà du plafond, jamais le paquet en cours, et note chaque retrait dans `agent.log`.
+- **Comptes limités à certains sites.**
+  - Une séance de maintenance vue à travers l'un de leurs postes ne montre plus la salle (hors périmètre) ni l'observation générale, et ne peut plus être supprimée si elle déborde du périmètre.
+  - Dans le journal d'audit, une fusion dont la fiche absorbée était ailleurs s'affiche « a absorbé une fiche hors de votre périmètre », y compris pour les fusions antérieures.
+- **Séances de maintenance.** Une séance où aucun poste n'a été fait s'enregistre si elle dit pourquoi (observation générale de la salle ou note d'un poste non fait), sans toucher aux échéances. Une salle de plus de 1 000 postes s'enregistre en une seule séance, envoyée par parts, avec reprise de l'envoi en cas de coupure.
+- **Téléphone.** La page Salles, la fiche d'une salle et les dialogues de séance s'affichent en cartes et en plein écran, sans défilement horizontal.
+- **Précédent / suivant sur la fiche.** Les flèches sont calculées par le serveur sur l'ordre exact de la liste (mêmes filtres, tri et périmètre) : plus de poste sauté ni de limite de 2 000 lignes, et le rang « Poste n sur N » est toujours juste.
+
+Reste acceptée l'**origine déclarative de l'emplacement et de l'OU** d'un poste (S19, S20) : la lecture de l'annuaire par le serveur est planifiée dans `dev/plan-lecture-annuaire.md`.
+
+---
+
 ## Nouvelles variables d'environnement
 
 Toutes facultatives : leur valeur par défaut est celle décrite plus haut.
@@ -184,13 +209,20 @@ Toutes facultatives : leur valeur par défaut est celle décrite plus haut.
 | `SOFTWARE_NEW_ENTRIES_PER_DAY` | `2000` | Nouveaux logiciels qu'un poste peut ajouter au catalogue par 24 h |
 | `SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET` | `50000` | Nouveaux logiciels que tout le parc peut ajouter au catalogue par 24 h |
 | `PACKAGE_METHOD_A_MAX_GB` | `8` | Taille totale, en Gio, d'un paquet non signé ; à garder égale à `DeployMethodAMaxGB` |
+| `PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS` | `10` | Liens de réinitialisation valides à la fois pour un compte, toutes adresses confondues (hors adresses habituelles) |
+| `LOGIN_SLOW_MAX_FAILED_ATTEMPTS` | `20` | Échecs de connexion sur la fenêtre longue qui verrouillent le compte |
+| `LOGIN_SLOW_WINDOW_HOURS` | `24` | Fenêtre longue des échecs, et durée du verrou qu'elle déclenche |
+| `TRUSTED_PROXIES_ALLOW_WIDE` | `false` | Accepte dans `TRUSTED_PROXIES` une plage plus large qu'un /24 ou un /64 |
+| `BACKUP_ENCRYPT_RECIPIENT` | vide | Clés publiques `age` pour chiffrer les sauvegardes ; vide = dumps en clair |
 
-Clé de registre de l'agent : `DeployMethodAMaxGB` (`REG_DWORD`), voir plus haut.
+Clés de registre de l'agent : `DeployMethodAMaxGB` et `DeployCacheMaxGB` (`REG_DWORD`), voir plus haut.
+
+`PASSWORD_RESET_COOLDOWN_MINUTES` et `PASSWORD_RESET_MAX_LIVE_LINKS` s'appliquent désormais par compte **et par adresse d'origine**.
 
 ## Écarts connus
 
-- Les sauvegardes ne sont toujours pas chiffrées sur le serveur : la copie hors serveur doit l'être (`DEPLOYMENT.md` § « Sauvegardes et restauration »).
-- Les autres limites acceptées sont listées dans `dev/plan-audit-2026-11.md` §6.4.
+- Le chiffrement des sauvegardes est facultatif : sans `BACKUP_ENCRYPT_RECIPIENT`, les dumps restent en clair sur le serveur, et la copie hors serveur doit alors être chiffrée (`DEPLOYMENT.md` § « Sauvegardes et restauration »).
+- L'emplacement et l'OU d'un poste restent déclarés par l'agent (S19, S20) ; les autres limites acceptées sont listées dans `dev/plan-audit-2026-11.md` §6.4.
 
 ## Migrations
 
@@ -203,5 +235,7 @@ Clé de registre de l'agent : `DeployMethodAMaxGB` (`REG_DWORD`), voir plus haut
 | `0036` | Verdict d'une commande remonté par le poste (`commands.agent_verdict_at`) ; date du relevé de l'âge des signatures (`machines.signature_reported_at`), initialisée avec le dernier contact |
 | `0037` | Noms de groupe uniques à la casse près (doublons renommés « (2) »…) ; lecture des paquets pour le groupe intégré « Techniciens » |
 | `0038` | Lignes « non fait » d'une séance de maintenance reliées à leur séance ; titres d'historique sans le type répété |
+| `0039` | Essais de connexion lents (`users.slow_failed_login_attempts`, `slow_window_started_at`, `lock_admits_known_only`) ; adresse d'origine des liens de réinitialisation (`password_reset_tokens.requested_ip`) ; essais du changement de mot de passe par session (`auth_sessions.password_failures`) |
+| `0040` | Compteurs partagés entre processus (`shared_counter`) : budgets du catalogue logiciel |
 
 Le backend applique les migrations à son démarrage.
