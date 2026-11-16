@@ -65,7 +65,12 @@ async def test_ask_assign_and_close_writes_the_journal(client, db_session):
         instructions="Vérifier le câble réseau",
     )
     assert check["requested_by"] == "admin@test.local"
-    assert check["assigned_to"] == {"id": tech_id, "name": "Marie", "active": True}
+    assert check["assigned_to"] == {
+        "id": tech_id,
+        "name": "Marie",
+        "active": True,
+        "reachable": True,
+    }
     assert check["machine"]["hostname"] == "PC-1"
 
     # The fiche and the list carry it.
@@ -310,4 +315,10 @@ async def test_a_deactivated_assignee_is_named_as_such(client, db_session):
     db_session.add(user)
     await db_session.commit()
     got = (await client.get(f"/api/v1/checks/{check['id']}", headers=admin)).json()
-    assert got["assigned_to"] == {"id": tech_id, "name": "Marie", "active": False}
+    # Deactivated: no longer reaching the poste either, so « à prendre ».
+    assert got["assigned_to"] == {
+        "id": tech_id,
+        "name": "Marie",
+        "active": False,
+        "reachable": False,
+    }
