@@ -119,6 +119,12 @@ export interface MaintenanceSession {
   items: SessionItem[];
   /** Postes left out, with why (and lines turned since into another kind). */
   skipped?: SessionItem[];
+  /**
+   * Part of the visit lies beyond the reader's scope: its other postes, and —
+   * when the room is not the reader's either — the room and the global note,
+   * which come back null.
+   */
+  partial?: boolean;
 }
 
 export interface SessionList {
@@ -251,6 +257,70 @@ export async function getDue(owner?: string): Promise<Due> {
 export async function recordSession(payload: SessionPayload): Promise<MaintenanceSession> {
   const { data } = await api.post<MaintenanceSession>('/maintenance', payload);
   return data;
+}
+
+/** More postes of a visit already recorded — its next part. */
+export async function addSessionLines(
+  id: string,
+  lines: Pick<SessionPayload, 'items' | 'skipped'>,
+): Promise<MaintenanceSession> {
+  const { data } = await api.post<MaintenanceSession>(`/maintenance/${id}/lines`, lines);
+  return data;
+}
+
+/**
+ * Lines (done and left out) per request. The server takes 1,000 of each, and
+ * Caddy 8 MB a body; a note may hold 5,000 characters, so a part of 250 stays
+ * under both whatever was typed.
+ */
+export const SESSION_PART_SIZE = 250;
+
+/** How far a visit sent in parts got: kept by the caller to resume after a failure. */
+export interface SessionProgress {
+  /** The visit, once its first part is recorded. */
+  sessionId: string | null;
+  /** Lines recorded so far, done first then left out, in payload order. */
+  sent: number;
+  total: number;
+}
+
+export function sessionProgress(payload: SessionPayload): SessionProgress {
+  return { sessionId: null, sent: 0, total: payload.items.length + (payload.skipped?.length ?? 0) };
+}
+
+/**
+ * Record a visit of any size as one visit (audit T30): the first part creates
+ * it with the date and the global note, the next ones are added to it. Done
+ * postes go first, so the part that creates the visit carries one whenever
+ * there is any. `progress` moves as each part is recorded: on a failure the
+ * caller keeps it and calls again with the same payload to send the rest —
+ * a part the server recorded but whose answer was lost is passed over there.
+ */
+export async function recordSessionInParts(
+  payload: SessionPayload,
+  progress: SessionProgress = sessionProgress(payload),
+  size: number = SESSION_PART_SIZE,
+): Promise<MaintenanceSession> {
+  const lines = [
+    ...payload.items.map((line) => ({ done: true, line })),
+    ...(payload.skipped ?? []).map((line) => ({ done: false, line })),
+  ];
+  let last: MaintenanceSession | null = null;
+  while (progress.sessionId === null || progress.sent < lines.length) {
+    const part = lines.slice(progress.sent, progress.sent + size);
+    const items = part.filter((p) => p.done).map((p) => p.line);
+    const skipped = part
+      .filter((p) => !p.done)
+      .map((p) => p.line as { machine_id: string; note: string });
+    if (progress.sessionId === null) {
+      last = await recordSession({ ...payload, items, skipped });
+      progress.sessionId = last.id;
+    } else {
+      last = await addSessionLines(progress.sessionId, { items, skipped });
+    }
+    progress.sent += part.length;
+  }
+  return last ?? getSession(progress.sessionId);
 }
 
 export async function listSessions(

@@ -1,16 +1,30 @@
 """Console-facing endpoints: list and inspect managed machines."""
 
+import base64
+import json
 import re
 import uuid
 from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field, computed_field
-from sqlalchemy import Subquery, case, exists, func, not_, or_
+from sqlalchemy import (
+    Subquery,
+    and_,
+    case,
+    exists,
+    false,
+    func,
+    literal,
+    not_,
+    or_,
+    true,
+)
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 from sqlmodel import col, select
 
@@ -1139,6 +1153,377 @@ async def list_machines(
     )
 
 
+# --- neighbours: the fiche's previous/next ----------------------------------
+#
+# The fiche walks the list it was opened from (audit T31). The neighbours are
+# computed here, by keyset comparisons on the list's own ORDER BY, rather than
+# by the console reading the list in blocks: a block-reader cannot see a poste
+# that moved into a block it already read, and has to give up somewhere.
+
+
+@dataclass(frozen=True)
+class _OrderKey:
+    """One component of the list's ORDER BY, as data the keyset reads."""
+
+    expr: Any
+    descending: bool
+    # Where NULL sorts. ``list_machines`` writes no NULLS clause on its
+    # tie-breakers, so they take PostgreSQL's default: last ascending, first
+    # descending.
+    nulls_last: bool
+
+    def clause(self, *, reverse: bool = False) -> UnaryExpression[Any]:
+        descending = self.descending != reverse
+        nulls_last = self.nulls_last != reverse
+        ordered: UnaryExpression[Any] = (
+            self.expr.desc() if descending else self.expr.asc()
+        )
+        return ordered.nulls_last() if nulls_last else ordered.nulls_first()
+
+
+def _list_order(
+    sort_by: MachineSortField | None,
+    sort_desc: bool,
+    policy: MaintenancePolicy,
+    versions: FleetVersions,
+    usage: UsageWindow,
+) -> list[_OrderKey]:
+    """``list_machines``'s ORDER BY, component by component: the sort column
+    (``_sort_clause``: NULLs last both ways), then last contact descending,
+    then id. Kept in step with it by ``test_api_machines_neighbours``, which
+    walks every sort field against the list's pages."""
+    tie_breakers = [
+        _OrderKey(col(Machine.last_seen), descending=True, nulls_last=False),
+        _OrderKey(col(Machine.id), descending=False, nulls_last=True),
+    ]
+    if sort_by is None:
+        return tie_breakers
+    key = _sort_key(sort_by, policy, versions, usage)
+    return [_OrderKey(key, descending=sort_desc, nulls_last=True), *tie_breakers]
+
+
+@dataclass(frozen=True)
+class _Known:
+    """A position component known in Python (from a cursor), not in SQL."""
+
+    value: Any
+
+
+def _bound(column: Any, value: Any) -> Any:
+    """A cursor's value as a parameter of the column's type (a bare ``True``
+    would not compare with ``<``)."""
+    return literal(value, type_=column.type)
+
+
+def _is_null(x: Any) -> Any:
+    if isinstance(x, _Known):
+        return true() if x.value is None else false()
+    return x.is_(None)
+
+
+def _not_null(x: Any) -> Any:
+    if isinstance(x, _Known):
+        return false() if x.value is None else true()
+    return x.is_not(None)
+
+
+def _same(a: Any, b: Any) -> Any:
+    """``a IS NOT DISTINCT FROM b``; a cursor's NULL needs no typed parameter."""
+    if isinstance(a, _Known):
+        a, b = b, a
+    if isinstance(b, _Known):
+        return a.is_(None) if b.value is None else a == _bound(a, b.value)
+    return a.is_not_distinct_from(b)
+
+
+def _less(a: Any, b: Any, descending: bool) -> Any:
+    """``a`` strictly ahead of ``b`` in one direction, NULLs aside."""
+    if descending:
+        a, b = b, a
+    if isinstance(b, _Known):
+        return false() if b.value is None else a < _bound(a, b.value)
+    if isinstance(a, _Known):
+        return false() if a.value is None else b > _bound(b, a.value)
+    return a < b
+
+
+def _ahead(a: Sequence[Any], b: Sequence[Any], order: Sequence[_OrderKey]) -> Any:
+    """Whether position ``a`` sorts strictly before position ``b``.
+
+    The row comparison ``(k0, k1, …) < (p0, p1, …)`` spelled out per
+    component, since each has its own direction and NULL placement: equal on
+    every component before, and ahead on this one — NULL included, which is
+    ahead of a value when NULLs sort first and behind it when they sort last.
+    """
+    terms = []
+    for i, key in enumerate(order):
+        if key.nulls_last:
+            ahead = or_(
+                and_(_not_null(a[i]), _is_null(b[i])), _less(a[i], b[i], key.descending)
+            )
+        else:
+            ahead = or_(
+                and_(_is_null(a[i]), _not_null(b[i])), _less(a[i], b[i], key.descending)
+            )
+        terms.append(and_(*(_same(a[j], b[j]) for j in range(i)), ahead))
+    return or_(*terms)
+
+
+def _cursor_value(value: Any) -> Any:
+    """One position component as JSON, its Python type kept."""
+    if isinstance(value, datetime):
+        return {"t": value.isoformat()}
+    if isinstance(value, Decimal):
+        return {"n": str(value)}
+    if isinstance(value, float):
+        return {"f": repr(value)}
+    if isinstance(value, uuid.UUID):
+        return {"u": str(value)}
+    return value
+
+
+def _cursor_decode_value(raw: Any) -> Any:
+    if isinstance(raw, dict) and len(raw) == 1:
+        tag, text = next(iter(raw.items()))
+        if isinstance(text, str):
+            if tag == "t":
+                return datetime.fromisoformat(text)
+            if tag == "n":
+                return Decimal(text)
+            if tag == "f":
+                return float(text)
+            if tag == "u":
+                return uuid.UUID(text)
+    if raw is None or isinstance(raw, bool | int | str):
+        return raw
+    raise ValueError("unknown cursor value")
+
+
+def _encode_cursor(sort_by: str | None, sort_desc: bool, values: Sequence[Any]) -> str:
+    """Where a poste stood in a sort, to walk from there later: the values of
+    every ORDER BY component but the id (which the route names)."""
+    payload = {
+        "s": sort_by or "",
+        "d": sort_desc,
+        "v": [_cursor_value(v) for v in values],
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_cursor(
+    cursor: str, sort_by: str | None, sort_desc: bool, width: int
+) -> list[Any] | None:
+    """The values a cursor carries, or None when it belongs to another sort.
+
+    Malformed is a 422; another sort's (or a version rank against a raw
+    version, the day a parc's first versions come in) is not this walk's and
+    is ignored — the poste's own place is used instead.
+    """
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode()))
+        values = [_cursor_decode_value(v) for v in payload["v"]]
+        same_sort = payload["s"] == (sort_by or "") and payload["d"] is sort_desc
+    except (ValueError, TypeError, KeyError) as exc:
+        raise AppError(
+            code=ErrorCode.REQUEST_VALIDATION_ERROR,
+            status_code=422,
+            message="Malformed cursor",
+        ) from exc
+    if not same_sort or len(values) != width:
+        return None
+    return values
+
+
+# The Python kind each sort column reads back as: a cursor whose value is of
+# another kind cannot be compared in SQL (a varchar against an integer is an
+# error, not a false), and is ignored like another sort's.
+_KEY_KINDS: dict[str, tuple[type, ...]] = {
+    **dict.fromkeys(_CASEFOLD_SORT_FIELDS, (str,)),
+    "building": (str,),
+    "room": (str,),
+    "maintenance_due_at": (datetime,),
+    "last_seen": (datetime,),
+    "wu_pending_count": (int,),
+    "ram_total_mb": (int,),
+    "session_user_present": (bool,),
+    "disk_free_percent": (int, float, Decimal),
+    "usage_hours": (int, float, Decimal),
+}
+
+
+def _cursor_fits(
+    values: Sequence[Any], sort_by: MachineSortField | None, versions: FleetVersions
+) -> bool:
+    fields: list[str] = [] if sort_by is None else [sort_by]
+    fields.append("last_seen")
+    for field, value in zip(fields, values, strict=True):
+        if value is None:
+            continue
+        if field == "agent_version":
+            # A rank once the parc has versions (``_agent_version_rank``).
+            kinds: tuple[type, ...] = (int,) if versions.counts else (str,)
+        else:
+            kinds = _KEY_KINDS[field]
+        if bool not in kinds and isinstance(value, bool):
+            return False
+        if not isinstance(value, kinds):
+            return False
+    return True
+
+
+class NeighbourOut(BaseModel):
+    """A poste next to the open one in the list: enough to label the arrow
+    and go there, and where it stands, to walk on from that place."""
+
+    id: uuid.UUID
+    hostname: str | None
+    machine_uuid: str
+    cursor: str
+
+
+class MachineNeighbours(BaseModel):
+    """The open poste's place in the list it was opened from."""
+
+    previous: NeighbourOut | None
+    next: NeighbourOut | None
+    # 0-based, among the list's ``total`` postes; None (and no neighbours)
+    # when the poste no longer belongs to that list — a filter it left since.
+    rank: int | None
+    total: int
+    # Where this poste stands, to send back as ``cursor`` on a later visit.
+    cursor: str | None
+
+
+# Two segments, so ``/{machine_id}`` cannot swallow it whatever the order;
+# declared next to the list whose query it reads.
+@router.get("/{machine_id}/neighbours", response_model=MachineNeighbours)
+async def machine_neighbours(
+    machine_id: uuid.UUID,
+    session: SessionDep,
+    filters: FiltersDep,
+    sort_by: MachineSortField | None = None,
+    sort_desc: bool = True,
+    cursor: str | None = Query(None, max_length=2048),
+) -> MachineNeighbours:
+    """The postes before and after this one in the list — same filters, same
+    scope, same sort as ``GET /machines`` — its rank and the list's size.
+
+    One statement: the filtered list as a CTE (read once), the poste's place
+    in it, a count of the rows ahead of that place, and the nearest row on
+    either side by keyset comparison on the list's exact ORDER BY.
+
+    ``cursor`` (from a previous answer's ``previous``/``next``/``cursor``) puts
+    the walk where the poste stood when it was reached, rather than where it
+    stands now: on the default sort, the last contact, the open poste's own
+    heartbeat would otherwise send its neighbours to the top of the list
+    (audit B18). The neighbours are those of that place in the list as it is
+    now. A poste no longer in the list answers ``rank: null`` and no
+    neighbours; one that does not exist, or is out of the caller's scope, 404.
+    """
+    versions = await fleet_versions(session)
+    policies = await setting_crud.policies(session)
+    policy = policies.maintenance
+    usage = _usage_window(policies.usage, filters.usage_days)
+    order = _list_order(sort_by, sort_desc, policy, versions, usage)
+    width = len(order) - 1  # every component but the id
+
+    rows = (
+        _filtered_machines(
+            filters, usage, versions.outdated, policy, fleet=policies.fleet
+        )
+        .with_only_columns(
+            col(Machine.id).label("id"),
+            col(Machine.hostname).label("hostname"),
+            col(Machine.machine_uuid).label("machine_uuid"),
+            *(key.expr.label(f"k{i}") for i, key in enumerate(order)),
+        )
+        .cte("nav_rows")
+    )
+    row_keys = [rows.c[f"k{i}"] for i in range(len(order))]
+    nav_order = [
+        _OrderKey(row_keys[i], key.descending, key.nulls_last)
+        for i, key in enumerate(order)
+    ]
+    own = [
+        select(row_keys[i]).where(rows.c.id == machine_id).scalar_subquery()
+        for i in range(width)
+    ]
+    known = _decode_cursor(cursor, sort_by, sort_desc, width) if cursor else None
+    if known is not None and not _cursor_fits(known, sort_by, versions):
+        known = None
+    place: list[Any] = [_Known(v) for v in known] if known is not None else list(own)
+    place.append(_Known(machine_id))
+
+    others = rows.c.id != machine_id
+    before = and_(others, _ahead(row_keys, place, nav_order))
+    after = and_(others, _ahead(place, row_keys, nav_order))
+    shown = [rows.c.id, rows.c.hostname, rows.c.machine_uuid, *row_keys[:width]]
+    previous = (
+        select(*shown)
+        .where(before)
+        .order_by(*(k.clause(reverse=True) for k in nav_order))
+        .limit(1)
+        .subquery("nav_previous")
+    )
+    following = (
+        select(*shown)
+        .where(after)
+        .order_by(*(k.clause() for k in nav_order))
+        .limit(1)
+        .subquery("nav_next")
+    )
+    stats = (
+        select(
+            func.count().label("total"),
+            func.count().filter(before).label("rank"),
+            func.coalesce(func.bool_or(rows.c.id == machine_id), false()).label(
+                "present"
+            ),
+        )
+        .select_from(rows)
+        .subquery("nav_stats")
+    )
+    stmt = select(
+        stats.c.total,
+        stats.c.rank,
+        stats.c.present,
+        *(c.label(f"p_{c.key}") for c in previous.c),
+        *(c.label(f"n_{c.key}") for c in following.c),
+        *(own[i].label(f"own{i}") for i in range(width)),
+    ).select_from(stats.outerjoin(previous, true()).outerjoin(following, true()))
+    result: Any = (await session.exec(stmt)).one()
+    data = result._mapping
+
+    if not data["present"]:
+        # Out of the list, or not a poste this caller may see at all.
+        await _require_machine(session, machine_id, filters.scope)
+        return MachineNeighbours(
+            previous=None, next=None, rank=None, total=data["total"], cursor=None
+        )
+
+    def neighbour(prefix: str) -> NeighbourOut | None:
+        if data[f"{prefix}_id"] is None:
+            return None
+        values = [data[f"{prefix}_k{i}"] for i in range(width)]
+        return NeighbourOut(
+            id=data[f"{prefix}_id"],
+            hostname=data[f"{prefix}_hostname"],
+            machine_uuid=data[f"{prefix}_machine_uuid"],
+            cursor=_encode_cursor(sort_by, sort_desc, values),
+        )
+
+    values = known if known is not None else [data[f"own{i}"] for i in range(width)]
+    return MachineNeighbours(
+        previous=neighbour("p"),
+        next=neighbour("n"),
+        rank=data["rank"],
+        total=data["total"],
+        cursor=_encode_cursor(sort_by, sort_desc, values),
+    )
+
+
 class AntivirusProduct(BaseModel):
     """One antivirus present in the fleet, with how many machines report it."""
 
@@ -2238,6 +2623,11 @@ async def merge_machine(
             "source_id": str(source.id),
             "source_hostname": source.hostname,
             "source_machine_uuid": source.machine_uuid,
+            # Where the merged record stood: the row is deleted, and a
+            # confined reader of this entry is shown its identity only if it
+            # would have seen it (``routes/audit.py``, audit S17).
+            "source_location": source.location,
+            "source_room_id": str(source.room_id) if source.room_id else None,
         },
     )
     held_files = await machine_crud.merge_into(session, target=target, source=source)

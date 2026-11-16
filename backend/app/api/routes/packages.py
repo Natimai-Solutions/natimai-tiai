@@ -374,6 +374,11 @@ def _apply(package: Package, fields: dict[str, Any]) -> None:
             raise _invalid(
                 "Installation par msiexec : indiquer les arguments (ex. /i {dir}\\app.msi /qn)"
             )
+        if manifest.msiexec_removes(package.install_run, package.install_args):
+            # Every poste refuses it (agent deploy.MsiExecRemoves), and the
+            # console would read « Installation terminée » for a product
+            # taken off.
+            raise _invalid(manifest.INSTALL_REMOVES, field="install_args")
 
 
 @router.get("", response_model=list[PackageOut])
@@ -475,31 +480,26 @@ async def upload_files(
     manifest — and so the signature — follows."""
     package = await require_package(session, package_id, lock=True)
     _require_files_kind(package)
-    # What this request stored, pinned against another request's sweep until
-    # the rows naming them are committed or rolled back (audit T09).
-    pinned: list[str] = []
+    # Each file stored is held against any sweep, in this process or another,
+    # by this transaction until it commits or rolls back (audit T09).
     try:
-        try:
-            added = await _store_uploads(session, package, files, pinned)
-        except BaseException:
-            # Files stored before the one that failed belong to nothing now:
-            # the transaction that would have named them is gone (audit S09).
-            await session.rollback()
-            _unpin(pinned)
-            await crud.sweep_store(session)
-            raise
-        await crud.refresh_manifest(session, package)
-        audit.record(
-            session,
-            actor=current.email,
-            action="package.upload",
-            resource_type="package",
-            resource_id=str(package.id),
-            details={"name": package.name, "files": added},
-        )
-        await session.commit()
-    finally:
-        _unpin(pinned)
+        added = await _store_uploads(session, package, files)
+    except BaseException:
+        # Files stored before the one that failed belong to nothing now:
+        # the transaction that would have named them is gone (audit S09).
+        await session.rollback()
+        await crud.sweep_store(session)
+        raise
+    await crud.refresh_manifest(session, package)
+    audit.record(
+        session,
+        actor=current.email,
+        action="package.upload",
+        resource_type="package",
+        resource_id=str(package.id),
+        details={"name": package.name, "files": added},
+    )
+    await session.commit()
     # A file replaced under the same name goes once no open deployment
     # downloads it any more.
     await crud.sweep_store(session)
@@ -507,21 +507,14 @@ async def upload_files(
     return await _out(session, package, scope)
 
 
-def _unpin(pinned: list[str]) -> None:
-    for sha in pinned:
-        storage.unpin(sha)
-    pinned.clear()
-
-
 async def _store_uploads(
     session: SessionDep,
     package: Package,
     files: list[UploadFile],
-    pinned: list[str],
 ) -> list[dict[str, Any]]:
     """Stream each upload to the store and name it in the package, replacing
-    a file of the same name. Flushed, not committed. Each stored hash is
-    appended to ``pinned``, for the caller to unpin (``storage.save``).
+    a file of the same name. Flushed, not committed. Each stored file is held
+    by the session's transaction against the sweep (``crud.hold_file``).
 
     "The same name" is read as Windows and the agent read it, case aside
     (audit T23): ``A.INI`` replaces ``a.ini`` — two rows would be one file on
@@ -556,7 +549,11 @@ async def _store_uploads(
                 details={"name": name, "same_as": other, "reason": reason},
             )
         try:
-            stored = await storage.save(upload, settings.PACKAGE_MAX_BYTES)
+            stored = await storage.save(
+                upload,
+                settings.PACKAGE_MAX_BYTES,
+                lambda sha: crud.hold_file(session, sha),
+            )
         except storage.TooLarge:
             raise AppError(
                 code=ErrorCode.PACKAGE_FILE_TOO_LARGE,
@@ -564,7 +561,6 @@ async def _store_uploads(
                 message="Fichier trop volumineux",
                 details={"max_bytes": settings.PACKAGE_MAX_BYTES},
             ) from None
-        pinned.append(stored.sha256)
         with stored.path.open("rb") as f:
             publisher = authenticode.signer_name(f)
         replaced = await crud.files_named(session, package.id, name)

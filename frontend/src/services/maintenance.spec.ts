@@ -15,6 +15,9 @@ import {
   maintenanceStateLabel,
   ownerLabel,
   recordSession,
+  recordSessionInParts,
+  SESSION_PART_SIZE,
+  sessionProgress,
   updateMachineMaintenance,
   updateRoomMaintenance,
 } from './maintenance';
@@ -70,6 +73,70 @@ describe('maintenance service', () => {
     });
     expect(api.patch).toHaveBeenNthCalledWith(2, '/rooms/r-1/maintenance', {
       maintenance_owner_id: 'u-1',
+    });
+  });
+});
+
+describe('a visit sent in parts (audit T30)', () => {
+  beforeEach(() => vi.mocked(api.post).mockReset());
+
+  const ids = (n: number, prefix: string) =>
+    Array.from({ length: n }, (_, i) => ({ machine_id: `${prefix}-${i}`, note: 'x' }));
+
+  it('creates the visit with the first part and adds the others to it', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: { id: 's-1' } });
+    // More than one request takes: 1,000 done and 200 left out.
+    const payload = { room_id: 'r-1', note: 'RAS', items: ids(1000, 'd'), skipped: ids(200, 'k') };
+    const progress = sessionProgress(payload);
+    await recordSessionInParts(payload, progress);
+
+    const calls = vi.mocked(api.post).mock.calls;
+    expect(calls.map((c) => c[0])).toEqual([
+      '/maintenance',
+      '/maintenance/s-1/lines',
+      '/maintenance/s-1/lines',
+      '/maintenance/s-1/lines',
+      '/maintenance/s-1/lines',
+    ]);
+    const parts = calls.map((c) => c[1] as { items: unknown[]; skipped: unknown[] });
+    expect(parts.every((p) => p.items.length + p.skipped.length <= SESSION_PART_SIZE)).toBe(true);
+    // The date and the note go once, with the done postes first.
+    expect(calls[0]![1]).toMatchObject({ room_id: 'r-1', note: 'RAS' });
+    expect(parts[0]!.items).toHaveLength(SESSION_PART_SIZE);
+    expect(calls[1]![1]).not.toHaveProperty('note');
+    expect(parts.flatMap((p) => p.items)).toEqual(payload.items);
+    expect(parts.flatMap((p) => p.skipped)).toEqual(payload.skipped);
+    expect(progress).toEqual({ sessionId: 's-1', sent: 1200, total: 1200 });
+  });
+
+  it('resumes after a failed part without sending the recorded ones again', async () => {
+    vi.mocked(api.post)
+      .mockResolvedValueOnce({ data: { id: 's-1' } })
+      .mockRejectedValueOnce(new Error('réseau'))
+      .mockResolvedValue({ data: { id: 's-1' } });
+    const payload = { room_id: 'r-1', items: ids(600, 'd') };
+    const progress = sessionProgress(payload);
+    await expect(recordSessionInParts(payload, progress)).rejects.toThrow('réseau');
+    expect(progress).toMatchObject({ sessionId: 's-1', sent: 250 });
+
+    await recordSessionInParts(payload, progress);
+    const calls = vi.mocked(api.post).mock.calls.slice(2);
+    expect(calls.map((c) => c[0])).toEqual(['/maintenance/s-1/lines', '/maintenance/s-1/lines']);
+    expect((calls[0]![1] as { items: { machine_id: string }[] }).items[0]!.machine_id).toBe(
+      'd-250',
+    );
+    expect(progress.sent).toBe(600);
+  });
+
+  it('records a visit with nothing done in one request', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: { id: 's-1' } });
+    await recordSessionInParts({ room_id: 'r-1', note: 'Salle fermée', items: [] });
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledWith('/maintenance', {
+      room_id: 'r-1',
+      note: 'Salle fermée',
+      items: [],
+      skipped: [],
     });
   });
 });

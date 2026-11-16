@@ -105,6 +105,10 @@ class ErrorCode(enum.StrEnum):
     MAINTENANCE_OWNER_OUT_OF_REACH = "maintenance.owner.out_of_reach"
     # A visit recorded for a room names postes that are not in it.
     MAINTENANCE_ITEMS_NOT_IN_ROOM = "maintenance.items.not_in_room"
+    # A visit with no poste done that says nothing of why (audit T30).
+    MAINTENANCE_SESSION_EMPTY = "maintenance.session.empty"
+    # Postes added to a visit by someone other than its author.
+    MAINTENANCE_SESSION_NOT_AUTHOR = "maintenance.session.not_author"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     RATE_LIMITED = "request.rate_limited"

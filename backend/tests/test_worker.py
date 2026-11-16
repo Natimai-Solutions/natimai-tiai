@@ -120,6 +120,7 @@ def test_build_jobs_registers_the_whole_schedule():
         "maintenance_reminders",
         "purge_outbox",
         "purge_software",
+        "purge_shared_counters",
         "purge_usage",
         "purge_sessions",
         "purge_audit",

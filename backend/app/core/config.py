@@ -179,11 +179,25 @@ class Settings(BaseSettings):
     # opened the account within LOGIN_KNOWN_ADDRESS_DAYS (audit S03).
     LOGIN_SIEGE_ADDRESSES: int = Field(default=10, ge=2, le=1000)
     LOGIN_KNOWN_ADDRESS_DAYS: int = Field(default=30, ge=1, le=365)
-    # « Mot de passe oublié » (audit S14): no new mail for an account within
-    # this many minutes of the last one, and at most this many links alive at
-    # once. A request never voids a link still valid.
+    # Slow guessing (audit T06): failures spaced more than
+    # LOGIN_LOCKOUT_MINUTES apart never add up to the lock above — four
+    # guesses a quarter of an hour, forever. This many failures within
+    # LOGIN_SLOW_WINDOW_HOURS of the first one lock the account for that many
+    # hours, and that lock admits only the account's usual addresses.
+    LOGIN_SLOW_MAX_FAILED_ATTEMPTS: int = Field(default=20, ge=2, le=1000)
+    LOGIN_SLOW_WINDOW_HOURS: int = Field(default=24, ge=1, le=24 * 7)
+    # « Mot de passe oublié » (audit S14, T34): counted per account *and*
+    # requesting address — no new mail within this many minutes of the last
+    # one asked from that address, at most this many links alive from it — so
+    # a third party spending their own budget leaves the owner's whole.
+    # A request never voids a link still valid.
     PASSWORD_RESET_COOLDOWN_MINUTES: int = Field(default=5, ge=0, le=60)
     PASSWORD_RESET_MAX_LIVE_LINKS: int = Field(default=3, ge=1, le=10)
+    # ... and, whatever the addresses, at most this many links alive for one
+    # account: the inbox is not flooded from a botnet. A request from one of
+    # the account's usual addresses (LOGIN_KNOWN_ADDRESS_DAYS) is held to its
+    # own budget only.
+    PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS: int = Field(default=10, ge=1, le=100)
     # Heartbeats one poste may send per minute (429 beyond). The agent sends
     # one per heartbeat_interval_seconds (60 by default), plus one at a
     # restart (audit S21).
@@ -544,6 +558,10 @@ class Settings(BaseSettings):
     TRUSTED_PROXY_HOSTS: Annotated[list[str] | str, BeforeValidator(parse_list)] = [
         "caddy"
     ]
+    # A TRUSTED_PROXIES entry wider than a /24 (IPv4) or a /64 (IPv6) is
+    # refused at start: every client inside it could name its own address
+    # (audit S28). True accepts it, for a network made of proxies only.
+    TRUSTED_PROXIES_ALLOW_WIDE: bool = False
     # The OpenAPI schema and its pages (/docs, /redoc): a map of every route
     # and field, served only in local development unless asked (audit S36).
     EXPOSE_OPENAPI: bool = False
@@ -596,6 +614,79 @@ class Settings(BaseSettings):
                 f"USAGE_HIGH_HOURS ({self.USAGE_HIGH_HOURS}) exceeds the "
                 f"{24 * self.USAGE_WINDOW_DAYS} hours of USAGE_WINDOW_DAYS"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _account_limits_hold_together(self) -> Self:
+        """The slow-guessing lock must sit beyond the quick one, and the
+        account-wide reset ceiling at or above one address's budget: the other
+        way round, the one meant to be generous would be the one that bites
+        (audit T06, T34)."""
+        if self.LOGIN_SLOW_MAX_FAILED_ATTEMPTS <= self.LOGIN_MAX_FAILED_ATTEMPTS:
+            raise ValueError(
+                "LOGIN_SLOW_MAX_FAILED_ATTEMPTS must be above "
+                f"LOGIN_MAX_FAILED_ATTEMPTS ({self.LOGIN_SLOW_MAX_FAILED_ATTEMPTS} "
+                f"<= {self.LOGIN_MAX_FAILED_ATTEMPTS})"
+            )
+        if self.LOGIN_SLOW_WINDOW_HOURS * 60 <= self.LOGIN_LOCKOUT_MINUTES:
+            raise ValueError(
+                "LOGIN_SLOW_WINDOW_HOURS must be longer than LOGIN_LOCKOUT_MINUTES "
+                f"({self.LOGIN_SLOW_WINDOW_HOURS} h <= "
+                f"{self.LOGIN_LOCKOUT_MINUTES} min)"
+            )
+        if self.PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS < (
+            self.PASSWORD_RESET_MAX_LIVE_LINKS
+        ):
+            raise ValueError(
+                "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS must be at least "
+                "PASSWORD_RESET_MAX_LIVE_LINKS "
+                f"({self.PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS} < "
+                f"{self.PASSWORD_RESET_MAX_LIVE_LINKS})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _trusted_proxies_are_proxies(self) -> Self:
+        """Refuse to start on a TRUSTED_PROXIES entry wider than a /24 (IPv4)
+        or a /64 (IPv6), unless TRUSTED_PROXIES_ALLOW_WIDE says so.
+
+        Whoever sits inside a trusted network writes the X-Forwarded-For the
+        API believes: a whole school LAN listed there let any poste on it pick
+        the address it is rate-limited, locked out and audited under (audit
+        S28). A proxy is one address, a handful at most. An IPv6 entry inside
+        the IPv4-mapped range (::ffff:0:0/96) is measured as the IPv4 network
+        it covers. Unreadable entries are left to ``net.trusted_proxy``, which
+        grants them nothing.
+        """
+        if self.TRUSTED_PROXIES_ALLOW_WIDE:
+            return self
+        entries = (
+            [self.TRUSTED_PROXIES]
+            if isinstance(self.TRUSTED_PROXIES, str)
+            else self.TRUSTED_PROXIES
+        )
+        mapped = ipaddress.IPv6Network("::ffff:0:0/96")
+        for entry in entries:
+            try:
+                network = ipaddress.ip_network(entry, strict=False)
+            except ValueError:
+                continue
+            prefix, floor = network.prefixlen, 24
+            if isinstance(network, ipaddress.IPv6Network):
+                if network.subnet_of(mapped):
+                    prefix -= 96
+                elif mapped.subnet_of(network):
+                    prefix = 0
+                else:
+                    floor = 64
+            if prefix < floor:
+                raise ValueError(
+                    f"TRUSTED_PROXIES: {entry!r} is wider than a /{floor}: every "
+                    "client in it could choose the address the API sees. List "
+                    "the proxies' own addresses (or use TRUSTED_PROXY_HOSTS), or "
+                    "set TRUSTED_PROXIES_ALLOW_WIDE=true if that whole network "
+                    "is made of proxies"
+                )
         return self
 
     @model_validator(mode="after")

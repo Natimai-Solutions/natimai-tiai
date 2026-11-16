@@ -188,11 +188,12 @@ def test_the_limiters_read_their_settings(monkeypatch):
     settings; the lock's thresholds are read at each attempt."""
     from app.core import ratelimit
     from app.core.config import settings
+    from app.features.inventory import budget
 
     assert ratelimit.heartbeat_limiter.max_attempts == (
         settings.AGENT_HEARTBEAT_MAX_PER_MINUTE
     )
-    assert ratelimit.software_quota.units == settings.SOFTWARE_NEW_ENTRIES_PER_DAY
+    assert budget.software_quota.units == settings.SOFTWARE_NEW_ENTRIES_PER_DAY
 
 
 @pytest.mark.parametrize(
@@ -296,3 +297,106 @@ def test_the_console_bounds_are_the_environments():
         mail.TIMEOUT_MIN,
         mail.TIMEOUT_MAX,
     )
+
+
+# --- Trusted proxies no wider than a proxy (audit S28, accepted limit fixed) ---
+
+
+@pytest.mark.parametrize(
+    "value,entry",
+    [
+        ("10.0.0.0/8", "10.0.0.0/8"),
+        ("172.18.0.0/16", "172.18.0.0/16"),
+        ("192.168.1.2/32,192.168.0.0/23", "192.168.0.0/23"),
+        # Host bits do not narrow it: read as the network they sit in.
+        ("192.168.1.7/16", "192.168.1.7/16"),
+        ("2001:db8::/48", "2001:db8::/48"),
+        ("::/0", "::/0"),
+        # IPv4 written as IPv6: measured as the IPv4 network it covers.
+        ("::ffff:10.0.0.0/104", "::ffff:10.0.0.0/104"),
+        ("::/64", "::/64"),
+    ],
+)
+def test_a_trusted_proxy_entry_wider_than_a_proxy_refuses_the_start(value, entry):
+    """Every client inside a trusted network writes the X-Forwarded-For the
+    API believes: listing the whole LAN let any poste choose its address.
+    The start is refused, naming the entry and the way out."""
+    with pytest.raises(ValidationError) as caught:
+        make_settings(TRUSTED_PROXIES=value)
+    message = str(caught.value)
+    assert "TRUSTED_PROXIES" in message and repr(entry) in message
+    assert "TRUSTED_PROXIES_ALLOW_WIDE" in message
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "172.18.0.3",
+        "172.18.0.0/24",
+        "192.168.1.2/32, 10.4.7.0/24",
+        "2001:db8:0:1::/64",
+        "fd00::5/128",
+        "::ffff:10.0.0.0/120",
+        # Unreadable: not refused here, granted nothing by net.trusted_proxy.
+        "caddy",
+    ],
+)
+def test_proxy_sized_trusted_entries_are_accepted(value):
+    assert make_settings(TRUSTED_PROXIES=value).TRUSTED_PROXIES_ALLOW_WIDE is False
+
+
+def test_a_wide_trusted_network_is_accepted_when_asked_for(monkeypatch):
+    allowed = make_settings(
+        TRUSTED_PROXIES="10.0.0.0/8,2001:db8::/48", TRUSTED_PROXIES_ALLOW_WIDE=True
+    )
+    assert allowed.TRUSTED_PROXIES == ["10.0.0.0/8", "2001:db8::/48"]
+    monkeypatch.setenv("TRUSTED_PROXIES", "172.18.0.0/16")
+    with pytest.raises(ValidationError, match="172.18.0.0/16"):
+        make_settings()
+    monkeypatch.setenv("TRUSTED_PROXIES_ALLOW_WIDE", "true")
+    assert make_settings().TRUSTED_PROXIES == ["172.18.0.0/16"]
+
+
+# --- Slow guessing and the reset budget (audit T06, T34) -----------------------
+
+
+def test_the_slow_lock_and_reset_ceiling_have_bounded_defaults():
+    env = make_settings()
+    assert env.LOGIN_SLOW_MAX_FAILED_ATTEMPTS == 20
+    assert env.LOGIN_SLOW_WINDOW_HOURS == 24
+    assert env.PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS == 10
+    for name, wrong in (
+        ("LOGIN_SLOW_MAX_FAILED_ATTEMPTS", 1001),
+        ("LOGIN_SLOW_WINDOW_HOURS", 0),
+        ("LOGIN_SLOW_WINDOW_HOURS", 24 * 7 + 1),
+        ("PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS", 0),
+        ("PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS", 101),
+    ):
+        with pytest.raises(ValidationError):
+            make_settings(**{name: wrong})
+
+
+@pytest.mark.parametrize(
+    "overrides,named",
+    [
+        (
+            {"LOGIN_MAX_FAILED_ATTEMPTS": 20, "LOGIN_SLOW_MAX_FAILED_ATTEMPTS": 20},
+            "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
+        ),
+        (
+            {"LOGIN_LOCKOUT_MINUTES": 120, "LOGIN_SLOW_WINDOW_HOURS": 2},
+            "LOGIN_SLOW_WINDOW_HOURS",
+        ),
+        (
+            {
+                "PASSWORD_RESET_MAX_LIVE_LINKS": 5,
+                "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS": 4,
+            },
+            "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS",
+        ),
+    ],
+)
+def test_the_generous_limit_must_stay_above_the_tight_one(overrides, named):
+    with pytest.raises(ValidationError, match=named):
+        make_settings(**overrides)

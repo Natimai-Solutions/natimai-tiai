@@ -107,7 +107,7 @@ const resourceLink = computed(() =>
 
 const detailRows = computed(() =>
   Object.entries(props.entry?.details ?? {}).map(([key, raw]) => {
-    const value = auditDetailValue(raw);
+    const value = auditDetailValue(raw, key);
     return {
       key,
       label: auditDetailKeyLabel(key),

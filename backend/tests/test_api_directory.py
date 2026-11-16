@@ -239,11 +239,11 @@ async def test_a_poste_creates_a_bounded_number_of_catalogue_entries(
     applied again)."""
     from sqlmodel import func, select
 
-    from app.core import ratelimit
+    from app.features.inventory import budget
     from app.features.inventory.models import Software
     from app.features.machine.models import Machine
 
-    monkeypatch.setattr(ratelimit.software_quota, "units", 3)
+    monkeypatch.setattr(budget.software_quota, "units", 3)
     a = await _enroll(client, "pc-a", hostname="A")
     b = await _enroll(client, "pc-b", hostname="B")
 

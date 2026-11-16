@@ -458,6 +458,41 @@ export async function listMachines(params: ListMachinesParams = {}): Promise<Mac
   return data;
 }
 
+/** A poste next to the open one in the list it was opened from. */
+export interface MachineNeighbour {
+  id: string;
+  hostname: string | null;
+  machine_uuid: string;
+  /** Where it stands in the list: sent back when the walk reaches it. */
+  cursor: string;
+}
+
+/** The open poste's place in a list: `GET /machines/{id}/neighbours`. */
+export interface MachineNeighbours {
+  previous: MachineNeighbour | null;
+  next: MachineNeighbour | null;
+  /** 0-based; null (and no neighbours) when the poste has left the list. */
+  rank: number | null;
+  total: number;
+  /** Where this poste stands, to send back on a later visit. */
+  cursor: string | null;
+}
+
+export type MachineNeighboursParams = ListMachinesParams & { cursor?: string };
+
+/**
+ * The postes before and after `id` in the list `params` describe — same
+ * filters, sort and scope as `listMachines` — worked out by the server on the
+ * list's own order (audit T31).
+ */
+export async function getMachineNeighbours(
+  id: string,
+  params: MachineNeighboursParams = {},
+): Promise<MachineNeighbours> {
+  const { data } = await api.get<MachineNeighbours>(`/machines/${id}/neighbours`, { params });
+  return data;
+}
+
 /** One antivirus present in the fleet, with how many machines report it. */
 export interface AntivirusProduct {
   name: string;

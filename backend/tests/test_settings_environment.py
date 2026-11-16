@@ -121,8 +121,12 @@ def test_the_settings_of_the_audit_are_listed():
         "SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET",
         "COMMAND_UNANSWERED_HOURS",
         "TRUSTED_PROXIES",
+        "TRUSTED_PROXIES_ALLOW_WIDE",
         "TRUSTED_PROXY_HOSTS",
         "EXPOSE_OPENAPI",
+        "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
+        "LOGIN_SLOW_WINDOW_HOURS",
+        "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS",
         "WOL_ALLOWED_NETWORKS",
         "WOL_RELAY_MIN_AGE_MINUTES",
         "WOL_RELAY_MIN_AGENT_VERSION",
@@ -149,11 +153,14 @@ def test_the_new_values_are_rendered():
     env = Settings(
         WOL_ALLOWED_NETWORKS="10.4.0.0/16,10.5.0.0/16",
         TRUSTED_PROXIES="172.18.0.0/16",
+        # A /16 is refused at start without it (audit S28).
+        TRUSTED_PROXIES_ALLOW_WIDE=True,
         EXPOSE_OPENAPI=False,
     )
     by_key = {i.key: i.value for i in _items(env)}
     assert by_key["WOL_ALLOWED_NETWORKS"] == "10.4.0.0/16, 10.5.0.0/16"
     assert by_key["TRUSTED_PROXIES"] == "172.18.0.0/16"
+    assert by_key["TRUSTED_PROXIES_ALLOW_WIDE"] == "oui"
     assert by_key["TRUSTED_PROXY_HOSTS"] == "caddy"
     assert by_key["EXPOSE_OPENAPI"] == "non"
     assert by_key["SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET"] == "50000"

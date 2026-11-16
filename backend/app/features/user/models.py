@@ -93,6 +93,16 @@ class User(SQLModel, table=True):
     failed_login_attempts: int = Field(default=0)
     last_failed_login_at: datetime | None = utc_field(default=None, nullable=True)
     locked_until: datetime | None = utc_field(default=None, nullable=True)
+    # The slow counter (audit T06): failures within LOGIN_SLOW_WINDOW_HOURS of
+    # ``slow_window_started_at``, however far apart — what the counter above
+    # forgets after LOGIN_LOCKOUT_MINUTES. A failure past the window opens a
+    # new one. Reset, with the lock, by a successful login or a new password.
+    slow_failed_login_attempts: int = Field(default=0)
+    slow_window_started_at: datetime | None = utc_field(default=None, nullable=True)
+    # Set with ``locked_until`` by the slow counter: that lock admits only the
+    # account's usual addresses (``addresses.shut_out``). Its guesser waited
+    # out every quick lock, so the addresses that failed lately say nothing.
+    lock_admits_known_only: bool = Field(default=False)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
 
@@ -176,6 +186,9 @@ class UserGroup(SQLModel, table=True):
     )
 
 
+LOGIN_ADDRESS_MAX_LENGTH = 64
+
+
 class PasswordResetToken(SQLModel, table=True):
     """A single-use, time-limited "forgot password" token.
 
@@ -200,12 +213,13 @@ class PasswordResetToken(SQLModel, table=True):
         )
     )
     token_hash: str = Field(unique=True, index=True)
+    # The address the link was asked from: the request budget is counted per
+    # account and address (audit T34), so a third party asking from theirs
+    # spends theirs, not the owner's. NULL for links issued before.
+    requested_ip: str | None = Field(default=None, max_length=LOGIN_ADDRESS_MAX_LENGTH)
     expires_at: datetime = utc_field()
     used_at: datetime | None = utc_field(default=None, nullable=True)
     created_at: datetime = utc_field(default_factory=utcnow)
-
-
-LOGIN_ADDRESS_MAX_LENGTH = 64
 
 
 class LoginAddress(SQLModel, table=True):

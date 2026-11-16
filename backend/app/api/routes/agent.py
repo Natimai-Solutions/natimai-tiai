@@ -31,6 +31,7 @@ from app.features.command.models import (
     CommandStatus,
     CommandType,
 )
+from app.features.inventory import budget as software_budget
 from app.features.inventory.crud import apply_inventory
 from app.features.inventory.schemas import InventoryReport
 from app.features.machine import fingerprint, token_rotation
@@ -1062,7 +1063,7 @@ async def heartbeat(
     resend_inventory = (
         machine.software_truncated_at is not None
         and now - machine.software_truncated_at >= RESEND_INVENTORY_AFTER
-        and ratelimit.software_budget_left(str(machine.id)) > 0
+        and await software_budget.budget_left(session, str(machine.id)) > 0
     )
     await session.commit()
     if refused_held_files:

@@ -2,8 +2,18 @@
   <!-- One recorded visit, read back: when, by whom, the global note, the
        postes done and those left out, each with its own note. Opened from a
        poste's journal and from a room's list of visits. -->
-  <q-dialog :model-value="modelValue" @update:model-value="(v) => emit('update:modelValue', v)">
-    <q-card style="width: 640px; max-width: 95vw">
+  <!-- The whole screen on a phone, its list scrolling under the title
+       (audit U23). -->
+  <q-dialog
+    :model-value="modelValue"
+    :maximized="small"
+    @update:model-value="(v) => emit('update:modelValue', v)"
+  >
+    <q-card
+      :class="small ? 'column no-wrap' : ''"
+      :style="small ? undefined : 'width: 640px; max-width: 95vw'"
+      data-test="visit-card"
+    >
       <q-card-section class="text-h6">
         Séance de maintenance{{ visit?.room_name ? ` — ${visit.room_name}` : '' }}
       </q-card-section>
@@ -11,7 +21,17 @@
         <q-spinner size="32px" />
       </q-card-section>
       <q-card-section v-else-if="error" class="text-negative">{{ error }}</q-card-section>
-      <template v-else-if="visit">
+      <div v-else-if="visit" :class="small ? 'col scroll' : ''">
+        <!-- Seen through a poste of the reader's scope: the rest of the visit
+             — other postes, and the room and its note when the room is not
+             the reader's — is not shown (audit S06). -->
+        <q-card-section v-if="visit.partial" class="q-pt-none" data-test="visit-partial">
+          <q-banner rounded dense class="surface-blue">
+            Cette séance déborde de votre périmètre : seuls vos postes sont affichés{{
+              visit.note === null ? ", sans l'observation générale" : ''
+            }}.
+          </q-banner>
+        </q-card-section>
         <q-card-section class="q-pt-none q-gutter-xs">
           <div class="row">
             <div class="col-4 text-muted">Date</div>
@@ -56,10 +76,13 @@
             </q-list>
           </template>
         </q-card-section>
-      </template>
-      <q-card-actions align="right" class="q-px-md q-pb-md">
+      </div>
+      <q-separator v-if="small" />
+      <q-card-actions align="right" class="q-px-md q-pb-md" :class="small ? 'q-pt-md' : ''">
+        <!-- Not on a partial visit: removing it would remove lines and a
+             note beyond the reader's scope, which the server refuses. -->
         <q-btn
-          v-if="visit && canDelete"
+          v-if="visit && canDelete && !visit.partial"
           flat
           color="negative"
           icon="delete"
@@ -90,6 +113,7 @@ const emit = defineEmits<{
 }>();
 
 const $q = useQuasar();
+const small = computed(() => $q.screen.lt.sm);
 const auth = useAuthStore();
 const canDelete = computed(() => auth.can('maintenance', 'write'));
 const visit = ref<MaintenanceSession | null>(null);

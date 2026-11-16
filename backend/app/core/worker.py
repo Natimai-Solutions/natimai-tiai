@@ -224,6 +224,14 @@ async def purge_reset_tokens() -> int:
         )
 
 
+async def purge_shared_counters() -> int:
+    """Drop the budget counters no window reaches any more (audit T36)."""
+    from app.features.counter import quota
+
+    async with AsyncSession(engine) as session:
+        return await quota.purge_expired(session)
+
+
 async def purge_login_addresses() -> int:
     """Drop the login addresses that no longer say anything: no failure
     within the lock window, no success within the known period."""
@@ -381,6 +389,12 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
         ),
         Job("purge_outbox", purge_outbox, housekeeping(now), housekeeping),
         Job("purge_software", purge_software, housekeeping(now), housekeeping),
+        Job(
+            "purge_shared_counters",
+            purge_shared_counters,
+            housekeeping(now),
+            housekeeping,
+        ),
         Job("purge_usage", purge_usage, housekeeping(now), housekeeping),
         Job("purge_sessions", purge_sessions, housekeeping(now), housekeeping),
         Job("purge_audit", purge_audit, housekeeping(now), housekeeping),

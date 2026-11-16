@@ -722,7 +722,7 @@ def _meet_in_save(monkeypatch, parties: int = 2, patience: float = 0.5):
     everyone = asyncio.Event()
     arrived = 0
 
-    async def save(upload, max_bytes):
+    async def save(upload, max_bytes, hold):
         nonlocal arrived
         arrived += 1
         if arrived >= parties:
@@ -731,7 +731,7 @@ def _meet_in_save(monkeypatch, parties: int = 2, patience: float = 0.5):
             await asyncio.wait_for(everyone.wait(), patience)
         except TimeoutError:
             pass
-        return await original(upload, max_bytes)
+        return await original(upload, max_bytes, hold)
 
     monkeypatch.setattr(storage, "save", save)
 
@@ -805,7 +805,7 @@ async def test_an_upload_and_a_change_of_definition_do_not_lose_each_other(
     in_save = asyncio.Event()
     patch_answered = asyncio.Event()
 
-    async def save(upload, max_bytes):
+    async def save(upload, max_bytes, hold):
         # The upload has read the package; it lets the PATCH go first if the
         # PATCH can — behind the lock it cannot, and the wait runs out.
         in_save.set()
@@ -813,7 +813,7 @@ async def test_an_upload_and_a_change_of_definition_do_not_lose_each_other(
             await asyncio.wait_for(patch_answered.wait(), 0.5)
         except TimeoutError:
             pass
-        return await original(upload, max_bytes)
+        return await original(upload, max_bytes, hold)
 
     monkeypatch.setattr(storage, "save", save)
     uploading = asyncio.create_task(
@@ -934,3 +934,162 @@ async def test_the_package_says_how_large_a_file_may_be(
     assert (await _get(client, admin, package["id"]))["file_max_bytes"] == 6 * GIB
     listed = await client.get("/api/v1/packages", headers=admin)
     assert listed.json()[0]["file_max_bytes"] == 6 * GIB
+
+
+# --- 9. an installation that uninstalls (§6.4, residual) ----------------------------
+
+# Spellings msiexec reads as a removal, and the agent refuses as an install
+# (deploy_test.go, TestMsiExecRemoves).
+REMOVALS = [
+    ["/x", PRODUCT_CODE, "/qn"],
+    ["/X" + PRODUCT_CODE],
+    ["-x", PRODUCT_CODE],
+    ["/qn", "/uninstall", PRODUCT_CODE],
+    ["-UNINSTALL", "{dir}\\app.msi"],
+]
+
+
+async def test_an_installation_by_msiexec_may_not_remove(client, db_session, store):
+    """Method A rebuilds any msiexec step holding a product code as ``/x
+    {code}``; the agent now runs that for an uninstallation only, and refuses
+    a removal filed as an installation under either method. The server
+    refuses to write one, in the console's words."""
+    from app.features.package import manifest
+
+    admin = await _admin(client, db_session)
+    for args in REMOVALS:
+        created = await client.post(
+            "/api/v1/packages",
+            headers=admin,
+            json={
+                "kind": "files",
+                "name": "App",
+                "install_run": "msiexec",
+                "install_args": args,
+            },
+        )
+        assert created.status_code == 422, (args, created.text)
+        error = created.json()["error"]
+        assert error["code"] == "package.invalid"
+        assert error["message"] == manifest.INSTALL_REMOVES
+        assert error["details"]["field"] == "install_args"
+
+    package = await _pronote(client, admin)
+    url = f"/api/v1/packages/{package['id']}"
+    patched = await client.patch(
+        url,
+        headers=admin,
+        json={"install_run": "msiexec", "install_args": ["/x", PRODUCT_CODE]},
+    )
+    assert patched.status_code == 422, patched.text
+    assert (await _get(client, admin, package["id"]))["install_run"] == (
+        "Install_PRNclient.exe"
+    )
+
+    # The same switches as the uninstallation: what they are for.
+    for args in REMOVALS:
+        ok = await client.patch(
+            url,
+            headers=admin,
+            json={"uninstall_run": "msiexec", "uninstall_args": args},
+        )
+        assert ok.status_code == 200, (args, ok.text)
+    # And an installation by msiexec that installs.
+    ok = await client.patch(
+        url,
+        headers=admin,
+        json={
+            "install_run": "msiexec",
+            "install_args": ["/i", "{dir}\\app.msi", "/qn", "/norestart"],
+        },
+    )
+    assert ok.status_code == 200, ok.text
+    # Not msiexec: an executable's own /x is its business.
+    ok = await client.patch(
+        url,
+        headers=admin,
+        json={"install_run": "Install_PRNclient.exe", "install_args": ["/x", "-s"]},
+    )
+    assert ok.status_code == 200, ok.text
+
+
+async def test_a_row_written_before_the_rule_blocks_its_install_only(
+    client, db_session, store
+):
+    """A package stored before the rule: its installation is a problem every
+    poste refuses — 409 ``package.not_ready`` on install, signed or not —
+    and its uninstallation is not held back (``blocks_uninstall`` false, the
+    flag the console filters on)."""
+    from app.features.package import manifest
+    from app.features.package.models import Package
+
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    machine_id, _ = await _enroll(client, "poste-1")
+    row = (
+        await db_session.exec(
+            select(Package).where(col(Package.name) == "Client PRONOTE")
+        )
+    ).one()
+    row.install_run = "msiexec"
+    row.install_args = ["/x", PRODUCT_CODE, "/qn"]
+    row.uninstall_run = "msiexec"
+    row.uninstall_args = ["/x", PRODUCT_CODE, "/qn"]
+    db_session.add(row)
+    await db_session.commit()
+
+    got = await _get(client, admin, package["id"])
+    (problem,) = got["problems"]
+    assert problem == {
+        "code": "install_removes",
+        "message": manifest.INSTALL_REMOVES,
+        "blocks_uninstall": False,
+    }
+    assert got["install_blockers"] == [manifest.INSTALL_REMOVES]
+
+    refused = await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={
+            "type": "package_install",
+            "machine_ids": [machine_id],
+            "package_id": package["id"],
+        },
+    )
+    assert refused.status_code == 409, refused.text
+    error = refused.json()["error"]
+    assert error["code"] == "package.not_ready"
+    assert error["details"]["problems"] == [manifest.INSTALL_REMOVES]
+    # Not signable either: the script would refuse it, and every poste.
+    assert (await _sign(client, admin, package["id"])).status_code == 409
+
+    accepted = await _uninstall(client, admin, package["id"], machine_id)
+    assert accepted.status_code == 200, accepted.text
+
+
+def test_the_signing_script_refuses_the_same_removals():
+    """Sign-TiaiPackage.ps1 refuses to sign an installation that removes,
+    with the server's pattern (and the agent's, deploy.msiexecRemoval). Read
+    as the .NET regular expression it is; the script itself is not run."""
+    from app.features.package import manifest
+
+    repo = Path(__file__).resolve().parents[2]
+    script = repo / "deploy" / "packages" / "Sign-TiaiPackage.ps1"
+    agent_go = repo / "agent" / "internal" / "deploy" / "deploy.go"
+    if not script.exists() or not agent_go.exists():
+        pytest.skip("deploy/ or agent/ not in this checkout")
+    source = script.read_text(encoding="ascii")
+    found = re.search(r"^\$MsiExecUninstallSwitch = '([^']+)'$", source, re.M)
+    assert found, "$MsiExecUninstallSwitch not found in Sign-TiaiPackage.ps1"
+    assert "-match $MsiExecUninstallSwitch" in source
+    assert "$doc.install.run -ceq 'msiexec'" in source
+    # PowerShell's -match ignores case, as the server's flag does.
+    assert found.group(1) == manifest.UNINSTALL_SWITCH.pattern
+    assert manifest.UNINSTALL_SWITCH.flags & re.IGNORECASE
+
+    go = re.search(
+        r"msiexecRemoval = regexp\.MustCompile\(`\(\?i\)([^`]+)`\)",
+        agent_go.read_text(encoding="utf-8"),
+    )
+    assert go, "msiexecRemoval not found in deploy.go"
+    assert go.group(1) == manifest.UNINSTALL_SWITCH.pattern

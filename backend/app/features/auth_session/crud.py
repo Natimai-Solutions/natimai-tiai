@@ -210,6 +210,19 @@ def revoke(session: AsyncSession, row: AuthSession) -> None:
         session.add(row)
 
 
+async def note_password_failure(session: AsyncSession, row: AuthSession) -> int:
+    """Count one wrong current password typed through this session, and
+    return how many it has now. In the database, so that concurrent guesses
+    all count and a restart gives none back (audit T07). Does not commit."""
+    result = await session.exec(
+        update(AuthSession)
+        .where(col(AuthSession.id) == row.id)
+        .values(password_failures=col(AuthSession.password_failures) + 1)
+        .returning(col(AuthSession.password_failures))
+    )
+    return int(result.scalar_one())
+
+
 async def revoke_all(session: AsyncSession, user_id: uuid.UUID) -> int:
     """End every open session of a user. Does not commit; returns how many.
 

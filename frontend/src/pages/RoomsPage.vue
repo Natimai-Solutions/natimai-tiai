@@ -61,8 +61,91 @@
           hide-pagination
           flat
           bordered
+          :grid="small"
+          card-container-class="q-col-gutter-sm"
           @row-click="(_evt, row) => !selectingText() && goRoom(row)"
         >
+          <!-- On a phone, a card per room — its name, place, postes and
+               maintenance in sight, its actions as buttons — rather than a
+               table to scroll sideways (audit U23). -->
+          <template #item="props">
+            <div class="col-12" :data-test="`room-card-${props.row.id}`">
+              <q-card flat bordered>
+                <q-card-section class="q-pb-xs">
+                  <router-link
+                    :to="{ name: 'room-detail', params: { id: props.row.id } }"
+                    class="row-link text-weight-medium"
+                    style="overflow-wrap: anywhere"
+                  >
+                    {{ props.row.name }}
+                  </router-link>
+                  <q-icon
+                    v-if="props.row.ad_key"
+                    name="account_tree"
+                    size="16px"
+                    class="q-ml-xs text-muted"
+                    :aria-label="`Créée depuis l'annuaire : ${props.row.ad_key}`"
+                  />
+                  <div class="text-caption text-muted" style="overflow-wrap: anywhere">
+                    {{
+                      [props.row.building?.name, props.row.effective_location]
+                        .filter(Boolean)
+                        .join(' · ') || 'Sans bâtiment ni emplacement'
+                    }}
+                  </div>
+                  <div
+                    v-if="props.row.notes"
+                    class="text-caption text-muted ellipsis-2-lines"
+                    style="overflow-wrap: anywhere"
+                  >
+                    {{ props.row.notes }}
+                  </div>
+                  <div class="q-mt-xs">
+                    {{ props.row.machine_count }} poste(s)
+                    <q-badge v-if="props.row.mismatch_count" color="orange" class="q-ml-xs">
+                      {{ props.row.mismatch_count }} divergent(s)
+                    </q-badge>
+                  </div>
+                  <div class="q-mt-xs">
+                    <q-badge v-if="props.row.maintenance_overdue" color="negative" class="q-mr-xs">
+                      {{ props.row.maintenance_overdue }} en retard
+                    </q-badge>
+                    <q-badge v-if="props.row.maintenance_due_soon" color="orange" class="q-mr-xs">
+                      {{ props.row.maintenance_due_soon }} à échéance
+                    </q-badge>
+                    <span class="text-caption text-muted">
+                      Maintenance :
+                      {{
+                        props.row.effective_cycle_days > 0
+                          ? `${props.row.effective_cycle_days} j`
+                          : 'exclue'
+                      }}
+                      {{
+                        props.row.effective_owner_name ? `· ${props.row.effective_owner_name}` : ''
+                      }}
+                    </span>
+                  </div>
+                </q-card-section>
+                <q-card-actions v-if="canWrite" align="right">
+                  <q-btn
+                    flat
+                    no-caps
+                    icon="edit"
+                    label="Modifier"
+                    @click="openRoomForm(props.row)"
+                  />
+                  <q-btn
+                    flat
+                    no-caps
+                    color="negative"
+                    icon="delete"
+                    label="Supprimer"
+                    @click="confirmDeleteRoom(props.row)"
+                  />
+                </q-card-actions>
+              </q-card>
+            </div>
+          </template>
           <template #body-cell-name="props">
             <q-td :props="props">
               <div>
@@ -178,7 +261,43 @@
           hide-pagination
           flat
           bordered
+          :grid="small"
+          card-container-class="q-col-gutter-sm"
         >
+          <template #item="props">
+            <div class="col-12" :data-test="`building-card-${props.row.id}`">
+              <q-card flat bordered>
+                <q-card-section class="q-pb-xs">
+                  <div class="text-weight-medium" style="overflow-wrap: anywhere">
+                    {{ props.row.name }}
+                  </div>
+                  <div class="text-caption text-muted" style="overflow-wrap: anywhere">
+                    {{ props.row.location ?? 'Sans emplacement' }}
+                  </div>
+                  <div class="q-mt-xs">
+                    {{ props.row.room_count }} salle(s) · {{ props.row.machine_count }} poste(s)
+                  </div>
+                </q-card-section>
+                <q-card-actions v-if="canWrite" align="right">
+                  <q-btn
+                    flat
+                    no-caps
+                    icon="edit"
+                    label="Modifier"
+                    @click="openBuildingForm(props.row)"
+                  />
+                  <q-btn
+                    flat
+                    no-caps
+                    color="negative"
+                    icon="delete"
+                    label="Supprimer"
+                    @click="confirmDeleteBuilding(props.row)"
+                  />
+                </q-card-actions>
+              </q-card>
+            </div>
+          </template>
           <template #body-cell-location="props">
             <q-td :props="props">{{ props.value ?? '—' }}</q-td>
           </template>
@@ -262,6 +381,8 @@ import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 
 const $q = useQuasar();
+// A phone: cards rather than tables (audit U23).
+const small = computed(() => $q.screen.lt.sm);
 const router = useRouter();
 const auth = useAuthStore();
 

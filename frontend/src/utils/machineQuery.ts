@@ -124,7 +124,7 @@ export function queryValue(v: unknown): string | null {
  * a broader search, not to a 422.
  *
  * Page and page size are deliberately left to the caller — the list reads its
- * own, while the fiche asks for single-row pages to walk the results.
+ * own, while the fiche's neighbours (`getMachineNeighbours`) take none.
  */
 export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams {
   const params: ListMachinesParams = {};

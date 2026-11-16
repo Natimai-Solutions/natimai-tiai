@@ -86,6 +86,11 @@ export const AUDIT_DETAIL_KEY_LABELS: Record<string, string> = {
   source_id: 'Fiche fusionnée (id)',
   source_hostname: 'Fiche fusionnée (nom)',
   source_machine_uuid: 'Fiche fusionnée (UUID)',
+  source_location: 'Fiche fusionnée (emplacement)',
+  source_room_id: 'Fiche fusionnée (salle)',
+  source_withheld: 'Fiche fusionnée hors de votre périmètre',
+  via: 'Déclenché par',
+  failures: 'Échecs',
   email: 'E-mail',
   generated: 'Mot de passe généré',
   group_ids: 'Groupes',
@@ -165,8 +170,18 @@ export function auditResourceLink(
     : null;
 }
 
-/** One detail value as text: lists joined, booleans in words, objects as JSON. */
-export function auditDetailValue(value: unknown): string {
+/** What triggered a lock or a closed session (`via`), in the console's words. */
+const VIA_LABELS: Record<string, string> = {
+  slow_attempts: 'essais espacés (24 h)',
+  password_change: 'changement de mot de passe',
+};
+
+/**
+ * One detail value as text: lists joined, booleans in words, objects as JSON.
+ * `key` names the detail, for the few whose values have words of their own.
+ */
+export function auditDetailValue(value: unknown, key?: string): string {
+  if (key === 'via' && typeof value === 'string' && VIA_LABELS[value]) return VIA_LABELS[value];
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'boolean') return value ? 'Oui' : 'Non';
   if (typeof value === 'string') return value;
@@ -259,6 +274,11 @@ export function auditDetailsSummary(action: string, details: Record<string, unkn
       text(details, 'source_machine_uuid') ??
       text(details, 'source_id');
     if (source) parts.push(`a absorbé « ${source} »`);
+    // A confined reader is not told which record a poste of its scope absorbed
+    // when that record stood elsewhere (audit S17): say so rather than nothing.
+    else if (details.source_withheld === true) {
+      parts.push('a absorbé une fiche hors de votre périmètre');
+    }
   }
 
   if (action === 'user.reset_password' && typeof details.generated === 'boolean') {

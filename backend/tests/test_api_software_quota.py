@@ -79,13 +79,38 @@ async def _detail(client, headers, enrolled) -> dict:
 @pytest.fixture
 def budgets(monkeypatch):
     """Small budgets: (per poste, fleet)."""
-    from app.core import ratelimit
+    from app.features.inventory import budget
 
     def set_budgets(poste: int, fleet: int) -> None:
-        monkeypatch.setattr(ratelimit.software_quota, "units", poste)
-        monkeypatch.setattr(ratelimit.software_fleet_quota, "units", fleet)
+        monkeypatch.setattr(budget.software_quota, "units", poste)
+        monkeypatch.setattr(budget.software_fleet_quota, "units", fleet)
 
     return set_budgets
+
+
+async def _poste_left(db_session, enrolled) -> int:
+    from app.features.inventory import budget
+
+    return await budget.poste_budget_left(db_session, enrolled["machine_id"])
+
+
+async def _fleet_left(db_session) -> int:
+    from app.features.inventory import budget
+
+    return await budget.fleet_budget_left(db_session)
+
+
+async def _forget(db_session, quota) -> None:
+    """Empty a budget's window: what a day going by does."""
+    from sqlalchemy import delete
+    from sqlmodel import col
+
+    from app.features.counter.models import SharedCounter
+
+    await db_session.exec(
+        delete(SharedCounter).where(col(SharedCounter.name) == quota.name)
+    )
+    await db_session.commit()
 
 
 # --- What is charged ----------------------------------------------------------
@@ -99,7 +124,6 @@ async def test_a_heartbeat_that_fails_does_not_spend_the_budget(
     back: the budget they were granted from comes back with them. Also when
     a savepoint was released on the way (the directory placement), which is
     a commit of its own for the session's events and not the one that counts."""
-    from app.core import ratelimit
     from app.core.config import settings
     from app.features.usage import crud as usage_crud
 
@@ -123,8 +147,8 @@ async def test_a_heartbeat_that_fails_does_not_spend_the_budget(
     with pytest.raises(RuntimeError):
         await _heartbeat(client, a, **_inventory(["s1", "s2", "s3"], **extra))
     assert await _catalogue(db_session) == 0
-    assert ratelimit.software_quota.remaining(a["machine_id"]) == 3
-    assert ratelimit.software_fleet_budget_left() == 100
+    assert await _poste_left(db_session, a) == 3
+    assert await _fleet_left(db_session) == 100
 
     # The same list sent again is applied whole: nothing was paid for the
     # rows that never existed.
@@ -132,23 +156,22 @@ async def test_a_heartbeat_that_fails_does_not_spend_the_budget(
     body = await _heartbeat(client, a, **_inventory(["s1", "s2", "s3"], **extra))
     assert body["resend_inventory"] is False
     assert await _catalogue(db_session) == 3
-    assert ratelimit.software_quota.remaining(a["machine_id"]) == 0
-    assert ratelimit.software_fleet_budget_left() == 97
+    assert await _poste_left(db_session, a) == 0
+    assert await _fleet_left(db_session) == 97
 
 
 async def test_a_committed_heartbeat_spends_exactly_what_it_created(
     client, db_session, budgets
 ):
-    from app.core import ratelimit
 
     budgets(10, 100)
     a = await _enroll(client, "pc-a")
     await _heartbeat(client, a, **_inventory(["s1", "s2", "s3"]))
-    assert ratelimit.software_quota.remaining(a["machine_id"]) == 7
+    assert await _poste_left(db_session, a) == 7
     # Known entries are free.
     await _heartbeat(client, a, **_inventory(["s1", "s2", "s3", "s4"], "h2"))
-    assert ratelimit.software_quota.remaining(a["machine_id"]) == 6
-    assert ratelimit.software_fleet_budget_left() == 96
+    assert await _poste_left(db_session, a) == 6
+    assert await _fleet_left(db_session) == 96
 
 
 # --- The fleet-wide budget ----------------------------------------------------
@@ -172,14 +195,14 @@ async def test_many_postes_together_are_bounded_by_the_fleet_budget(
 
 
 def test_the_fleet_budget_is_the_setting():
-    from app.core import ratelimit
     from app.core.config import settings
+    from app.features.inventory import budget
 
     assert settings.SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET == 50_000
-    assert ratelimit.software_fleet_quota.units == (
+    assert budget.software_fleet_quota.units == (
         settings.SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET
     )
-    assert ratelimit.software_fleet_quota.window == 24 * 3600
+    assert budget.software_fleet_quota.window_seconds == 24 * 3600
 
 
 # --- A list cut short ---------------------------------------------------------
@@ -206,7 +229,7 @@ async def _cut_long_ago(db_session, enrolled) -> None:
 async def test_a_truncated_list_is_flagged_then_asked_again_and_completed(
     client, db_session, budgets
 ):
-    from app.core import ratelimit
+    from app.features.inventory import budget
     from app.features.machine.models import Machine
 
     budgets(3, 100)
@@ -229,7 +252,7 @@ async def test_a_truncated_list_is_flagged_then_asked_again_and_completed(
 
     # The budget is back, but the cut is minutes old: not asked yet — a
     # budget being drained must not have every poste re-upload at each tick.
-    ratelimit.software_quota.reset()
+    await _forget(db_session, budget.software_quota)
     assert (await _heartbeat(client, a))["resend_inventory"] is False
 
     # An hour after the cut, the next heartbeat asks for the list.
@@ -254,16 +277,16 @@ async def test_no_resend_is_asked_while_the_fleet_budget_is_empty(
 ):
     """Both budgets must have room: the poste's own being back is not enough
     while the fleet's is spent."""
-    from app.core import ratelimit
+    from app.features.inventory import budget
 
     budgets(3, 3)
     a = await _enroll(client, "pc-a")
     await _heartbeat(client, a, **_inventory(["s1", "s2", "s3", "s4"]))
-    ratelimit.software_quota.reset()
-    assert ratelimit.software_quota.remaining(a["machine_id"]) == 3
+    await _forget(db_session, budget.software_quota)
+    assert await _poste_left(db_session, a) == 3
     assert (await _heartbeat(client, a))["resend_inventory"] is False
 
-    ratelimit.software_fleet_quota.reset()
+    await _forget(db_session, budget.software_fleet_quota)
     await _cut_long_ago(db_session, a)
     assert (await _heartbeat(client, a))["resend_inventory"] is True
 

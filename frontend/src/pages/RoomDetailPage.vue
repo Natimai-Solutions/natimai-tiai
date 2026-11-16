@@ -180,8 +180,69 @@
       hide-pagination
       flat
       bordered
+      :grid="small"
+      card-container-class="q-col-gutter-sm"
       @row-click="(_evt, row) => !selectingText() && goMachine(row)"
     >
+      <!-- On a phone, a card per poste with its link and « Retirer » in
+           sight, rather than a table to scroll sideways (audit U23). -->
+      <template #item="cell">
+        <div class="col-12" :data-test="`machine-card-${cell.row.id}`">
+          <q-card flat bordered>
+            <q-card-section class="row items-start no-wrap q-py-sm">
+              <div class="col" style="min-width: 0">
+                <div style="overflow-wrap: anywhere">
+                  <q-icon
+                    :name="onlineIcon(cell.row.is_online)"
+                    :color="onlineColor(cell.row.is_online)"
+                    size="16px"
+                    class="q-mr-xs"
+                  />
+                  <router-link
+                    :to="{ name: 'machine-detail', params: { id: cell.row.id } }"
+                    class="row-link text-weight-medium"
+                  >
+                    {{ cell.row.hostname || cell.row.machine_uuid }}
+                  </router-link>
+                </div>
+                <div class="text-caption text-muted" style="overflow-wrap: anywhere">
+                  {{
+                    [cell.row.location ?? 'sans emplacement', cell.row.session_username]
+                      .filter(Boolean)
+                      .join(' · ')
+                  }}
+                  <q-icon
+                    v-if="cell.row.location_mismatch"
+                    name="wrong_location"
+                    color="orange"
+                    size="16px"
+                    aria-label="L'agent déclare un autre emplacement que la salle"
+                  />
+                </div>
+                <div class="q-mt-xs">
+                  <q-badge
+                    v-if="cell.row.maintenance_state"
+                    :color="maintenanceStateColor(cell.row.maintenance_state)"
+                    :label="maintenanceStateLabel(cell.row.maintenance_state)"
+                    class="q-mr-xs"
+                  />
+                  <span class="text-caption text-muted">{{
+                    cell.row.last_seen ? `vu ${timeAgoLabel(cell.row.last_seen)}` : 'jamais vu'
+                  }}</span>
+                </div>
+              </div>
+              <q-btn
+                v-if="canPlace"
+                flat
+                round
+                icon="remove_circle_outline"
+                :aria-label="`Retirer ${cell.row.hostname ?? ''} de la salle`"
+                @click="confirmRemove(cell.row)"
+              />
+            </q-card-section>
+          </q-card>
+        </div>
+      </template>
       <template #body-cell-hostname="cell">
         <q-td :props="cell">
           <q-icon
@@ -375,6 +436,8 @@ import {
 const props = defineProps<{ id: string }>();
 
 const $q = useQuasar();
+// A phone: a card per poste rather than a table (audit U23).
+const small = computed(() => $q.screen.lt.sm);
 const router = useRouter();
 const auth = useAuthStore();
 

@@ -167,9 +167,25 @@ async def record_session(
     )
     session.add(visit)
     await session.flush()
+    await add_lines(session, visit, machines=machines, notes=notes, skipped=skipped)
+    return visit
+
+
+async def add_lines(
+    session: AsyncSession,
+    visit: Maintenance,
+    *,
+    machines: list[Machine],
+    notes: dict[uuid.UUID, str | None],
+    skipped: dict[uuid.UUID, str] | None = None,
+) -> None:
+    """The visit's journal lines: one per poste done, one per poste left out
+    with why. Dated and titled as the visit, so a large room sent in several
+    parts reads as one visit. Does not commit."""
     # The kind says « Maintenance » already: the title only adds the room
-    # (« Maintenance — Maintenance — A101 » otherwise).
-    title = room.name if room else None
+    # (« Maintenance — Maintenance — A101 » otherwise). The name at the time,
+    # kept on the visit, so a part added later carries the same title.
+    title = visit.room_name
     for machine in machines:
         session.add(
             Intervention(
@@ -177,15 +193,15 @@ async def record_session(
                 kind=InterventionKind.MAINTENANCE.value,
                 title=title,
                 note=notes.get(machine.id),
-                performed_by=performed_by,
-                performed_at=performed_at,
+                performed_by=visit.performed_by,
+                performed_at=visit.performed_at,
                 maintenance_id=visit.id,
             )
         )
     # A poste left out of the visit keeps why, in its own journal — not as a
     # maintenance, which would move its cycle (audit U20). Linked to the
     # session all the same: the session shows who was skipped, and why.
-    where = f" — {room.name}" if room else ""
+    where = f" — {title}" if title else ""
     for machine_id, reason in (skipped or {}).items():
         session.add(
             Intervention(
@@ -193,17 +209,31 @@ async def record_session(
                 kind=InterventionKind.OTHER.value,
                 title=f"Maintenance non faite{where}",
                 note=reason,
-                performed_by=performed_by,
-                performed_at=performed_at,
+                performed_by=visit.performed_by,
+                performed_at=visit.performed_at,
                 maintenance_id=visit.id,
             )
         )
     # From the journal, like every other change to it: a visit older than the
-    # last one known is history, not a step back on the cycle.
+    # last one known is history, not a step back on the cycle. Nothing done
+    # (only postes left out) moves no poste's last maintenance.
     await intervention_crud.recompute_last_maintenance(
         session, [m.id for m in machines]
     )
-    return visit
+
+
+async def lined_machines(
+    session: AsyncSession, maintenance_id: uuid.UUID, machine_ids: set[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Those of ``machine_ids`` that already have a line in this visit."""
+    if not machine_ids:
+        return set()
+    rows = await session.exec(
+        select(col(Intervention.machine_id))
+        .where(col(Intervention.maintenance_id) == maintenance_id)
+        .where(col(Intervention.machine_id).in_(machine_ids))
+    )
+    return set(rows.all())
 
 
 async def list_sessions(
@@ -277,6 +307,32 @@ async def item_counts(
     for mid, n in rows.all():
         if mid is not None:
             counts[mid] = n
+    return counts
+
+
+async def line_counts(
+    session: AsyncSession, maintenance_ids: list[uuid.UUID], where: Any
+) -> dict[uuid.UUID, tuple[int, int]]:
+    """Every journal line per visit — done, skipped or turned since — and how
+    many of them ``where`` (a clause on Machine) keeps: ``(total, seen)``. A
+    line whose poste the clause leaves undecided (NULL) is not seen, so a
+    visit only reads as wholly visible when every poste of it is."""
+    if not maintenance_ids:
+        return {}
+    rows = await session.exec(
+        select(
+            col(Intervention.maintenance_id),
+            func.count(),
+            func.count().filter(where),
+        )
+        .join(Machine, col(Machine.id) == col(Intervention.machine_id))
+        .where(col(Intervention.maintenance_id).in_(maintenance_ids))
+        .group_by(col(Intervention.maintenance_id))
+    )
+    counts = dict.fromkeys(maintenance_ids, (0, 0))
+    for mid, total, seen in rows.all():
+        if mid is not None:
+            counts[mid] = (total, seen)
     return counts
 
 

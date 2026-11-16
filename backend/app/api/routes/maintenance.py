@@ -6,6 +6,7 @@ is the same write, audited.
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
@@ -170,19 +171,42 @@ class SessionItemIn(BaseModel):
     note: str | None = Field(default=None, max_length=5000)
 
 
+# Lines per request, done and left out each: bounds one transaction and one
+# request body (Caddy caps it at 8 MB). A larger room is sent in parts, the
+# first creating the visit and the next ones added to it (``/lines``).
+SESSION_LINES_MAX = 1000
+
+
 class SessionCreate(BaseModel):
     """One visit. ``room_id`` names the room visited (for the record and the
     title); ``items`` says which postes were actually done — a poste absent
-    or off that day is simply left out."""
+    or off that day is simply left out. A visit where nothing was done is
+    recorded too, as long as it says why (audit T30)."""
 
     room_id: uuid.UUID | None = None
     # Not in the future: it would push the cycle out of reach (audit B06).
     performed_at: intervention_crud.PastDatetime | None = None
     note: str | None = Field(default=None, max_length=5000)
-    items: list[SessionItemIn] = Field(min_length=1, max_length=1000)
+    items: list[SessionItemIn] = Field(
+        default_factory=list, max_length=SESSION_LINES_MAX
+    )
     # Postes left out, with why (« absent de la salle ») — written to their
     # own journal as « Maintenance non faite », their cycle untouched.
-    skipped: list[SessionItemIn] = Field(default_factory=list, max_length=1000)
+    skipped: list[SessionItemIn] = Field(
+        default_factory=list, max_length=SESSION_LINES_MAX
+    )
+
+
+class SessionLinesIn(BaseModel):
+    """More postes of a visit already recorded: the next part of a room too
+    large for one request."""
+
+    items: list[SessionItemIn] = Field(
+        default_factory=list, max_length=SESSION_LINES_MAX
+    )
+    skipped: list[SessionItemIn] = Field(
+        default_factory=list, max_length=SESSION_LINES_MAX
+    )
 
 
 class SessionItemOut(BaseModel):
@@ -194,10 +218,14 @@ class SessionItemOut(BaseModel):
 
 class SessionOut(BaseModel):
     id: uuid.UUID
+    # Null for a confined reader when the room visited is outside its scope:
+    # the visit is visible through one of its postes, not its room.
     room_id: uuid.UUID | None
     room_name: str | None
     performed_by: str
     performed_at: datetime
+    # The visit's global observation, about the room and all its postes: null
+    # for a confined reader unless the whole visit is in its scope.
     note: str | None
     # The postes still maintained by it: its remaining ``maintenance`` lines.
     machine_count: int
@@ -205,6 +233,9 @@ class SessionOut(BaseModel):
     # Postes left out, with why — and lines of the visit turned since into
     # another kind: in the session's record, not counted as maintained.
     skipped: list[SessionItemOut] = []
+    # Part of the visit (its room, postes, or the global note) lies beyond
+    # the caller's scope and is left out of this payload (audit S06).
+    partial: bool = False
 
 
 class SessionList(BaseModel):
@@ -625,6 +656,74 @@ def _visit_clause(scope: Scope | None) -> Any:
     )
 
 
+@dataclass(frozen=True)
+class _Reach:
+    """How much of a visit a caller may read: its room (name and id), and the
+    whole of it — room and every poste — which the global note speaks for."""
+
+    room: bool
+    whole: bool
+
+
+_FULL = _Reach(room=True, whole=True)
+
+
+async def _reach(
+    session: SessionDep, visits: list[Maintenance], scope: Scope | None
+) -> dict[uuid.UUID, _Reach]:
+    """A confined account sees a visit through one poste of it (audit S06);
+    the room's name is the room's, and the note is about the room and all
+    its postes, so neither follows that one poste. A room-less visit (no room,
+    or the room deleted since) is named by its postes alone."""
+    if scope is None:
+        return {v.id: _FULL for v in visits}
+    room_ids = {v.room_id for v in visits if v.room_id is not None}
+    rooms: set[uuid.UUID] = set()
+    if room_ids:
+        found = await session.exec(
+            select(col(Room.id))
+            .where(col(Room.id).in_(room_ids))
+            .where(room_clause(scope))
+        )
+        rooms = set(found.all())
+    lines = await crud.line_counts(
+        session, [v.id for v in visits], machine_clause(scope)
+    )
+    out: dict[uuid.UUID, _Reach] = {}
+    for v in visits:
+        total, seen = lines[v.id]
+        postes = seen == total
+        room = postes if v.room_id is None else v.room_id in rooms
+        out[v.id] = _Reach(room=room, whole=room and postes)
+    return out
+
+
+def _out(
+    visit: Maintenance,
+    reach: _Reach,
+    count: int,
+    items: list[tuple[Intervention, Machine]] | None = None,
+) -> SessionOut:
+    def item(i: Intervention, m: Machine) -> SessionItemOut:
+        return SessionItemOut(
+            intervention_id=i.id, machine_id=m.id, hostname=m.hostname, note=i.note
+        )
+
+    done = InterventionKind.MAINTENANCE.value
+    return SessionOut(
+        id=visit.id,
+        room_id=visit.room_id if reach.room else None,
+        room_name=visit.room_name if reach.room else None,
+        performed_by=visit.performed_by,
+        performed_at=visit.performed_at,
+        note=visit.note if reach.whole else None,
+        machine_count=count,
+        items=[item(i, m) for i, m in items or [] if i.kind == done],
+        skipped=[item(i, m) for i, m in items or [] if i.kind != done],
+        partial=not reach.whole,
+    )
+
+
 async def _session_out(
     session: SessionDep,
     visit: Maintenance,
@@ -640,23 +739,73 @@ async def _session_out(
     count = (await crud.item_counts(session, [visit.id], machine_clause(scope)))[
         visit.id
     ]
+    reach = (await _reach(session, [visit], scope))[visit.id]
+    return _out(visit, reach, count, items)
 
-    def item(i: Intervention, m: Machine) -> SessionItemOut:
-        return SessionItemOut(
-            intervention_id=i.id, machine_id=m.id, hostname=m.hostname, note=i.note
+
+@dataclass
+class _Lines:
+    machines: list[Machine]
+    notes: dict[uuid.UUID, str | None]
+    skipped: dict[uuid.UUID, str]
+
+
+async def _resolve_lines(
+    session: SessionDep,
+    scope: Scope | None,
+    room_id: uuid.UUID | None,
+    items: list[SessionItemIn],
+    skipped_in: list[SessionItemIn],
+) -> _Lines:
+    """The postes of a visit, checked: each in the caller's scope, and in the
+    room visited when there is one."""
+    ids = [i.machine_id for i in items]
+    # Only a skipped poste with something to say is written; one also done
+    # is done.
+    skipped = {
+        i.machine_id: reason
+        for i in skipped_in
+        if (reason := _clean(i.note)) and i.machine_id not in set(ids)
+    }
+    wanted = set(ids) | set(skipped)
+    every: list[Machine] = []
+    if wanted:
+        found = await session.exec(
+            restrict(
+                select(Machine).where(col(Machine.id).in_(wanted)),
+                machine_clause(scope),
+            )
         )
-
-    done = InterventionKind.MAINTENANCE.value
-    return SessionOut(
-        id=visit.id,
-        room_id=visit.room_id,
-        room_name=visit.room_name,
-        performed_by=visit.performed_by,
-        performed_at=visit.performed_at,
-        note=visit.note,
-        machine_count=count,
-        items=[item(i, m) for i, m in items if i.kind == done],
-        skipped=[item(i, m) for i, m in items if i.kind != done],
+        every = list(found.all())
+    if len(every) != len(wanted):
+        raise AppError(
+            code=ErrorCode.MACHINE_NOT_FOUND,
+            status_code=404,
+            message="Machine not found",
+        )
+    if room_id is not None:
+        # A visit of a room is the visit of its postes: a poste filed
+        # elsewhere would get a line « Maintenance — <this room> » it never
+        # had (the console only ever offers the room's own).
+        strays = sorted(
+            (m for m in every if m.room_id != room_id),
+            key=lambda m: (m.hostname or "").lower(),
+        )
+        if strays:
+            names = [m.hostname or str(m.id) for m in strays]
+            raise AppError(
+                code=ErrorCode.MAINTENANCE_ITEMS_NOT_IN_ROOM,
+                status_code=422,
+                message="Postes not in this room: " + ", ".join(names),
+                details={
+                    "machine_ids": [str(m.id) for m in strays],
+                    "hostnames": names,
+                },
+            )
+    return _Lines(
+        machines=[m for m in every if m.id in set(ids)],
+        notes={i.machine_id: _clean(i.note) for i in items},
+        skipped=skipped,
     )
 
 
@@ -673,57 +822,77 @@ async def record_session(
         if payload.room_id
         else None
     )
-    ids = [i.machine_id for i in payload.items]
-    # Only a skipped poste with something to say is written; one also done
-    # is done.
-    skipped = {
-        i.machine_id: reason
-        for i in payload.skipped
-        if (reason := _clean(i.note)) and i.machine_id not in set(ids)
-    }
-    wanted = set(ids) | set(skipped)
-    found = await session.exec(
-        restrict(
-            select(Machine).where(col(Machine.id).in_(wanted)), machine_clause(scope)
-        )
+    lines = await _resolve_lines(
+        session, scope, room.id if room else None, payload.items, payload.skipped
     )
-    every = list(found.all())
-    machines = [m for m in every if m.id in set(ids)]
-    if len(every) != len(wanted):
+    note = _clean(payload.note)
+    # Nothing done is a visit too — the room was closed, every poste was
+    # off — but only one that says why: a poste left out with its reason,
+    # or the room's global note. Recorded, it moves no poste's cycle.
+    if not lines.machines and not lines.skipped and not (room and note):
         raise AppError(
-            code=ErrorCode.MACHINE_NOT_FOUND,
-            status_code=404,
-            message="Machine not found",
+            code=ErrorCode.MAINTENANCE_SESSION_EMPTY,
+            status_code=422,
+            message="A visit with no poste done must say why: a note on a "
+            "poste left out, or the room's global note",
         )
-    if room is not None:
-        # A visit of a room is the visit of its postes: a poste filed
-        # elsewhere would get a line « Maintenance — <this room> » it never
-        # had (the console only ever offers the room's own).
-        strays = sorted(
-            (m for m in every if m.room_id != room.id),
-            key=lambda m: (m.hostname or "").lower(),
-        )
-        if strays:
-            names = [m.hostname or str(m.id) for m in strays]
-            raise AppError(
-                code=ErrorCode.MAINTENANCE_ITEMS_NOT_IN_ROOM,
-                status_code=422,
-                message="Postes not in this room: " + ", ".join(names),
-                details={
-                    "machine_ids": [str(m.id) for m in strays],
-                    "hostnames": names,
-                },
-            )
-    notes = {i.machine_id: _clean(i.note) for i in payload.items}
     visit = await crud.record_session(
         session,
         room=room,
-        machines=machines,
-        notes=notes,
+        machines=lines.machines,
+        notes=lines.notes,
         performed_by=current.email,
         performed_at=payload.performed_at or utcnow(),
-        note=_clean(payload.note),
-        skipped=skipped,
+        note=note,
+        skipped=lines.skipped,
+    )
+    await session.commit()
+    await session.refresh(visit)
+    return await _session_out(session, visit, with_items=True, scope=scope)
+
+
+@router.post(
+    "/{maintenance_id}/lines", response_model=SessionOut, dependencies=[_WRITE]
+)
+async def add_session_lines(
+    maintenance_id: uuid.UUID,
+    payload: SessionLinesIn,
+    session: SessionDep,
+    scope: CurrentScope,
+    current: CurrentUser,
+) -> SessionOut:
+    """The next part of a visit: postes done or left out, dated and titled as
+    the visit. For a room larger than one request (audit T30), so that it
+    stays one visit. Only its author adds to it; a poste that already has a
+    line in it is passed over, so a part sent twice (a retry after a lost
+    answer) writes nothing twice."""
+    visit = await _require_session(session, maintenance_id, scope)
+    if visit.performed_by != current.email:
+        raise AppError(
+            code=ErrorCode.MAINTENANCE_SESSION_NOT_AUTHOR,
+            status_code=403,
+            message="Only the author of a visit adds postes to it",
+        )
+    # Serialise the parts of one visit: two retries at once would each find
+    # the poste unlined and write it twice.
+    await session.exec(
+        select(col(Maintenance.id))
+        .where(col(Maintenance.id) == visit.id)
+        .with_for_update()
+    )
+    room = await session.get(Room, visit.room_id) if visit.room_id else None
+    lines = await _resolve_lines(
+        session, scope, room.id if room else None, payload.items, payload.skipped
+    )
+    known = await crud.lined_machines(
+        session, visit.id, {m.id for m in lines.machines} | set(lines.skipped)
+    )
+    await crud.add_lines(
+        session,
+        visit,
+        machines=[m for m in lines.machines if m.id not in known],
+        notes=lines.notes,
+        skipped={k: v for k, v in lines.skipped.items() if k not in known},
     )
     await session.commit()
     await session.refresh(visit)
@@ -751,19 +920,9 @@ async def list_sessions(
     counts = await crud.item_counts(
         session, [r.id for r in rows], machine_clause(scope)
     )
+    reach = await _reach(session, rows, scope)
     return SessionList(
-        items=[
-            SessionOut(
-                id=r.id,
-                room_id=r.room_id,
-                room_name=r.room_name,
-                performed_by=r.performed_by,
-                performed_at=r.performed_at,
-                note=r.note,
-                machine_count=counts.get(r.id, 0),
-            )
-            for r in rows
-        ],
+        items=[_out(r, reach[r.id], counts.get(r.id, 0)) for r in rows],
         total=total,
         page=page,
         page_size=page_size,
@@ -816,20 +975,16 @@ async def delete_session(
     journal then says. Audited, with what was removed."""
     visit = await _require_session(session, maintenance_id, scope)
     lines = await crud.session_items(session, visit.id)
-    clause = machine_clause(scope)
-    if clause is not None and lines:
-        # Every line is removed: a confined account may only remove a visit
-        # whose postes it all sees (audit S06).
-        ids = {m.id for _, m in lines}
-        seen = await session.exec(
-            select(col(Machine.id)).where(col(Machine.id).in_(ids)).where(clause)
+    # Every line is removed, and the global note with them: a confined account
+    # may only remove a visit wholly in its scope — its room and every poste
+    # (audit S06). The trace written below would otherwise hand it the room's
+    # name and the note it is not shown.
+    if not (await _reach(session, [visit], scope))[visit.id].whole:
+        raise AppError(
+            code=ErrorCode.AUTH_SCOPE_RESTRICTED,
+            status_code=403,
+            message="This visit covers a room or postes beyond your scope",
         )
-        if len(set(seen.all())) != len(ids):
-            raise AppError(
-                code=ErrorCode.AUTH_SCOPE_RESTRICTED,
-                status_code=403,
-                message="This visit covers postes beyond your scope",
-            )
     audit.record(
         session,
         actor=current.email,

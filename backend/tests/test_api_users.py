@@ -5,6 +5,7 @@ DB-backed tests require TIAI_TEST_DATABASE_URL; the unit tests at the bottom
 always run.
 """
 
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -401,7 +402,7 @@ async def test_reset_request_issues_a_token_for_a_known_address(client, db_sessi
 
 async def test_a_second_reset_request_keeps_the_link_just_sent(client, db_session):
     """Audit S14: anyone may ask, but not void the link a user is opening,
-    nor fill the inbox."""
+    nor fill the inbox. The cooldown is the requesting address's (T34)."""
     from sqlmodel import select
 
     from app.features.user import crud
@@ -409,11 +410,11 @@ async def test_a_second_reset_request_keeps_the_link_just_sent(client, db_sessio
 
     await crud.create_user(db_session, email="forgot@test.local", password=STRONG)
     hashes = []
-    for ip in ("10.0.0.1", "10.0.0.2"):
+    for _ in range(2):
         resp = await client.post(
             "/api/v1/auth/password-reset/request",
             json={"email": "forgot@test.local"},
-            headers={"X-Forwarded-For": ip},
+            headers={"X-Forwarded-For": "10.0.0.1"},
         )
         assert resp.status_code == 204
         db_session.expire_all()
@@ -575,7 +576,8 @@ async def test_reset_links_alive_at_once_are_capped(client, db_session):
     user = await crud.create_user(db_session, email="cap@test.local", password=STRONG)
     for _ in range(settings.PASSWORD_RESET_MAX_LIVE_LINKS):
         await db_session.refresh(user)
-        await crud.create_reset_token(db_session, user)
+        # Asked from the test client's own address: the cap is per address.
+        await crud.create_reset_token(db_session, user, "127.0.0.1")
         await db_session.commit()
     await db_session.exec(
         update(PasswordResetToken).values(created_at=utcnow() - timedelta(hours=1))
@@ -593,8 +595,9 @@ async def test_reset_links_alive_at_once_are_capped(client, db_session):
 
 
 async def test_concurrent_reset_requests_issue_one_link(client, db_session):
-    """Audit S14 (T34): four requests at the same instant used to leave two
-    links (and two mails): the account's row serialises them."""
+    """Audit S14 (T34): four requests at the same instant from one address
+    used to leave two links (and two mails): the account's row serialises
+    them."""
     import asyncio
 
     from sqlmodel import select
@@ -608,13 +611,149 @@ async def test_concurrent_reset_requests_issue_one_link(client, db_session):
         return await client.post(
             "/api/v1/auth/password-reset/request",
             json={"email": "race@test.local"},
-            headers={"X-Forwarded-For": f"10.0.1.{i}"},
+            headers={"X-Forwarded-For": "10.0.1.7"},
         )
 
     answers = await asyncio.gather(*(ask(i) for i in range(4)))
     assert [r.status_code for r in answers] == [204] * 4
     db_session.expire_all()
     assert len((await db_session.exec(select(PasswordResetToken))).all()) == 1
+
+
+async def _ask_reset(client, email: str, ip: str):
+    return await client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"email": email},
+        headers={"X-Forwarded-For": ip},
+    )
+
+
+async def _age_reset_links(db_session, minutes: int) -> None:
+    """Move every link's issue time back, past the cooldown."""
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from app.features.base import utcnow
+    from app.features.user.models import PasswordResetToken
+
+    await db_session.exec(
+        update(PasswordResetToken).values(
+            created_at=utcnow() - timedelta(minutes=minutes)
+        )
+    )
+    await db_session.commit()
+
+
+async def _live_links(db_session) -> list:
+    from sqlmodel import select
+
+    from app.features.user.models import PasswordResetToken
+
+    db_session.expire_all()
+    return list((await db_session.exec(select(PasswordResetToken))).all())
+
+
+async def test_a_third_party_spends_its_own_reset_budget_not_the_owners(
+    client, db_session
+):
+    """Audit T34 (accepted limit, fixed): three requests an hour from anybody
+    used to spend the account's budget, and the owner's own request then
+    sent nothing. The budget is the requesting address's."""
+    from app.core.config import settings
+    from app.features.user import crud
+
+    await crud.create_user(db_session, email="target@test.local", password=STRONG)
+    for _ in range(settings.PASSWORD_RESET_MAX_LIVE_LINKS):
+        assert (
+            await _ask_reset(client, "target@test.local", "10.6.6.6")
+        ).status_code == 204
+        await _age_reset_links(db_session, 10)
+    links = await _live_links(db_session)
+    assert len(links) == settings.PASSWORD_RESET_MAX_LIVE_LINKS
+    assert {r.requested_ip for r in links} == {"10.6.6.6"}
+    # The third party's budget is spent: one more request from it sends nothing.
+    await _ask_reset(client, "target@test.local", "10.6.6.6")
+    assert len(await _live_links(db_session)) == settings.PASSWORD_RESET_MAX_LIVE_LINKS
+
+    # The owner, from their own poste: a link, mailed.
+    assert (
+        await _ask_reset(client, "target@test.local", "10.0.0.10")
+    ).status_code == 204
+    links = await _live_links(db_session)
+    assert len(links) == settings.PASSWORD_RESET_MAX_LIVE_LINKS + 1
+    assert sum(r.requested_ip == "10.0.0.10" for r in links) == 1
+
+
+async def test_the_account_ceiling_bounds_links_from_many_addresses(
+    client, db_session, monkeypatch
+):
+    """Per address alone, a botnet would fill the inbox: the links alive for
+    one account are capped whatever the addresses — except for a request
+    from one of the owner's usual postes."""
+    from app.core.config import settings
+    from app.features.base import utcnow
+    from app.features.user import addresses, crud
+
+    monkeypatch.setattr(settings, "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS", 4)
+    user = await crud.create_user(db_session, email="flood@test.local", password=STRONG)
+    await addresses.note_success(db_session, user.id, "10.0.0.10", utcnow())
+    await db_session.commit()
+    for i in range(6):
+        await _ask_reset(client, "flood@test.local", f"10.7.{i}.1")
+    assert len(await _live_links(db_session)) == 4
+
+    # The owner's usual poste is not held to the account's ceiling.
+    await _ask_reset(client, "flood@test.local", "10.0.0.10")
+    links = await _live_links(db_session)
+    assert len(links) == 5
+    assert any(r.requested_ip == "10.0.0.10" for r in links)
+
+
+async def test_a_reset_request_answers_in_the_same_time_whatever_the_account(
+    client, db_session, monkeypatch
+):
+    """Audit T34 (accepted limit, fixed): issuing a link writes to the
+    database where an unknown address only reads, and the answer's delay told
+    which addresses have an account. Every outcome now answers after the same
+    floor. The writes are slowed down here (as on a loaded server) so that
+    the gap is plain without the floor."""
+    import statistics
+    import time
+
+    from app.api.routes import auth
+    from app.features.user import crud
+
+    floor = 0.25
+    monkeypatch.setattr(auth, "PASSWORD_RESET_REQUEST_SECONDS", floor)
+    issue = crud.create_reset_token
+
+    async def slow_issue(*args, **kwargs):
+        await asyncio.sleep(0.12)
+        return await issue(*args, **kwargs)
+
+    monkeypatch.setattr(crud, "create_reset_token", slow_issue)
+    await crud.create_user(db_session, email="known@test.local", password=STRONG)
+
+    async def timed(email: str, ip: str) -> float:
+        started = time.monotonic()
+        resp = await _ask_reset(client, email, ip)
+        assert resp.status_code == 204
+        return time.monotonic() - started
+
+    unknown, issued, refused = [], [], []
+    for i in range(3):
+        unknown.append(await timed("nobody@test.local", f"10.8.{i}.1"))
+        # A fresh address each time: a link is issued (and mailed).
+        issued.append(await timed("known@test.local", f"10.8.{i}.2"))
+        # Same address again within the cooldown: nothing issued.
+        refused.append(await timed("known@test.local", f"10.8.{i}.2"))
+    assert len(await _live_links(db_session)) == 3
+
+    medians = [statistics.median(t) for t in (unknown, issued, refused)]
+    for t in unknown + issued + refused:
+        assert floor - 0.01 <= t < floor + 0.1, (unknown, issued, refused)
+    assert max(medians) - min(medians) < 0.04, medians
 
 
 async def test_redeeming_a_link_takes_the_account_lock_first(engine, db_session):

@@ -512,14 +512,23 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 _item(
                     env,
                     "PASSWORD_RESET_COOLDOWN_MINUTES",
-                    "Minutes pendant lesquelles un compte ne reçoit pas de nouvel "
-                    "e-mail « mot de passe oublié » après le précédent",
+                    "Minutes pendant lesquelles une même adresse ne fait pas "
+                    "envoyer de nouvel e-mail « mot de passe oublié » pour un "
+                    "compte après le précédent qu'elle a demandé",
                 ),
                 _item(
                     env,
                     "PASSWORD_RESET_MAX_LIVE_LINKS",
                     "Nombre de liens de réinitialisation valides à la fois pour un "
-                    "même compte ; une demande n'annule jamais un lien encore valide",
+                    "même compte et une même adresse qui les demande ; une demande "
+                    "n'annule jamais un lien encore valide",
+                ),
+                _item(
+                    env,
+                    "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS",
+                    "Plafond de liens valides à la fois pour un même compte, toutes "
+                    "adresses confondues ; une demande venue d'une adresse "
+                    "habituelle du compte n'y est pas soumise",
                 ),
                 _item(
                     env,
@@ -550,6 +559,19 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 ),
                 _item(
                     env,
+                    "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
+                    "Échecs de connexion, même espacés, en LOGIN_SLOW_WINDOW_HOURS "
+                    "heures qui verrouillent un compte pour ce nombre d'heures ; ce "
+                    "verrou n'admet que les adresses habituelles du compte",
+                ),
+                _item(
+                    env,
+                    "LOGIN_SLOW_WINDOW_HOURS",
+                    "Fenêtre, en heures, de ce second compteur, et durée du verrou "
+                    "qu'il pose ; une réinitialisation du mot de passe le lève",
+                ),
+                _item(
+                    env,
                     "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
                     "Un poste déjà enrôlé qui redemande un token attend l'approbation "
                     "d'un administrateur",
@@ -558,7 +580,7 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "RATE_LIMIT_ENABLED",
                     "Limitation du débit par adresse (connexion, mot de passe oublié, "
-                    "enrôlement), par compte (changement de mot de passe) et par poste "
+                    "enrôlement), par session (changement de mot de passe) et par poste "
                     "(battements) ; non = tout cela est levé, à réserver à des "
                     "opérateurs qui arrivent tous d'une même adresse. Ni le "
                     "verrouillage des comptes ni le budget du catalogue logiciel "
@@ -569,6 +591,13 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "TRUSTED_PROXIES",
                     "Réseaux (CIDR) des proxys dont l'en-tête X-Forwarded-For est cru "
                     "pour connaître l'adresse du client, en plus de la boucle locale",
+                ),
+                _item(
+                    env,
+                    "TRUSTED_PROXIES_ALLOW_WIDE",
+                    "oui = TRUSTED_PROXIES peut lister un réseau plus large qu'un /24 "
+                    "(IPv4) ou un /64 (IPv6) ; non = le serveur refuse de démarrer, "
+                    "car tout client de ce réseau pourrait choisir son adresse",
                 ),
                 _item(
                     env,

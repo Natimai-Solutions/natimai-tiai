@@ -9,7 +9,9 @@ That alone gives one guess per address during a lock, which a botnet or an
 IPv6 prefix multiplies at will. So once ``LOGIN_SIEGE_ADDRESSES`` distinct
 addresses have failed on the account within the window, the lock shuts out
 every address but those that opened the account within
-``LOGIN_KNOWN_ADDRESS_DAYS`` — its owner's usual postes.
+``LOGIN_KNOWN_ADDRESS_DAYS`` — its owner's usual postes. The lock the slow
+counter sets (guesses spaced out over hours, audit T06) does the same from
+the start.
 
 All of it is in the database (``user_login_addresses``): a restart of the API
 neither lifts a lock nor forgets the usual postes, and several API processes
@@ -38,6 +40,11 @@ def _address(ip: str | None) -> str:
     return (ip or "unknown")[:LOGIN_ADDRESS_MAX_LENGTH]
 
 
+# The same spelling for the other tables that key on a client's address (the
+# reset links' ``requested_ip``), so that both compare alike.
+stored_address = _address
+
+
 def _window_start(now: datetime) -> datetime:
     return now - timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
 
@@ -47,11 +54,19 @@ def _known_since(now: datetime) -> datetime:
 
 
 async def shut_out(
-    session: AsyncSession, user_id: uuid.UUID, ip: str | None, now: datetime
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    ip: str | None,
+    now: datetime,
+    *,
+    known_only: bool = False,
 ) -> bool:
     """Whether the lock of the account refuses ``ip``: it failed on the
-    account within the window, or enough addresses have for the lock to admit
-    only the usual ones, and it is not one of them."""
+    account within the window, or the lock admits only the usual addresses
+    and it is not one of them. A lock admits only those when enough addresses
+    failed on the account (a siege), or when ``known_only`` — the lock the
+    slow counter sets (audit T06), whose guesser spaced the failures out so
+    that no address failed lately."""
     row = await session.get(LoginAddress, (user_id, _address(ip)))
     window = _window_start(now)
     if row is not None and row.last_failure_at is not None:
@@ -60,8 +75,23 @@ async def shut_out(
     if row is not None and row.last_success_at is not None:
         if row.last_success_at > _known_since(now):
             return False
+    if known_only:
+        return True
     return await failing_addresses(session, user_id, now) >= (
         settings.LOGIN_SIEGE_ADDRESSES
+    )
+
+
+async def is_known(
+    session: AsyncSession, user_id: uuid.UUID, ip: str | None, now: datetime
+) -> bool:
+    """Whether ``ip`` opened the account within LOGIN_KNOWN_ADDRESS_DAYS —
+    one of its owner's usual postes."""
+    row = await session.get(LoginAddress, (user_id, _address(ip)))
+    return (
+        row is not None
+        and row.last_success_at is not None
+        and row.last_success_at > _known_since(now)
     )
 
 

@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Screen } from 'quasar';
 import { defineComponent, h } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
@@ -234,5 +235,73 @@ describe('RoomsPage — what the scope lets create, and selecting text (items 14
     await wrapper.find('tbody tr').trigger('click');
     expect(push).toHaveBeenCalledWith({ name: 'room-detail', params: { id: 'r-1' } });
     selection.mockRestore();
+  });
+});
+
+describe('RoomsPage — on a phone (audit U23)', () => {
+  const room = {
+    id: 'r-1',
+    name: 'Salle informatique B-204',
+    building: { id: 'b-1', name: 'Sciences' },
+    location: null,
+    effective_location: 'Lycée A',
+    notes: null,
+    ad_key: null,
+    machine_count: 24,
+    mismatch_count: 2,
+    maintenance_cycle_days: null,
+    maintenance_owner_name: null,
+    effective_cycle_days: 90,
+    effective_owner_name: 'Marie',
+    maintenance_overdue: 3,
+    maintenance_due_soon: 0,
+    created_at: '',
+    updated_at: '',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getRoomConfig).mockResolvedValue({ source: 'manual', manual: true });
+    vi.mocked(getRoomCreation).mockResolvedValue({ rooms: true, buildings: true });
+    vi.mocked(listLocations).mockResolvedValue([]);
+    vi.mocked(listRooms).mockResolvedValue([room] as never);
+    vi.mocked(listBuildings).mockResolvedValue([
+      { id: 'b-1', name: 'Sciences', location: 'Lycée A', room_count: 1, machine_count: 24 },
+    ] as never);
+    Screen.lt.sm = true;
+  });
+  afterEach(() => {
+    Screen.lt.sm = false;
+  });
+
+  it('shows a card per room, with its place, postes, maintenance and actions, no table', async () => {
+    const wrapper = await mountPage();
+    expect(wrapper.find('table').exists()).toBe(false);
+    const card = wrapper.find('[data-test="room-card-r-1"]');
+    const text = card.text();
+    expect(text).toContain('Salle informatique B-204');
+    expect(text).toContain('Sciences · Lycée A');
+    expect(text).toContain('24 poste(s)');
+    expect(text).toContain('2 divergent(s)');
+    expect(text).toContain('3 en retard');
+    expect(text).toContain('90 j');
+    expect(card.find('a').attributes('href')).toBe('/rooms/r-1');
+
+    // Actions as labelled buttons, not a dense menu to aim at.
+    const edit = card.findAll('button').find((b) => b.text().includes('Modifier'))!;
+    expect(edit.classes()).not.toContain('q-btn--dense');
+    expect(card.findAll('button').some((b) => b.text().includes('Supprimer'))).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('shows a card per building too', async () => {
+    const wrapper = await mountPage();
+    // The tabs are stubbed: switch the panel directly.
+    (wrapper.vm as unknown as { tab: string }).tab = 'buildings';
+    await flushPromises();
+    expect(wrapper.find('table').exists()).toBe(false);
+    const card = wrapper.find('[data-test="building-card-b-1"]');
+    expect(card.text()).toContain('1 salle(s) · 24 poste(s)');
+    wrapper.unmount();
   });
 });

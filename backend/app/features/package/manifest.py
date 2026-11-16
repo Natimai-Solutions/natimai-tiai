@@ -118,6 +118,28 @@ def case_duplicates(files: Sequence[PackageFile]) -> list[list[str]]:
     return [sorted(names) for _, names in sorted(groups.items()) if len(names) > 1]
 
 
+# An msiexec switch that removes a product: /x and /uninstall, any case,
+# either prefix msiexec takes, whatever is glued to it ("/x{code}"). No other
+# switch of msiexec starts with x or "uninstall". The agent
+# (deploy.msiexecRemoval) and the signing script ($MsiExecUninstallSwitch)
+# use the same pattern, kept equal by a test.
+UNINSTALL_SWITCH = re.compile(r"^[/-](x|uninstall)", re.IGNORECASE)
+
+
+def msiexec_removes(run: str | None, args: Sequence[str]) -> bool:
+    """Whether a step runs msiexec with a switch that removes a product: an
+    uninstallation, whatever step it is filed under. As an installation every
+    poste refuses it (agent deploy.MsiExecRemoves, and deploy.MethodAStep
+    under method A, which would otherwise rebuild it as ``/x {code}``)."""
+    return run == MSIEXEC and any(UNINSTALL_SWITCH.search(a) for a in args)
+
+
+INSTALL_REMOVES = (
+    "L'installation lance une désinstallation (msiexec /x ou /uninstall) : "
+    "placez cette commande dans la désinstallation du paquet"
+)
+
+
 def by_product_code(package: Package) -> bool:
     """Whether the uninstallation is ``msiexec`` with an MSI product code among
     its arguments: what method A runs as ``/x {code}`` without downloading any
@@ -145,6 +167,11 @@ def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
                 "install_missing", f"« {package.install_run} » n'est pas dans le paquet"
             )
         )
+    elif msiexec_removes(package.install_run, package.install_args):
+        # Refused on write (packages._apply); a row written before that rule
+        # may remain. The uninstallation is not concerned: the agent runs
+        # only the step of the action it was sent.
+        out.append(Problem("install_removes", INSTALL_REMOVES, blocks_uninstall=False))
     if (
         package.uninstall_run
         and package.uninstall_run != MSIEXEC
@@ -237,7 +264,7 @@ def runnable_somewhere(
     product code: the agent rebuilds the command line as ``/x {code} /qn
     /norestart`` and downloads nothing (agent deploy.MethodAStep, audit U04).
     An installation by msiexec is not accepted here under method A: the agent
-    would turn it into that uninstall."""
+    refuses it, since the line it rebuilds is that uninstall."""
     if package.signature is not None:
         return True
     if action == "uninstall":

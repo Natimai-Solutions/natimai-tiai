@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Screen } from 'quasar';
 import { defineComponent, h } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
@@ -320,6 +321,42 @@ describe('RoomDetailPage — acceptance fixes', () => {
     await flushPromises();
     expect(push).toHaveBeenCalledWith({ name: 'machine-detail', params: { id: 'm-1' } });
     selection.mockRestore();
+    wrapper.unmount();
+  });
+});
+
+describe('RoomDetailPage — on a phone (audit U23)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getRoom).mockResolvedValue(room);
+    vi.mocked(getRoomConfig).mockResolvedValue({ source: 'manual', manual: true });
+    vi.mocked(listBuildings).mockResolvedValue([]);
+    vi.mocked(listLocations).mockResolvedValue([]);
+    vi.mocked(listMachines).mockResolvedValue({ items: [inRoom], total: 1 } as never);
+    vi.mocked(getRoomMaintenance).mockResolvedValue(settings);
+    vi.mocked(listSessions).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 5 });
+    Screen.lt.sm = true;
+  });
+  afterEach(() => {
+    Screen.lt.sm = false;
+  });
+
+  it('shows a card per poste with its link and « Retirer » at touch size, no table', async () => {
+    const wrapper = await mountPage();
+    expect(wrapper.find('table').exists()).toBe(false);
+    const card = wrapper.find('[data-test="machine-card-m-1"]');
+    expect(card.find('a').attributes('href')).toBe('/machines/m-1');
+    expect(card.text()).toContain('PC-01');
+    const remove = card.find('[aria-label="Retirer PC-01 de la salle"]');
+    expect(remove.classes()).not.toContain('q-btn--dense');
+
+    const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+      onOk() {
+        return this;
+      },
+    })) as never);
+    await remove.trigger('click');
+    expect(dialog).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });
 });

@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { QBtn } from 'quasar';
+import { QBtn, QDialog, Screen } from 'quasar';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('src/services/maintenance', async (importOriginal) => ({
@@ -74,6 +74,43 @@ describe('MaintenanceSessionViewDialog (item 6)', () => {
   it('offers no deletion without maintenance:write', async () => {
     const wrapper = await open(['maintenance:read']);
     expect(wrapper.findAllComponents(QBtn).some((b) => b.text().includes('Supprimer'))).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('says a visit seen through one poste is partial, and offers no deletion (audit S06)', async () => {
+    vi.mocked(getSession).mockResolvedValue({
+      id: 's-1',
+      room_id: null,
+      room_name: null,
+      performed_by: 'alice@test.local',
+      performed_at: '2026-11-10T20:00:00Z',
+      note: null,
+      machine_count: 1,
+      items: [{ intervention_id: 'i-1', machine_id: 'm-1', hostname: 'PC-A', note: null }],
+      skipped: [],
+      partial: true,
+    });
+    const wrapper = await open(['maintenance:read', 'maintenance:write']);
+    const banner = document.body.querySelector('[data-test="visit-partial"]')!;
+    expect(banner.textContent).toContain('seuls vos postes sont affichés');
+    expect(banner.textContent).toContain("sans l'observation générale");
+    expect(wrapper.findAllComponents(QBtn).some((b) => b.text().includes('Supprimer'))).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('takes the whole screen on a phone (audit U23)', async () => {
+    Screen.lt.sm = true;
+    try {
+      const wrapper = await open(['maintenance:read']);
+      expect(wrapper.findComponent(QDialog).props('maximized')).toBe(true);
+      const card = document.body.querySelector('[data-test="visit-card"]')!;
+      expect(card.getAttribute('style') ?? '').not.toMatch(/width/);
+      wrapper.unmount();
+    } finally {
+      Screen.lt.sm = false;
+    }
+    const wrapper = await open(['maintenance:read']);
+    expect(wrapper.findComponent(QDialog).props('maximized')).toBe(false);
     wrapper.unmount();
   });
 });

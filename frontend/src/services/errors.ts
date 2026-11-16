@@ -77,6 +77,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'room.in_group_scope':
     'Le périmètre d’un groupe nomme ce lieu : retirez-le du groupe avant de le supprimer',
   'maintenance.items.not_in_room': 'Ces postes ne sont pas dans la salle de la séance',
+  'maintenance.session.empty':
+    'Aucun poste fait : dites pourquoi, par une observation générale ou la note d’un poste non fait',
+  'maintenance.session.not_author': 'Seul l’auteur de la séance peut lui ajouter des postes',
   'request.validation_error': 'Requête invalide',
   'request.rate_limited': 'Trop de tentatives : réessayez dans quelques minutes',
   'http.not_found': 'Ressource introuvable',

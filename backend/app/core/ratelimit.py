@@ -65,63 +65,6 @@ class RateLimiter:
         self._last_sweep = float("-inf")
 
 
-class Quota:
-    """A budget of units per key over a sliding window: ``take`` grants what
-    is left of it, possibly less than asked. Where a limiter counts requests,
-    this counts what they create — the software catalogue entries a poste
-    adds, say, whatever the number of heartbeats they ride (audit S21)."""
-
-    def __init__(self, units: int, window_seconds: float) -> None:
-        self.units = units
-        self.window = window_seconds
-        self._taken: dict[str, deque[tuple[float, int]]] = {}
-        self._last_sweep = float("-inf")
-
-    def _used(self, key: str, window_start: float) -> int:
-        taken = self._taken.get(key)
-        if taken is None:
-            return 0
-        while taken and taken[0][0] <= window_start:
-            taken.popleft()
-        return sum(n for _, n in taken)
-
-    def take(self, key: str, wanted: int) -> int:
-        """Grant up to ``wanted`` units to ``key`` and return how many."""
-        now = time.monotonic()
-        window_start = now - self.window
-        granted = max(0, min(wanted, self.units - self._used(key, window_start)))
-        if granted:
-            self._taken.setdefault(key, deque()).append((now, granted))
-        if len(self._taken) > 1024 and now - self._last_sweep >= self.window:
-            self._last_sweep = now
-            for k in list(self._taken):
-                if not self._used(k, window_start):
-                    del self._taken[k]
-        return granted
-
-    def remaining(self, key: str) -> int:
-        """What ``key`` could still be granted right now, taking nothing."""
-        used = self._used(key, time.monotonic() - self.window)
-        return max(0, self.units - used)
-
-    def give_back(self, key: str, units: int) -> None:
-        """Return ``units`` granted to ``key`` and not used after all — what
-        they were to create was rolled back. The latest grants go first."""
-        taken = self._taken.get(key)
-        while taken and units > 0:
-            at, granted = taken[-1]
-            if granted <= units:
-                taken.pop()
-                units -= granted
-            else:
-                taken[-1] = (at, granted - units)
-                units = 0
-
-    def reset(self) -> None:
-        self._taken.clear()
-        self._last_sweep = float("-inf")
-
-
 # One limiter per guarded surface, so hammering /enroll never locks the
 # console's /login. Keyed on client IP: the parc is a LAN where every poste
 # has its own address, and the console reaches us through Caddy, which
@@ -140,8 +83,10 @@ password_reset_check_limiter = RateLimiter(max_attempts=20, window_seconds=900)
 # back all at once — roomy, since each poste still arrives from its own IP.
 enroll_limiter = RateLimiter(max_attempts=30, window_seconds=300)
 
-# Self-service password change: keyed on the account, not the address — a
-# stolen access token is the threat, and it works from anywhere (audit S04).
+# Self-service password change: keyed on the session, not the address — a
+# stolen access token is the threat, and it works from anywhere (audit S04)
+# — nor the account, whose budget the thief would spend for its owner's
+# other sessions (audit T07).
 password_change_limiter = RateLimiter(max_attempts=5, window_seconds=900)
 
 # Heartbeat: keyed on the poste. The agent polls every
@@ -154,54 +99,6 @@ password_change_limiter = RateLimiter(max_attempts=5, window_seconds=900)
 heartbeat_limiter = RateLimiter(
     max_attempts=settings.AGENT_HEARTBEAT_MAX_PER_MINUTE, window_seconds=60
 )
-
-# New software catalogue entries one poste may create per day
-# (SOFTWARE_NEW_ENTRIES_PER_DAY). A first inventory names at most MAX_SOFTWARE
-# (2,000) entries, and on a parc whose catalogue already exists nearly all of
-# them are known; a token in a loop used to add 2,000 new names per heartbeat
-# (audit S21). Same in-process trade-off as the limiters above.
-software_quota = Quota(
-    units=settings.SOFTWARE_NEW_ENTRIES_PER_DAY, window_seconds=24 * 3600
-)
-# The same entries, all postes together (SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET).
-# The budget above is per poste, and the fleet secret enrolls as many postes
-# as one cares to forge, each with a budget of its own: twenty-nine of them
-# added 58,000 rows in under a minute. One key, since there is one catalogue.
-software_fleet_quota = Quota(
-    units=settings.SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET, window_seconds=24 * 3600
-)
-_FLEET = "fleet"
-
-
-def software_fleet_budget_left() -> int:
-    """New catalogue entries the postes together may still create."""
-    return software_fleet_quota.remaining(_FLEET)
-
-
-def software_budget_left(machine_key: str) -> int:
-    """New catalogue entries this poste could be granted right now: the
-    smaller of what is left of its own budget and of the fleet's."""
-    return min(software_quota.remaining(machine_key), software_fleet_budget_left())
-
-
-def reserve_software_entries(machine_key: str, wanted: int) -> int:
-    """Take up to ``wanted`` new catalogue entries from both budgets, and
-    return how many were granted. Nothing awaits in here, so the two budgets
-    move together. To be given back with ``release_software_entries`` when
-    the transaction that was to create them does not commit."""
-    granted = min(wanted, software_budget_left(machine_key))
-    if granted <= 0:
-        return 0
-    software_quota.take(machine_key, granted)
-    software_fleet_quota.take(_FLEET, granted)
-    return granted
-
-
-def release_software_entries(machine_key: str, units: int) -> None:
-    """Give back a reservation whose entries were never committed."""
-    software_quota.give_back(machine_key, units)
-    software_fleet_quota.give_back(_FLEET, units)
-
 
 _ALL = (
     login_limiter,
@@ -217,8 +114,6 @@ def reset_all() -> None:
     """Forget every recorded attempt (tests)."""
     for limiter in _ALL:
         limiter.reset()
-    software_quota.reset()
-    software_fleet_quota.reset()
 
 
 def check_account(limiter: RateLimiter, key: str, surface: str) -> None:

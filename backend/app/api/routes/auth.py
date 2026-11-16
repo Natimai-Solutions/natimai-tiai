@@ -11,8 +11,10 @@ other route; ``POST /auth/refresh`` trades it for a new access token, and a
 new refresh token with it. ``POST /auth/logout`` ends the session for good.
 """
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import datetime
 from typing import Annotated, Any
@@ -181,13 +183,19 @@ async def login(
         user = await crud.authenticate(session, form.username, form.password, ip)
     except crud.AccountLockedError as exc:
         if exc.just_locked:
+            details = {"locked_until": exc.locked_until.isoformat()}
+            if exc.slow:
+                # Failures spaced out over hours (audit T06): the audit log
+                # says which counter locked, since this lock admits only the
+                # account's usual addresses.
+                details["via"] = "slow_attempts"
             audit.record(
                 session,
                 actor=exc.user.email,
                 action="user.locked",
                 resource_type="user",
                 resource_id=str(exc.user.id),
-                details={"locked_until": exc.locked_until.isoformat()},
+                details=details,
             )
         # %r: the field is typed by whoever is at the keyboard; a line break in
         # it must not forge a second log line.
@@ -195,7 +203,7 @@ async def login(
             "login refused for %r from %s: %s until %s",
             form.username,
             ip,
-            "account locked"
+            ("account locked (slow guessing)" if exc.slow else "account locked")
             if exc.just_locked
             else "address shut out of the locked account",
             exc.locked_until.isoformat(),
@@ -525,43 +533,83 @@ class PasswordChange(BaseModel):
     new_password: Password
 
 
+# Wrong current passwords one session may type on « changer mon mot de
+# passe » before it is ended (audit S04, T07).
+PASSWORD_CHANGE_SESSION_FAILURES = 5
+
+
 @router.post("/password", status_code=204)
 async def change_password(
-    request: Request, payload: PasswordChange, user: CurrentUser, session: SessionDep
+    request: Request,
+    payload: PasswordChange,
+    user: CurrentUser,
+    current: CurrentAuthSession,
+    session: SessionDep,
 ) -> None:
     """Change one's own password.
 
     Every session of the account is revoked — the one this request came
     through included — so the console re-authenticates right after.
     """
-    # Keyed on the account: a stolen access token guesses from anywhere, and
-    # each check is a bcrypt the whole API would wait for (audit S04).
+    # Keyed on the session, not the account (audit T07): a stolen session
+    # guesses from anywhere, and each check is a bcrypt the whole API would
+    # wait for (audit S04) — but an account-wide budget was one the thief
+    # spent for the owner, whose own sessions then could not change the
+    # password either. A session cannot beget another without the password,
+    # so per session bounds the thief all the same.
     ratelimit.check_account(
-        ratelimit.password_change_limiter, str(user.id), "auth.password"
+        ratelimit.password_change_limiter, str(current.id), "auth.password"
     )
     if not await security.check_password(
         payload.current_password, user.hashed_password
     ):
         # Guessing the password of an open session is guessing at a login:
-        # it counts towards the lock like one, and the failure that locks the
-        # account also ends its sessions — the guesser's token with them.
+        # it counts towards the lock like one. The session that spends its
+        # budget, or whose failure locks the account, is ended — the
+        # guesser's token with it — and the owner's other sessions are left
+        # alone: they never typed a wrong password.
         ip = client_ip(request)
-        until = await crud.record_failure(session, user, ip)
-        if until is not None:
-            await auth_sessions.revoke_all(session, user.id)
+        lock = await crud.record_failure(session, user, ip)
+        failures = await auth_sessions.note_password_failure(session, current)
+        if lock is not None:
+            details: dict[str, Any] = {
+                "locked_until": lock.until.isoformat(),
+                "via": "password_change",
+            }
+            if lock.slow:
+                details["slow"] = True
             audit.record(
                 session,
                 actor=user.email,
                 action="user.locked",
                 resource_type="user",
                 resource_id=str(user.id),
-                details={"locked_until": until.isoformat(), "via": "password_change"},
+                details=details,
+            )
+        if lock is not None or failures >= PASSWORD_CHANGE_SESSION_FAILURES:
+            auth_sessions.revoke(session, current)
+            audit.record(
+                session,
+                actor=user.email,
+                action="auth.session_revoked",
+                resource_type="user",
+                resource_id=str(user.id),
+                details={
+                    "current": True,
+                    "via": "password_change",
+                    "failures": failures,
+                    "user_agent": current.user_agent,
+                    "ip": current.ip,
+                    "created_at": current.created_at.isoformat(),
+                },
             )
             security_log.warning(
-                "password change: too many wrong current passwords for %s from %s, "
-                "sessions revoked",
+                "password change: %d wrong current passwords for %s from %s, "
+                "session %s ended",
+                failures,
                 user.email,
                 ip,
+                current.id,
             )
         await session.commit()
         raise AppError(
@@ -609,6 +657,13 @@ async def password_policy() -> PasswordPolicy:
     )
 
 
+# How long « mot de passe oublié » takes to answer, whatever it did (audit
+# T34). Well above what issuing a link costs (a few writes, tens of
+# milliseconds), so that the known and the unknown address answer alike; a
+# person waiting for a mail does not notice half a second.
+PASSWORD_RESET_REQUEST_SECONDS = 0.5
+
+
 class PasswordResetRequest(BaseModel):
     """Ask for a reset link to be mailed."""
 
@@ -632,25 +687,51 @@ async def request_password_reset(
     """Mail a reset link to the account, if it exists.
 
     Public endpoint. It answers 204 whatever happens — unknown address,
-    deactivated account, mail failure — so it cannot be used to find out which
-    e-mails have a console account. Rate-limited per source address: each
-    accepted call can put a mail in a known operator's inbox.
+    deactivated account, budget spent, mail failure — so it cannot be used to
+    find out which e-mails have a console account; and it answers after the
+    same time whatever happens (``PASSWORD_RESET_REQUEST_SECONDS``): issuing
+    a link writes to the database where an unknown address only reads, and
+    the difference showed (audit T34). Rate-limited per source address: each
+    accepted call can put a mail in a known operator's inbox; the link budget
+    itself is per account and address (``crud.reset_request_allowed``).
     """
-    security_log.info(
-        "password reset requested for %s from %s",
-        payload.email,
-        client_ip(request),
-    )
-    user = await crud.get_by_email(session, payload.email)
+    started = time.monotonic()
+    ip = client_ip(request)
+    security_log.info("password reset requested for %s from %s", payload.email, ip)
+    try:
+        await _issue_reset_link(session, payload.email, ip)
+    finally:
+        elapsed = time.monotonic() - started
+        if elapsed > PASSWORD_RESET_REQUEST_SECONDS:
+            # Past the floor, the answer's delay tells again what it hides:
+            # worth an operator's eye (a database this slow is news anyway).
+            security_log.warning(
+                "password reset request took %.3f s, above its %.3f s floor",
+                elapsed,
+                PASSWORD_RESET_REQUEST_SECONDS,
+            )
+        await asyncio.sleep(max(0.0, PASSWORD_RESET_REQUEST_SECONDS - elapsed))
+
+
+async def _issue_reset_link(session: SessionDep, email: str, ip: str) -> None:
+    """The work behind a reset request. Every path ends its transaction the
+    same way (a commit), so none has a step of its own left to time."""
+    user = await crud.get_by_email(session, email)
     if user is None or not user.is_active:
+        await session.commit()
         return
-    if not await crud.reset_request_allowed(session, user):
-        # A link mailed less than five minutes ago, or three still valid:
-        # nothing voided, nothing sent — the inbox is not filled from another
-        # poste (audit S14). Same 204 as any request.
-        security_log.info("password reset for %s: link already sent", user.email)
+    if not await crud.reset_request_allowed(session, user, ip):
+        # From this address, a link mailed less than five minutes ago or
+        # three still valid — or ten for the account, from anywhere: nothing
+        # voided, nothing sent (audit S14, T34). Same 204 as any request.
+        security_log.info(
+            "password reset for %s from %s: budget spent, nothing sent",
+            user.email,
+            ip,
+        )
+        await session.commit()
         return
-    token = await crud.create_reset_token(session, user)
+    token = await crud.create_reset_token(session, user, ip)
     # Queued before the commit, so the mail and the token it links to are one
     # transaction: no link mailed for a token that was rolled back, no token
     # whose mail was lost to a Mailgun outage — the worker sends with retries.

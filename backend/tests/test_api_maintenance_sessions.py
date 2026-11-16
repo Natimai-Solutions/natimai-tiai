@@ -405,3 +405,155 @@ async def test_settings_name_a_default_owner_that_no_longer_resolves(
         "/api/v1/settings", headers=admin, json={"maintenance_default_cycle_days": 60}
     )
     assert resp.json()["maintenance_default_owner_unavailable"]["id"] == tech_id
+
+
+# --- Audit T30: nothing done, and rooms larger than one request ---------------
+
+
+async def test_a_visit_with_nothing_done_is_recorded_when_it_says_why(
+    client, db_session
+):
+    """A visit where every poste was left out, each with its reason, is
+    recorded: one « Maintenance non faite » line per poste, no maintenance
+    counted, and no poste's last maintenance moved."""
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "A101")
+    a = await _machine(db_session, "A", room_id=room)
+    b = await _machine(db_session, "B", room_id=room)
+    visit = await _visit(client, admin, room, [], skipped=[a, b])
+    assert visit["machine_count"] == 0
+    assert visit["items"] == []
+    assert sorted(i["hostname"] for i in visit["skipped"]) == ["A", "B"]
+    for m in (a, b):
+        (line,) = await _journal(client, admin, m)
+        assert line["kind"] == "other"
+        assert line["title"] == "Maintenance non faite — A101"
+        detail = (await client.get(f"/api/v1/machines/{m}", headers=admin)).json()
+        assert detail["last_maintenance_at"] is None
+    listed = (
+        await client.get(f"/api/v1/maintenance?room_id={room}", headers=admin)
+    ).json()
+    assert [v["machine_count"] for v in listed["items"]] == [0]
+
+
+async def test_a_room_visit_with_only_its_global_note_is_recorded(client, db_session):
+    """The room was closed: no poste line at all, the global note says why."""
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "A101")
+    a = await _machine(db_session, "A", room_id=room)
+    resp = await client.post(
+        "/api/v1/maintenance",
+        headers=admin,
+        json={"room_id": room, "note": "Salle fermée (examens)", "items": []},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert (body["note"], body["machine_count"], body["room_name"]) == (
+        "Salle fermée (examens)",
+        0,
+        "A101",
+    )
+    assert await _journal(client, admin, a) == []
+    got = await client.get(f"/api/v1/maintenance/{body['id']}", headers=admin)
+    assert got.status_code == 200, got.text
+
+
+async def test_a_visit_with_nothing_done_and_no_reason_is_refused(client, db_session):
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "A101")
+    a = await _machine(db_session, "A", room_id=room)
+    for payload in (
+        {"room_id": room, "items": []},
+        # A blank reason is no reason: the skipped poste is not written.
+        {"room_id": room, "items": [], "skipped": [{"machine_id": a, "note": " "}]},
+        # A note about no room and no poste is about nothing.
+        {"note": "RAS", "items": []},
+        {"items": []},
+    ):
+        resp = await client.post("/api/v1/maintenance", headers=admin, json=payload)
+        assert resp.status_code == 422, (payload, resp.text)
+        assert resp.json()["error"]["code"] == "maintenance.session.empty"
+    assert await _journal(client, admin, a) == []
+    listed = (await client.get("/api/v1/maintenance", headers=admin)).json()
+    assert listed["total"] == 0
+
+
+async def test_a_large_room_is_sent_in_parts_as_one_visit(client, db_session):
+    """More postes than one request takes: the first part creates the visit,
+    the next ones are added to it — same date, same title, one visit."""
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "Amphi")
+    a = await _machine(db_session, "A", room_id=room)
+    b = await _machine(db_session, "B", room_id=room)
+    c = await _machine(db_session, "C", room_id=room)
+    when = (datetime.now(UTC) - timedelta(days=2)).replace(microsecond=0)
+    resp = await client.post(
+        "/api/v1/maintenance",
+        headers=admin,
+        json={
+            "room_id": room,
+            "performed_at": when.isoformat(),
+            "note": "Tout l'amphi",
+            "items": [{"machine_id": a}],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    visit_id = resp.json()["id"]
+    part = {"items": [{"machine_id": b}], "skipped": [{"machine_id": c, "note": "HS"}]}
+    resp = await client.post(
+        f"/api/v1/maintenance/{visit_id}/lines", headers=admin, json=part
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["machine_count"] == 2
+    assert [i["hostname"] for i in body["items"]] == ["A", "B"]
+    assert [i["hostname"] for i in body["skipped"]] == ["C"]
+    # Sent twice (an answer lost on the way): nothing written twice.
+    resp = await client.post(
+        f"/api/v1/maintenance/{visit_id}/lines", headers=admin, json=part
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["machine_count"] == 2
+    (line,) = await _journal(client, admin, b)
+    assert line["maintenance_id"] == visit_id
+    assert line["title"] == "Amphi"
+    assert datetime.fromisoformat(line["performed_at"]) == when
+    detail = (await client.get(f"/api/v1/machines/{b}", headers=admin)).json()
+    assert datetime.fromisoformat(detail["last_maintenance_at"]) == when
+    (line,) = await _journal(client, admin, c)
+    assert line["title"] == "Maintenance non faite — Amphi"
+    listed = (await client.get("/api/v1/maintenance", headers=admin)).json()
+    assert listed["total"] == 1
+
+    # The room's own postes only, and its author only.
+    other = await _room(client, admin, "B12")
+    stray = await _machine(db_session, "STRAY", room_id=other)
+    resp = await client.post(
+        f"/api/v1/maintenance/{visit_id}/lines",
+        headers=admin,
+        json={"items": [{"machine_id": stray}]},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "maintenance.items.not_in_room"
+    tech, _ = await _tech(client, db_session)
+    d = await _machine(db_session, "D", room_id=room)
+    resp = await client.post(
+        f"/api/v1/maintenance/{visit_id}/lines",
+        headers=tech,
+        json={"items": [{"machine_id": d}]},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "maintenance.session.not_author"
+    resp = await client.post(
+        f"/api/v1/maintenance/{uuid.uuid4()}/lines",
+        headers=admin,
+        json={"items": [{"machine_id": d}]},
+    )
+    assert resp.status_code == 404
+    # One request stays bounded.
+    resp = await client.post(
+        f"/api/v1/maintenance/{visit_id}/lines",
+        headers=admin,
+        json={"items": [{"machine_id": d}] * 1001},
+    )
+    assert resp.status_code == 422
