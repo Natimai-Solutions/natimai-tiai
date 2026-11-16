@@ -289,3 +289,33 @@ async def test_actions_lists_distinct_slugs_sorted(client, db_session):
     resp = await client.get("/api/v1/audit/actions", headers=headers)
     assert resp.status_code == 200
     assert resp.json() == ["group.create", "room.update"]
+
+
+async def test_list_items_carry_the_source_address_as_ip(client, db_session):
+    """The console prints where an action came from: each item of the list
+    exposes it as ``ip`` — the request's address, null for the worker's own."""
+    from app.features.audit.models import AuditEntry
+
+    headers = await _admin(client, db_session)
+    db_session.add(
+        AuditEntry(
+            actor="worker",
+            action="x.job",
+            resource_type="machine",
+            resource_id="r",
+            ip=None,
+        )
+    )
+    await db_session.commit()
+    resp = await client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={"email": "traced@test.local", "password": STRONG},
+    )
+    assert resp.status_code == 201, resp.text
+    items = (await _entries(client, headers))["items"]
+    created = next(i for i in items if i["action"] == "user.create")
+    # The test client's address, as the API saw it.
+    assert created["ip"] == "127.0.0.1"
+    job = next(i for i in items if i["action"] == "x.job")
+    assert "ip" in job and job["ip"] is None

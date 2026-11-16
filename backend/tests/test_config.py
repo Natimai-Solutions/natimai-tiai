@@ -227,3 +227,72 @@ def test_the_wol_allowed_networks_are_checked_from_the_environment(monkeypatch):
         make_settings()
     monkeypatch.setenv("WOL_ALLOWED_NETWORKS", "10.4.0.0/16,10.4.7.0/24")
     assert make_settings().WOL_ALLOWED_NETWORKS == ["10.4.0.0/16", "10.4.7.0/24"]
+
+
+# --- Out-of-range values refuse the start (acceptance, 2026-11) ----------------
+#
+# Each pair: the variable, values just outside its range, values at its edges.
+# Where the page Paramètres or the « Envoi des e-mails » card validates the
+# same setting, the bounds are theirs.
+_BOUNDS: list[tuple[str, list[Any], list[Any]]] = [
+    ("WOL_PORT", [0, 65536], [1, 65535]),
+    ("LOW_DISK_FREE_PERCENT", [0, 100], [1, 99]),
+    ("INACTIVE_AFTER_DAYS", [0, 3651], [1, 3650]),
+    ("SIGNATURE_MAX_AGE_DAYS", [-1, 366], [0, 365]),
+    ("EMAIL_MAX_ATTEMPTS", [0], [1]),
+    ("EMAIL_OUTBOX_RETENTION_DAYS", [-1], [0]),
+    ("NOTIFICATION_MAX_ITEMS", [0], [1]),
+    ("POSTGRES_POOL_SIZE", [0], [1]),
+    ("POSTGRES_MAX_OVERFLOW", [-1], [0]),
+    ("WOL_PACKET_COUNT", [0, 21], [1, 20]),
+    ("WOL_SUBNET_PREFIXLEN", [7, 31], [8, 30]),
+    ("SMTP_TIMEOUT_SECONDS", [0, 121], [1, 120]),
+    ("EMAIL_FROM_EMAIL", ["tiai", "a b@x.fr", "tiai@local"], ["tiai@lycee.local", ""]),
+    (
+        "CONSOLE_BASE_URL",
+        ["tiai.lycee.pf", "ftp://tiai.lycee.pf", "https://"],
+        ["https://tiai.lycee.pf", "http://10.0.0.5:8080/console", ""],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [(name, v) for name, bad, _ in _BOUNDS for v in bad],
+)
+def test_an_out_of_range_setting_refuses_the_start(name: str, value: Any):
+    with pytest.raises(ValidationError):
+        make_settings(**{name: value})
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [(name, v) for name, _, good in _BOUNDS for v in good],
+)
+def test_a_setting_at_the_edge_of_its_range_is_accepted(name: str, value: Any):
+    assert getattr(make_settings(**{name: value}), name) == value
+
+
+def test_the_console_bounds_are_the_environments():
+    """The fleet thresholds and the SMTP timeout share their bounds with the
+    console's forms, which override them."""
+    from app.api.routes.settings_routes import SettingsUpdate
+    from app.core.config import Settings
+    from app.features.setting import email_policy as mail
+
+    def bounds(model: Any, field: str) -> tuple[Any, Any]:
+        meta = model.model_fields[field].metadata
+        ge = next(m.ge for m in meta if hasattr(m, "ge") and m.ge is not None)
+        le = next(m.le for m in meta if hasattr(m, "le") and m.le is not None)
+        return ge, le
+
+    for env_name, form_name in (
+        ("SIGNATURE_MAX_AGE_DAYS", "signature_max_age_days"),
+        ("INACTIVE_AFTER_DAYS", "inactive_after_days"),
+        ("LOW_DISK_FREE_PERCENT", "low_disk_free_percent"),
+    ):
+        assert bounds(Settings, env_name) == bounds(SettingsUpdate, form_name)
+    assert bounds(Settings, "SMTP_TIMEOUT_SECONDS") == (
+        mail.TIMEOUT_MIN,
+        mail.TIMEOUT_MAX,
+    )

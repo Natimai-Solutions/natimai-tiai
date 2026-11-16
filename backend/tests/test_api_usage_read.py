@@ -194,7 +194,8 @@ async def test_export_names_its_window_and_writes_numbers(client, db_session):
     text = resp.content.decode("utf-8-sig")
     rows = list(csv.reader(io.StringIO(text), delimiter=DELIMITER))
     assert rows[0] == ["Nom", "Heures allumées (7 j)"]
-    assert sorted(rows[1:]) == [["IDLE", "0.0"], ["LIGHT", "4.5"]]
+    # A decimal comma: the file is read by a French Excel (``;``-separated).
+    assert sorted(rows[1:]) == [["IDLE", "0,0"], ["LIGHT", "4,5"]]
 
     resp = await client.get(
         "/api/v1/machines/export.xlsx",

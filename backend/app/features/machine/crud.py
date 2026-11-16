@@ -8,7 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
 from app.features.check import crud as check_crud
-from app.features.command.models import Command
+from app.features.command.models import Command, CommandStatus
 from app.features.intervention import crud as intervention_crud
 from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
@@ -16,10 +16,19 @@ from app.features.maintenance.reach import owner_reach
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 
+MERGED_ERROR = "Poste fusionné : commande annulée"
+
+# What a merge closes on the absorbed record rather than hand to the kept one.
+_OPEN_STATUSES = [
+    CommandStatus.PENDING.value,
+    CommandStatus.DELIVERED.value,
+    CommandStatus.RUNNING.value,
+]
+
 
 async def merge_into(
     session: AsyncSession, *, target: Machine, source: Machine
-) -> None:
+) -> bool:
     """Merge ``source`` into ``target`` (plan §8): reattach the source's threats
     and commands to the target, clear the verification flag, and delete the
     source. Threats whose ``detection_id`` already exists on the target are
@@ -34,7 +43,27 @@ async def merge_into(
 
     Its *usage counters* are reattached, hour by hour, and added to the
     target's where both have the same hour (``usage.crud.move_to``).
+
+    Its *open* commands (pending, delivered, running) are closed as failed
+    first, then moved with the rest of the history: handed to the kept poste
+    still open, a pending one would be delivered there a second time, and a
+    delivered one would wait for a verdict from an agent that no longer has a
+    record — blocking that command type on the kept poste until it timed out.
+    Returns whether a closed one held package files, for the caller to sweep
+    the store once committed.
     """
+    closed = await session.exec(
+        update(Command)
+        .where(col(Command.machine_id) == source.id)
+        .where(col(Command.status).in_(_OPEN_STATUSES))
+        .values(
+            status=CommandStatus.FAILED.value,
+            error=MERGED_ERROR,
+            finished_at=utcnow(),
+        )
+        .returning(col(Command.package_files))
+    )
+    held_files = any(files for (files,) in closed.all())
     # Commands carry no uniqueness constraint — reassign them wholesale.
     await session.exec(
         update(Command)
@@ -106,6 +135,7 @@ async def merge_into(
     target.updated_at = utcnow()
 
     await session.delete(source)
+    return held_files
 
 
 async def recompute_up_to_date(session: AsyncSession, *, max_age_days: int) -> int:
@@ -118,8 +148,16 @@ async def recompute_up_to_date(session: AsyncSession, *, max_age_days: int) -> i
     machine last reported, by the heartbeat's own function, so the two can
     never differ. Only the machines whose verdict moved are written. Returns
     how many; the caller commits.
+
+    A machine with no verdict at all is left alone: it never reported an
+    antivirus block, and is « inconnu », not « périmé », whatever the
+    threshold.
     """
-    machines = (await session.exec(select(Machine))).all()
+    machines = (
+        await session.exec(
+            select(Machine).where(col(Machine.is_up_to_date).is_not(None))
+        )
+    ).all()
     changed = 0
     for machine in machines:
         verdict = compute_is_up_to_date(

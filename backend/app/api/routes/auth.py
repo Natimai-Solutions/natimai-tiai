@@ -21,6 +21,9 @@ from fastapi import APIRouter, Cookie, Depends, Header, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import Text, bindparam, update
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlmodel import col
 
 from app.api.deps import (
     CurrentAuthSession,
@@ -443,19 +446,10 @@ class ProfileUpdate(BaseModel):
         return value
 
 
-def merge_preferences(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    """The stored document after ``patch``: keys set, null keys removed.
-
-    Raises ``AppError`` (422) when the result exceeds the bounds — measured on
-    the merged document, since the caller's patch may be small and the
-    accumulated document large.
-    """
-    merged = {**current}
-    for key, value in patch.items():
-        if value is None:
-            merged.pop(key, None)
-        else:
-            merged[key] = value
+def check_preferences(merged: dict[str, Any]) -> None:
+    """Raise ``AppError`` (422) when the merged document exceeds the bounds —
+    measured on it rather than on the patch, since the caller's patch may be
+    small and the accumulated document large."""
     too_many = len(merged) > PREFERENCES_MAX_KEYS
     too_big = len(json.dumps(merged, separators=(",", ":"))) > PREFERENCES_MAX_BYTES
     if too_many or too_big:
@@ -467,7 +461,33 @@ def merge_preferences(current: dict[str, Any], patch: dict[str, Any]) -> dict[st
                 f"{PREFERENCES_MAX_BYTES} bytes"
             ),
         )
-    return merged
+
+
+async def _merge_stored_preferences(
+    session: SessionDep, user: User, patch: dict[str, Any]
+) -> None:
+    """Apply ``patch`` to the stored document in one statement.
+
+    Merged by the database (``preferences || set - removed``) on the row as it
+    is when the UPDATE takes its lock, not on the copy this request read: two
+    pages saving different keys at the same instant both keep theirs. Read
+    in Python and written back whole, the later write used to erase the
+    earlier one's key. The bounds are checked on the merged document the
+    statement returns; refusing raises, and the transaction is not committed.
+    """
+    to_set = {k: v for k, v in patch.items() if v is not None}
+    to_drop = [k for k, v in patch.items() if v is None]
+    stored = User.__table__.c.preferences  # type: ignore[attr-defined]
+    merged_expr = stored.op("||", return_type=JSONB)(
+        bindparam("to_set", to_set, type_=JSONB)
+    ).op("-", return_type=JSONB)(bindparam("to_drop", to_drop, type_=ARRAY(Text)))
+    result = await session.exec(
+        update(User)
+        .where(col(User.id) == user.id)
+        .values(preferences=merged_expr, updated_at=utcnow())
+        .returning(stored)
+    )
+    check_preferences(result.scalar_one())
 
 
 @router.patch("/me", response_model=UserOut)
@@ -484,14 +504,10 @@ async def update_me(
     whether it is active stay with an administrator (``/users``) — a read-only
     operator who could edit their own row would not be read-only for long.
     """
+    if payload.preferences is not None:
+        await _merge_stored_preferences(session, user, payload.preferences)
     if payload.email_preference is not None:
         user.email_preference = payload.email_preference
-    if payload.preferences is not None:
-        # A new dict and not an in-place update: SQLAlchemy only notices a
-        # JSONB column changing when the attribute is reassigned.
-        user.preferences = merge_preferences(
-            user.preferences or {}, payload.preferences
-        )
     user.updated_at = utcnow()
     session.add(user)
     await session.commit()
@@ -553,6 +569,16 @@ async def change_password(
             status_code=400,
             message="Current password is incorrect",
         )
+    if payload.new_password == payload.current_password:
+        # Checked once the current password is proved, so it tells nothing to
+        # whoever is guessing it. Changing a password to itself would end
+        # every session for nothing — and is mostly a form filled in the
+        # wrong order.
+        raise AppError(
+            code=ErrorCode.PASSWORD_UNCHANGED,
+            status_code=400,
+            message="The new password must differ from the current one",
+        )
     # The owner, proved by the current password: this address stays known.
     await crud.set_password(
         session, user, payload.new_password, chosen_from=client_ip(request)
@@ -567,6 +593,9 @@ class PasswordPolicy(BaseModel):
     console (audit B24)."""
 
     min_length: int
+    # bcrypt reads no further (``security.PASSWORD_MAX_BYTES``): UTF-8 bytes,
+    # not characters.
+    max_bytes: int
     reset_expire_minutes: int
 
 
@@ -575,6 +604,7 @@ async def password_policy() -> PasswordPolicy:
     """Public: the reset page needs it before anyone is logged in."""
     return PasswordPolicy(
         min_length=settings.PASSWORD_MIN_LENGTH,
+        max_bytes=security.PASSWORD_MAX_BYTES,
         reset_expire_minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES,
     )
 
@@ -626,6 +656,35 @@ async def request_password_reset(
     # whose mail was lost to a Mailgun outage — the worker sends with retries.
     emails.send_password_reset(session, user.email, token)
     await session.commit()
+
+
+@router.get(
+    "/password-reset/check",
+    status_code=204,
+    dependencies=[
+        Depends(
+            ratelimit.rate_limit(
+                ratelimit.password_reset_check_limiter, "auth.password_reset_check"
+            )
+        )
+    ],
+)
+async def check_password_reset(token: str, session: SessionDep) -> None:
+    """Whether a reset link can still be redeemed, without redeeming it.
+
+    Public, for the reset page to say « ce lien a expiré » before the owner
+    types a new password twice for nothing. 204 when the confirm route would
+    accept it, the confirm route's own 400 otherwise. Nothing is consumed,
+    locked or written. Rate-limited per address like the reset requests (a
+    budget of its own, so reloading the page does not spend theirs): it
+    answers whether a token is live, which is what guessing tokens would ask.
+    """
+    if not await crud.reset_token_usable(session, token):
+        raise AppError(
+            code=ErrorCode.PASSWORD_RESET_TOKEN_INVALID,
+            status_code=400,
+            message="This reset link is invalid or has expired",
+        )
 
 
 class PasswordResetConfirm(BaseModel):

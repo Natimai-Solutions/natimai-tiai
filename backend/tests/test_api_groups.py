@@ -350,3 +350,123 @@ async def test_risky_alone_is_not_enough_to_reach_the_route(client, db_session):
         json={"type": "reboot", "machine_ids": [str(machine.id)]},
     )
     assert resp.status_code == 403
+
+
+# --- Names: bounds, case, races (acceptance, 2026-11) --------------------------
+
+
+async def test_group_names_are_unique_whatever_their_case(client, db_session):
+    admin = await _admin(client, db_session)
+    resp = await client.post(
+        "/api/v1/groups", headers=admin, json={"name": "lecture SEULE"}
+    )
+    assert resp.status_code == 409
+    assert _code(resp) == "group.name.taken"
+    mine = await _create_group(client, admin, "  Atelier  ", [])
+    assert mine["name"] == "Atelier"
+    resp = await client.patch(
+        f"/api/v1/groups/{mine['id']}", headers=admin, json={"name": "TECHNICIENS"}
+    )
+    assert resp.status_code == 409
+    # Recasing one's own name is a rename like any other.
+    resp = await client.patch(
+        f"/api/v1/groups/{mine['id']}", headers=admin, json={"name": "ATELIER"}
+    )
+    assert resp.status_code == 200, resp.text
+
+
+async def test_a_blank_or_long_group_name_is_a_422(client, db_session):
+    admin = await _admin(client, db_session)
+    for name in ("   ", "x" * 101):
+        resp = await client.post("/api/v1/groups", headers=admin, json={"name": name})
+        assert resp.status_code == 422, (name, resp.text)
+    mine = await _create_group(client, admin, "Atelier", [])
+    resp = await client.patch(
+        f"/api/v1/groups/{mine['id']}", headers=admin, json={"name": " "}
+    )
+    assert resp.status_code == 422
+
+
+async def test_concurrent_creations_of_one_group_name_answer_409(client, db_session):
+    import asyncio
+
+    admin = await _admin(client, db_session)
+    results = await asyncio.gather(
+        *(
+            client.post(
+                "/api/v1/groups",
+                headers=admin,
+                json={"name": "Atelier" if i % 2 else "ATELIER"},
+            )
+            for i in range(6)
+        )
+    )
+    codes = sorted(r.status_code for r in results)
+    assert codes == [201] + [409] * 5, [r.text for r in results]
+
+
+async def test_a_group_names_its_scope_for_any_reader(client, db_session):
+    """GET /groups carries ``scope_labels``: each place in words, resolved by
+    the server whatever the reader may see of rooms — and a place deleted
+    since says so instead of showing a bare id."""
+    from app.features.machine.models import Machine
+    from app.features.room.models import Building, Room
+
+    admin = await _admin(client, db_session)
+    bat_id, a101_id, loose_id, gone = (uuid.uuid4() for _ in range(4))
+    db_session.add(Building(id=bat_id, name="Bat A1", location="Papeete"))
+    await db_session.commit()
+    db_session.add_all(
+        [
+            Room(id=a101_id, name="A101", building_id=bat_id),
+            Room(id=loose_id, name="Labo", location="Taravao"),
+            Machine(machine_uuid=str(uuid.uuid4()), location="Faa'a"),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/v1/groups",
+        headers=admin,
+        json={
+            "name": "Confinés",
+            "permissions": ["user:read"],
+            "scope": {
+                "locations": ["Faa'a", "Nulle part"],
+                "buildings": [str(bat_id)],
+                "rooms": [str(a101_id), str(loose_id)],
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    group_id = resp.json()["id"]
+    # A room deleted since the scope was saved.
+    from app.features.user.models import GroupScope
+
+    db_session.add(
+        GroupScope(group_id=uuid.UUID(group_id), kind="room", value=str(gone))
+    )
+    await db_session.commit()
+
+    # Read by an account with user:read but no room:read.
+    reader = await _user(client, db_session, "reader@test.local", [uuid.UUID(group_id)])
+    listed = (await client.get("/api/v1/groups", headers=reader)).json()
+    mine = next(g for g in listed if g["id"] == group_id)
+    assert mine["scope_labels"] == [
+        {"kind": "site", "id": "Faa'a", "label": "Faa'a", "exists": True},
+        {"kind": "site", "id": "Nulle part", "label": "Nulle part", "exists": False},
+        {
+            "kind": "building",
+            "id": str(bat_id),
+            "label": "Bat A1 — Papeete",
+            "exists": True,
+        },
+        {"kind": "room", "id": str(a101_id), "label": "A101 — Bat A1", "exists": True},
+        {"kind": "room", "id": str(loose_id), "label": "Labo", "exists": True},
+        {"kind": "room", "id": str(gone), "label": str(gone), "exists": False},
+    ]
+    one = (await client.get(f"/api/v1/groups/{group_id}", headers=reader)).json()
+    assert one["scope_labels"] == mine["scope_labels"]
+    # The whole parc has nothing to name.
+    admins = next(g for g in listed if g["builtin_key"] == "admin")
+    assert admins["scope_labels"] == []

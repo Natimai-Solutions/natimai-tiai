@@ -1,11 +1,12 @@
 """Package queries, and the one rule that keeps signatures honest."""
 
+import asyncio
 import base64
 import hashlib
 import json
 import logging
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -15,6 +16,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import contains, utcnow
+from app.features.command import crud as command_crud
 from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.inventory.models import MachineSoftware, Software
 from app.features.package import manifest, storage
@@ -82,6 +84,46 @@ async def cancel_pending_installs(
         .where(col(Command.type) == CommandType.PACKAGE_INSTALL.value)
         .where(col(Command.status) == CommandStatus.PENDING.value)
         .values(status=CommandStatus.FAILED, error=RETIRED_ERROR, finished_at=now)
+    )
+    return result.rowcount or 0
+
+
+# What a pending deployment replaced by a newer one says in the console
+# (``supersede_stale_pending``).
+SUPERSEDED_ERROR = "Remplacée par un nouveau déploiement"
+
+
+async def supersede_stale_pending(
+    session: AsyncSession,
+    *,
+    package_id: uuid.UUID,
+    command_type: str,
+    digest: str,
+    machine_ids: Sequence[uuid.UUID],
+    now: datetime,
+) -> int:
+    """Fail the deployments of this package and action still waiting on these
+    postes that were queued for another version of it, and return how many.
+
+    Left pending, each would count as « déjà en attente » for the deployment
+    being queued — which would then send nothing — and fail at delivery as
+    « paquet modifié après la mise en file »: the administrator would have
+    redeployed for nothing. One queued for the version as it stands is kept,
+    and still counts as already pending. A deployment a poste has received is
+    its own: it runs, or fails, to its end. One queued before fingerprints
+    existed (no digest) is delivered as the package stands: current too.
+    The caller holds the package's lock, and commits."""
+    if not machine_ids:
+        return 0
+    result = await session.exec(
+        update(Command)
+        .where(col(Command.package_id) == package_id)
+        .where(col(Command.type) == command_type)
+        .where(col(Command.status) == CommandStatus.PENDING.value)
+        .where(col(Command.machine_id).in_(list(machine_ids)))
+        .where(col(Command.package_digest).is_not(None))
+        .where(col(Command.package_digest) != digest)
+        .values(status=CommandStatus.FAILED, error=SUPERSEDED_ERROR, finished_at=now)
     )
     return result.rowcount or 0
 
@@ -242,3 +284,34 @@ async def sweep_store(session: AsyncSession) -> int:
         except SQLAlchemyError:
             logger.exception("rollback after the package store sweep failed")
     return removed
+
+
+# How often the API process sweeps the store on its own (``sweep_periodically``).
+SWEEP_INTERVAL_SECONDS = 3600
+
+
+async def sweep_periodically(
+    session_factory: Callable[[], AsyncSession],
+    interval_seconds: float = SWEEP_INTERVAL_SECONDS,
+) -> None:
+    """Sweep the store every ``interval_seconds``, until cancelled.
+
+    The sweeps the requests trigger — an upload, a verdict, a refusal at
+    delivery — miss the files whose last deployment ended without one: it
+    expired on a poste that stayed off, or was closed unanswered by the
+    worker. On a quiet server those stayed on disk indefinitely. Expired
+    deployments are marked first: a pending one past its TTL still holds its
+    files until something says it expired. Run in the API process, where the
+    upload pins live (``storage.pin``): a sweep elsewhere would not see them.
+    Never raises but on cancellation."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            async with session_factory() as session:
+                await command_crud.mark_expired(session)
+                await session.commit()
+                await sweep_store(session)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("periodic package store sweep failed")

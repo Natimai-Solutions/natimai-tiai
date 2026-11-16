@@ -7,6 +7,8 @@ TIAI_TEST_DATABASE_URL) point that engine at the test database via monkeypatch.
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 
 async def test_expire_stale_commands_marks_pending(engine, db_session, monkeypatch):
     from sqlmodel import select
@@ -312,3 +314,139 @@ async def test_main_reads_the_schedule_from_the_database(
     policy = await worker.load_schedule()
     assert policy is not None
     assert (policy.digest_hour_utc, policy.reminder_weekday) == (5, 3)
+
+
+# --- Acceptance, 2026-11: a stuck drain, a failed digest, a second digest ----------
+
+
+async def test_a_stuck_drain_holds_neither_the_loop_nor_the_other_jobs():
+    """The outbox runs beside the loop: a drain stuck on a silent server
+    lets the other jobs run on every tick, and is not started twice."""
+    import asyncio
+
+    from app.core.worker import Job, every, finish_background, run_due_jobs
+
+    release = asyncio.Event()
+    drains: list[int] = []
+    others: list[int] = []
+
+    async def stuck_drain() -> int:
+        drains.append(1)
+        await release.wait()
+        return 0
+
+    async def other() -> int:
+        others.append(1)
+        return 0
+
+    now = datetime(2026, 10, 1, 6, 0, tzinfo=UTC)
+    jobs = [
+        Job("outbox", stuck_drain, now, every(30), background=True),
+        Job("expire", other, now, every(30)),
+    ]
+    await asyncio.wait_for(run_due_jobs(jobs, now), timeout=1)
+    await asyncio.sleep(0)
+    later = now + timedelta(seconds=30)
+    await asyncio.wait_for(run_due_jobs(jobs, later), timeout=1)
+    assert drains == [1]
+    assert others == [1, 1]
+    release.set()
+    await finish_background(jobs, timeout=1)
+    await asyncio.wait_for(run_due_jobs(jobs, later + timedelta(seconds=30)), 1)
+    await finish_background(jobs, timeout=1)
+    assert drains == [1, 1]
+
+
+async def test_a_failed_digest_is_retried_the_same_day_only():
+    from app.core.worker import POLL_SECONDS, Job, daily_at, run_due_jobs
+
+    outcomes = [RuntimeError("db down"), RuntimeError("db down"), 3]
+    calls: list[datetime] = []
+
+    async def digest() -> int:
+        calls.append(datetime.now(UTC))
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    at = datetime(2026, 10, 1, 18, 0, tzinfo=UTC)
+    job = Job("daily_digest", digest, at, daily_at(18), retry_same_day=True)
+    await run_due_jobs([job], at)
+    assert job.next_run == at + timedelta(seconds=POLL_SECONDS)
+    tick = job.next_run
+    await run_due_jobs([job], tick)
+    await run_due_jobs([job], job.next_run)
+    assert len(calls) == 3
+    assert job.next_run == datetime(2026, 10, 2, 18, tzinfo=UTC)
+    assert job.retrying_on is None
+
+    # Failing until midnight: the next day does not get yesterday's digest
+    # at 00:00, it waits for its own hour.
+    async def always_down() -> int:
+        raise RuntimeError("db down")
+
+    job = Job("daily_digest", always_down, at, daily_at(18), retry_same_day=True)
+    await run_due_jobs([job], at)
+    midnight = datetime(2026, 10, 2, 0, 0, 10, tzinfo=UTC)
+    job.next_run = midnight
+    await run_due_jobs([job], midnight)
+    assert job.next_run == datetime(2026, 10, 2, 18, tzinfo=UTC)
+    assert job.retrying_on is None
+
+
+async def test_a_mail_job_never_runs_twice_for_one_period(
+    engine, db_session, monkeypatch
+):
+    """The period a mail job went out for is kept in the database, with the
+    mails: a restart followed by an hour change does not send the day's
+    digest a second time, and a run that failed is not taken for one sent."""
+    from app.core import worker
+    from app.features.notification import digest
+    from app.features.setting import crud
+
+    monkeypatch.setattr(worker, "engine", engine)
+    runs: list[int] = []
+    fail = [True]
+
+    async def fake_digest(session) -> int:
+        runs.append(1)
+        if fail[0]:
+            raise RuntimeError("smtp down")
+        return 2
+
+    monkeypatch.setattr(digest, "send_daily_digest", fake_digest)
+    with pytest.raises(RuntimeError):
+        await worker.send_daily_digest()
+    assert (
+        await crud.get_value(db_session, worker.LAST_RUN_KEYS["daily_digest"]) is None
+    )
+
+    fail[0] = False
+    assert await worker.send_daily_digest() == 2
+    # Another process — a restart — with the same day: nothing sent.
+    assert await worker.send_daily_digest() == 0
+    assert len(runs) == 2
+    db_session.expire_all()
+    assert (
+        await crud.get_value(db_session, worker.LAST_RUN_KEYS["daily_digest"])
+        == worker.utcnow().date().isoformat()
+    )
+
+
+async def test_the_weekly_reminder_is_kept_per_iso_week(engine, monkeypatch):
+    from app.core import worker
+    from app.features.notification import tasks
+
+    monkeypatch.setattr(worker, "engine", engine)
+    runs: list[int] = []
+
+    async def fake(session) -> int:
+        runs.append(1)
+        return 1
+
+    monkeypatch.setattr(tasks, "send_maintenance_reminders", fake)
+    assert await worker.send_maintenance_reminders() == 1
+    assert await worker.send_maintenance_reminders() == 0
+    assert runs == [1]
+    assert worker._iso_week(datetime(2026, 1, 1, tzinfo=UTC)) == "2026-W01"

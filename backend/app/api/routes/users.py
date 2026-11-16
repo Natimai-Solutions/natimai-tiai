@@ -21,19 +21,21 @@ being the shortest path of all, since it hands the new password back.
 import logging
 import uuid
 from datetime import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentAuthority, CurrentUser, SessionDep, require_permission
-from app.api.fields import Email, Password, not_null
+from app.api.fields import Email, Password, bounded_name, not_null
 from app.core import security
-from app.core.errors import AppError, ErrorCode
+from app.core.errors import AppError, ErrorCode, violated_constraint
 from app.features.audit import crud as audit
 from app.features.auth_session import crud as auth_sessions
 from app.features.base import utcnow
 from app.features.user import crud
-from app.features.user.models import EmailPreference, User
+from app.features.user.models import FULL_NAME_MAX_LENGTH, EmailPreference, User
 from app.features.user.permissions import (
     Action,
     Authority,
@@ -92,6 +94,10 @@ class UserList(BaseModel):
     page_size: int
 
 
+# Trimmed, not blank, within its column (``User.full_name``).
+FullName = Annotated[str | None, bounded_name(FULL_NAME_MAX_LENGTH)]
+
+
 class UserCreate(BaseModel):
     """New account. The password is set by the admin and sent out of band.
 
@@ -101,7 +107,7 @@ class UserCreate(BaseModel):
 
     email: Email
     password: Password
-    full_name: str | None = None
+    full_name: FullName = None
     group_ids: list[uuid.UUID] = []
 
 
@@ -109,7 +115,7 @@ class UserUpdate(BaseModel):
     """Partial update — only the supplied fields are changed."""
 
     email: Email | None = None
-    full_name: str | None = None
+    full_name: FullName = None
     group_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None
     email_preference: EmailPreference | None = None
@@ -139,17 +145,35 @@ async def _require_user(session: SessionDep, user_id: uuid.UUID) -> User:
     return user
 
 
+def _email_taken() -> AppError:
+    return AppError(
+        code=ErrorCode.USER_EMAIL_TAKEN,
+        status_code=409,
+        message="This email is already in use",
+    )
+
+
 async def _reject_email_taken(
     session: SessionDep, email: str, *, exclude: uuid.UUID | None = None
 ) -> None:
     """Raise if ``email`` already belongs to another account."""
     existing = await crud.get_by_email(session, email)
     if existing is not None and existing.id != exclude:
-        raise AppError(
-            code=ErrorCode.USER_EMAIL_TAKEN,
-            status_code=409,
-            message="This email is already in use",
-        )
+        raise _email_taken()
+
+
+# The index that says « this address has an account already » when two
+# requests race past ``_reject_email_taken`` together.
+_EMAIL_INDEX = "ix_users_email_lower"
+
+
+async def _email_race(session: SessionDep, exc: IntegrityError) -> AppError | None:
+    """The 409 a lost race on an address deserves, after rolling the
+    transaction back; None (nothing rolled back) for any other failure."""
+    if violated_constraint(exc) != _EMAIL_INDEX:
+        return None
+    await session.rollback()
+    return _email_taken()
 
 
 async def _require_groups_exist(
@@ -221,6 +245,13 @@ async def reject_lockout(session: SessionDep) -> None:
     same effect one step removed.
     """
     await session.flush()
+    # Serialised: two last administrators deactivating each other at the same
+    # instant would each count the other as still active — neither change is
+    # committed yet — and the console would be left with none. Under this
+    # lock, held to the end of the transaction, the second one counts after
+    # the first has committed (READ COMMITTED: the count below is a fresh
+    # snapshot), and is refused.
+    await crud.lock_account_management(session)
     if await crud.users_holding(session, USER_WRITE) == 0:
         raise AppError(
             code=ErrorCode.USER_LOCKOUT,
@@ -287,13 +318,19 @@ async def create_user(
     # touching it afterwards would lazy-load from an async session, which
     # cannot be done outside an await.
     actor = current.email
-    user = await crud.create_user(
-        session,
-        email=payload.email,
-        password=payload.password,
-        full_name=payload.full_name,
-        groups=payload.group_ids,
-    )
+    try:
+        user = await crud.create_user(
+            session,
+            email=payload.email,
+            password=payload.password,
+            full_name=payload.full_name,
+            groups=payload.group_ids,
+        )
+    except IntegrityError as exc:
+        # Another request created the same address since the check above.
+        if (taken := await _email_race(session, exc)) is not None:
+            raise taken from None
+        raise
     audit.record(
         session,
         actor=actor,
@@ -365,6 +402,14 @@ async def update_user(
         setattr(user, name, stored)
     user.updated_at = utcnow()
     session.add(user)
+    if email_changed:
+        try:
+            await session.flush()
+        except IntegrityError as exc:
+            # Another account took this address since the check above.
+            if (taken := await _email_race(session, exc)) is not None:
+                raise taken from None
+            raise
     if group_ids is not None:
         await crud.set_user_groups(session, user, group_ids)
     if deactivating:

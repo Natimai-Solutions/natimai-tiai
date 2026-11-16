@@ -26,6 +26,9 @@ from app.features.setting.email_policy import EmailPolicy
 PROBE_TIMEOUT_SECONDS = 15
 _OVERALL_TIMEOUT_SECONDS = PROBE_TIMEOUT_SECONDS + 10
 _MAX_MESSAGE = 400
+# « 530 5.7.0 Authentication required »: the server wants a login before it
+# accepts a sender.
+SMTP_AUTH_REQUIRED = 530
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,30 @@ def describe_error(exc: BaseException, policy: EmailPolicy) -> str:
     """A failure as the page shows it: what went wrong, in French, and the
     server's own words where it gave any."""
     smtp_where = f"{policy.smtp_host}:{policy.smtp_port}"
+    if (
+        isinstance(exc, smtplib.SMTPResponseException)
+        and exc.smtp_code == SMTP_AUTH_REQUIRED
+    ):
+        # Answered to MAIL FROM by a server that wants a login first: the
+        # sender is not what it refuses, and saying so sent administrators
+        # chasing the wrong field.
+        account = (
+            "le compte configuré n'a pas suffi : vérifiez l'utilisateur"
+            if policy.smtp_user
+            else "renseignez l'utilisateur et le mot de passe SMTP"
+        )
+        return (
+            f"Le serveur {smtp_where} exige une authentification — {account} "
+            f"(réponse : {_server_text(exc)})"
+        )
+    if isinstance(exc, smtplib.SMTPServerDisconnected) and _timed_out(exc):
+        # smtplib turns a read that timed out into « connection unexpectedly
+        # closed »: the server accepted the connection and said nothing.
+        return (
+            f"Le serveur {smtp_where} a accepté la connexion mais n'a pas répondu "
+            f"dans les {policy.smtp_timeout_seconds} s. Est-ce bien un serveur "
+            "SMTP, et le mode de sécurité correspond-il au port (TLS sur 465) ?"
+        )
     if isinstance(exc, smtplib.SMTPAuthenticationError):
         return (
             "Identifiants refusés par le serveur SMTP — vérifiez l'utilisateur et "
@@ -111,12 +138,22 @@ def describe_error(exc: BaseException, policy: EmailPolicy) -> str:
     if isinstance(exc, httpx.RequestError):
         return f"Impossible de joindre Mailgun : {exc}"
     if isinstance(exc, TimeoutError):
-        return f"Le serveur {_where(policy)} n'a pas répondu dans le délai imparti"
+        return (
+            f"Le serveur {_where(policy)} n'a pas répondu dans le délai imparti "
+            f"({_OVERALL_TIMEOUT_SECONDS} s)"
+        )
     if isinstance(exc, ConnectionRefusedError):
         return f"Connexion refusée par {smtp_where} — le port est-il le bon ?"
     if isinstance(exc, OSError):
         return f"Impossible de joindre {_where(policy)} : {exc.strerror or exc}"
     return f"Erreur inattendue : {type(exc).__name__}: {exc}"
+
+
+def _timed_out(exc: BaseException) -> bool:
+    """Whether an SMTP disconnection was a read that timed out — smtplib
+    raises it from the timeout, which stays attached as its context."""
+    cause = exc.__cause__ or exc.__context__
+    return isinstance(cause, TimeoutError) or "timed out" in str(exc)
 
 
 def _where(policy: EmailPolicy) -> str:

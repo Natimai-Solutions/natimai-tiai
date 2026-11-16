@@ -65,7 +65,7 @@ async def test_ask_assign_and_close_writes_the_journal(client, db_session):
         instructions="Vérifier le câble réseau",
     )
     assert check["requested_by"] == "admin@test.local"
-    assert check["assigned_to"] == {"id": tech_id, "name": "Marie"}
+    assert check["assigned_to"] == {"id": tech_id, "name": "Marie", "active": True}
     assert check["machine"]["hostname"] == "PC-1"
 
     # The fiche and the list carry it.
@@ -194,7 +194,8 @@ async def test_assignable_users_and_permissions(client, db_session):
             await client.get("/api/v1/checks/assignable-users", headers=tech)
         ).json()
     )
-    assert names == ["Marie", "admin@test.local", "ro@test.local"]
+    # Read-only cannot close a check: not offered (it used to be).
+    assert names == ["Marie", "admin@test.local"]
     # A deactivated account cannot be assigned.
     users = (await client.get("/api/v1/users", headers=admin)).json()["items"]
     ro_id = next(u["id"] for u in users if u["email"] == "ro@test.local")
@@ -247,3 +248,66 @@ async def test_dashboard_counts_open_requests_and_export_carries_them(
     )
     assert resp.status_code == 200
     assert "Oui" in resp.text and "Marie" in resp.text and "Écran" in resp.text
+
+
+async def test_a_check_cannot_be_closed_before_it_was_asked(client, db_session):
+    """Item 12: a closing date earlier than the request is refused."""
+    from datetime import UTC, datetime, timedelta
+
+    admin, _ = await _admin(client, db_session)
+    m = await _machine(db_session)
+    check = await _ask(client, admin, m)
+    before = datetime.now(UTC) - timedelta(days=2)
+    resp = await client.post(
+        f"/api/v1/checks/{check['id']}/close",
+        headers=admin,
+        json={"note": "vu", "closed_at": before.isoformat()},
+    )
+    assert resp.status_code == 422, resp.text
+    (error,) = resp.json()["error"]["details"]["errors"]
+    assert error["loc"] == ["body", "closed_at"]
+    assert "précéder la demande" in error["msg"]
+    # A past date after the request is fine, and the check is still open.
+    created = datetime.fromisoformat(check["created_at"])
+    resp = await client.post(
+        f"/api/v1/checks/{check['id']}/close",
+        headers=admin,
+        json={"note": "vu", "closed_at": (created + timedelta(seconds=1)).isoformat()},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+async def test_the_journal_line_of_a_closing_does_not_repeat_its_kind(
+    client, db_session
+):
+    """Item 13: « Vérification — Vérification » — the kind is the heading."""
+    admin, _ = await _admin(client, db_session)
+    m = await _machine(db_session)
+    check = await _ask(client, admin, m)
+    resp = await client.post(
+        f"/api/v1/checks/{check['id']}/close", headers=admin, json={"note": "ok"}
+    )
+    assert resp.status_code == 200, resp.text
+    journal = (
+        await client.get(f"/api/v1/machines/{m}/interventions", headers=admin)
+    ).json()
+    (line,) = journal["items"]
+    assert line["kind"] == "verification" and line["title"] is None
+    assert line["check_id"] == check["id"]
+
+
+async def test_a_deactivated_assignee_is_named_as_such(client, db_session):
+    """Item 4: the check names its assignee as inactive, so the console shows
+    « (désactivé) » rather than an id."""
+    from app.features.user.models import User
+
+    admin, _ = await _admin(client, db_session)
+    _, tech_id = await _tech(client, db_session)
+    m = await _machine(db_session)
+    check = await _ask(client, admin, m, assigned_to_id=tech_id)
+    user = await db_session.get(User, uuid.UUID(tech_id))
+    user.is_active = False
+    db_session.add(user)
+    await db_session.commit()
+    got = (await client.get(f"/api/v1/checks/{check['id']}", headers=admin)).json()
+    assert got["assigned_to"] == {"id": tech_id, "name": "Marie", "active": False}

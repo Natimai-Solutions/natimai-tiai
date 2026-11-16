@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -8,6 +10,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api import api_router
 from app.api.routes.health import router as health_router
 from app.core.config import settings
+from app.core.control_chars import ControlCharMiddleware
 from app.core.db import assert_not_superuser
 from app.core.errors import register_error_handlers
 from app.core.net import ClientIPMiddleware
@@ -57,7 +60,17 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             await package_crud.sweep_store(session)
     except Exception:
         logging.getLogger(__name__).exception("Could not sweep the package store")
-    yield
+    # And again every hour while the API runs: a quiet server would otherwise
+    # keep a replaced file until its next restart (audit S09).
+    sweeper = asyncio.create_task(
+        package_crud.sweep_periodically(lambda: AsyncSession(engine))
+    )
+    try:
+        yield
+    finally:
+        sweeper.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sweeper
 
 
 # The schema and its pages describe every route of the API: in local
@@ -77,6 +90,11 @@ app = FastAPI(
 
 # Standardized error envelope for every error response (plan §2.14).
 register_error_handlers(app)
+
+# NUL and other control characters: stripped from what a poste reports,
+# refused (422) from the console, instead of a 500 from PostgreSQL. Added
+# first, so it runs inside CORS: a refusal still carries its headers.
+app.add_middleware(ControlCharMiddleware)
 
 # Every request's client address, for the audit log (app.core.net).
 app.add_middleware(ClientIPMiddleware)

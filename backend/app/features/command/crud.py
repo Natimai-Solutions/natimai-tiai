@@ -57,6 +57,33 @@ async def machines_with_open_command(
     return set(rows.all())
 
 
+async def open_command_status(
+    session: AsyncSession,
+    *,
+    machine_id: uuid.UUID,
+    command_type: CommandType,
+    package_id: uuid.UUID | None = None,
+) -> str | None:
+    """The status of the unfinished command that makes ``create_for_machines``
+    skip this machine — pending, delivered or running — or None.
+
+    The same definition of "unfinished" as ``machines_with_open_command``;
+    the most recent such command when, against the odds, there are several.
+    """
+    stmt = (
+        select(Command.status)
+        .where(col(Command.machine_id) == machine_id)
+        .where(col(Command.type) == command_type.value)
+        .where(col(Command.status).notin_([s.value for s in TERMINAL_STATUSES]))
+        .where(col(Command.expires_at) > utcnow())
+        .order_by(col(Command.created_at).desc())
+        .limit(1)
+    )
+    if package_id is not None:
+        stmt = stmt.where(col(Command.package_id) == package_id)
+    return (await session.exec(stmt)).first()
+
+
 async def create_for_machines(
     session: AsyncSession,
     *,

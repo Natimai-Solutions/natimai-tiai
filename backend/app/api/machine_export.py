@@ -25,7 +25,11 @@ from app.core.errors import AppError, ErrorCode
 from app.features.base import utcnow
 from app.features.check.models import MachineCheck
 from app.features.machine.models import Machine
-from app.features.machine.status import is_online
+from app.features.machine.status import (
+    effective_signature_age,
+    effective_up_to_date,
+    is_online,
+)
 from app.features.maintenance.policy import MaintenanceState, Resolved
 from app.features.room import crud as room_crud
 from app.features.room.models import Building, Room
@@ -52,6 +56,11 @@ class ExportRow:
     # Hours on over the export's usage window; None for a poste enrolled
     # inside it (``usage.crud.usage_hours``).
     usage_hours: float | None = None
+    # The fleet's signature age threshold, and when the export was taken: the
+    # antivirus columns read the signature age as it stands now, as the list
+    # and the fiche do. Unset, the values stored at the last heartbeat.
+    signature_max_age_days: int | None = None
+    taken_at: datetime | None = None
 
     @property
     def room_location(self) -> str | None:
@@ -96,6 +105,24 @@ class ExportColumn:
 
 def _attr(name: str) -> Callable[[ExportRow], object]:
     return lambda r: getattr(r.machine, name)
+
+
+def _up_to_date(r: ExportRow) -> object:
+    if r.signature_max_age_days is None:
+        return r.machine.is_up_to_date
+    return effective_up_to_date(
+        r.machine, r.taken_at or utcnow(), r.signature_max_age_days
+    )
+
+
+def _signature_age(r: ExportRow) -> object:
+    if r.signature_max_age_days is None:
+        return r.machine.signature_age_days
+    return effective_signature_age(
+        r.machine.signature_age_days,
+        r.machine.signature_reported_at,
+        r.taken_at or utcnow(),
+    )
 
 
 def _building(r: ExportRow) -> object:
@@ -309,9 +336,7 @@ COLUMNS: Sequence[ExportColumn] = (
     ),
     # --- Antivirus
     ExportColumn("av_product_name", "Antivirus", "antivirus", "text", _antivirus, True),
-    ExportColumn(
-        "is_up_to_date", "Antivirus à jour", "antivirus", "bool", _attr("is_up_to_date")
-    ),
+    ExportColumn("is_up_to_date", "Antivirus à jour", "antivirus", "bool", _up_to_date),
     ExportColumn(
         "av_product_enabled",
         "Protection active",
@@ -348,7 +373,7 @@ COLUMNS: Sequence[ExportColumn] = (
         "Âge signatures (j)",
         "antivirus",
         "int",
-        _attr("signature_age_days"),
+        _signature_age,
     ),
     ExportColumn(
         "last_quick_scan",
@@ -581,11 +606,18 @@ def resolve_timezone(name: str | None) -> tzinfo:
 
 
 def csv_value(column: ExportColumn, value: object, tz: tzinfo) -> object:
-    """A cell for the CSV: text throughout, dates in ISO order so they sort."""
+    """A cell for the CSV: text throughout, dates in ISO order so they sort.
+
+    Decimals with a comma: the file is ``;``-separated for a French Excel,
+    which reads « 4.9 » as text (or as the 4th of September) and « 4,9 » as
+    the number it is. The workbook keeps real numbers (``xlsx_value``).
+    """
     if value is None:
         return None
     if column.kind == "bool":
         return BOOL_LABELS.get(bool(value), "")
+    if column.kind == "float" and isinstance(value, float):
+        return str(value).replace(".", ",")
     if column.kind == "datetime" and isinstance(value, datetime):
         return value.astimezone(tz).strftime("%Y-%m-%d %H:%M")
     if column.kind == "date" and isinstance(value, date):

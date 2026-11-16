@@ -20,6 +20,7 @@ from app.features.machine.status import (
     agent_outdated_clause,
     aging_hardware_clause,
     low_disk_clause,
+    reenroll_pending_clause,
     status_clause,
 )
 from app.features.maintenance import policy as maintenance_policy
@@ -96,6 +97,10 @@ class StatsOverview(BaseModel):
     # « peu utilisé » everywhere is a parc counted since Tuesday: the console
     # says « comptage depuis le … » under the cards. None = nothing yet.
     usage_since: datetime | None
+    # Postes waiting on an administrator: a re-enrollment held for approval,
+    # and a revoked token (cut off until its re-enrollment is allowed).
+    machines_reenroll_pending: int = 0
+    machines_token_revoked: int = 0
 
 
 async def _count(
@@ -122,14 +127,26 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
     days = fleet_policy.inactive_after_days
 
     total = await _count(session, in_scope)
+    # Judged on the signature age as it stands now, like the list's filter.
     up_to_date = await _count(
-        session, in_scope, status_clause(MachineStatus.UP_TO_DATE, now, days)
+        session,
+        in_scope,
+        status_clause(
+            MachineStatus.UP_TO_DATE, now, days, fleet_policy.signature_max_age_days
+        ),
     )
     needs_verification = await _count(
         session, in_scope, status_clause(MachineStatus.NEEDS_VERIFICATION, now, days)
     )
     inactive = await _count(
         session, in_scope, status_clause(MachineStatus.INACTIVE, now, days)
+    )
+
+    machines_reenroll_pending = await _count(
+        session, in_scope, reenroll_pending_clause()
+    )
+    machines_token_revoked = await _count(
+        session, in_scope, col(Machine.token_revoked).is_(True)
     )
 
     machines_wu_pending = await _count(
@@ -277,4 +294,6 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
         usage_high_hours=usage.high_hours,
         usage_window_days=usage.window_days,
         usage_since=await usage_crud.usage_since(session),
+        machines_reenroll_pending=machines_reenroll_pending,
+        machines_token_revoked=machines_token_revoked,
     )

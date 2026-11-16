@@ -10,9 +10,10 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlmodel import col, select
-from starlette.background import BackgroundTask
+from starlette.types import Receive, Send
+from starlette.types import Scope as ASGIScope
 
 from app.api.deps import CurrentMachine, SessionDep, verify_enrollment_secret
 from app.core import ratelimit, security
@@ -129,7 +130,7 @@ def clean_location(value: str | None) -> str | None:
 class EnrollRequest(BaseModel):
     """First-contact payload (authenticated by X-Enrollment-Secret header)."""
 
-    machine_uuid: str = Field(max_length=MACHINE_UUID_MAX)
+    machine_uuid: str = Field(min_length=1, max_length=MACHINE_UUID_MAX)
     hostname: str | None = None
     domain: str | None = None
     # Absent from an agent older than the field; "" from one whose
@@ -139,6 +140,13 @@ class EnrollRequest(BaseModel):
     os_version: str | None = None
     agent_version: str | None = None
     fingerprint: Fingerprint | None = None
+
+    @field_validator("machine_uuid", mode="before")
+    @classmethod
+    def _strip_uuid(cls, value: object) -> object:
+        """Trim the identity before its bounds are checked: " X " and "X" are
+        one poste, and a blank one is no identity at all (422)."""
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("location")
     @classmethod
@@ -511,6 +519,54 @@ class CommandResult(BaseModel):
 
 # --- Routes ----------------------------------------------------------------
 
+# How long after an enrollment its token may be replaced without approval,
+# provided it was never used: the window in which an agent whose 200 answer
+# was lost retries (it backs off for minutes, not hours).
+UNUSED_TOKEN_RETRY_WINDOW = timedelta(hours=1)
+
+
+async def _locked_machine(session: SessionDep, machine_uuid: str) -> Machine | None:
+    """The machine of this identity, row-locked until the enrollment commits:
+    two enrollments of one poste are served one after the other."""
+    result = await session.exec(
+        select(Machine)
+        .where(col(Machine.machine_uuid) == machine_uuid)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return result.one_or_none()
+
+
+def _same_fingerprint(machine: Machine, fp: Fingerprint) -> bool:
+    """Whether the enrollment reports exactly the fingerprint stored — every
+    component, a missing one included: omitting a component is the cheapest
+    way around a comparison."""
+    return (
+        fp.machine_guid == machine.machine_guid
+        and fp.smbios_uuid == machine.smbios_uuid
+        and fp.tpm_ek_hash == machine.tpm_ek_hash
+    )
+
+
+def _unused_enrollment_retry(machine: Machine, fp: Fingerprint) -> bool:
+    """Whether this enrollment is the same agent asking again because the
+    answer to its previous one never reached it.
+
+    The token that enrollment minted has then never been used: no heartbeat
+    was accepted with it (each one moves ``last_seen`` past
+    ``token_issued_at``), and no rotation offered. Only within
+    ``UNUSED_TOKEN_RETRY_WINDOW`` of it, and only with the very fingerprint
+    it stored — anything else is the reinstall-or-impostor case the
+    approval exists for.
+    """
+    if machine.token_hash is None or machine.pending_token_hash is not None:
+        return False
+    if machine.last_seen > machine.token_issued_at:
+        return False
+    if utcnow() - machine.token_issued_at > UNUSED_TOKEN_RETRY_WINDOW:
+        return False
+    return _same_fingerprint(machine, fp)
+
 
 @router.post(
     "/enroll",
@@ -534,19 +590,35 @@ async def enroll(
     never by the fleet-wide secret — otherwise anyone holding that secret could
     take over a poste's identity, or undo the kill-switch.
     """
-    result = await session.exec(
-        select(Machine).where(Machine.machine_uuid == payload.machine_uuid)
-    )
-    machine = result.one_or_none()
+    machine = await _locked_machine(session, payload.machine_uuid)
     fp = payload.fingerprint or Fingerprint()
 
     token = security.generate_token()
     suspicious = False
     is_new = machine is None
     if machine is None:
-        machine = Machine(machine_uuid=payload.machine_uuid)
-        session.add(machine)
-    else:
+        candidate = Machine(machine_uuid=payload.machine_uuid)
+        try:
+            # In a savepoint: the same new poste enrolling twice at once (an
+            # agent retrying while its first attempt is still being served)
+            # meets the unique identity here, and must not cost a 500.
+            async with session.begin_nested():
+                session.add(candidate)
+        except IntegrityError:
+            # The other enrollment committed first: this one is now a
+            # re-enrollment of that poste, under the same rules.
+            machine = await _locked_machine(session, payload.machine_uuid)
+            if machine is None:
+                raise AppError(
+                    code=ErrorCode.HTTP_ERROR,
+                    status_code=409,
+                    message="Concurrent enrollment of this machine; retry",
+                ) from None
+            is_new = False
+        else:
+            machine = candidate
+    retry = False
+    if not is_new:
         if machine.token_revoked:
             security_log.warning(
                 "enroll refused for revoked machine %s from %s",
@@ -559,9 +631,11 @@ async def enroll(
                 message="Machine token was revoked; an administrator must "
                 "allow re-enrollment from the console",
             )
+        retry = _unused_enrollment_retry(machine, fp)
         if (
             machine.token_hash is not None
             and settings.ENROLLMENT_REENROLL_REQUIRES_APPROVAL
+            and not retry
         ):
             # A live token already exists for this identity. Its own agent never
             # asks for another while it holds one (it re-enrolls only after
@@ -659,12 +733,30 @@ async def enroll(
     token_rotation.reset_rotation(machine)
     machine.updated_at = utcnow()
 
+    if retry:
+        # The unused token dies here, replaced above: one live token per poste.
+        audit.record(
+            session,
+            actor="agent",
+            action="machine.enrollment_retried",
+            resource_type="machine",
+            resource_id=str(machine.id),
+            details={
+                "hostname": payload.hostname,
+                "machine_uuid": payload.machine_uuid,
+                "ip": client_ip(request),
+            },
+        )
     # Every enrollment is a security event: a token was minted. The log line is
     # what ties a rogue enrollment to its source address after the fact.
     security_log.log(
         logging.WARNING if suspicious else logging.INFO,
         "%s of machine %s from %s%s",
-        "enrollment" if is_new else "re-enrollment",
+        "enrollment"
+        if is_new
+        else "enrollment retry (unused token replaced)"
+        if retry
+        else "re-enrollment",
         payload.machine_uuid,
         client_ip(request),
         " (suspicious fingerprint, flagged for verification)" if suspicious else "",
@@ -724,6 +816,9 @@ async def heartbeat(
         machine.signature_version = d.signature_version
         machine.signature_last_updated = d.signature_last_updated
         machine.signature_age_days = d.signature_age_days
+        # What the age above is measured from: it is aged on read
+        # (``status.effective_signature_age``).
+        machine.signature_reported_at = utcnow()
         machine.last_quick_scan = d.last_quick_scan
         machine.last_full_scan = d.last_full_scan
         machine.running_mode = d.running_mode
@@ -902,12 +997,16 @@ async def heartbeat(
         return None
 
     commands: list[CommandOut] = []
+    # A refused deployment held files: they may be the last hold on a file
+    # replaced in the package since (audit S09), swept once committed.
+    refused_held_files = False
     for c in pending:
         reason = refusal(c)
         if reason is not None:
             c.status = CommandStatus.FAILED
             c.error = reason
             c.finished_at = now
+            refused_held_files = refused_held_files or bool(c.package_files)
             continue
         commands.append(
             CommandOut(
@@ -966,6 +1065,8 @@ async def heartbeat(
         and ratelimit.software_budget_left(str(machine.id)) > 0
     )
     await session.commit()
+    if refused_held_files:
+        await package_crud.sweep_store(session)
     return HeartbeatResponse(
         commands=commands, new_token=new_token, resend_inventory=resend_inventory
     )
@@ -983,7 +1084,9 @@ async def command_result(
     The reporter is the command's own machine, or — for a relayed wake — the
     poste that claimed it: the target is off and cannot answer for itself.
     """
-    cmd = await session.get(Command, command_id)
+    # Locked: two deliveries of one verdict (the agent's queue replaying a
+    # POST whose answer it missed) are judged one after the other.
+    cmd = await session.get(Command, command_id, with_for_update=True)
     if cmd is None:
         return {"status": "ignored"}
     relayed = cmd.relay_machine_id is not None and cmd.relay_machine_id == machine.id
@@ -993,6 +1096,13 @@ async def command_result(
         # The target came back on its own before the relay reported — its
         # heartbeat closed the row with the one acknowledgement a wake can
         # have, and "packet emitted" is not news next to "poste revenu".
+        return {"status": "ignored"}
+    if cmd.agent_verdict_at is not None:
+        # Already closed by its poste's own verdict: a replay must not move
+        # « Terminée le », and a second, different verdict must not overwrite
+        # the first (a success turned failure, its output erased). A closure
+        # the *server* made — expiry, no answer, package refused, merge — is
+        # not one of these: the poste's late verdict replaces it below.
         return {"status": "ignored"}
 
     if payload.status == CommandStatus.RUNNING:
@@ -1021,6 +1131,7 @@ async def command_result(
         if cmd.error:
             cmd.error = f"Relayé par {who} — {cmd.error}"
     cmd.finished_at = utcnow()
+    cmd.agent_verdict_at = cmd.finished_at
     held_files = bool(cmd.package_files)
     await session.commit()
     if held_files:
@@ -1042,6 +1153,23 @@ _downloads_in_flight = 0
 def _release_download() -> None:
     global _downloads_in_flight
     _downloads_in_flight = max(0, _downloads_in_flight - 1)
+
+
+class _CountedFileResponse(FileResponse):
+    """A download holding one of the slots above until it is over, however
+    it ends.
+
+    Not a ``BackgroundTask``: FileResponse answers a ``Range`` it cannot
+    serve (416, or 400 for a malformed one) without running its background,
+    and a client gone mid-transfer raises past it — each one a slot never
+    given back, until every poste was told 429 until a restart.
+    """
+
+    async def __call__(self, scope: ASGIScope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            _release_download()
 
 
 @router.get("/packages/{package_id}/files/{sha256}")
@@ -1108,9 +1236,6 @@ async def download_package_file(
             headers={"Retry-After": "60"},
         )
     _downloads_in_flight += 1
-    return FileResponse(
-        path,
-        media_type="application/octet-stream",
-        filename=name,
-        background=BackgroundTask(_release_download),
+    return _CountedFileResponse(
+        path, media_type="application/octet-stream", filename=name
     )

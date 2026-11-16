@@ -25,6 +25,10 @@ async def test_second_enrollment_of_a_live_identity_is_held(client, db_session):
     and the real poste keeps its token."""
     headers = await _admin_headers(client, db_session)
     enrolled = await _enroll(client, "m-held", hostname="PC-HELD")
+    # In service: its token has been used. (A token never used yet is the
+    # case of an answer lost on the way, which the same agent may retry —
+    # tests/test_api_machine_fixes.py.)
+    assert (await _heartbeat(client, enrolled["token"])).status_code == 200
 
     resp = await _enroll_raw(client, "m-held", hostname="IMPOSTOR")
     assert resp.status_code == 403
@@ -55,7 +59,8 @@ async def test_a_held_request_is_audited_once_not_per_retry(client, db_session):
     """Audit B33: an agent waiting for approval asks every few minutes; the
     log says it once."""
     headers = await _admin_headers(client, db_session)
-    await _enroll(client, "m-retry", hostname="PC-R")
+    live = await _enroll(client, "m-retry", hostname="PC-R")
+    assert (await _heartbeat(client, live["token"])).status_code == 200
     for _ in range(3):
         resp = await _enroll_raw(client, "m-retry", hostname="PC-R")
         assert resp.status_code == 403
@@ -72,6 +77,7 @@ async def test_allowing_the_request_lets_the_poste_back_with_a_new_token(
 ):
     headers = await _admin_headers(client, db_session)
     enrolled = await _enroll(client, "m-approve")
+    assert (await _heartbeat(client, enrolled["token"])).status_code == 200
     assert (await _enroll_raw(client, "m-approve")).status_code == 403
 
     allowed = await client.post(

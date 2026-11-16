@@ -26,12 +26,19 @@ from app.features.setting.crud import MaintenancePolicy
 
 @dataclass
 class DueRoom:
-    """One room of the "to do" list: its counts, and the postes behind them."""
+    """One group of the "to do" list — the postes of a room under one owner
+    and one cycle: its counts, and the postes behind them.
+
+    ``room_level``: the postes that follow the room's own owner and cycle.
+    The postes of the room that resolve to another owner or cycle (their own
+    override) are a group of their own, beside it: taking the room would not
+    take them, and their header must not say the room's owner."""
 
     room: Room
     building: Building | None
     owner_id: uuid.UUID | None
     cycle_days: int
+    room_level: bool = True
     total: int = 0
     overdue: int = 0
     due_soon: int = 0
@@ -64,9 +71,10 @@ def group_due(
 ) -> tuple[list[DueRoom], list[tuple[Machine, Resolved]]]:
     """Rooms with their counts, and the room-less postes, for one owner (or
     everybody). A room's owner is what its postes resolve to when none of
-    them overrides it; a poste that overrides the owner is listed under its
-    own owner, not its room's."""
-    rooms: dict[uuid.UUID, DueRoom] = {}
+    them overrides it; the postes that resolve to another owner or cycle are
+    grouped apart, by that (owner, cycle) — a header says what its postes
+    resolve to, and taking the group takes those postes, not the room."""
+    rooms: dict[tuple[uuid.UUID, uuid.UUID | None, int | None], DueRoom] = {}
     loose: list[tuple[Machine, Resolved]] = []
     for machine, room, building, res in resolved:
         if owner_filter is not None and res.owner_id != owner_filter:
@@ -77,25 +85,36 @@ def group_due(
             if res.state != MaintenanceState.EXCLUDED:
                 loose.append((machine, res))
             continue
-        entry = rooms.get(room.id)
+        room_owner = (
+            room.maintenance_owner_id
+            if available(room.maintenance_owner_id, policy, room=room)
+            else policy.owner_id
+        )
+        room_cycle = (
+            room.maintenance_cycle_days
+            if room.maintenance_cycle_days is not None
+            else policy.cycle_days
+        )
+        # An excluded poste is counted with its room, whatever its override:
+        # it is a count, never a group to take.
+        room_level = res.state == MaintenanceState.EXCLUDED or (
+            res.owner_id == room_owner and res.cycle_days == room_cycle
+        )
+        key = (
+            (room.id, None, None)
+            if room_level
+            else (room.id, res.owner_id, res.cycle_days)
+        )
+        entry = rooms.get(key)
         if entry is None:
-            room_owner = (
-                room.maintenance_owner_id
-                if available(room.maintenance_owner_id, policy, room=room)
-                else policy.owner_id
-            )
-            room_cycle = (
-                room.maintenance_cycle_days
-                if room.maintenance_cycle_days is not None
-                else policy.cycle_days
-            )
             entry = DueRoom(
                 room=room,
                 building=building,
-                owner_id=room_owner,
-                cycle_days=room_cycle,
+                owner_id=room_owner if room_level else res.owner_id,
+                cycle_days=room_cycle if room_level else res.cycle_days,
+                room_level=room_level,
             )
-            rooms[room.id] = entry
+            rooms[key] = entry
         entry.total += 1
         if res.state == MaintenanceState.EXCLUDED:
             # Counted, not listed: a poste kept out of the cycle (a server, a
@@ -148,7 +167,9 @@ async def record_session(
     )
     session.add(visit)
     await session.flush()
-    title = f"Maintenance — {room.name}" if room else "Maintenance"
+    # The kind says « Maintenance » already: the title only adds the room
+    # (« Maintenance — Maintenance — A101 » otherwise).
+    title = room.name if room else None
     for machine in machines:
         session.add(
             Intervention(
@@ -162,7 +183,8 @@ async def record_session(
             )
         )
     # A poste left out of the visit keeps why, in its own journal — not as a
-    # maintenance, which would move its cycle (audit U20).
+    # maintenance, which would move its cycle (audit U20). Linked to the
+    # session all the same: the session shows who was skipped, and why.
     where = f" — {room.name}" if room else ""
     for machine_id, reason in (skipped or {}).items():
         session.add(
@@ -173,6 +195,7 @@ async def record_session(
                 note=reason,
                 performed_by=performed_by,
                 performed_at=performed_at,
+                maintenance_id=visit.id,
             )
         )
     # From the journal, like every other change to it: a visit older than the
@@ -232,11 +255,15 @@ async def session_items(
 async def item_counts(
     session: AsyncSession, maintenance_ids: list[uuid.UUID], where: Any = None
 ) -> dict[uuid.UUID, int]:
-    """Postes per visit. ``where`` (a clause on Machine) counts only those the
+    """Postes maintained per visit: its remaining ``maintenance`` lines — a
+    line deleted, or turned into another kind, no longer counts, nor does a
+    poste skipped. ``where`` (a clause on Machine) counts only those the
     caller may see."""
     if not maintenance_ids:
         return {}
-    stmt = select(col(Intervention.maintenance_id), func.count())
+    stmt = select(col(Intervention.maintenance_id), func.count()).where(
+        col(Intervention.kind) == InterventionKind.MAINTENANCE.value
+    )
     if where is not None:
         stmt = stmt.join(
             Machine, col(Machine.id) == col(Intervention.machine_id)
@@ -251,3 +278,19 @@ async def item_counts(
         if mid is not None:
             counts[mid] = n
     return counts
+
+
+async def delete_session(session: AsyncSession, visit: Maintenance) -> list[uuid.UUID]:
+    """Remove a visit and every journal line it wrote — done or skipped — and
+    move each poste's last maintenance back to what its journal now says.
+    Returns the postes concerned. Does not commit."""
+    rows = await session.exec(
+        select(Intervention).where(col(Intervention.maintenance_id) == visit.id)
+    )
+    lines = list(rows.all())
+    machine_ids = list({line.machine_id for line in lines})
+    for line in lines:
+        await session.delete(line)
+    await session.delete(visit)
+    await intervention_crud.recompute_last_maintenance(session, machine_ids)
+    return machine_ids

@@ -5,16 +5,18 @@ to the caller's session, so the mail is committed — or rolled back — with th
 business change that motivated it. ``send_pending`` and ``purge_settled`` are
 the worker's side of the table.
 
-Delivery is at-least-once: the drain commits after the batch, so a worker
-killed between a provider's accept and the commit re-sends that mail on restart.
-The reverse trade — marking rows sent before trying — would lose mail instead,
-and a rare duplicate alert is the better failure.
+Delivery is at-least-once: the drain commits each mail's outcome as soon as
+it has one, so a worker killed between a provider's accept and that commit
+re-sends that one mail on restart — not the batch. The reverse trade — marking
+rows sent before trying — would lose mail instead, and a rare duplicate alert
+is the better failure.
 """
 
 import logging
+import time
 from datetime import timedelta
 
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -59,18 +61,32 @@ def _retry_delay(attempts: int) -> timedelta:
     )
 
 
-async def send_pending(session: AsyncSession, *, batch_size: int = 50) -> int:
+async def send_pending(
+    session: AsyncSession,
+    *,
+    batch_size: int = 50,
+    budget_seconds: float | None = None,
+) -> int:
     """Try every due mail once; returns how many went out.
 
-    One commit for the whole batch, *after* the loop: committing inside it
-    would expire the remaining instances mid-iteration (sync refresh under
-    asyncio — MissingGreenlet). A failure never raises past its own row, so one
-    dead address cannot cost the rest of the batch their turn.
+    Each mail's outcome is committed as soon as it is known: a worker killed
+    mid-drain re-sends at most the one mail it was sending, not every mail of
+    the batch delivered before it. The rows are read into plain values first
+    and written back by id — a commit expires ORM instances, and reading one
+    afterwards would be a lazy load outside the event loop (MissingGreenlet).
+    A failure never raises past its own row, so one dead address cannot cost
+    the rest of the batch their turn.
+
+    ``budget_seconds``: no new mail is started once that much time has gone
+    by. A server that accepts the connection and then stays silent costs a
+    full timeout per mail; without a budget, fifty of them held the worker for
+    many minutes. What is left waits for the next drain, still due.
 
     The policy is resolved once per drain, from the database: a provider, a
     server or a password changed in the console applies from the next tick,
     without restarting the worker.
     """
+    started = time.monotonic()
     policy = await email_policy(session)
     now = utcnow()
     rows = await session.exec(
@@ -80,11 +96,19 @@ async def send_pending(session: AsyncSession, *, batch_size: int = 50) -> int:
         .order_by(col(EmailOutbox.created_at))
         .limit(batch_size)
     )
+    due = [(r.id, r.to_address, r.subject, r.body, r.attempts) for r in rows.all()]
+    session.expunge_all()
     sent = 0
-    for row in rows.all():
+    for row_id, to_address, subject, body, attempts in due:
+        if budget_seconds is not None and time.monotonic() - started >= budget_seconds:
+            logger.warning(
+                "Outbox: drain stopped after %.0f s, the rest waits for the next tick",
+                time.monotonic() - started,
+            )
+            break
         try:
             ok = await send_email(
-                subject=row.subject, text=row.body, to=[row.to_address], policy=policy
+                subject=subject, text=body, to=[to_address], policy=policy
             )
             # False means the provider is no longer configured — the guard in
             # queue_email was passed once, so treat it like any other failure
@@ -94,32 +118,34 @@ async def send_pending(session: AsyncSession, *, batch_size: int = 50) -> int:
             ok = False
             error = f"{type(exc).__name__}: {exc}"[:500]
 
+        values: dict[str, object]
         if ok:
-            row.status = EmailStatus.SENT
-            row.sent_at = utcnow()
+            values = {"status": EmailStatus.SENT, "sent_at": utcnow()}
             sent += 1
-            continue
-
-        row.attempts += 1
-        row.last_error = error
-        if row.attempts >= settings.EMAIL_MAX_ATTEMPTS:
-            row.status = EmailStatus.ABANDONED
-            logger.error(
-                "Outbox: giving up on mail to %s after %d attempts (%s)",
-                row.to_address,
-                row.attempts,
-                error,
-            )
         else:
-            row.next_attempt_at = utcnow() + _retry_delay(row.attempts)
-            logger.warning(
-                "Outbox: mail to %s failed (attempt %d/%d): %s",
-                row.to_address,
-                row.attempts,
-                settings.EMAIL_MAX_ATTEMPTS,
-                error,
-            )
-    await session.commit()
+            attempts += 1
+            values = {"attempts": attempts, "last_error": error}
+            if attempts >= settings.EMAIL_MAX_ATTEMPTS:
+                values["status"] = EmailStatus.ABANDONED
+                logger.error(
+                    "Outbox: giving up on mail to %s after %d attempts (%s)",
+                    to_address,
+                    attempts,
+                    error,
+                )
+            else:
+                values["next_attempt_at"] = utcnow() + _retry_delay(attempts)
+                logger.warning(
+                    "Outbox: mail to %s failed (attempt %d/%d): %s",
+                    to_address,
+                    attempts,
+                    settings.EMAIL_MAX_ATTEMPTS,
+                    error,
+                )
+        await session.exec(
+            update(EmailOutbox).where(col(EmailOutbox.id) == row_id).values(**values)
+        )
+        await session.commit()
     return sent
 
 

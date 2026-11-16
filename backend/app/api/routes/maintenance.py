@@ -7,7 +7,7 @@ is the same write, audited.
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -25,7 +25,7 @@ from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.intervention import crud as intervention_crud
-from app.features.intervention.models import Intervention
+from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
 from app.features.maintenance import crud
 from app.features.maintenance.models import Maintenance
@@ -78,6 +78,9 @@ owners_router = APIRouter(
 class UserRef(BaseModel):
     id: uuid.UUID
     name: str
+    # False for an account deactivated since it was named: the console shows
+    # « (désactivé) » rather than an id it cannot find among the choices.
+    active: bool = True
 
 
 class ResolvedOut(BaseModel):
@@ -106,6 +109,10 @@ class RoomSettingsOut(BaseModel):
     maintenance_owner: UserRef | None
     effective_cycle_days: int
     effective_owner: UserRef | None
+    # Where each effective value comes from: the room, or the parc's default
+    # — the room's own owner, deactivated or out of reach, counts as none.
+    effective_cycle_origin: Literal["room", "global"] = "global"
+    effective_owner_origin: Literal["room", "global"] = "global"
 
 
 class SettingsUpdate(BaseModel):
@@ -130,6 +137,13 @@ class DueMachineOut(BaseModel):
 
 class DueRoomOut(BaseModel):
     id: uuid.UUID
+    # One room can be several groups — its own, and one per (owner, cycle)
+    # its postes override it with: this tells them apart.
+    key: str
+    # "room": the postes following the room's owner and cycle — taking it
+    # sets the room's owner. "machine": postes overriding them — taking it
+    # sets those postes' own owner.
+    level: Literal["room", "machine"] = "room"
     name: str
     building_name: str | None
     location: str | None
@@ -185,8 +199,12 @@ class SessionOut(BaseModel):
     performed_by: str
     performed_at: datetime
     note: str | None
+    # The postes still maintained by it: its remaining ``maintenance`` lines.
     machine_count: int
     items: list[SessionItemOut] = []
+    # Postes left out, with why — and lines of the visit turned since into
+    # another kind: in the session's record, not counted as maintained.
+    skipped: list[SessionItemOut] = []
 
 
 class SessionList(BaseModel):
@@ -283,10 +301,21 @@ async def _require_owner(
         )
 
 
-def _ref(names: dict[uuid.UUID, str], user_id: uuid.UUID | None) -> UserRef | None:
+class OwnerChoice(BaseModel):
+    """An account the picker offers: id and name only."""
+
+    id: uuid.UUID
+    name: str
+
+
+def _ref(
+    names: dict[uuid.UUID, str],
+    user_id: uuid.UUID | None,
+    inactive: frozenset[uuid.UUID] = frozenset(),
+) -> UserRef | None:
     if user_id is None or user_id not in names:
         return None
-    return UserRef(id=user_id, name=names[user_id])
+    return UserRef(id=user_id, name=names[user_id], active=user_id not in inactive)
 
 
 def _resolved_out(
@@ -321,7 +350,9 @@ async def machine_maintenance(
     )
     return MachineSettingsOut(
         maintenance_cycle_days=machine.maintenance_cycle_days,
-        maintenance_owner=_ref(names, machine.maintenance_owner_id),
+        maintenance_owner=_ref(
+            names, machine.maintenance_owner_id, policy.inactive_owners
+        ),
         resolved=_resolved_out(machine, res, names),
     )
 
@@ -374,23 +405,26 @@ async def room_maintenance(
 ) -> RoomSettingsOut:
     room = await _require_room(session, room_id, scope)
     policy = await setting_crud.maintenance_policy(session)
-    effective_owner = (
-        room.maintenance_owner_id
-        if available(room.maintenance_owner_id, policy, room=room)
-        else policy.owner_id
-    )
+    own_owner = available(room.maintenance_owner_id, policy, room=room)
+    effective_owner = room.maintenance_owner_id if own_owner else policy.owner_id
     names = await setting_crud.user_names(
         session, {i for i in (room.maintenance_owner_id, effective_owner) if i}
     )
     return RoomSettingsOut(
         maintenance_cycle_days=room.maintenance_cycle_days,
-        maintenance_owner=_ref(names, room.maintenance_owner_id),
+        maintenance_owner=_ref(
+            names, room.maintenance_owner_id, policy.inactive_owners
+        ),
         effective_cycle_days=(
             room.maintenance_cycle_days
             if room.maintenance_cycle_days is not None
             else policy.cycle_days
         ),
         effective_owner=_ref(names, effective_owner),
+        effective_cycle_origin=(
+            "room" if room.maintenance_cycle_days is not None else "global"
+        ),
+        effective_owner_origin="room" if own_owner else "global",
     )
 
 
@@ -429,13 +463,13 @@ async def update_room_maintenance(
     return await room_maintenance(room.id, session, scope)
 
 
-@owners_router.get("/assignable-owners", response_model=list[UserRef])
+@owners_router.get("/assignable-owners", response_model=list[OwnerChoice])
 async def assignable_owners(
     session: SessionDep,
     scope: CurrentScope,
     machine_id: uuid.UUID | None = None,
     room_id: uuid.UUID | None = None,
-) -> list[UserRef]:
+) -> list[OwnerChoice]:
     """Active accounts that may be named owner — of this poste, of this room,
     or, with neither, of the parc by default: exactly those the write that
     follows accepts. Id and name only, like ``/checks/assignable-users``,
@@ -469,7 +503,9 @@ async def assignable_owners(
         return reach.parc(user_id)
 
     return [
-        UserRef(id=u.id, name=u.full_name or u.email) for u in users if can_own(u.id)
+        OwnerChoice(id=u.id, name=u.full_name or u.email)
+        for u in users
+        if can_own(u.id)
     ]
 
 
@@ -533,6 +569,12 @@ async def due(
     rooms_out = [
         DueRoomOut(
             id=r.room.id,
+            key=(
+                str(r.room.id)
+                if r.room_level
+                else f"{r.room.id}:{r.owner_id or '-'}:{r.cycle_days}"
+            ),
+            level="room" if r.room_level else "machine",
             name=r.room.name,
             building_name=r.building.name if r.building else None,
             location=room_crud.effective_location(r.room, r.building),
@@ -598,6 +640,13 @@ async def _session_out(
     count = (await crud.item_counts(session, [visit.id], machine_clause(scope)))[
         visit.id
     ]
+
+    def item(i: Intervention, m: Machine) -> SessionItemOut:
+        return SessionItemOut(
+            intervention_id=i.id, machine_id=m.id, hostname=m.hostname, note=i.note
+        )
+
+    done = InterventionKind.MAINTENANCE.value
     return SessionOut(
         id=visit.id,
         room_id=visit.room_id,
@@ -606,12 +655,8 @@ async def _session_out(
         performed_at=visit.performed_at,
         note=visit.note,
         machine_count=count,
-        items=[
-            SessionItemOut(
-                intervention_id=i.id, machine_id=m.id, hostname=m.hostname, note=i.note
-            )
-            for i, m in items
-        ],
+        items=[item(i, m) for i, m in items if i.kind == done],
+        skipped=[item(i, m) for i, m in items if i.kind != done],
     )
 
 
@@ -650,6 +695,25 @@ async def record_session(
             status_code=404,
             message="Machine not found",
         )
+    if room is not None:
+        # A visit of a room is the visit of its postes: a poste filed
+        # elsewhere would get a line « Maintenance — <this room> » it never
+        # had (the console only ever offers the room's own).
+        strays = sorted(
+            (m for m in every if m.room_id != room.id),
+            key=lambda m: (m.hostname or "").lower(),
+        )
+        if strays:
+            names = [m.hostname or str(m.id) for m in strays]
+            raise AppError(
+                code=ErrorCode.MAINTENANCE_ITEMS_NOT_IN_ROOM,
+                status_code=422,
+                message="Postes not in this room: " + ", ".join(names),
+                details={
+                    "machine_ids": [str(m.id) for m in strays],
+                    "hostnames": names,
+                },
+            )
     notes = {i.machine_id: _clean(i.note) for i in payload.items}
     visit = await crud.record_session(
         session,
@@ -706,10 +770,9 @@ async def list_sessions(
     )
 
 
-@router.get("/{maintenance_id}", response_model=SessionOut)
-async def get_session(
-    maintenance_id: uuid.UUID, session: SessionDep, scope: CurrentScope
-) -> SessionOut:
+async def _require_session(
+    session: SessionDep, maintenance_id: uuid.UUID, scope: Scope | None
+) -> Maintenance:
     visit = await session.get(Maintenance, maintenance_id)
     clause = _visit_clause(scope)
     if visit is None or (
@@ -728,6 +791,59 @@ async def get_session(
             status_code=404,
             message="Maintenance session not found",
         )
+    return visit
+
+
+@router.get("/{maintenance_id}", response_model=SessionOut)
+async def get_session(
+    maintenance_id: uuid.UUID, session: SessionDep, scope: CurrentScope
+) -> SessionOut:
+    visit = await _require_session(session, maintenance_id, scope)
     # The visit is visible through one of its postes; the others may lie
     # outside the caller's scope (audit S06).
     return await _session_out(session, visit, with_items=True, scope=scope)
+
+
+@router.delete("/{maintenance_id}", status_code=204, dependencies=[_WRITE])
+async def delete_session(
+    maintenance_id: uuid.UUID,
+    session: SessionDep,
+    scope: CurrentScope,
+    current: CurrentUser,
+) -> None:
+    """Remove a visit recorded by mistake: the session, and every journal
+    line it wrote. The postes' last maintenance goes back to what their
+    journal then says. Audited, with what was removed."""
+    visit = await _require_session(session, maintenance_id, scope)
+    lines = await crud.session_items(session, visit.id)
+    clause = machine_clause(scope)
+    if clause is not None and lines:
+        # Every line is removed: a confined account may only remove a visit
+        # whose postes it all sees (audit S06).
+        ids = {m.id for _, m in lines}
+        seen = await session.exec(
+            select(col(Machine.id)).where(col(Machine.id).in_(ids)).where(clause)
+        )
+        if len(set(seen.all())) != len(ids):
+            raise AppError(
+                code=ErrorCode.AUTH_SCOPE_RESTRICTED,
+                status_code=403,
+                message="This visit covers postes beyond your scope",
+            )
+    audit.record(
+        session,
+        actor=current.email,
+        action="maintenance.delete",
+        resource_type="maintenance",
+        resource_id=str(visit.id),
+        details={
+            "room_name": visit.room_name,
+            "performed_by": visit.performed_by,
+            "performed_at": visit.performed_at.isoformat(),
+            "note": visit.note,
+            "hostnames": sorted(m.hostname or str(m.id) for _, m in lines),
+            "lines": len(lines),
+        },
+    )
+    await crud.delete_session(session, visit)
+    await session.commit()

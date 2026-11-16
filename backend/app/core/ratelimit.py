@@ -132,6 +132,10 @@ login_limiter = RateLimiter(max_attempts=10, window_seconds=300)
 # Reset requests: each accepted call may send a mail — the tightest budget,
 # because the cost (mail to a known operator, Mailgun quota) starts at one.
 password_reset_limiter = RateLimiter(max_attempts=5, window_seconds=900)
+# Checking a reset link before the form is shown: sends nothing, so roomier
+# than the requests — a page reloaded a few times must not spend the budget a
+# new link would need — but bounded the same way, per address.
+password_reset_check_limiter = RateLimiter(max_attempts=20, window_seconds=900)
 # Enroll: one poste enrolls once in its life, but a re-imaged salle can come
 # back all at once — roomy, since each poste still arrives from its own IP.
 enroll_limiter = RateLimiter(max_attempts=30, window_seconds=300)
@@ -202,6 +206,7 @@ def release_software_entries(machine_key: str, units: int) -> None:
 _ALL = (
     login_limiter,
     password_reset_limiter,
+    password_reset_check_limiter,
     enroll_limiter,
     password_change_limiter,
     heartbeat_limiter,

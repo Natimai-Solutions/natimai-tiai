@@ -32,6 +32,12 @@ SECRET_MIN_LENGTHS = {
 }
 
 
+# An address as the console accepts one (``app.api.fields.Email``, which
+# reuses this): one @, a dotted domain, no spaces — special-use domains such
+# as ``.local`` included.
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
 class Settings(BaseSettings):
     """Application settings, loaded from environment / .env."""
 
@@ -80,7 +86,10 @@ class Settings(BaseSettings):
     # reset, a poste's fiche). Explicit when the console is reached under
     # something other than https://<TIAI_SERVER_NAME> — another port, a proxy
     # in front of Caddy; otherwise derived, see ``console_base_url``.
-    CONSOLE_BASE_URL: str | None = None
+    # An http(s) URL when set (the empty string reads as unset).
+    CONSOLE_BASE_URL: str | None = Field(
+        default=None, pattern=r"^(|https?://[^\s/]+(/\S*)?)$"
+    )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -224,8 +233,8 @@ class Settings(BaseSettings):
     # Async connection pool (psycopg 3). Load is light (~1–3 req/s for 1000
     # endpoints, plan §2.2) but the backend and the worker share Postgres, so
     # the pool is tunable per deployment.
-    POSTGRES_POOL_SIZE: int = 20
-    POSTGRES_MAX_OVERFLOW: int = 10
+    POSTGRES_POOL_SIZE: int = Field(default=20, ge=1)
+    POSTGRES_MAX_OVERFLOW: int = Field(default=10, ge=0)
     POSTGRES_POOL_TIMEOUT: int = 30
 
     @computed_field  # type: ignore[prop-decorator]
@@ -265,7 +274,11 @@ class Settings(BaseSettings):
     # Sender shared by both providers. The MAILGUN_FROM_* names below still
     # work and take over when these are empty, so a deployment written before
     # SMTP existed does not have to be renamed.
-    EMAIL_FROM_EMAIL: str | None = None
+    # Same shape check as the console's « Adresse d'expéditeur » (``api.fields.
+    # Email``): a typo here would otherwise surface as every mail refused.
+    EMAIL_FROM_EMAIL: str | None = Field(
+        default=None, pattern=f"^(|{EMAIL_PATTERN.strip('^$')})$"
+    )
     EMAIL_FROM_NAME: str | None = None
 
     # --- Mailgun ---
@@ -298,7 +311,8 @@ class Settings(BaseSettings):
     # cannot verify (self-signed, private CA not mounted). Credentials still
     # travel encrypted; what is lost is the proof of who is at the other end.
     SMTP_VERIFY_TLS: bool = True
-    SMTP_TIMEOUT_SECONDS: int = 10
+    # The console's bounds for the same field (``email_policy.TIMEOUT_MIN``…).
+    SMTP_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=120)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -339,11 +353,11 @@ class Settings(BaseSettings):
     # backoff (1 min doubling to a 1 h ceiling). After this many attempts —
     # roughly 14 hours, enough to ride out a night-long proxy or mail-provider
     # outage — the row is marked abandoned and kept with its last error.
-    EMAIL_MAX_ATTEMPTS: int = 20
+    EMAIL_MAX_ATTEMPTS: int = Field(default=20, ge=1)
     # How long sent and abandoned rows stay in the table before the daily purge
     # drops them. Pending rows are never purged: a mail still owed is not
     # clutter, whatever its age.
-    EMAIL_OUTBOX_RETENTION_DAYS: int = 30
+    EMAIL_OUTBOX_RETENTION_DAYS: int = Field(default=30, ge=0)
 
     # --- Notifications sent to console accounts ---
     # Hour (UTC) the daily digest goes out. The parc this console was built for
@@ -364,13 +378,14 @@ class Settings(BaseSettings):
     # back on "… et N autres". A digest is a nudge to open the console, not a
     # report to work from — and a fleet-wide outage must not send a mail with
     # three hundred lines in it.
-    NOTIFICATION_MAX_ITEMS: int = 10
+    NOTIFICATION_MAX_ITEMS: int = Field(default=10, ge=1)
 
     # --- Defender freshness policy ---
     # A machine is "up to date" if signatures are younger than this many days.
-    SIGNATURE_MAX_AGE_DAYS: int = 3
+    # Bounded like the page Paramètres bounds the setting that overrides it.
+    SIGNATURE_MAX_AGE_DAYS: int = Field(default=3, ge=0, le=365)
     # A machine is considered inactive after this many days without heartbeat.
-    INACTIVE_AFTER_DAYS: int = 30
+    INACTIVE_AFTER_DAYS: int = Field(default=30, ge=1, le=3650)
     # A machine counts as *online* (powered on, agent reachable) when its last
     # heartbeat is younger than this. Three times the agent's 60 s default poll,
     # not one: a single missed beat — a network blip, a server restart, the
@@ -385,7 +400,7 @@ class Settings(BaseSettings):
     # where Windows Update starts failing to stage a cumulative update — the
     # symptom being a poste that quietly stops patching, which is the other
     # module's problem and this one's early warning.
-    LOW_DISK_FREE_PERCENT: int = 10
+    LOW_DISK_FREE_PERCENT: int = Field(default=10, ge=1, le=99)
     # Past this age — read off the BIOS date, the only age a poste knows about
     # itself — a machine is counted as due for renewal. Five years is a default,
     # not a policy: parcs amortise on their own schedule, hence a setting.
@@ -455,9 +470,9 @@ class Settings(BaseSettings):
     # address — which is the only source that can be right on a parc where /16
     # and /24 segments coexist. This applies to a poste whose agent predates that
     # reporting, or whose adapter did not expose a mask: 192.168.1.42 at /24 →
-    # 192.168.1.255. /32 degrades to a unicast to the address itself, which only
-    # wakes a poste whose ARP entry is still alive upstream.
-    WOL_SUBNET_PREFIXLEN: int = 24
+    # 192.168.1.255. Bounded to /8–/30: a /31 or /32 has no broadcast address
+    # to aim at, and wider than /8 is a typo.
+    WOL_SUBNET_PREFIXLEN: int = Field(default=24, ge=8, le=30)
     # Explicit broadcast addresses, comma-separated. When set they *replace* the
     # derived one and every poste is woken through all of them — the answer for a
     # server that must reach segments it has no address on, and the only way to
@@ -468,10 +483,10 @@ class Settings(BaseSettings):
     # UDP/9 (discard) by convention. The port is immaterial to the hardware — a
     # NIC in standby matches the magic pattern anywhere in the frame — so this
     # only ever matters to a firewall on the way.
-    WOL_PORT: int = 9
+    WOL_PORT: int = Field(default=9, ge=1, le=65535)
     # UDP over a broadcast is unacknowledged and dropped without notice; three
     # copies cost three datagrams and remove the single-loss case.
-    WOL_PACKET_COUNT: int = 3
+    WOL_PACKET_COUNT: int = Field(default=3, ge=1, le=20)
 
     # --- Wake-on-LAN relayed by an agent ---
     # For a server that is nowhere near the postes — hosted off-site, or in a

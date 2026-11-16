@@ -309,6 +309,18 @@ async def open_wake_for(
     return rows.first()
 
 
+def _elapsed(since: datetime, now: datetime) -> str:
+    """« 12 min », « 1 h 05 » — a duration rather than a clock time: the
+    server's clock is UTC and the console reads local time, and an hour
+    printed in one zone is read in the other (« depuis 07:45 UTC »)."""
+    minutes = max(0, int((now - since).total_seconds() // 60))
+    if minutes < 1:
+        return "moins d'une minute"
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60:02d}"
+
+
 async def queue_relayed_wake(
     session: AsyncSession,
     target: Machine,
@@ -377,8 +389,8 @@ async def queue_relayed_wake(
         return WakeOutcome(
             ok=True,
             detail=(
-                f"Réveil {state} depuis {already.created_at:%H:%M} UTC ; rien de "
-                "nouveau n'a été mis en file."
+                f"Réveil {state} depuis {_elapsed(already.created_at, now)} ; rien "
+                "de nouveau n'a été mis en file."
             ),
         )
 

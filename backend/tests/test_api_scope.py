@@ -177,18 +177,26 @@ async def test_a_broadcast_stays_on_the_site(client, db_session):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["count"] == 1
-    # A listed poste of the other site is dropped like an unknown id.
+    # A listed poste of the other site is dropped like an unknown id: named
+    # alone, it is « poste introuvable » (404); in a list, it is left out.
     resp = await client.post(
         "/api/v1/commands",
         headers=t.scoped,
         json={"type": "flush_dns", "machine_ids": [str(t.b.id)]},
     )
-    assert resp.json()["count"] == 0
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["error"]["code"] == "machine.not_found"
+    resp = await client.post(
+        "/api/v1/commands",
+        headers=t.scoped,
+        json={"type": "flush_dns", "machine_ids": [str(t.a.id), str(t.b.id)]},
+    )
+    assert resp.json()["count"] == 1
     rows = (await db_session.exec(select(Command))).all()
     assert {c.machine_id for c in rows} == {t.a.id}
 
     listed = await client.get("/api/v1/commands", headers=t.scoped)
-    assert listed.json()["total"] == 1
+    assert listed.json()["total"] == 2
 
 
 async def test_threats_and_dashboard_are_the_sites(client, db_session):

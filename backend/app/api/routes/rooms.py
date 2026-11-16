@@ -11,10 +11,10 @@ Placing a poste by hand is always allowed here; the directory-driven mode
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Query
+from pydantic import AfterValidator, BaseModel, Field
 from sqlmodel import col, select
 
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
@@ -30,9 +30,11 @@ from app.features.maintenance.policy import MaintenanceState, available
 from app.features.room import crud
 from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
+from app.features.user.models import Group, GroupScope
 from app.features.user.permissions import Action, Resource
 from app.features.user.scope import (
     Scope,
+    ScopeKind,
     building_clause,
     machine_clause,
     restrict,
@@ -49,6 +51,18 @@ rooms_router = APIRouter(prefix="/rooms", tags=["rooms"], dependencies=[_READ])
 # --- Schemas ----------------------------------------------------------------
 
 
+def _name(value: str) -> str:
+    """A building's or a room's name, its spaces collapsed: « » or «   » is
+    no name (it was stored as one, and listed as a blank row)."""
+    cleaned = " ".join(value.split())
+    if not cleaned:
+        raise ValueError("le nom ne peut pas être vide")
+    return cleaned
+
+
+PlaceName = Annotated[str, Field(min_length=1, max_length=100), AfterValidator(_name)]
+
+
 class BuildingOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -62,7 +76,7 @@ class BuildingOut(BaseModel):
 
 
 class BuildingCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
+    name: PlaceName
     location: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
 
@@ -70,7 +84,7 @@ class BuildingCreate(BaseModel):
 class BuildingUpdate(BaseModel):
     """Partial update — only the supplied fields are changed."""
 
-    name: str | None = Field(default=None, min_length=1, max_length=100)
+    name: PlaceName | None = None
     location: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
 
@@ -114,7 +128,7 @@ class RoomOut(BaseModel):
 
 
 class RoomCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
+    name: PlaceName
     building_id: uuid.UUID | None = None
     location: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
@@ -124,7 +138,7 @@ class RoomUpdate(BaseModel):
     """Partial update — only the supplied fields are changed. ``building_id``
     set to null takes the room out of its building."""
 
-    name: str | None = Field(default=None, min_length=1, max_length=100)
+    name: PlaceName | None = None
     building_id: uuid.UUID | None = None
     location: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
@@ -140,11 +154,22 @@ class RoomConfigOut(BaseModel):
     manual: bool
 
 
+class RoomCreationOut(BaseModel):
+    """What the caller's scope lets it create — the console hides the
+    buttons whose every use would be refused."""
+
+    rooms: bool
+    buildings: bool
+
+
 class SyncOut(BaseModel):
-    """What re-filing the parc from the directory did."""
+    """What re-filing the parc from the directory did — or, on a dry run,
+    would do."""
 
     placed: int
     unplaced: int
+    # Postes that leave the room they were in, for another or for none.
+    moved_out: int = 0
     rooms_created: int
     # Postes left where they were: the room made by hand bearing their name
     # was claimed without a strict majority, so nobody was filed in it.
@@ -286,6 +311,30 @@ def _clean_name(name: str) -> str:
     return " ".join(name.split())
 
 
+async def _reject_in_group_scope(
+    session: SessionDep, kind: ScopeKind, ident: uuid.UUID
+) -> None:
+    """A room or a building a group is confined to cannot be deleted: its
+    scope row would name nothing (the group then sees less than it should),
+    and removing the row would widen the group to the whole parc if it was
+    its last. The administrator changes the group's scope first (C11)."""
+    rows = await session.exec(
+        select(Group.name)
+        .join(GroupScope, col(GroupScope.group_id) == col(Group.id))
+        .where(col(GroupScope.kind) == kind.value)
+        .where(col(GroupScope.value) == str(ident))
+        .order_by(col(Group.name))
+    )
+    groups = list(rows.all())
+    if groups:
+        raise AppError(
+            code=ErrorCode.ROOM_IN_GROUP_SCOPE,
+            status_code=409,
+            message="Used in the scope of a group: " + ", ".join(groups),
+            details={"groups": groups},
+        )
+
+
 def _reject_locked_placement() -> None:
     """In a directory mode, a placement made by hand would be undone on the
     poste's next inventory: refused, with the mode named, rather than
@@ -301,9 +350,14 @@ def _reject_locked_placement() -> None:
 
 
 async def _buildings_out(
-    session: SessionDep, buildings: list[Building]
+    session: SessionDep, buildings: list[Building], scope: Scope | None = None
 ) -> list[BuildingOut]:
-    counts = await crud.building_counts(session, [b.id for b in buildings])
+    counts = await crud.building_counts(
+        session,
+        [b.id for b in buildings],
+        room_where=room_clause(scope),
+        machine_where=machine_clause(scope),
+    )
     return [
         BuildingOut(
             id=b.id,
@@ -393,7 +447,7 @@ async def _room_out(session: SessionDep, room: Room) -> RoomOut:
 async def list_buildings(session: SessionDep, scope: CurrentScope) -> list[BuildingOut]:
     """Every building, by site then name. Not paginated: a parc has dozens."""
     return await _buildings_out(
-        session, await crud.list_buildings(session, building_clause(scope))
+        session, await crud.list_buildings(session, building_clause(scope)), scope
     )
 
 
@@ -425,7 +479,7 @@ async def create_building(
     )
     await session.commit()
     await session.refresh(building)
-    return (await _buildings_out(session, [building]))[0]
+    return (await _buildings_out(session, [building], scope))[0]
 
 
 @buildings_router.patch(
@@ -465,7 +519,7 @@ async def update_building(
     )
     await session.commit()
     await session.refresh(building)
-    return (await _buildings_out(session, [building]))[0]
+    return (await _buildings_out(session, [building], scope))[0]
 
 
 @buildings_router.delete("/{building_id}", status_code=204, dependencies=[_WRITE])
@@ -480,6 +534,7 @@ async def delete_building(
     is renamed after the building."""
     building = await _require_building(session, building_id, scope)
     _reject_out_of_scope(_building_writable(building, scope))
+    await _reject_in_group_scope(session, ScopeKind.BUILDING, building.id)
     renamed = await crud.detach_building(session, building)
     audit.record(
         session,
@@ -510,9 +565,29 @@ async def room_config() -> RoomConfigOut:
     )
 
 
+@rooms_router.get("/creation", response_model=RoomCreationOut)
+async def room_creation(scope: CurrentScope) -> RoomCreationOut:
+    """Whether the caller's scope lets it create a room, a building — before
+    room:write, which the console checks on its own. A building is created
+    on a site the scope names; a room in a building or on a site it names:
+    an account confined to rooms creates neither, one confined to buildings
+    creates rooms in them only. Declared before ``/{room_id}``."""
+    if scope is None:
+        return RoomCreationOut(rooms=True, buildings=True)
+    return RoomCreationOut(
+        rooms=bool(scope.locations or scope.buildings),
+        buildings=bool(scope.locations),
+    )
+
+
 @rooms_router.post("/sync-directory", response_model=SyncOut, dependencies=[_WRITE])
 async def sync_directory(
-    session: SessionDep, current: CurrentUser, scope: CurrentScope
+    session: SessionDep,
+    current: CurrentUser,
+    scope: CurrentScope,
+    dry_run: bool = Query(
+        False, description="Say what the re-sync would do, and write nothing"
+    ),
 ) -> SyncOut:
     """Re-file every poste from what its agent last said of the directory.
 
@@ -520,9 +595,19 @@ async def sync_directory(
     ``ROOM_SOURCE`` switched on the server would otherwise take effect one
     poste at a time, on the day each one moves. In manual mode this does
     nothing and says so.
+
+    ``dry_run``: the same work in a savepoint rolled back — the counts the
+    console shows before asking to confirm, nothing written, nothing audited.
     """
     # Parc-wide by nature: it refiles every poste, whatever its site.
     _reject_out_of_scope(scope is None)
+    if dry_run:
+        nested = await session.begin_nested()
+        try:
+            preview = await crud.sync_from_directory(session, settings.ROOM_SOURCE)
+        finally:
+            await nested.rollback()
+        return _sync_out(preview)
     result = await crud.sync_from_directory(session, settings.ROOM_SOURCE)
     audit.record(
         session,
@@ -534,15 +619,21 @@ async def sync_directory(
             "source": settings.ROOM_SOURCE,
             "placed": result.placed,
             "unplaced": result.unplaced,
+            "moved_out": result.moved_out,
             "rooms_created": result.rooms_created,
             "undecided": result.undecided,
             "undecided_rooms": list(result.undecided_rooms),
         },
     )
     await session.commit()
+    return _sync_out(result)
+
+
+def _sync_out(result: crud.SyncResult) -> SyncOut:
     return SyncOut(
         placed=result.placed,
         unplaced=result.unplaced,
+        moved_out=result.moved_out,
         rooms_created=result.rooms_created,
         undecided=result.undecided,
         undecided_rooms=list(result.undecided_rooms),
@@ -660,8 +751,10 @@ async def update_room(
 async def delete_room(
     room_id: uuid.UUID, session: SessionDep, current: CurrentUser, scope: CurrentScope
 ) -> None:
-    """Delete a room. Its postes stay, room-less (``ON DELETE SET NULL``)."""
+    """Delete a room. Its postes stay, room-less (``ON DELETE SET NULL``).
+    Refused while a group's scope names it (C11)."""
     room = await _require_room(session, room_id, scope)
+    await _reject_in_group_scope(session, ScopeKind.ROOM, room.id)
     audit.record(
         session,
         actor=current.email,

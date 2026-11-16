@@ -7,11 +7,12 @@ is a route of its own rather than a PATCH with a date.
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
-from sqlalchemy import func, update
+from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
@@ -33,9 +34,8 @@ from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
 from app.features.notification import tasks as task_mail
 from app.features.room import crud as room_crud
-from app.features.user import crud as user_crud
 from app.features.user.models import User
-from app.features.user.permissions import Action, Resource, has_permission
+from app.features.user.permissions import Action, Resource
 from app.features.user.scope import (
     Scope,
     machine_clause,
@@ -77,6 +77,22 @@ def _user_ref(user: User | None) -> UserRef | None:
     return UserRef(id=user.id, name=user.full_name or user.email)
 
 
+class AssigneeRef(UserRef):
+    """Who a check is given to. ``active`` false for an account deactivated
+    since: the console names them « (désactivé) » rather than showing an id
+    it cannot find among the choices."""
+
+    active: bool = True
+
+
+def _assignee_ref(user: User | None) -> AssigneeRef | None:
+    if user is None:
+        return None
+    return AssigneeRef(
+        id=user.id, name=user.full_name or user.email, active=user.is_active
+    )
+
+
 class MachineRef(BaseModel):
     """The poste a task is about, as the task list shows it."""
 
@@ -91,7 +107,7 @@ class CheckOut(BaseModel):
     id: uuid.UUID
     machine_id: uuid.UUID
     requested_by: str
-    assigned_to: UserRef | None
+    assigned_to: AssigneeRef | None
     instructions: str | None
     created_at: datetime
     updated_at: datetime
@@ -180,29 +196,36 @@ async def _require_check(
     return row
 
 
+async def _takers(
+    session: SessionDep, user_ids: list[uuid.UUID], machine_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Which of these accounts can take checks on all of these postes: active,
+    check:read and check:write — closing is what doing the task means — and
+    every poste within their scope. Anyone else would be mailed hostnames and
+    instructions about postes kept out of their sight (audit S18), or handed
+    a task they cannot close. The rule the lists and the mails apply to an
+    assignee afterwards (``check_crud.assignee_reach``)."""
+    reach = await crud.assignee_reach(session, user_ids)
+    if not machine_ids:
+        return set(reach.scopes)
+    found = await session.exec(
+        select(col(Machine.location), col(Machine.room_id)).where(
+            col(Machine.id).in_(set(machine_ids))
+        )
+    )
+    places = list(found.all())
+    return {
+        user_id
+        for user_id in reach.scopes
+        if all(reach.machine(user_id, location, room) for location, room in places)
+    }
+
+
 async def _can_take(
     session: SessionDep, user_id: uuid.UUID, machine_ids: list[uuid.UUID]
 ) -> bool:
-    """Whether the account can see these checks: check:read, and every poste
-    within its scope. Anyone else would be mailed hostnames and instructions
-    about postes kept out of their sight (audit S18)."""
-    authority = await user_crud.user_authority(session, user_id)
-    if authority.is_admin:
-        return True
-    if not has_permission(
-        authority.permissions, Resource.CHECK.value, Action.READ.value
-    ):
-        return False
-    clause = machine_clause(authority.scope)
-    if clause is None or not machine_ids:
-        return True
-    seen = await session.scalar(
-        select(func.count())
-        .select_from(Machine)
-        .where(col(Machine.id).in_(machine_ids))
-        .where(clause)
-    )
-    return (seen or 0) == len(set(machine_ids))
+    """``_takers`` for one account."""
+    return user_id in await _takers(session, [user_id], machine_ids)
 
 
 async def _require_assignee(
@@ -259,7 +282,7 @@ async def _out(
             id=r.id,
             machine_id=r.machine_id,
             requested_by=r.requested_by,
-            assigned_to=_user_ref(
+            assigned_to=_assignee_ref(
                 users.get(r.assigned_to_id) if r.assigned_to_id else None
             ),
             instructions=r.instructions,
@@ -366,10 +389,13 @@ async def list_machine_checks(
 async def assignable_users(
     session: SessionDep, scope: CurrentScope, machine_id: uuid.UUID | None = None
 ) -> list[UserRef]:
-    """Active accounts, id and name only: who a task can be given to, without
-    opening the accounts page to everyone who may assign. Also who may own a
-    maintenance — so open to whoever sets one, not only to check:read (audit
-    B35). Registered before ``router``, whose ``/{check_id}`` would take it."""
+    """Who a task can be given to, id and name only, without opening the
+    accounts page to everyone who may assign: active accounts that can read
+    and close checks — a read-only account would be handed a task it cannot
+    close. For one poste, only those who see it. Open to whoever sets a
+    maintenance owner too, not only to check:read (audit B35) — the owner
+    picker has its own list since (``/maintenance/assignable-owners``).
+    Registered before ``router``, whose ``/{check_id}`` would take it."""
     if machine_id is not None and not await machine_visible(session, machine_id, scope):
         # A poste out of the caller's own reach: who could take it is not
         # theirs to learn (audit T32).
@@ -382,10 +408,11 @@ async def assignable_users(
         select(User).where(col(User.is_active).is_(True)).order_by(col(User.email))
     )
     users = list(rows.all())
-    if machine_id is not None:
-        # For a check on that poste: only who can see it (audit S18).
-        users = [u for u in users if await _can_take(session, u.id, [machine_id])]
-    return [ref for u in users if (ref := _user_ref(u)) is not None]
+    # For a check on that poste: only who can see it (audit S18).
+    takers = await _takers(
+        session, [u.id for u in users], [machine_id] if machine_id else []
+    )
+    return [ref for u in users if u.id in takers and (ref := _user_ref(u))]
 
 
 @router.post(
@@ -587,6 +614,21 @@ async def close_check(
     """Close a request with what was found. Writes the poste's journal."""
     row = await _require_check(session, check_id, scope)
     closed_at = payload.closed_at or utcnow()
+    if closed_at.tzinfo is None:
+        # Read as UTC, as ``not_in_the_future`` reads it.
+        closed_at = closed_at.replace(tzinfo=UTC)
+    if closed_at < row.created_at:
+        # Closed before it was asked: a typo in the date, and a journal line
+        # that would read before the request it answers.
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("body", "closed_at"),
+                    "msg": "Value error, la date ne peut pas précéder la demande",
+                    "type": "value_error",
+                }
+            ]
+        )
     note = _clean(payload.note)
     # Closed in one statement, on the condition that it still is open: of two
     # closings at the same time, one wins and the other is told (audit B21) —
@@ -615,7 +657,9 @@ async def close_check(
         Intervention(
             machine_id=row.machine_id,
             kind=InterventionKind.VERIFICATION.value,
-            title="Vérification",
+            # The kind says « Vérification »: a title repeating it read
+            # « Vérification — Vérification » in the journal.
+            title=None,
             note=note,
             performed_by=current.email,
             performed_at=closed_at,

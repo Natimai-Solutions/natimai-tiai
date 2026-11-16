@@ -55,7 +55,12 @@ while :; do
     # Une purge qui échoue (fichier non supprimable) est signalée sans arrêter
     # le script : sous set -e, le conteneur redémarrerait en boucle, avec un
     # dump de plus à chaque tour.
-    find /backups -name 'tiai-*.dump' -mtime +"$KEEP_DAYS" -delete \
+    # Seuls les dumps de ce script, à leur nom exact (tiai-AAAAMMJJ-HHMMSS.dump)
+    # et à la racine du dossier : un dump manuel (tiai-avant-operation.dump,
+    # cf. DEPLOYMENT.md) ou rangé dans un sous-dossier n'est jamais purgé.
+    find /backups -maxdepth 1 -type f \
+      -name 'tiai-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].dump' \
+      -mtime +"$KEEP_DAYS" -delete \
       || echo "ATTENTION : purge des dumps de plus de $KEEP_DAYS jours incomplète" >&2
   else
     rm -f "$tmp"

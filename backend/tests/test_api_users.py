@@ -870,6 +870,7 @@ async def test_the_password_policy_is_public(client):
     assert resp.status_code == 200
     assert resp.json() == {
         "min_length": settings.PASSWORD_MIN_LENGTH,
+        "max_bytes": 72,
         "reset_expire_minutes": settings.PASSWORD_RESET_EXPIRE_MINUTES,
     }
 
@@ -931,3 +932,249 @@ async def test_a_required_field_sent_as_null_is_a_422(client, db_session):
         json={"building_id": None},
     )
     assert resp.status_code == 200, resp.text
+
+
+# --- Concurrency and bounds (acceptance, 2026-11) -----------------------------
+
+
+async def test_two_last_admins_deactivating_each_other_leave_one(
+    client, db_session, monkeypatch
+):
+    """Two administrators, the last two, deactivate each other at the same
+    instant: one change goes through, the other is refused — never zero
+    administrators. The commit is held back so that both changes are counted
+    before either commits, the window the guard used to leave open."""
+    import asyncio
+
+    from sqlmodel import select
+
+    from app.features.user import crud
+    from app.features.user.models import User
+
+    first = await _admin(client, db_session, "a1@test.local")
+    second = await _admin(client, db_session, "a2@test.local")
+    ids = {
+        u["email"]: u["id"]
+        for u in (await client.get("/api/v1/users", headers=first)).json()["items"]
+    }
+    counted = crud.users_holding
+
+    async def slow_count(session, permission):
+        # Counted, then a pause before the commit: without the lock, the
+        # other change counts during it, sees this one's target still active,
+        # and both commit.
+        held = await counted(session, permission)
+        await asyncio.sleep(0.3)
+        return held
+
+    monkeypatch.setattr(crud, "users_holding", slow_count)
+    results = await asyncio.gather(
+        client.patch(
+            f"/api/v1/users/{ids['a2@test.local']}",
+            headers=first,
+            json={"is_active": False},
+        ),
+        client.patch(
+            f"/api/v1/users/{ids['a1@test.local']}",
+            headers=second,
+            json={"is_active": False},
+        ),
+    )
+    assert sorted(r.status_code for r in results) == [200, 409], [
+        r.text for r in results
+    ]
+    db_session.expire_all()
+    active = (
+        await db_session.exec(select(User).where(User.is_active.is_(True)))  # type: ignore[attr-defined]
+    ).all()
+    assert len(active) == 1
+
+
+async def test_concurrent_creations_of_one_address_answer_409(client, db_session):
+    """Eight requests creating the same address at once: one account, and
+    seven « déjà utilisée » — never a 500."""
+    import asyncio
+
+    headers = await _admin(client, db_session)
+    results = await asyncio.gather(
+        *(
+            client.post(
+                "/api/v1/users",
+                headers=headers,
+                json={"email": "twin@test.local", "password": STRONG},
+            )
+            for _ in range(8)
+        )
+    )
+    codes = sorted(r.status_code for r in results)
+    assert codes == [201] + [409] * 7, [r.text for r in results]
+    assert all(_code(r) == "user.email.taken" for r in results if r.status_code == 409)
+
+
+async def test_concurrent_renames_to_one_address_answer_409(client, db_session):
+    import asyncio
+
+    headers = await _admin(client, db_session)
+    ids = []
+    for i in range(4):
+        resp = await client.post(
+            "/api/v1/users",
+            headers=headers,
+            json={"email": f"u{i}@test.local", "password": STRONG},
+        )
+        ids.append(resp.json()["id"])
+    results = await asyncio.gather(
+        *(
+            client.patch(
+                f"/api/v1/users/{uid}",
+                headers=headers,
+                json={"email": "same@test.local"},
+            )
+            for uid in ids
+        )
+    )
+    codes = sorted(r.status_code for r in results)
+    assert codes == [200] + [409] * 3, [r.text for r in results]
+
+
+async def test_a_full_name_is_trimmed_and_bounded(client, db_session):
+    headers = await _admin(client, db_session)
+    resp = await client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={"email": "long@test.local", "password": STRONG, "full_name": "x" * 256},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "255" in resp.json()["error"]["details"]["errors"][0]["msg"]
+    resp = await client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={"email": "blank@test.local", "password": STRONG, "full_name": "   "},
+    )
+    assert resp.status_code == 422
+    assert "vide" in resp.json()["error"]["details"]["errors"][0]["msg"]
+    resp = await client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={"email": "trim@test.local", "password": STRONG, "full_name": "  Marie  "},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["full_name"] == "Marie"
+    uid = resp.json()["id"]
+    resp = await client.patch(
+        f"/api/v1/users/{uid}", headers=headers, json={"full_name": "é" * 300}
+    )
+    assert resp.status_code == 422
+    # Clearing the name is still a null, not a blank.
+    resp = await client.patch(
+        f"/api/v1/users/{uid}", headers=headers, json={"full_name": None}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["full_name"] is None
+
+
+async def test_the_search_term_is_trimmed(client, db_session):
+    headers = await _admin(client, db_session)
+    resp = await client.get(
+        "/api/v1/users", headers=headers, params={"search": "  admin@test.local "}
+    )
+    assert resp.json()["total"] == 1
+
+
+async def test_a_password_bcrypt_would_cut_is_refused(client, db_session):
+    """bcrypt reads 72 bytes: a longer password would have its end ignored.
+    Counted in bytes — « é » weighs two."""
+    from app.core.security import PASSWORD_MAX_BYTES
+
+    headers = await _admin(client, db_session)
+    resp = await client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={"email": "bytes@test.local", "password": "a" * PASSWORD_MAX_BYTES},
+    )
+    assert resp.status_code == 201, resp.text
+    resp = await client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={"email": "accents@test.local", "password": "é" * 37},
+    )
+    assert resp.status_code == 422
+    assert "72 octets" in resp.json()["error"]["details"]["errors"][0]["msg"]
+    resp = await client.post(
+        "/api/v1/auth/password",
+        headers=headers,
+        json={"current_password": STRONG, "new_password": "b" * 73},
+    )
+    assert resp.status_code == 422
+    policy = (await client.get("/api/v1/auth/password-policy")).json()
+    assert policy["max_bytes"] == PASSWORD_MAX_BYTES
+
+
+async def test_the_new_password_must_differ_from_the_current_one(client, db_session):
+    from app.features.user.permissions import BuiltinGroup
+
+    headers = await _headers(
+        client, db_session, "same@test.local", BuiltinGroup.READONLY
+    )
+    resp = await client.post(
+        "/api/v1/auth/password",
+        headers=headers,
+        json={"current_password": STRONG, "new_password": STRONG},
+    )
+    assert resp.status_code == 400
+    assert _code(resp) == "password.unchanged"
+    # Nothing ended: the session still works.
+    assert (await client.get("/api/v1/auth/me", headers=headers)).status_code == 200
+
+
+async def test_a_reset_link_can_be_checked_without_being_spent(
+    client, db_session, monkeypatch
+):
+    """GET /auth/password-reset/check: 204 while the link is usable, the
+    confirm route's 400 otherwise, and checking never consumes it."""
+    from app.features.user import crud
+    from app.features.user.permissions import BuiltinGroup
+
+    user = await crud.create_user(
+        db_session,
+        email="forgot@test.local",
+        password=STRONG,
+        groups=[BuiltinGroup.READONLY],
+    )
+    token = await crud.create_reset_token(db_session, user)
+    await db_session.commit()
+
+    for _ in range(2):
+        resp = await client.get(
+            "/api/v1/auth/password-reset/check", params={"token": token}
+        )
+        assert resp.status_code == 204, resp.text
+    resp = await client.get(
+        "/api/v1/auth/password-reset/check", params={"token": "nope"}
+    )
+    assert resp.status_code == 400
+    assert _code(resp) == "password.reset_token.invalid"
+
+    # Still redeemable after being checked; dead once redeemed.
+    resp = await client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": token, "new_password": "a-brand-new-passphrase"},
+    )
+    assert resp.status_code == 204, resp.text
+    resp = await client.get(
+        "/api/v1/auth/password-reset/check", params={"token": token}
+    )
+    assert resp.status_code == 400
+
+
+async def test_checking_reset_links_is_rate_limited(client, db_session):
+    statuses = [
+        (
+            await client.get(
+                "/api/v1/auth/password-reset/check", params={"token": f"t{i}"}
+            )
+        ).status_code
+        for i in range(21)
+    ]
+    assert statuses[:20] == [400] * 20
+    assert statuses[20] == 429

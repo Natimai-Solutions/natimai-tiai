@@ -43,16 +43,20 @@ from app.features.machine.status import (
     WindowsUpdateFilter,
     agent_outdated_clause,
     disk_free_percent,
+    effective_signature_age,
+    effective_up_to_date,
     is_online,
     low_disk_clause,
     online_clause,
     ram_clause,
+    reenroll_pending_clause,
     scan_clause,
     status_clause,
     windows_update_clause,
 )
 from app.features.maintenance import policy as maintenance_policy
 from app.features.maintenance.policy import MaintenanceState
+from app.features.package import crud as package_crud
 from app.features.room import crud as room_crud
 from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
@@ -114,6 +118,11 @@ class MachineOut(BaseModel):
     agent_version: str | None
     is_up_to_date: bool | None
     needs_verification: bool
+    # Enrollment states an administrator has to act on, in the list and not
+    # only on the fiche: a re-enrollment held for approval, and a revoked
+    # token (``allow-reenroll`` lifts both).
+    token_revoked: bool = False
+    reenroll_requested: bool = False
     signature_version: str | None
     # Which antivirus guards the poste. In the list and not only in the detail:
     # on a mixed parc it is the column that explains an "outdated" Defender
@@ -171,6 +180,16 @@ def _place(out: MachineOut, machine: Machine, placement: room_crud.Placement) ->
     )
 
 
+def _reenroll_pending(machine: Machine) -> bool:
+    """Python twin of ``status.reenroll_pending_clause``."""
+    return machine.reenroll_requested_at is not None and not machine.token_revoked
+
+
+def _enrollment_state(out: MachineOut, machine: Machine) -> None:
+    """Fill the payload's derived enrollment flag."""
+    out.reenroll_requested = _reenroll_pending(machine)
+
+
 def _machine_out(
     machine: Machine,
     room: Room | None,
@@ -179,10 +198,17 @@ def _machine_out(
     names: dict[uuid.UUID, str] | None = None,
     policy: MaintenancePolicy | None = None,
     now: datetime | None = None,
+    fleet: FleetPolicy | None = None,
 ) -> MachineOut:
     """A list row, with its placement, open request and maintenance standing
     as the joined query and the policy give them."""
     out = MachineOut.model_validate(machine)
+    _enrollment_state(out, machine)
+    if fleet is not None:
+        # Judged now, not at the last heartbeat (``effective_up_to_date``).
+        out.is_up_to_date = effective_up_to_date(
+            machine, now or utcnow(), fleet.signature_max_age_days
+        )
     _place(out, machine, room_crud.Placement(room=room, building=building))
     if check is not None:
         out.check_open = True
@@ -712,6 +738,9 @@ class MachineFilters:
     usage_days: int | None = None
     usage_hours_below: float | None = None
     usage_hours_above: float | None = None
+    # Enrollment waiting on an administrator: a re-enrollment held for
+    # approval ("pending"), or a revoked token ("revoked").
+    enrollment: Literal["pending", "revoked"] | None = None
 
 
 def machine_filters(
@@ -746,6 +775,7 @@ def machine_filters(
     usage_days: int | None = Query(None, ge=1, le=90),
     usage_hours_below: float | None = Query(None, ge=0),
     usage_hours_above: float | None = Query(None, ge=0),
+    enrollment: Literal["pending", "revoked"] | None = None,
 ) -> MachineFilters:
     """The list's facets as query parameters, shared by the list and the exports.
 
@@ -784,6 +814,7 @@ def machine_filters(
         usage_days=usage_days,
         usage_hours_below=usage_hours_below,
         usage_hours_above=usage_hours_above,
+        enrollment=enrollment,
         scope=scope,
     )
 
@@ -928,8 +959,17 @@ def _filtered_machines(
         )
     if filters.status is not None:
         stmt = stmt.where(
-            status_clause(filters.status, utcnow(), fleet.inactive_after_days)
+            status_clause(
+                filters.status,
+                utcnow(),
+                fleet.inactive_after_days,
+                fleet.signature_max_age_days,
+            )
         )
+    if filters.enrollment == "pending":
+        stmt = stmt.where(reenroll_pending_clause())
+    elif filters.enrollment == "revoked":
+        stmt = stmt.where(col(Machine.token_revoked).is_(True))
     if filters.online is not None:
         # Its own axis, not a MachineStatus value: "allumé maintenant" must stay
         # combinable with the antivirus statuses — the everyday question is
@@ -996,7 +1036,7 @@ async def list_machines(
     now = utcnow()
     items = []
     for m, room, building, check, seconds in page_rows:
-        out = _machine_out(m, room, building, check, names, policy, now)
+        out = _machine_out(m, room, building, check, names, policy, now, policies.fleet)
         out.usage_hours = usage_crud.usage_hours(seconds, m.first_seen, usage.start)
         items.append(out)
     return MachineList(
@@ -1277,6 +1317,8 @@ async def _export_rows(
                 else None
             ),
             usage_hours=usage_crud.usage_hours(seconds, m.first_seen, usage.start),
+            signature_max_age_days=policies.fleet.signature_max_age_days,
+            taken_at=now,
         )
         for m, room, building, check, seconds in all_rows
     ], usage
@@ -1564,9 +1606,19 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
         .order_by(severity_rank, col(WindowsUpdate.title))
     )
     detail = MachineDetailOut.model_validate(machine)
+    _enrollment_state(detail, machine)
     detail.software_truncated = machine.software_truncated_at is not None
     _place(detail, machine, await room_crud.placement(session, machine.room_id))
     policies = await setting_crud.policies(session)
+    # The age as it stands now, and the verdict on it — what the list and
+    # the dashboard say about the same poste.
+    now = utcnow()
+    detail.signature_age_days = effective_signature_age(
+        machine.signature_age_days, machine.signature_reported_at, now
+    )
+    detail.is_up_to_date = effective_up_to_date(
+        machine, now, policies.fleet.signature_max_age_days
+    )
     # The same figure as the machine's list row, over the console's window.
     usage = _usage_window(policies.usage, None)
     detail.usage_days = usage.days
@@ -1790,7 +1842,9 @@ def _duplicate_candidate(
     """A machine as a merge candidate, tagged with what makes it one."""
     # ``is_online`` is derived from ``last_seen`` at serialization time, so it is
     # dropped here rather than fed back in as an input.
-    base = MachineOut.model_validate(machine).model_dump(exclude={"is_online"})
+    out = MachineOut.model_validate(machine)
+    _enrollment_state(out, machine)
+    base = out.model_dump(exclude={"is_online"})
     return DuplicateCandidateOut(
         **base, first_seen=machine.first_seen, match_reason=reason
     )
@@ -1928,6 +1982,13 @@ async def allow_reenroll(
     token on the first 401, and retries a held enrollment by itself).
     """
     machine = await _require_machine(session, machine_id, scope)
+    _allow_reenroll(session, machine, user)
+    await session.commit()
+    return {"status": "reenroll-allowed"}
+
+
+def _allow_reenroll(session: SessionDep, machine: Machine, user: User) -> None:
+    """Clear the way for the poste's next enrollment, and audit it."""
     details = {"hostname": machine.hostname, "machine_uuid": machine.machine_uuid}
     if machine.reenroll_requested_at is not None:
         details["requested_at"] = machine.reenroll_requested_at.isoformat()
@@ -1946,8 +2007,90 @@ async def allow_reenroll(
         resource_id=str(machine.id),
         details=details,
     )
+
+
+class ApproveReenrollRequest(BaseModel):
+    """The postes whose held re-enrollment to approve, from the list."""
+
+    machine_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+class ApproveReenrollResponse(BaseModel):
+    approved: int
+    # Not pending (nothing held, or revoked — a revocation is lifted one
+    # poste at a time, from its fiche), unknown, or outside the caller's
+    # scope: told apart from none of the others, as for a single poste.
+    skipped: int
+
+
+@router.post(
+    "/approve-reenroll",
+    response_model=ApproveReenrollResponse,
+    dependencies=[Depends(require_permission(Resource.MACHINE, Action.WRITE))],
+)
+async def approve_reenroll(
+    payload: ApproveReenrollRequest,
+    session: SessionDep,
+    scope: CurrentScope,
+    user: CurrentUser,
+) -> ApproveReenrollResponse:
+    """Approve the held re-enrollments of a selection at once — a room
+    reinstalled over the holidays asks for thirty. Each poste is approved and
+    audited exactly as from its fiche (``allow-reenroll``)."""
+    requested = list(dict.fromkeys(payload.machine_ids))
+    rows = await session.exec(
+        restrict(
+            select(Machine)
+            .where(col(Machine.id).in_(requested))
+            .where(reenroll_pending_clause())
+            .order_by(col(Machine.id))
+            .with_for_update(of=Machine),
+            machine_clause(scope),
+        )
+    )
+    machines = rows.all()
+    for machine in machines:
+        _allow_reenroll(session, machine, user)
     await session.commit()
-    return {"status": "reenroll-allowed"}
+    return ApproveReenrollResponse(
+        approved=len(machines), skipped=len(requested) - len(machines)
+    )
+
+
+@router.post(
+    "/{machine_id}/confirm-identity",
+    response_model=MachineDetailOut,
+    dependencies=[Depends(require_permission(Resource.MACHINE, Action.WRITE))],
+)
+async def confirm_identity(
+    machine_id: uuid.UUID, session: SessionDep, scope: CurrentScope, user: CurrentUser
+) -> MachineDetailOut:
+    """Clear « identité à confirmer » without a merge.
+
+    The flag says the poste's hardware anchor changed, or that another record
+    shares it: a reinstall, a motherboard swap, a clone — or nothing at all,
+    and then the administrator who checked says so here. Audited with the
+    fingerprint they vouched for. Sticky again if the anchor moves again.
+    """
+    machine = await _require_machine(session, machine_id, scope)
+    machine.needs_verification = False
+    machine.updated_at = utcnow()
+    audit.record(
+        session,
+        actor=user.email,
+        action="machine.identity_confirmed",
+        resource_type="machine",
+        resource_id=str(machine.id),
+        details={
+            "hostname": machine.hostname,
+            "machine_uuid": machine.machine_uuid,
+            "smbios_uuid": machine.smbios_uuid,
+            "tpm_ek_hash": machine.tpm_ek_hash,
+        },
+    )
+    await session.commit()
+    await session.refresh(machine)
+    return await _machine_detail(session, machine)
 
 
 class MergeRequest(BaseModel):
@@ -1982,6 +2125,13 @@ async def merge_machine(
             status_code=400,
             message="Cannot merge a machine into itself",
         )
+    # Both rows locked, in id order: two merges of the same pair in opposite
+    # directions (A←B, B←A) would otherwise each delete the other's kept
+    # record. The second one waits, then finds its pair broken: 404.
+    for locked_id in sorted((machine_id, payload.source_id)):
+        await session.exec(
+            select(Machine.id).where(col(Machine.id) == locked_id).with_for_update()
+        )
     target = await _require_machine(session, machine_id, scope)
     source = await _require_machine(session, payload.source_id, scope)
     audit.record(
@@ -1998,7 +2148,11 @@ async def merge_machine(
             "source_machine_uuid": source.machine_uuid,
         },
     )
-    await machine_crud.merge_into(session, target=target, source=source)
+    held_files = await machine_crud.merge_into(session, target=target, source=source)
     await session.commit()
+    if held_files:
+        # A deployment the merge cancelled may have been the last one holding
+        # a file replaced in its package since (audit S09).
+        await package_crud.sweep_store(session)
     await session.refresh(target)
     return await _machine_detail(session, target)

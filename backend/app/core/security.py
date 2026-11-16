@@ -53,6 +53,12 @@ ACCESS_TOKEN_TYPE = "access"
 # switch. Bytes, not characters: bcrypt works on the UTF-8 encoding, and a cut
 # landing mid-codepoint is harmless because the value is never decoded back.
 _BCRYPT_MAX_BYTES = 72
+# What a *new* password may weigh, then: beyond it, the end of what was typed
+# would silently count for nothing, and two passwords sharing their first 72
+# bytes would open the same account. Refused when chosen (``api.fields.
+# Password``) rather than cut — a password already stored longer than that
+# still verifies, through the cut above.
+PASSWORD_MAX_BYTES = _BCRYPT_MAX_BYTES
 
 
 def _password_bytes(password: str) -> bytes:

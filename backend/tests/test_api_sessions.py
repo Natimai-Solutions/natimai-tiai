@@ -231,6 +231,90 @@ async def test_two_tabs_racing_for_the_same_token_are_not_theft(client, db_sessi
     assert (await _refresh(client, first_tab.cookies[COOKIE])).status_code == 200
 
 
+async def _refresh_with(client, token: str):
+    """A refresh carrying exactly ``token``, safe to run concurrently: the
+    jar is left alone (the header names the cookie)."""
+    return await client.post(
+        "/api/v1/auth/refresh", headers={"Cookie": f"{COOKIE}={token}"}
+    )
+
+
+@pytest.mark.parametrize("tabs", [3, 6])
+async def test_tabs_refreshing_at_once_with_one_slow_keep_the_session(
+    client, db_session, tabs
+):
+    """Every tab of a browser reloaded at once sends the same cookie. The
+    fast ones answer and the browser stores the first new cookie; a tab
+    reloaded a moment later sends that one; a slow request still carries the
+    old cookie. None of them is a thief, and the session must survive all."""
+    import asyncio
+
+    user_id = await _account(db_session)
+    old = (await _login(client)).cookies[COOKIE]
+    client.cookies.clear()
+
+    fast = await asyncio.gather(*(_refresh_with(client, old) for _ in range(tabs - 1)))
+    assert [r.status_code for r in fast] == [200] * (tabs - 1)
+    rotated = [r.cookies.get(COOKIE) for r in fast if r.cookies.get(COOKIE)]
+    # One rotation for the lot; the others answer without a new cookie.
+    assert len(rotated) == 1
+    newest = rotated[0]
+
+    # A tab started after the first answer sends the newest cookie, and the
+    # slow one arrives last with the old: neither rotates the session again.
+    again = await asyncio.gather(
+        *(_refresh_with(client, newest) for _ in range(tabs - 1))
+    )
+    assert [r.status_code for r in again] == [200] * (tabs - 1)
+    assert all("set-cookie" not in r.headers for r in again)
+    slow = await _refresh_with(client, old)
+    assert slow.status_code == 200, slow.text
+    assert "set-cookie" not in slow.headers
+    assert (await _me(client, _bearer(slow))).status_code == 200
+
+    (row,) = await _sessions(db_session, user_id)
+    assert row.revoked_at is None
+    # The browser's cookie still opens the session.
+    assert (await _refresh_with(client, newest)).status_code == 200
+
+
+async def test_the_old_token_after_the_window_is_still_theft(client, db_session):
+    """The tolerance is the grace window and nothing more: once it is past,
+    the replaced token presented again revokes the session."""
+    from app.features.auth_session import crud as auth_sessions
+
+    user_id = await _account(db_session)
+    old = (await _login(client)).cookies[COOKIE]
+    client.cookies.clear()
+    newest = (await _refresh_with(client, old)).cookies[COOKIE]
+    (row,) = await _sessions(db_session, user_id)
+    row.last_used_at = row.last_used_at - auth_sessions.REFRESH_REUSE_GRACE * 2
+    db_session.add(row)
+    await db_session.commit()
+
+    assert (await _refresh_with(client, old)).status_code == 401
+    assert (await _refresh_with(client, newest)).status_code == 401
+    (row,) = await _sessions(db_session, user_id)
+    assert row.revoked_at is not None
+
+
+async def test_the_new_token_rotates_again_once_the_window_is_past(client, db_session):
+    from app.features.auth_session import crud as auth_sessions
+
+    user_id = await _account(db_session)
+    old = (await _login(client)).cookies[COOKIE]
+    client.cookies.clear()
+    newest = (await _refresh_with(client, old)).cookies[COOKIE]
+    (row,) = await _sessions(db_session, user_id)
+    row.last_used_at = row.last_used_at - auth_sessions.REFRESH_REUSE_GRACE * 2
+    db_session.add(row)
+    await db_session.commit()
+
+    resp = await _refresh_with(client, newest)
+    assert resp.status_code == 200
+    assert resp.cookies.get(COOKIE) not in (None, newest, old)
+
+
 @pytest.mark.parametrize(
     "token",
     [None, "", "garbage", "not-a-uuid.secret", f"{uuid.uuid4()}.secret"],

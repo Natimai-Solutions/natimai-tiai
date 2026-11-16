@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, File, Response, UploadFile
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ValidationInfo, field_validator
 from sqlmodel import col, select
 
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
@@ -85,6 +85,26 @@ def _no_control(value: str | None) -> str | None:
     return value
 
 
+def _within(value: str | None, limit: int) -> str | None:
+    """A length check said in French: Pydantic's own reads « String should
+    have at most 100 characters », and reached the console as is."""
+    if value is not None and len(value) > limit:
+        raise ValueError(f"{limit} caractères au plus")
+    return value
+
+
+# Bounds of the text fields, the columns' (``Package``): the console's inputs
+# carry the same ``maxlength``.
+_LIMITS = {
+    "name": 200,
+    "version": 100,
+    "notes": 5000,
+    "install_run": 255,
+    "uninstall_run": 255,
+    "detect_name": 200,
+}
+
+
 def _check_args(args: list[str]) -> list[str]:
     if len(args) > _MAX_ARGS:
         raise ValueError(f"au plus {_MAX_ARGS} arguments")
@@ -106,17 +126,18 @@ def _check_codes(codes: list[int]) -> list[int]:
 class PackageBody(BaseModel):
     """Create or update. On update only the supplied fields change."""
 
-    name: str | None = Field(default=None, min_length=1, max_length=200)
-    version: str | None = Field(default=None, max_length=100)
-    notes: str | None = Field(default=None, max_length=5000)
+    # Bounded by ``_LIMITS``, checked in French below.
+    name: str | None = None
+    version: str | None = None
+    notes: str | None = None
     winget_id: str | None = None
     winget_version: str | None = None
-    install_run: str | None = Field(default=None, max_length=255)
+    install_run: str | None = None
     install_args: list[str] | None = None
-    uninstall_run: str | None = Field(default=None, max_length=255)
+    uninstall_run: str | None = None
     uninstall_args: list[str] | None = None
     success_codes: list[int] | None = None
-    detect_name: str | None = Field(default=None, max_length=200)
+    detect_name: str | None = None
 
     @field_validator("name", mode="before")
     @classmethod
@@ -124,6 +145,19 @@ class PackageBody(BaseModel):
         # Before the length check: a name of spaces — or of U+00A0, which
         # strip() takes too — is no name, not one to store as "".
         return v.strip() if isinstance(v, str) else v
+
+    @field_validator("name")
+    @classmethod
+    def _not_blank(cls, v: str | None) -> str | None:
+        # Given, it says something: null or blank is no name to rename to.
+        if not v:
+            raise ValueError("nom requis")
+        return v
+
+    @field_validator(*_LIMITS)
+    @classmethod
+    def _bounded(cls, v: str | None, info: ValidationInfo) -> str | None:
+        return _within(v, _LIMITS[str(info.field_name)])
 
     @field_validator("name", "version", "install_run", "uninstall_run", "detect_name")
     @classmethod
@@ -143,7 +177,7 @@ class PackageBody(BaseModel):
 
 class PackageCreate(PackageBody):
     kind: PackageKind
-    name: str = Field(min_length=1, max_length=200)
+    name: str
 
 
 class PackageFileOut(BaseModel):
@@ -195,6 +229,12 @@ class PackageOut(BaseModel):
     file_max_bytes: int
     # What stands between this package and a deployment; empty when ready.
     problems: list[ProblemOut]
+    # Why no poste would run an installation of it, in French, one sentence
+    # each: what the command route refuses a deployment with (409
+    # ``package.not_ready``) — the problems above, or else why neither method
+    # B nor method A would carry it, method A's size cap included. Empty when
+    # some poste could install it; a retirement is said by ``retired_at``.
+    install_blockers: list[str]
     # Postes (within the caller's scope) whose inventory shows the program;
     # null when ``detect_name`` is empty.
     installed_count: int | None
@@ -252,6 +292,9 @@ async def _out(
                 code=p.code, message=p.message, blocks_uninstall=p.blocks_uninstall
             )
             for p in problems
+        ],
+        install_blockers=[
+            p.message for p in manifest.step_blockers(package, files, "install")
         ],
         installed_count=await crud.installed_count(
             session, package, machine_ids_clause(scope, col(MachineSoftware.machine_id))
@@ -315,8 +358,14 @@ def _apply(package: Package, fields: dict[str, Any]) -> None:
                 # An MSI is not an executable: msiexec runs it, with the
                 # package's .msi among the arguments ("/i {dir}\\app.msi").
                 continue
-            if not manifest.valid_file_name(value):
-                raise _invalid("Nom de fichier à lancer invalide", field=key)
+            reason = manifest.file_name_problem(value)
+            if reason is not None:
+                raise _invalid(
+                    f"Fichier à lancer « {value} » refusé : {reason}",
+                    field=key,
+                    name=value,
+                    reason=reason,
+                )
         if package.uninstall_run == manifest.MSIEXEC and not package.uninstall_args:
             raise _invalid(
                 "Désinstallation par msiexec : indiquer les arguments (ex. /x {code produit} /qn)"
@@ -482,20 +531,29 @@ async def _store_uploads(
     spelled: dict[str, str] = {}
     for upload in files:
         name = (upload.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-        if not manifest.valid_file_name(name):
+        # The name and the clause it fails, said to the administrator: « nom
+        # refusé » alone left « nul.txt » and « _config.ini » unexplained.
+        reason = manifest.file_name_problem(name)
+        if reason is None and not manifest.valid_file_name(name):
+            reason = "nom refusé par les postes"  # the two rules disagree: never
+        if reason is not None:
             raise AppError(
                 code=ErrorCode.PACKAGE_FILE_NAME_INVALID,
                 status_code=422,
-                message="Nom de fichier refusé",
-                details={"name": name},
+                message=f"« {name} » refusé : {reason}",
+                details={"name": name, "reason": reason},
             )
         other = spelled.setdefault(name.lower(), name)
         if other != name:
+            reason = (
+                f"même nom que « {other} » à la casse près (un seul fichier sous "
+                "Windows) : envoyez-en un seul"
+            )
             raise AppError(
                 code=ErrorCode.PACKAGE_FILE_NAME_INVALID,
                 status_code=422,
-                message="Deux fichiers de l'envoi ne diffèrent que par la casse",
-                details={"name": name, "same_as": other},
+                message=f"« {name} » refusé : {reason}",
+                details={"name": name, "same_as": other, "reason": reason},
             )
         try:
             stored = await storage.save(upload, settings.PACKAGE_MAX_BYTES)
@@ -579,14 +637,30 @@ async def download_manifest(package_id: uuid.UUID, session: SessionDep) -> Respo
     if package.manifest is None:
         await crud.refresh_manifest(session, package)
         await session.commit()
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{package.name}-{package.version or ''}")
     return Response(
         content=package.manifest or b"",
         media_type="application/json",
         headers={
-            "Content-Disposition": f'attachment; filename="{safe.strip("-")}.tiai-manifest.json"'
+            "Content-Disposition": (
+                f'attachment; filename="{manifest_file_stem(package)}.tiai-manifest.json"'
+            )
         },
     )
+
+
+def _safe(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-.")
+
+
+def manifest_file_stem(package: Package) -> str:
+    """The manifest's file name before ``.tiai-manifest.json``: name and
+    version, in the characters any file system takes. A name written in
+    another script keeps none of them: the package id stands in for it, never
+    an empty stem — a file called ``.tiai-manifest.json`` is a hidden one.
+    The console names its download the same way (PackageDetailPage)."""
+    name = _safe(package.name) or str(package.id)
+    version = _safe(package.version or "")
+    return f"{name}-{version}" if version else name
 
 
 @router.put("/{package_id}/signature", response_model=PackageOut, dependencies=[_WRITE])
@@ -595,11 +669,16 @@ async def attach_signature(
     session: SessionDep,
     current: CurrentUser,
     scope: CurrentScope,
-    document: Annotated[dict[str, Any], Body()],
+    document: Annotated[Any, Body()] = None,
 ) -> PackageOut:
     """Attach the signature ``Sign-TiaiPackage.ps1`` produced. Refused unless
     it verifies over the manifest as it stands — a signature made before the
-    last change would be refused by every poste anyway, better to say so now."""
+    last change would be refused by every poste anyway, better to say so now.
+
+    Any JSON is taken in, not only an object: what is not the document is
+    refused by ``signature.verify`` in a sentence the console shows, where
+    the framework's « Input should be a valid dictionary » meant nothing to
+    the administrator."""
     import json
 
     package = await require_package(session, package_id, lock=True)

@@ -224,3 +224,21 @@ async def test_processors_and_chassis_listings(client, db_session):
 
     kinds = await client.get("/api/v1/machines/chassis-types", headers=headers)
     assert kinds.json()[0] == {"name": "laptop", "count": 2}
+
+
+# --- Decimals -----------------------------------------------------------------
+
+
+def test_csv_writes_decimals_with_a_comma_and_the_workbook_keeps_numbers():
+    """« 4,9 » in the ;-separated CSV a French Excel reads; 4.9 in the workbook."""
+    from zoneinfo import ZoneInfo
+
+    from app.api.machine_export import csv_value, resolve_columns, xlsx_value
+
+    (column,) = resolve_columns("usage_hours")
+    utc = ZoneInfo("UTC")
+    assert csv_value(column, 4.9, utc) == "4,9"
+    assert csv_value(column, None, utc) is None
+    assert xlsx_value(column, 4.9, utc) == 4.9
+    (count,) = resolve_columns("cpu_cores")
+    assert csv_value(count, 8, utc) == 8

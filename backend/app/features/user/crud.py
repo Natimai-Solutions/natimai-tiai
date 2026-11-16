@@ -190,6 +190,8 @@ async def list_users(
 ) -> tuple[list[User], int]:
     """List users (optionally filtered on email/full name), newest first."""
     stmt = select(User)
+    # Trimmed: an address pasted with a trailing space must still be found.
+    search = search.strip() if search else None
     if search:
         stmt = stmt.where(
             or_(
@@ -323,6 +325,22 @@ async def create_reset_token(session: AsyncSession, user: User) -> str:
     return token
 
 
+async def reset_token_usable(session: AsyncSession, token: str) -> bool:
+    """Whether ``consume_reset_token`` would accept ``token`` now: known,
+    unused, unexpired, of an active account. Reads only — no lock, nothing
+    marked."""
+    found = await session.exec(
+        select(PasswordResetToken, User)
+        .join(User, col(User.id) == col(PasswordResetToken.user_id))
+        .where(PasswordResetToken.token_hash == security.hash_token(token))
+    )
+    pair = found.one_or_none()
+    if pair is None:
+        return False
+    row, user = pair
+    return user.is_active and row.used_at is None and row.expires_at >= utcnow()
+
+
 async def consume_reset_token(session: AsyncSession, token: str) -> User | None:
     """Validate a reset token and return its user, marking the token used.
 
@@ -420,7 +438,11 @@ async def get_group(session: AsyncSession, group_id: uuid.UUID) -> Group | None:
 
 
 async def get_group_by_name(session: AsyncSession, name: str) -> Group | None:
-    result = await session.exec(select(Group).where(Group.name == name))
+    """The group of this name, whatever its capitalisation — the comparison
+    the unique index ``ix_groups_name_lower`` makes."""
+    result = await session.exec(
+        select(Group).where(func.lower(Group.name) == name.strip().lower())
+    )
     return result.one_or_none()
 
 
@@ -667,6 +689,19 @@ async def groups_authority(
         permissions=frozenset().union(*permissions.values()),
         scope=None if is_admin_ else scope_union(scopes.values()),
     )
+
+
+# The key of the transaction-scoped advisory lock every change that may take
+# ``user:write`` away from somebody takes before counting who still holds it
+# (``routes/users.reject_lockout``). Any constant would do; this one spells
+# "tiai-usr" in ASCII so that it reads as what it is in ``pg_locks``.
+ACCOUNT_MANAGEMENT_LOCK = 0x746961692D757372
+
+
+async def lock_account_management(session: AsyncSession) -> None:
+    """Wait for, then hold until the transaction ends, the lock that
+    serialises the last-administrator guard. Does not commit."""
+    await session.exec(select(func.pg_advisory_xact_lock(ACCOUNT_MANAGEMENT_LOCK)))
 
 
 async def users_holding(session: AsyncSession, permission: str) -> int:

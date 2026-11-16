@@ -45,6 +45,10 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+FULL_NAME_MAX_LENGTH = 255
+GROUP_NAME_MAX_LENGTH = 100
+
+
 class User(SQLModel, table=True):
     """A console operator authenticating with email + password (JWT).
 
@@ -62,7 +66,7 @@ class User(SQLModel, table=True):
     # rule hold for a row written by any other path.
     email: str = Field(max_length=255)
     hashed_password: str
-    full_name: str | None = Field(default=None, max_length=255)
+    full_name: str | None = Field(default=None, max_length=FULL_NAME_MAX_LENGTH)
     # A plain string column, the enum being the vocabulary rather than a
     # database type. A PostgreSQL ENUM would need a migration to add a fifth
     # cadence.
@@ -110,11 +114,18 @@ class Group(SQLModel, table=True):
     __tablename__ = "groups"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    name: str = Field(unique=True, max_length=100)
+    name: str = Field(unique=True, max_length=GROUP_NAME_MAX_LENGTH)
     description: str | None = Field(default=None, max_length=500)
     builtin_key: str | None = Field(default=None, unique=True)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
+
+
+# « Lecture seule » and « lecture SEULE » would be two groups nobody can tell
+# apart in a picker: names are unique whatever their capitalisation, like
+# addresses. The plain unique constraint on ``name`` stays (migrated databases
+# have it), this one is the rule.
+Index("ix_groups_name_lower", func.lower(Group.name), unique=True)
 
 
 class GroupPermission(SQLModel, table=True):

@@ -8,6 +8,7 @@ machine (plan §4).
 
 import uuid
 from datetime import datetime, timedelta
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -37,7 +38,7 @@ from app.features.machine.models import Machine
 from app.features.machine.status import MachineStatus, status_clause
 from app.features.package import crud as package_crud
 from app.features.package import manifest
-from app.features.package.models import Package, PackageKind
+from app.features.package.models import Package
 from app.features.setting import crud as setting_crud
 from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import Scope, machine_clause, machine_ids_clause, restrict
@@ -114,6 +115,14 @@ class CreateCommandsResponse(BaseModel):
     created: list[uuid.UUID]
     count: int
     skipped: int = 0
+    # Targets left alone because their token is revoked: nothing reaches such
+    # a poste until its re-enrollment is allowed, and a command queued for
+    # it would only sit there until it expired. Not counted in ``skipped``.
+    revoked: int = 0
+    # A command on one poste only: why nothing was created — the status of
+    # the unfinished command already there. None when one was created, and
+    # on a request aimed at several postes. ("gone" is answered as a 404.)
+    reason: Literal["pending", "delivered", "running", "gone"] | None = None
 
 
 class CommandOut(BaseModel):
@@ -131,6 +140,10 @@ class CommandOut(BaseModel):
     # The poste's name, so that a list across postes (a package's
     # deployments) reads without a lookup per row.
     machine_hostname: str | None = None
+    # The package's name and version (« 7-Zip 23.01 »), so that a poste's
+    # list says what a deployment installs; null on every other row, and on a
+    # deployment whose package is gone.
+    package_name: str | None = None
     created_by: str | None
     created_at: datetime
     expires_at: datetime
@@ -154,11 +167,12 @@ class CommandList(BaseModel):
 
 async def _resolve_targets(
     session: SessionDep, payload: CreateCommands, scope: Scope | None
-) -> list[uuid.UUID]:
+) -> list[tuple[uuid.UUID, bool]]:
     """Resolve the payload's target into existing machine ids, within the
     caller's scope: "the whole parc" from an account confined to a site is
-    that site, and a listed poste outside it is dropped like an unknown id."""
-    stmt = restrict(select(Machine.id), machine_clause(scope))
+    that site, and a listed poste outside it is dropped like an unknown id.
+    Each with whether its token is revoked."""
+    stmt = restrict(select(Machine.id, Machine.token_revoked), machine_clause(scope))
     if payload.machine_ids:
         # Restrict to ids that actually exist (avoids FK violations on insert).
         stmt = stmt.where(col(Machine.id).in_(payload.machine_ids))
@@ -169,11 +183,16 @@ async def _resolve_targets(
     elif payload.target_status is not None:
         fleet = await setting_crud.fleet_policy(session)
         stmt = stmt.where(
-            status_clause(payload.target_status, utcnow(), fleet.inactive_after_days)
+            status_clause(
+                payload.target_status,
+                utcnow(),
+                fleet.inactive_after_days,
+                fleet.signature_max_age_days,
+            )
         )
     # target_all → no predicate.
     rows = await session.exec(stmt)
-    return list(rows.all())
+    return [(machine_id, revoked) for machine_id, revoked in rows.all()]
 
 
 async def _deployable_package(
@@ -191,10 +210,11 @@ async def _deployable_package(
     the package payload): a package without an install step is uninstalled
     all the same, as the agent would.
 
-    The package row is read under a shared lock, held until the commands are
-    committed: a change of the package or its retirement waits for them
-    (``package_crud.locked``), and so sees them — the fingerprint taken here
-    is the package's, and a retirement cancels these installations too.
+    The package row is locked (``package_crud.locked``) until the commands
+    are committed: a change of the package or its retirement waits for them,
+    and so sees them — the fingerprint taken here is the package's, and a
+    retirement cancels these installations too — and so does another
+    deployment of the same package, which then finds them open.
     """
     if payload.type not in PACKAGE_COMMAND_TYPES:
         return None
@@ -204,9 +224,11 @@ async def _deployable_package(
             status_code=422,
             message="A deployment command names its package",
         )
-    package = await session.get(
-        Package, payload.package_id, with_for_update={"read": True}
-    )
+    # Locked exclusively, not shared: two deployments of one package queued
+    # at once would otherwise both find no open command on the postes and
+    # both queue one (audit: six identical requests, six installations per
+    # poste). Behind the lock the second one sees what the first committed.
+    package = await package_crud.locked(session, payload.package_id)
     if package is None:
         raise AppError(
             code=ErrorCode.PACKAGE_NOT_FOUND,
@@ -219,53 +241,20 @@ async def _deployable_package(
             status_code=409,
             message="This package is retired",
         )
-    if package.kind == PackageKind.FILES:
-        files = await package_crud.files_of(session, package.id)
-        problems = manifest.problems(package, files)
-        uninstall = payload.type == CommandType.PACKAGE_UNINSTALL
-        step = "uninstall" if uninstall else "install"
-        if uninstall:
-            problems = [p for p in problems if p.blocks_uninstall]
-            if not package.uninstall_run:
-                problems = [
-                    *problems,
-                    manifest.Problem("no_uninstall", "Pas de désinstallation définie"),
-                ]
-        # The agent's rule for the step it would run (audit B30, U04): what
-        # no poste would accept is refused here rather than queued to fail.
-        if not problems and not manifest.runnable_somewhere(package, files, step):
-            if manifest.runnable_somewhere(package, files, step, capped=False):
-                # Method A in every respect but the size: the agent caps what
-                # an unsigned manifest may have it download.
-                gib = manifest.method_a_max_bytes() >> 30
-                problems = [
-                    manifest.Problem(
-                        "method_a_too_large",
-                        f"Plus de {gib} Gio de fichiers : sans signature de "
-                        "l'administrateur, aucun poste ne les téléchargera "
-                        "(plafond de la méthode A). Signez le paquet.",
-                    )
-                ]
-            else:
-                problems = [
-                    manifest.Problem(
-                        "untrusted",
-                        "Désinstallation ni signée, ni lancée par un exécutable "
-                        "d'éditeur seul dans son dossier, ni « msiexec /x {code "
-                        "produit} » : aucun poste ne l'exécutera. Signez le paquet."
-                        if uninstall
-                        else "Ni signé, ni lancé par un exécutable d'éditeur seul "
-                        "dans son dossier : aucun poste ne l'exécutera. Signez le "
-                        "paquet.",
-                    )
-                ]
-        if problems:
-            raise AppError(
-                code=ErrorCode.PACKAGE_NOT_READY,
-                status_code=409,
-                message="This package cannot be deployed yet",
-                details={"problems": [p.message for p in problems]},
-            )
+    # The agent's rule for the step it would run (audit B30, U04): what no
+    # poste would accept is refused here rather than queued to fail — the
+    # same list the package payload gives as ``install_blockers``.
+    step = "uninstall" if payload.type == CommandType.PACKAGE_UNINSTALL else "install"
+    problems = manifest.step_blockers(
+        package, await package_crud.files_of(session, package.id), step
+    )
+    if problems:
+        raise AppError(
+            code=ErrorCode.PACKAGE_NOT_READY,
+            status_code=409,
+            message="This package cannot be deployed yet",
+            details={"problems": [p.message for p in problems]},
+        )
     return package
 
 
@@ -307,7 +296,25 @@ async def create_commands(
             },
         )
     package = await _deployable_package(session, payload)
-    machine_ids = await _resolve_targets(session, payload, scope)
+    targets = await _resolve_targets(session, payload, scope)
+    # One poste named alone: the console's button on a fiche or a row. What
+    # stops it is said as an error rather than as an empty success — the
+    # poste is gone (deleted, merged away), or cut off.
+    single = payload.machine_ids is not None and len(set(payload.machine_ids)) == 1
+    if single and not targets:
+        raise AppError(
+            code=ErrorCode.MACHINE_NOT_FOUND,
+            status_code=404,
+            message="Machine not found",
+        )
+    if single and targets[0][1]:
+        raise AppError(
+            code=ErrorCode.MACHINE_TOKEN_REVOKED,
+            status_code=409,
+            message="This machine's token is revoked; allow its re-enrollment first",
+        )
+    machine_ids = [machine_id for machine_id, revoked in targets if not revoked]
+    revoked_count = len(targets) - len(machine_ids)
     # Same sweep the tracking endpoint runs: a command left pending past its TTL
     # must not block the one an administrator is queueing now, on a poste that
     # was simply off the whole time.
@@ -322,10 +329,21 @@ async def create_commands(
     # (audit T08); and its files, kept for them meanwhile (T09).
     digest: str | None = None
     package_shas: list[str] | None = None
+    superseded = 0
     if package is not None:
         package_files = await package_crud.files_of(session, package.id)
         digest = package_crud.fingerprint(package, package_files)
         package_shas = sorted({f.sha256 for f in package_files})
+        # A deployment still waiting for an older version of the package is
+        # replaced by this one, not counted as already pending.
+        superseded = await package_crud.supersede_stale_pending(
+            session,
+            package_id=package.id,
+            command_type=payload.type.value,
+            digest=digest,
+            machine_ids=machine_ids,
+            now=utcnow(),
+        )
     created, skipped = await command_crud.create_for_machines(
         session,
         machine_ids=machine_ids,
@@ -362,12 +380,33 @@ async def create_commands(
                 **target,
                 "created": len(created),
                 "skipped": len(skipped),
+                # Postes cut off by a revoked token, left out of the request.
+                **({"revoked": revoked_count} if revoked_count else {}),
                 "ttl_minutes": ttl_minutes,
+                **({"superseded": superseded} if superseded else {}),
             },
         )
+    reason = None
+    if single and skipped:
+        status = await command_crud.open_command_status(
+            session,
+            machine_id=skipped[0],
+            command_type=payload.type,
+            package_id=package.id if package is not None else None,
+        )
+        if status in ("pending", "delivered", "running"):
+            reason = status
     await session.commit()
+    if superseded:
+        # A replaced deployment may have been the last one holding a file
+        # changed in the package since (audit S09).
+        await package_crud.sweep_store(session)
     return CreateCommandsResponse(
-        created=created, count=len(created), skipped=len(skipped)
+        created=created,
+        count=len(created),
+        skipped=len(skipped),
+        revoked=revoked_count,
+        reason=reason,
     )
 
 
@@ -379,6 +418,10 @@ class PackageSummary(BaseModel):
     postes: int
     by_status: dict[str, int]
     by_action: dict[str, int]
+    # Installations no poste has received yet, every one of them (not only
+    # each poste's latest): what retiring the package cancels — the console
+    # says how many before it asks.
+    pending_installs: int = 0
 
 
 @router.get(
@@ -418,8 +461,21 @@ async def package_summary(
     for kind, status, n in rows:
         by_status[status] = by_status.get(status, 0) + n
         by_action[kind] = by_action.get(kind, 0) + n
+    pending_installs = await session.scalar(
+        restrict(
+            select(func.count())
+            .select_from(Command)
+            .where(col(Command.package_id) == package_id)
+            .where(col(Command.type) == CommandType.PACKAGE_INSTALL.value)
+            .where(col(Command.status) == CommandStatus.PENDING.value),
+            machine_ids_clause(scope, col(Command.machine_id)),
+        )
+    )
     return PackageSummary(
-        postes=sum(by_status.values()), by_status=by_status, by_action=by_action
+        postes=sum(by_status.values()),
+        by_status=by_status,
+        by_action=by_action,
+        pending_installs=pending_installs or 0,
     )
 
 
@@ -434,10 +490,15 @@ async def list_commands(
     status: CommandStatus | None = None,
     machine_id: uuid.UUID | None = None,
     package_id: uuid.UUID | None = None,
+    latest: bool = False,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> CommandList:
-    """List/track commands, optionally filtered by status and machine."""
+    """List/track commands, optionally filtered by status and machine.
+
+    ``latest`` (with ``package_id``): each poste's latest command for that
+    package only — the rows the package summary counts, so that its chip
+    « En attente : 9 » lists nine rows, not every attempt behind them."""
     # Lazy sweep so stale pending commands read as EXPIRED (cron takes over in M5).
     await command_crud.mark_expired(session)
     await session.commit()
@@ -449,15 +510,41 @@ async def list_commands(
         stmt = stmt.where(col(Command.machine_id) == machine_id)
     if package_id is not None:
         stmt = stmt.where(col(Command.package_id) == package_id)
+        if latest:
+            stmt = stmt.where(
+                col(Command.id).in_(
+                    select(Command.id)
+                    .where(col(Command.package_id) == package_id)
+                    .distinct(col(Command.machine_id))
+                    .order_by(
+                        col(Command.machine_id),
+                        col(Command.created_at).desc(),
+                        col(Command.id).desc(),
+                    )
+                )
+            )
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     # ``id`` behind the timestamp: a broadcast queues one row per poste in the
     # same instant, and ties reordered between two OFFSETs would duplicate a
     # command on one page and hide another.
+    order: list[Any] = [col(Command.created_at).desc(), col(Command.id)]
+    if package_id is not None:
+        # A package's deployments read batch by batch, each batch by poste
+        # name: its rows differ by microseconds of creation, in no order a
+        # reader can follow. One request's rows share their expiry, author
+        # and type — the batch — which sorts by its newest row.
+        batch = func.max(col(Command.created_at)).over(
+            partition_by=(
+                col(Command.type),
+                col(Command.expires_at),
+                col(Command.created_by),
+            )
+        )
+        stmt = stmt.outerjoin(Machine, col(Machine.id) == col(Command.machine_id))
+        order = [batch.desc(), col(Machine.hostname), col(Command.id)]
     rows = await session.exec(
-        stmt.order_by(col(Command.created_at).desc(), col(Command.id))
-        .offset((page - 1) * page_size)
-        .limit(page_size)
+        stmt.order_by(*order).offset((page - 1) * page_size).limit(page_size)
     )
     commands = list(rows.all())
     names: dict[uuid.UUID, str | None] = {}
@@ -467,9 +554,23 @@ async def list_commands(
             select(Machine.id, Machine.hostname).where(col(Machine.id).in_(ids))
         )
         names = dict(found.all())
+    package_names: dict[uuid.UUID, str] = {}
+    package_ids = {c.package_id for c in commands if c.package_id is not None}
+    if package_ids:
+        found_packages = await session.exec(
+            select(Package.id, Package.name, Package.version).where(
+                col(Package.id).in_(package_ids)
+            )
+        )
+        package_names = {
+            pid: f"{name} {version}" if version else name
+            for pid, name, version in found_packages.all()
+        }
     items = []
     for c in commands:
         out = CommandOut.model_validate(c)
         out.machine_hostname = names.get(c.machine_id)
+        if c.package_id is not None:
+            out.package_name = package_names.get(c.package_id)
         items.append(out)
     return CommandList(items=items, total=total or 0, page=page, page_size=page_size)
