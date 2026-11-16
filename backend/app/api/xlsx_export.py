@@ -7,6 +7,7 @@ spreadsheet handed to a meeting looks like. The column set is the caller's
 business — this module only knows how to lay a header and rows out.
 """
 
+import asyncio
 import io
 import re
 from collections.abc import Iterable, Sequence
@@ -48,7 +49,7 @@ def _cell(value: object) -> object:
     return value
 
 
-def xlsx_response(
+async def xlsx_response(
     filename: str,
     header: Sequence[str],
     rows: Iterable[Sequence[object]],
@@ -56,6 +57,29 @@ def xlsx_response(
     sheet_title: str = "Export",
 ) -> Response:
     """Render rows as a downloadable ``.xlsx`` workbook with one sheet.
+
+    Built in a worker thread: a fleet-wide workbook takes seconds of CPU, and
+    the API is one process whose event loop also answers every heartbeat —
+    built in place, an export froze the postes and every console user. The
+    rows must therefore be plain values already read, not lazy ORM objects.
+    """
+    content = await asyncio.to_thread(
+        xlsx_bytes, header, list(rows), sheet_title=sheet_title
+    )
+    return Response(
+        content=content,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def xlsx_bytes(
+    header: Sequence[str],
+    rows: Iterable[Sequence[object]],
+    *,
+    sheet_title: str = "Export",
+) -> bytes:
+    """The workbook of ``xlsx_response``, as bytes.
 
     ``None`` becomes an empty cell, as in the CSV: a spreadsheet has no notion
     of "never reported". Dates and datetimes are written as Excel dates with a
@@ -80,20 +104,24 @@ def xlsx_response(
         cell.font = Font(bold=True)
 
     widths = [len(h) for h in header]
+    # The row number is counted here, never read back from the sheet:
+    # ``sheet.max_row`` walks every cell written so far, and reading it once
+    # per cell made the export quadratic — 10 s for 1,500 postes, minutes for
+    # all columns.
+    last = 1
     for row in rows:
         values = [_cell(v) for v in row]
         sheet.append(values)
+        last += 1
         for i, value in enumerate(values):
             if isinstance(value, str):
-                sheet.cell(row=sheet.max_row, column=i + 1).data_type = "s"
+                sheet.cell(row=last, column=i + 1).data_type = "s"
                 length = len(value)
             elif isinstance(value, datetime):
-                sheet.cell(
-                    row=sheet.max_row, column=i + 1
-                ).number_format = DATETIME_FORMAT
+                sheet.cell(row=last, column=i + 1).number_format = DATETIME_FORMAT
                 length = len(DATETIME_FORMAT)
             elif isinstance(value, date):
-                sheet.cell(row=sheet.max_row, column=i + 1).number_format = DATE_FORMAT
+                sheet.cell(row=last, column=i + 1).number_format = DATE_FORMAT
                 length = len(DATE_FORMAT)
             else:
                 length = len(str(value))
@@ -108,14 +136,8 @@ def xlsx_response(
     # dropdown Excel users reach for first.
     sheet.freeze_panes = "A2"
     if header:
-        sheet.auto_filter.ref = (
-            f"A1:{get_column_letter(len(header))}{max(sheet.max_row, 1)}"
-        )
+        sheet.auto_filter.ref = f"A1:{get_column_letter(len(header))}{last}"
 
     buffer = io.BytesIO()
     workbook.save(buffer)
-    return Response(
-        content=buffer.getvalue(),
-        media_type=XLSX_MEDIA_TYPE,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return buffer.getvalue()

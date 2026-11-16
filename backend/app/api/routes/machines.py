@@ -1329,7 +1329,7 @@ async def export_machines_xlsx(
     chosen = machine_export.resolve_columns(columns)
     zone = machine_export.resolve_timezone(tz)
     machines, usage = await _export_rows(session, filters)
-    return xlsx_response(
+    return await xlsx_response(
         "parc.xlsx",
         machine_export.headers(chosen, usage_days=usage.days),
         [
