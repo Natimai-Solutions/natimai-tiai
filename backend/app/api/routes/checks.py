@@ -80,16 +80,24 @@ def _user_ref(user: User | None) -> UserRef | None:
 class AssigneeRef(UserRef):
     """Who a check is given to. ``active`` false for an account deactivated
     since: the console names them « (désactivé) » rather than showing an id
-    it cannot find among the choices."""
+    it cannot find among the choices. ``reachable`` false, on an open check,
+    when the account no longer reaches the poste (rights withdrawn, poste
+    moved, account deactivated): the check counts as nobody's in the lists,
+    the badge and the mails, and the console says why it is « à prendre »
+    while still naming who had it."""
 
     active: bool = True
+    reachable: bool = True
 
 
-def _assignee_ref(user: User | None) -> AssigneeRef | None:
+def _assignee_ref(user: User | None, reachable: bool = True) -> AssigneeRef | None:
     if user is None:
         return None
     return AssigneeRef(
-        id=user.id, name=user.full_name or user.email, active=user.is_active
+        id=user.id,
+        name=user.full_name or user.email,
+        active=user.is_active,
+        reachable=reachable,
     )
 
 
@@ -277,13 +285,20 @@ async def _out(
                     else None
                 ),
             )
+    orphaned = await crud.orphaned_open_checks(
+        session,
+        check_ids=[
+            r.id for r in rows if r.closed_at is None and r.assigned_to_id is not None
+        ],
+    )
     return [
         CheckOut(
             id=r.id,
             machine_id=r.machine_id,
             requested_by=r.requested_by,
             assigned_to=_assignee_ref(
-                users.get(r.assigned_to_id) if r.assigned_to_id else None
+                users.get(r.assigned_to_id) if r.assigned_to_id else None,
+                reachable=r.id not in orphaned,
             ),
             instructions=r.instructions,
             created_at=r.created_at,

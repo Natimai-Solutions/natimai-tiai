@@ -9,9 +9,13 @@ the command history and the spent password-reset tokens. One worker process per 
 drain assumes no concurrent drainer.
 
 A job that comes due while the worker is down runs at the next matching time,
-not on catch-up — the same semantics the ARQ crons had. The outbox is the
-exception that makes this safe for mail: a due row is due until sent, so a
-restart resumes deliveries within one tick.
+not on catch-up — the same semantics the ARQ crons had — with one exception:
+the two mail jobs. A worker started after the digest hour (or on the
+reminder's day, after its hour) sends that day's mail at once rather than
+skipping it: the period recorded in the database (below) is what keeps a
+restart after the mail went out from sending it a second time. The outbox
+makes the rest safe for mail: a due row is due until sent, so a restart
+resumes deliveries within one tick.
 
 The two mail jobs — the daily digest, the weekly reminder — keep in the
 database (``app_settings``, ``worker.last_run.*``) the day or the week they
@@ -269,9 +273,9 @@ def every(seconds: int) -> Callable[[datetime], datetime]:
 def daily_at(hour: int) -> Callable[[datetime], datetime]:
     """The next HH:00 UTC strictly after ``now``.
 
-    Strictly after: a job that just ran at 18:00 must aim for tomorrow, and a
-    worker started at 18:05 skips today's occurrence rather than firing late —
-    the semantics the ARQ crons had.
+    Strictly after: a job that just ran at 18:00 must aim for tomorrow. A
+    worker started at 18:05 skips today's occurrence for the housekeeping;
+    the mail jobs catch it up (``first_run``).
     """
 
     def _next(now: datetime) -> datetime:
@@ -317,6 +321,21 @@ def _reminder_params(policy: SchedulePolicy) -> tuple[int, ...]:
     return (policy.reminder_weekday, policy.digest_hour_utc)
 
 
+def first_run(schedule: Callable[[datetime], datetime], now: datetime) -> datetime:
+    """When a mail job is first due in a worker started at ``now``.
+
+    Now, when today's occurrence has already passed — a worker restarted at
+    18:05 (deployment, crash, host reboot) still sends the 18:00 digest; the
+    period stored by ``_once_per_period`` skips it if it went out before the
+    restart. Otherwise the next occurrence. Never a day late: yesterday's
+    digest is not sent this morning.
+    """
+    today = schedule(now - timedelta(days=1))
+    if today <= now and today.date() == now.date():
+        return now
+    return schedule(now)
+
+
 def _same_period(job_name: str, a: datetime, b: datetime) -> bool:
     """Whether two instants fall in the same period of a mail job: the same
     UTC day for the digest, the same ISO week for the weekly reminder."""
@@ -347,7 +366,7 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
         Job(
             "daily_digest",
             send_daily_digest,
-            digest_hour(now),
+            first_run(digest_hour, now),
             digest_hour,
             params=_digest_params(policy),
             retry_same_day=True,
@@ -355,7 +374,7 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
         Job(
             "maintenance_reminders",
             send_maintenance_reminders,
-            reminder(now),
+            first_run(reminder, now),
             reminder,
             params=_reminder_params(policy),
             retry_same_day=True,

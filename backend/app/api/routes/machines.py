@@ -2,13 +2,15 @@
 
 import re
 import uuid
+from collections.abc import Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field, computed_field
-from sqlalchemy import Subquery, case, exists, func, or_
+from sqlalchemy import Subquery, case, exists, func, not_, or_
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 from sqlmodel import col, select
 
@@ -42,6 +44,7 @@ from app.features.machine.status import (
     ScanFilter,
     WindowsUpdateFilter,
     agent_outdated_clause,
+    aging_hardware_clause,
     disk_free_percent,
     effective_signature_age,
     effective_up_to_date,
@@ -199,6 +202,7 @@ def _machine_out(
     policy: MaintenancePolicy | None = None,
     now: datetime | None = None,
     fleet: FleetPolicy | None = None,
+    orphaned: AbstractSet[uuid.UUID] = frozenset(),
 ) -> MachineOut:
     """A list row, with its placement, open request and maintenance standing
     as the joined query and the policy give them."""
@@ -212,7 +216,9 @@ def _machine_out(
     _place(out, machine, room_crud.Placement(room=room, building=building))
     if check is not None:
         out.check_open = True
-        if check.assigned_to_id and names:
+        # An assignee who no longer reaches the poste is nobody: the request
+        # is « à prendre » here as in « Mes tâches » (``orphaned_open_checks``).
+        if check.assigned_to_id and names and check.id not in orphaned:
             out.check_assigned_to = names.get(check.assigned_to_id)
     if policy is not None:
         res = maintenance_policy.resolve(machine, room, policy, now or utcnow())
@@ -223,6 +229,18 @@ def _machine_out(
             names.get(res.owner_id) if names and res.owner_id else None
         )
     return out
+
+
+async def _orphaned_checks(session: SessionDep, rows: Sequence[Any]) -> set[uuid.UUID]:
+    """The rows' open requests whose assignee no longer reaches the poste."""
+    return await check_crud.orphaned_open_checks(
+        session,
+        check_ids=[
+            check.id
+            for _m, _room, _b, check, _seconds in rows
+            if check is not None and check.assigned_to_id
+        ],
+    )
 
 
 def _owner_ids(rows: list[Any], policy: MaintenancePolicy) -> set[uuid.UUID]:
@@ -379,6 +397,9 @@ class OpenCheckOut(BaseModel):
     requested_by: str
     assigned_to_id: uuid.UUID | None
     assigned_to_name: str | None
+    # False when the assignee no longer reaches the poste: the request is
+    # « à prendre », and the fiche says who had it and why it is free again.
+    assignee_reachable: bool = True
     instructions: str | None
     created_at: datetime
 
@@ -677,6 +698,14 @@ def _search_clause(search: str) -> ColumnElement[bool]:
     return or_(*clauses)
 
 
+ExactFacet = Literal[
+    "antivirus", "os_version", "hw_model", "hw_manufacturer", "cpu_model"
+]
+_EXACT_FACETS: frozenset[str] = frozenset(
+    ("antivirus", "os_version", "hw_model", "hw_manufacturer", "cpu_model")
+)
+
+
 @dataclass(frozen=True)
 class MachineFilters:
     """Every facet the machine list understands.
@@ -741,6 +770,30 @@ class MachineFilters:
     # Enrollment waiting on an administrator: a re-enrollment held for
     # approval ("pending"), or a revoked token ("revoked").
     enrollment: Literal["pending", "revoked"] | None = None
+    # Hardware older than the parc's renewal threshold (``hardware_aging_years``)
+    # — the dashboard's « À renouveler » card, as a list.
+    hardware_aging: bool | None = None
+    # The text facets matched exactly rather than as a substring. The console
+    # asks it for a value picked from its dropdown, so that « OptiPlex 7010
+    # (12) » lists those 12 postes and not the « OptiPlex 7010 AIO » too; a
+    # value typed by hand keeps the substring that gathers a whole range.
+    exact: frozenset[ExactFacet] = frozenset()
+
+
+def _exact_facets(raw: str | None) -> frozenset[ExactFacet]:
+    """``exact=hw_model,cpu_model`` → the facets named; an unknown one is a 422
+    rather than a filter silently broader than asked."""
+    if not raw:
+        return frozenset()
+    names = {part.strip() for part in raw.split(",") if part.strip()}
+    unknown = sorted(names - _EXACT_FACETS)
+    if unknown:
+        raise AppError(
+            code=ErrorCode.REQUEST_VALIDATION_ERROR,
+            status_code=422,
+            message=f"Unknown facet in exact: {', '.join(unknown)}",
+        )
+    return frozenset(names)  # type: ignore[arg-type]
 
 
 def machine_filters(
@@ -776,6 +829,12 @@ def machine_filters(
     usage_hours_below: float | None = Query(None, ge=0),
     usage_hours_above: float | None = Query(None, ge=0),
     enrollment: Literal["pending", "revoked"] | None = None,
+    hardware_aging: bool | None = None,
+    exact: str | None = Query(
+        None,
+        description="Comma-separated facets matched exactly: antivirus, "
+        "os_version, hw_model, hw_manufacturer, cpu_model",
+    ),
 ) -> MachineFilters:
     """The list's facets as query parameters, shared by the list and the exports.
 
@@ -815,11 +874,18 @@ def machine_filters(
         usage_hours_below=usage_hours_below,
         usage_hours_above=usage_hours_above,
         enrollment=enrollment,
+        hardware_aging=hardware_aging,
+        exact=_exact_facets(exact),
         scope=scope,
     )
 
 
 FiltersDep = Annotated[MachineFilters, Depends(machine_filters)]
+
+
+def _facet(column: Any, value: str, exact: bool) -> Any:
+    """One text facet: the value itself when ``exact``, else a substring."""
+    return col(column) == value if exact else contains(col(column), value)
 
 
 def _room_location() -> Any:
@@ -920,24 +986,40 @@ def _filtered_machines(
         # feeds it exact names from the fleet, but a hand-typed "eset" must find
         # "ESET Endpoint Security" too — vendors rename their products between
         # versions and a parc runs several at once.
-        stmt = stmt.where(contains(col(Machine.av_product_name), filters.antivirus))
+        stmt = stmt.where(
+            _facet(
+                Machine.av_product_name, filters.antivirus, "antivirus" in filters.exact
+            )
+        )
     if filters.os_version:
         # Substring like the antivirus filter, and for the same reason: the
         # dropdown feeds exact values, but "Windows 10" typed by hand must
         # gather every build of it.
-        stmt = stmt.where(contains(col(Machine.os_version), filters.os_version))
+        stmt = stmt.where(
+            _facet(
+                Machine.os_version, filters.os_version, "os_version" in filters.exact
+            )
+        )
     if filters.hw_model:
         # Substring again: "OptiPlex" has to gather the 7010 and the 7020, which
         # is how a parc is actually reasoned about.
-        stmt = stmt.where(contains(col(Machine.hw_model), filters.hw_model))
+        stmt = stmt.where(
+            _facet(Machine.hw_model, filters.hw_model, "hw_model" in filters.exact)
+        )
     if filters.hw_manufacturer:
         stmt = stmt.where(
-            contains(col(Machine.hw_manufacturer), filters.hw_manufacturer)
+            _facet(
+                Machine.hw_manufacturer,
+                filters.hw_manufacturer,
+                "hw_manufacturer" in filters.exact,
+            )
         )
     if filters.cpu_model:
         # Substring like the model: "i5-8" gathers a whole generation, which is
         # the granularity a renewal plan reasons at.
-        stmt = stmt.where(contains(col(Machine.cpu_model), filters.cpu_model))
+        stmt = stmt.where(
+            _facet(Machine.cpu_model, filters.cpu_model, "cpu_model" in filters.exact)
+        )
     if filters.hw_chassis_type:
         # Equality: the agent normalises the kind to a short closed vocabulary
         # (desktop, laptop…), and "desktop" as a substring of nothing else.
@@ -966,6 +1048,9 @@ def _filtered_machines(
                 fleet.signature_max_age_days,
             )
         )
+    if filters.hardware_aging is not None:
+        aging = aging_hardware_clause(utcnow(), fleet.hardware_aging_years)
+        stmt = stmt.where(aging if filters.hardware_aging else not_(aging))
     if filters.enrollment == "pending":
         stmt = stmt.where(reenroll_pending_clause())
     elif filters.enrollment == "revoked":
@@ -1033,10 +1118,13 @@ async def list_machines(
     rows = await session.exec(stmt.offset((page - 1) * page_size).limit(page_size))
     page_rows = rows.all()
     names = await setting_crud.user_names(session, _owner_ids(page_rows, policy))
+    orphaned = await _orphaned_checks(session, page_rows)
     now = utcnow()
     items = []
     for m, room, building, check, seconds in page_rows:
-        out = _machine_out(m, room, building, check, names, policy, now, policies.fleet)
+        out = _machine_out(
+            m, room, building, check, names, policy, now, policies.fleet, orphaned
+        )
         out.usage_hours = usage_crud.usage_hours(seconds, m.first_seen, usage.start)
         items.append(out)
     return MachineList(
@@ -1298,6 +1386,7 @@ async def _export_rows(
     rows = await session.exec(stmt)
     all_rows = rows.all()
     names = await setting_crud.user_names(session, _owner_ids(all_rows, policy))
+    orphaned = await _orphaned_checks(session, all_rows)
     now = utcnow()
     return [
         machine_export.ExportRow(
@@ -1307,7 +1396,7 @@ async def _export_rows(
             check=check,
             check_assigned_to=(
                 names.get(check.assigned_to_id)
-                if check and check.assigned_to_id
+                if check and check.assigned_to_id and check.id not in orphaned
                 else None
             ),
             maintenance=maintenance_policy.resolve(m, room, policy, now),
@@ -1645,14 +1734,17 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
             if open_check.assigned_to_id
             else None
         )
-        detail.check_assigned_to = (
-            (assignee.full_name or assignee.email) if assignee else None
+        assignee_name = (assignee.full_name or assignee.email) if assignee else None
+        reachable = assignee is None or open_check.id not in (
+            await check_crud.orphaned_open_checks(session, check_ids=[open_check.id])
         )
+        detail.check_assigned_to = assignee_name if reachable else None
         detail.open_check = OpenCheckOut(
             id=open_check.id,
             requested_by=open_check.requested_by,
             assigned_to_id=open_check.assigned_to_id,
-            assigned_to_name=detail.check_assigned_to,
+            assigned_to_name=assignee_name,
+            assignee_reachable=reachable,
             instructions=open_check.instructions,
             created_at=open_check.created_at,
         )

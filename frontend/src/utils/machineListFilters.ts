@@ -114,6 +114,11 @@ export interface MachineFilters {
   softwareId: number | null;
   /** C2: a re-enrolment waits for approval (`pending`), or the token is revoked. */
   enrollment: 'pending' | 'revoked' | null;
+  /**
+   * Hardware past the parc's renewal age — the dashboard's « À renouveler »
+   * card, opened as a list. Set by that link, cleared from its chip.
+   */
+  aging: 'true' | null;
 }
 
 /** The whole parc: no search, no facet, both toggles off. */
@@ -147,6 +152,7 @@ export function emptyMachineFilters(): MachineFilters {
     usageDays: null,
     softwareId: null,
     enrollment: null,
+    aging: null,
   };
 }
 
@@ -369,6 +375,7 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
     usageDays: days !== null && days <= USAGE_MAX_DAYS ? days : null,
     softwareId: Number.isInteger(software) && software > 0 ? software : null,
     enrollment: enrollment === 'pending' || enrollment === 'revoked' ? enrollment : null,
+    aging: queryValue(q.hardware_aging) === 'true' ? 'true' : null,
   };
 }
 
@@ -416,6 +423,7 @@ export function machineFiltersToQuery(f: MachineFilters): Record<string, string>
   if (f.usageDays !== null) query.usage_days = String(f.usageDays);
   if (f.softwareId != null) query.software_id = String(f.softwareId);
   if (f.enrollment) query.enrollment = f.enrollment;
+  if (f.aging) query.hardware_aging = 'true';
   return query;
 }
 
@@ -468,6 +476,23 @@ export function machineFiltersToParams(f: MachineFilters): ListMachinesParams {
   if (f.usageDays !== null) params.usage_days = f.usageDays;
   if (f.softwareId != null) params.software_id = f.softwareId;
   if (f.enrollment) params.enrollment = f.enrollment;
+  if (f.aging) params.hardware_aging = true;
+  // The console sets these five from dropdowns fed by the fleet's exact
+  // values, with their counts: matched exactly, « OptiPlex 7010 (12) » lists
+  // those 12 postes and not the « OptiPlex 7010 AIO » too. The API keeps the
+  // substring for a value without `exact`.
+  const exact = (
+    [
+      ['antivirus', f.antivirus],
+      ['os_version', f.os],
+      ['hw_model', f.model],
+      ['hw_manufacturer', f.manufacturer],
+      ['cpu_model', f.processor],
+    ] as const
+  )
+    .filter(([, value]) => value)
+    .map(([facet]) => facet);
+  if (exact.length) params.exact = exact.join(',');
   return params;
 }
 
@@ -493,7 +518,8 @@ export type MachineFilterKey =
   | 'disk'
   | 'usage'
   | 'software'
-  | 'agent';
+  | 'agent'
+  | 'aging';
 
 export interface MachineFilterChip {
   key: MachineFilterKey;
@@ -562,6 +588,8 @@ export function machineFilterChips(
   if (f.softwareId != null) {
     chips.push({ key: 'software', label: 'Postes portant un logiciel' });
   }
+  // From the dashboard's card, like the software one: the chip says why.
+  if (f.aging) chips.push({ key: 'aging', label: 'Matériel à renouveler' });
   return chips;
 }
 
@@ -594,6 +622,7 @@ const FIELDS_BY_KEY: Record<
   software: 'softwareId',
   agent: 'agent',
   enrollment: 'enrollment',
+  aging: 'aging',
 };
 
 /** The filters with one chip's facet off. */

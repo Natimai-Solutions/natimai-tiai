@@ -48,6 +48,7 @@ function everything(): MachineFilters {
     usageDays: 30,
     softwareId: 42,
     enrollment: 'pending',
+    aging: 'true',
   };
 }
 
@@ -88,6 +89,7 @@ describe('machineFiltersToQuery / machineFiltersFromQuery', () => {
       usage_days: '30',
       software_id: '42',
       enrollment: 'pending',
+      hardware_aging: 'true',
     });
     expect(machineFiltersFromQuery(query)).toEqual(everything());
   });
@@ -161,6 +163,25 @@ describe('machineFiltersToParams', () => {
     }
   });
 
+  it('asks the dropdown facets matched exactly, and only those set', () => {
+    // « OptiPlex 7010 (12) » must list those 12, not the 7010 AIO as well.
+    expect(
+      machineFiltersToParams({
+        ...emptyMachineFilters(),
+        model: 'OptiPlex 7010',
+        os: 'Windows 11',
+      }),
+    ).toEqual({
+      hw_model: 'OptiPlex 7010',
+      os_version: 'Windows 11',
+      exact: 'os_version,hw_model',
+    });
+    expect(machineFiltersToParams(everything()).exact).toBe(
+      'antivirus,os_version,hw_model,hw_manufacturer,cpu_model',
+    );
+    expect(machineFiltersToParams(emptyMachineFilters()).exact).toBeUndefined();
+  });
+
   it('turns the « Sans salle » entry into its own flag', () => {
     expect(machineFiltersToParams({ ...emptyMachineFilters(), room: ROOM_NONE })).toEqual({
       without_room: true,
@@ -222,6 +243,7 @@ describe('machineFilterChips', () => {
       'disk',
       'usage',
       'software',
+      'aging',
     ]);
     const label = (key: string) => chips.find((c) => c.key === key)!.label;
     expect(label('location')).toBe('Papeete (40)');
@@ -233,6 +255,7 @@ describe('machineFilterChips', () => {
     expect(label('disk')).toBe('Moins de 10 % libres');
     expect(label('usage')).toBe('Allumés moins de 50 h sur 7 j');
     expect(label('software')).toBe('Postes portant un logiciel');
+    expect(label('aging')).toBe('Matériel à renouveler');
   });
 
   it('names a memory ceiling with its own sign', () => {

@@ -287,6 +287,27 @@ describe('MachineDetailPage', () => {
     expect(tasksVersion.value).toBe(before + 1);
   });
 
+  // Solidity pass: an assignee who no longer reaches the poste is nobody —
+  // the banner says « à prendre », and who had it.
+  it('says a check is free again when its assignee no longer sees the poste', async () => {
+    const w = await mountPage('B', ['machine:read', 'check:write']);
+    answer('B', 0, {
+      open_check: {
+        id: 'c-1',
+        requested_by: 'Alice',
+        assigned_to_id: 'u-2',
+        assigned_to_name: 'Marie',
+        assignee_reachable: false,
+        instructions: null,
+        created_at: '2026-11-10T20:00:00Z',
+      },
+    });
+    await flushPromises();
+    const text = w.text();
+    expect(text).toContain('à prendre (Marie, à qui elle était affectée, ne voit plus ce poste)');
+    expect(text).not.toContain('affectée à Marie.');
+  });
+
   // Audit U19: a poste follows its room's maintenance owner and cycle.
   it('has the tasks badge read again once the poste is moved to another room', async () => {
     vi.mocked(api.post).mockReset();

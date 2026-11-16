@@ -1,3 +1,4 @@
+import type { QTableColumn } from 'quasar';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +18,13 @@ vi.mock('src/services/checks', async (importOriginal) => ({
   listAllChecks: vi.fn(),
 }));
 
-import { listAllChecks, listChecks, type Check } from 'src/services/checks';
+import {
+  effectiveAssignee,
+  formerAssigneeNote,
+  listAllChecks,
+  listChecks,
+  type Check,
+} from 'src/services/checks';
 import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
 import {
   getDue,
@@ -188,6 +195,31 @@ describe('TasksPage — acceptance fixes', () => {
     expect(wrapper.find('[data-test="checks-total"]').text()).toBe('310 vérification(s)');
     const table = wrapper.findComponent({ name: 'QTable' });
     expect((table.props('rows') as Check[]).length).toBe(310);
+  });
+
+  it('shows a check whose assignee no longer sees the poste as « à prendre »', async () => {
+    const check = {
+      id: 'c-1',
+      machine_id: 'm-1',
+      machine: { id: 'm-1', hostname: 'PC-1', location: null, room_name: null },
+      instructions: 'Écran',
+      created_at: '2026-11-10T08:00:00Z',
+      assigned_to: { id: 'u-2', name: 'Marie', active: true, reachable: false },
+    } as unknown as Check;
+    vi.mocked(listAllChecks).mockResolvedValue({ items: [check], total: 1, page: 1, page_size: 1 });
+    const wrapper = await mountPage({ rooms: [], machines: [], overdue: 0, due_soon: 0 });
+    const table = wrapper.findComponent({ name: 'QTable' });
+    const column = (table.props('columns') as QTableColumn<Check>[]).find(
+      (c) => c.name === 'assigned_to',
+    )!;
+    // Sorted and read as nobody's: the name is the reason, not the assignee.
+    expect((column.field as (r: Check) => string)(check)).toBe('');
+    expect(effectiveAssignee(check.assigned_to)).toBeNull();
+    expect(formerAssigneeNote(check.assigned_to)).toBe('Marie ne voit plus ce poste');
+    expect(formerAssigneeNote({ id: 'u-3', name: 'Paul', active: false, reachable: false })).toBe(
+      'Paul, désactivé',
+    );
+    expect(formerAssigneeNote({ id: 'u-4', name: 'Léa' })).toBe('');
   });
 
   it('shows a maintenance-only account its maintenances, and no checks (item 5)', async () => {

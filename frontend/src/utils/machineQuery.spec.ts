@@ -52,6 +52,7 @@ describe('machineListParamsFromQuery', () => {
       online: true,
       sort_by: 'hostname',
       sort_desc: false,
+      exact: 'antivirus,os_version',
     });
   });
 
@@ -130,6 +131,13 @@ describe('machineListParamsFromQuery inventory facets', () => {
       ram_max_gb: 16,
       disk_free_below: 10,
       software_id: 42,
+      exact: 'hw_model,hw_manufacturer,cpu_model',
+    });
+  });
+
+  it('carries the « À renouveler » list', () => {
+    expect(machineListParamsFromQuery({ hardware_aging: 'true' })).toEqual({
+      hardware_aging: true,
     });
   });
 

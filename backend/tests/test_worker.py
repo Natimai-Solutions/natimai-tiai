@@ -450,3 +450,30 @@ async def test_the_weekly_reminder_is_kept_per_iso_week(engine, monkeypatch):
     assert await worker.send_maintenance_reminders() == 0
     assert runs == [1]
     assert worker._iso_week(datetime(2026, 1, 1, tzinfo=UTC)) == "2026-W01"
+
+
+# --- A worker started after the digest hour -----------------------------------
+
+
+def test_a_worker_started_after_the_hour_sends_that_days_mail():
+    """Solidity pass: a worker restarted at 18:05 (deployment, reboot) skipped
+    the 18:00 digest until the next day. It is due at once now, the period
+    stored in the database keeping it from going out twice."""
+    from app.core.worker import build_jobs
+
+    late = datetime(2026, 10, 5, 18, 5, tzinfo=UTC)  # a Monday
+    jobs = build_jobs(late, _policy(hour=18, weekday=0))
+    assert _job(jobs, "daily_digest").next_run == late
+    assert _job(jobs, "maintenance_reminders").next_run == late
+
+    # Before the hour, and on another day of the week: the next occurrence.
+    early = datetime(2026, 10, 6, 6, 0, tzinfo=UTC)  # Tuesday morning
+    jobs = build_jobs(early, _policy(hour=18, weekday=0))
+    assert _job(jobs, "daily_digest").next_run == datetime(2026, 10, 6, 18, tzinfo=UTC)
+    assert _job(jobs, "maintenance_reminders").next_run == datetime(
+        2026, 10, 12, 18, tzinfo=UTC
+    )
+    # Never a day late: after midnight, yesterday's digest is not sent.
+    after_midnight = datetime(2026, 10, 6, 0, 30, tzinfo=UTC)
+    jobs = build_jobs(after_midnight, _policy(hour=18, weekday=0))
+    assert _job(jobs, "daily_digest").next_run == datetime(2026, 10, 6, 18, tzinfo=UTC)

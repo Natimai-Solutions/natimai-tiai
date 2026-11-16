@@ -11,6 +11,23 @@ export interface UserRef {
   name: string;
   /** false for an assignee deactivated since (absent: active). */
   active?: boolean;
+  /**
+   * false, on an open check, when the assignee no longer reaches the poste
+   * (rights withdrawn, poste moved, account deactivated): the check is
+   * « à prendre » again, the name kept to say who had it.
+   */
+  reachable?: boolean;
+}
+
+/** The assignee a check really has: none when the one named no longer reaches it. */
+export function effectiveAssignee(a: UserRef | null | undefined): UserRef | null {
+  return a && a.reachable !== false ? a : null;
+}
+
+/** Why a check named after someone is « à prendre »; empty when it is not. */
+export function formerAssigneeNote(a: UserRef | null | undefined): string {
+  if (!a || a.reachable !== false) return '';
+  return a.active === false ? `${a.name}, désactivé` : `${a.name} ne voit plus ce poste`;
 }
 
 export interface CheckMachineRef {

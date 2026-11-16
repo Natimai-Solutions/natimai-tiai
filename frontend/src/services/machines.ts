@@ -266,6 +266,8 @@ export interface MachineDetail extends Machine {
     requested_by: string;
     assigned_to_id: string | null;
     assigned_to_name: string | null;
+    /** false when the assignee no longer reaches the poste: « à prendre » again. */
+    assignee_reachable?: boolean;
     instructions: string | null;
     created_at: string;
   } | null;
@@ -437,6 +439,13 @@ export interface ListMachinesParams {
    * = the token was revoked. Ignored by a server older than the filter.
    */
   enrollment?: 'pending' | 'revoked';
+  /** Hardware past the parc's renewal age (`hardware_aging_years`). */
+  hardware_aging?: boolean;
+  /**
+   * Comma-separated facets matched exactly rather than as a substring:
+   * antivirus, os_version, hw_model, hw_manufacturer, cpu_model.
+   */
+  exact?: string;
   /** Server-side sort; omitted = freshest contact first. */
   sort_by?: MachineSortField;
   sort_desc?: boolean;

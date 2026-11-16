@@ -64,7 +64,14 @@
                 {{ props.row.instructions || '—' }}
               </div>
               <div class="text-caption text-muted q-mt-xs">
-                {{ props.row.assigned_to ? props.row.assigned_to.name : 'à prendre' }} ·
+                {{
+                  effectiveAssignee(props.row.assigned_to)
+                    ? props.row.assigned_to!.name
+                    : formerAssigneeNote(props.row.assigned_to)
+                      ? `à prendre (${formerAssigneeNote(props.row.assigned_to)})`
+                      : 'à prendre'
+                }}
+                ·
                 {{ timeAgoLabel(props.row.created_at) }}
               </div>
             </q-card-section>
@@ -114,8 +121,15 @@
       </template>
       <template #body-cell-assigned_to="props">
         <q-td :props="props">
-          <span v-if="props.row.assigned_to">{{ props.row.assigned_to.name }}</span>
-          <q-badge v-else color="grey-6">à prendre</q-badge>
+          <span v-if="effectiveAssignee(props.row.assigned_to)">
+            {{ props.row.assigned_to.name }}
+          </span>
+          <template v-else>
+            <q-badge color="grey-6">à prendre</q-badge>
+            <div v-if="formerAssigneeNote(props.row.assigned_to)" class="text-caption text-muted">
+              {{ formerAssigneeNote(props.row.assigned_to) }}
+            </div>
+          </template>
         </q-td>
       </template>
       <template #body-cell-created_at="props">
@@ -339,6 +353,8 @@ import {
   type DueRoom,
 } from 'src/services/maintenance';
 import {
+  effectiveAssignee,
+  formerAssigneeNote,
   listAllChecks,
   updateCheck,
   type Check,
@@ -376,7 +392,7 @@ const columns: QTableColumn<Check>[] = [
   {
     name: 'assigned_to',
     label: 'Affectée à',
-    field: (r) => r.assigned_to?.name ?? '',
+    field: (r) => effectiveAssignee(r.assigned_to)?.name ?? '',
     align: 'left',
   },
   { name: 'created_at', label: 'Demandée', field: 'created_at', align: 'left' },

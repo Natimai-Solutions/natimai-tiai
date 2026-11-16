@@ -290,8 +290,16 @@
       <div>
         <span class="text-weight-medium">Vérification demandée</span>
         par {{ machine.open_check.requested_by }} {{ timeAgoLabel(machine.open_check.created_at) }},
-        <template v-if="machine.open_check.assigned_to_name">
+        <template
+          v-if="
+            machine.open_check.assigned_to_name && machine.open_check.assignee_reachable !== false
+          "
+        >
           affectée à {{ machine.open_check.assigned_to_name }}.
+        </template>
+        <template v-else-if="machine.open_check.assigned_to_name">
+          à prendre ({{ machine.open_check.assigned_to_name }}, à qui elle était affectée, ne voit
+          plus ce poste).
         </template>
         <template v-else>à prendre.</template>
       </div>
@@ -679,7 +687,11 @@ const openCheckAsCheck = computed<Check | null>(() => {
     requested_by: c.requested_by,
     assigned_to:
       c.assigned_to_id && c.assigned_to_name
-        ? { id: c.assigned_to_id, name: c.assigned_to_name }
+        ? {
+            id: c.assigned_to_id,
+            name: c.assigned_to_name,
+            ...(c.assignee_reachable === false ? { reachable: false } : {}),
+          }
         : null,
     instructions: c.instructions,
     created_at: c.created_at,

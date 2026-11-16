@@ -165,7 +165,7 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   }
   if (queryValue(q.with_active_threats) === 'true') params.with_active_threats = true;
   if (queryValue(q.online) === 'true') params.online = true;
-  // Inventory facets. Text ones travel as-is (the server matches substrings);
+  // Inventory facets. Text ones travel as-is (matched exactly, below);
   // the numeric ones must parse, or they are dropped like an unknown status.
   const model = queryValue(q.hw_model);
   if (model) params.hw_model = model;
@@ -193,6 +193,21 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   if (queryValue(q.agent_outdated) === 'true') params.agent_outdated = true;
   const enrollment = queryValue(q.enrollment);
   if (enrollment === 'pending' || enrollment === 'revoked') params.enrollment = enrollment;
+  if (queryValue(q.hardware_aging) === 'true') params.hardware_aging = true;
+  // The five text facets the list sets from its dropdowns: matched exactly,
+  // as the list asked (``machineFiltersToParams``).
+  const exact = (
+    [
+      ['antivirus', antivirus],
+      ['os_version', os],
+      ['hw_model', model],
+      ['hw_manufacturer', manufacturer],
+      ['cpu_model', cpu],
+    ] as const
+  )
+    .filter(([, value]) => value)
+    .map(([facet]) => facet);
+  if (exact.length) params.exact = exact.join(',');
   // Usage: a window and two bounds in hours, each dropped when it does not
   // parse or falls outside what the server takes.
   const usageDays = queryInt(q.usage_days);

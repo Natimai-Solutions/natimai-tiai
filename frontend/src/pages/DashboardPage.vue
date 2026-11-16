@@ -400,12 +400,12 @@ const alertKpis = computed<AlertKpi[]>(() => {
       ...(s.agent_latest_version ? { caption: `référence ${s.agent_latest_version}` } : {}),
     },
     {
-      // The hardware-age setting, made visible. A figure and not a link: the
-      // list has no filter on the hardware's age yet.
+      // The hardware-age setting, made visible — and the list it counts.
       label: 'À renouveler',
       value: s.machines_aging,
       icon: 'hourglass_bottom',
       color: 'blue-grey',
+      to: { name: 'machines', query: { hardware_aging: 'true' } },
       detail: `matériel de plus de ${s.hardware_aging_years} ans`,
     },
   ];

@@ -17,7 +17,7 @@ Queued through the outbox like everything else; nothing here sends.
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from sqlmodel import col, select
@@ -29,6 +29,7 @@ from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
 from app.features.machine.models import Machine
 from app.features.maintenance import crud as maintenance_crud
+from app.features.maintenance.crud import DueRoom
 from app.features.maintenance.policy import MaintenanceState, Resolved
 from app.features.notification.outbox import queue_email
 from app.features.room.models import Building, Room
@@ -187,7 +188,19 @@ async def personal_block(
     rooms, loose = maintenance_crud.group_due(
         fleet.resolved, fleet.policy, owner_filter=user.id, unowned=False
     )
-    due_rooms = [r for r in rooms if r.overdue or r.due_soon]
+    # One line per room: « Mes tâches » splits a room whose postes resolve to
+    # different cycles (each group is taken on its own), but the mail only
+    # counts, and the same room twice would read as two rooms.
+    merged: dict[uuid.UUID, DueRoom] = {}
+    for r in rooms:
+        if not (r.overdue or r.due_soon):
+            continue
+        if r.room.id not in merged:
+            merged[r.room.id] = replace(r, machines=list(r.machines))
+        else:
+            merged[r.room.id].overdue += r.overdue
+            merged[r.room.id].due_soon += r.due_soon
+    due_rooms = list(merged.values())
     due_loose = [
         (m, res)
         for m, res in loose

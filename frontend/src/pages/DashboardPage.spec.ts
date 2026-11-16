@@ -240,6 +240,10 @@ describe('DashboardPage — enrolment and hardware age (C2, item 9)', () => {
     expect(text).toContain('À renouveler');
     expect(text).toContain('matériel de plus de 6 ans');
     expect(links).toContain(JSON.stringify({ name: 'machines', query: { enrollment: 'pending' } }));
+    // « À renouveler » opens the list it counts.
+    expect(links).toContain(
+      JSON.stringify({ name: 'machines', query: { hardware_aging: 'true' } }),
+    );
   });
 
   it('shows no enrolment card for a server that does not count them', async () => {

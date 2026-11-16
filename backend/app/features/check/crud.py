@@ -93,11 +93,13 @@ async def assignee_reach(
 
 
 async def orphaned_open_checks(
-    session: AsyncSession, assignee_id: uuid.UUID | None = None
+    session: AsyncSession,
+    assignee_id: uuid.UUID | None = None,
+    check_ids: Iterable[uuid.UUID] | None = None,
 ) -> set[uuid.UUID]:
     """The open checks whose assignee no longer reaches the poste — all of
-    them, or ``assignee_id``'s. One per poste at most is open, so this reads
-    at most a parc's worth of small rows."""
+    them, ``assignee_id``'s, or those among ``check_ids``. One per poste at
+    most is open, so this reads at most a parc's worth of small rows."""
     stmt = (
         select(
             col(MachineCheck.id),
@@ -113,6 +115,11 @@ async def orphaned_open_checks(
     )
     if assignee_id is not None:
         stmt = stmt.where(col(MachineCheck.assigned_to_id) == assignee_id)
+    if check_ids is not None:
+        wanted = set(check_ids)
+        if not wanted:
+            return set()
+        stmt = stmt.where(col(MachineCheck.id).in_(wanted))
     rows = list((await session.exec(stmt)).all())
     reach = await assignee_reach(session, {r[1] for r in rows if r[1] is not None})
     return {

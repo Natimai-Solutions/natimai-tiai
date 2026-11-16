@@ -104,7 +104,12 @@ async function loadUsers() {
     const current = props.check?.assigned_to;
     if (current && !options.some((o) => o.value === current.id)) {
       options.unshift({
-        label: current.active === false ? `${current.name} (désactivé)` : current.name,
+        label:
+          current.active === false
+            ? `${current.name} (désactivé)`
+            : current.reachable === false
+              ? `${current.name} (ne voit plus ce poste)`
+              : current.name,
         value: current.id,
       });
     }

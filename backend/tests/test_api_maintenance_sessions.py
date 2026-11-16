@@ -305,6 +305,39 @@ async def test_due_list_groups_postes_by_what_they_resolve_to(client, db_session
     assert [m["id"] for m in by_level["machine"]["machines"]] == [b]
 
 
+async def test_the_tasks_mail_names_a_split_room_once(client, db_session):
+    """A room whose postes resolve to two cycles is two groups in « Mes
+    tâches » (each taken on its own); the mail only counts, and named the
+    room twice. One line, with both groups' counts."""
+    from app.features.notification import tasks
+    from app.features.user.models import User
+
+    admin, admin_id = await _admin(client, db_session)
+    room = await _room(client, admin, "A101")
+    await client.patch(
+        f"/api/v1/rooms/{room}/maintenance",
+        headers=admin,
+        json={"maintenance_owner_id": admin_id},
+    )
+    await _machine(db_session, "A", room_id=room)
+    b = await _machine(db_session, "B", room_id=room)
+    resp = await client.patch(
+        f"/api/v1/machines/{b}/maintenance",
+        headers=admin,
+        json={"maintenance_cycle_days": 30},
+    )
+    assert resp.status_code == 200, resp.text
+    groups = (
+        await client.get("/api/v1/maintenance/due?owner=me", headers=admin)
+    ).json()
+    assert len(groups["rooms"]) == 2
+
+    user = await db_session.get(User, uuid.UUID(admin_id))
+    lines = await tasks.personal_block(db_session, user)
+    rooms = [line for line in lines if "A101" in line]
+    assert rooms == ["    • A101 — 2 en retard, 0 à échéance"]
+
+
 async def test_a_room_says_where_its_owner_comes_from(client, db_session):
     """Item 4: a room owner deactivated since resolves to the parc's default —
     the room says « global », and names its own owner as inactive."""

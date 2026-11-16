@@ -320,6 +320,24 @@ async def test_a_check_out_of_its_assignees_reach_is_nobodys(
         "/api/v1/checks", headers=t.admin, params={"assigned_to": "none"}
     )
     assert [c["machine_id"] for c in nobody.json()["items"]] == [str(t.a.id)]
+    # Named, but flagged: the console says why it is « à prendre ».
+    assigned = nobody.json()["items"][0]["assigned_to"]
+    assert (assigned["id"], assigned["reachable"]) == (tech_a, False)
+    # The fiche, the list and the export read it the same way.
+    fiche = (await client.get(f"/api/v1/machines/{t.a.id}", headers=t.admin)).json()
+    assert fiche["check_assigned_to"] is None
+    assert fiche["open_check"]["assigned_to_id"] == tech_a
+    assert fiche["open_check"]["assignee_reachable"] is False
+    rows = (
+        await client.get("/api/v1/machines?check_open=true", headers=t.admin)
+    ).json()["items"]
+    assert [(r["id"], r["check_assigned_to"]) for r in rows] == [(str(t.a.id), None)]
+    export = await client.get(
+        "/api/v1/machines/export.csv?columns=hostname,check_assigned_to"
+        "&check_open=true",
+        headers=t.admin,
+    )
+    assert export.text.lstrip("\ufeff").splitlines()[1].split(";")[1] == ""
 
     await digest.send_daily_digest(db_session)
     bodies = {q.to_address: q.body for q in await _queued(db_session)}
