@@ -1412,7 +1412,10 @@ l'heure des e-mails programmés. L'environnement n'en donne que la valeur de
 départ ; une valeur enregistrée dans la console prend le dessus, et chaque
 changement est inscrit au journal d'audit. Le worker relit l'heure du résumé
 à chaque tour (30 s) et ne renvoie jamais deux fois le résumé du jour, ni le
-rappel de la semaine, quand on déplace leur heure.
+rappel de la semaine, quand on déplace leur heure ou qu'il redémarre. Un worker
+démarré après l'heure du résumé (mise à jour, redémarrage de l'hôte) l'envoie
+aussitôt s'il n'est pas déjà parti ce jour-là ; il ne rattrape jamais celui de
+la veille.
 
 **Utilisation des postes.** Le serveur compte les heures où chaque poste est
 allumé, à partir des battements de l'agent : un écart entre deux battements

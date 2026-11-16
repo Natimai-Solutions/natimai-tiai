@@ -115,6 +115,8 @@ Chaque correction a un test qui échoue sans elle.
 - Des demandes de reprise de téléchargement invalides (plage hors fichier) ne bloquent plus les déploiements avec « Too many downloads in progress ».
 - Le message « réveil déjà en attente » indique depuis combien de temps (« depuis 12 min ») au lieu d'une heure UTC.
 - Un poste resté silencieux ne reste plus « Antivirus à jour » : l'âge des signatures vieillit avec le temps, de la même façon dans la liste, la fiche, les filtres, le tableau de bord, le résumé quotidien et l'export. Changer le seuil d'âge ne transforme plus un antivirus « inconnu » en « périmé ».
+- Une valeur choisie dans les listes de choix des filtres d'inventaire (antivirus, OS, constructeur, modèle, processeur) filtre sur cette valeur exacte : « OptiPlex 7010 (12) » liste ces 12 postes, et plus aussi les « OptiPlex 7010 AIO ». L'API garde la recherche par sous-chaîne quand le paramètre `exact` n'est pas donné.
+- La carte « À renouveler » du tableau de bord ouvre la liste des postes concernés (filtre `hardware_aging`).
 - L'export Excel du parc est construit en un temps proportionnel au nombre de lignes (il en prenait le carré : 89 s pour 1 500 postes avec toutes les colonnes) et hors de la boucle de l'API, qui continue de répondre pendant ce temps. L'export CSV écrit les décimales avec une virgule.
 
 ### Paquets logiciels
@@ -136,7 +138,7 @@ Chaque correction a un test qui échoue sans elle.
 - La fenêtre « à échéance » est limitée à la moitié du cycle : un poste au cycle court redevient « À jour » après sa maintenance.
 - Enregistrer les Paramètres n'efface plus le responsable de maintenance par défaut quand son compte a été désactivé ; il s'affiche « Compte désactivé : <nom> ». Un responsable ou un destinataire désactivé est affiché par son nom suivi de « (désactivé) », jamais par un identifiant.
 - Un compte qui ne gère que la maintenance a le menu « Mes tâches ». La page affiche toutes les vérifications ouvertes (plus de coupure à 200), et les postes qui ont leur propre responsable ou cycle y forment un groupe à part.
-- Une vérification dont l'affecté ne voit plus le poste (déplacé, droits retirés, compte désactivé) redevient « à prendre » partout et n'est plus envoyée par e-mail. Seuls les comptes pouvant clore une vérification sont proposés pour la prendre.
+- Une vérification dont l'affecté ne voit plus le poste (déplacé, droits retirés, compte désactivé) redevient « à prendre » partout (Mes tâches, liste des postes, export, fiche) et n'est plus envoyée par e-mail ; la fiche et Mes tâches disent à qui elle était affectée. Seuls les comptes pouvant clore une vérification sont proposés pour la prendre.
 - La clôture d'une vérification peut être antidatée, mais jamais avant la demande. Une séance de maintenance d'une salle refuse les postes d'une autre salle et les nomme. Le texte saisi dans « Demander une vérification » est retrouvé si la session prend fin avant l'envoi.
 - Un nom de salle ou de bâtiment vide est refusé, et deux salles d'un même bâtiment ne peuvent plus porter le même nom à la casse près. Une salle ou un bâtiment cité dans le périmètre d'un groupe ne peut plus être supprimé.
 - L'historique n'affiche plus « Vérification — Vérification » ni « Maintenance — Maintenance — A101 ».
@@ -150,7 +152,8 @@ Chaque correction a un test qui échoue sans elle.
 - Des préférences enregistrées en même temps par plusieurs pages ne s'écrasent plus.
 - Le groupe intégré « Techniciens » reçoit la lecture des paquets sur les installations antérieures.
 - Seuls les comptes qui lisent les postes reçoivent l'état du parc par e-mail ; les autres ne reçoivent que leurs tâches. Les dates des e-mails indiquent « (UTC) », les consignes sur plusieurs lignes restent alignées, le pied de message vient en dernier et le bloc « Vos tâches » n'est plus reçu deux fois le matin du rappel.
-- Un serveur de messagerie muet ne bloque plus le worker ; un résumé dont l'envoi échoue est retenté le jour même ; résumé et rappel ne partent jamais deux fois pour la même journée ou semaine, même après un redémarrage.
+- Un serveur de messagerie muet ne bloque plus le worker ; un résumé dont l'envoi échoue est retenté le jour même ; résumé et rappel ne partent jamais deux fois pour la même journée ou semaine, même après un redémarrage. Un worker démarré après l'heure du résumé l'envoie aussitôt s'il n'est pas déjà parti ce jour-là, au lieu d'attendre le lendemain.
+- Dans le bloc « Vos tâches » des e-mails, une salle dont les postes suivent deux cycles différents n'apparaît plus qu'une fois.
 - L'e-mail de test dit clairement qu'un serveur muet n'a pas répondu dans le délai, et qu'un serveur exigeant une authentification attend un compte.
 - La page Paramètres affiche aussi les réglages des paquets, de la file d'e-mails, du pool de base de données, de Mailgun (le proxy par son seul hôte) et le nom du serveur.
 
@@ -164,12 +167,6 @@ Chaque correction a un test qui échoue sans elle.
 - Le seuil « disque presque plein » réglé dans Paramètres s'applique à la fiche et aux barres de la liste ; le tableau de bord montre les postes à renouveler.
 - Nombres au format français partout (« 2,3 Gio »), « — » pour les cases vides, « (sans nom) » pour une menace sans nom. La réinitialisation d'un mot de passe lève aussitôt le badge « Verrouillé ».
 - La fiche garde le nom du poste dans l'onglet du navigateur, et les noms très longs ne débordent plus. Icône d'onglet, lien « Aller au contenu », graphique d'utilisation lisible au lecteur d'écran, confirmation avant de quitter Paramètres sans enregistrer, impression de la liste des postes.
-
-### Restent hors de cette version
-
-- Les listes de choix des filtres d'inventaire (modèle, fabricant, processeur, OS, antivirus) comptent des valeurs exactes, alors que le filtre cherche une sous-chaîne : le nombre de postes listés peut être plus grand que celui annoncé. Il faudrait un filtre exact côté API.
-- Le nombre de postes à renouveler du tableau de bord n'ouvre pas de liste filtrée : la liste n'a pas encore de filtre sur l'âge du matériel.
-- Un worker démarré après l'heure du résumé quotidien attend le lendemain ; seul un échec d'envoi est retenté le jour même.
 
 ---
 
