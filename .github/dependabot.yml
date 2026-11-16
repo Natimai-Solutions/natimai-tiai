@@ -77,12 +77,14 @@ updates:
       agent-modules:
         patterns: ["*"]
 
-  # ── Images de base des Dockerfile (backend, console) ──────────────────────
-  # python, node et nginx : les correctifs de sécurité de ces images arrivent
-  # par leurs étiquettes, que rien d'autre ne fait avancer (audit S31). Le job
-  # `images` de la CI construit les deux images de chaque PR.
+  # ── Images de base des Dockerfile (backend, console, sauvegardes) ─────────
+  # python, node, nginx et postgres (image db-backup, construite sur place
+  # avec age) : les correctifs de sécurité de ces images arrivent par leurs
+  # étiquettes, que rien d'autre ne fait avancer (audit S31). Le job `images`
+  # de la CI construit les images backend et console de chaque PR ; l'e2e
+  # construit db-backup.
   - package-ecosystem: docker
-    directories: [/backend, /frontend]
+    directories: [/backend, /frontend, /deploy/backup]
     schedule:
       interval: weekly
       day: monday
@@ -96,10 +98,16 @@ updates:
       images-mineures:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # Même raison que pour la stack : db-backup doit garder la majeure de
+      # PostgreSQL du service db (pg_dump au niveau du serveur).
+      - dependency-name: "postgres"
+        update-types: [version-update:semver-major]
 
   # ── Images tierces de la stack (deploy/docker-compose.yml) ─────────────────
-  # postgres (db et db-backup) et caddy. Les images tiai-* suivent TIAI_VERSION
-  # et ne sont pas concernées.
+  # postgres (db) et caddy ; db-backup est construite depuis deploy/backup
+  # (bloc docker ci-dessus). Les images tiai-* suivent TIAI_VERSION et ne sont
+  # pas concernées.
   - package-ecosystem: docker-compose
     directory: /deploy
     schedule:
