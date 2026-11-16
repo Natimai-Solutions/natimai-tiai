@@ -337,7 +337,7 @@ Il n'est jamais committé.
 | `COMMAND_UNANSWERED_HOURS` | `24` | Une commande remise au poste, ou annoncée en cours, sans verdict au-delà de ce délai (en heures, 1 à 720) est close en **échec « sans réponse du poste »** par le worker : agent arrêté ou mis à jour, poste éteint pendant l'exécution, agent trop ancien. Le serveur ne remet jamais une commande deux fois ; un verdict qui arrive plus tard remplace celui-ci |
 | `AUDIT_RETENTION_DAYS` | `730` | Conservation du journal d'audit, en jours (0 à 3650), purgé chaque matin par le worker. `0` = conserver indéfiniment, si la politique de l'établissement l'exige |
 | `MAINTENANCE_DEFAULT_CYCLE_DAYS` | `90` | Cycle de maintenance par défaut du parc, en jours, **valeur initiale seulement** : la page Paramètres de la console peut en écrire une autre, qui prend alors le dessus. Une salle ou un poste peuvent surcharger le cycle (0 = exclu de la maintenance) et le responsable ; le plus précis gagne |
-| `MAINTENANCE_DUE_SOON_DAYS` | `14` | Fenêtre « à échéance » : un poste est signalé ce nombre de jours avant sa date. Même règle : valeur initiale, modifiable dans Paramètres |
+| `MAINTENANCE_DUE_SOON_DAYS` | `14` | Fenêtre « à échéance » : un poste est signalé ce nombre de jours avant sa date — au plus la moitié de son cycle, pour qu'un cycle court reste « à jour » après une visite. Même règle : valeur initiale, modifiable dans Paramètres |
 | `USAGE_WINDOW_DAYS` | `7` | Fenêtre glissante, en jours (1 à 90), sur laquelle sont comptées les heures allumées des postes. **Valeur initiale seulement**, modifiable dans Paramètres |
 | `USAGE_LOW_HOURS` | `10` | En dessous de ce nombre d'heures sur la fenêtre, un poste est « peu utilisé ». Un poste enrôlé pendant la fenêtre ne l'est jamais. Valeur initiale, modifiable dans Paramètres |
 | `USAGE_HIGH_HOURS` | `30` | Au-dessus, un poste est « toujours allumé ». Valeur initiale, modifiable dans Paramètres |
@@ -647,7 +647,9 @@ redémarrage du serveur), puis un par 24 h, au format custom de `pg_dump` (`-Fc`
 compressé), dans `deploy/backups/` sur l'hôte. La rétention est de
 `BACKUP_KEEP_DAYS` jours (défaut 14) et la purge n'a lieu qu'après un dump
 réussi : une base en panne ne fait jamais disparaître les sauvegardes
-existantes.
+existantes. Seuls les dumps quotidiens (`tiai-AAAAMMJJ-HHMMSS.dump`) sont
+purgés : un dump manuel sous un autre nom (`tiai-avant-operation.dump`, ci-dessous)
+ou rangé dans un sous-dossier n'est jamais supprimé.
 
 Vérifier que ça tourne :
 
@@ -1438,6 +1440,19 @@ console range les postes à la main (`ROOM_SOURCE=manual`) ou depuis l'annuaire 
 lectures viennent de l'agent, sans rien configurer (voir « Paramètres de l'agent
 Windows », paragraphe *Annuaire*). Après un changement de `ROOM_SOURCE`,
 « Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc.
+
+La resynchronisation range chaque poste dans la salle que nomme sa dernière
+lecture de l'annuaire (son OU, ou son attribut *Emplacement*), en créant les
+salles qui manquent ; une salle créée à la main du même nom — dans un bâtiment
+ou non — est reprise plutôt que doublée, si une majorité des postes qui la
+réclament s'accordent sur la même OU (sinon ils restent où ils sont et la salle
+est signalée). Un poste dont la lecture ne nomme aucune salle est retiré de la
+sienne ; un poste dont l'agent n'a **jamais** transmis de lecture d'annuaire
+(agent ancien, poste hors domaine) reste où il est, comme lors d'un simple
+inventaire. Elle ne s'exécute pas d'un clic : la console calcule d'abord, sans
+rien écrire, combien de postes changeront de salle et combien de salles seront
+créées, et demande confirmation avant de lancer le reclassement (tracé dans le
+journal d'audit).
 
 **Vérifications et maintenance.** « Mes tâches » réunit, pour chaque compte, les
 vérifications qu'on lui a affectées et les salles et postes dont il est
