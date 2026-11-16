@@ -46,7 +46,7 @@ défaut ou ce que la GPO a déjà posé dans le registre.
 | `REPORTSOFTWARE` | `ReportSoftware` | `1` ou `0` (`0` = inventaire matériel seul) |
 | `INVENTORYCOLLECTINTERVALSECONDS` | `InventoryCollectIntervalSeconds` | entier > 0 |
 | `LOCATION` | `Location` | texte libre, ex. `"Lycée de Taravao"` — l'emplacement du poste, par lequel la console filtre le parc et le réveil relayé choisit un poste voisin |
-| `ALLOWINSECUREHTTP` | `AllowInsecureHTTP` | `1` ou `0` — `1` accepte une `APIBASEURL` en `http://` (port HTTP direct d'un réseau de test) ; absent, l'agent refuse une URL `http://` et ne démarre pas |
+| `ALLOWINSECUREHTTP` | `AllowInsecureHTTP` | `1` ou `0` (pas `true`/`false`, que prend le script GPO) — `1` accepte une `APIBASEURL` en `http://` (port HTTP direct d'un réseau de test) ; absent, l'agent refuse une URL `http://` : le service reste « En cours d'exécution » mais ne contacte pas le serveur, et l'écrit dans `agent.log` |
 
 ```powershell
 # Installation silencieuse avec configuration
@@ -63,6 +63,14 @@ quand même : le service démarre, constate l'absence d'URL, l'écrit dans
 `%ProgramData%\Tiai\agent.log` et **réessaie** (une minute, puis de plus en plus
 espacé jusqu'à un quart d'heure). Il repart donc tout seul dès que la valeur est
 posée — par GPO, par exemple — sans attendre un redémarrage du poste.
+
+Même comportement pour une `APIBASEURL` en `http://` sans `ALLOWINSECUREHTTP=1` :
+le service tourne, ne contacte pas le serveur, et répète dans `agent.log`
+`agent: cannot run yet (api_base_url … is http://…)` jusqu'à ce que la valeur
+`AllowInsecureHTTP` soit posée ou l'URL passée en `https://`. À l'inverse, un
+agent qui fonctionne ne relit le registre qu'au démarrage de son service :
+une valeur changée après coup (retirer l'autorisation, par exemple) ne prend
+effet qu'à son prochain redémarrage.
 
 ## Mise à jour et désinstallation
 

@@ -18,6 +18,29 @@ au code. La console, elle, garde sa session dans un cookie `Secure` dès que
 `ENVIRONMENT` n'est pas `local` : elle n'est de toute façon servie qu'en HTTPS,
 par Caddy (cf. § « [Sessions de la console](#sessions-de-la-console) »).
 
+## Obtenir les fichiers de déploiement
+
+Toutes les commandes de ce guide partent du dossier `deploy/` du dépôt. Il
+**fait partie du serveur** : outre le `docker-compose.yml`, il porte des
+fichiers que les conteneurs lisent directement sur l'hôte — le `Caddyfile`, le
+script de sauvegarde (`backup/backup.sh`), le script du rôle PostgreSQL
+(`db/app-role.sh`). Ils se prennent à la **même version** que les images, sous
+le tag de la release :
+
+```bash
+git clone https://github.com/Natimai-Solutions/natimai-tiai.git
+cd natimai-tiai
+git checkout v1.2.0          # le tag de la release : celle de TIAI_VERSION=1.2.0
+```
+
+Sans git, l'archive « Source code » de la release (page
+[Releases](https://github.com/Natimai-Solutions/natimai-tiai/releases))
+contient les mêmes fichiers. Ce qui est propre au serveur — `deploy/.env`,
+`deploy/certs/`, `deploy/backups/` — n'est ni dans le dépôt ni dans l'archive :
+changer de version n'y touche pas. Ces fichiers se mettent à jour **avec** les
+images, à chaque montée de version (§ « [Mettre à jour le
+serveur](#mettre-à-jour-le-serveur) »).
+
 ## Les trois modes
 
 | Mode | TLS | Pour qui | Prérequis |
@@ -58,8 +81,11 @@ Côté poste, récupérer `tiai-agent-windows-amd64.exe` depuis la page
 .\tiai-agent.exe run
 ```
 
-`--allow-insecure-http` est indispensable : sans lui, l'agent refuse de
-démarrer sur une URL en `http://` (cf. § « Paramètres de l'agent Windows »).
+`--allow-insecure-http` est indispensable : sans lui, l'agent refuse une URL
+en `http://`. La commande `run` lancée au premier plan s'arrête alors
+aussitôt, en disant pourquoi ; installé en service, l'agent reste « En cours
+d'exécution » mais ne contacte pas le serveur (cf. § « Paramètres de l'agent
+Windows »).
 
 Ce port fait circuler en clair tout ce qu'échangent agents et serveur, **secret
 d'enrôlement compris** (l'agent l'envoie en en-tête à chaque enrôlement) : un
@@ -137,7 +163,9 @@ docker compose up -d
 - `deploy/.env` (secrets) et `deploy/backups/` (dumps de la base, non chiffrés)
   sont réservés au propriétaire : `chmod 600 .env`, `chmod 700 backups`. Le
   service `db-backup` resserre aussi le dossier et ses dumps à chaque démarrage,
-  mais seulement une fois lancé — et rien ne protège le `.env` à sa place.
+  mais seulement une fois lancé, et seulement si le système de fichiers le lui
+  permet (§ « Sauvegardes et restauration ») — et rien ne protège le `.env` à
+  sa place.
 - Hors `ENVIRONMENT=local`, le backend **refuse de démarrer** si `SECRET_KEY`,
   `ENROLLMENT_SECRET`, `POSTGRES_PASSWORD` ou `FIRST_ADMIN_PASSWORD` est vide ou
   commence encore par `changeme`, ou si `SECRET_KEY` fait moins de 32 caractères,
@@ -278,19 +306,21 @@ Il n'est jamais committé.
 | `SESSION_MAX_DAYS` | `30` | Durée **absolue** d'une session, comptée depuis la connexion, glissement compris : au-delà, reconnexion obligatoire. Borne ce que vaut un jeton de session volé |
 | `FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` | — | Compte admin créé au démarrage s'il n'existe pas |
 | `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée à tout mot de passe |
-| `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié » |
+| `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié », en minutes (5 à 10 080) |
 | `PASSWORD_RESET_COOLDOWN_MINUTES` / `PASSWORD_RESET_MAX_LIVE_LINKS` | `5` / `3` | « Mot de passe oublié » : pas de nouveau courriel pour un compte dans ce délai (0 à 60 min) après le précédent, et au plus ce nombre de liens valides à la fois (1 à 10). Une demande n'annule jamais un lien encore valide ; utiliser un lien annule les autres |
 | `CONSOLE_BASE_URL` | `https://<TIAI_SERVER_NAME>` | URL publique de la console, dans les liens des e-mails (réinitialisation, fiche d'un poste). À renseigner seulement si la console est jointe sous une autre URL (autre port, proxy devant Caddy). Si ni elle ni `TIAI_SERVER_NAME` n'est connue, aucun e-mail de réinitialisation n'est envoyé |
 | `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste — 16 caractères minimum hors `local` |
 | `ENROLLMENT_SECRET_PREVIOUS` | *(vide)* | Ancien secret, encore accepté pendant une rotation (cf. « Enrôlement : approbation et rotation du secret ») |
 | `ENROLLMENT_REENROLL_REQUIRES_APPROVAL` | `true` | Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur |
 | `LOGIN_MAX_FAILED_ATTEMPTS` / `LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Verrouillage d'un compte après N échecs de connexion espacés de moins de cette durée, pour cette durée (voir *Verrouillage des comptes*). Une connexion réussie ou une réinitialisation du mot de passe le lève |
-| `LOGIN_SIEGE_ADDRESSES` / `LOGIN_KNOWN_ADDRESS_DAYS` | `10` / `30` | Pendant un verrou, au-delà de ce nombre d'adresses distinctes en échec sur le compte (2 à 1 000), seules les adresses qui ont ouvert ce compte depuis ce nombre de jours (1 à 365) restent admises (voir *Verrouillage des comptes*) |
+| `LOGIN_SIEGE_ADDRESSES` / `LOGIN_KNOWN_ADDRESS_DAYS` | `10` / `30` | Pendant un verrou, dès que ce nombre d'adresses distinctes (2 à 1 000) ont échoué sur le compte en `LOGIN_LOCKOUT_MINUTES`, seules les adresses qui ont ouvert ce compte depuis ce nombre de jours (1 à 365) restent admises (voir *Verrouillage des comptes*) |
+| `RATE_LIMIT_ENABLED` | `true` | Limitation de débit par adresse (connexion, « mot de passe oublié », enrôlement, e-mail de test). À `false`, elle est coupée, et avec elle le plafond de heartbeats par poste et la limite des changements de mot de passe — **pas** le verrouillage des comptes ni les quotas de logiciels. Une issue de secours, pas un réglage : réservée à un déploiement dont tous les opérateurs arrivent par la même adresse (VPN, proxy) |
 | `AGENT_HEARTBEAT_MAX_PER_MINUTE` | `12` | Heartbeats acceptés par poste et par minute (2 à 600) ; au-delà, 429. L'agent en envoie un par `heartbeat_interval_seconds` (60 s par défaut), plus un au redémarrage : relever cette limite si l'intervalle est abaissé sous 10 s |
-| `SOFTWARE_NEW_ENTRIES_PER_DAY` | `2000` | Nouveaux logiciels qu'un poste peut ajouter au catalogue par 24 h (100 à 1 000 000) ; les logiciels déjà connus ne comptent pas. En dessous de 2 000 (le plus qu'un inventaire transporte), le premier inventaire d'un poste sur un catalogue vide peut demander plus d'une journée |
+| `SOFTWARE_NEW_ENTRIES_PER_DAY` | `2000` | Nouveaux logiciels qu'un poste peut ajouter au catalogue par 24 h (100 à 1 000 000) ; les logiciels déjà connus ne comptent pas. Une liste coupée par ce quota est signalée sur la fiche du poste (« Relevé partiel »), et le serveur redemande l'inventaire à l'agent dès que le budget le permet (agents à partir de la v1.2.1 ; un agent plus ancien le complète à son prochain redémarrage ou au prochain changement de son inventaire). En dessous de 2 000 (le plus qu'un inventaire transporte), le premier inventaire d'un poste sur un catalogue vide est donc d'abord partiel |
+| `SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET` | `50000` | Nouveaux logiciels que **tous les postes réunis** peuvent ajouter au catalogue par 24 h (1 000 à 10 000 000). Même règle : les logiciels déjà connus ne comptent pas, et une liste coupée est signalée puis redemandée |
 | `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
-| `TRUSTED_PROXIES` | *(vide)* | Réseaux (CIDR, séparés par des virgules) dont l'en-tête `X-Forwarded-For` est cru, en plus de la boucle locale et de `TRUSTED_PROXY_HOSTS` ; l'adresse retenue est alors l'entrée la plus à droite de l'en-tête. Pour tout autre pair, l'en-tête est ignoré et l'adresse du client — limitation de débit, journal d'audit — est celle de la connexion. À renseigner seulement si un autre proxy que le Caddy de la stack joint directement le backend |
+| `TRUSTED_PROXIES` | *(vide)* | Réseaux (CIDR, séparés par des virgules) dont l'en-tête `X-Forwarded-For` est cru, en plus de la boucle locale et de `TRUSTED_PROXY_HOSTS`. Toutes les lignes de l'en-tête sont alors lues bout à bout, dans l'ordre, et l'adresse retenue est l'entrée la plus à droite qui n'est pas elle-même un proxy de confiance ; chaque entrée est lue comme une adresse (port et crochets retirés), et une entrée illisible ramène à l'adresse de la connexion. Pour tout autre pair, l'en-tête est ignoré et l'adresse du client — limitation de débit, journal d'audit — est celle de la connexion. À renseigner seulement si un autre proxy que le Caddy de la stack joint directement le backend, et **n'y lister que les proxys** : une plage large (tout le réseau local) laisse un client qui s'y trouve choisir l'adresse sous laquelle il apparaît, ou ramène tous les clients à l'adresse du proxy |
 | `TRUSTED_PROXY_HOSTS` | `caddy` | Noms d'hôte dont l'en-tête `X-Forwarded-For` est cru, séparés par des virgules, résolus dans le réseau Compose (au plus une fois par minute). Un nom qui ne se résout pas (hors Docker) n'accorde rien. Le défaut désigne le service Caddy de la stack |
 | `EXPOSE_OPENAPI` | `false` | Sert le schéma OpenAPI (`/api/v1/openapi.json`) et ses pages `/docs` et `/redoc` hors `ENVIRONMENT=local`, où ils le sont toujours. Derrière Caddy, seul `/api/*` atteint le backend : seul le schéma JSON devient joignable, les pages ne le sont que sur le port direct de l'override de dev. Le schéma décrit chaque route et chaque champ : laisser à `false` en production |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
@@ -351,20 +381,40 @@ compte plus : quelques fautes de frappe étalées sur la semaine ne verrouillent
 pas. Le verrou ne ferme le compte qu'aux **adresses qui ont échoué dessus**
 pendant cette durée : le bon mot de passe saisi depuis un autre poste ouvre la
 session et lève le verrou, si bien qu'échouer exprès ne bloque pas un
-administrateur. Si les essais viennent de nombreuses adresses
-(`LOGIN_SIEGE_ADDRESSES`, 10 adresses distinctes pendant la durée du verrou),
-le verrou s'étend à toutes les adresses sauf celles qui ont ouvert ce compte
-depuis `LOGIN_KNOWN_ADDRESS_DAYS` jours (30) : répartir les essais sur un réseau entier
-n'en donne pas davantage. Pendant un verrou, la console répond le même 401
-qu'à un mauvais mot de passe : la réponse ne dit pas quels comptes existent.
+administrateur. Pendant un verrou, la console répond le même 401 qu'à un
+mauvais mot de passe : la réponse ne dit pas quels comptes existent.
 
-Ces adresses sont gardées en mémoire du processus de l'API (un seul, cf.
-`entrypoint.sh`) : un redémarrage les oublie, le verrou lui-même reste en base.
-Deux limites découlent de l'adresse : des opérateurs qui sortent tous par la
-**même adresse** (NAT, VPN, proxy absent de `TRUSTED_PROXIES`) partagent aussi
-le verrou de l'adresse fautive ; et derrière un proxy non déclaré, toutes les
-requêtes semblent venir de lui. Déclarer le proxy (`TRUSTED_PROXIES`,
-`TRUSTED_PROXY_HOSTS`) avant tout.
+Si les essais viennent de nombreuses adresses — dès que
+`LOGIN_SIEGE_ADDRESSES` adresses distinctes (10) ont échoué sur le compte en
+`LOGIN_LOCKOUT_MINUTES` — le verrou s'étend à toutes les adresses sauf les
+**adresses habituelles** du compte : celles qui l'ont ouvert depuis
+`LOGIN_KNOWN_ADDRESS_DAYS` jours (30). Répartir les essais sur un réseau entier
+n'en donne donc pas davantage. Une adresse devient habituelle par une connexion
+réussie, le reste tant qu'une session y est utilisée, et le devient aussi quand
+un lien « mot de passe oublié » y est utilisé. Un changement de mot de passe
+efface les adresses habituelles de l'ancien, sauf celle d'où le nouveau vient
+d'être choisi.
+
+Adresses en échec et adresses habituelles sont **en base**
+(`user_login_addresses`, purgée chaque matin) : un redémarrage de l'API ne lève
+pas un verrou et n'oublie pas les postes habituels.
+
+Trois limites à connaître :
+
+- Le titulaire qui se présente depuis une adresse **jamais vue**, pendant que
+  des essais arrivent de `LOGIN_SIEGE_ADDRESSES` adresses ou plus, est refusé
+  comme les autres. Sa sortie : « Mot de passe oublié » depuis ce poste — le
+  lien utilisé rend l'adresse habituelle — ou une réinitialisation par un
+  administrateur suivie d'une connexion rapide. Une session déjà ouverte n'est
+  pas touchée.
+- Des opérateurs qui sortent tous par la **même adresse** (NAT, VPN, proxy
+  absent de `TRUSTED_PROXIES`) partagent le verrou de l'adresse fautive ; et
+  derrière un proxy non déclaré, toutes les requêtes semblent venir de lui.
+  Déclarer le proxy (`TRUSTED_PROXIES`, `TRUSTED_PROXY_HOSTS`) avant tout.
+- Les échecs espacés de plus de `LOGIN_LOCKOUT_MINUTES` ne verrouillent
+  jamais : quatre essais par quart d'heure restent possibles sans verrou. Ils
+  figurent au journal de sécurité du backend (« login failed »), pas au journal
+  d'audit ; la longueur minimale des mots de passe est ce qui les rend vains.
 
 La page Utilisateurs affiche « Verrouillé » ; une réinitialisation du mot de
 passe par un administrateur lève le verrou. Le verrouillage et la
@@ -391,14 +441,14 @@ variables ci-dessous ne décrivent que la destination du paquet.
 |---|---|---|
 | `WOL_SUBNET_PREFIXLEN` | `24` | **Repli seulement.** Le masque vient normalement du poste lui-même : son agent le lit sur la carte et le remonte avec l'adresse, ce qui est la seule source juste sur un parc où cohabitent des /16 et des /24. Ce réglage ne sert qu'aux postes dont l'agent est antérieur à cette remontée, ou dont la carte n'a pas exposé de masque |
 | `WOL_BROADCAST_ADDRESSES` | *(vide)* | Adresses de diffusion explicites, séparées par des virgules. Renseignées, elles **remplacent** l'adresse déduite et servent pour *tous* les postes — la réponse pour un serveur qui doit joindre des segments où il n'a pas d'adresse, et le seul moyen de réveiller un poste qui n'a jamais remonté d'IP |
-| `WOL_ALLOWED_NETWORKS` | *(vide)* | Réseaux (CIDR, séparés par des virgules) vers lesquels le serveur accepte de diffuser un réveil déduit de l'adresse d'un poste. Vide : les plages privées RFC 1918 (10/8, 172.16/12, 192.168/16), et elles seules. Le sous-réseau déduit (adresse et masque remontés) doit tenir entièrement dans l'un de ces réseaux ; sinon le préfixe par défaut est essayé, sinon le poste n'a pas de destination. Un masque hors de /16 à /30 n'est pas retenu |
+| `WOL_ALLOWED_NETWORKS` | *(vide)* | Réseaux (CIDR, séparés par des virgules) vers lesquels le serveur accepte de diffuser un réveil déduit de l'adresse d'un poste. Vide : les plages privées RFC 1918 (10/8, 172.16/12, 192.168/16), et elles seules. Renseignée, la liste **remplace** ces plages, elle ne s'y ajoute pas : y remettre celles du parc qui doivent rester joignables. Une entrée qui n'est pas un réseau IPv4 lisible est refusée au démarrage du backend, qui la nomme. Le sous-réseau déduit (adresse et masque remontés) doit tenir entièrement dans l'un de ces réseaux ; sinon le préfixe par défaut est essayé, sinon le poste n'a pas de destination. Un masque hors de /16 à /30 n'est pas retenu |
 | `WOL_PORT` | `9` | Port UDP du paquet magique. Indifférent au matériel (la carte reconnaît le motif n'importe où dans la trame) ; ne compte que pour un pare-feu sur le trajet |
 | `WOL_PACKET_COUNT` | `3` | Nombre de copies émises. Une diffusion UDP n'accuse rien et se perd sans bruit ; trois copies coûtent trois datagrammes |
 | `WOL_RELAY_ENABLED` | `false` | **Serveur distant.** À `true`, le serveur n'émet plus rien lui-même : il confie le réveil au premier poste allumé du **même emplacement** que la cible (à défaut d'emplacement, du même domaine) qui le contacte, et c'est l'agent de ce poste qui diffuse le paquet magique sur ses propres sous-réseaux. Voir le point 4 de la section « Réveil des postes » |
 | `WOL_RELAY_TTL_MINUTES` | `10` | Délai laissé à un poste relais pour prendre un réveil en attente ; passé ce délai, il expire. Court à dessein : un réveil relayé une heure plus tard rencontre un poste que quelqu'un a déjà rallumé à la main |
 | `WOL_RELAY_SUBNET_GRACE_SECONDS` | `90` | Un poste du **même sous-réseau** que la cible prend le réveil aussitôt ; un poste d'un autre VLAN du même emplacement attend ce délai — un cycle d'agent — pour laisser la priorité au mieux placé. `0` supprime la préférence |
 | `WOL_RELAY_MIN_AGE_MINUTES` | `60` | Un poste enrôlé depuis moins longtemps ne relaie pas de réveil ; un poste « identité à confirmer », au token révoqué, ou d'agent plus ancien que `WOL_RELAY_MIN_AGENT_VERSION` non plus |
-| `WOL_RELAY_MIN_AGENT_VERSION` | `1.0.0` | Version d'agent minimale d'un poste relais : un agent plus ancien, qui garderait le réveil sans savoir l'émettre, n'en reçoit aucun. Comparée champ par champ (`1.10.0` > `1.9.0`), une pré-version (`1.0.0-dev.…`) passant sous la version qu'elle précède ; un poste qui ne remonte pas de version lisible n'est pas écarté par ce critère |
+| `WOL_RELAY_MIN_AGENT_VERSION` | `1.0.0` | Version d'agent minimale d'un poste relais : un agent plus ancien, qui garderait le réveil sans savoir l'émettre, n'en reçoit aucun. Comparée champ par champ (`1.10.0` > `1.9.0`), une pré-version (`1.0.0-dev.…`) passant sous la version qu'elle précède. Un poste qui ne remonte aucune version, ou une version illisible (`dev`), **ne relaie pas** non plus : rien ne dit que son agent connaît la commande |
 | `WOL_RELAY_CLAIM_TIMEOUT_SECONDS` | `180` | Un réveil pris par un relais qui ne rend pas de verdict dans ce délai retourne dans la file, pour qu'un autre poste le prenne |
 
 ### Alertes e-mail et e-mails de compte
@@ -557,8 +607,31 @@ Côté serveur :
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `PACKAGES_DIR` | `/data/packages` | Où les fichiers des paquets sont stockés, un par empreinte SHA-256. Monté sur le volume Docker `packages` |
-| `PACKAGE_MAX_BYTES` | `2147483648` (2 Gio) | Taille maximale d'un fichier déposé. Caddy accepte 2 Gio par requête sur la seule route de dépôt, et la console envoie un fichier par requête : relever les deux ensemble |
+| `PACKAGE_MAX_BYTES` | `2147483648` (2 Gio) | Taille maximale d'un fichier déposé, en octets (de 1 Mio à 8 Gio) ; au-delà, l'API répond un 413 qui nomme la limite. La console envoie un fichier par requête, et Caddy borne la requête entière sur la seule route de dépôt (cf. « Relever la taille maximale » ci-dessous) |
+| `PACKAGE_METHOD_A_MAX_GB` | `8` | Taille totale, en Gio (1 à 1 024), qu'un paquet **non signé** (méthode A) peut annoncer. À tenir égale à la valeur de registre `DeployMethodAMaxGB` des postes : au-delà, le serveur et la console refusent le déploiement, au lieu de le laisser échouer sur chaque poste |
 | `PACKAGE_MAX_CONCURRENT_DOWNLOADS` | `20` | Téléchargements servis en même temps par le processus de l'API. Au-delà, l'agent est prié de revenir (429) sans que sa commande échoue |
+
+**Relever la taille maximale.** Le [Caddyfile](deploy/Caddyfile) plafonne la
+route de dépôt à `max_size 2050MiB`, soit 2 Mio **au-dessus** du défaut de
+`PACKAGE_MAX_BYTES` (2 Gio = 2 048 Mio). L'écart est voulu : Caddy compte toute
+la requête, en-têtes du formulaire compris, et à égalité un fichier juste sous
+la limite recevrait le 413 nu de Caddy au lieu de celui de l'API, qui dit
+laquelle. La règle, pour un autre plafond : la limite de Caddy reste
+**légèrement au-dessus** de `PACKAGE_MAX_BYTES`, jamais égale ni en dessous.
+Pour 8 Gio, le plus que le backend accepte :
+
+```bash
+cd deploy
+# 1. .env :      PACKAGE_MAX_BYTES=8589934592        (8 Gio = 8 192 Mio)
+# 2. Caddyfile : max_size 8194MiB                    (bloc @package_upload)
+docker compose up -d                          # backend et worker relisent le .env
+docker compose up -d --force-recreate caddy   # Caddy relit son fichier
+docker compose exec caddy grep max_size /etc/caddy/Caddyfile
+```
+
+`up -d` seul ne recrée pas `caddy` : son fichier est monté depuis l'hôte, et
+Compose ne voit pas qu'il a changé. Le Caddyfile ainsi modifié est un fichier
+local : le reporter à chaque mise à jour (§ « Mettre à jour le serveur »).
 
 Le volume `packages` **n'est pas dans le dump PostgreSQL** (voir ci-dessous) :
 le sauvegarder à part, ou garder les installateurs d'origine pour pouvoir les
@@ -584,8 +657,12 @@ sudo ls -lh backups/              # dumps en -rw------- (root), dossier en drwx-
 ```
 
 Les dumps sont lisibles du seul propriétaire (`umask 077`, `chmod 600`), et le
-dossier `deploy/backups/` est ramené en `700` à chaque démarrage du service :
-ils contiennent les hachés des mots de passe et tout l'inventaire du parc. Les
+dossier `deploy/backups/` est ramené en `700` à chaque démarrage du service, si
+le système de fichiers le permet ; sinon (Docker en *userns-remap* ou sans
+root, partage NFS en *root squash*) le service l'écrit dans son journal
+(`docker compose logs db-backup`), et c'est le `chmod 700 backups` fait sur
+l'hôte qui ferme le dossier. Les dumps contiennent les hachés des mots de passe
+et tout l'inventaire du parc. Les
 commandes de dump manuel ci-dessous posent elles aussi `umask 077` — un `sh -c`
 lancé par `docker compose exec` n'hérite pas de celui du script de sauvegarde.
 Les dumps ne sont **pas chiffrés** — l'image PostgreSQL n'embarque ni `gpg` ni
@@ -656,30 +733,103 @@ la stack démarre est `TIAI_VERSION` dans `deploy/.env` : **l'épingler** en
 production (`TIAI_VERSION=1.2.0`), pour qu'une mise à jour soit une décision et
 pas l'effet de bord du prochain `docker compose pull`.
 
+**Une version, ce sont les images *et* les fichiers de `deploy/`.** Le
+`Caddyfile` et le script de sauvegarde (`backup/backup.sh`) ne sont pas dans
+les images : les conteneurs `caddy` et `db-backup` les lisent sur l'hôte
+(§ « [Obtenir les fichiers de déploiement](#obtenir-les-fichiers-de-déploiement) »),
+et leurs propres images (`caddy`, `postgres`) ne changent pas d'une release de
+Tia'i à l'autre. Changer `TIAI_VERSION` puis lancer `docker compose pull` et
+`docker compose up -d` ne met donc à jour que le backend, le worker et la
+console : le serveur garderait l'ancien Caddyfile et l'ancien script de
+sauvegarde, sans les corrections que la release y apporte. D'où les étapes 2
+et 5 ci-dessous, à faire à **chaque** mise à jour — ici de la 1.2.0 vers la
+1.2.1 :
+
 ```bash
 cd deploy
-# 1. Un dump juste avant : `up -d` ne recrée que les services dont l'image
-#    change, donc db-backup ne refait pas le sien à cette occasion.
+# 1. Un dump juste avant. db-backup en refait un à l'étape 5, mais après les
+#    migrations : celui-ci est le seul qui permette de revenir en arrière.
 docker compose exec db-backup sh -c \
   'umask 077 && PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" \
    -d "$POSTGRES_DB" -Fc -f /backups/tiai-avant-mise-a-jour.dump'
-# 2. Changer TIAI_VERSION dans .env, puis :
+
+# 2. Les fichiers de déploiement, à la version visée. `.env`, `certs/` et
+#    `backups/` ne sont pas suivis par git : ils restent tels quels.
+git status --short .                # un fichier suivi modifié sur place ? (voir plus bas)
+git fetch --tags
+git checkout v1.2.1                 # le tag de la release
+
+# 3. Le .env face au nouveau .env.example. La première commande montre ce que
+#    la release y a changé (variables ajoutées ou retirées, défauts, consignes) ;
+#    la seconde nomme les variables de l'exemple absentes du .env (lignes « < »)
+#    et celles du .env que l'exemple ne connaît plus (lignes « > »).
+git diff v1.2.0 v1.2.1 -- .env.example
+diff <(grep -oE '^#?[A-Z][A-Z0-9_]*=' .env.example | tr -d '#=' | sort -u) \
+     <(grep -oE '^#?[A-Z][A-Z0-9_]*=' .env         | tr -d '#=' | sort -u)
+
+# 4. Dans .env : TIAI_VERSION=1.2.1, et ce que l'étape 3 a fait apparaître.
+#    Puis les droits — à poser aussi sur un serveur installé avant que ce
+#    guide ne les demande (sudo si Docker a créé le dossier, donc en root) :
+chmod 600 .env
+chmod 700 backups
+
+# 5. Les images, puis les services.
 docker compose pull                 # télécharge les images de cette version
 docker compose up -d                # recrée backend, worker et console
+docker compose up -d --force-recreate caddy db-backup   # relisent Caddyfile et backup.sh
+
+# 6. Vérifier.
 docker compose ps                   # tous les services « healthy » en 2 min
+docker compose exec caddy grep max_size /etc/caddy/Caddyfile   # celui de la release (v1.2.1 : 2050MiB et 8MB)
+docker compose logs --tail 5 db-backup   # « sauvegarde OK : … », sans ligne « ATTENTION »
+ls -ld .env backups                 # -rw------- et drwx------
 ```
 
 Le backend rejoue les migrations Alembic à son démarrage.
 
-> **Montée vers la v1.2.0, qui introduit le rôle applicatif PostgreSQL** : créer
-> le rôle avant l'étape 2 (§ « Rôle applicatif PostgreSQL »). Sans lui, le
-> backend refuse de démarrer.
+**Pourquoi `--force-recreate`.** `docker compose up -d` ne recrée un service
+que si son image ou sa définition dans le compose a changé ; le contenu d'un
+fichier monté n'en fait pas partie. Et un fichier monté seul reste, dans le
+conteneur, celui qui existait à sa création : git le remplace sur l'hôte, le
+conteneur garde l'ancien. Sans cette commande, ni `caddy` ni `db-backup` ne
+voient les fichiers de l'étape 2. La recréation de `caddy` coupe la console et
+les agents quelques secondes (les agents réessaient d'eux-mêmes) ; celle de
+`db-backup` déclenche un dump.
 
-**Revenir en arrière** : remettre l'ancienne valeur de `TIAI_VERSION` et
-relancer `docker compose up -d` — tant que la version quittée n'a pas migré la
-base. Si elle l'a fait, restaurer le dump pris avant la montée (§ « Restaurer »)
-*puis* redémarrer sur l'ancienne version : un schéma plus récent que le code
-n'est pas supporté.
+**Les notes de version** (`dev/notes-de-version-v<version>.md`, section « À
+faire avant de mettre à jour ») disent ce qu'une release demande de plus : une
+variable devenue obligatoire, une opération à faire une fois. Les lire avant
+l'étape 4.
+
+**Fichier suivi modifié sur place** — le Caddyfile, pour `tls internal` ou un
+autre `max_size` (§ « Déploiement logiciel ») : `git status` le signale à
+l'étape 2, et `git checkout` refuse de l'écraser s'il a changé entre les deux
+versions. Mettre la modification de côté (`git stash`), changer de version,
+puis la reposer (`git stash pop`) et relire le fichier obtenu avant l'étape 5.
+
+**Sans git** (dossier venu de l'archive « Source code » d'une release) :
+extraire l'archive de la nouvelle version par-dessus le dossier existant, à la
+place de l'étape 2. `.env`, `certs/` et `backups/` n'y figurent pas et restent
+en place ; un fichier modifié sur place, lui, est écrasé — le comparer avant.
+
+```bash
+# depuis la racine du dépôt (le dossier qui contient deploy/)
+curl -L https://github.com/Natimai-Solutions/natimai-tiai/archive/refs/tags/v1.2.1.tar.gz \
+  | tar -xz --strip-components=1
+```
+
+> **Montée vers la v1.2.0, qui introduit le rôle applicatif PostgreSQL** : créer
+> le rôle après l'étape 4 et avant l'étape 5 (§ « Rôle applicatif
+> PostgreSQL ») — il faut les fichiers de la v1.2.0 et `POSTGRES_APP_PASSWORD`
+> dans le `.env`. Sans lui, le backend refuse de démarrer.
+
+**Revenir en arrière** : remettre l'ancienne valeur de `TIAI_VERSION` **et**
+les fichiers de déploiement de l'ancienne version (`git checkout v1.2.0`), puis
+relancer `docker compose up -d` et
+`docker compose up -d --force-recreate caddy db-backup` — tant que la version
+quittée n'a pas migré la base. Si elle l'a fait, restaurer le dump pris avant
+la montée (§ « Restaurer ») *puis* redémarrer sur l'ancienne version : un
+schéma plus récent que le code n'est pas supporté.
 
 **Construire depuis les sources** plutôt que tirer les images (dépôt modifié,
 serveur sans accès à ghcr.io) : `docker compose up -d --build`. Compose
@@ -1089,7 +1239,30 @@ de mettre à jour l'agent** sur un parc installé en `http://`, sinon les postes
 cessent de joindre le serveur. L'agent ne suit plus non plus les redirections
 (le 301 de Caddy de `http://` vers `https://` répond une erreur).
 
-Les quatre valeurs `Deploy*` ouvrent le **déploiement logiciel** sur le poste.
+Sans l'option, **le service ne s'arrête pas** : il reste « En cours
+d'exécution » dans le gestionnaire de services, ne contacte pas le serveur, et
+relit sa configuration toutes les 1 à 15 minutes en écrivant chaque fois dans
+`agent.log` la ligne `agent: cannot run yet (api_base_url "http://…" is
+http://: …)`. Un poste dans cet état se reconnaît donc à son journal, pas à
+l'état du service. Poser la valeur ensuite le répare à l'essai suivant, sans
+redémarrer le service. Seule la commande `run` lancée au premier plan s'arrête
+sur cette erreur. À l'inverse, un agent **déjà en marche** ne relit le registre
+qu'au démarrage du service : retirer l'autorisation (`AllowInsecureHTTP` à 0)
+ne prend effet qu'au prochain redémarrage du service ou du poste.
+
+**Par le script GPO** ([deploy/gpo/](deploy/gpo/README.md)), la valeur se passe
+en `-AllowInsecureHttp true` ou `false` ; par le MSI, en propriété
+`ALLOWINSECUREHTTP=1` ou `0`. Le script `Install-TiaiAgent.ps1` n'est pas
+publié avec les releases (elles ne portent que les `.exe`, les `.msi` et
+`SHA256SUMS.txt`) : il se copie à la main sur le partage. **Y déposer le
+nouveau script avant d'ajouter le paramètre à la GPO** : face à l'ancien
+script, PowerShell rejette le paramètre inconnu avant la première ligne —
+rien dans `deploy.log`, et aucun poste installé ni mis à jour, à chaque
+démarrage, tant que l'ancien script reste en place.
+
+Les cinq valeurs `Deploy*` règlent le **déploiement logiciel** sur le poste ;
+la dernière, `DeployMethodAMaxGB`, borne la taille d'un paquet non signé et se
+tient égale à `PACKAGE_METHOD_A_MAX_GB` côté serveur.
 Elles ne se lisent **que dans le registre**, jamais dans le YAML, et sont
 relues à chaque commande. Absentes, tout déploiement est refusé. Leur rôle et
 la façon de les poser sont décrits dans
@@ -1279,8 +1452,9 @@ chaque compte (page « Mon compte »).
 | Symptôme | Cause probable | Correctif |
 |---|---|---|
 | `curl` HTTPS renvoie un code `000` | Certificat auto-signé non approuvé | `curl -k`, ou importer la racine Caddy |
-| L'agent journalise une erreur TLS x509 | Auto-signé, que le client de l'agent refuse | Importer la racine Caddy ; à défaut, viser le port HTTP direct `http://...:8800` **avec** `AllowInsecureHTTP` = 1 (registre) ou `--allow-insecure-http` à `init-config` — sans l'option, l'agent refuse de démarrer |
-| L'agent refuse de démarrer : `api_base_url "http://..." is http://` | Agent publié après la v1.1.0 : une URL en `http://` est refusée sauf déclaration explicite | Passer en `https://`, ou poser `AllowInsecureHTTP` = 1 (registre) / `allow_insecure_http: true` (YAML) en connaissance de cause (cf. § « Surcharge par le registre (GPO) ») |
+| L'agent journalise une erreur TLS x509 | Auto-signé, que le client de l'agent refuse | Importer la racine Caddy dans le magasin machine du poste (§ « Mode B »). Sur la stack de production (mode C, repliée sur `tls internal`), c'est le seul correctif : elle n'a pas de port HTTP. Avec l'override de dev seulement (`docker-compose.dev.yml`), on peut à défaut viser le port HTTP direct `http://...:8800` **avec** `AllowInsecureHTTP` = 1 (registre) ou `--allow-insecure-http` à `init-config` ; ce port n'est publié que sur `127.0.0.1` tant que `TIAI_DEV_BACKEND_BIND=0.0.0.0` n'est pas posé dans le `.env` (§ « Mode A ») |
+| Le poste n'apparaît pas (ou plus) dans la console, service `TiaiAgent` pourtant « En cours d'exécution » ; `agent.log` répète `agent: cannot run yet (api_base_url "http://..." is http://: …)` toutes les 1 à 15 minutes | Agent publié après la v1.1.0 : une URL en `http://` est refusée sauf déclaration explicite. Le service ne s'arrête pas, il attend une configuration utilisable sans contacter le serveur (la commande `run` au premier plan, elle, s'arrête sur cette erreur) | Passer en `https://`, ou poser `AllowInsecureHTTP` = 1 (registre) / `allow_insecure_http: true` (YAML) en connaissance de cause (cf. § « Surcharge par le registre (GPO) »). L'agent repart à l'essai suivant, sans redémarrage |
+| Depuis un changement des paramètres de la GPO, aucun poste n'est installé ni mis à jour ; `deploy.log` n'a plus de ligne nouvelle | Le script du partage ne connaît pas un paramètre ajouté à la GPO (`-AllowInsecureHttp` face à un script antérieur), ou une valeur hors de celles qu'il admet (`1` au lieu de `true`) : PowerShell rejette la ligne avant la première instruction du script | Copier sur le partage le `Install-TiaiAgent.ps1` de la release visée (il n'est pas dans ses fichiers : le prendre dans le dépôt, `deploy/gpo/`), **puis** modifier les paramètres ; cf. [deploy/gpo/README.md](deploy/gpo/README.md) |
 | L'agent échoue sur `http://<serveur>` (port 80, sans `:8800`), réponse 301 | Caddy redirige `http://` vers `https://`, et l'agent ne suit aucune redirection | Viser directement `https://<TIAI_SERVER_NAME>` |
 | `https://<ip>` ne répond pas / mauvais certificat | Le site Caddy est lié à un nom d'hôte ; `http://<ip>` redirige, `https://<ip>` n'a pas de certificat | Taper le nom (`TIAI_SERVER_NAME`, ou un alias déclaré), résolu par le DNS ou le fichier `hosts` |
 | Le nom court (`http://tiai`) donne une page blanche ou une erreur, le nom complet marche | Stack antérieure à la redirection des autres hôtes, ou nom court non résolu | Mettre à jour la stack ; vérifier `nslookup tiai` depuis un poste ; pour `https://tiai`, déclarer l'alias dans `TIAI_SERVER_ALIASES` et le mettre dans les SAN du certificat |

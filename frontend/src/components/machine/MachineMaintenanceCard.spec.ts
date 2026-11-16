@@ -53,6 +53,15 @@ describe('MachineMaintenanceCard', () => {
     expect(wrapper.text()).not.toMatch(/\d{2}:\d{2}:\d{2}/);
   });
 
+  it('has the settings dialog offer the owners the server accepts for this poste', async () => {
+    const wrapper = mountCard();
+    await flushPromises();
+
+    const dialog = wrapper.findComponent(MaintenanceSettingsDialog);
+    expect(dialog.props('machineId')).toBe('m1');
+    expect(dialog.props('roomId')).toBeUndefined();
+  });
+
   // Audit U19: another owner or cycle changes « Mes tâches » for somebody.
   it('has the tasks badge read again once the settings are saved', async () => {
     const wrapper = mountCard();

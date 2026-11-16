@@ -235,6 +235,20 @@ def resolve(stored: StoredEmailSettings, environment: Settings = env) -> EmailPo
     return policy
 
 
+def withheld(stored: StoredEmailSettings, environment: Settings = env) -> list[str]:
+    """The environment's secrets ``resolve`` holds back: set in the ``.env``,
+    not replaced in the console, and not sent because the console points at
+    another server than the ``.env``'s. For the page to say so — the send
+    would otherwise fail on authentication with nothing to explain it."""
+    unbound = _resolve_fields(stored, environment)
+    bound = resolve(stored, environment)
+    return [
+        secret
+        for secret in _SECRET_DESTINATION
+        if getattr(unbound, secret) and not getattr(bound, secret)
+    ]
+
+
 def _resolve_fields(stored: StoredEmailSettings, environment: Settings) -> EmailPolicy:
     """``resolve`` without the binding of the environment's secrets."""
     v = stored.values
@@ -319,7 +333,17 @@ def secrets_to_retype(
     home = _resolve_fields(StoredEmailSettings(), environment)
     out: list[str] = []
     for secret, fields in _SECRET_DESTINATION.items():
-        if isinstance(changes.get(secret), str) or not getattr(after, secret):
+        if isinstance(changes.get(secret), str):
+            continue
+        if secret in merged.unreadable:
+            # Sealed under a key the server no longer has, so absent for now
+            # — but still in the table: were the key to come back, it would
+            # leave for wherever the console points by then. It does not
+            # follow a server change either.
+            if _destination_moved(fields, before, after):
+                out.append(secret)
+            continue
+        if not getattr(after, secret):
             continue
         if secret in merged.secrets:
             # The console's own secret: bound to where it was typed for.

@@ -160,6 +160,49 @@ export interface SyncResult {
   placed: number;
   unplaced: number;
   rooms_created: number;
+  /**
+   * Postes left where they were: the room made by hand that bears their name
+   * is claimed by several directory keys, none with a majority. Absent from an
+   * older server.
+   */
+  undecided?: number;
+  /** Those rooms, by name (the server sends 20 at most). */
+  undecided_rooms?: string[];
+}
+
+/** How many undecided rooms the notification names before « et d'autres ». */
+const UNDECIDED_ROOMS_NAMED = 5;
+
+/**
+ * The notification a re-sync earns. Postes left undecided turn it into a
+ * warning that stays, names the rooms and says what settles them.
+ */
+export function syncNotification(res: SyncResult): {
+  type: 'positive' | 'warning';
+  message: string;
+  caption?: string;
+  timeout?: number;
+  actions?: { label: string; color: string }[];
+} {
+  const message = `${res.placed} poste(s) rangé(s), ${res.unplaced} retiré(s), ${res.rooms_created} salle(s) créée(s)`;
+  const undecided = res.undecided ?? 0;
+  if (!undecided) return { type: 'positive', message };
+  const rooms = res.undecided_rooms ?? [];
+  const named = rooms
+    .slice(0, UNDECIDED_ROOMS_NAMED)
+    .map((name) => `« ${name} »`)
+    .join(', ');
+  const which = !rooms.length
+    ? ''
+    : ` pour ${named}${rooms.length > UNDECIDED_ROOMS_NAMED ? " et d'autres salles" : ''}`;
+  return {
+    type: 'warning',
+    message: `${message} — ${undecided} poste(s) laissé(s) en place`,
+    caption: `Aucune unité d'organisation n'est majoritaire${which}. Renommez la salle créée à la main, puis resynchronisez : les postes iront dans la salle de leur unité d'organisation.`,
+    // Names to act on: it stays until read.
+    timeout: 0,
+    actions: [{ label: 'Fermer', color: 'white' }],
+  };
 }
 
 /** Re-file every poste from what its agent last said of the directory. */

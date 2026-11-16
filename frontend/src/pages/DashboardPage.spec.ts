@@ -134,6 +134,77 @@ describe('DashboardPage', () => {
     );
   });
 
+  describe('when only the threats fail on a requested reload', () => {
+    const threat = {
+      id: 't1',
+      machine_id: 'm1',
+      threat_name: 'Trojan:Win32/Old',
+      detection_id: 'd1',
+      severity: 'high',
+      status: 'active',
+      detected_at: '2026-11-10T20:00:00Z',
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-11-14T18:00:00Z'));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function refreshedAt(w: Awaited<ReturnType<typeof mountPage>>): string {
+      return /Actualisé à ([\d:]+)/.exec(w.text())?.[1] ?? '';
+    }
+
+    it('says so, and does not date the rows left on screen as fresh', async () => {
+      serverUp();
+      vi.mocked(listThreats).mockResolvedValue({ ...empty, items: [threat], total: 1 } as never);
+      const w = await mountPage();
+      const loadedAt = refreshedAt(w);
+      expect(loadedAt).not.toBe('');
+      const notify = vi.spyOn(w.vm.$q, 'notify');
+
+      // Five minutes later the counters answer and the threats do not.
+      vi.setSystemTime(new Date('2026-11-14T18:05:00Z'));
+      vi.mocked(listThreats).mockRejectedValue(fail500);
+      await clickReload(w);
+
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(notify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'negative',
+          caption: 'Les informations affichées sont celles du dernier chargement réussi.',
+        }),
+      );
+      // The row is the one of 18:00, and the page still says 18:00.
+      expect(w.text()).toContain('Trojan:Win32/Old');
+      expect(refreshedAt(w)).toBe(loadedAt);
+      expect(w.text()).not.toContain('Aucune menace active.');
+    });
+
+    it('moves « Actualisé à » on once the threats answer again', async () => {
+      serverUp();
+      const w = await mountPage();
+      const loadedAt = refreshedAt(w);
+
+      vi.setSystemTime(new Date('2026-11-14T18:05:00Z'));
+      await clickReload(w);
+
+      expect(refreshedAt(w)).not.toBe(loadedAt);
+    });
+
+    it('still shows the counters the same reload brought back', async () => {
+      serverUp();
+      const w = await mountPage();
+      vi.mocked(getOverview).mockResolvedValue({ ...overview, total: 42 });
+      vi.mocked(listThreats).mockRejectedValue(fail500);
+      await clickReload(w);
+
+      expect(w.text()).toContain('42');
+    });
+  });
+
   it('does not notify when a requested reload succeeds', async () => {
     serverUp();
     const w = await mountPage();

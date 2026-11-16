@@ -62,6 +62,10 @@ export interface EmailSettings {
   configured: boolean;
   /** What the chosen provider still lacks, in words. */
   missing: string[];
+  /** The `.env` secrets the server holds back because the console points at
+   * another server than the `.env`'s: to be typed here. Absent on an older
+   * server. */
+  withheld?: string[];
   env: EmailEnv;
 }
 

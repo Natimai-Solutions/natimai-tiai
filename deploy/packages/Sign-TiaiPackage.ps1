@@ -121,11 +121,28 @@ if ($doc.format -ne 'tiai-package-1') {
 # C1 code) in a name or an argument could move the cursor and erase a line,
 # and show a command other than the one the postes will run (audit S25).
 # Refused outright, before anything is displayed.
+#
+# With them what Unicode offers for the same trick (audit T38): characters
+# that reorder what is displayed, or that show nothing at all. The server
+# refuses the same set (_CONTROL, backend/app/api/routes/packages.py), and a
+# test of the backend keeps the two equal - but the manifest signed here is
+# a file, which may not have come from the server:
+#   U+00AD          soft hyphen
+#   U+061C          Arabic letter mark
+#   U+200B-U+200F   zero-width space, joiners, left-to-right/right-to-left marks
+#   U+2028-U+202E   line and paragraph separators, bidirectional embeddings
+#   U+2060-U+206F   word joiner, invisible operators, bidirectional isolates
+#   U+FEFF          byte order mark / zero-width no-break space
+#   U+E0000-U+E007F tag characters: a surrogate pair in a .NET string, U+DB40
+#                   then U+DC00-U+DC7F
+# Letters written right to left are not refused. Written as \uXXXX escapes of
+# the .NET regular expression: this file stays pure ASCII.
+$ForbiddenCharacters = '[\x00-\x1F\x7F-\x9F\u00AD\u061C\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF]|\uDB40[\uDC00-\uDC7F]'
 function Assert-NoControl {
     param([string]$Label, $Value)
     foreach ($v in @($Value)) {
-        if ($null -ne $v -and "$v" -match '[\x00-\x1F\x7F-\x9F]') {
-            throw "Caractere de controle dans $Label : manifeste refuse, rien n'a ete signe."
+        if ($null -ne $v -and "$v" -match $ForbiddenCharacters) {
+            throw "Caractere de controle ou invisible dans $Label : manifeste refuse, rien n'a ete signe."
         }
     }
 }

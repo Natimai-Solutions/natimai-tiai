@@ -178,3 +178,36 @@ func TestNoRedirectAndABoundedErrorBody(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// An error body is the answerer's text and ends up in the agent's log with
+// the error: rendered on one line, it cannot start a line of its own there.
+// The body itself is kept as received — the agent reads codes in it.
+func TestAStatusErrorIsRenderedOnOneLine(t *testing.T) {
+	const body = "{\"error\":{\"code\":\"machine.enrollment.revoked\"}}\n" +
+		"2026/11/15 08:00:00 agent: first heartbeat accepted by the server\r\n" +
+		"more\u2028and\u2029more\x00\x1b[2J\u0085"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "tok", 5*time.Second, nil)
+
+	_, err := c.Heartbeat(context.Background(), models.HeartbeatRequest{})
+	var se *StatusError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v", err)
+	}
+	if se.Body != body {
+		t.Errorf("Body = %q, want it as received", se.Body)
+	}
+	msg := err.Error()
+	if strings.ContainsFunc(msg, func(r rune) bool {
+		return r < 0x20 || r == 0x7f || r == 0x85 || r == 0x2028 || r == 0x2029
+	}) {
+		t.Errorf("the error message carries a control character or a line break: %q", msg)
+	}
+	if !strings.Contains(msg, "status 403") || !strings.Contains(msg, "machine.enrollment.revoked") {
+		t.Errorf("the error message lost what it reports: %q", msg)
+	}
+}

@@ -61,3 +61,17 @@ func (c *stateCache[T]) markSent(gen uint64) {
 		c.sentGen = gen
 	}
 }
+
+// resend makes the reading the server already acknowledged pending again, and
+// reports whether there was one to offer. A new generation rather than a
+// rewound sentGen: the acknowledgement of a heartbeat still in flight then
+// cannot cancel it, for the same reason it cannot bury a fresh reading.
+func (c *stateCache[T]) resend() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.state == nil {
+		return false
+	}
+	c.gen++
+	return true
+}

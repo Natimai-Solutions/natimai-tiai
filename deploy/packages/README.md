@@ -29,7 +29,7 @@ Nouveau → Élément Registre**, ruche `HKEY_LOCAL_MACHINE`, clé `SOFTWARE\Tia
 | `DeployWingetAllow` | `REG_MULTI_SZ` | *Facultatif.* Les seuls identifiants winget autorisés, un par ligne : `Mozilla.Firefox`, ou un préfixe terminé par `*` (`Mozilla.*`). Absente : tout le dépôt winget est autorisé. |
 | `DeploySigners` | `REG_MULTI_SZ` | Méthode B : l'**empreinte SHA-256** de chaque certificat dont la signature est acceptée, une par ligne (voir § 2). |
 | `DeployPublishers` | `REG_MULTI_SZ` | Méthode A : le **nom du signataire** de chaque éditeur approuvé, une par ligne, tel que l'onglet *Signatures numériques* de l'installateur l'affiche (ex. `INDEX EDUCATION SAS`). |
-| `DeployMethodAMaxGB` | `REG_DWORD` | *Facultatif.* Méthode A : taille totale, en Gio, qu'un manifeste non signé peut annoncer (8 par défaut, de 1 à 1 024). Au-delà, l'agent refuse avant tout téléchargement ; un paquet plus gros se signe (méthode B). |
+| `DeployMethodAMaxGB` | `REG_DWORD` | *Facultatif.* Méthode A : taille totale, en Gio, qu'un manifeste non signé peut annoncer (8 par défaut, de 1 à 1 024). Au-delà, l'agent refuse avant tout téléchargement ; un paquet plus gros se signe (méthode B). Tenir `PACKAGE_METHOD_A_MAX_GB` du serveur à la même valeur : le serveur et la console refusent alors le déploiement d'eux-mêmes, au lieu de le laisser échouer sur chaque poste. |
 
 L'agent relit ces valeurs à chaque commande : une GPO appliquée (`gpupdate`)
 prend effet au déploiement suivant, sans redémarrer le service.
@@ -144,8 +144,15 @@ tout ce que le manifeste ne nomme pas.
 Ces règles de la méthode A — fichiers chargeables refusés, dossier nettoyé,
 désinstallation limitée à `msiexec /x {code produit}` — sont appliquées **par
 l'agent du poste** : elles ne protègent un poste qu'une fois son agent mis à
-jour vers une version qui les connaît (v1.2.0 ou ultérieure). Diffuser l'agent
-à jour sur le parc avant de s'appuyer sur la méthode A.
+jour vers une version qui les connaît.
+
+| Règle | Agent |
+|---|---|
+| Refus de `.dll`, `.ocx`, `.cpl`, `.sys`, `.manifest`, `.local`, `.config`, autre `.exe`, `.msi`, `.mst`, scripts ; dossier nettoyé ; désinstallation limitée à `msiexec /x {code produit}` | v1.2.0 ou ultérieure |
+| Refus des modules chargés par leur nom : `.bpl`, `.pyd`, `.xll`, `.node`, `.rll`, `.wsc`, `.sct` | v1.2.1 ou ultérieure |
+| Plafond de taille d'un paquet non signé (`DeployMethodAMaxGB`, § 1) | v1.2.1 ou ultérieure |
+
+Diffuser l'agent à jour sur le parc avant de s'appuyer sur la méthode A.
 
 1. Page du paquet, carte *Confiance des postes* : **Télécharger le
    manifeste**. C'est un fichier JSON lisible, qui décrit exactement ce que
@@ -224,5 +231,8 @@ Les fichiers sont stockés sur le volume Docker `packages`, un fichier par
 empreinte SHA-256, et servis aux seuls postes qui ont une commande ouverte sur
 le paquet. Ce volume n'est pas dans le dump PostgreSQL : sauvegardez-le avec la
 base, ou conservez les installateurs d'origine pour pouvoir les redéposer.
-Réglages : `PACKAGES_DIR`, `PACKAGE_MAX_BYTES` (2 Gio par défaut),
-`PACKAGE_MAX_CONCURRENT_DOWNLOADS` (20) — voir DEPLOYMENT.md.
+Réglages : `PACKAGES_DIR`, `PACKAGE_MAX_BYTES` (2 Gio par défaut ; la limite
+de Caddy sur la route de dépôt se tient légèrement au-dessus),
+`PACKAGE_METHOD_A_MAX_GB` (8, à tenir égal à `DeployMethodAMaxGB` des postes),
+`PACKAGE_MAX_CONCURRENT_DOWNLOADS` (20) — voir DEPLOYMENT.md, § « Déploiement
+logiciel ».

@@ -265,6 +265,7 @@
     <MaintenanceSettingsDialog
       v-model="maintenanceOpen"
       :subject="room?.name ?? ''"
+      :room-id="props.id"
       :cycle-days="maintenance?.maintenance_cycle_days ?? null"
       :owner-id="maintenance?.maintenance_owner?.id ?? null"
       inherit-hint="Vide : le responsable par défaut du parc"
@@ -473,6 +474,9 @@ function goMachine(m: Machine) {
 async function remove(m: Machine) {
   try {
     await unassignMachines([m.id]);
+    // Out of the room, the poste leaves its maintenance owner's « Mes tâches »:
+    // the menu badge reads again (audit U19).
+    notifyTasksChanged();
     $q.notify({ type: 'positive', message: `${m.hostname ?? 'Poste'} retiré de la salle` });
     await load();
   } catch (e) {
@@ -531,6 +535,9 @@ async function addPicked() {
       props.id,
       picked.value.map((m) => m.id),
     );
+    // The postes moved here now follow this room's maintenance owner and
+    // cycle: « Mes tâches » counts them differently (audit U19).
+    notifyTasksChanged();
     $q.notify(placementNotification(res));
     addOpen.value = false;
     await load();

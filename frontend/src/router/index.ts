@@ -34,17 +34,22 @@ export default defineRouter(() => {
     if (rewritten) window.history.replaceState(null, '', rewritten);
   }
 
-  // Which navigation is the latest: a position held back for one page must
-  // not land on the next (see whenScrollable).
-  let navigation = 0;
-
   const router = createRouter({
     // Back to a page: where it was (audit U10), once its data has made it
     // tall enough to get there. A query change on the same page — a tab, a
     // filter, a page of results — stays put. Anything else starts at the top.
     scrollBehavior: (to, from, saved) => {
-      const id = ++navigation;
-      if (saved) return whenScrollable(saved, { isCurrent: () => id === navigation });
+      // The first page of the tab — a reload, a pasted link — is shown from
+      // the top, as the browser loads it. `saved` is then what history.state
+      // kept from the last time this entry was left: not where the reader is.
+      if (from === START_LOCATION) return false;
+      if (saved) {
+        // Held for this very navigation, by the identity of its route: a page
+        // that writes its own URL back as it loads (SoftwarePage's load()) has
+        // the router call this again for the same route object, and that must
+        // not cancel the position — while any real navigation makes another.
+        return whenScrollable(saved, { isCurrent: () => router.currentRoute.value === to });
+      }
       return to.path === from.path ? false : { left: 0, top: 0 };
     },
     routes,
@@ -87,7 +92,8 @@ export default defineRouter(() => {
   });
 
   // A tab opened before a deployment asks for chunks the new build no longer
-  // serves: reload it, once (audit S34).
+  // serves: reload it, once, on the page it was going to (audit S34) — and
+  // only on proof of a new build; a chunk lost to the network is said instead.
   if (typeof window !== 'undefined') installStaleChunkReload(router);
 
   return router;

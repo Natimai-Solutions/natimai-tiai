@@ -6,17 +6,24 @@ vi.mock('boot/axios', () => ({
 
 import { api } from 'boot/axios';
 import {
+  blockingProblems,
   deployPackage,
   deployable,
   formatSize,
   joinArgs,
   getPackageSummary,
   listPackageCommands,
+  methodAMaxLabel,
   splitArgs,
   stepTrust,
+  tooLargeFiles,
+  tooLargeForMethodA,
   trustMethod,
+  uninstallable,
   type Package,
 } from './packages';
+
+const GIB = 1024 ** 3;
 
 function pkg(over: Partial<Package> = {}): Package {
   return {
@@ -40,6 +47,9 @@ function pkg(over: Partial<Package> = {}): Package {
     signed_at: null,
     signed_by: null,
     publisher_name: null,
+    method_a_too_large: false,
+    method_a_max_bytes: 8 * GIB,
+    file_max_bytes: 2 * GIB,
     problems: [],
     installed_count: 0,
     created_by: null,
@@ -151,7 +161,87 @@ describe('trust method', () => {
   it('deploys only what is complete and not retired', () => {
     expect(deployable(pkg())).toBe(true);
     expect(deployable(pkg({ retired_at: '2026-11-04T00:00:00Z' }))).toBe(false);
-    expect(deployable(pkg({ problems: [{ code: 'no_files', message: '' }] }))).toBe(false);
+    expect(
+      deployable(pkg({ problems: [{ code: 'no_files', message: '', blocks_uninstall: true }] })),
+    ).toBe(false);
+  });
+
+  it('leaves method A to packages under the cap the server reports', () => {
+    const file = (name: string, publisher_name: string | null = null) => ({
+      name,
+      sha256: 'a'.repeat(64),
+      size: 1,
+      publisher_name,
+    });
+    const heavy = pkg({
+      publisher_name: 'INDEX EDUCATION SAS',
+      files: [file('Install_PRNclient.exe', 'INDEX EDUCATION SAS'), file('data.cab')],
+      method_a_too_large: true,
+    });
+    // The agent refuses to download it unsigned (deploy.MethodAFiles).
+    expect(trustMethod(heavy)).toBe('none');
+    expect(tooLargeForMethodA(heavy, 'install')).toBe(true);
+    expect(methodAMaxLabel(heavy)).toBe('8 Gio');
+    expect(methodAMaxLabel({ ...heavy, method_a_max_bytes: 16 * GIB })).toBe('16 Gio');
+    // Under the cap, the same package is method A.
+    expect(trustMethod({ ...heavy, method_a_too_large: false })).toBe('publisher');
+    // Signed, the size no longer counts.
+    expect(trustMethod({ ...heavy, signed: true })).toBe('signed');
+    expect(tooLargeForMethodA({ ...heavy, signed: true }, 'install')).toBe(false);
+    // Not method A to begin with: the size is not what is wrong.
+    expect(tooLargeForMethodA({ ...heavy, publisher_name: null }, 'install')).toBe(false);
+    // An uninstaller .exe is downloaded too: capped. msiexec /x {code} is not.
+    const exe = { ...heavy, uninstall_run: 'Install_PRNclient.exe', uninstall_args: ['/u'] };
+    expect(stepTrust(exe, 'uninstall')).toBe('none');
+    expect(tooLargeForMethodA(exe, 'uninstall')).toBe(true);
+    const byCode = {
+      ...heavy,
+      uninstall_run: 'msiexec',
+      uninstall_args: ['/x', '{6C2A1A7B-0D5E-4F1C-9E4B-3B1C2D3E4F50}'],
+    };
+    expect(stepTrust(byCode, 'uninstall')).toBe('product_code');
+    expect(tooLargeForMethodA(byCode, 'uninstall')).toBe(false);
+  });
+
+  it('holds an uninstall back only for what the server flags', () => {
+    const noInstall = { code: 'no_install', message: 'Fichier à lancer non choisi' };
+    const missing = { code: 'install_missing', message: '« setup.exe » n’est pas dans le paquet' };
+    const byCode = (problems: Package['problems']) =>
+      pkg({ install_run: null, uninstall_run: 'msiexec', uninstall_args: ['/x'], problems });
+
+    // The agent runs the uninstall step of a manifest without install step.
+    const only = byCode([{ ...noInstall, blocks_uninstall: false }]);
+    expect(deployable(only)).toBe(false);
+    expect(uninstallable(only)).toBe(true);
+    expect(blockingProblems(only, 'install')).toHaveLength(1);
+    expect(blockingProblems(only, 'uninstall')).toEqual([]);
+    // It refuses a manifest naming a file the package does not have.
+    const broken = byCode([{ ...missing, blocks_uninstall: true }]);
+    expect(uninstallable(broken)).toBe(false);
+    expect(blockingProblems(broken, 'uninstall').map((p) => p.code)).toEqual(['install_missing']);
+    // No uninstall defined; winget needs none; a retired package is still removed.
+    expect(uninstallable(pkg())).toBe(false);
+    expect(uninstallable(pkg({ kind: 'winget' }))).toBe(true);
+    expect(uninstallable({ ...byCode([]), retired_at: '2026-11-04T00:00:00Z' })).toBe(true);
+  });
+});
+
+describe('upload size', () => {
+  const file = (name: string, size: number) => ({ name, size }) as File;
+
+  it('checks files against the bound the server reports, not a built-in one', () => {
+    const files = [file('petit.iss', 10), file('gros.exe', 3 * GIB)];
+    // The default deployment: 2 Gio.
+    expect(tooLargeFiles(pkg(), files).map((f) => f.name)).toEqual(['gros.exe']);
+    // PACKAGE_MAX_BYTES raised to 4 Gio: the 3 Gio file is sent.
+    expect(tooLargeFiles(pkg({ file_max_bytes: 4 * GIB }), files)).toEqual([]);
+    // Lowered: refused before sending rather than after the transfer.
+    expect(tooLargeFiles(pkg({ file_max_bytes: 5 }), files).map((f) => f.name)).toEqual([
+      'petit.iss',
+      'gros.exe',
+    ]);
+    // Exactly the bound is accepted, as the server accepts it.
+    expect(tooLargeFiles(pkg({ file_max_bytes: 10 }), [file('x', 10)])).toEqual([]);
   });
 });
 

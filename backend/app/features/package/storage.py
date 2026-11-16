@@ -47,6 +47,14 @@ def path_for(sha256: str) -> Path:
     return root() / sha256
 
 
+def exists(sha256: str) -> bool:
+    """Whether the store holds this file. One ``stat``; creates nothing — it
+    is asked for every file of every package the catalogue lists."""
+    if not _SHA256.fullmatch(sha256):
+        return False
+    return (Path(settings.PACKAGES_DIR) / sha256).is_file()
+
+
 # --- Pins: files stored by an upload not committed yet (audit T09) -------------
 #
 # ``save`` puts a file under its hash before the request that uploads it has

@@ -52,11 +52,33 @@ class Resolved:
     state: MaintenanceState
 
 
-def available(owner_id: uuid.UUID | None, policy: MaintenancePolicy) -> bool:
+def available(
+    owner_id: uuid.UUID | None,
+    policy: MaintenancePolicy,
+    *,
+    machine: Machine | None = None,
+    room: Room | None = None,
+) -> bool:
     """Whether ``owner_id`` is an owner someone can act as: set, and not a
     deactivated account — which counts as no owner, so that the next level
-    applies and its postes show under « À prendre » (audit B08)."""
-    return owner_id is not None and owner_id not in policy.inactive_owners
+    applies and its postes show under « À prendre » (audit B08).
+
+    Nor an account that no longer reaches what it is named on — ``machine``
+    for a poste's own owner, ``room`` for a room's: rights removed, or the
+    poste moved out of its sight since. It would otherwise keep being mailed
+    hostnames and rooms it cannot open. Checked when the policy carries the
+    accounts' reach, which ``setting.crud.maintenance_policy`` always does.
+    """
+    if owner_id is None or owner_id in policy.inactive_owners:
+        return False
+    reach = policy.reach
+    if reach is None:
+        return True
+    if machine is not None:
+        return reach.machine(owner_id, machine)
+    if room is not None:
+        return reach.room(owner_id, room.id)
+    return True
 
 
 def resolve(
@@ -70,9 +92,9 @@ def resolve(
         cycle, cycle_origin = policy.cycle_days, Origin.GLOBAL
 
     owner: uuid.UUID | None
-    if available(machine.maintenance_owner_id, policy):
+    if available(machine.maintenance_owner_id, policy, machine=machine):
         owner, owner_origin = machine.maintenance_owner_id, Origin.MACHINE
-    elif room is not None and available(room.maintenance_owner_id, policy):
+    elif room is not None and available(room.maintenance_owner_id, policy, room=room):
         owner, owner_origin = room.maintenance_owner_id, Origin.ROOM
     else:
         owner, owner_origin = policy.owner_id, Origin.GLOBAL

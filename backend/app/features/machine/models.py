@@ -218,6 +218,11 @@ class Machine(SQLModel, table=True):
     # a minute ago whose inventory is three weeks old is an anomaly to show, not
     # to hide behind a fresh heartbeat.
     inventory_last_seen: datetime | None = utc_field(default=None, nullable=True)
+    # Set when the last software list applied was cut short — the catalogue
+    # budget ran out (``inventory.crud.replace_software``) — and cleared when
+    # a complete one is. The console says the list is partial, and the
+    # heartbeat asks the agent for it again once the budget has room.
+    software_truncated_at: datetime | None = utc_field(default=None, nullable=True)
 
     # Interactive session (WTS), refreshed on each heartbeat. NULL means "never
     # reported" — an agent older than the feature, or a failed read — which is

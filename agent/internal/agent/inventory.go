@@ -37,6 +37,10 @@ const inventoryFirstCollectSpread = 5 * time.Minute
 // Update one, generation counter included — see cache.go.
 type inventoryCache = stateCache[models.InventoryState]
 
+// readInventory is the inventory collection, behind a variable so a test can
+// stand in for WMI and the registry — and see whether software was asked for.
+var readInventory = collector.ReadInventory
+
 // inventoryLoop collects the hardware and software inventory once a day.
 //
 // Its own goroutine for the same reason as the Windows Update cycle: a dozen WMI
@@ -88,7 +92,7 @@ func (a *Agent) collectInventory(ctx context.Context) {
 	}
 
 	start := time.Now()
-	inv, err := collector.ReadInventory(ctx, a.cfg.ReportsSoftware())
+	inv, err := readInventory(ctx, a.cfg.ReportsSoftware())
 	if err != nil {
 		log.Printf("agent: inventory: %v", err)
 		return
@@ -109,6 +113,44 @@ func (a *Agent) collectInventory(ctx context.Context) {
 		len(inv.Disks), len(inv.Volumes), len(inv.Nics), len(inv.Software))
 }
 
+// resendInventory answers the server's resend_inventory: it does not hold all
+// of what this poste reported — its catalogue budget cut the software list
+// short — and the hash check in collectInventory would keep a stable poste
+// silent about it until its next restart. The last reading goes back to
+// pending, and rides the next heartbeat.
+//
+// Re-offered from the cache, not collected again: the hash covers the whole
+// block, so the reading the cache holds is, field for field, what a collection
+// finding that same hash would produce — without a dozen WMI queries on the
+// polling loop, or once a minute for as long as a server keeps asking. It was
+// read under ReportsSoftware like every other, so a poste told not to report
+// its software re-sends its hardware and no program. inventorySent stays: the
+// server is about to hold that hash again.
+//
+// At most one block per heartbeat, by construction. And the answer to a
+// heartbeat that carried the block itself is not taken as a request
+// (justSent): the server was handed, in that very exchange, what the answer
+// asks for. A server that sets the flag before it stores the block would
+// otherwise be sent the inventory on every poll, for ever; one that still
+// wants it after storing it says so again in its next answer, and gets it one
+// heartbeat later.
+//
+// Before the first collection there is nothing to send *again*, and nothing to
+// do: that collection is sent whatever its hash, and keeps its start-up spread
+// (inventoryFirstCollectSpread) — a server asking a whole parc at once must
+// not be what lines every poste up on the same minute.
+func (a *Agent) resendInventory(justSent bool) {
+	if justSent {
+		logging.Debugf("agent: inventory asked again by the answer to the heartbeat that carried it, ignoring")
+		return
+	}
+	if !a.inventory.resend() {
+		logging.Debugf("agent: inventory asked again before the first collection, which will be sent anyway")
+		return
+	}
+	log.Printf("agent: the server asked for the inventory again, it rides the next heartbeat")
+}
+
 // runInventoryScan forces a collection and reports what it found.
 //
 // Its value is immediacy, like wu_scan's: an administrator who has just added
@@ -123,7 +165,7 @@ func (a *Agent) runInventoryScan(ctx context.Context) (string, error) {
 	a.inventoryOp.Lock()
 	defer a.inventoryOp.Unlock()
 
-	inv, err := collector.ReadInventory(ctx, a.cfg.ReportsSoftware())
+	inv, err := readInventory(ctx, a.cfg.ReportsSoftware())
 	if err != nil {
 		return "", err
 	}

@@ -123,6 +123,7 @@ def test_build_jobs_registers_the_whole_schedule():
         "purge_audit",
         "purge_commands",
         "purge_reset_tokens",
+        "purge_login_addresses",
     }
     # The outbox is due immediately: a restarted worker must resume mail
     # delivery on its first tick, not after an arbitrary wait.

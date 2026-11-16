@@ -356,8 +356,9 @@
         </q-tab>
         <q-tab name="hardware" icon="memory" label="Matériel" />
         <q-tab name="software" icon="apps" label="Logiciels">
+          <!-- « 212+ » : a partial list is not counted as a whole one. -->
           <q-badge v-if="machine.software.length" color="grey-7" floating>
-            {{ machine.software.length }}
+            {{ machine.software.length }}{{ machine.software_truncated ? '+' : '' }}
           </q-badge>
         </q-tab>
         <q-tab v-if="canReadCommands" name="commands" icon="history" label="Commandes" />
@@ -737,6 +738,9 @@ async function savePlace() {
       placeRoomId.value === ROOM_NONE
         ? await unassignMachines([machine.value.id])
         : await placeMachines(placeRoomId.value, [machine.value.id]);
+    // The poste now follows another room's maintenance owner and cycle, which
+    // moves it in or out of somebody's « Mes tâches » (audit U19).
+    notifyTasksChanged();
     $q.notify(placementNotification(res));
     placeOpen.value = false;
     await load();

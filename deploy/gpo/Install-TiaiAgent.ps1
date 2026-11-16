@@ -9,8 +9,20 @@
 
     Idempotent : compare le binaire du partage a celui installe (hash), ne
     recopie que s'il differe, reapplique les valeurs HKLM\SOFTWARE\Tiai (une
-    modification de GPO est donc prise au boot suivant), puis s'assure que le
+    modification de GPO est donc ecrite au boot suivant), puis s'assure que le
     service tourne. Un poste deja a jour ressort en quelques dizaines de ms.
+
+    L'agent ne lit le registre qu'au demarrage de son service : une valeur
+    ecrite alors que le service tourne deja (le cas normal au boot, le service
+    demarrant avant le script) n'est appliquee qu'au demarrage suivant du
+    service -- sauf quand le script remplace le binaire, puisqu'il relance
+    alors le service apres avoir ecrit le registre.
+
+    Ce script n'est pas publie avec les releases : il se copie a la main sur
+    le partage. Y deposer la nouvelle version AVANT d'ajouter a la GPO un
+    parametre qu'elle introduit : PowerShell rejette un parametre inconnu
+    avant la premiere ligne du script, sans rien ecrire dans deploy.log, et
+    aucun poste n'est alors installe ni mis a jour.
 
     Aucun config.yaml n'est genere : l'agent tolere son absence et se configure
     depuis le registre et ses valeurs par defaut. Le seul reglage obligatoire
@@ -61,12 +73,18 @@
     du README agent.
 
 .PARAMETER AllowInsecureHttp
-    Accepte une ApiBaseUrl en http:// ('true' / 'false'), ecrit en DWORD dans
-    HKLM\SOFTWARE\Tiai\AllowInsecureHTTP. Sans lui, un agent recent refuse de
-    demarrer sur une URL http:// : le secret d'enrolement puis le token
-    passeraient en clair. Reserve au port HTTP direct d'un reseau de test.
+    Accepte une ApiBaseUrl en http:// ('true' / 'false' ici ; 1 / 0 dans la
+    propriete ALLOWINSECUREHTTP du MSI), ecrit en DWORD dans
+    HKLM\SOFTWARE\Tiai\AllowInsecureHTTP. Sans lui, un agent recent refuse
+    une URL http:// : le secret d'enrolement puis le token passeraient en
+    clair. Son service reste alors "en cours d'execution" mais ne contacte
+    pas le serveur ; il l'ecrit dans agent.log et relit sa configuration
+    toutes les 1 a 15 minutes, et ce script le signale dans deploy.log (WARN).
+    Reserve au port HTTP direct d'un reseau de test.
     Laisse vide, la valeur registre n'est pas touchee et l'agent applique son
-    defaut (refus) ; 'false' retire une autorisation posee auparavant.
+    defaut (refus) ; 'false' retire une autorisation posee auparavant -- un
+    agent deja en marche continue toutefois en http:// jusqu'au demarrage
+    suivant de son service.
 
 .EXAMPLE
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\natimai.local\NETLOGON\Tiai\Install-TiaiAgent.ps1 -SourceExe \\natimai.local\NETLOGON\Tiai\tiai-agent.exe -ApiBaseUrl https://tiai.natimai.local
@@ -236,6 +254,25 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($AllowInsecureHttp)) {
         $allowHttp = if ($AllowInsecureHttp -eq 'true') { 1 } else { 0 }
         Set-ItemProperty -Path $RegPath -Name 'AllowInsecureHTTP' -Value $allowHttp -Type DWord
+    }
+    # Une ApiBaseUrl en http:// sans autorisation : le service tournera, mais
+    # l'agent (publie apres la v1.1.0) ne contactera pas le serveur. Il le
+    # repete dans agent.log ; dit ici aussi, deploy.log etant le journal qu'on
+    # lit apres un deploiement. Non fatal : le reste du script (service, ACL)
+    # vaut quand meme, et l'agent repart seul des que la valeur arrive.
+    # Le test porte sur la valeur du registre, pas sur le parametre : elle a
+    # pu etre posee par une execution anterieure ou par une preference de GPO,
+    # et l'agent la lit comme "differente de 0". Une valeur absente fait
+    # echouer la lecture, d'ou le try.
+    if ($ApiBaseUrl.Trim() -like 'http://*') {
+        $httpAllowed = $false
+        try {
+            $httpAllowed = ((Get-ItemProperty -Path $RegPath -Name 'AllowInsecureHTTP' -ErrorAction Stop).AllowInsecureHTTP -ne 0)
+        }
+        catch { $httpAllowed = $false }
+        if (-not $httpAllowed) {
+            Write-Log "ApiBaseUrl est en http:// et AllowInsecureHTTP n'est pas pose (1) dans le registre : le service tournera, mais un agent publie apres la v1.1.0 ne contactera pas le serveur (voir agent.log). Passer en https://, ou ajouter -AllowInsecureHttp true (reseau de test seulement)." 'WARN'
+        }
     }
     # L'emplacement : presence de la valeur = elle compte, vide = retire. D'ou
     # le switch explicite pour l'effacer, plutot que d'ecrire une chaine vide

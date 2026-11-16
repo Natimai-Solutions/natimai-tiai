@@ -247,6 +247,7 @@ import {
   listRooms,
   ROOM_SOURCE_LABELS,
   syncDirectory,
+  syncNotification,
   type Building,
   type Room,
   type RoomConfig,
@@ -287,10 +288,7 @@ async function sync() {
   syncing.value = true;
   try {
     const res = await syncDirectory();
-    $q.notify({
-      type: 'positive',
-      message: `${res.placed} poste(s) rangé(s), ${res.unplaced} retiré(s), ${res.rooms_created} salle(s) créée(s)`,
-    });
+    $q.notify(syncNotification(res));
     await reload();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Resynchronisation impossible') });

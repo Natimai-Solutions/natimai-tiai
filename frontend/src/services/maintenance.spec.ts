@@ -10,6 +10,7 @@ import {
   dueLabel,
   isDue,
   getDue,
+  listAssignableOwners,
   maintenanceStateLabel,
   recordSession,
   updateMachineMaintenance,
@@ -29,6 +30,26 @@ describe('maintenance service', () => {
     await getDue();
     expect(api.get).toHaveBeenNthCalledWith(1, '/maintenance/due', { params: { owner: 'me' } });
     expect(api.get).toHaveBeenNthCalledWith(2, '/maintenance/due', { params: {} });
+  });
+
+  it('asks who may own the maintenance of a poste, of a room, or of the parc', async () => {
+    const owners = [{ id: 'u-1', name: 'Alice' }];
+    vi.mocked(api.get).mockResolvedValue({ data: owners });
+
+    expect(await listAssignableOwners({ machineId: 'm-1' })).toEqual(owners);
+    await listAssignableOwners({ roomId: 'r-1' });
+    await listAssignableOwners({ machineId: null, roomId: null });
+    await listAssignableOwners();
+
+    expect(api.get).toHaveBeenNthCalledWith(1, '/maintenance/assignable-owners', {
+      params: { machine_id: 'm-1' },
+    });
+    expect(api.get).toHaveBeenNthCalledWith(2, '/maintenance/assignable-owners', {
+      params: { room_id: 'r-1' },
+    });
+    // Neither: the parc's default owner. No empty parameter is sent.
+    expect(api.get).toHaveBeenNthCalledWith(3, '/maintenance/assignable-owners', undefined);
+    expect(api.get).toHaveBeenNthCalledWith(4, '/maintenance/assignable-owners', undefined);
   });
 
   it('records a visit and patches the two levels of settings', async () => {

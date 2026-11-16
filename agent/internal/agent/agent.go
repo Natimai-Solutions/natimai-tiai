@@ -81,6 +81,9 @@ type Agent struct {
 	// with no verdict at all (audit B16).
 	stopped bool
 	wg      sync.WaitGroup
+	// Test seam, nil in production: run by enqueue right before its channel
+	// send, so a test can stop the worker at that very point.
+	beforeEnqueue func()
 
 	// The token the server last answered 401 to. Read back from token.dat when
 	// ClearToken could not delete the file, it must not be taken for a token
@@ -348,7 +351,7 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	if err := saveToken(filepath.Dir(a.cfgPath), resp.Token); err != nil {
 		return fmt.Errorf("persist token: %w", err)
 	}
-	log.Printf("agent: enrolled as machine %s", resp.MachineID)
+	log.Printf("agent: enrolled as machine %q", resp.MachineID)
 	return nil
 }
 
@@ -357,7 +360,24 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 func (a *Agent) pollOnce(ctx context.Context) error {
 	a.phase("queue")
 	a.flushQueue(ctx)
+	return a.heartbeat(ctx, a.readHost(ctx))
+}
 
+// hostReading is what one poll reads from the machine before it reports. Any
+// field may be its zero value — the read failed — and is then left out of the
+// heartbeat, so the server keeps what it last knew.
+type hostReading struct {
+	defender *models.DefenderState
+	threats  []models.Threat
+	session  *models.SessionState
+	network  collector.NetworkInfo
+	av       *models.AVProductState
+}
+
+// readHost reads, for one heartbeat, what is read afresh on each: Defender,
+// the session, the address, the antivirus in charge. Apart from heartbeat so
+// that the protocol half of a poll can be exercised without a Windows to read.
+func (a *Agent) readHost(ctx context.Context) hostReading {
 	a.phase("defender state")
 	state, err := collector.ReadDefenderState(ctx)
 	if err != nil {
@@ -399,7 +419,13 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 	if err != nil {
 		a.logAVError(err)
 	}
+	return hostReading{defender: state, threats: threats, session: sess, network: netInfo, av: av}
+}
 
+// heartbeat reports a reading to the server, with whatever slow-cycle block
+// is pending, and acts on the answer: a renewed token, the commands to run, a
+// request for the inventory again.
+func (a *Agent) heartbeat(ctx context.Context, reading hostReading) error {
 	// Attached only when the background cycle has produced something the server
 	// has not acknowledged — nil on the vast majority of heartbeats, which then
 	// leave the stored Windows Update state exactly as it was.
@@ -423,18 +449,18 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		Hostname:       a.host.Hostname,
 		Domain:         a.host.Domain,
 		Location:       a.cfg.Location,
-		IPAddress:      netInfo.IP,
-		MACAddress:     netInfo.MAC,
-		IPPrefixLength: netInfo.PrefixLength,
+		IPAddress:      reading.network.IP,
+		MACAddress:     reading.network.MAC,
+		IPPrefixLength: reading.network.PrefixLength,
 		OSVersion:      a.host.OSVersion,
 		AgentVersion:   Version,
-		Defender:       state,
-		AVProduct:      av,
-		Session:        sess,
+		Defender:       reading.defender,
+		AVProduct:      reading.av,
+		Session:        reading.session,
 		WindowsUpdate:  wu,
 		Inventory:      inv,
 		Fingerprint:    &fp,
-		Threats:        threats,
+		Threats:        reading.threats,
 		// This agent stores a token handed back below (rotateToken).
 		SupportsTokenRotation: true,
 	})
@@ -474,6 +500,11 @@ func (a *Agent) pollOnce(ctx context.Context) error {
 		// poste, never again. The one line saying it landed is what tells a
 		// deployment it worked.
 		log.Printf("agent: inventory reported to the server (%d logiciel(s))", len(inv.Software))
+	}
+	if resp.ResendInventory {
+		// After markSent, never before: the acknowledgement above would
+		// otherwise cancel the very resend this asks for.
+		a.resendInventory(inv != nil)
 	}
 	if n := len(resp.Commands); n > 0 {
 		log.Printf("agent: heartbeat ok, %d command(s) to run", n)
@@ -594,26 +625,21 @@ func (a *Agent) accept(cmd models.Command) {
 	a.mu.Lock()
 	if _, dup := a.running[cmd.ID]; dup {
 		a.mu.Unlock()
-		logging.Debugf("agent: %s (id %s) already in flight, ignoring", cmd.Type, cmd.ID)
+		logging.Debugf("agent: %q (id %s) already in flight, ignoring", cmd.Type, cmd.ID)
 		return
 	}
 	if a.stopped {
 		// The worker has drained its backlog and left (the service stops):
 		// nothing would ever take this one out of the channel.
 		a.mu.Unlock()
-		log.Printf("agent: stopping, %s (id %s) not run", cmd.Type, cmd.ID)
+		log.Printf("agent: stopping, %q (id %s) not run", cmd.Type, cmd.ID)
 		a.failLater(cmd, abandonedOnStop)
 		return
 	}
 	a.running[cmd.ID] = struct{}{}
 	// Sent under the lock the worker takes to stop: either the command is in
 	// the channel before the worker drains it, or accept sees stopped above.
-	var queued bool
-	select {
-	case a.commands <- cmd:
-		queued = true
-	default:
-	}
+	queued := a.enqueue(cmd)
 	a.mu.Unlock()
 
 	if !queued {
@@ -621,11 +647,25 @@ func (a *Agent) accept(cmd models.Command) {
 		// the local queue (replayed at the next poll), rather than leave it
 		// "transmise" for ever.
 		a.release(cmd.ID)
-		log.Printf("agent: backlog full (%d), refusing %s (id %s)",
+		log.Printf("agent: backlog full (%d), refusing %q (id %s)",
 			maxPendingCommands, cmd.Type, cmd.ID)
 		a.failLater(cmd, fmt.Sprintf(
 			"file d'attente de l'agent pleine (%d commandes) : commande non exécutée, à relancer",
 			maxPendingCommands))
+	}
+}
+
+// enqueue offers cmd to the worker without blocking, and reports whether the
+// backlog took it. Called with a.mu held, and only so — see accept.
+func (a *Agent) enqueue(cmd models.Command) bool {
+	if a.beforeEnqueue != nil {
+		a.beforeEnqueue()
+	}
+	select {
+	case a.commands <- cmd:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -683,7 +723,7 @@ func (a *Agent) stop() {
 const abandonedOnStop = "interrompue par l'arrêt de l'agent avant d'avoir commencé : à relancer"
 
 func (a *Agent) abandon(cmd models.Command) {
-	log.Printf("agent: stopping, %s (id %s) not run", cmd.Type, cmd.ID)
+	log.Printf("agent: stopping, %q (id %s) not run", cmd.Type, cmd.ID)
 	a.failLater(cmd, abandonedOnStop)
 	a.release(cmd.ID)
 }
@@ -869,7 +909,7 @@ func (a *Agent) runPowerAction(
 // server expires it (COMMAND_UNANSWERED_HOURS), and the administrator who
 // triggered it would have no idea the poste had decided otherwise.
 func (a *Agent) refuse(ctx context.Context, cmd models.Command, reason error) {
-	log.Printf("agent: refusing %s (id %s): %v", cmd.Type, cmd.ID, reason)
+	log.Printf("agent: refusing %q (id %s): %v", cmd.Type, cmd.ID, reason)
 	res := models.CommandResult{Status: "failed", Error: reason.Error()}
 	if err := a.client.PostResult(ctx, cmd.ID, res); err != nil {
 		if qerr := a.queue.Enqueue(queue.Item{CommandID: cmd.ID, Result: res}); qerr != nil {
@@ -896,8 +936,9 @@ func (a *Agent) reportRunning(ctx context.Context, cmd models.Command) {
 
 // flushQueue replays queued command results oldest-first, stopping at the first
 // delivery failure that a later poll may not see (the server is down, busy, or
-// does not take our token right now). A verdict the server refused for good is
-// dropped instead, or it would hold back every verdict queued behind it.
+// does not take our token right now — or something between it and us answered
+// in its place). A verdict the server itself refused for good is dropped
+// instead, or it would hold back every verdict queued behind it.
 func (a *Agent) flushQueue(ctx context.Context) {
 	for {
 		item, path, err := a.queue.Peek()
@@ -924,23 +965,20 @@ func (a *Agent) flushQueue(ctx context.Context) {
 	}
 }
 
-// refusedForGood reports whether err is the server's answer that this request
-// will never be accepted as it stands: a 4xx, except those that say "not now"
-// or "not with this token" — 401 and 403 (a token being renewed, a poste
-// waiting for approval), 408 and 429 (a server too busy to read it) — and
-// 404: the server answers 200 for a command it no longer knows, so a 404 is
-// a misrouted proxy, not a verdict to throw away.
+// refusedForGood reports whether err is the server's answer that this verdict
+// will never be accepted as it stands: a 422, and nothing else.
+//
+// The result route answers three statuses in all — 200 (recorded, or ignored
+// for a command it no longer knows), 401 (the token) and 422 (an id that is
+// not a UUID, a status that is not the agent's to report). Any other 4xx was
+// therefore written by something on the way: a forward proxy asking for
+// credentials (407), a portal, a WAF, a misrouted reverse proxy. Those answer
+// every request alike, and dropping on them would empty the whole queue in
+// one poll for a fault that has nothing to do with the verdicts — so they
+// stop the replay, like a 5xx or a network error, and the queue waits.
 func refusedForGood(err error) bool {
 	var se *api.StatusError
-	if !errors.As(err, &se) || se.StatusCode < 400 || se.StatusCode >= 500 {
-		return false
-	}
-	switch se.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
-		http.StatusRequestTimeout, http.StatusTooManyRequests:
-		return false
-	}
-	return true
+	return errors.As(err, &se) && se.StatusCode == http.StatusUnprocessableEntity
 }
 
 // nextBackoff doubles the wait up to a cap.

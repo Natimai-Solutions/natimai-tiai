@@ -38,6 +38,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Policy is the trust a GPO granted on this poste.
@@ -97,7 +98,7 @@ const manifestFormat = "tiai-package-1"
 
 var (
 	fileName       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._()+\-]{0,254}$`)
-	reservedName   = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$`)
+	reservedStem   = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com\d|lpt\d)$`)
 	sha256Hex      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	wingetID       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+\-]{0,127}$`)
 	wingetVersion  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}$`)
@@ -151,6 +152,65 @@ func PruneDir(dir string, files []FileRef) error {
 	return nil
 }
 
+// StalePackageAfter is how long a package folder nobody touched is kept for
+// a retry to resume. Past it the retry is not coming, and what a refused or
+// interrupted run left would stay on the system volume for good — one folder
+// per package id, and the ids are the server's to choose (audit S24).
+const StalePackageAfter = 7 * 24 * time.Hour
+
+// PruneStalePackages removes from root the package folders that nothing has
+// written to for more than StalePackageAfter at now. Only what the agent
+// itself puts there is looked at: direct children that are folders named by a
+// package id. keep, the package about to be used, is never removed.
+//
+// Best effort, and silent: a sibling that will not go must not fail the
+// deployment that found it.
+func PruneStalePackages(root, keep string, now time.Time) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || !ValidPackageID(name) || name == keep {
+			continue
+		}
+		dir := filepath.Join(root, name)
+		last, ok := lastWrite(dir)
+		if !ok || now.Sub(last) <= StalePackageAfter {
+			continue
+		}
+		_ = os.RemoveAll(dir)
+	}
+}
+
+// lastWrite is when a package folder was last written to: the newest
+// modification time among the folder and the files right inside it. The
+// folder's own time is not enough — a download resumed into a file that
+// already exists changes the file's, not the folder's. ok is false when the
+// folder cannot be read, and it is then left alone.
+func lastWrite(dir string) (last time.Time, ok bool) {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return time.Time{}, false
+	}
+	last = info.ModTime()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return time.Time{}, false
+	}
+	for _, e := range entries {
+		fi, err := e.Info()
+		if err != nil {
+			return time.Time{}, false
+		}
+		if fi.ModTime().After(last) {
+			last = fi.ModTime()
+		}
+	}
+	return last, true
+}
+
 // loadableExt lists what Windows may load or run on its own from the folder
 // an installer starts in: DLL search order, side-by-side manifests and
 // redirection, .NET configuration, Windows Installer databases and scripts,
@@ -200,9 +260,18 @@ func MethodAFiles(files []FileRef, run string, maxBytes int64) error {
 
 // ValidFileName mirrors the server's rule: a bare file name, nothing a
 // Windows path would read as a directory, a device or a stream.
+//
+// A device is recognised by its stem — what precedes the first dot — in any
+// case and whatever spaces or dots trail it: Windows drops those before it
+// looks the name up, so "nul .cab" opens NUL exactly as "nul.cab" does.
+// (The superscript digits Windows also takes after COM and LPT are outside
+// what fileName admits at all.)
 func ValidFileName(name string) bool {
-	return fileName.MatchString(name) && !reservedName.MatchString(name) &&
-		!strings.HasSuffix(name, ".") && !strings.HasSuffix(name, " ")
+	if !fileName.MatchString(name) || strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+		return false
+	}
+	stem, _, _ := strings.Cut(name, ".")
+	return !reservedStem.MatchString(strings.TrimRight(stem, " ."))
 }
 
 // ParseManifest decodes and checks a manifest for package id.

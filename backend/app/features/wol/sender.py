@@ -11,7 +11,13 @@ import socket
 from dataclasses import dataclass
 
 from app.core.config import settings
-from app.features.wol.packet import destinations_for, magic_packet, normalize_mac
+from app.features.wol.packet import (
+    NoDestination,
+    destinations_for,
+    magic_packet,
+    no_destination_reason,
+    normalize_mac,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +53,47 @@ def _emit(destinations: list[str], port: int, payload: bytes, count: int) -> Non
                 sock.sendto(payload, (destination, port))
 
 
+def _no_destination_detail(ip: str | None, prefix_length: int | None) -> str:
+    """Why the server found no broadcast address, naming the setting to change.
+
+    Three different situations, and three different things to do about them:
+    an address that is missing, one the deployment does not allow, and one
+    whose subnet reaches beyond what it allows.
+    """
+    reason = no_destination_reason(ip)
+    if reason is NoDestination.NO_IPV4:
+        return (
+            "Aucune adresse de diffusion pour ce poste : sa dernière adresse IP "
+            "connue est absente ou n'est pas de l'IPv4. Renseigner "
+            "WOL_BROADCAST_ADDRESSES côté serveur pour émettre malgré tout."
+        )
+    allowed = (
+        ", ".join(settings.WOL_ALLOWED_NETWORKS)
+        if settings.WOL_ALLOWED_NETWORKS
+        else "les plages privées 10.0.0.0/8, 172.16.0.0/12 et 192.168.0.0/16"
+    )
+    if reason is NoDestination.ADDRESS_NOT_ALLOWED:
+        return (
+            f"Réveil refusé : la dernière adresse IP connue du poste ({ip}) est "
+            "hors des réseaux sur lesquels le serveur peut émettre un réveil "
+            f"({allowed}). Ajouter le réseau du poste à WOL_ALLOWED_NETWORKS côté "
+            "serveur, ou renseigner WOL_BROADCAST_ADDRESSES."
+        )
+    default = f"/{settings.WOL_SUBNET_PREFIXLEN} de WOL_SUBNET_PREFIXLEN"
+    masks = (
+        f"masque /{prefix_length} remonté par le poste, à défaut {default}"
+        if prefix_length is not None
+        else f"masque {default}"
+    )
+    return (
+        f"Réveil refusé : l'adresse du poste ({ip}) est autorisée, mais son "
+        f"sous-réseau ({masks}) n'est pas contenu en entier dans les réseaux "
+        f"sur lesquels le serveur peut émettre un réveil ({allowed}). Élargir "
+        "WOL_ALLOWED_NETWORKS au sous-réseau entier du poste, ou renseigner "
+        "WOL_BROADCAST_ADDRESSES."
+    )
+
+
 async def wake(
     *, mac: str | None, ip: str | None, prefix_length: int | None = None
 ) -> WakeOutcome:
@@ -79,14 +126,7 @@ async def wake(
         reported_prefixlen=prefix_length,
     )
     if not destinations:
-        return WakeOutcome(
-            ok=False,
-            detail=(
-                "Aucune adresse de diffusion pour ce poste : sa dernière adresse IP "
-                "connue est absente ou n'est pas de l'IPv4. Renseigner "
-                "WOL_BROADCAST_ADDRESSES côté serveur pour émettre malgré tout."
-            ),
-        )
+        return WakeOutcome(ok=False, detail=_no_destination_detail(ip, prefix_length))
 
     port = settings.WOL_PORT
     count = settings.WOL_PACKET_COUNT

@@ -14,7 +14,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlmodel import col, select
 
-from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
+from app.api.deps import (
+    CurrentScope,
+    CurrentUser,
+    SessionDep,
+    require_any_permission,
+    require_permission,
+)
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
@@ -29,12 +35,12 @@ from app.features.maintenance.policy import (
     Resolved,
     available,
 )
+from app.features.maintenance.reach import owner_reach
 from app.features.room import crud as room_crud
 from app.features.room.models import Room
 from app.features.setting import crud as setting_crud
-from app.features.user import crud as user_crud
 from app.features.user.models import User
-from app.features.user.permissions import Action, Resource, has_permission
+from app.features.user.permissions import Action, Resource
 from app.features.user.scope import (
     Scope,
     machine_clause,
@@ -51,6 +57,21 @@ router = APIRouter(prefix="/maintenance", tags=["maintenance"], dependencies=[_R
 room_router = APIRouter(prefix="/rooms", tags=["maintenance"], dependencies=[_READ])
 machine_router = APIRouter(
     prefix="/machines", tags=["maintenance"], dependencies=[_READ]
+)
+# Who may be named owner: asked by whoever sets one — on a poste or a room
+# (maintenance:write), or as the parc's default (settings:write). Registered
+# before ``router``, whose ``/{maintenance_id}`` would take the path.
+owners_router = APIRouter(
+    prefix="/maintenance",
+    tags=["maintenance"],
+    dependencies=[
+        Depends(
+            require_any_permission(
+                (Resource.MAINTENANCE, Action.WRITE),
+                (Resource.SETTINGS, Action.WRITE),
+            )
+        )
+    ],
 )
 
 
@@ -227,32 +248,15 @@ async def _owner_reaches(
     room, the room itself, which means seeing every poste filed in it. The
     rule of checks' ``_can_take``: an owner is mailed the hostnames of what
     they own, and must not be handed postes kept out of their sight (audit
-    S18, T32)."""
-    authority = await user_crud.user_authority(session, user_id)
-    if authority.is_admin:
-        return True
-    for action in (Action.READ, Action.WRITE):
-        if not has_permission(
-            authority.permissions, Resource.MAINTENANCE.value, action.value
-        ):
-            return False
+    S18, T32). The rule itself is ``maintenance.reach``'s, the one the
+    resolution applies again each time it names an owner."""
+    reach = await owner_reach(session, {user_id})
     if machine_id is not None:
-        clause = machine_clause(authority.scope)
-        if clause is None:
-            return True
-        found = await session.exec(
-            select(col(Machine.id)).where(col(Machine.id) == machine_id).where(clause)
-        )
-        return found.first() is not None
+        machine = await session.get(Machine, machine_id)
+        return machine is not None and reach.machine(user_id, machine)
     if room_id is not None:
-        clause = room_clause(authority.scope)
-        if clause is None:
-            return True
-        found_room = await session.exec(
-            select(col(Room.id)).where(col(Room.id) == room_id).where(clause)
-        )
-        return found_room.first() is not None
-    return True
+        return reach.room(user_id, room_id)
+    return reach.parc(user_id)
 
 
 async def _require_owner(
@@ -372,7 +376,7 @@ async def room_maintenance(
     policy = await setting_crud.maintenance_policy(session)
     effective_owner = (
         room.maintenance_owner_id
-        if available(room.maintenance_owner_id, policy)
+        if available(room.maintenance_owner_id, policy, room=room)
         else policy.owner_id
     )
     names = await setting_crud.user_names(
@@ -423,6 +427,50 @@ async def update_room_maintenance(
     await session.commit()
     await session.refresh(room)
     return await room_maintenance(room.id, session, scope)
+
+
+@owners_router.get("/assignable-owners", response_model=list[UserRef])
+async def assignable_owners(
+    session: SessionDep,
+    scope: CurrentScope,
+    machine_id: uuid.UUID | None = None,
+    room_id: uuid.UUID | None = None,
+) -> list[UserRef]:
+    """Active accounts that may be named owner — of this poste, of this room,
+    or, with neither, of the parc by default: exactly those the write that
+    follows accepts. Id and name only, like ``/checks/assignable-users``,
+    which offered every account that may read a check and left the server to
+    refuse most of them."""
+    if machine_id is not None and room_id is not None:
+        raise AppError(
+            code=ErrorCode.REQUEST_VALIDATION_ERROR,
+            status_code=422,
+            message="Give machine_id or room_id, not both",
+        )
+    # Out of the caller's own reach: who could own it is not theirs to learn.
+    machine = (
+        await _require_machine(session, machine_id, scope)
+        if machine_id is not None
+        else None
+    )
+    if room_id is not None:
+        await _require_room(session, room_id, scope)
+    rows = await session.exec(
+        select(User).where(col(User.is_active).is_(True)).order_by(col(User.email))
+    )
+    users = list(rows.all())
+    reach = await owner_reach(session, {u.id for u in users})
+
+    def can_own(user_id: uuid.UUID) -> bool:
+        if machine is not None:
+            return reach.machine(user_id, machine)
+        if room_id is not None:
+            return reach.room(user_id, room_id)
+        return reach.parc(user_id)
+
+    return [
+        UserRef(id=u.id, name=u.full_name or u.email) for u in users if can_own(u.id)
+    ]
 
 
 # --- What is due ----------------------------------------------------------------

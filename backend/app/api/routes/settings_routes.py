@@ -18,6 +18,7 @@ from app.core.config import settings as env
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.machine import crud as machine_crud
+from app.features.maintenance.reach import owner_reach
 from app.features.notification import probe
 from app.features.setting import crud
 from app.features.setting import email_policy as mail
@@ -106,6 +107,10 @@ class EmailSettingsOut(BaseModel):
     effective_provider: Literal["mailgun", "smtp"]
     configured: bool
     missing: list[str]
+    # The environment's secrets not sent because the console points at
+    # another server than the environment's ("smtp_password",
+    # "mailgun_api_key"): to be typed in the console.
+    withheld: list[str]
     env: EmailEnvOut
 
 
@@ -252,6 +257,20 @@ def _email_out(stored: mail.StoredEmailSettings) -> EmailSettingsOut:
     policy = mail.resolve(stored)
     from_env = mail.resolve(mail.StoredEmailSettings())
     v = stored.values
+    held_back = mail.withheld(stored)
+    missing = policy.missing()
+    # An SMTP account without its password logs in with an empty one: the
+    # send fails. The page says what to do rather than « configuré ».
+    smtp_login_broken = (
+        policy.provider == "smtp"
+        and "smtp_password" in held_back
+        and bool(policy.smtp_user)
+    )
+    if smtp_login_broken:
+        missing.append(
+            "le mot de passe SMTP (celui du .env ne sert que pour le serveur "
+            "du .env : à ressaisir ici)"
+        )
     return EmailSettingsOut(
         provider=v.get("provider"),
         from_email=v.get("from_email"),
@@ -269,8 +288,9 @@ def _email_out(stored: mail.StoredEmailSettings) -> EmailSettingsOut:
         mailgun_api_key_set="mailgun_api_key" in stored.secrets,
         mailgun_api_key_unreadable="mailgun_api_key" in stored.unreadable,
         effective_provider=policy.provider,
-        configured=policy.enabled,
-        missing=policy.missing(),
+        configured=policy.enabled and not smtp_login_broken,
+        missing=missing,
+        withheld=held_back,
         env=EmailEnvOut(
             provider=from_env.provider,
             from_email=from_env.from_email,
@@ -488,6 +508,17 @@ async def update_settings(
                     code=ErrorCode.USER_NOT_FOUND,
                     status_code=404,
                     message="User not found",
+                )
+            # Any poste with no owner of its own falls to the default one:
+            # the rule of a poste's or a room's owner, over the whole parc.
+            if not (await owner_reach(session, {owner.id})).parc(owner.id):
+                raise AppError(
+                    code=ErrorCode.MAINTENANCE_OWNER_OUT_OF_REACH,
+                    status_code=422,
+                    message=(
+                        "The default owner must hold maintenance:read and "
+                        "maintenance:write over the whole parc"
+                    ),
                 )
         await crud.set_value(
             session,

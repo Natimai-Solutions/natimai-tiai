@@ -28,6 +28,7 @@
           icon="delete_sweep"
           label="Désinstaller"
           no-caps
+          :disable="!uninstallable(pkg)"
           class="q-mr-sm"
           @click="openDeploy('uninstall')"
         />
@@ -294,7 +295,12 @@
             <q-separator />
             <q-card-section class="text-body2">
               <div class="text-weight-medium q-mb-xs">Méthode A — éditeur approuvé (repli)</div>
-              <template v-if="method === 'publisher' || (!pkg.signed && pkg.publisher_name)">
+              <template v-if="tooLargeForMethodA(pkg, 'install')">
+                Indisponible : les fichiers pèsent plus de
+                {{ methodAMaxLabel(pkg) }} au total, ce que les postes refusent de télécharger pour
+                un paquet non signé. Signez le paquet (méthode B).
+              </template>
+              <template v-else-if="method === 'publisher' || (!pkg.signed && pkg.publisher_name)">
                 Le fichier lancé est signé par <b>{{ pkg.publisher_name }}</b
                 >. Sans signature de l'administrateur, les postes l'exécutent si la GPO liste ce nom
                 dans <code>DeployPublishers</code>.
@@ -411,15 +417,18 @@ import {
   formatSize,
   getPackage,
   getPackageSummary,
-  PACKAGE_FILE_MAX_BYTES,
   joinArgs,
   listPackageCommands,
+  methodAMaxLabel,
   removeSignature,
   restorePackage,
   retirePackage,
   splitArgs,
+  tooLargeFiles,
+  tooLargeForMethodA,
   trustLabels,
   trustMethod,
+  uninstallable,
   updatePackage,
   uploadPackageFiles,
   type Package,
@@ -688,12 +697,13 @@ let uploadAbort: AbortController | null = null;
 async function upload() {
   if (!pkg.value || !toUpload.value?.length) return;
   const files = [...toUpload.value];
-  const tooBig = files.filter((f) => f.size > PACKAGE_FILE_MAX_BYTES);
+  // Against the server's own bound, as the package reports it.
+  const tooBig = tooLargeFiles(pkg.value, files);
   if (tooBig.length) {
     $q.notify({
       type: 'negative',
       message: `Trop volumineux : ${tooBig.map((f) => f.name).join(', ')}`,
-      caption: `Limite : ${formatSize(PACKAGE_FILE_MAX_BYTES)} par fichier.`,
+      caption: `Limite de ce serveur : ${formatSize(pkg.value.file_max_bytes)} par fichier.`,
     });
     return;
   }

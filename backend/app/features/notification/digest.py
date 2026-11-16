@@ -33,7 +33,7 @@ from app.features.machine.status import (
 from app.features.machine.status import WindowsUpdateFilter as WUFilter
 from app.features.notification.outbox import queue_email
 from app.features.notification.recipients import users_for
-from app.features.notification.tasks import personal_block
+from app.features.notification.tasks import fleet_maintenance, personal_block
 from app.features.setting import crud as setting_crud
 from app.features.setting.email_policy import email_policy
 from app.features.threat.models import Threat
@@ -384,11 +384,13 @@ async def send_daily_digest(session: AsyncSession) -> int:
         return 0
 
     queued = 0
+    # The parc's maintenance is resolved once for the run, not per recipient.
+    fleet = await fleet_maintenance(session, chosen[0][1].generated_at)
     for user, digest in chosen:
         subject, text = render_digest(digest)
         # The same parc for everyone, then what is *theirs*: the verifications
         # they were handed, the maintenances they own that are due.
-        personal = await personal_block(session, user, digest.generated_at)
+        personal = await personal_block(session, user, digest.generated_at, fleet=fleet)
         body = text if not personal else text + "\n\n" + "\n".join(personal)
         if queue_email(session, to=user.email, subject=subject, text=body):
             queued += 1

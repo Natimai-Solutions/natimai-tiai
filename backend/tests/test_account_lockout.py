@@ -11,6 +11,8 @@ import asyncio
 from app.core.config import settings
 from tests.test_api_login import STRONG, _admin, _login
 
+COOKIE = "tiai_refresh"
+
 
 async def _operator(db_session, email: str = "operator@test.local"):
     from app.features.user import crud
@@ -141,15 +143,22 @@ async def test_password_change_is_rate_limited_per_account(
     assert codes[5:] == [429, 429]
 
 
+async def _siege(client, *, start: int = 0) -> None:
+    """Lock the operator's account, then fail from enough distinct addresses
+    for the lock to admit only the known ones."""
+    for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS):
+        await _login_from(client, "10.0.0.66", "wrong-password-here")
+    for n in range(start, start + settings.LOGIN_SIEGE_ADDRESSES - 1):
+        await _login_from(client, f"10.9.{n}.1", "wrong-password-here")
+
+
 async def test_guesses_spread_over_many_addresses_turn_the_lock_account_wide(
     client, db_session
 ):
     """Audit S03, second pass: during a lock every fresh address used to get
-    one real guess, so a /24 or an IPv6 prefix bought hundreds. Past
-    ``besieged_after`` failing addresses the lock shuts out every address but
-    those that opened the account before."""
-    from app.core import ratelimit
-
+    one real guess, so a /24 or an IPv6 prefix bought hundreds. From
+    LOGIN_SIEGE_ADDRESSES failing addresses on, the lock shuts out every
+    address but those that opened the account before."""
     await _operator(db_session)
     # The owner's usual poste opened the account last week.
     assert (await _login_from(client, "10.0.0.10")).status_code == 200
@@ -158,17 +167,139 @@ async def test_guesses_spread_over_many_addresses_turn_the_lock_account_wide(
         await _login_from(client, "10.0.0.66", "wrong-password-here")
     # A few more addresses: still one person's postes, the lock stays narrow.
     assert (await _login_from(client, "10.0.1.1")).status_code == 200
-    for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS):
-        await _login_from(client, "10.0.0.66", "wrong-password-here")
-
-    for n in range(ratelimit.besieged_after() - 1):
-        await _login_from(client, f"10.9.{n}.1", "wrong-password-here")
+    await _siege(client)
 
     # The right password from yet another address no longer gets a check.
     assert (await _login_from(client, "10.9.200.1")).status_code == 401
     # The owner's postes still open it, and that lifts the lock.
     assert (await _login_from(client, "10.0.0.10")).status_code == 200
     assert (await _login_from(client, "10.9.200.1")).status_code == 200
+
+
+async def test_a_restart_neither_lifts_the_lock_nor_forgets_the_usual_postes(
+    client, db_session
+):
+    """Audit S03, third pass: what guards the lock was in the process's
+    memory. After a restart the lock in the database refused nobody, and the
+    owner's poste was unknown — guesses from ten addresses then shut the owner
+    out. It is all in the database now."""
+    from app.core import ratelimit
+
+    await _operator(db_session)
+    assert (await _login_from(client, "10.0.0.10")).status_code == 200
+    await _siege(client)
+
+    # Everything a process holds in memory, gone.
+    ratelimit.reset_all()
+
+    # The guessing address is still shut out, a fresh one too…
+    assert (await _login_from(client, "10.0.0.66")).status_code == 401
+    assert (await _login_from(client, "10.9.200.1")).status_code == 401
+    # …and the owner's poste is still the owner's.
+    assert (await _login_from(client, "10.0.0.10")).status_code == 200
+
+
+async def test_a_session_in_use_keeps_its_address_known(client, db_session):
+    """An owner who never logs out refreshes for SESSION_MAX_DAYS, the very
+    time LOGIN_KNOWN_ADDRESS_DAYS lasts by default: without the refresh
+    counting, their poste stopped being known the day they had to log in."""
+    from datetime import timedelta
+
+    from app.features.base import utcnow
+    from app.features.user.models import LoginAddress
+
+    user = await _operator(db_session)
+    opened = await _login_from(client, "10.0.0.10")
+    assert opened.status_code == 200
+    cookie = opened.cookies.get(COOKIE)
+    row = await db_session.get(LoginAddress, (user.id, "10.0.0.10"))
+    row.last_success_at = utcnow() - timedelta(
+        days=settings.LOGIN_KNOWN_ADDRESS_DAYS - 1
+    )
+    stale = row.last_success_at
+    db_session.add(row)
+    await db_session.commit()
+
+    client.cookies.clear()
+    refreshed = await client.post(
+        "/api/v1/auth/refresh",
+        headers={
+            "Cookie": f"{COOKIE}={cookie}",
+            "X-Forwarded-For": "10.0.0.10",
+        },
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    await db_session.refresh(row)
+    assert row.last_success_at > stale
+    # Written once a day at most: the next refresh leaves it alone.
+    seen = row.last_success_at
+    cookie = refreshed.cookies.get(COOKIE)
+    client.cookies.clear()
+    again = await client.post(
+        "/api/v1/auth/refresh",
+        headers={
+            "Cookie": f"{COOKIE}={cookie}",
+            "X-Forwarded-For": "10.0.0.10",
+        },
+    )
+    assert again.status_code == 200, again.text
+    await db_session.refresh(row)
+    assert row.last_success_at == seen
+
+
+async def test_a_reset_link_is_the_way_back_in_from_a_new_address(client, db_session):
+    """An owner on an address the account has never seen, while guesses come
+    from many: the lock refuses them, a reset link redeemed from that address
+    lets them in — and the old password's addresses stop being known."""
+    from app.features.user import crud
+    from app.features.user.models import LoginAddress
+
+    user = await _operator(db_session)
+    user_id = user.id
+    assert (await _login_from(client, "10.0.0.10")).status_code == 200
+    await _siege(client)
+    assert (await _login_from(client, "10.7.7.7")).status_code == 401
+
+    await db_session.refresh(user)
+    token = await crud.create_reset_token(db_session, user)
+    await db_session.commit()
+    redeemed = await client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": token, "new_password": "a-brand-new-password-1"},
+        headers={"X-Forwarded-For": "10.7.7.7"},
+    )
+    assert redeemed.status_code == 204, redeemed.text
+
+    # The guessing resumes and locks the account again…
+    await _siege(client, start=100)
+    # …the address the link was redeemed from gets in all the same.
+    back = await _login_from(client, "10.7.7.7", "a-brand-new-password-1")
+    assert back.status_code == 200
+    # The poste that knew the old password is no longer one of the owner's.
+    assert await db_session.get(LoginAddress, (user_id, "10.0.0.10")) is None
+
+
+async def test_the_addresses_that_say_nothing_any_more_are_purged(client, db_session):
+    from datetime import timedelta
+
+    from sqlmodel import select
+
+    from app.features.base import utcnow
+    from app.features.user import addresses
+    from app.features.user.models import LoginAddress
+
+    user = await _operator(db_session)
+    now = utcnow()
+    long_ago = now - timedelta(days=settings.LOGIN_KNOWN_ADDRESS_DAYS + 1)
+    await addresses.note_success(db_session, user.id, "10.0.0.1", now)
+    await addresses.note_failure(db_session, user.id, "10.0.0.2", now)
+    await addresses.note_success(db_session, user.id, "10.0.0.3", long_ago)
+    await addresses.note_failure(db_session, user.id, "10.0.0.4", long_ago)
+    await db_session.commit()
+
+    assert await addresses.purge_stale(db_session, now) == 2
+    kept = (await db_session.exec(select(LoginAddress.ip))).all()
+    assert sorted(kept) == ["10.0.0.1", "10.0.0.2"]
 
 
 async def test_old_failures_do_not_add_up_to_a_lock(client, db_session):

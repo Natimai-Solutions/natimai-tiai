@@ -617,6 +617,79 @@ async def test_concurrent_reset_requests_issue_one_link(client, db_session):
     assert len((await db_session.exec(select(PasswordResetToken))).all()) == 1
 
 
+async def test_redeeming_a_link_takes_the_account_lock_first(engine, db_session):
+    """Audit S14 (T34), third pass: a reset request locks the account's row,
+    then touches its tokens; a redemption did it the other way round, and the
+    two could deadlock — one of them answered a 500. Both now lock the
+    account first."""
+    import pytest
+    from sqlalchemy.exc import OperationalError
+    from sqlmodel import col, select
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.features.user import crud
+    from app.features.user.models import User
+
+    user = await crud.create_user(db_session, email="order@test.local", password=STRONG)
+    user_id = user.id
+    token = await crud.create_reset_token(db_session, user)
+    await db_session.commit()
+
+    async with AsyncSession(engine) as redeeming, AsyncSession(engine) as asking:
+        assert await crud.consume_reset_token(redeeming, token) is not None
+        # The redemption has not committed: the account is its own.
+        with pytest.raises(OperationalError):
+            await asking.exec(
+                select(User.id)
+                .where(col(User.id) == user_id)
+                .with_for_update(nowait=True)
+            )
+        await asking.rollback()
+        await redeeming.rollback()
+
+
+async def test_a_link_redeemed_while_another_is_requested(client, db_session):
+    """The two at the same instant, with a spent link lying around (what made
+    them wait on each other): both are answered, nothing but the new
+    password's own state is left."""
+    import asyncio
+    from datetime import timedelta
+
+    from sqlmodel import select
+
+    from app.features.base import utcnow
+    from app.features.user import crud
+    from app.features.user.models import PasswordResetToken
+
+    for i in range(6):
+        email = f"both{i}@test.local"
+        user = await crud.create_user(db_session, email=email, password=STRONG)
+        spent = await crud.create_reset_token(db_session, user)
+        live = await crud.create_reset_token(db_session, user)
+        await db_session.commit()
+        rows = (await db_session.exec(select(PasswordResetToken))).all()
+        for row in rows:
+            row.created_at = utcnow() - timedelta(minutes=30)
+            if row.token_hash == crud.security.hash_token(spent):
+                row.used_at = utcnow() - timedelta(minutes=20)
+            db_session.add(row)
+        await db_session.commit()
+
+        redeemed, asked = await asyncio.gather(
+            client.post(
+                "/api/v1/auth/password-reset/confirm",
+                json={"token": live, "new_password": "a-brand-new-password-1"},
+            ),
+            client.post(
+                "/api/v1/auth/password-reset/request",
+                json={"email": email},
+                headers={"X-Forwarded-For": f"10.0.2.{i}"},
+            ),
+        )
+        assert redeemed.status_code == 204, redeemed.text
+        assert asked.status_code == 204, asked.text
+
+
 # --- Unit tests (no database) ----------------------------------------------
 
 

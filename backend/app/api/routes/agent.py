@@ -445,16 +445,27 @@ async def _package_deliveries(
     return deliveries, digests, retired
 
 
+# How long after a software list was cut short the server asks the agent to
+# send it again, at the earliest.
+RESEND_INVENTORY_AFTER = timedelta(hours=1)
+
+
 class HeartbeatResponse(BaseModel):
     """Heartbeat ack carrying the machine's pending commands.
 
     ``new_token`` is set when the token this heartbeat used is due for
     renewal: the agent stores it and authenticates with it from the next
     request on, which retires the old one. Null on every other heartbeat.
+
+    ``resend_inventory`` asks the agent to send its software inventory again
+    on its next heartbeat: the list the server holds was cut short by the
+    catalogue budget, and the agent would otherwise only send it again at a
+    restart or a change. An agent that predates the field ignores it.
     """
 
     commands: list[CommandOut]
     new_token: str | None = None
+    resend_inventory: bool = False
 
 
 # Bounds what one command result can write to the database and pour into the
@@ -944,8 +955,20 @@ async def heartbeat(
             "re-offered" if reoffer else "offered",
             machine.machine_uuid,
         )
+    # A list cut short is asked for again only while both budgets have room:
+    # a resend that could create nothing would be cut again, for nothing. And
+    # not within RESEND_INVENTORY_AFTER of the cut: while the fleet's budget
+    # is being drained, every truncated poste would otherwise upload its whole
+    # inventory each time a few units come back.
+    resend_inventory = (
+        machine.software_truncated_at is not None
+        and now - machine.software_truncated_at >= RESEND_INVENTORY_AFTER
+        and ratelimit.software_budget_left(str(machine.id)) > 0
+    )
     await session.commit()
-    return HeartbeatResponse(commands=commands, new_token=new_token)
+    return HeartbeatResponse(
+        commands=commands, new_token=new_token, resend_inventory=resend_inventory
+    )
 
 
 @router.post("/commands/{command_id}/result")
@@ -1039,6 +1062,12 @@ async def download_package_file(
     not_found = AppError(
         code=ErrorCode.PACKAGE_NOT_FOUND, status_code=404, message="Not found"
     )
+    # Before any query: what is not a SHA-256 names no file, and a NUL in it
+    # is a value PostgreSQL refuses outright — a 500 where a 404 is due.
+    try:
+        path = package_storage.path_for(sha256)
+    except ValueError:
+        raise not_found from None
     open_commands = (
         await session.exec(
             select(Command.package_files)
@@ -1069,10 +1098,6 @@ async def download_package_file(
         if row is None or not any(shas is None for shas in open_commands):
             raise not_found
         name = row.name
-    try:
-        path = package_storage.path_for(sha256)
-    except ValueError:
-        raise not_found from None
     if not path.exists():
         raise not_found
     if _downloads_in_flight >= settings.PACKAGE_MAX_CONCURRENT_DOWNLOADS:

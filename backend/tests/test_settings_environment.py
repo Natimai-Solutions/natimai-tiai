@@ -98,3 +98,55 @@ def test_mail_variables_say_the_console_overrides_them(provider):
     assert "EMAIL_PROVIDER" in mail_keys and len(mail_keys) >= 5
     for key, description in mail_keys.items():
         assert "valeur initiale" in description, key
+
+
+def test_the_settings_of_the_audit_are_listed():
+    """The variables introduced since the page was written: an administrator
+    who reads a 429 or a partial inventory must find what decides it."""
+    keys = {i.key for i in _items()}
+    assert {
+        "LOGIN_SIEGE_ADDRESSES",
+        "LOGIN_KNOWN_ADDRESS_DAYS",
+        "PASSWORD_RESET_COOLDOWN_MINUTES",
+        "PASSWORD_RESET_MAX_LIVE_LINKS",
+        "AGENT_HEARTBEAT_MAX_PER_MINUTE",
+        "SOFTWARE_NEW_ENTRIES_PER_DAY",
+        "SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET",
+        "COMMAND_UNANSWERED_HOURS",
+        "TRUSTED_PROXIES",
+        "TRUSTED_PROXY_HOSTS",
+        "EXPOSE_OPENAPI",
+        "WOL_ALLOWED_NETWORKS",
+        "WOL_RELAY_MIN_AGE_MINUTES",
+        "WOL_RELAY_MIN_AGENT_VERSION",
+        "WOL_RELAY_CLAIM_TIMEOUT_SECONDS",
+    } <= keys
+    # Each variable once.
+    assert len(keys) == len(_items())
+
+
+def test_the_rate_limit_switch_says_all_it_switches_off():
+    """It also lifts the heartbeat cap and the password-change limiter — and
+    neither the account lock nor the software catalogue budget."""
+    by_key = {i.key: i.description for i in _items()}
+    text = by_key["RATE_LIMIT_ENABLED"]
+    assert "battements" in text and "changement de mot de passe" in text
+    assert "verrouillage" in text and "catalogue logiciel" in text
+    assert "n'en dépendent" in text
+    # The lock counts failures close to one another, not consecutive ones.
+    assert "consécutifs" not in by_key["LOGIN_MAX_FAILED_ATTEMPTS"]
+    assert "LOGIN_LOCKOUT_MINUTES" in by_key["LOGIN_MAX_FAILED_ATTEMPTS"]
+
+
+def test_the_new_values_are_rendered():
+    env = Settings(
+        WOL_ALLOWED_NETWORKS="10.4.0.0/16,10.5.0.0/16",
+        TRUSTED_PROXIES="172.18.0.0/16",
+        EXPOSE_OPENAPI=False,
+    )
+    by_key = {i.key: i.value for i in _items(env)}
+    assert by_key["WOL_ALLOWED_NETWORKS"] == "10.4.0.0/16, 10.5.0.0/16"
+    assert by_key["TRUSTED_PROXIES"] == "172.18.0.0/16"
+    assert by_key["TRUSTED_PROXY_HOSTS"] == "caddy"
+    assert by_key["EXPOSE_OPENAPI"] == "non"
+    assert by_key["SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET"] == "50000"

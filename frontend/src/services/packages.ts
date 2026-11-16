@@ -24,6 +24,13 @@ export interface PackageFile {
 export interface PackageProblem {
   code: string;
   message: string;
+  /**
+   * Whether it stands in the way of an uninstallation too. Decided by the
+   * server, which applies it itself when the command is queued: the agent
+   * reads the whole manifest before either step, so most problems do — a
+   * missing install step does not.
+   */
+  blocks_uninstall: boolean;
 }
 
 export interface Package {
@@ -49,6 +56,16 @@ export interface Package {
   signed_by: string | null;
   /** Method A: the signer of the file that runs, if it is signed. */
   publisher_name: string | null;
+  /**
+   * Method A: the files weigh more, together, than the postes download for an
+   * unsigned package (their DeployMethodAMaxGB, the server's
+   * PACKAGE_METHOD_A_MAX_GB). Computed by the server; `method_a_max_bytes` is
+   * that bound, for the sentence that explains it.
+   */
+  method_a_too_large: boolean;
+  method_a_max_bytes: number;
+  /** The largest file an upload accepts (the server's PACKAGE_MAX_BYTES). */
+  file_max_bytes: number;
   /** Why it cannot be deployed yet; empty when it can. */
   problems: PackageProblem[];
   /** Postes whose inventory shows the program; null without `detect_name`. */
@@ -125,17 +142,37 @@ export function trustMethod(p: Package): TrustMethod {
 export function stepTrust(p: Package, action: DeployAction): StepTrust {
   if (p.kind === 'winget') return 'winget';
   if (p.signed) return 'signed';
-  const run = (action === 'install' ? p.install_run : p.uninstall_run) ?? '';
-  if (action === 'uninstall' && run === 'msiexec')
-    // Method A rebuilds it as /x {code} /qn /norestart: nothing else is run.
+  if (action === 'uninstall' && p.uninstall_run === 'msiexec')
+    // Method A rebuilds it as /x {code} /qn /norestart: nothing else is run,
+    // and nothing is downloaded — the size of the files does not count.
     return p.uninstall_args.some((a) => PRODUCT_CODE.test(a)) ? 'product_code' : 'none';
-  if (
-    publisherOf(p, action) &&
+  // The agent caps what an unsigned manifest may have it download
+  // (deploy.MethodAFiles); the server says whether this package is over.
+  return methodAExecutable(p, action) && !p.method_a_too_large ? 'publisher' : 'none';
+}
+
+/** An .exe of the package, signed by a publisher, nothing loadable beside it. */
+function methodAExecutable(p: Package, action: DeployAction): boolean {
+  const run = (action === 'install' ? p.install_run : p.uninstall_run) ?? '';
+  return (
+    !!publisherOf(p, action) &&
     run.toLowerCase().endsWith('.exe') &&
     !(p.files ?? []).some((f) => f.name !== run && LOADABLE_EXTENSIONS.has(extension(f.name)))
-  )
-    return 'publisher';
-  return 'none';
+  );
+}
+
+/**
+ * Method A would carry the step but for the weight of the files: the one
+ * `none` whose way out is said differently — sign it, nothing else is wrong.
+ */
+export function tooLargeForMethodA(p: Package, action: DeployAction): boolean {
+  return (
+    p.kind === 'files' &&
+    !p.signed &&
+    p.method_a_too_large &&
+    !(action === 'uninstall' && p.uninstall_run === 'msiexec') &&
+    methodAExecutable(p, action)
+  );
 }
 
 /** The Authenticode signer of the file the step runs, if it is one. */
@@ -143,6 +180,11 @@ export function publisherOf(p: Package, action: DeployAction = 'install'): strin
   if (action === 'install') return p.publisher_name;
   const run = p.uninstall_run;
   return (p.files ?? []).find((f) => f.name === run)?.publisher_name ?? null;
+}
+
+/** The method A bound as the sentences say it: whole Gio, as it is set. */
+export function methodAMaxLabel(p: Package): string {
+  return `${Math.round(p.method_a_max_bytes / 1024 ** 3)} Gio`;
 }
 
 export const trustLabels: Record<TrustMethod, string> = {
@@ -155,6 +197,22 @@ export const trustLabels: Record<TrustMethod, string> = {
 /** Ready to deploy: complete, not retired. */
 export function deployable(p: Package): boolean {
   return p.retired_at === null && p.problems.length === 0;
+}
+
+/**
+ * What stands in the way of the step. An uninstallation is held back only by
+ * what the agent would refuse it for — the server's flag on each problem,
+ * which it applies itself when the command is queued — and a retired package
+ * is still uninstalled: taking it off the parc is what one does with it.
+ */
+export function blockingProblems(p: Package, action: DeployAction): PackageProblem[] {
+  return action === 'install' ? p.problems : p.problems.filter((x) => x.blocks_uninstall);
+}
+
+/** Can be uninstalled: it says how, and nothing the agent would refuse. */
+export function uninstallable(p: Package): boolean {
+  if (p.kind === 'winget') return true;
+  return !!p.uninstall_run && blockingProblems(p, 'uninstall').length === 0;
 }
 
 /**
@@ -228,14 +286,18 @@ export async function updatePackage(id: string, fields: PackageFields): Promise<
   return data;
 }
 
-/** Upload files, reporting progress as a fraction (0–1). */
 /**
- * The server's default bound on one file (PACKAGE_MAX_BYTES, 2 Gio), checked
- * before sending: refused after the transfer, a large file costs minutes for
- * nothing. A server configured lower still answers 413 with its own figure.
+ * The files the server would refuse for their size, checked before sending:
+ * refused after the transfer, a large file costs minutes for nothing. The
+ * bound is the server's own (PACKAGE_MAX_BYTES, which a deployment sets
+ * anywhere up to 8 Gio), as the package reports it — never a figure compiled
+ * in here.
  */
-export const PACKAGE_FILE_MAX_BYTES = 2 * 1024 ** 3;
+export function tooLargeFiles(p: Package, files: File[]): File[] {
+  return files.filter((f) => f.size > p.file_max_bytes);
+}
 
+/** Upload files, reporting progress as a fraction (0–1). */
 export async function uploadPackageFiles(
   id: string,
   files: File[],

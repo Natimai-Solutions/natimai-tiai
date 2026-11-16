@@ -8,6 +8,7 @@ import {
   type CommandAction,
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { wakeMachines, wakeNotification, type Machine } from 'src/services/machines';
 import { placeMachines, placementNotification, unassignMachines } from 'src/services/rooms';
 import { ROOM_NONE } from 'src/utils/machineListFilters';
@@ -37,7 +38,11 @@ export function useMachineBulkActions(options: {
   async function askSelection(payload: CheckPayload) {
     const ids = selectedIds();
     if (!ids.length) return;
-    $q.notify(bulkCheckNotification(await createChecksBulk(ids, payload)));
+    const res = await createChecksBulk(ids, payload);
+    // Checks handed out change what « Mes tâches » counts — the asker's own
+    // when the requests are theirs: the menu badge reads again (audit U19).
+    notifyTasksChanged();
+    $q.notify(bulkCheckNotification(res));
     selected.value = [];
     await reload();
   }
@@ -54,6 +59,9 @@ export function useMachineBulkActions(options: {
     try {
       const res =
         roomId === ROOM_NONE ? await unassignMachines(ids) : await placeMachines(roomId, ids);
+      // A poste follows its room's maintenance owner and cycle: moved, it
+      // enters or leaves somebody's « Mes tâches » (audit U19).
+      notifyTasksChanged();
       $q.notify(placementNotification(res));
       placeOpen.value = false;
       selected.value = [];

@@ -527,6 +527,81 @@ async def test_the_environment_secret_does_not_follow_in_two_steps(
     )
 
 
+async def test_a_withheld_environment_password_is_said_on_the_page(
+    client, db_session, monkeypatch
+):
+    """Third pass: with the console's server and the ``.env``'s account, the
+    ``.env`` password is held back — and the page said « configuré » while
+    every send failed on authentication."""
+    from app.core.config import settings as env
+
+    monkeypatch.setattr(env, "SMTP_HOST", "smtp.corp.example")
+    monkeypatch.setattr(env, "SMTP_USER", "tiai@corp.example")
+    monkeypatch.setattr(env, "SMTP_PASSWORD", "ENV-SECRET-PW")
+    monkeypatch.setattr(env, "EMAIL_FROM_EMAIL", "tiai@corp.example")
+    monkeypatch.setattr(env, "EMAIL_PROVIDER", "smtp")
+    admin = await _admin(client, db_session)
+
+    untouched = (await client.get("/api/v1/settings", headers=admin)).json()["email"]
+    assert untouched["configured"] is True
+    assert untouched["withheld"] == []
+
+    moved = await _patch(
+        client, admin, smtp_host="autre.example", smtp_password="typed-for-autre"
+    )
+    assert moved["withheld"] == [] and moved["configured"] is True
+
+    # The row an earlier version could leave: the console's server, no
+    # password of its own.
+    from app.features.setting import crud as setting_crud
+
+    await setting_crud.set_value(db_session, "email.smtp_password", None, actor="x")
+    await db_session.commit()
+    legacy = (await client.get("/api/v1/settings", headers=admin)).json()["email"]
+    assert legacy["withheld"] == ["smtp_password"]
+    assert legacy["configured"] is False
+    assert any("mot de passe SMTP" in item for item in legacy["missing"])
+
+
+async def test_an_unreadable_secret_does_not_follow_a_server_change(
+    client, db_session, monkeypatch
+):
+    """Third pass: a console password sealed under a ``SECRET_KEY`` since
+    changed reads as absent, so moving the server asked for nothing — and the
+    sealed row stayed, to leave for the new server the day the key came
+    back."""
+    from app.core.config import settings as env
+
+    admin = await _admin(client, db_session)
+    await _patch(
+        client,
+        admin,
+        provider="smtp",
+        smtp_host="a.example",
+        from_email="tiai@a.example",
+        smtp_user="tiai@a.example",
+        smtp_password="typed-for-a",
+    )
+    monkeypatch.setattr(env, "SECRET_KEY", "a-new-secret-key-after-rotation-0123")
+    # The key signs the access tokens too: log in again under the new one.
+    again = await client.post(
+        "/api/v1/auth/login", data={"username": "admin@test.local", "password": STRONG}
+    )
+    admin = {"Authorization": f"Bearer {again.json()['access_token']}"}
+    shown = (await client.get("/api/v1/settings", headers=admin)).json()["email"]
+    assert shown["smtp_password_unreadable"] is True
+
+    moved = await client.patch(
+        "/api/v1/settings",
+        headers=admin,
+        json={"email": {"smtp_host": "evil.example", "smtp_security": "none"}},
+    )
+    assert moved.status_code == 422, moved.text
+    assert moved.json()["error"]["details"]["fields"] == ["smtp_password"]
+    # Typed again, or dropped, with the move: accepted.
+    await _patch(client, admin, smtp_host="b.example", smtp_password="typed-for-b")
+
+
 async def test_the_environment_mailgun_key_does_not_follow_in_two_steps(
     client, db_session, monkeypatch
 ):

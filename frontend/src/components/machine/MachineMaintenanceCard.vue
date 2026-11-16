@@ -67,6 +67,7 @@
     <MaintenanceSettingsDialog
       v-model="settingsOpen"
       :subject="hostname"
+      :machine-id="machineId"
       :cycle-days="info?.maintenance_cycle_days ?? null"
       :owner-id="info?.maintenance_owner?.id ?? null"
       inherit-hint="Vide : hérite de la salle, puis du parc"

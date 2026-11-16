@@ -59,6 +59,36 @@ def trusted_proxy(peer: str | None) -> bool:
     return any(peer in _proxy_addresses(h) for h in settings.TRUSTED_PROXY_HOSTS)
 
 
+def forwarded_address(entry: str) -> str | None:
+    """The address an ``X-Forwarded-For`` entry names, in one canonical
+    spelling, or None when it names none.
+
+    A proxy may append the client's port (``192.168.1.20:51234``,
+    ``[2001:db8::1]:443``): taken verbatim, every connection of one client
+    was a client of its own — one rate-limit key each, one "address" each in
+    the audit log. The port and the brackets go, and ``ipaddress`` settles
+    the spelling (an IPv6 address has many; an IPv4 one mapped into IPv6 is
+    that IPv4 address).
+    """
+    text = entry.strip().strip('"')
+    if text.startswith("["):
+        # "[v6]" or "[v6]:port".
+        host, bracket, rest = text[1:].partition("]")
+        if not bracket or (rest and not rest.startswith(":")):
+            return None
+        text = host
+    elif text.count(":") == 1:
+        # One colon is "v4:port"; an IPv6 address has at least two.
+        text = text.partition(":")[0]
+    try:
+        address = ipaddress.ip_address(text)
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return str(address.ipv4_mapped)
+    return str(address)
+
+
 def client_ip(request: Request) -> str:
     """Best client address available for this request.
 
@@ -76,6 +106,12 @@ def client_ip(request: Request) -> str:
     — and empty entries are skipped (a header ending in a comma named the
     client ''). From the right, entries that are proxies of ours are passed
     over (a chain of them); with nothing else left, the socket peer it is.
+
+    An entry is read as an address (``forwarded_address``), never returned as
+    written. The first one that is not a proxy of ours names the client; if
+    it is not an address at all, nothing in the header says who the client
+    is — what lies left of it is the client's own word — and the socket peer
+    stands in.
     """
     peer = request.client.host if request.client else None
     if not trusted_proxy(peer):
@@ -87,8 +123,11 @@ def client_ip(request: Request) -> str:
     ]
     entries = [e for e in entries if e]
     for entry in reversed(entries):
-        if not trusted_proxy(entry):
-            return entry
+        address = forwarded_address(entry)
+        if address is None:
+            break
+        if not trusted_proxy(address):
+            return address
     return peer or "unknown"
 
 

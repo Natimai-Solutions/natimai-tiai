@@ -399,6 +399,12 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
   - la CI ajoute des builds croisés `linux/amd64`, `linux/arm64`, `darwin/amd64` et `darwin/arm64`, ainsi que govulncheck sur ces cibles.
 - **DoD** : un poste Linux et un Mac pilotes enrôlés, visibles dans la console avec leur inventaire et leur session, et des commandes non applicables refusées proprement.
 
+### Phase 6 — Console bilingue français / anglais *(à planifier)*
+La console n'existe aujourd'hui qu'en français : textes écrits en dur dans les composants, pack de langue Quasar `fr`, et une partie des messages du backend (problèmes d'un paquet, verdicts de commande, e-mails) en français.
+- **Langues** : français et anglais.
+- **Choix** : par utilisateur, enregistré avec ses préférences de compte ; tant qu'il n'a rien choisi, la console suit la langue du navigateur.
+- **À cadrer** : la bibliothèque de traduction côté console, le sort des textes renvoyés par le backend (codes traduits par la console, ou langue demandée par la requête), et la langue des e-mails, qui partent sans navigateur.
+
 ---
 
 ## Suivi d'avancement

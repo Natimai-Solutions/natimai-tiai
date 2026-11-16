@@ -41,6 +41,7 @@ from app.features.notification import digest, outbox
 from app.features.setting import crud as setting_crud
 from app.features.setting.crud import SchedulePolicy
 from app.features.usage import crud as usage_crud
+from app.features.user import addresses as login_addresses
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,13 @@ async def purge_reset_tokens() -> int:
         return await password_reset_retention.purge_spent_reset_tokens(
             session, utcnow()
         )
+
+
+async def purge_login_addresses() -> int:
+    """Drop the login addresses that no longer say anything: no failure
+    within the lock window, no success within the known period."""
+    async with AsyncSession(engine) as session:
+        return await login_addresses.purge_stale(session, utcnow())
 
 
 # --- Scheduling -------------------------------------------------------------
@@ -288,6 +296,12 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
         Job(
             "purge_reset_tokens",
             purge_reset_tokens,
+            housekeeping(now),
+            housekeeping,
+        ),
+        Job(
+            "purge_login_addresses",
+            purge_login_addresses,
             housekeeping(now),
             housekeeping,
         ),
