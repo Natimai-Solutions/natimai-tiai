@@ -201,6 +201,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		log.Printf("agent: installed-software inventory disabled (hardware only)")
 	}
 
+	sweepPackageCache()
+
 	q, err := queue.New(filepath.Join(dir, "queue"), a.cfg.QueueMaxItems)
 	if err != nil {
 		return fmt.Errorf("open local queue: %w", err)
@@ -1140,14 +1142,7 @@ func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.Pack
 	a.wuOp.Lock()
 	defer a.wuOp.Unlock()
 
-	trust := config.DeployKeys()
-	policy := deploy.Policy{
-		Signers:      trust.Signers,
-		Publishers:   trust.Publishers,
-		Winget:       trust.Winget,
-		WingetAllow:  trust.WingetAllow,
-		MethodAMaxGB: trust.MethodAMaxGB,
-	}
+	policy := deployPolicy(config.DeployKeys())
 	env := &deploy.SystemEnv{Fetcher: a.client, DataDir: config.DefaultConfigDir()}
 	res, err := deploy.Execute(ctx, env, policy, cmdType, pkg)
 	if err != nil {
@@ -1159,4 +1154,27 @@ func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.Pack
 		log.Printf("agent: inventory after %s: %v", cmdType, ierr)
 	}
 	return res.Output, nil
+}
+
+// deployPolicy is the trust a GPO granted, as internal/deploy reads it.
+func deployPolicy(trust config.DeployTrust) deploy.Policy {
+	return deploy.Policy{
+		Signers:      trust.Signers,
+		Publishers:   trust.Publishers,
+		Winget:       trust.Winget,
+		WingetAllow:  trust.WingetAllow,
+		MethodAMaxGB: trust.MethodAMaxGB,
+		CacheMaxGB:   trust.CacheMaxGB,
+	}
+}
+
+// sweepPackageCache clears, when the service starts, the package folders that
+// earlier runs left: those untouched for a week, then the oldest while they
+// hold more than DeployCacheMaxGB (audit S24). Nothing is being deployed yet
+// — the worker has not started — so no folder is spared. Without it, folders
+// would wait for the next deployment to be weighed, and a poste that receives
+// none would keep them for a week whatever their size.
+func sweepPackageCache() {
+	env := &deploy.SystemEnv{DataDir: config.DefaultConfigDir()}
+	deploy.SweepPackages(env.PackagesDir(), "", 0, deployPolicy(config.DeployKeys()).CacheMaxBytes(), time.Now())
 }

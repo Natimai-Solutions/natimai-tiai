@@ -30,6 +30,7 @@ Nouveau → Élément Registre**, ruche `HKEY_LOCAL_MACHINE`, clé `SOFTWARE\Tia
 | `DeploySigners` | `REG_MULTI_SZ` | Méthode B : l'**empreinte SHA-256** de chaque certificat dont la signature est acceptée, une par ligne (voir § 2). |
 | `DeployPublishers` | `REG_MULTI_SZ` | Méthode A : le **nom du signataire** de chaque éditeur approuvé, une par ligne, tel que l'onglet *Signatures numériques* de l'installateur l'affiche (ex. `INDEX EDUCATION SAS`). |
 | `DeployMethodAMaxGB` | `REG_DWORD` | *Facultatif.* Méthode A : taille totale, en Gio, qu'un manifeste non signé peut annoncer (8 par défaut, de 1 à 1 024). Au-delà, l'agent refuse avant tout téléchargement ; un paquet plus gros se signe (méthode B). Tenir `PACKAGE_METHOD_A_MAX_GB` du serveur à la même valeur : le serveur et la console refusent alors le déploiement d'eux-mêmes, au lieu de le laisser échouer sur chaque poste. |
+| `DeployCacheMaxGB` | `REG_DWORD` | *Facultatif.* Place totale, en Gio, des dossiers de paquets sous `C:\ProgramData\Tiai\packages` (16 par défaut, de 1 à 1 024). Au démarrage du service et avant chaque téléchargement, l'agent retire les dossiers les plus anciens au-delà de ce plafond, jamais celui du paquet en cours, et note chaque retrait dans `agent.log`. Une valeur inutilisable est signalée dans le journal et le défaut s'applique. |
 
 L'agent relit ces valeurs à chaque commande : une GPO appliquée (`gpupdate`)
 prend effet au déploiement suivant, sans redémarrer le service.
@@ -123,7 +124,9 @@ qu'à un `.exe` d'éditeur, et `msiexec` accepterait n'importe quel MSI.
 **Désinstallation** (facultative) : un fichier du paquet avec ses arguments,
 ou `msiexec` avec `/x {code-produit} /qn /norestart`. En méthode A, seule la
 forme `msiexec /x {code produit}` est acceptée, et l'agent reconstruit
-lui-même les arguments.
+lui-même les arguments. À l'inverse, une **installation** qui lance
+`msiexec /x` ou `/uninstall` est refusée par la console, le script de
+signature et l'agent : placez cette commande dans la désinstallation.
 
 ### Signer le paquet (méthode B)
 
@@ -151,6 +154,7 @@ jour vers une version qui les connaît.
 | Refus de `.dll`, `.ocx`, `.cpl`, `.sys`, `.manifest`, `.local`, `.config`, autre `.exe`, `.msi`, `.mst`, scripts ; dossier nettoyé ; désinstallation limitée à `msiexec /x {code produit}` | v1.2.0 ou ultérieure |
 | Refus des modules chargés par leur nom : `.bpl`, `.pyd`, `.xll`, `.node`, `.rll`, `.wsc`, `.sct` | v1.2.1 ou ultérieure |
 | Plafond de taille d'un paquet non signé (`DeployMethodAMaxGB`, § 1) | v1.2.1 ou ultérieure |
+| Installation qui lance `msiexec /x` ou `/uninstall` refusée (méthodes A et B) ; place des téléchargements bornée (`DeployCacheMaxGB`, § 1) | v1.2.1 ou ultérieure |
 
 Diffuser l'agent à jour sur le parc avant de s'appuyer sur la méthode A.
 

@@ -778,6 +778,15 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
   L'état/les menaces sont reconstruits à chaque heartbeat (pas mis en file), et
   l'état Windows Update reste en cache jusqu'à ce qu'un heartbeat l'ait
   effectivement remis.
+- Dossier des **paquets logiciels** (`C:\ProgramData\Tiai\packages\<id>`) :
+  un téléchargement interrompu y reste pour reprendre là où il s'est arrêté.
+  Ce qui y reste est borné par la date (dossier inutilisé depuis 7 jours) et
+  par la place : `DeployCacheMaxGB` (registre, 16 Gio par défaut, de 1 à
+  1 024 ; valeur inutilisable signalée dans le journal, défaut appliqué). Au
+  démarrage du service et avant chaque téléchargement, les dossiers les plus
+  anciens partent jusqu'à repasser sous le plafond, le paquet à télécharger
+  compté pour sa taille annoncée et jamais retiré (audit S24). Chaque retrait
+  est une ligne `deploy: removed package folder …` de `agent.log`.
 
 ## Build & essai
 

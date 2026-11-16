@@ -31,6 +31,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"log"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -50,6 +53,9 @@ type Policy struct {
 	// MethodAMaxGB caps what a method A manifest may announce, in GiB
 	// (registry DeployMethodAMaxGB). 0 or less: DefaultMethodAMaxGB.
 	MethodAMaxGB int
+	// CacheMaxGB caps what the package folders may hold together, in GiB
+	// (registry DeployCacheMaxGB). 0 or less: DefaultCacheMaxGB.
+	CacheMaxGB int
 }
 
 // MethodAMaxBytes is the cap MethodAFiles applies under this policy.
@@ -57,6 +63,15 @@ func (p Policy) MethodAMaxBytes() int64 {
 	gb := p.MethodAMaxGB
 	if gb <= 0 {
 		gb = DefaultMethodAMaxGB
+	}
+	return int64(gb) << 30
+}
+
+// CacheMaxBytes is the cap SweepPackages applies under this policy.
+func (p Policy) CacheMaxBytes() int64 {
+	gb := p.CacheMaxGB
+	if gb <= 0 {
+		gb = DefaultCacheMaxGB
 	}
 	return int64(gb) << 30
 }
@@ -108,6 +123,13 @@ var (
 	errNoMsiInMode = errors.New("méthode A : msiexec n'est accepté que pour désinstaller un code produit")
 )
 
+// msiexecRemoval is an msiexec switch that removes a product: /x and
+// /uninstall, in any case, with either of the prefixes msiexec takes, and with
+// whatever is glued to it ("/x{code}"). No other switch of msiexec starts with
+// x, nor with "uninstall". The server (manifest.UNINSTALL_SWITCH) and the
+// signing script ($MsiExecUninstallSwitch) use the same pattern.
+var msiexecRemoval = regexp.MustCompile(`(?i)^[/-](x|uninstall)`)
+
 const cryptoSHA256 = crypto.SHA256
 
 // ValidPackageID tells whether id is a canonical UUID, the only form the
@@ -158,17 +180,62 @@ func PruneDir(dir string, files []FileRef) error {
 // per package id, and the ids are the server's to choose (audit S24).
 const StalePackageAfter = 7 * 24 * time.Hour
 
-// PruneStalePackages removes from root the package folders that nothing has
-// written to for more than StalePackageAfter at now. Only what the agent
-// itself puts there is looked at: direct children that are folders named by a
-// package id. keep, the package about to be used, is never removed.
+// DefaultCacheMaxGB caps, in GiB, what the package folders may hold together
+// (registry DeployCacheMaxGB). Age alone bounds nothing: a compromised server
+// can interrupt one download after another, each under a new id and up to
+// the method A cap, and every folder is "recent" for a week (audit S24). Twice
+// the default method A cap: an interrupted package of that size still waits
+// for its retry while another of the same size downloads.
+const DefaultCacheMaxGB = 16
+
+// Removal is a package folder a sweep took away, or tried to.
+type Removal struct {
+	ID        string
+	Bytes     int64
+	LastWrite time.Time
+	// Stale: untouched for more than StalePackageAfter; otherwise removed to
+	// bring the folders under the cap.
+	Stale bool
+	Err   error
+}
+
+// SweepPackages removes from root the package folders earlier runs left —
+// downloads interrupted or refused, which nothing else comes back for — and
+// logs each one. Two rules, in this order:
 //
-// Best effort, and silent: a sibling that will not go must not fail the
-// deployment that found it.
-func PruneStalePackages(root, keep string, now time.Time) {
+//   - a folder nothing has written to for more than StalePackageAfter at now
+//     goes, whatever the space;
+//   - then, while what the remaining folders hold plus need — what the
+//     package keep will occupy once downloaded — is above maxBytes, the
+//     least recently written folder goes.
+//
+// keep, the package about to be used, is never removed, nor counted beyond
+// need: it may alone be above the cap (a signed package is not capped), and
+// the others then all go. Called with keep "" and need 0 when the service
+// starts, when nothing is in progress.
+//
+// Only what the agent itself puts there is looked at: direct children that
+// are folders named by a package id. A folder that cannot be read is left
+// alone and not counted. Best effort: a folder that will not go is logged and
+// must not fail the deployment that found it.
+func SweepPackages(root, keep string, need, maxBytes int64, now time.Time) []Removal {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return
+		return nil
+	}
+	type folder struct {
+		id    string
+		last  time.Time
+		bytes int64
+	}
+	var kept []folder
+	var removed []Removal
+	remove := func(f folder, stale bool) bool {
+		r := Removal{ID: f.id, Bytes: f.bytes, LastWrite: f.last, Stale: stale}
+		r.Err = os.RemoveAll(filepath.Join(root, f.id))
+		removed = append(removed, r)
+		logRemoval(r, maxBytes)
+		return r.Err == nil
 	}
 	for _, e := range entries {
 		name := e.Name()
@@ -177,11 +244,103 @@ func PruneStalePackages(root, keep string, now time.Time) {
 		}
 		dir := filepath.Join(root, name)
 		last, ok := lastWrite(dir)
-		if !ok || now.Sub(last) <= StalePackageAfter {
+		if !ok {
 			continue
 		}
-		_ = os.RemoveAll(dir)
+		size, ok := folderBytes(dir)
+		if !ok {
+			continue
+		}
+		f := folder{id: name, last: last, bytes: size}
+		if now.Sub(last) > StalePackageAfter && remove(f, true) {
+			continue
+		}
+		kept = append(kept, f)
 	}
+	// Oldest first; the id breaks a tie, so that the same folders give the
+	// same choice.
+	slices.SortFunc(kept, func(a, b folder) int {
+		if c := a.last.Compare(b.last); c != 0 {
+			return c
+		}
+		return strings.Compare(a.id, b.id)
+	})
+	total := max(need, 0)
+	for _, f := range kept {
+		total = addCapped(total, f.bytes)
+	}
+	for _, f := range kept {
+		if total <= maxBytes {
+			break
+		}
+		if remove(f, false) {
+			total -= f.bytes
+		}
+	}
+	if need > maxBytes {
+		// Said, not refused: the package's size is checked elsewhere (the
+		// method A cap, or the administrator's signature), and a cap the
+		// administrator set below one package must not stop its deployment.
+		log.Printf("deploy: package %s announces %s on its own, above the package cache cap of %s (DeployCacheMaxGB): downloaded all the same",
+			keep, humanBytes(need), humanBytes(maxBytes))
+	}
+	return removed
+}
+
+// logRemoval writes what a sweep removed, or failed to: the package folder is
+// the agent's own doing under C:\ProgramData, and the log is where an
+// administrator who finds the space gone or a download started over looks.
+func logRemoval(r Removal, maxBytes int64) {
+	why := "untouched for more than 7 days"
+	if !r.Stale {
+		why = "package cache above its cap of " + humanBytes(maxBytes) + " (DeployCacheMaxGB), oldest first"
+	}
+	if r.Err != nil {
+		log.Printf("deploy: could not remove package folder %s (%s, last written %s; %s): %v",
+			r.ID, humanBytes(r.Bytes), r.LastWrite.Format(time.RFC3339), why, r.Err)
+		return
+	}
+	log.Printf("deploy: removed package folder %s (%s, last written %s): %s",
+		r.ID, humanBytes(r.Bytes), r.LastWrite.Format(time.RFC3339), why)
+}
+
+// folderBytes is what the regular files under dir hold, links not followed.
+// ok is false when part of it cannot be read.
+func folderBytes(dir string) (total int64, ok bool) {
+	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type().IsRegular() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			total = addCapped(total, info.Size())
+		}
+		return nil
+	})
+	return total, err == nil
+}
+
+// addCapped adds two sizes without wrapping: a signed manifest's sizes are
+// the administrator's, and nothing bounds their sum.
+func addCapped(a, b int64) int64 {
+	if b > 0 && a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
+}
+
+// humanBytes writes a size for the log, in the unit an administrator reads.
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
 
 // lastWrite is when a package folder was last written to: the newest
@@ -514,13 +673,35 @@ func PublisherApproved(name string, publishers []string) bool {
 	return false
 }
 
+// MsiExecRemoves tells whether a step runs msiexec with a switch that removes
+// a product (/x, /uninstall). Such a step is an uninstall whatever the
+// manifest files it under.
+func MsiExecRemoves(step Step) bool {
+	if step.Run != MsiExec {
+		return false
+	}
+	for _, a := range step.Args {
+		if msiexecRemoval.MatchString(a) {
+			return true
+		}
+	}
+	return false
+}
+
 // MethodAStep checks a step for method A and returns what to run. The file
 // must be an .exe of the package; an uninstall may instead be msiexec with a
 // product code, in which case the arguments are rebuilt here, whatever the
 // server sent — msiexec takes far more than "/x" (an /i of any URL, among
 // others), and nobody signed these.
-func MethodAStep(step Step) (Step, error) {
+//
+// Only an uninstall: the rebuilt command line is "/x {code}", so an
+// installation handed msiexec and a product code would remove the product
+// it was meant to put there, and report « Installation … terminée ».
+func MethodAStep(step Step, action string) (Step, error) {
 	if step.Run == MsiExec {
+		if action != "uninstall" {
+			return Step{}, errNoMsiInMode
+		}
 		for _, a := range step.Args {
 			if productCode.MatchString(a) {
 				return Step{Run: MsiExec, Args: []string{"/x", a, "/qn", "/norestart"}}, nil

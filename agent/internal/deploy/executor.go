@@ -159,11 +159,19 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 			return Result{}, errors.New("paquet non signé, et aucun éditeur approuvé sur ce poste (DeployPublishers)")
 		}
 		method = "A"
-		checked, aerr := MethodAStep(*step)
+		checked, aerr := MethodAStep(*step, action)
 		if aerr != nil {
 			return refused(aerr)
 		}
 		step = &checked
+	}
+	// An installation that runs msiexec /x removes what it was sent to
+	// install, and the console would read « Installation … terminée ».
+	// Method A refused any installation by msiexec above (MethodAStep); a
+	// signed manifest gets here, and the server and the signing script refuse
+	// to produce one — what reaches a poste anyway is refused here too.
+	if action == "install" && MsiExecRemoves(*step) {
+		return Result{}, errors.New("l'installation de ce paquet lance une désinstallation (msiexec /x ou /uninstall) : refusée — placez cette commande dans la désinstallation du paquet")
 	}
 
 	files := manifest.Files
@@ -181,8 +189,13 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	}
 
 	// Before this folder is made: the ones earlier runs left and nobody came
-	// back for.
-	PruneStalePackages(env.PackagesDir(), pkg.ID, time.Now())
+	// back for, and, oldest first, whatever stands between the folders and
+	// their cap once this package is downloaded (audit S24).
+	var need int64
+	for _, f := range files {
+		need = addCapped(need, f.Size)
+	}
+	SweepPackages(env.PackagesDir(), pkg.ID, need, policy.CacheMaxBytes(), time.Now())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("dossier du paquet : %w", err)
 	}
