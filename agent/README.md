@@ -726,6 +726,14 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
   **abandonné sur le premier 401** : l'agent retente alors l'enrôlement avec le
   secret du parc. Tant que la révocation tient, le serveur répond 403 et l'agent
   attend ; dès qu'un admin « autorise le ré-enrôlement », le poste revient seul.
+  Même attente pour un enrôlement **en attente d'approbation** : une tentative
+  d'enrôlement par palier, le premier après une minute, puis le double à chaque
+  fois jusqu'à un plafond de 15 minutes (avec jitter), et retour au premier
+  palier dès que la réponse change. Une approbation donnée depuis la console est
+  ainsi prise en compte dans les minutes qui suivent, et un poste que personne
+  n'approuve coûte au serveur une tentative par quart d'heure. Le journal
+  porte une ligne par palier ; cette attente voulue n'est pas signalée comme un
+  polling bloqué.
 - **Rotation du token.** Un token copié hors du poste (image disque, sauvegarde
   de `%ProgramData%`) ne doit pas fonctionner pour toujours : le serveur le
   renouvelle tous les `AGENT_TOKEN_ROTATE_DAYS` jours (30 par défaut). L'agent

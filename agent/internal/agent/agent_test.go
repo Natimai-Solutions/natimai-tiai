@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -302,6 +304,118 @@ func TestAnEnrollmentOnHoldIsRecognised(t *testing.T) {
 	}
 }
 
+var (
+	errHeld = fmt.Errorf("POST /api/v1/agent/enroll: %w", &api.StatusError{
+		StatusCode: 403, Body: `{"error":{"code":"machine.enrollment.approval_required"}}`})
+	errRevoked = fmt.Errorf("POST /api/v1/agent/enroll: %w", &api.StatusError{
+		StatusCode: 403, Body: `{"error":{"code":"machine.enrollment.revoked"}}`})
+)
+
+// An enrollment on hold is retried one minute later, then twice as long each
+// time up to a quarter of an hour — an approval given in the console must
+// bring the poste back within minutes, not half an hour. Once the server
+// answers something else, the next hold starts over from the short step.
+func TestEnrollmentHoldStepsEscalateAndReset(t *testing.T) {
+	p := newRetryPlan(time.Minute, 5*time.Minute)
+	steps := func(err error, n int) []time.Duration {
+		var out []time.Duration
+		for range n {
+			step, onHold := p.next(err)
+			if onHold != enrollmentOnHold(err) {
+				t.Fatalf("next(%v) onHold = %v", err, onHold)
+			}
+			out = append(out, step)
+		}
+		return out
+	}
+	m := time.Minute
+	want := []time.Duration{m, 2 * m, 4 * m, 8 * m, 15 * m, 15 * m}
+	if got := steps(errHeld, 6); !slices.Equal(got, want) {
+		t.Errorf("approval hold steps = %v, want %v", got, want)
+	}
+	// Approved: the plain interval, and the hold is forgotten.
+	if got := steps(nil, 1); got[0] != time.Minute {
+		t.Errorf("after the approval: %v", got)
+	}
+	if got := steps(errRevoked, 3); !slices.Equal(got, want[:3]) {
+		t.Errorf("revoked steps after a success = %v, want %v", got, want[:3])
+	}
+	// A server that went down ends the hold too: ordinary back-off, then the
+	// next hold starts again at one minute.
+	if got := steps(errors.New("dial tcp: connection refused"), 1); got[0] != 2*time.Minute {
+		t.Errorf("network failure step = %v", got)
+	}
+	if got := steps(errHeld, 1); got[0] != time.Minute {
+		t.Errorf("a new hold starts at %v", got)
+	}
+	// Ordinary failures keep their own back-off, untouched by the holds.
+	if got := steps(errors.New("status 502"), 3); !slices.Equal(got, []time.Duration{4 * m, 5 * m, 5 * m}) {
+		t.Errorf("ordinary back-off = %v", got)
+	}
+}
+
+// What is slept on a hold is the step with jitter — one enrollment attempt
+// per step, never later than the step — with one log line per step that says
+// why, and the watchdog is told when the next poll is due.
+func TestScheduleNextLogsEachHoldStep(t *testing.T) {
+	buf := captureLog(t)
+	a := &Agent{}
+	p := newRetryPlan(time.Minute, 5*time.Minute)
+	now := time.Unix(1_800_000_000, 0)
+	for i, step := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute} {
+		err := errHeld
+		if i == 2 {
+			err = errRevoked
+		}
+		sleep := a.scheduleNext(p, err, now)
+		if sleep < step/2 || sleep > step {
+			t.Errorf("hold step %s slept %s", step, sleep)
+		}
+		if got := a.nextPollAt.Load(); got != now.Add(sleep).Unix() {
+			t.Errorf("next poll due at %d, want %d", got, now.Add(sleep).Unix())
+		}
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 3 ||
+		!strings.Contains(lines[0], "waiting for an administrator's approval, next enrollment attempt in") ||
+		!strings.Contains(lines[2], "revoked") || strings.Contains(buf.String(), "tick failed") {
+		t.Errorf("logged:\n%s", buf.String())
+	}
+}
+
+// Waiting on purpose — an enrollment hold of a quarter of an hour — is not a
+// poll that hangs: the watchdog stays silent, and so no "polling resumed"
+// follows. A poll that does hang once it was due is still reported.
+func TestWatchdogDoesNotReportADeliberateWait(t *testing.T) {
+	buf := captureLog(t)
+	a := &Agent{}
+	start := time.Unix(1_800_000_000, 0)
+	a.lastPollDone.Store(start.Unix())
+	a.phase("idle")
+	// The loop sleeps a 15-minute hold step after that poll.
+	a.nextPollAt.Store(start.Add(15 * time.Minute).Unix())
+	for m := 1; m <= 15; m++ {
+		a.checkStall(start.Add(time.Duration(m)*time.Minute), start.Unix())
+	}
+	a.pollFinished()
+	if out := buf.String(); out != "" {
+		t.Errorf("a deliberate wait was reported:\n%s", out)
+	}
+
+	// The next poll starts when due and hangs: reported ten minutes after it
+	// was due, not before.
+	a.lastPollDone.Store(start.Unix())
+	a.phase("defender state")
+	a.checkStall(start.Add(24*time.Minute), start.Unix())
+	if out := buf.String(); out != "" {
+		t.Errorf("reported before the poll was ten minutes late:\n%s", out)
+	}
+	a.checkStall(start.Add(25*time.Minute), start.Unix())
+	if out := buf.String(); !strings.Contains(out, `stuck in "defender state"`) {
+		t.Errorf("a hung poll was not reported:\n%s", out)
+	}
+}
+
 // drain empties a queue, returning its items oldest first.
 func drain(t *testing.T, q *queue.Queue) []queue.Item {
 	t.Helper()
@@ -354,6 +468,85 @@ func TestAcceptRefusesACommandIDThatIsNotAUUID(t *testing.T) {
 	a.accept(models.Command{ID: strings.ToUpper(c3), Type: "quick_scan"})
 	if len(a.commands) != 1 {
 		t.Error("an upper-case UUID was refused")
+	}
+}
+
+// A verdict the server keeps answering 5xx to stays at the head of the queue —
+// and says so, once per failed replay, naming its command: the queue that
+// held back every verdict behind it used to leave no trace in the log.
+func TestFlushQueueLogsEachFailedReplay(t *testing.T) {
+	q, err := queue.New(t.TempDir(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{c1, c2} {
+		if err := q.Enqueue(queue.Item{CommandID: id, Result: models.CommandResult{Status: "failed"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv, _ := resultRecorder(t, func(string) int { return http.StatusInternalServerError })
+	a := &Agent{queue: q, client: api.New(srv.URL, "tok", 5*time.Second, nil)}
+	buf := captureLog(t)
+	for range 3 {
+		a.flushQueue(context.Background())
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("want one line per failed replay, got:\n%s", buf.String())
+	}
+	for _, line := range lines {
+		if !strings.Contains(line, "command "+c1+" not delivered") || !strings.Contains(line, "status 500") {
+			t.Errorf("line = %q", line)
+		}
+	}
+	if q.Depth() != 2 {
+		t.Errorf("depth %d", q.Depth())
+	}
+}
+
+// A NUL in a command's output — what a tool writing UTF-16 into a pipe leaves
+// — is refused by the server's database (500), and the verdict then held the
+// queue for good. The agent strips it, whether the verdict is posted at once
+// or replayed from a queue an older agent filled.
+func TestAVerdictWithANulIsDelivered(t *testing.T) {
+	q, err := queue.New(t.TempDir(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirty := models.CommandResult{Status: "failed", Output: "S\x00F\x00C\x00\tok\r\n", Error: "boom\x00\x1b[31m"}
+	if err := q.Enqueue(queue.Item{CommandID: c1, Result: dirty}); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	got := map[string]models.CommandResult{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		// What PostgreSQL does with a NUL in a text column.
+		if bytes.Contains(body, []byte(`\u0000`)) {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		var res models.CommandResult
+		_ = json.Unmarshal(body, &res)
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/agent/commands/"), "/result")
+		mu.Lock()
+		got[id] = res
+		mu.Unlock()
+	}))
+	t.Cleanup(srv.Close)
+	a := &Agent{queue: q, client: api.New(srv.URL, "tok", 5*time.Second, nil)}
+	a.flushQueue(context.Background())
+	if err := a.client.PostResult(context.Background(), c2, dirty); err != nil {
+		t.Fatal(err)
+	}
+	if q.Depth() != 0 {
+		t.Fatal("the verdict with a NUL is still queued")
+	}
+	want := models.CommandResult{Status: "failed", Output: "SFC\tok\r\n", Error: "boom[31m"}
+	for _, id := range []string{c1, c2} {
+		if got[id] != want {
+			t.Errorf("%s: server got %+v, want %+v", id, got[id], want)
+		}
 	}
 }
 

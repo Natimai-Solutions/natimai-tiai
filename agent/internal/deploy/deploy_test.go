@@ -912,6 +912,110 @@ func TestMethodARefusalThatNoRetryLiftsLeavesNoFolder(t *testing.T) {
 	}
 }
 
+// A signed package whose signer this poste does not trust, on a poste that also
+// approves publishers, falls to method A — and when method A refuses it too,
+// the verdict leads with method B's reason: the administrator signed the
+// package, the missing thumbprint is what they have to fix.
+func TestBothMethodsRefusedReportsMethodBFirst(t *testing.T) {
+	sign := func(t *testing.T, env *fakeEnv, step *Step) *models.PackageDelivery {
+		raw := manifestFor(t, signedID, env.files, step)
+		sig, cert, _ := signRSA(t, raw)
+		return &models.PackageDelivery{ID: signedID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw),
+			Signature: sig, SignatureAlgorithm: "rsa-pkcs1-sha256", Certificate: cert}
+	}
+	const methodB = "méthode B : certificat de signature non approuvé sur ce poste (empreinte "
+	for _, c := range []struct {
+		name      string
+		files     map[string][]byte
+		step      *Step
+		publisher string
+		methodA   string
+	}{
+		{"msiexec install", map[string][]byte{"app.msi": []byte("msi")},
+			&Step{Run: MsiExec, Args: []string{"/i", "{dir}/app.msi", "/qn"}}, "X",
+			" ; méthode A : msiexec n'est accepté que pour désinstaller un code produit"},
+		{"publisher not approved", map[string][]byte{"setup.exe": signedPE(t, "INDEX EDUCATION SAS")},
+			&Step{Run: "setup.exe"}, "Someone Else",
+			` ; méthode A : éditeur "INDEX EDUCATION SAS" non approuvé sur ce poste (DeployPublishers)`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true, files: c.files}
+			pkg := sign(t, env, c.step)
+			policy := Policy{Signers: []string{"AB"}, Publishers: []string{c.publisher}}
+			_, err := Execute(context.Background(), env, policy, "package_install", pkg)
+			if err == nil {
+				t.Fatal("ran")
+			}
+			msg := err.Error()
+			if !strings.HasPrefix(msg, methodB) || !strings.HasSuffix(msg, c.methodA) ||
+				strings.Count(msg, "méthode A") != 1 {
+				t.Errorf("verdict = %q", msg)
+			}
+			if len(env.ran) != 0 {
+				t.Errorf("ran = %v", env.ran)
+			}
+		})
+	}
+
+	// An unsigned package never went through method B: method A speaks alone.
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true}
+	pkg := pronote(t, env)
+	_, err := Execute(context.Background(), env, Policy{Signers: []string{"AB"}, Publishers: []string{"Someone Else"}},
+		"package_install", pkg)
+	if err == nil || strings.Contains(err.Error(), "méthode B") {
+		t.Errorf("unsigned package verdict = %v", err)
+	}
+}
+
+// The success line is built from the parts that exist: no « (méthode A, ) »
+// for an uninstall by product code, which names no publisher, and no double
+// space for a package without a version.
+func TestSuccessLineHasNoEmptyParts(t *testing.T) {
+	// Method A, uninstall by product code.
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}}
+	m := Manifest{Format: "tiai-package-1", PackageID: pronoteID, Name: "App", Version: "1",
+		Files:     []FileRef{{Name: "app.msi", SHA256: sha([]byte("msi")), Size: 3}},
+		Uninstall: &Step{Run: MsiExec, Args: []string{"/x", "{01234567-89AB-CDEF-0123-456789ABCDEF}"}}}
+	raw, _ := json.Marshal(m)
+	pkg := &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+	res, err := Execute(context.Background(), env, Policy{Publishers: []string{"X"}}, "package_uninstall", pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Output != "Désinstallation de App 1 terminée (méthode A)" {
+		t.Errorf("output = %q", res.Output)
+	}
+
+	// Method B, no version.
+	env = &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}}
+	env.files = map[string][]byte{"app.msi": []byte("msi")}
+	m = Manifest{Format: "tiai-package-1", PackageID: signedID, Name: "App",
+		Files:   []FileRef{{Name: "app.msi", SHA256: sha(env.files["app.msi"]), Size: 3}},
+		Install: &Step{Run: MsiExec, Args: []string{"/i", "{dir}/app.msi", "/qn"}}}
+	raw, _ = json.Marshal(m)
+	sig, cert, der := signRSA(t, raw)
+	pkg = &models.PackageDelivery{ID: signedID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw),
+		Signature: sig, SignatureAlgorithm: "rsa-pkcs1-sha256", Certificate: cert}
+	res, err = Execute(context.Background(), env, Policy{Signers: []string{thumb(der)}}, "package_install", pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Output != "Installation de App terminée (méthode B, paquet signé par CN=Tiai Signature)" {
+		t.Errorf("output = %q", res.Output)
+	}
+
+	// A failed run under method A by product code: no « () » either.
+	env = &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, code: 1603}
+	raw, _ = json.Marshal(Manifest{Format: "tiai-package-1", PackageID: pronoteID, Name: "App", Version: "1",
+		Files:     []FileRef{{Name: "app.msi", SHA256: sha([]byte("msi")), Size: 3}},
+		Uninstall: &Step{Run: MsiExec, Args: []string{"/x", "{01234567-89AB-CDEF-0123-456789ABCDEF}"}}})
+	pkg = &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+	if _, err = Execute(context.Background(), env, Policy{Publishers: []string{"X"}}, "package_uninstall", pkg); err == nil ||
+		err.Error() != MsiExec+" a renvoyé le code 1603" {
+		t.Errorf("failure = %v", err)
+	}
+}
+
 // Under method B the manifest is the administrator's: a failed run keeps its
 // folder as before, whatever the failure — the id and the sizes are not the
 // server's word there.
