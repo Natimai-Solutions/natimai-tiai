@@ -183,7 +183,7 @@ services:
   caddy:
     # Version mineure épinglée : une montée de Caddy est une décision, pas un
     # effet de bord d'un `docker compose pull`.
-    image: caddy:2.10-alpine
+    image: caddy:2.11-alpine
     restart: unless-stopped
     logging: *logging
     # Seules variables dont le Caddyfile a besoin — pas d'`env_file: .env` ici,
