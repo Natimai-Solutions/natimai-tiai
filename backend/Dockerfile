@@ -15,6 +15,13 @@ WORKDIR /app
 RUN apt-get update && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
+# pip goes: the dependencies are installed by uv, and nothing at run time
+# installs a package. Left in, it is code the server never runs that the scan
+# still answers for — pip 26 declares its vendored libraries in an SBOM
+# (urllib3, msgpack, setuptools' pkg_resources), and their advisories failed
+# the image (Trivy, November 2026).
+RUN python -m pip uninstall -y pip
+
 # The account the API and the worker run as (audit S32). The entrypoint
 # starts as root only to hand it the packages volume — which an existing
 # deployment created root-owned — then drops to it for good (setpriv).
