@@ -1,3 +1,5 @@
+# The Python the backend ships with: keep it equal to .python-version, which
+# the CI and uv follow (tests/test_python_version.py checks it).
 FROM python:3.15-slim
 
 ENV PYTHONUNBUFFERED=1 \

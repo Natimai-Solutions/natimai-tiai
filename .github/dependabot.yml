@@ -98,6 +98,11 @@ updates:
       images-mineures:
         patterns: ["*"]
         update-types: [minor, patch]
+    # Une montée de Python dans backend/Dockerfile ne passe pas seule : la CI
+    # exige que backend/.python-version nomme la même version (test
+    # test_python_version.py), pour que les tests tournent sous le Python
+    # livré. Mettre à jour les deux, et uv.lock si une dépendance compilée n'a
+    # pas encore de wheel pour la nouvelle version.
     ignore:
       # Même raison que pour la stack : db-backup doit garder la majeure de
       # PostgreSQL du service db (pg_dump au niveau du serveur).
