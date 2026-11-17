@@ -11,7 +11,7 @@ COPY . .
 RUN npx quasar prepare && npm run build
 
 # ── Production stage ─────────────────────────────────────────────────────────
-FROM nginx:1.30-alpine AS runner
+FROM nginx:1.31-alpine AS runner
 # Les correctifs de sécurité d'Alpine arrivent avant la reconstruction de
 # l'image officielle (libxslt, relevé par Trivy) : comme le backend, l'image
 # applique les mises à jour de sa distribution à chaque construction.
