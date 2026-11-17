@@ -50,8 +50,8 @@
             <!-- Same wording whether or not the address has an account: the API
                  answers alike so the console must not leak the difference. -->
             <q-card-section class="q-pt-none text-body2">
-              Si un compte existe pour <b>{{ email }}</b
-              >, un lien de réinitialisation vient d'être envoyé. Il expire dans {{ resetExpiry }}.
+              Si un compte existe pour <b>{{ email }}</b>, un lien de réinitialisation vient d'être
+              envoyé. Il expire dans {{ resetExpiry }}.
             </q-card-section>
             <q-card-actions class="q-px-md q-pb-md">
               <q-btn

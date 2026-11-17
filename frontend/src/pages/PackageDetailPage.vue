@@ -311,17 +311,17 @@
                 un paquet non signé. Signez le paquet (méthode B).
               </template>
               <template v-else-if="method === 'publisher'">
-                Le fichier lancé est signé par <b>{{ pkg.publisher_name }}</b
-                >. Sans signature de l'administrateur, les postes l'exécutent si la GPO liste ce nom
-                dans <code>DeployPublishers</code>.
+                Le fichier lancé est signé par <b>{{ pkg.publisher_name }}</b>. Sans signature de
+                l'administrateur, les postes l'exécutent si la GPO liste ce nom dans
+                <code>DeployPublishers</code>.
               </template>
               <template v-else-if="pkg.signed">Inutile : le paquet est signé.</template>
               <template v-else-if="pkg.publisher_name && besideRun.length">
                 <span class="break-anywhere">
-                  Indisponible : le fichier lancé est signé par <b>{{ pkg.publisher_name }}</b
-                  >, mais {{ quoted(besideRun) }} {{ besideRun.length > 1 ? 'sont' : 'est' }} à
-                  côté, et les postes refusent sous la méthode A tout fichier que Windows pourrait
-                  charger ou lancer (.dll, .exe, .msi, scripts…) à côté de l'exécutable. Retirez
+                  Indisponible : le fichier lancé est signé par <b>{{ pkg.publisher_name }}</b>,
+                  mais {{ quoted(besideRun) }} {{ besideRun.length > 1 ? 'sont' : 'est' }} à côté,
+                  et les postes refusent sous la méthode A tout fichier que Windows pourrait charger
+                  ou lancer (.dll, .exe, .msi, scripts…) à côté de l'exécutable. Retirez
                   {{ besideRun.length > 1 ? 'ces fichiers' : 'ce fichier' }} du paquet, ou signez-le
                   (méthode B).
                 </span>
