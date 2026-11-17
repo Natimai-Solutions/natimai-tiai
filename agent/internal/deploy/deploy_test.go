@@ -1262,10 +1262,16 @@ func packageFolder(t *testing.T, root, id string, size int64, now time.Time, d t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Truncate(size); err != nil {
-		t.Fatal(err)
+	// Closed before anything can fail: an open handle keeps Windows from
+	// removing the test's folder.
+	err = makeSparse(f)
+	if err == nil {
+		err = f.Truncate(size)
 	}
 	_ = f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 	age(t, file, now, d)
 	age(t, dir, now, d)
 	return dir

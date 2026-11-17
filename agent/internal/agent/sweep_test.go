@@ -31,11 +31,16 @@ func TestRunSweepsThePackageCacheAtStart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Sparse: what counts is the size the download reached.
-		if err := f.Truncate(size); err != nil {
-			t.Fatal(err)
+		// Sparse: what counts is the size the download reached. Closed
+		// before anything can fail, so Windows can remove the folder.
+		err = makeSparse(f)
+		if err == nil {
+			err = f.Truncate(size)
 		}
 		_ = f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, p := range []string{file, dir} {
 			if err := os.Chtimes(p, now.Add(-age), now.Add(-age)); err != nil {
 				t.Fatal(err)
