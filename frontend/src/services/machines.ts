@@ -104,6 +104,14 @@ export interface Machine {
    * goes stale until the next refresh.
    */
   is_online: boolean;
+  /**
+   * The poste presented the fleet secret while it still held a live token,
+   * and waits for an administrator (« Autoriser le ré-enrôlement »). Optional:
+   * an older server does not send it.
+   */
+  reenroll_requested?: boolean;
+  /** Its token was revoked: it is cut off until re-enrolment is allowed. Optional likewise. */
+  token_revoked?: boolean;
 }
 
 /** An update Windows Update reports as applicable and not yet installed. */
@@ -258,6 +266,8 @@ export interface MachineDetail extends Machine {
     requested_by: string;
     assigned_to_id: string | null;
     assigned_to_name: string | null;
+    /** false when the assignee no longer reaches the poste: « à prendre » again. */
+    assignee_reachable?: boolean;
     instructions: string | null;
     created_at: string;
   } | null;
@@ -424,6 +434,18 @@ export interface ListMachinesParams {
    */
   usage_hours_below?: number;
   usage_hours_above?: number;
+  /**
+   * Enrolment state: `pending` = a re-enrolment waits for approval, `revoked`
+   * = the token was revoked. Ignored by a server older than the filter.
+   */
+  enrollment?: 'pending' | 'revoked';
+  /** Hardware past the parc's renewal age (`hardware_aging_years`). */
+  hardware_aging?: boolean;
+  /**
+   * Comma-separated facets matched exactly rather than as a substring:
+   * antivirus, os_version, hw_model, hw_manufacturer, cpu_model.
+   */
+  exact?: string;
   /** Server-side sort; omitted = freshest contact first. */
   sort_by?: MachineSortField;
   sort_desc?: boolean;
@@ -433,6 +455,41 @@ export interface ListMachinesParams {
 
 export async function listMachines(params: ListMachinesParams = {}): Promise<MachineList> {
   const { data } = await api.get<MachineList>('/machines', { params });
+  return data;
+}
+
+/** A poste next to the open one in the list it was opened from. */
+export interface MachineNeighbour {
+  id: string;
+  hostname: string | null;
+  machine_uuid: string;
+  /** Where it stands in the list: sent back when the walk reaches it. */
+  cursor: string;
+}
+
+/** The open poste's place in a list: `GET /machines/{id}/neighbours`. */
+export interface MachineNeighbours {
+  previous: MachineNeighbour | null;
+  next: MachineNeighbour | null;
+  /** 0-based; null (and no neighbours) when the poste has left the list. */
+  rank: number | null;
+  total: number;
+  /** Where this poste stands, to send back on a later visit. */
+  cursor: string | null;
+}
+
+export type MachineNeighboursParams = ListMachinesParams & { cursor?: string };
+
+/**
+ * The postes before and after `id` in the list `params` describe — same
+ * filters, sort and scope as `listMachines` — worked out by the server on the
+ * list's own order (audit T31).
+ */
+export async function getMachineNeighbours(
+  id: string,
+  params: MachineNeighboursParams = {},
+): Promise<MachineNeighbours> {
+  const { data } = await api.get<MachineNeighbours>(`/machines/${id}/neighbours`, { params });
   return data;
 }
 
@@ -637,6 +694,49 @@ export async function revokeToken(id: string): Promise<void> {
  */
 export async function allowReenroll(id: string): Promise<void> {
   await api.post(`/machines/${id}/allow-reenroll`);
+}
+
+/**
+ * The administrator vouches for the poste's identity after a fingerprint
+ * divergence (a hardware swap, a re-image): « Identité à confirmer » is lifted
+ * without merging anything. Answers the updated fiche.
+ */
+export async function confirmIdentity(id: string): Promise<MachineDetail> {
+  const { data } = await api.post<MachineDetail>(`/machines/${id}/confirm-identity`);
+  return data;
+}
+
+export interface ApproveReenrollResponse {
+  /** Postes whose re-enrolment was allowed. */
+  approved: number;
+  /** Postes with nothing to approve (no request pending, token not revoked). */
+  skipped: number;
+}
+
+/** Allow the re-enrolment of several postes at once (the list's bulk action). */
+export async function approveReenroll(ids: string[]): Promise<ApproveReenrollResponse> {
+  const { data } = await api.post<ApproveReenrollResponse>('/machines/approve-reenroll', {
+    machine_ids: ids,
+  });
+  return data;
+}
+
+/** What the bulk approval did, as a notification. */
+export function approveReenrollNotification(res: ApproveReenrollResponse): {
+  type: 'positive' | 'warning';
+  message: string;
+} {
+  if (res.approved === 0) {
+    return {
+      type: 'warning',
+      message: 'Aucun ré-enrôlement à autoriser parmi les postes sélectionnés.',
+    };
+  }
+  const done = `Ré-enrôlement autorisé pour ${res.approved} poste(s)`;
+  return {
+    type: 'positive',
+    message: res.skipped > 0 ? `${done} — ${res.skipped} sans demande en attente, ignoré(s)` : done,
+  };
 }
 
 /** What makes a record a candidate duplicate, strongest evidence first. */

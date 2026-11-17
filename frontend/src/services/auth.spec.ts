@@ -7,6 +7,7 @@ vi.mock('boot/axios', () => ({
 import { api } from 'boot/axios';
 import {
   changePassword,
+  checkPasswordResetToken,
   closeSession,
   confirmPasswordReset,
   getMe,
@@ -188,5 +189,17 @@ describe('updateMe', () => {
     expect(api.patch).toHaveBeenCalledWith('/auth/me', {
       preferences: { machines_columns: ['hostname', 'room'], theme: null },
     });
+  });
+});
+
+describe('checkPasswordResetToken (C7)', () => {
+  it('reads 204 as valid, 400 as invalid, and anything else as unknown', async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ status: 204, data: '' });
+    expect(await checkPasswordResetToken('t')).toBe('valid');
+    expect(api.get).toHaveBeenCalledWith('/auth/password-reset/check', { params: { token: 't' } });
+    vi.mocked(api.get).mockRejectedValueOnce({ response: { status: 400 } });
+    expect(await checkPasswordResetToken('t')).toBe('invalid');
+    vi.mocked(api.get).mockRejectedValueOnce({ response: { status: 404 } });
+    expect(await checkPasswordResetToken('t')).toBe('unknown');
   });
 });

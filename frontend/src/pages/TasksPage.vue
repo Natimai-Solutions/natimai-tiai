@@ -23,9 +23,18 @@
       Les vérifications demandées sur des postes et les maintenances à faire : les vôtres, celles
       que personne n'a encore prises, ou toutes.
     </div>
-    <div class="text-h6 q-mb-sm">Vérifications</div>
+    <!-- Each section for who may read it: an account that only holds the
+         maintenance (no check:read) is sent here by its reminders too. -->
+    <div v-if="canReadChecks" class="row items-center q-mb-sm">
+      <div class="text-h6">Vérifications</div>
+      <q-space />
+      <div v-if="!loading" class="text-caption text-muted" data-test="checks-total">
+        {{ checksTotal }} vérification(s)
+      </div>
+    </div>
 
     <q-table
+      v-if="canReadChecks"
       :rows="rows"
       :columns="columns"
       row-key="id"
@@ -36,7 +45,7 @@
       bordered
       no-data-label="Rien à faire."
       :grid="$q.screen.lt.sm"
-      @row-click="(_evt, row) => goMachine(row)"
+      @row-click="(_evt, row) => !selectingText() && goMachine(row)"
     >
       <!-- On a phone, a card per check with « Clore » in sight, rather than
            a table to scroll sideways (audit U23). -->
@@ -55,7 +64,14 @@
                 {{ props.row.instructions || '—' }}
               </div>
               <div class="text-caption text-muted q-mt-xs">
-                {{ props.row.assigned_to ? props.row.assigned_to.name : 'à prendre' }} ·
+                {{
+                  effectiveAssignee(props.row.assigned_to)
+                    ? props.row.assigned_to!.name
+                    : formerAssigneeNote(props.row.assigned_to)
+                      ? `à prendre (${formerAssigneeNote(props.row.assigned_to)})`
+                      : 'à prendre'
+                }}
+                ·
                 {{ timeAgoLabel(props.row.created_at) }}
               </div>
             </q-card-section>
@@ -105,8 +121,15 @@
       </template>
       <template #body-cell-assigned_to="props">
         <q-td :props="props">
-          <span v-if="props.row.assigned_to">{{ props.row.assigned_to.name }}</span>
-          <q-badge v-else color="grey-6">à prendre</q-badge>
+          <span v-if="effectiveAssignee(props.row.assigned_to)">
+            {{ props.row.assigned_to.name }}
+          </span>
+          <template v-else>
+            <q-badge color="grey-6">à prendre</q-badge>
+            <div v-if="formerAssigneeNote(props.row.assigned_to)" class="text-caption text-muted">
+              {{ formerAssigneeNote(props.row.assigned_to) }}
+            </div>
+          </template>
         </q-td>
       </template>
       <template #body-cell-created_at="props">
@@ -152,7 +175,7 @@
     </q-table>
 
     <!-- Maintenance: rooms with something due, then the loose postes. -->
-    <div v-if="auth.can('maintenance', 'read')" class="q-mt-xl">
+    <div v-if="auth.can('maintenance', 'read')" :class="canReadChecks ? 'q-mt-xl' : ''">
       <div class="row items-center q-mb-sm">
         <div class="text-h6">Maintenances à faire</div>
         <q-space />
@@ -163,7 +186,7 @@
       <q-list v-if="due && (dueRooms.length || dueMachines.length)" bordered separator>
         <q-expansion-item
           v-for="r in dueRooms"
-          :key="r.id"
+          :key="r.key ?? r.id"
           :label="r.name"
           group="rooms"
           expand-separator
@@ -178,6 +201,11 @@
                 {{ r.total }} poste(s) · cycle {{ r.cycle_days }} jours ·
                 {{ r.owner ? r.owner.name : 'sans responsable' }}
                 {{ r.next_due_at ? ` · ${dueLabel(r.next_due_at)}` : '' }}
+              </q-item-label>
+              <!-- Postes whose own owner or cycle overrides the room's: their
+                   group says what they resolve to, not the room's. -->
+              <q-item-label v-if="r.level === 'machine'" caption class="text-italic">
+                postes à réglage propre
               </q-item-label>
             </q-item-section>
             <q-item-section side>
@@ -210,6 +238,7 @@
                     @click="takeRoom(r)"
                   />
                   <q-btn
+                    v-if="r.level !== 'machine'"
                     flat
                     dense
                     no-caps
@@ -315,6 +344,7 @@ import {
   isDue,
   maintenanceStateColor,
   maintenanceStateLabel,
+  updateMachineMaintenance,
   updateRoomMaintenance,
   type MaintenanceSettingsPayload,
   type RoomMaintenance,
@@ -323,7 +353,9 @@ import {
   type DueRoom,
 } from 'src/services/maintenance';
 import {
-  listChecks,
+  effectiveAssignee,
+  formerAssigneeNote,
+  listAllChecks,
   updateCheck,
   type Check,
   type CheckMachineRef,
@@ -344,8 +376,15 @@ const scopeOptions = [
   { label: 'Toutes', value: 'all' },
 ];
 const rows = ref<Check[]>([]);
+const checksTotal = ref(0);
 const loading = ref(false);
 const canWrite = computed(() => auth.can('check', 'write'));
+const canReadChecks = computed(() => auth.can('check', 'read'));
+
+/** A click that ends a text selection is not a click on the row. */
+function selectingText(): boolean {
+  return (window.getSelection?.()?.toString() ?? '') !== '';
+}
 
 const columns: QTableColumn<Check>[] = [
   { name: 'machine', label: 'Poste', field: (r) => r.machine?.hostname ?? '', align: 'left' },
@@ -353,7 +392,7 @@ const columns: QTableColumn<Check>[] = [
   {
     name: 'assigned_to',
     label: 'Affectée à',
-    field: (r) => r.assigned_to?.name ?? '',
+    field: (r) => effectiveAssignee(r.assigned_to)?.name ?? '',
     align: 'left',
   },
   { name: 'created_at', label: 'Demandée', field: 'created_at', align: 'left' },
@@ -401,9 +440,22 @@ function stateWithDate(m: DueMachine): string {
 
 async function takeRoom(r: DueRoom) {
   if (!auth.user) return;
+  const me = auth.user.id;
   try {
-    await updateRoomMaintenance(r.id, { maintenance_owner_id: auth.user.id });
-    $q.notify({ type: 'positive', message: `Salle ${r.name} affectée à vous` });
+    if (r.level === 'machine') {
+      // Postes that override the room: taking them is setting their own
+      // owner — the room, and its other postes, stay whose they are.
+      for (const m of r.machines) {
+        await updateMachineMaintenance(m.id, { maintenance_owner_id: me });
+      }
+      $q.notify({
+        type: 'positive',
+        message: `${r.machines.length} poste(s) de ${r.name} affecté(s) à vous`,
+      });
+    } else {
+      await updateRoomMaintenance(r.id, { maintenance_owner_id: me });
+      $q.notify({ type: 'positive', message: `Salle ${r.name} affectée à vous` });
+    }
     notifyTasksChanged();
     await reload();
   } catch (e) {
@@ -448,13 +500,18 @@ async function loadDue() {
 async function reload() {
   loading.value = true;
   void loadDue();
+  if (!canReadChecks.value) {
+    loading.value = false;
+    return;
+  }
   try {
-    const res = await listChecks({
+    // Every page: the list stopped at 200 while the badge said 310.
+    const res = await listAllChecks({
       open: true,
       ...(scope.value === 'all' ? {} : { assigned_to: scope.value }),
-      page_size: 200,
     });
     rows.value = res.items;
+    checksTotal.value = res.total;
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
   } finally {

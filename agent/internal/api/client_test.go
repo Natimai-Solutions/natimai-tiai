@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -209,5 +210,80 @@ func TestAStatusErrorIsRenderedOnOneLine(t *testing.T) {
 	}
 	if !strings.Contains(msg, "status 403") || !strings.Contains(msg, "machine.enrollment.revoked") {
 		t.Errorf("the error message lost what it reports: %q", msg)
+	}
+}
+
+// Every request body leaves without C0 control characters, tab, line feed and
+// carriage return excepted: the server's database refuses a NUL (500), and a
+// heartbeat refused that way would take the poste offline, a verdict refused
+// that way would hold the local queue. Every string field is covered, however
+// deep — the strip runs on the encoded document, not field by field.
+func TestRequestsLeaveWithoutControlCharacters(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "tok", 5*time.Second, nil)
+	ctx := context.Background()
+
+	const dirty = "a\x00b\x01c\x1fd\te\nf\rg"
+	if _, err := c.Enroll(ctx, "s", models.EnrollRequest{Hostname: dirty}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Heartbeat(ctx, models.HeartbeatRequest{
+		Hostname:      dirty,
+		Session:       &models.SessionState{Username: dirty},
+		WindowsUpdate: &models.WUState{Pending: []models.PendingUpdate{{Title: dirty}}},
+		Inventory:     &models.InventoryState{Software: []models.Software{{Name: dirty, Publisher: dirty}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.PostResult(ctx, "id", models.CommandResult{Status: "succeeded", Output: dirty, Error: dirty}); err != nil {
+		t.Fatal(err)
+	}
+
+	const clean = `ab` + `cd\te\nf\rg`
+	for _, body := range bodies {
+		for _, esc := range []string{`\u0000`, `\u0001`, `\u001f`} {
+			if strings.Contains(body, esc) {
+				t.Errorf("%s left in %s", esc, body)
+			}
+		}
+		if n := strings.Count(body, `"`+clean+`"`); n == 0 {
+			t.Errorf("cleaned value missing from %s", body)
+		}
+	}
+	if len(bodies) != 3 {
+		t.Fatalf("%d requests", len(bodies))
+	}
+	if n := strings.Count(bodies[1], `"`+clean+`"`); n != 5 {
+		t.Errorf("heartbeat: %d field(s) cleaned, want 5: %s", n, bodies[1])
+	}
+}
+
+// The strip works escape by escape: a literal backslash followed by the text
+// "u0000" — a Windows path, a regex in a log excerpt — is data and stays; and
+// characters above the C0 range, escaped by encoding/json too, are kept.
+func TestStripControlEscapesKeepsWhatIsNotAControlCharacter(t *testing.T) {
+	for in, want := range map[string]string{
+		`{"p":"C:\\u0000\\x"}`:             `{"p":"C:\\u0000\\x"}`,
+		`{"p":"C:\\\u0000u0000"}`:          `{"p":"C:\\u0000"}`,
+		`{"p":"\u003c\u0026\u2028\u007f"}`: `{"p":"\u003c\u0026\u2028\u007f"}`,
+		`{"p":"\t\n\r\u0009\u000a\u000D"}`: `{"p":"\t\n\r\u0009\u000a\u000D"}`,
+		`{"p":"\u0000\u000B\u001F\u001f"}`: `{"p":""}`,
+		`{"p":"\u0020\u0100\u00ff"}`:       `{"p":"\u0020\u0100\u00ff"}`,
+		`{"p":"\\"}`:                       `{"p":"\\"}`,
+		`{"p":1}`:                          `{"p":1}`,
+	} {
+		if got := string(stripControlEscapes([]byte(in))); got != want {
+			t.Errorf("stripControlEscapes(%s) = %s, want %s", in, got, want)
+		}
 	}
 }

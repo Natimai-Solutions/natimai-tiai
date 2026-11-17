@@ -222,3 +222,68 @@ async def test_purge_drops_only_old_settled_rows(db_session):
 
     remaining = {row.to_address for row in await _rows(db_session)}
     assert remaining == {"old-pending@test.local", "recent-sent@test.local"}
+
+
+# --- Acceptance, 2026-11: a hard kill, a silent server -----------------------------
+
+
+async def _queue(db_session, n: int) -> None:
+    from app.features.notification.outbox import queue_email
+
+    for i in range(n):
+        queue_email(db_session, to=f"r{i}@test.local", subject="s", text="t")
+    await db_session.commit()
+
+
+async def test_a_kill_mid_drain_keeps_what_was_delivered(
+    db_session, mailgun_configured, monkeypatch
+):
+    """Each delivered mail is recorded as soon as it is sent: a worker killed
+    on the third mail re-sends the third, not the two before it."""
+    import asyncio
+
+    from app.features.notification import outbox
+    from app.features.notification.models import EmailStatus
+
+    await _queue(db_session, 5)
+    sent: list[str] = []
+
+    async def deliver_then_die(subject, text, to, *, policy=None):
+        if len(sent) == 2:
+            raise asyncio.CancelledError  # the process going down
+        sent.append(to[0])
+        return True
+
+    monkeypatch.setattr(outbox, "send_email", deliver_then_die)
+    with pytest.raises(asyncio.CancelledError):
+        await outbox.send_pending(db_session)
+    await db_session.rollback()
+
+    statuses = {r.to_address: r.status for r in await _rows(db_session)}
+    assert [a for a, s in statuses.items() if s == EmailStatus.SENT] == sent
+    assert sum(s == EmailStatus.PENDING for s in statuses.values()) == 3
+
+
+async def test_a_drain_stops_starting_mails_past_its_budget(
+    db_session, mailgun_configured, monkeypatch
+):
+    """A server that takes its time on every mail: the drain stops starting
+    new ones once its budget is spent; the rest stays due, untouched."""
+    import asyncio
+
+    from app.features.notification import outbox
+    from app.features.notification.models import EmailStatus
+
+    await _queue(db_session, 6)
+
+    async def slow(subject, text, to, *, policy=None):
+        await asyncio.sleep(0.2)
+        return True
+
+    monkeypatch.setattr(outbox, "send_email", slow)
+    sent = await outbox.send_pending(db_session, budget_seconds=0.3)
+    assert 1 <= sent <= 3
+    rows = await _rows(db_session)
+    pending = [r for r in rows if r.status == EmailStatus.PENDING]
+    assert len(pending) == 6 - sent
+    assert all(r.attempts == 0 for r in pending)

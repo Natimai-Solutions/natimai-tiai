@@ -41,7 +41,9 @@ class RefreshOutcome(enum.Enum):
     # The session's current token: rotated, a new one handed back.
     ROTATED = "rotated"
     # The token rotated away an instant ago (another tab of the same browser
-    # won the race): an access token, and the cookie left as the winner set it.
+    # won the race), or the one that rotation handed out, presented again
+    # within the same instant: an access token, no rotation, and the cookie
+    # left as the winner set it.
     CONCURRENT = "concurrent"
     # Unknown, malformed, expired, revoked: nothing to give.
     INVALID = "invalid"
@@ -133,7 +135,20 @@ async def refresh(session: AsyncSession, token: str) -> RefreshResult:
     if row is None or not is_live(row, now):
         return RefreshResult(RefreshOutcome.INVALID)
 
+    rotated_lately = (
+        row.previous_refresh_token_hash is not None
+        and now - row.last_used_at <= REFRESH_REUSE_GRACE
+    )
     if _same_hash(token, row.refresh_token_hash):
+        if rotated_lately:
+            # The token handed out by a rotation a moment ago, presented
+            # again by another tab — typically one that read the new cookie
+            # while a slower request still carried the old one. Rotating
+            # again would put the old one two steps behind and have the slow
+            # request taken for a thief: within the window the session
+            # answers without rotating, so concurrent refreshes never form a
+            # chain longer than one.
+            return RefreshResult(RefreshOutcome.CONCURRENT, row)
         new_token = security.generate_refresh_token(row.id)
         row.previous_refresh_token_hash = row.refresh_token_hash
         row.refresh_token_hash = security.hash_token(new_token)
@@ -142,10 +157,7 @@ async def refresh(session: AsyncSession, token: str) -> RefreshResult:
         session.add(row)
         return RefreshResult(RefreshOutcome.ROTATED, row, new_token)
 
-    if (
-        _same_hash(token, row.previous_refresh_token_hash)
-        and now - row.last_used_at <= REFRESH_REUSE_GRACE
-    ):
+    if rotated_lately and _same_hash(token, row.previous_refresh_token_hash):
         return RefreshResult(RefreshOutcome.CONCURRENT, row)
 
     row.revoked_at = now
@@ -196,6 +208,19 @@ def revoke(session: AsyncSession, row: AuthSession) -> None:
     if row.revoked_at is None:
         row.revoked_at = utcnow()
         session.add(row)
+
+
+async def note_password_failure(session: AsyncSession, row: AuthSession) -> int:
+    """Count one wrong current password typed through this session, and
+    return how many it has now. In the database, so that concurrent guesses
+    all count and a restart gives none back (audit T07). Does not commit."""
+    result = await session.exec(
+        update(AuthSession)
+        .where(col(AuthSession.id) == row.id)
+        .values(password_failures=col(AuthSession.password_failures) + 1)
+        .returning(col(AuthSession.password_failures))
+    )
+    return int(result.scalar_one())
 
 
 async def revoke_all(session: AsyncSession, user_id: uuid.UUID) -> int:

@@ -27,7 +27,7 @@
                  poste about to stop taking Windows updates. -->
             <q-linear-progress
               :value="usedRatio(v)"
-              :color="diskColor(freePercent(v.total_mb, v.free_mb))"
+              :color="diskColor(freePercent(v.total_mb, v.free_mb), lowDiskPercent)"
               size="8px"
               rounded
               class="q-mt-xs"
@@ -88,7 +88,8 @@ import {
   sizeLabel,
 } from 'src/utils/format';
 
-defineProps<{ machine: MachineDetail }>();
+// `lowDiskPercent`: the parc's « disque presque plein » setting, for the bars' colour.
+defineProps<{ machine: MachineDetail; lowDiskPercent?: number | undefined }>();
 
 /** The bar fills with what is *used*: a full disk is a full bar. */
 function usedRatio(v: Volume): number {

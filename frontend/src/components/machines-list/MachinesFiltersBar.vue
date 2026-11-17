@@ -11,6 +11,7 @@
         placeholder="Nom, IP, MAC, antivirus ou UUID…"
         style="max-width: 480px"
         @update:model-value="(v) => set({ search: v == null ? '' : String(v) })"
+        @blur="trimSearch"
       >
         <template #prepend><q-icon name="search" /></template>
       </q-input>
@@ -62,6 +63,7 @@
       :usage-thresholds="usageThresholds"
       :usage-window-days="usageWindowDays"
       :active-count="chips.length"
+      :can-read-rooms="canReadRooms"
       @update:model-value="(f) => emit('update:modelValue', f)"
       @clear-all="clearAll"
     />
@@ -84,6 +86,18 @@
     >
       {{ chip.label }}
     </q-chip>
+    <q-btn
+      v-if="!filtersOpen"
+      flat
+      dense
+      no-caps
+      size="sm"
+      color="primary"
+      icon="filter_list_off"
+      label="Tout effacer"
+      class="q-ml-xs"
+      @click="clearAll"
+    />
   </div>
 </template>
 
@@ -107,12 +121,17 @@ import type { UsageThresholds } from 'src/utils/usageFilter';
  * folded panel is filtering. Every change is emitted as a whole new set of
  * filters; the page writes it into the URL, which stays the source of truth.
  */
-const props = defineProps<{
-  modelValue: MachineFilters;
-  options: MachineFleetOptions;
-  usageThresholds: UsageThresholds | null;
-  usageWindowDays: number;
-}>();
+const props = withDefaults(
+  defineProps<{
+    modelValue: MachineFilters;
+    options: MachineFleetOptions;
+    usageThresholds: UsageThresholds | null;
+    usageWindowDays: number;
+    /** See MachinesFilterPanel: the room filters need room:read. */
+    canReadRooms?: boolean;
+  }>(),
+  { canReadRooms: true },
+);
 
 const emit = defineEmits<{ 'update:modelValue': [value: MachineFilters] }>();
 
@@ -156,6 +175,12 @@ const shownChips = computed(() =>
 
 function set(patch: Partial<MachineFilters>) {
   emit('update:modelValue', { ...props.modelValue, ...patch });
+}
+
+/** Leaving the box: « PC-01 » pasted with its spaces reads as typed, without them. */
+function trimSearch() {
+  const trimmed = props.modelValue.search.trim();
+  if (trimmed !== props.modelValue.search) set({ search: trimmed });
 }
 
 /** Back to the whole parc: every folded filter off, the two toggles and the

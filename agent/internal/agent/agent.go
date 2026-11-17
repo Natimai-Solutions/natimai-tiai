@@ -130,9 +130,13 @@ type Agent struct {
 	// with no log line at all, and "no heartbeat for ten minutes, last seen
 	// reading the Defender state" is the line that names it.
 	lastPollDone atomic.Int64 // unix seconds; 0 until the first poll completes
-	pollPhase    atomic.Value // string
-	stallLogged  atomic.Bool
-	firstOK      atomic.Bool
+	// When the loop's deliberate wait ends (unix seconds): the next poll is not
+	// late before then, however long ago the last one finished — an
+	// enrollment hold waits up to a quarter of an hour on purpose.
+	nextPollAt  atomic.Int64
+	pollPhase   atomic.Value // string
+	stallLogged atomic.Bool
+	firstOK     atomic.Bool
 }
 
 // pollStallAfter is how long the watchdog tolerates without a completed poll
@@ -197,6 +201,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		log.Printf("agent: installed-software inventory disabled (hardware only)")
 	}
 
+	sweepPackageCache()
+
 	q, err := queue.New(filepath.Join(dir, "queue"), a.cfg.QueueMaxItems)
 	if err != nil {
 		return fmt.Errorf("open local queue: %w", err)
@@ -217,42 +223,85 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.watchdog(ctx)
 	defer a.wg.Wait()
 
-	base := time.Duration(a.cfg.HeartbeatIntervalSeconds) * time.Second
-	maxBackoff := time.Duration(a.cfg.BackoffMaxSeconds) * time.Second
-	// wait is the back-off *step* — doubled on each failure, deterministic —
-	// and sleep is what is actually slept: the step with jitter on a failure,
-	// the plain interval on a success.
-	//
 	// The first tick runs at once, without jitter, and that is deliberate: it
 	// is the poste's presence signal, a boot is already its own spread (no two
 	// machines finish starting at the same second), and the heaviest payload a
 	// start produces, the first inventory, is spread on its own
 	// (inventoryFirstCollectSpread). The herd worth breaking is the one a
 	// server outage builds — see jitterBackoff.
-	wait := base
+	plan := newRetryPlan(
+		time.Duration(a.cfg.HeartbeatIntervalSeconds)*time.Second,
+		time.Duration(a.cfg.BackoffMaxSeconds)*time.Second)
 
 	for {
-		sleep := base
-		if err := a.tick(ctx); err != nil {
-			wait = nextBackoff(wait, maxBackoff)
-			sleep = jitterBackoff(wait)
-			if enrollmentOnHold(err) {
-				// Waiting for an administrator, or revoked: asking every five
-				// minutes changes nothing but the server's audit log (audit
-				// B33). Still asked, so an approval is picked up.
-				sleep = jitterBackoff(enrollmentOnHoldWait)
-			}
-			log.Printf("agent: tick failed, retrying in %s: %v", sleep.Round(time.Second), err)
-		} else {
-			wait = base
-		}
-
+		sleep := a.scheduleNext(plan, a.tick(ctx), time.Now())
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-time.After(sleep):
 		}
 	}
+}
+
+// retryPlan is the polling loop's schedule: the plain interval after a
+// successful tick, an exponential back-off after a failed one, and a back-off
+// of its own while the server holds the enrollment (waiting for an approval,
+// or revoked).
+//
+// The steps are deterministic, and doubled on each failure; what is actually
+// slept is the step with jitter on a failure, the plain interval on a success
+// (scheduleNext).
+type retryPlan struct {
+	base, max time.Duration
+	// wait is the regular back-off step.
+	wait time.Duration
+	// hold is the enrollment-hold step, zero while the server holds nothing:
+	// the first hold step is then enrollmentHoldFirst again.
+	hold time.Duration
+}
+
+func newRetryPlan(base, max time.Duration) *retryPlan {
+	return &retryPlan{base: base, max: max, wait: base}
+}
+
+// next returns the step to wait after a tick that returned err (nil for a
+// success), and whether that step is an enrollment hold.
+func (p *retryPlan) next(err error) (step time.Duration, onHold bool) {
+	if err == nil {
+		p.wait, p.hold = p.base, 0
+		return p.base, false
+	}
+	if enrollmentOnHold(err) {
+		p.hold = nextHoldStep(p.hold)
+		return p.hold, true
+	}
+	// The hold has ended — the server answers something else now — and the
+	// next one starts again from its first, short step.
+	p.hold = 0
+	p.wait = nextBackoff(p.wait, p.max)
+	return p.wait, false
+}
+
+// scheduleNext decides how long the loop sleeps after a tick that returned
+// err, logs the failure or the hold, and tells the watchdog when the next poll
+// is due — a wait chosen on purpose is not a poll that hangs.
+func (a *Agent) scheduleNext(p *retryPlan, err error, now time.Time) time.Duration {
+	step, onHold := p.next(err)
+	sleep := step
+	switch {
+	case err == nil:
+	case onHold:
+		sleep = jitterBackoff(step)
+		// One line per hold step: the step grows to enrollmentHoldMax, so a
+		// poste left waiting for a day writes about a hundred of them.
+		log.Printf("agent: %s, next enrollment attempt in %s",
+			enrollmentHoldReason(err), sleep.Round(time.Second))
+	default:
+		sleep = jitterBackoff(step)
+		log.Printf("agent: tick failed, retrying in %s: %v", sleep.Round(time.Second), err)
+	}
+	a.nextPollAt.Store(now.Add(sleep).Unix())
+	return sleep
 }
 
 // tick enrolls if needed, then runs one heartbeat cycle. A returned error means
@@ -277,20 +326,48 @@ func (a *Agent) tick(ctx context.Context) error {
 	return err
 }
 
-// enrollmentOnHoldWait is the retry step while an enrollment waits for an
-// administrator's approval, or the poste is revoked.
-const enrollmentOnHoldWait = 30 * time.Minute
+// The enrollment-hold back-off: the first attempt after a hold one minute
+// later, then twice as long each time up to a quarter of an hour.
+//
+// An approval is what an administrator does while looking at the console,
+// which promises the poste back within minutes: the first steps are short for
+// that. A poste nobody approves settles at one enrollment attempt per quarter
+// of an hour — retrying every five minutes, as an ordinary failure would,
+// changed nothing but the server's audit log (audit B33). Each step is one
+// tick, so one enrollment attempt.
+const (
+	enrollmentHoldFirst = time.Minute
+	enrollmentHoldMax   = 15 * time.Minute
+)
+
+// nextHoldStep is the hold step after cur (zero: the hold just started).
+func nextHoldStep(cur time.Duration) time.Duration {
+	if cur <= 0 {
+		return enrollmentHoldFirst
+	}
+	return nextBackoff(cur, enrollmentHoldMax)
+}
 
 // enrollmentOnHold reports whether err is the server's 403 saying the poste
-// waits for approval or is revoked — an answer that a retry in five minutes
-// will not change.
+// waits for approval or is revoked — an answer only an administrator changes.
 func enrollmentOnHold(err error) bool {
+	return enrollmentHoldReason(err) != ""
+}
+
+// enrollmentHoldReason says, for the log, why the server holds the
+// enrollment, or returns "" when err is not such a hold.
+func enrollmentHoldReason(err error) string {
 	var se *api.StatusError
 	if !errors.As(err, &se) || se.StatusCode != http.StatusForbidden {
-		return false
+		return ""
 	}
-	return strings.Contains(se.Body, "machine.enrollment.approval_required") ||
-		strings.Contains(se.Body, "machine.enrollment.revoked")
+	switch {
+	case strings.Contains(se.Body, "machine.enrollment.approval_required"):
+		return "enrollment waiting for an administrator's approval"
+	case strings.Contains(se.Body, "machine.enrollment.revoked"):
+		return "this machine is revoked, waiting for an administrator to allow re-enrollment"
+	}
+	return ""
 }
 
 // isUnauthorized reports whether err wraps an HTTP 401 from the server.
@@ -568,19 +645,29 @@ func (a *Agent) watchdog(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		last := a.lastPollDone.Load()
-		if last == 0 {
-			last = started
-		}
-		since := time.Since(time.Unix(last, 0))
-		if since < pollStallAfter || a.stallLogged.Load() {
-			continue
-		}
-		a.stallLogged.Store(true)
-		phase, _ := a.pollPhase.Load().(string)
-		log.Printf("agent: no poll has completed for %s — the current one is stuck in %q",
-			since.Round(time.Minute), phase)
+		a.checkStall(time.Now(), started)
 	}
+}
+
+// checkStall logs, once, a poll that has not completed for pollStallAfter.
+// The clock runs from the last completed poll, or from the end of the wait
+// the loop chose after it — a poll is only late once it was due.
+func (a *Agent) checkStall(now time.Time, started int64) {
+	ref := a.lastPollDone.Load()
+	if ref == 0 {
+		ref = started
+	}
+	if due := a.nextPollAt.Load(); due > ref {
+		ref = due
+	}
+	since := now.Sub(time.Unix(ref, 0))
+	if since < pollStallAfter || a.stallLogged.Load() {
+		return
+	}
+	a.stallLogged.Store(true)
+	phase, _ := a.pollPhase.Load().(string)
+	log.Printf("agent: no poll has completed for %s — the current one is stuck in %q",
+		since.Round(time.Minute), phase)
 }
 
 // logAVError reports a Security Center read failure once, then at debug level.
@@ -951,6 +1038,7 @@ func (a *Agent) flushQueue(ctx context.Context) {
 		}
 		if err := a.client.PostResult(ctx, item.CommandID, item.Result); err != nil {
 			if !refusedForGood(err) {
+				a.logReplayFailure(item.CommandID, err)
 				return
 			}
 			log.Printf("agent: queued result for command %s refused by the server, dropping it: %v",
@@ -963,6 +1051,25 @@ func (a *Agent) flushQueue(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// logReplayFailure says why the verdict at the head of the queue stays there,
+// naming its command: one line per failed replay. Without it, a verdict the
+// server answers 500 to on every poll held back the whole queue without a
+// trace in the log.
+//
+// An answer from the other end — the server, or whatever answered for it —
+// is logged at INFO. A request that reached nothing is not: the heartbeat
+// right after it fails the same way and says so in its "tick failed" line.
+func (a *Agent) logReplayFailure(commandID string, err error) {
+	var se *api.StatusError
+	if errors.As(err, &se) {
+		log.Printf("agent: queued result for command %s not delivered, kept in the queue: %v",
+			commandID, err)
+		return
+	}
+	logging.Debugf("agent: queued result for command %s not delivered, kept in the queue: %v",
+		commandID, err)
 }
 
 // refusedForGood reports whether err is the server's answer that this verdict
@@ -1035,14 +1142,7 @@ func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.Pack
 	a.wuOp.Lock()
 	defer a.wuOp.Unlock()
 
-	trust := config.DeployKeys()
-	policy := deploy.Policy{
-		Signers:      trust.Signers,
-		Publishers:   trust.Publishers,
-		Winget:       trust.Winget,
-		WingetAllow:  trust.WingetAllow,
-		MethodAMaxGB: trust.MethodAMaxGB,
-	}
+	policy := deployPolicy(config.DeployKeys())
 	env := &deploy.SystemEnv{Fetcher: a.client, DataDir: config.DefaultConfigDir()}
 	res, err := deploy.Execute(ctx, env, policy, cmdType, pkg)
 	if err != nil {
@@ -1054,4 +1154,27 @@ func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.Pack
 		log.Printf("agent: inventory after %s: %v", cmdType, ierr)
 	}
 	return res.Output, nil
+}
+
+// deployPolicy is the trust a GPO granted, as internal/deploy reads it.
+func deployPolicy(trust config.DeployTrust) deploy.Policy {
+	return deploy.Policy{
+		Signers:      trust.Signers,
+		Publishers:   trust.Publishers,
+		Winget:       trust.Winget,
+		WingetAllow:  trust.WingetAllow,
+		MethodAMaxGB: trust.MethodAMaxGB,
+		CacheMaxGB:   trust.CacheMaxGB,
+	}
+}
+
+// sweepPackageCache clears, when the service starts, the package folders that
+// earlier runs left: those untouched for a week, then the oldest while they
+// hold more than DeployCacheMaxGB (audit S24). Nothing is being deployed yet
+// — the worker has not started — so no folder is spared. Without it, folders
+// would wait for the next deployment to be weighed, and a poste that receives
+// none would keep them for a week whatever their size.
+func sweepPackageCache() {
+	env := &deploy.SystemEnv{DataDir: config.DefaultConfigDir()}
+	deploy.SweepPackages(env.PackagesDir(), "", 0, deployPolicy(config.DeployKeys()).CacheMaxBytes(), time.Now())
 }

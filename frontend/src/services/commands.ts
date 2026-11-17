@@ -147,7 +147,7 @@ export const commandActions: CommandAction[] = [
     group: 'windows_update',
     confirm: true,
     bulk: true,
-    hint: 'Comme ci-dessus, mais les pilotes proposés par Windows Update sont installés eux aussi — à réserver aux postes où c’est souhaité. Aucun redémarrage automatique.',
+    hint: 'Le poste télécharge et installe ses mises à jour, y compris les pilotes proposés par Windows Update — à réserver aux postes où c’est souhaité ; compter plusieurs dizaines de minutes. Aucun redémarrage automatique : le poste signalera s’il en attend un.',
   },
   {
     // Last in the section, after the two installs: it is what an admin reaches
@@ -378,6 +378,39 @@ export function commandTypeLabel(type: string): string {
   return commandActions.find((a) => a.type === type)?.label ?? packageCommandLabels[type] ?? type;
 }
 
+/** A history row's label: the type, and for a deployment the package it carried. */
+export function commandRowLabel(cmd: Pick<Command, 'type' | 'package_name'>): string {
+  const label = commandTypeLabel(cmd.type);
+  return cmd.package_name ? `${label} — ${cmd.package_name}` : label;
+}
+
+const ALREADY_THERE: Record<string, string> = {
+  pending: 'déjà en attente',
+  delivered: 'déjà transmise',
+  running: 'déjà en cours',
+};
+
+/**
+ * What a single-poste send did, as a notification. The server creates nothing
+ * when the same command is still standing on the poste, and says where it
+ * stands (`reason`): « déjà en cours sur ce poste » is not the same news as
+ * « déjà en attente ».
+ */
+export function singleSendNotification(
+  action: Pick<CommandAction, 'label'>,
+  res: CreateCommandsResponse,
+): { type: 'positive' | 'warning' | 'negative'; message: string } {
+  if (res.count > 0) return { type: 'positive', message: 'Commande envoyée' };
+  if ((res.revoked ?? 0) > 0) {
+    return {
+      type: 'negative',
+      message: `« ${action.label} » non envoyée : le token de ce poste est révoqué.`,
+    };
+  }
+  const where = ALREADY_THERE[res.reason ?? ''] ?? ALREADY_THERE.pending;
+  return { type: 'warning', message: `« ${action.label} » est ${where} sur ce poste.` };
+}
+
 export interface CreateCommandsPayload {
   type: CommandType;
   ttl_minutes?: number;
@@ -403,6 +436,17 @@ export interface CreateCommandsResponse {
    * rather than as NaN in the notification.
    */
   skipped?: number;
+  /**
+   * Targets left alone because their token is revoked: no agent will ever
+   * fetch the command. Optional: an older server does not send it.
+   */
+  revoked?: number;
+  /**
+   * On a single target left alone: where the command already standing on it
+   * is (`pending`, `delivered`, `running`). Optional: an older server does not
+   * send it, and the console then says « déjà en attente ».
+   */
+  reason?: 'pending' | 'delivered' | 'running' | null;
 }
 
 export interface Command {
@@ -417,6 +461,8 @@ export interface Command {
   relay_machine_id?: string | null;
   /** The package of a deployment command. Optional: an older server does not send it. */
   package_id?: string | null;
+  /** That package's name and version (« 7-Zip 23.01 »). Optional likewise. */
+  package_name?: string | null;
   /** The poste's name, sent by the list endpoint. */
   machine_hostname?: string | null;
   created_by: string | null;
@@ -517,16 +563,21 @@ export function bulkSendNotification(res: CreateCommandsResponse): {
   // ?? 0 and not a required field: an older server does not send it, and NaN
   // in a notification is worse than an undercount.
   const skipped = res.skipped ?? 0;
-  if (res.count === 0 && skipped > 0) {
-    return {
-      type: 'warning',
-      message: `Rien à envoyer : cette commande est déjà en attente sur ${skipped} poste(s).`,
-    };
+  const revoked = res.revoked ?? 0;
+  const revokedPart = revoked > 0 ? `${revoked} au token révoqué` : '';
+  if (res.count === 0 && (skipped > 0 || revoked > 0)) {
+    const parts = [
+      skipped > 0 ? `cette commande est déjà en attente sur ${skipped} poste(s)` : '',
+      revokedPart ? `${revoked} poste(s) au token révoqué` : '',
+    ].filter(Boolean);
+    return { type: 'warning', message: `Rien à envoyer : ${parts.join(' ; ')}.` };
   }
   const sent = `${res.count} commande(s) envoyée(s)`;
+  const left = [skipped > 0 ? `${skipped} déjà en attente` : '', revokedPart].filter(Boolean);
   return {
-    type: 'positive',
-    message: skipped > 0 ? `${sent} — ${skipped} déjà en attente, ignoré(s)` : sent,
+    // Skipped ones are routine (pressed twice); a revoked poste is not.
+    type: revoked > 0 ? 'warning' : 'positive',
+    message: left.length ? `${sent} — ${left.join(', ')}, ignoré(s)` : sent,
   };
 }
 

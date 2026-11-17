@@ -1,5 +1,6 @@
 import { api } from 'boot/axios';
 import type { Command, CommandList, CreateCommandsResponse } from './commands';
+import { frNumber } from 'src/utils/format';
 
 /**
  * Software packages the console deploys (dev/plan-deploiement-logiciel.md).
@@ -68,6 +69,14 @@ export interface Package {
   file_max_bytes: number;
   /** Why it cannot be deployed yet; empty when it can. */
   problems: PackageProblem[];
+  /**
+   * Why no poste would run an installation of it, one French sentence each:
+   * what the server refuses a deployment with (409 package.not_ready) — the
+   * problems above, or else why neither method B nor method A carries it,
+   * naming the file in the way. Empty when some poste could install it. A
+   * retirement is said by `retired_at`, not here.
+   */
+  install_blockers: string[];
   /** Postes whose inventory shows the program; null without `detect_name`. */
   installed_count: number | null;
   created_by: string | null;
@@ -157,8 +166,21 @@ function methodAExecutable(p: Package, action: DeployAction): boolean {
   return (
     !!publisherOf(p, action) &&
     run.toLowerCase().endsWith('.exe') &&
-    !(p.files ?? []).some((f) => f.name !== run && LOADABLE_EXTENSIONS.has(extension(f.name)))
+    loadableBeside(p, action).length === 0
   );
+}
+
+/**
+ * The files beside the one the step runs that Windows could load or run from
+ * that folder: what makes every poste refuse the step under method A, named
+ * where the console explains why method A does not carry it.
+ */
+export function loadableBeside(p: Package, action: DeployAction = 'install'): string[] {
+  const run = (action === 'install' ? p.install_run : p.uninstall_run) ?? '';
+  return (p.files ?? [])
+    .filter((f) => f.name !== run && LOADABLE_EXTENSIONS.has(extension(f.name)))
+    .map((f) => f.name)
+    .sort(compareFileNames);
 }
 
 /**
@@ -193,6 +215,60 @@ export const trustLabels: Record<TrustMethod, string> = {
   publisher: 'Éditeur (méthode A)',
   none: 'Non signé',
 };
+
+/**
+ * File names as a French reader sorts them: case and accents aside, digits by
+ * value (« setup2 » before « setup10 »). A plain sort put « Z.exe » before
+ * « a.ini » and « été.txt » after « zip.cab ».
+ */
+export function compareFileNames(a: string, b: string): number {
+  return (
+    a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }) || (a < b ? -1 : a > b ? 1 : 0)
+  );
+}
+
+/** The package's files in that order. */
+export function sortedFiles(p: Package): PackageFile[] {
+  return [...(p.files ?? [])].sort((a, b) => compareFileNames(a.name, b.name));
+}
+
+function safeStem(text: string): string {
+  return text.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
+}
+
+/**
+ * The name the manifest is saved under: the server's (packages.py
+ * manifest_file_stem). A name written in another script keeps no character a
+ * file system takes everywhere: the package id stands in for it — never a
+ * bare `.tiai-manifest.json`, which is a hidden file.
+ */
+export function manifestFileName(p: Package): string {
+  const name = safeStem(p.name) || p.id;
+  const version = safeStem(p.version ?? '');
+  return `${version ? `${name}-${version}` : name}.tiai-manifest.json`;
+}
+
+/**
+ * How a package reads in a list to choose from: name and version, and — when
+ * another package reads the same — what tells them apart: its kind (winget
+ * identifier, or the file it runs) and its creation date.
+ */
+export function packageChoiceLabel(p: Package, among: Package[]): string {
+  const base = p.version ? `${p.name} ${p.version}` : p.name;
+  const twins = among.filter(
+    (o) => o.id !== p.id && (o.version ? `${o.name} ${o.version}` : o.name) === base,
+  );
+  if (!twins.length) return base;
+  const kind =
+    p.kind === 'winget'
+      ? `winget ${p.winget_id ?? ''}`.trim()
+      : `fichiers, ${p.install_run ?? 'sans fichier à lancer'}`;
+  const created = new Date(p.created_at).toLocaleString('fr-FR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  });
+  return `${base} (${kind} — créé le ${created})`;
+}
 
 /** Ready to deploy: complete, not retired. */
 export function deployable(p: Package): boolean {
@@ -263,7 +339,7 @@ export function formatSize(bytes: number): string {
     value /= 1024;
     unit++;
   }
-  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+  return `${frNumber(value, value < 10 ? 1 : 0)} ${units[unit]}`;
 }
 
 export async function listPackages(retired = false): Promise<Package[]> {
@@ -368,15 +444,26 @@ export async function deployPackage(
   return data;
 }
 
-/** The deployments of a package, newest first, one page at a time. */
+/**
+ * The deployments of a package, newest batch first, each batch by poste name,
+ * one page at a time. `latest`: each poste's latest deployment only — the
+ * rows the summary counts.
+ */
 export async function listPackageCommands(
   id: string,
   page = 1,
   pageSize = 25,
   status: string | null = null,
+  latest = false,
 ): Promise<CommandList> {
   const { data } = await api.get<CommandList>('/commands', {
-    params: { package_id: id, page, page_size: pageSize, ...(status ? { status } : {}) },
+    params: {
+      package_id: id,
+      page,
+      page_size: pageSize,
+      ...(status ? { status } : {}),
+      ...(latest ? { latest: true } : {}),
+    },
   });
   return data;
 }
@@ -386,6 +473,8 @@ export interface PackageSummary {
   postes: number;
   by_status: Record<string, number>;
   by_action: Record<string, number>;
+  /** Installations no poste has received yet: what a retirement cancels. */
+  pending_installs: number;
 }
 
 export async function getPackageSummary(id: string): Promise<PackageSummary> {

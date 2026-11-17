@@ -12,9 +12,25 @@ export interface Group {
   permissions: string[];
   /** Where the group is confined; null = the whole parc. */
   scope: GroupScope | null;
+  /**
+   * Each scope entry named by the server, whether or not the reader may read
+   * rooms — `exists: false` for a building or room deleted since. Optional:
+   * an older server does not send it, and the console then names the entries
+   * from the room listings.
+   */
+  scope_labels?: ScopeLabel[];
   member_count: number;
   created_at: string;
   updated_at: string;
+}
+
+/** One entry of a group's scope, as the server names it (C6). */
+export interface ScopeLabel {
+  kind: 'location' | 'building' | 'room';
+  /** The site's own name for a location, the id for a building or a room. */
+  id: string;
+  label: string;
+  exists: boolean;
 }
 
 /**

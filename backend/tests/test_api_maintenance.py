@@ -356,7 +356,8 @@ async def test_recording_a_visit_writes_the_journal_and_moves_the_cycle(
         await client.get(f"/api/v1/machines/{a}/interventions", headers=admin)
     ).json()
     assert journal["items"][0]["kind"] == "maintenance"
-    assert journal["items"][0]["title"] == "Maintenance — B12"
+    # The kind says « Maintenance »: the title only adds the room.
+    assert journal["items"][0]["title"] == "B12"
     assert journal["items"][0]["note"] == "Clavier changé"
     assert journal["items"][0]["maintenance_id"] == visit["id"]
 

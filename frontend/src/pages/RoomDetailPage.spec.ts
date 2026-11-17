@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Screen } from 'quasar';
 import { defineComponent, h } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
@@ -79,6 +80,22 @@ const settings: RoomMaintenance = {
 const inRoom = machineDetail({ id: 'm-1', hostname: 'PC-01', room_id: 'r-1' }) as Machine;
 const elsewhere = machineDetail({ id: 'm-2', hostname: 'PC-02', room_id: 'r-2' }) as Machine;
 
+/** Click « Retirer » on PC-01 and say yes to the question it now asks. */
+async function removeConfirmed(wrapper: Awaited<ReturnType<typeof mountPage>>) {
+  let confirm: (() => void) | null = null;
+  const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+    onOk(fn: () => void) {
+      confirm = fn;
+      return this;
+    },
+  })) as never);
+  await wrapper.find('[aria-label="Retirer PC-01 de la salle"]').trigger('click');
+  await flushPromises();
+  expect(dialog).toHaveBeenCalledTimes(1);
+  confirm!();
+  await flushPromises();
+}
+
 async function mountPage() {
   const pinia = createPinia();
   setActivePinia(pinia);
@@ -106,6 +123,7 @@ async function mountPage() {
         QPage: PageStub,
         MaintenanceSettingsDialog: true,
         MaintenanceSessionDialog: true,
+        MaintenanceSessionViewDialog: true,
         RoomFormDialog: true,
       },
     },
@@ -158,8 +176,7 @@ describe('RoomDetailPage', () => {
       const wrapper = await mountPage();
       const before = tasksVersion.value;
 
-      await wrapper.find('[aria-label="Retirer PC-01 de la salle"]').trigger('click');
-      await flushPromises();
+      await removeConfirmed(wrapper);
 
       expect(unassignMachines).toHaveBeenCalledWith(['m-1']);
       expect(tasksVersion.value).toBe(before + 1);
@@ -194,12 +211,152 @@ describe('RoomDetailPage', () => {
       const wrapper = await mountPage();
       const before = tasksVersion.value;
 
-      await wrapper.find('[aria-label="Retirer PC-01 de la salle"]').trigger('click');
-      await flushPromises();
+      await removeConfirmed(wrapper);
 
       expect(unassignMachines).toHaveBeenCalledTimes(1);
       expect(tasksVersion.value).toBe(before);
       wrapper.unmount();
     });
+  });
+});
+
+describe('RoomDetailPage — acceptance fixes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getRoom).mockResolvedValue(room);
+    vi.mocked(getRoomConfig).mockResolvedValue({ source: 'manual', manual: true });
+    vi.mocked(listBuildings).mockResolvedValue([]);
+    vi.mocked(listLocations).mockResolvedValue([]);
+    vi.mocked(listMachines).mockResolvedValue({ items: [inRoom], total: 1 } as never);
+    vi.mocked(getRoomMaintenance).mockResolvedValue(settings);
+    vi.mocked(listSessions).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 5 });
+    vi.mocked(unassignMachines).mockResolvedValue({ moved: 1, mismatched: [] });
+  });
+
+  it('asks before taking a poste out of the room (item 14)', async () => {
+    const wrapper = await mountPage();
+    const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+      onOk() {
+        return this;
+      },
+    })) as never);
+    await wrapper.find('[aria-label="Retirer PC-01 de la salle"]').trigger('click');
+    await flushPromises();
+    expect(dialog).toHaveBeenCalledTimes(1);
+    expect(unassignMachines).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('says « défaut du parc » when the room owner no longer applies (item 4)', async () => {
+    vi.mocked(getRoomMaintenance).mockResolvedValue({
+      maintenance_cycle_days: null,
+      maintenance_owner: { id: 'u-gone', name: 'Marie', active: false },
+      effective_cycle_days: 90,
+      effective_owner: { id: 'u-def', name: 'Paul' },
+      effective_cycle_origin: 'global',
+      effective_owner_origin: 'global',
+    });
+    const wrapper = await mountPage();
+    expect(wrapper.find('[data-test="owner-origin"]').text()).toBe('(défaut du parc)');
+    expect(wrapper.text()).toContain('Marie (désactivé)');
+    expect(wrapper.findComponent(MaintenanceSettingsDialog).props('ownerLabel')).toBe(
+      'Marie (désactivé)',
+    );
+    wrapper.unmount();
+  });
+
+  it('lists every visit a page at a time, each opening its detail (item 1)', async () => {
+    const visit = (n: number) => ({
+      id: `s-${n}`,
+      room_id: 'r-1',
+      room_name: 'B12',
+      performed_by: 'alice@test.local',
+      performed_at: `2026-11-${String(10 - n).padStart(2, '0')}T20:00:00Z`,
+      note: `Note ${n}`,
+      machine_count: 1,
+      items: [],
+    });
+    vi.mocked(listSessions)
+      .mockResolvedValueOnce({
+        items: [0, 1, 2, 3, 4].map(visit),
+        total: 7,
+        page: 1,
+        page_size: 5,
+      })
+      .mockResolvedValueOnce({ items: [5, 6].map(visit), total: 7, page: 2, page_size: 5 });
+    const wrapper = await mountPage();
+    const sessions = () => wrapper.find('[data-test="room-sessions"]');
+    expect(sessions().text()).toContain('Note 4');
+    expect(sessions().text()).not.toContain('Note 6');
+
+    await sessions()
+      .findAll('button')
+      .find((b) => b.text().includes('Afficher plus'))!
+      .trigger('click');
+    await flushPromises();
+    expect(listSessions).toHaveBeenLastCalledWith({ room_id: 'r-1', page: 2, page_size: 5 });
+    expect(sessions().text()).toContain('Note 6');
+
+    await wrapper.find('[data-test="session-s-6"]').trigger('click');
+    await flushPromises();
+    const view = wrapper.findComponent({ name: 'MaintenanceSessionViewDialog' });
+    expect(view.props('sessionId')).toBe('s-6');
+    expect(view.props('modelValue')).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('does not open a poste when the click ends a text selection (item 15)', async () => {
+    const wrapper = await mountPage();
+    const router = wrapper.vm.$router;
+    const push = vi.spyOn(router, 'push');
+    const selection = vi
+      .spyOn(window, 'getSelection')
+      .mockReturnValue({ toString: () => 'PC-01' } as Selection);
+    await wrapper.find('tbody tr').trigger('click');
+    await flushPromises();
+    expect(push).not.toHaveBeenCalled();
+
+    selection.mockReturnValue({ toString: () => '' } as Selection);
+    await wrapper.find('tbody tr').trigger('click');
+    await flushPromises();
+    expect(push).toHaveBeenCalledWith({ name: 'machine-detail', params: { id: 'm-1' } });
+    selection.mockRestore();
+    wrapper.unmount();
+  });
+});
+
+describe('RoomDetailPage — on a phone (audit U23)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getRoom).mockResolvedValue(room);
+    vi.mocked(getRoomConfig).mockResolvedValue({ source: 'manual', manual: true });
+    vi.mocked(listBuildings).mockResolvedValue([]);
+    vi.mocked(listLocations).mockResolvedValue([]);
+    vi.mocked(listMachines).mockResolvedValue({ items: [inRoom], total: 1 } as never);
+    vi.mocked(getRoomMaintenance).mockResolvedValue(settings);
+    vi.mocked(listSessions).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 5 });
+    Screen.lt.sm = true;
+  });
+  afterEach(() => {
+    Screen.lt.sm = false;
+  });
+
+  it('shows a card per poste with its link and « Retirer » at touch size, no table', async () => {
+    const wrapper = await mountPage();
+    expect(wrapper.find('table').exists()).toBe(false);
+    const card = wrapper.find('[data-test="machine-card-m-1"]');
+    expect(card.find('a').attributes('href')).toBe('/machines/m-1');
+    expect(card.text()).toContain('PC-01');
+    const remove = card.find('[aria-label="Retirer PC-01 de la salle"]');
+    expect(remove.classes()).not.toContain('q-btn--dense');
+
+    const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+      onOk() {
+        return this;
+      },
+    })) as never);
+    await remove.trigger('click');
+    expect(dialog).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
   });
 });

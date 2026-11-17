@@ -19,6 +19,10 @@ export interface Intervention {
   performed_by: string;
   /** When it happened — not when it was typed in; backdating is allowed. */
   performed_at: string;
+  /** The verification request whose closing wrote this line, if any. */
+  check_id?: string | null;
+  /** The maintenance visit this line belongs to, if any: it holds the global note. */
+  maintenance_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -54,6 +58,25 @@ export const INTERVENTION_KINDS: readonly {
 
 export function interventionKindLabel(kind: string): string {
   return INTERVENTION_KINDS.find((k) => k.value === kind)?.label ?? kind;
+}
+
+/**
+ * « Maintenance — A101 »: the kind, then the title — without repeating the
+ * kind when the title starts with it, as the lines written before the server
+ * stopped doing so do (« Maintenance — Maintenance — A101 », « Vérification —
+ * Vérification »).
+ */
+export function interventionHeading(item: Pick<Intervention, 'kind' | 'title'>): string {
+  const label = interventionKindLabel(item.kind);
+  let title = (item.title ?? '').trim();
+  if (title.toLocaleLowerCase('fr-FR').startsWith(label.toLocaleLowerCase('fr-FR'))) {
+    // Only the whole word followed by a dash: « Maintenance non faite » stays.
+    const rest = title.slice(label.length);
+    if (!rest.trim() || /^\s*[—–:-]/.test(rest)) {
+      title = rest.replace(/^\s*[—–:-]\s*/, '').trim();
+    }
+  }
+  return title ? `${label} — ${title}` : label;
 }
 
 export function interventionKindIcon(kind: string): string {

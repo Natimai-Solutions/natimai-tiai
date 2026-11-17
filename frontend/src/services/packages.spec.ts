@@ -5,8 +5,14 @@ vi.mock('boot/axios', () => ({
 }));
 
 import { api } from 'boot/axios';
+import { apiErrorMessage } from './errors';
 import {
   blockingProblems,
+  compareFileNames,
+  loadableBeside,
+  manifestFileName,
+  packageChoiceLabel,
+  sortedFiles,
   deployPackage,
   deployable,
   formatSize,
@@ -51,6 +57,7 @@ function pkg(over: Partial<Package> = {}): Package {
     method_a_max_bytes: 8 * GIB,
     file_max_bytes: 2 * GIB,
     problems: [],
+    install_blockers: [],
     installed_count: 0,
     created_by: null,
     created_at: '2026-11-04T00:00:00Z',
@@ -248,7 +255,7 @@ describe('upload size', () => {
 describe('formatSize', () => {
   it('reads like the file explorer', () => {
     expect(formatSize(512)).toBe('512 o');
-    expect(formatSize(1536)).toBe('1.5 Kio');
+    expect(formatSize(1536)).toBe('1,5 Kio');
     expect(formatSize(250 * 1024 * 1024)).toBe('250 Mio');
   });
 });
@@ -287,5 +294,90 @@ describe('deployment calls', () => {
     expect(api.get).toHaveBeenLastCalledWith('/commands/package-summary', {
       params: { package_id: 'p-1' },
     });
+  });
+
+  it('lists each poste’s latest deployment only when asked', async () => {
+    vi.mocked(api.get).mockResolvedValue({ data: { items: [], total: 0 } });
+    await listPackageCommands('p-1', 1, 25, 'pending', true);
+    expect(api.get).toHaveBeenLastCalledWith('/commands', {
+      params: { package_id: 'p-1', page: 1, page_size: 25, status: 'pending', latest: true },
+    });
+  });
+});
+
+describe('what the package page reads', () => {
+  const file = (name: string) => ({ name, sha256: 'a'.repeat(64), size: 1, publisher_name: null });
+
+  it('sorts file names as a French reader does', () => {
+    const names = ['Zeta.exe', 'setup10.cab', 'été.txt', 'alpha.ini', 'Beta.dll', 'setup2.cab'];
+    expect([...names].sort(compareFileNames)).toEqual([
+      'alpha.ini',
+      'Beta.dll',
+      'été.txt',
+      'setup2.cab',
+      'setup10.cab',
+      'Zeta.exe',
+    ]);
+    expect(sortedFiles(pkg({ files: names.map(file) })).map((f) => f.name)[0]).toBe('alpha.ini');
+  });
+
+  it('names the files that keep method A from running the executable', () => {
+    const p = pkg({
+      install_run: 'setup.exe',
+      files: [file('setup.exe'), file('Helper.dll'), file('readme.txt'), file('autre.msi')],
+    });
+    expect(loadableBeside(p)).toEqual(['autre.msi', 'Helper.dll']);
+  });
+
+  it('never saves the manifest under a bare extension', () => {
+    expect(manifestFileName(pkg({ name: 'Блокнот', version: null }))).toBe(
+      'p-1.tiai-manifest.json',
+    );
+    expect(manifestFileName(pkg({ name: 'Блокнот', version: '1.0' }))).toBe(
+      'p-1-1.0.tiai-manifest.json',
+    );
+    expect(manifestFileName(pkg({ name: 'Client PRONOTE', version: '2026.2.8' }))).toBe(
+      'Client-PRONOTE-2026.2.8.tiai-manifest.json',
+    );
+  });
+
+  it('tells apart two packages read the same in a list', () => {
+    const a = pkg({ id: 'a', name: 'Outil', version: '1', install_run: 'setup.exe' });
+    const b = pkg({ id: 'b', name: 'Outil', version: '1', kind: 'winget', winget_id: 'X.Outil' });
+    const c = pkg({ id: 'c', name: 'Autre', version: null });
+    expect(packageChoiceLabel(c, [a, b, c])).toBe('Autre');
+    expect(packageChoiceLabel(a, [a, b, c])).toMatch(/^Outil 1 \(fichiers, setup\.exe — créé le /);
+    expect(packageChoiceLabel(b, [a, b, c])).toMatch(/^Outil 1 \(winget X\.Outil — créé le /);
+  });
+});
+
+describe('refusals the console passes on', () => {
+  const refusal = (code: string, message: string, details: object = {}) => ({
+    response: { status: 422, data: { error: { code, message, details } } },
+  });
+
+  it('says why a signature was refused', () => {
+    const why =
+      'La signature ne correspond pas au manifeste actuel : le paquet a changé depuis le téléchargement du manifeste signé.';
+    expect(apiErrorMessage(refusal('package.signature.invalid', why))).toBe(
+      `Signature refusée : ${why}`,
+    );
+  });
+
+  it('names a refused file and the rule it breaks', () => {
+    const message =
+      '« _config.ini » refusé : le nom doit commencer par une lettre sans accent ou un chiffre';
+    expect(
+      apiErrorMessage(
+        refusal('package.file.name_invalid', message, {
+          name: '_config.ini',
+          reason: 'le nom doit commencer par une lettre sans accent ou un chiffre',
+        }),
+      ),
+    ).toBe(message);
+    // An older server, without the reason: the label as before.
+    expect(
+      apiErrorMessage(refusal('package.file.name_invalid', 'Nom de fichier refusé', { name: 'x' })),
+    ).toContain('Nom de fichier refusé : lettres, chiffres');
   });
 });

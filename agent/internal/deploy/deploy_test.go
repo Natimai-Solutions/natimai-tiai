@@ -17,6 +17,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -418,21 +421,104 @@ func TestAdminSignatureECDSABothEncodings(t *testing.T) {
 
 func TestMethodAStep(t *testing.T) {
 	guid := "{12345678-1234-1234-1234-123456789ABC}"
-	got, err := MethodAStep(Step{Run: MsiExec, Args: []string{"/i", "http://x/evil.msi", guid}})
+	got, err := MethodAStep(Step{Run: MsiExec, Args: []string{"/i", "http://x/evil.msi", guid}}, "uninstall")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(got.Args, " ") != "/x "+guid+" /qn /norestart" {
 		t.Errorf("msiexec args not rebuilt: %v", got.Args)
 	}
-	if _, err := MethodAStep(Step{Run: MsiExec, Args: []string{"/i", "evil.msi"}}); err == nil {
+	if _, err := MethodAStep(Step{Run: MsiExec, Args: []string{"/i", "evil.msi"}}, "uninstall"); err == nil {
 		t.Error("msiexec without a product code accepted")
 	}
-	if _, err := MethodAStep(Step{Run: "setup.msi"}); err == nil {
+	// The rebuilt line is /x {code}: an installation would remove the product.
+	for _, args := range [][]string{{"/x", guid}, {"/i", "{dir}/app.msi", guid}, {guid}} {
+		if got, err := MethodAStep(Step{Run: MsiExec, Args: args}, "install"); err == nil {
+			t.Errorf("installation by msiexec %v accepted under method A, as %v", args, got)
+		}
+	}
+	if _, err := MethodAStep(Step{Run: "setup.msi"}, "install"); err == nil {
 		t.Error("an .msi accepted under method A")
 	}
-	if _, err := MethodAStep(Step{Run: "Install.EXE", Args: []string{"-s"}}); err != nil {
-		t.Error(err)
+	for _, action := range []string{"install", "uninstall"} {
+		if _, err := MethodAStep(Step{Run: "Install.EXE", Args: []string{"-s"}}, action); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// The switches that make msiexec remove a product, however they are spelled
+// — and nothing an installation ordinarily passes.
+func TestMsiExecRemoves(t *testing.T) {
+	const guid = "{12345678-1234-1234-1234-123456789ABC}"
+	for _, args := range [][]string{
+		{"/x", guid}, {"/X", guid}, {"-x", guid}, {"/x" + guid}, {"/qn", "/uninstall", guid},
+		{"/UNINSTALL", "{dir}/app.msi"}, {"-Uninstall", guid},
+	} {
+		if !MsiExecRemoves(Step{Run: MsiExec, Args: args}) {
+			t.Errorf("msiexec %v not seen as a removal", args)
+		}
+	}
+	for _, args := range [][]string{
+		{"/i", "{dir}/app.msi", "/qn", "/norestart"}, {"/package", "{dir}/x.msi"}, {"/update", "{dir}/fix.msp"},
+		{"/i", "{dir}/x.msi", "TARGETDIR=C:/x"}, {"/fa", guid}, {"/l*v", "{dir}/x.log"}, {"/i", "{dir}/x/y.msi"},
+	} {
+		if MsiExecRemoves(Step{Run: MsiExec, Args: args}) {
+			t.Errorf("msiexec %v seen as a removal", args)
+		}
+	}
+	// Not msiexec: an executable's own /x is its business.
+	if MsiExecRemoves(Step{Run: "setup.exe", Args: []string{"/x"}}) {
+		t.Error("setup.exe /x seen as an msiexec removal")
+	}
+}
+
+// An installation is never run as msiexec /x: under method A the agent would
+// otherwise rebuild any msiexec step holding a product code into one, and a
+// signed manifest that files a removal under "install" is refused too — the
+// console would read « Installation terminée » for a product taken off.
+func TestAnInstallationNeverRunsAnMsiExecRemoval(t *testing.T) {
+	const guid = "{01234567-89AB-CDEF-0123-456789ABCDEF}"
+	files := map[string][]byte{"app.msi": []byte("msi")}
+	for _, args := range [][]string{{"/x", guid, "/qn"}, {"/i", "{dir}/app.msi", guid}, {guid}} {
+		t.Run("method A "+strings.Join(args, " "), func(t *testing.T) {
+			env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true, files: files}
+			raw := manifestFor(t, pronoteID, env.files, &Step{Run: MsiExec, Args: args})
+			pkg := &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+			_, err := Execute(context.Background(), env, Policy{Publishers: []string{"X"}}, "package_install", pkg)
+			if err == nil || err.Error() != errNoMsiInMode.Error() {
+				t.Errorf("verdict = %v, want %q", err, errNoMsiInMode)
+			}
+			if len(env.ran) != 0 {
+				t.Errorf("ran = %v", env.ran)
+			}
+		})
+	}
+	for _, args := range [][]string{{"/x", guid, "/qn"}, {"/X" + guid}, {"/qn", "-uninstall", guid}} {
+		t.Run("method B "+strings.Join(args, " "), func(t *testing.T) {
+			env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, files: files}
+			raw := manifestFor(t, signedID, env.files, &Step{Run: MsiExec, Args: args})
+			sig, cert, der := signRSA(t, raw)
+			pkg := &models.PackageDelivery{ID: signedID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw),
+				Signature: sig, SignatureAlgorithm: "rsa-pkcs1-sha256", Certificate: cert}
+			_, err := Execute(context.Background(), env, Policy{Signers: []string{thumb(der)}}, "package_install", pkg)
+			if err == nil || !strings.Contains(err.Error(), "lance une désinstallation") {
+				t.Errorf("verdict = %v", err)
+			}
+			if len(env.ran) != 0 || len(env.fetched) != 0 {
+				t.Errorf("ran = %v, fetched = %v", env.ran, env.fetched)
+			}
+		})
+	}
+	// The same step as the uninstallation is what method A is for.
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, files: files}
+	m := Manifest{Format: "tiai-package-1", PackageID: pronoteID, Name: "App",
+		Files:     []FileRef{{Name: "app.msi", SHA256: sha(files["app.msi"]), Size: 3}},
+		Uninstall: &Step{Run: MsiExec, Args: []string{"/x", guid, "/qn"}}}
+	raw, _ := json.Marshal(m)
+	pkg := &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+	if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"X"}}, "package_uninstall", pkg); err != nil || len(env.ran) != 1 {
+		t.Errorf("uninstall by product code: %v, ran = %v", err, env.ran)
 	}
 }
 
@@ -912,6 +998,110 @@ func TestMethodARefusalThatNoRetryLiftsLeavesNoFolder(t *testing.T) {
 	}
 }
 
+// A signed package whose signer this poste does not trust, on a poste that also
+// approves publishers, falls to method A — and when method A refuses it too,
+// the verdict leads with method B's reason: the administrator signed the
+// package, the missing thumbprint is what they have to fix.
+func TestBothMethodsRefusedReportsMethodBFirst(t *testing.T) {
+	sign := func(t *testing.T, env *fakeEnv, step *Step) *models.PackageDelivery {
+		raw := manifestFor(t, signedID, env.files, step)
+		sig, cert, _ := signRSA(t, raw)
+		return &models.PackageDelivery{ID: signedID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw),
+			Signature: sig, SignatureAlgorithm: "rsa-pkcs1-sha256", Certificate: cert}
+	}
+	const methodB = "méthode B : certificat de signature non approuvé sur ce poste (empreinte "
+	for _, c := range []struct {
+		name      string
+		files     map[string][]byte
+		step      *Step
+		publisher string
+		methodA   string
+	}{
+		{"msiexec install", map[string][]byte{"app.msi": []byte("msi")},
+			&Step{Run: MsiExec, Args: []string{"/i", "{dir}/app.msi", "/qn"}}, "X",
+			" ; méthode A : msiexec n'est accepté que pour désinstaller un code produit"},
+		{"publisher not approved", map[string][]byte{"setup.exe": signedPE(t, "INDEX EDUCATION SAS")},
+			&Step{Run: "setup.exe"}, "Someone Else",
+			` ; méthode A : éditeur "INDEX EDUCATION SAS" non approuvé sur ce poste (DeployPublishers)`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true, files: c.files}
+			pkg := sign(t, env, c.step)
+			policy := Policy{Signers: []string{"AB"}, Publishers: []string{c.publisher}}
+			_, err := Execute(context.Background(), env, policy, "package_install", pkg)
+			if err == nil {
+				t.Fatal("ran")
+			}
+			msg := err.Error()
+			if !strings.HasPrefix(msg, methodB) || !strings.HasSuffix(msg, c.methodA) ||
+				strings.Count(msg, "méthode A") != 1 {
+				t.Errorf("verdict = %q", msg)
+			}
+			if len(env.ran) != 0 {
+				t.Errorf("ran = %v", env.ran)
+			}
+		})
+	}
+
+	// An unsigned package never went through method B: method A speaks alone.
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true}
+	pkg := pronote(t, env)
+	_, err := Execute(context.Background(), env, Policy{Signers: []string{"AB"}, Publishers: []string{"Someone Else"}},
+		"package_install", pkg)
+	if err == nil || strings.Contains(err.Error(), "méthode B") {
+		t.Errorf("unsigned package verdict = %v", err)
+	}
+}
+
+// The success line is built from the parts that exist: no « (méthode A, ) »
+// for an uninstall by product code, which names no publisher, and no double
+// space for a package without a version.
+func TestSuccessLineHasNoEmptyParts(t *testing.T) {
+	// Method A, uninstall by product code.
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}}
+	m := Manifest{Format: "tiai-package-1", PackageID: pronoteID, Name: "App", Version: "1",
+		Files:     []FileRef{{Name: "app.msi", SHA256: sha([]byte("msi")), Size: 3}},
+		Uninstall: &Step{Run: MsiExec, Args: []string{"/x", "{01234567-89AB-CDEF-0123-456789ABCDEF}"}}}
+	raw, _ := json.Marshal(m)
+	pkg := &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+	res, err := Execute(context.Background(), env, Policy{Publishers: []string{"X"}}, "package_uninstall", pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Output != "Désinstallation de App 1 terminée (méthode A)" {
+		t.Errorf("output = %q", res.Output)
+	}
+
+	// Method B, no version.
+	env = &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}}
+	env.files = map[string][]byte{"app.msi": []byte("msi")}
+	m = Manifest{Format: "tiai-package-1", PackageID: signedID, Name: "App",
+		Files:   []FileRef{{Name: "app.msi", SHA256: sha(env.files["app.msi"]), Size: 3}},
+		Install: &Step{Run: MsiExec, Args: []string{"/i", "{dir}/app.msi", "/qn"}}}
+	raw, _ = json.Marshal(m)
+	sig, cert, der := signRSA(t, raw)
+	pkg = &models.PackageDelivery{ID: signedID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw),
+		Signature: sig, SignatureAlgorithm: "rsa-pkcs1-sha256", Certificate: cert}
+	res, err = Execute(context.Background(), env, Policy{Signers: []string{thumb(der)}}, "package_install", pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Output != "Installation de App terminée (méthode B, paquet signé par CN=Tiai Signature)" {
+		t.Errorf("output = %q", res.Output)
+	}
+
+	// A failed run under method A by product code: no « () » either.
+	env = &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, code: 1603}
+	raw, _ = json.Marshal(Manifest{Format: "tiai-package-1", PackageID: pronoteID, Name: "App", Version: "1",
+		Files:     []FileRef{{Name: "app.msi", SHA256: sha([]byte("msi")), Size: 3}},
+		Uninstall: &Step{Run: MsiExec, Args: []string{"/x", "{01234567-89AB-CDEF-0123-456789ABCDEF}"}}})
+	pkg = &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
+	if _, err = Execute(context.Background(), env, Policy{Publishers: []string{"X"}}, "package_uninstall", pkg); err == nil ||
+		err.Error() != MsiExec+" a renvoyé le code 1603" {
+		t.Errorf("failure = %v", err)
+	}
+}
+
 // Under method B the manifest is the administrator's: a failed run keeps its
 // folder as before, whatever the failure — the id and the sizes are not the
 // server's word there.
@@ -943,10 +1133,11 @@ func age(t *testing.T, path string, now time.Time, d time.Duration) {
 // Nothing else sweeps packages/: a folder no retry came back for goes after
 // seven days — and only that. Not a folder still being written to, not the
 // one in use, not what the agent did not put there.
-func TestPruneStalePackages(t *testing.T) {
+func TestSweepPackagesRemovesStaleFolders(t *testing.T) {
 	const day = 24 * time.Hour
 	now := time.Now()
 	root := t.TempDir()
+	logged(t)
 	id := func(n int) string { return strings.Replace(pronoteID, "0f1e2d3c", "0000000"+string(rune('0'+n)), 1) }
 	folder := func(name string, dirAge, fileAge time.Duration) string {
 		dir := filepath.Join(root, name)
@@ -980,7 +1171,8 @@ func TestPruneStalePackages(t *testing.T) {
 	nested := folder(filepath.Join("logs", id(8)), 30*day, 30*day)
 	age(t, notOurs, now, 30*day)
 
-	PruneStalePackages(root, id(5), now)
+	// No cap in the way: age alone decides here.
+	SweepPackages(root, id(5), 0, math.MaxInt64, now)
 
 	for _, gone := range []string{stale, justPast} {
 		if _, err := os.Stat(gone); !os.IsNotExist(err) {
@@ -998,7 +1190,7 @@ func TestPruneStalePackages(t *testing.T) {
 	}
 	// A root that does not exist yet is no error, and creates nothing.
 	missing := filepath.Join(root, "absent")
-	PruneStalePackages(missing, id(1), now)
+	SweepPackages(missing, id(1), 0, 0, now)
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
 		t.Error("pruning created the packages folder")
 	}
@@ -1009,6 +1201,7 @@ func TestPruneStalePackages(t *testing.T) {
 func TestExecuteSweepsStaleSiblingsBeforeCreatingItsFolder(t *testing.T) {
 	const day = 24 * time.Hour
 	now := time.Now()
+	logged(t)
 	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true, code: 1603}
 	pkg := methodAPackage(t, env, pronoteID, nil)
 
@@ -1042,5 +1235,187 @@ func TestExecuteSweepsStaleSiblingsBeforeCreatingItsFolder(t *testing.T) {
 	// there to resume from — only the installer had to be fetched.
 	if len(env.fetched) != 1 || env.fetched[0] != "setup.exe" {
 		t.Errorf("fetched %v, want setup.exe alone: the folder in use was swept", env.fetched)
+	}
+}
+
+// logged collects what the deploy package logs during a test.
+func logged(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	out, flags := log.Writer(), log.Flags()
+	t.Cleanup(func() { log.SetOutput(out); log.SetFlags(flags) })
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	return &buf
+}
+
+// packageFolder makes root/id holding one file of size bytes (sparse: the
+// tests below weigh gibibytes), last written d before now.
+func packageFolder(t *testing.T, root, id string, size int64, now time.Time, d time.Duration) string {
+	t.Helper()
+	dir := filepath.Join(root, id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "setup.exe")
+	f, err := os.Create(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Closed before anything can fail: an open handle keeps Windows from
+	// removing the test's folder.
+	err = makeSparse(f)
+	if err == nil {
+		err = f.Truncate(size)
+	}
+	_ = f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	age(t, file, now, d)
+	age(t, dir, now, d)
+	return dir
+}
+
+// pkgID is the n-th of a run of package ids.
+func pkgID(n int) string { return fmt.Sprintf("%08d-2222-4333-8444-555555555555", n) }
+
+// Audit S24, the residual: age alone bounds nothing — a server can interrupt
+// one download after another, each under a new id, and every folder stays
+// "recent" for a week. The folders are held under a cap, oldest first, the
+// package in use aside and counted for what it will weigh.
+func TestSweepPackagesHoldsTheFoldersUnderTheCap(t *testing.T) {
+	const day = 24 * time.Hour
+	now := time.Now()
+	root := t.TempDir()
+	buf := logged(t)
+
+	stale := packageFolder(t, root, pkgID(1), 1, now, 8*day)
+	oldest := packageFolder(t, root, pkgID(2), 40, now, 3*day)
+	older := packageFolder(t, root, pkgID(3), 30, now, 2*day)
+	newest := packageFolder(t, root, pkgID(4), 30, now, time.Hour)
+	inUse := packageFolder(t, root, pkgID(5), 500, now, 30*day)
+	// Not the agent's: neither removed nor counted.
+	notOurs := packageFolder(t, root, "logs", 1000, now, 30*day)
+
+	// 40 + 30 + 30 and the 50 the package in use will weigh: 150, cap 100.
+	removed := SweepPackages(root, pkgID(5), 50, 100, now)
+
+	var ids []string
+	for _, r := range removed {
+		if r.Err != nil {
+			t.Errorf("%s: %v", r.ID, r.Err)
+		}
+		ids = append(ids, r.ID)
+	}
+	if want := []string{pkgID(1), pkgID(2), pkgID(3)}; !slices.Equal(ids, want) {
+		t.Errorf("removed %v, want %v (stale, then oldest first down to the cap)", ids, want)
+	}
+	for _, gone := range []string{stale, oldest, older} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("%s is still there", filepath.Base(gone))
+		}
+	}
+	for _, kept := range []string{newest, inUse, notOurs} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s was removed: %v", filepath.Base(kept), err)
+		}
+	}
+	// One line per folder, saying which, how much and why.
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 3 ||
+		!strings.Contains(lines[0], "removed package folder "+pkgID(1)) || !strings.Contains(lines[0], "more than 7 days") ||
+		!strings.Contains(lines[1], "removed package folder "+pkgID(2)+" (40 bytes") || !strings.Contains(lines[1], "DeployCacheMaxGB") ||
+		!strings.Contains(lines[2], "removed package folder "+pkgID(3)) {
+		t.Errorf("logged:\n%s", buf.String())
+	}
+
+	// Under the cap: nothing more goes, and nothing is said.
+	buf.Reset()
+	if removed := SweepPackages(root, pkgID(5), 50, 100, now); len(removed) != 0 || buf.Len() != 0 {
+		t.Errorf("removed %v under the cap, logged %q", removed, buf.String())
+	}
+
+	// A package that alone weighs more than the cap: every other folder
+	// goes, the one in use stays, and the log says so.
+	SweepPackages(root, pkgID(5), 200, 100, now)
+	if _, err := os.Stat(newest); !os.IsNotExist(err) {
+		t.Error("a folder survived a package above the cap on its own")
+	}
+	if _, err := os.Stat(inUse); err != nil {
+		t.Errorf("the package in use was removed: %v", err)
+	}
+	if !strings.Contains(buf.String(), "package "+pkgID(5)+" announces 200 bytes on its own") {
+		t.Errorf("logged:\n%s", buf.String())
+	}
+}
+
+// At the start of the service nothing is in use: the same sweep, with no
+// package kept and nothing to make room for.
+func TestSweepPackagesAtStart(t *testing.T) {
+	now := time.Now()
+	root := t.TempDir()
+	logged(t)
+	a := packageFolder(t, root, pkgID(1), 60, now, 2*time.Hour)
+	b := packageFolder(t, root, pkgID(2), 60, now, time.Hour)
+	SweepPackages(root, "", 0, 100, now)
+	if _, err := os.Stat(a); !os.IsNotExist(err) {
+		t.Error("the older folder outlived a start above the cap")
+	}
+	if _, err := os.Stat(b); err != nil {
+		t.Errorf("the newer folder was removed: %v", err)
+	}
+}
+
+// The sweep runs where folders are made, and weighs what the package about to
+// download announces: folders interrupted one after another under new ids —
+// what a compromised server can do — never hold more than the cap.
+func TestExecuteHoldsInterruptedDownloadsUnderTheCacheCap(t *testing.T) {
+	const gib = int64(1) << 30
+	now := time.Now()
+	logged(t)
+	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, trusted: true, code: 1603}
+	pkg := methodAPackage(t, env, pronoteID, nil)
+	// Three downloads cut short by the server, 7 GiB each: recent, and 21
+	// GiB together.
+	var dirs []string
+	for i := range 3 {
+		dirs = append(dirs, packageFolder(t, env.PackagesDir(), pkgID(i+1), 7*gib, now, time.Duration(3-i)*time.Hour))
+	}
+
+	// Default cap (16 GiB): the oldest goes — the other two and this package
+	// fit.
+	if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"INDEX EDUCATION SAS"}}, "package_install", pkg); err == nil {
+		t.Fatal("exit code 1603 accepted")
+	}
+	for i, dir := range dirs {
+		_, err := os.Stat(dir)
+		if gone := i == 0; gone != os.IsNotExist(err) {
+			t.Errorf("folder %d: gone = %v, want %v", i+1, os.IsNotExist(err), gone)
+		}
+	}
+	// The folder in use is kept for its retry (exit code), as before.
+	if _, err := os.Stat(filepath.Join(env.PackagesDir(), pronoteID)); err != nil {
+		t.Errorf("the package's own folder: %v", err)
+	}
+
+	// DeployCacheMaxGB lowered to 7: the other two go as well — 7 GiB and
+	// this package are above it.
+	if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"INDEX EDUCATION SAS"}, CacheMaxGB: 7}, "package_install", pkg); err == nil {
+		t.Fatal("exit code 1603 accepted")
+	}
+	for _, dir := range dirs[1:] {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Error("a 7 GiB folder survived a 7 GiB cap next to a package in use")
+		}
+	}
+}
+
+func TestCacheMaxBytes(t *testing.T) {
+	if got := (Policy{}).CacheMaxBytes(); got != DefaultCacheMaxGB<<30 || DefaultCacheMaxGB != 16 {
+		t.Errorf("default cap = %d", got)
+	}
+	if got := (Policy{CacheMaxGB: 3}).CacheMaxBytes(); got != 3<<30 {
+		t.Errorf("cap = %d", got)
 	}
 }

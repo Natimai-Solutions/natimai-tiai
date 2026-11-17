@@ -223,3 +223,55 @@ export function permissionLabel(key: string): string {
   const entry = PERMISSION_CATALOGUE.find((e) => e.key === key);
   return entry ? `${entry.resourceLabel} — ${entry.label.toLowerCase()}` : key;
 }
+
+/**
+ * What a permission needs to be of any use (item 4): a write or an execute
+ * grants nothing without the read of the same resource — `room:write` alone
+ * opens no page — and the risky commands run only with the everyday ones.
+ */
+export function permissionRequires(key: string): string[] {
+  const [resource, action] = key.split(':');
+  const needs: string[] = [];
+  const read = `${resource}:read`;
+  if (action !== 'read' && PERMISSION_CATALOGUE.some((e) => e.key === read)) needs.push(read);
+  if (key === 'risky_command:execute') needs.push('command:execute');
+  return needs;
+}
+
+/** Add everything `key` needs to `out`, transitively. */
+function addRequirements(key: string, out: Set<string>): void {
+  for (const need of permissionRequires(key)) {
+    if (out.has(need)) continue;
+    out.add(need);
+    addRequirements(need, out);
+  }
+}
+
+/**
+ * The grid's new selection once a box is ticked or unticked: ticking a
+ * permission ticks what it needs; unticking one unticks what needs it. `next`
+ * is the selection as the checkbox group hands it over, `previous` the one
+ * before the click.
+ */
+export function applyPermissionChange(
+  previous: readonly string[],
+  next: readonly string[],
+): string[] {
+  const added = next.filter((k) => !previous.includes(k));
+  const removed = previous.filter((k) => !next.includes(k));
+  const result = new Set(next);
+  for (const key of added) addRequirements(key, result);
+  // Unticking: whatever still needs a removed key goes too, until stable.
+  let changed = removed.length > 0;
+  while (changed) {
+    changed = false;
+    for (const key of [...result]) {
+      if (permissionRequires(key).some((need) => !result.has(need))) {
+        result.delete(key);
+        changed = true;
+      }
+    }
+  }
+  // In the catalogue's order, as the grid lists them.
+  return PERMISSION_CATALOGUE.map((e) => e.key).filter((k) => result.has(k));
+}

@@ -6,12 +6,12 @@
     :rows="rows"
     :columns="columns"
     row-key="id"
-    selection="multiple"
+    :selection="selectable ? 'multiple' : 'none'"
     :loading="loading"
     :rows-per-page-options="[25, 50, 100]"
     binary-state-sort
     @request="(evt) => emit('request', evt)"
-    @row-click="(_evt, row, index) => emit('open', row, index)"
+    @row-click="onRowClick"
   >
     <template #body-cell-hostname="props">
       <q-td :props="props">
@@ -59,6 +59,30 @@
                   : ', à prendre'
               }}
             </q-tooltip>
+          </q-icon>
+          <!-- Enrolment needing a decision: a reinstalled poste asking back in,
+               or a revoked one (C2). -->
+          <q-icon
+            v-if="props.row.token_revoked"
+            name="key_off"
+            color="negative"
+            size="16px"
+            class="q-ml-xs"
+            data-test="token-revoked"
+          >
+            <q-tooltip>Token révoqué : le poste est coupé du serveur</q-tooltip>
+          </q-icon>
+          <q-icon
+            v-else-if="props.row.reenroll_requested"
+            name="key"
+            color="orange"
+            size="16px"
+            class="q-ml-xs"
+            data-test="reenroll-requested"
+          >
+            <q-tooltip
+              >Ré-enrôlement demandé : à autoriser depuis la fiche ou la sélection</q-tooltip
+            >
           </q-icon>
           <q-icon
             v-if="props.row.needs_verification"
@@ -168,6 +192,7 @@
             :color="
               diskColor(
                 freePercent(props.row.system_volume_total_mb, props.row.system_volume_free_mb),
+                lowDiskPercent,
               )
             "
             size="8px"
@@ -242,6 +267,7 @@ import {
   usedRatio,
   type MachineListPagination,
 } from 'src/utils/machineListTable';
+import { hasTextSelection } from 'src/utils/textSelection';
 import { hoursLabel } from 'src/utils/usageFilter';
 
 /**
@@ -249,18 +275,28 @@ import { hoursLabel } from 'src/utils/usageFilter';
  * reader chose. Sorting and paging are the server's — every interaction comes
  * out as `request`, and the page writes it into the URL.
  */
-defineProps<{
-  rows: Machine[];
-  /** The visible columns, in the reader's order. */
-  columns: QTableColumn<Machine>[];
-  loading: boolean;
-  /** The agent version rows are flagged against, as the list response carries it. */
-  agentLatest: string | null;
-  /** The usage window the server answered with, in days. */
-  usageWindowDays: number;
-  /** Where a row's name links to (its fiche); without it, the name is text. */
-  detailRoute?: (row: Machine, index: number) => RouteLocationRaw;
-}>();
+withDefaults(
+  defineProps<{
+    rows: Machine[];
+    /** The visible columns, in the reader's order. */
+    columns: QTableColumn<Machine>[];
+    loading: boolean;
+    /** The agent version rows are flagged against, as the list response carries it. */
+    agentLatest: string | null;
+    /** The usage window the server answered with, in days. */
+    usageWindowDays: number;
+    /** Where a row's name links to (its fiche); without it, the name is text. */
+    detailRoute?: ((row: Machine, index: number) => RouteLocationRaw) | undefined;
+    /**
+     * Whether rows can be ticked. Only when a bulk action is on offer: a
+     * read-only account's checkboxes did nothing but pause the auto-refresh.
+     */
+    selectable?: boolean;
+    /** The parc's « disque presque plein » threshold, for the bars' colour. */
+    lowDiskPercent?: number | undefined;
+  }>(),
+  { selectable: true, lowDiskPercent: undefined, detailRoute: undefined },
+);
 
 const selected = defineModel<Machine[]>('selected', { required: true });
 const pagination = defineModel<MachineListPagination>('pagination', { required: true });
@@ -270,4 +306,10 @@ const emit = defineEmits<{
   /** A row clicked, with its index on the current page. */
   open: [row: Machine, index: number];
 }>();
+
+/** A row click opens the fiche — unless it ended a text selection (a hostname being copied). */
+function onRowClick(_evt: Event, row: Machine, index: number) {
+  if (hasTextSelection()) return;
+  emit('open', row, index);
+}
 </script>

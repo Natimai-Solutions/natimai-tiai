@@ -168,7 +168,7 @@ func (c *Client) do(ctx context.Context, method, path string, headers map[string
 		if err != nil {
 			return fmt.Errorf("marshal request: %w", err)
 		}
-		reader = bytes.NewReader(data)
+		reader = bytes.NewReader(stripControlEscapes(data))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
@@ -199,6 +199,57 @@ func (c *Client) do(ctx context.Context, method, path string, headers map[string
 		}
 	}
 	return nil
+}
+
+// stripControlEscapes removes from a JSON document every C0 control character
+// a string carries, except tab, line feed and carriage return.
+//
+// Done here, on what every request sends — enrollment, heartbeat, verdict — so
+// that no field escapes it: a NUL in a command's output (a tool writing
+// UTF-16 into a pipe), in a program name read from the registry or in an
+// update title is accepted by Go and refused by the server's database, which
+// answers 500. A verdict refused that way stayed at the head of the local
+// queue and held back every verdict behind it; a heartbeat refused that way
+// would take the poste offline. Nothing the agent reports means anything by
+// those characters.
+//
+// encoding/json writes every control character inside a string as an escape
+// (\u0000 … \u001f, or \n \r \t for those three), and a backslash anywhere in
+// its output starts an escape: a literal backslash is "\\". So the document
+// is walked escape by escape, and the \u00XX escapes of C0 characters dropped.
+func stripControlEscapes(data []byte) []byte {
+	if bytes.IndexByte(data, '\\') < 0 {
+		return data
+	}
+	out := make([]byte, 0, len(data))
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' || i+1 >= len(data) {
+			out = append(out, data[i])
+			continue
+		}
+		if data[i+1] == 'u' && i+5 < len(data) && isStrippedControl(data[i+2:i+6]) {
+			i += 5
+			continue
+		}
+		// Any other escape is copied whole, so that the backslash of "\\"
+		// is never read as the start of the next one.
+		out = append(out, data[i], data[i+1])
+		i++
+	}
+	return out
+}
+
+// isStrippedControl tells whether the four hex digits of a \u escape name a C0
+// control character other than tab, line feed and carriage return.
+func isStrippedControl(hex []byte) bool {
+	if hex[0] != '0' || hex[1] != '0' || (hex[2] != '0' && hex[2] != '1') {
+		return false
+	}
+	v, err := strconv.ParseUint(string(hex[2:]), 16, 8)
+	if err != nil {
+		return false
+	}
+	return v != '\t' && v != '\n' && v != '\r'
 }
 
 // FetchPackageFile streams a package file into f from offset — a Range

@@ -2,6 +2,9 @@
   <q-card flat bordered class="q-mt-md">
     <q-card-section class="text-subtitle1">Historique des menaces</q-card-section>
     <q-separator />
+    <q-card-section v-if="failed" class="q-pa-sm">
+      <CardLoadError what="les menaces" :loading="loading" @retry="emit('refresh')" />
+    </q-card-section>
     <q-table
       v-model:pagination="pagination"
       :rows="threats"
@@ -10,7 +13,7 @@
       :loading="loading"
       flat
       :rows-per-page-options="[10, 25, 50]"
-      no-data-label="Aucune menace détectée."
+      :no-data-label="failed ? 'Menaces non chargées.' : 'Aucune menace détectée.'"
       @request="onRequest"
     >
       <template #body-cell-severity="props">
@@ -36,6 +39,7 @@
 
 <script setup lang="ts">
 import type { QTableColumn } from 'quasar';
+import CardLoadError from 'src/components/CardLoadError.vue';
 import { DEFAULT_PAGE_SIZE, type TablePagination } from './types';
 import type { Threat } from 'src/services/threats';
 import {
@@ -43,10 +47,12 @@ import {
   threatSeverityColor,
   threatSeverityLabel,
   threatStatusColor,
+  threatNameLabel,
   threatStatusLabel,
 } from 'src/utils/format';
 
-defineProps<{ threats: Threat[]; loading: boolean }>();
+/** `failed`: the last read of this list failed — the rows, if any, are an earlier read's. */
+defineProps<{ threats: Threat[]; loading: boolean; failed?: boolean }>();
 
 const pagination = defineModel<TablePagination>('pagination', { required: true });
 
@@ -55,7 +61,14 @@ const pagination = defineModel<TablePagination>('pagination', { required: true }
 const emit = defineEmits<{ refresh: [] }>();
 
 const columns: QTableColumn<Threat>[] = [
-  { name: 'threat_name', label: 'Menace', field: 'threat_name', align: 'left' },
+  {
+    name: 'threat_name',
+    label: 'Menace',
+    field: 'threat_name',
+    align: 'left',
+    format: (v: string | null) => threatNameLabel(v),
+    classes: 'cell-wrap',
+  },
   { name: 'severity', label: 'Sévérité', field: 'severity', align: 'left' },
   { name: 'status', label: 'Statut', field: 'status', align: 'left' },
   { name: 'detected_at', label: 'Détectée le', field: 'detected_at', align: 'left' },

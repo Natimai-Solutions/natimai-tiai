@@ -60,6 +60,12 @@ const props = defineProps<{
   /** The level's own values; null = inherit. */
   cycleDays: number | null;
   ownerId: string | null;
+  /**
+   * How to name the current owner when the picker does not offer it — an
+   * account deactivated since, or out of reach: « Marie (désactivé) » rather
+   * than its raw id.
+   */
+  ownerLabel?: string | null | undefined;
   /** What "inherit" resolves to, for the hint. */
   inheritHint: string;
   /**
@@ -101,7 +107,14 @@ watch(
 async function loadUsers() {
   try {
     const owners = await listAssignableOwners({ machineId: props.machineId, roomId: props.roomId });
-    ownerOptions.value = owners.map((u) => ({ label: u.name, value: u.id }));
+    const options = owners.map((u) => ({ label: u.name, value: u.id }));
+    if (props.ownerId && !options.some((o) => o.value === props.ownerId)) {
+      options.unshift({
+        label: props.ownerLabel || 'Compte désactivé ou hors de portée',
+        value: props.ownerId,
+      });
+    }
+    ownerOptions.value = options;
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Comptes indisponibles') });
   }

@@ -3,8 +3,10 @@
     <div class="row items-center q-col-gutter-sm q-mb-md">
       <h1 class="text-h5 q-my-none col-auto">Salles</h1>
       <q-space />
+      <!-- Each only where the account's scope lets it create: one confined
+           to rooms creates neither, one confined to buildings no building. -->
       <q-btn
-        v-if="canWrite"
+        v-if="canWrite && creation.buildings"
         flat
         color="primary"
         icon="apartment"
@@ -12,7 +14,7 @@
         @click="openBuildingForm(null)"
       />
       <q-btn
-        v-if="canWrite"
+        v-if="canWrite && creation.rooms"
         color="primary"
         icon="meeting_room"
         label="Nouvelle salle"
@@ -59,8 +61,91 @@
           hide-pagination
           flat
           bordered
-          @row-click="(_evt, row) => goRoom(row)"
+          :grid="small"
+          card-container-class="q-col-gutter-sm"
+          @row-click="(_evt, row) => !selectingText() && goRoom(row)"
         >
+          <!-- On a phone, a card per room — its name, place, postes and
+               maintenance in sight, its actions as buttons — rather than a
+               table to scroll sideways (audit U23). -->
+          <template #item="props">
+            <div class="col-12" :data-test="`room-card-${props.row.id}`">
+              <q-card flat bordered>
+                <q-card-section class="q-pb-xs">
+                  <router-link
+                    :to="{ name: 'room-detail', params: { id: props.row.id } }"
+                    class="row-link text-weight-medium"
+                    style="overflow-wrap: anywhere"
+                  >
+                    {{ props.row.name }}
+                  </router-link>
+                  <q-icon
+                    v-if="props.row.ad_key"
+                    name="account_tree"
+                    size="16px"
+                    class="q-ml-xs text-muted"
+                    :aria-label="`Créée depuis l'annuaire : ${props.row.ad_key}`"
+                  />
+                  <div class="text-caption text-muted" style="overflow-wrap: anywhere">
+                    {{
+                      [props.row.building?.name, props.row.effective_location]
+                        .filter(Boolean)
+                        .join(' · ') || 'Sans bâtiment ni emplacement'
+                    }}
+                  </div>
+                  <div
+                    v-if="props.row.notes"
+                    class="text-caption text-muted ellipsis-2-lines"
+                    style="overflow-wrap: anywhere"
+                  >
+                    {{ props.row.notes }}
+                  </div>
+                  <div class="q-mt-xs">
+                    {{ props.row.machine_count }} poste(s)
+                    <q-badge v-if="props.row.mismatch_count" color="orange" class="q-ml-xs">
+                      {{ props.row.mismatch_count }} divergent(s)
+                    </q-badge>
+                  </div>
+                  <div class="q-mt-xs">
+                    <q-badge v-if="props.row.maintenance_overdue" color="negative" class="q-mr-xs">
+                      {{ props.row.maintenance_overdue }} en retard
+                    </q-badge>
+                    <q-badge v-if="props.row.maintenance_due_soon" color="orange" class="q-mr-xs">
+                      {{ props.row.maintenance_due_soon }} à échéance
+                    </q-badge>
+                    <span class="text-caption text-muted">
+                      Maintenance :
+                      {{
+                        props.row.effective_cycle_days > 0
+                          ? `${props.row.effective_cycle_days} j`
+                          : 'exclue'
+                      }}
+                      {{
+                        props.row.effective_owner_name ? `· ${props.row.effective_owner_name}` : ''
+                      }}
+                    </span>
+                  </div>
+                </q-card-section>
+                <q-card-actions v-if="canWrite" align="right">
+                  <q-btn
+                    flat
+                    no-caps
+                    icon="edit"
+                    label="Modifier"
+                    @click="openRoomForm(props.row)"
+                  />
+                  <q-btn
+                    flat
+                    no-caps
+                    color="negative"
+                    icon="delete"
+                    label="Supprimer"
+                    @click="confirmDeleteRoom(props.row)"
+                  />
+                </q-card-actions>
+              </q-card>
+            </div>
+          </template>
           <template #body-cell-name="props">
             <q-td :props="props">
               <div>
@@ -176,7 +261,43 @@
           hide-pagination
           flat
           bordered
+          :grid="small"
+          card-container-class="q-col-gutter-sm"
         >
+          <template #item="props">
+            <div class="col-12" :data-test="`building-card-${props.row.id}`">
+              <q-card flat bordered>
+                <q-card-section class="q-pb-xs">
+                  <div class="text-weight-medium" style="overflow-wrap: anywhere">
+                    {{ props.row.name }}
+                  </div>
+                  <div class="text-caption text-muted" style="overflow-wrap: anywhere">
+                    {{ props.row.location ?? 'Sans emplacement' }}
+                  </div>
+                  <div class="q-mt-xs">
+                    {{ props.row.room_count }} salle(s) · {{ props.row.machine_count }} poste(s)
+                  </div>
+                </q-card-section>
+                <q-card-actions v-if="canWrite" align="right">
+                  <q-btn
+                    flat
+                    no-caps
+                    icon="edit"
+                    label="Modifier"
+                    @click="openBuildingForm(props.row)"
+                  />
+                  <q-btn
+                    flat
+                    no-caps
+                    color="negative"
+                    icon="delete"
+                    label="Supprimer"
+                    @click="confirmDeleteBuilding(props.row)"
+                  />
+                </q-card-actions>
+              </q-card>
+            </div>
+          </template>
           <template #body-cell-location="props">
             <q-td :props="props">{{ props.value ?? '—' }}</q-td>
           </template>
@@ -243,19 +364,25 @@ import {
   deleteBuilding,
   deleteRoom,
   getRoomConfig,
+  getRoomCreation,
   listBuildings,
   listRooms,
   ROOM_SOURCE_LABELS,
   syncDirectory,
   syncNotification,
+  syncPreviewMessage,
   type Building,
   type Room,
   type RoomConfig,
+  type RoomCreation,
+  type SyncResult,
 } from 'src/services/rooms';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 
 const $q = useQuasar();
+// A phone: cards rather than tables (audit U23).
+const small = computed(() => $q.screen.lt.sm);
 const router = useRouter();
 const auth = useAuthStore();
 
@@ -269,6 +396,22 @@ const locations = ref<string[]>([]);
 const loading = ref(false);
 
 const canWrite = computed(() => auth.can('room', 'write'));
+// What the scope lets create; both until the server says, which only ever
+// shows a button the server then refuses.
+const creation = ref<RoomCreation>({ rooms: true, buildings: true });
+
+async function loadCreation() {
+  try {
+    creation.value = await getRoomCreation();
+  } catch {
+    // Kept as is: the routes still refuse what the scope does not allow.
+  }
+}
+
+/** A click that ends a text selection is not a click on the row. */
+function selectingText(): boolean {
+  return (window.getSelection?.()?.toString() ?? '') !== '';
+}
 
 const config = ref<RoomConfig | null>(null);
 const syncing = ref(false);
@@ -284,8 +427,35 @@ async function loadConfig() {
   }
 }
 
+/**
+ * The re-sync, never in one click: its dry run first — how many postes leave
+ * their room, how many rooms appear — and the real run only once confirmed.
+ * A first run on a parc filed by hand used to empty it.
+ */
 async function sync() {
   syncing.value = true;
+  let preview: SyncResult;
+  try {
+    preview = await syncDirectory(true);
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Resynchronisation impossible') });
+    syncing.value = false;
+    return;
+  }
+  $q.dialog({
+    title: "Resynchroniser depuis l'annuaire",
+    message: syncPreviewMessage(preview),
+    cancel: { flat: true, label: 'Annuler' },
+    ok: { label: 'Resynchroniser', color: 'primary' },
+    persistent: true,
+  })
+    .onOk(() => void runSync())
+    .onCancel(() => {
+      syncing.value = false;
+    });
+}
+
+async function runSync() {
   try {
     const res = await syncDirectory();
     $q.notify(syncNotification(res));
@@ -406,5 +576,6 @@ onMounted(() => {
   void reload();
   void loadLocations();
   void loadConfig();
+  void loadCreation();
 });
 </script>

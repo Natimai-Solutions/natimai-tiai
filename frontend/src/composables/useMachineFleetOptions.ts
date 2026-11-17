@@ -32,7 +32,16 @@ export function chassisLabelOf(name: string): string {
  * blank the machine list, so a failed listing leaves its « Tous » entry alone
  * (the filter is still typeable in the URL) and says nothing.
  */
-export function useMachineFleetOptions() {
+export function useMachineFleetOptions(
+  access: {
+    /** room:read — the room and building listings answer 403 without it. */
+    canReadRooms?: () => boolean;
+    /** room:write — the only use of the placement mode is placing postes. */
+    canPlaceRooms?: () => boolean;
+  } = {},
+) {
+  const canReadRooms = access.canReadRooms ?? (() => true);
+  const canPlaceRooms = access.canPlaceRooms ?? (() => true);
   const options = ref<MachineFleetOptions>(initialFleetOptions());
   const rooms = ref<Room[]>([]);
   // Moving postes by hand needs a server not in a directory mode. Assumed
@@ -115,11 +124,16 @@ export function useMachineFleetOptions() {
    * salle ». The room entries carry their building so two « B12 » read apart.
    */
   async function loadRooms() {
-    try {
-      manualMode.value = (await getRoomConfig()).manual;
-    } catch {
-      // Assumed manual, see above.
+    // Not asked of an account the server would refuse (item 4): its toasts
+    // and silent errors were the only thing these calls produced.
+    if (canPlaceRooms()) {
+      try {
+        manualMode.value = (await getRoomConfig()).manual;
+      } catch {
+        // Assumed manual, see above.
+      }
     }
+    if (!canReadRooms()) return;
     try {
       rooms.value = await listRooms();
       options.value.room = [

@@ -88,29 +88,46 @@ async def get_room(session: AsyncSession, room_id: uuid.UUID) -> Room | None:
 async def building_by_name(
     session: AsyncSession, location: str | None, name: str
 ) -> Building | None:
+    # Case-insensitive: « Bâtiment A » and « bâtiment a » on one site are one
+    # building to whoever reads the list.
     result = await session.exec(
         select(Building).where(
-            col(Building.name) == name,
+            func.lower(col(Building.name)) == name.lower(),
             col(Building.location).is_(None)
             if location is None
             else col(Building.location) == location,
         )
     )
-    return result.one_or_none()
+    return result.first()
 
 
 async def room_by_name(
     session: AsyncSession, building_id: uuid.UUID | None, name: str
 ) -> Room | None:
+    # Case-insensitive: « A101 » and « a101 » in one building are one room to
+    # whoever files a poste. ``first``: rows written before this rule may hold
+    # both spellings.
     result = await session.exec(
         select(Room).where(
-            col(Room.name) == name,
+            func.lower(col(Room.name)) == name.lower(),
             col(Room.building_id).is_(None)
             if building_id is None
             else col(Room.building_id) == building_id,
         )
     )
-    return result.one_or_none()
+    return result.first()
+
+
+async def hand_made_rooms(session: AsyncSession, name: str) -> list[Room]:
+    """The rooms made by hand (no directory key) bearing ``name``, in a
+    building or not: what the directory may adopt for an OU of that name."""
+    result = await session.exec(
+        select(Room)
+        .where(func.lower(col(Room.name)) == name.strip().lower())
+        .where(col(Room.ad_key).is_(None))
+        .order_by(col(Room.created_at))
+    )
+    return list(result.all())
 
 
 async def list_buildings(session: AsyncSession, where: Any = None) -> list[Building]:
@@ -191,24 +208,37 @@ class BuildingCounts:
 
 
 async def building_counts(
-    session: AsyncSession, building_ids: Iterable[uuid.UUID]
+    session: AsyncSession,
+    building_ids: Iterable[uuid.UUID],
+    *,
+    room_where: Any = None,
+    machine_where: Any = None,
 ) -> dict[uuid.UUID, BuildingCounts]:
+    """Rooms and postes per building — only those matching ``room_where`` and
+    ``machine_where`` (a scope's ``room_clause`` and ``machine_clause``): a
+    confined account is not told how many postes it cannot see."""
     ids = list(building_ids)
     if not ids:
         return {}
     counts = {bid: BuildingCounts() for bid in ids}
-    rooms = await session.exec(
+    room_stmt = (
         select(col(Room.building_id), func.count())
         .where(col(Room.building_id).in_(ids))
         .group_by(col(Room.building_id))
     )
+    if room_where is not None:
+        room_stmt = room_stmt.where(room_where)
+    rooms = await session.exec(room_stmt)
     room_totals = dict(rooms.all())
-    machines = await session.exec(
+    machine_stmt = (
         select(col(Room.building_id), func.count())
         .join(Machine, col(Machine.room_id) == col(Room.id))
         .where(col(Room.building_id).in_(ids))
         .group_by(col(Room.building_id))
     )
+    if machine_where is not None:
+        machine_stmt = machine_stmt.where(machine_where)
+    machines = await session.exec(machine_stmt)
     machine_totals = dict(machines.all())
     for bid in ids:
         counts[bid] = BuildingCounts(
@@ -313,12 +343,15 @@ async def room_for_key(
 ) -> tuple[Room | None, bool]:
     """The room the directory names by ``key``, created if missing.
 
-    Creation adopts a room of the same name that was made by hand and sits in
-    no building — the usual case on a parc that filed by hand before turning
-    the directory on, where "B12" already exists. Otherwise the name is taken
-    as is, or suffixed when another key already holds it (two "Salle B12"
-    OUs under two branches of the tree). Does not commit. Returns the room and
-    whether it was created.
+    Creation adopts a room of the same name that was made by hand, in a
+    building or not — the usual case on a parc that filed by hand before
+    turning the directory on, where "B12" already exists, often in its
+    building. Two rooms made by hand bearing the name (« B12 » in two
+    buildings) leave the name undecided: nothing is adopted, nothing is
+    created beside them, the postes stay where they are. Otherwise the name is
+    taken as is, or suffixed when another key already holds it (two "Salle
+    B12" OUs under two branches of the tree). Does not commit. Returns the
+    room and whether it was created.
 
     ``capped`` bounds the rooms created per hour (an agent's report); by
     default, whenever ``adopt`` is off.
@@ -329,14 +362,15 @@ async def room_for_key(
     room = result.one_or_none()
     if room is not None:
         return room, False
-    loose = await room_by_name(session, None, name)
-    if loose is not None and loose.ad_key is None:
-        if not adopt:
+    hand_made = await hand_made_rooms(session, name)
+    if hand_made:
+        if not adopt or len(hand_made) > 1:
             # A room made by hand is the console's: one agent's report does
             # not take it over (audit S20), and creating « Nom (2) » beside it
             # would only split the room. Left unfiled until an administrator
             # re-syncs from the directory, which does adopt it.
             return None, False
+        loose = hand_made[0]
         loose.ad_key = key
         loose.updated_at = utcnow()
         session.add(loose)
@@ -458,12 +492,29 @@ class SyncResult:
     placed: int = 0
     # Postes taken out of their room: the directory names none for them.
     unplaced: int = 0
+    # Postes that left the room they were in — for another, or for none.
+    moved_out: int = 0
     rooms_created: int = 0
     # Postes left where they were because the room made by hand that bears
     # their name was adopted by no key (a tie, no strict majority, no vote).
     undecided: int = 0
     # Those rooms, by name (``UNDECIDED_ROOMS_MAX`` at most).
     undecided_rooms: tuple[str, ...] = ()
+
+
+def has_reading(machine: Machine) -> bool:
+    """Whether the agent ever sent the directory block. A poste without any
+    reading — an agent older than the block, a workgroup machine — has told
+    the directory nothing: the re-sync leaves it where it was, as a heartbeat
+    without the block does, rather than emptying a room filed by hand."""
+    return any(
+        (
+            machine.ad_distinguished_name,
+            machine.ad_ou,
+            machine.ad_ou_dn,
+            machine.ad_location,
+        )
+    )
 
 
 def _votes(machine: Machine) -> bool:
@@ -486,10 +537,17 @@ async def sync_from_directory(session: AsyncSession, source: str) -> SyncResult:
     where they are until the directory says something clearer: they are
     counted as ``undecided``, not as placed, and the room is named.
 
+    A room made by hand is found by name in a building as well as outside
+    any (``room_for_key``). A poste with no directory reading at all is left
+    where it is (``has_reading``).
+
     Only the postes in good standing vote (``_votes``)."""
     if source == "manual":
         return SyncResult()
-    machines = list((await session.exec(select(Machine))).all())
+    machines = [
+        m for m in (await session.exec(select(Machine))).all() if has_reading(m)
+    ]
+    rooms_before = {m.id: m.room_id for m in machines}
 
     # Who claims each room made by hand, poste by poste.
     claims: dict[uuid.UUID, Counter[tuple[str, str]]] = {}
@@ -500,9 +558,9 @@ async def sync_from_directory(session: AsyncSession, source: str) -> SyncResult:
         owned = await session.exec(select(Room.id).where(Room.ad_key == key[0]))
         if owned.first() is not None:
             continue
-        loose = await room_by_name(session, None, key[1])
-        if loose is not None and loose.ad_key is None:
-            claims.setdefault(loose.id, Counter())[key] += 1
+        hand_made = await hand_made_rooms(session, key[1])
+        if len(hand_made) == 1:
+            claims.setdefault(hand_made[0].id, Counter())[key] += 1
     adopting: set[str] = set()
     for room_id, counter in claims.items():
         (winner, votes), *_ = counter.most_common(1)
@@ -535,11 +593,17 @@ async def sync_from_directory(session: AsyncSession, source: str) -> SyncResult:
             # A key the directory vouches for, and still no room: the one
             # made by hand that bears its name was adopted by nobody.
             undecided += 1
-            held = await room_by_name(session, None, key[1])
-            undecided_rooms.add(held.name if held is not None else key[1])
+            held = await hand_made_rooms(session, key[1])
+            undecided_rooms.add(held[0].name if held else key[1])
+    moved_out = sum(
+        1
+        for m in machines
+        if rooms_before[m.id] is not None and m.room_id != rooms_before[m.id]
+    )
     return SyncResult(
         placed=placed,
         unplaced=unplaced,
+        moved_out=moved_out,
         rooms_created=created,
         undecided=undecided,
         undecided_rooms=tuple(sorted(undecided_rooms)[:UNDECIDED_ROOMS_MAX]),

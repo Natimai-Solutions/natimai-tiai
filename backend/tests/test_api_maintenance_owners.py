@@ -168,6 +168,7 @@ async def test_an_owner_whose_poste_moved_out_of_sight_is_skipped_not_mailed(
     hostname the account cannot open."""
     from app.features.machine.models import Machine
     from app.features.notification import tasks
+    from app.features.user.models import User
 
     t = await two_sites(client, db_session)
     tech_a_id = await _id(db_session, "tech-a@test.local")
@@ -191,6 +192,12 @@ async def test_an_owner_whose_poste_moved_out_of_sight_is_skipped_not_mailed(
     assert _due_hostnames(await _due(client, t.scoped, "me")) == set()
     assert "PC-A" in _due_hostnames(await _due(client, t.admin, "me"))
 
+    # The admin on « seulement s'il y a du nouveau »: the reminder is theirs
+    # (on the daily digest, the same block would be in the digest instead).
+    admin = await db_session.get(User, uuid.UUID(admin_id))
+    admin.email_preference = "digest_events"
+    db_session.add(admin)
+    await db_session.commit()
     assert await tasks.send_maintenance_reminders(db_session) == 1
     queued = await _queued(db_session)
     assert set(queued) == {"admin@test.local"}
@@ -521,7 +528,10 @@ async def test_the_picker_offers_exactly_who_the_server_accepts(client, db_sessi
     # The list the console used before offers accounts the write refuses;
     # this one offers none of them, and every one it offers is accepted.
     before = await client.get("/api/v1/checks/assignable-users", headers=t.admin)
-    assert ids["ro"] in {u["id"] for u in before.json()}
+    # (It no longer offers read-only accounts, which cannot close a check;
+    # an account confined to the other site is still there.)
+    assert ids["tech-a"] in {u["id"] for u in before.json()}
+    assert ids["ro"] not in {u["id"] for u in before.json()}
     for name, account_id in ids.items():
         resp = await client.patch(
             f"/api/v1/machines/{t.b.id}/maintenance",

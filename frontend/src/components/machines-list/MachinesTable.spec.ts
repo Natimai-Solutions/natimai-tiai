@@ -227,3 +227,65 @@ describe('MachinesTable', () => {
     wrapper.unmount();
   });
 });
+
+describe('MachinesTable — selection, enrolment, thresholds', () => {
+  // Item 3: copying a hostname must not open the fiche.
+  it('opens nothing on a click that ends a text selection', async () => {
+    const wrapper = mountTable([row()]);
+    const selection = vi
+      .spyOn(window, 'getSelection')
+      .mockReturnValue({ isCollapsed: false, toString: () => 'PC-01' } as unknown as Selection);
+    await wrapper.find('tbody tr').trigger('click');
+    expect(wrapper.emitted('open')).toBeUndefined();
+
+    selection.mockReturnValue({ isCollapsed: true, toString: () => '' } as unknown as Selection);
+    await wrapper.find('tbody tr').trigger('click');
+    expect(wrapper.emitted('open')).toHaveLength(1);
+    selection.mockRestore();
+  });
+
+  // Item 4: no checkboxes without a bulk action to use them for.
+  it('offers no selection column when told rows are not selectable', () => {
+    const wrapper = mount(MachinesTable, {
+      props: {
+        rows: [row()],
+        columns: visibleMachineColumns([...MACHINE_COLUMN_KEYS], 7),
+        loading: false,
+        agentLatest: '0.3.0',
+        usageWindowDays: 7,
+        selected: [],
+        selectable: false,
+        pagination: { ...initialMachinePagination(), rowsNumber: 1 },
+      },
+    });
+    expect(wrapper.findComponent(QTable).props('selection')).toBe('none');
+    expect(wrapper.find('tbody .q-checkbox').exists()).toBe(false);
+  });
+
+  // C2: the enrolment state on the row.
+  it('flags a revoked token and a pending re-enrolment', () => {
+    const wrapper = mountTable([
+      row({ id: 'a', token_revoked: true }),
+      row({ id: 'b', reenroll_requested: true }),
+    ]);
+    expect(wrapper.find('[data-test="token-revoked"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="reenroll-requested"]').exists()).toBe(true);
+  });
+
+  // Item 9: the parc's threshold colours the bar.
+  it('colours the disk bar by the parc’s threshold', () => {
+    const wrapper = mount(MachinesTable, {
+      props: {
+        rows: [row()],
+        columns: visibleMachineColumns([...MACHINE_COLUMN_KEYS], 7),
+        loading: false,
+        agentLatest: '0.3.0',
+        usageWindowDays: 7,
+        selected: [],
+        lowDiskPercent: 51,
+        pagination: { ...initialMachinePagination(), rowsNumber: 1 },
+      },
+    });
+    expect(wrapper.findComponent(QLinearProgress).props('color')).toBe('negative');
+  });
+});

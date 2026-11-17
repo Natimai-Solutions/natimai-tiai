@@ -55,5 +55,10 @@ class AuthSession(SQLModel, table=True):
     # refresh, capped at ``created_at + SESSION_MAX_DAYS``.
     expires_at: datetime = utc_field()
     revoked_at: datetime | None = utc_field(default=None, nullable=True)
+    # Wrong current passwords typed on « changer mon mot de passe » through
+    # this session. The budget is the session's, not the account's (audit
+    # T07): a stolen session that spends it is ended, and the owner's other
+    # sessions keep theirs.
+    password_failures: int = Field(default=0)
     user_agent: str | None = Field(default=None, max_length=USER_AGENT_MAX_LENGTH)
     ip: str | None = Field(default=None, max_length=IP_MAX_LENGTH)

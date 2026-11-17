@@ -294,6 +294,7 @@ Il n'est jamais committé.
 | `TIAI_DEV_BACKEND_PORT` | `8800` | Port hôte du backend en HTTP direct (override de dev uniquement) |
 | `TIAI_DEV_BACKEND_BIND` | `127.0.0.1` | Adresse hôte sur laquelle ce port est publié (override de dev uniquement). `0.0.0.0` l'ouvre aux postes du réseau, en clair (cf. § « Mode A ») |
 | `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/` (cf. § « Sauvegardes et restauration ») |
+| `BACKUP_ENCRYPT_RECIPIENT` | *(vide)* | Clé publique `age` (`age1…`), ou plusieurs séparées par des espaces : chaque dump quotidien est chiffré pour elles (`tiai-AAAAMMJJ-HHMMSS.dump.age`). Vide : dumps en clair. Jamais la clé privée (cf. § « [Chiffrer les sauvegardes](#chiffrer-les-sauvegardes) ») |
 
 ### Backend
 
@@ -307,20 +308,23 @@ Il n'est jamais committé.
 | `FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` | — | Compte admin créé au démarrage s'il n'existe pas |
 | `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée à tout mot de passe |
 | `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié », en minutes (5 à 10 080) |
-| `PASSWORD_RESET_COOLDOWN_MINUTES` / `PASSWORD_RESET_MAX_LIVE_LINKS` | `5` / `3` | « Mot de passe oublié » : pas de nouveau courriel pour un compte dans ce délai (0 à 60 min) après le précédent, et au plus ce nombre de liens valides à la fois (1 à 10). Une demande n'annule jamais un lien encore valide ; utiliser un lien annule les autres |
+| `PASSWORD_RESET_COOLDOWN_MINUTES` / `PASSWORD_RESET_MAX_LIVE_LINKS` | `5` / `3` | « Mot de passe oublié », compté **par compte et par adresse qui demande** : pas de nouveau courriel dans ce délai (0 à 60 min) après le précédent demandé depuis la même adresse, et au plus ce nombre de liens valides à la fois demandés depuis elle (1 à 10). Un tiers qui épuise son budget laisse donc entier celui du titulaire, qui demande depuis son poste. Une demande n'annule jamais un lien encore valide ; utiliser un lien annule les autres. La réponse (204) arrive après le même délai (une demi-seconde) quelle que soit l'issue : ni son contenu ni sa durée ne disent si le compte existe |
+| `PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS` | `10` | Plafond de liens valides à la fois pour un même compte, **toutes adresses confondues** (1 à 100, au moins `PASSWORD_RESET_MAX_LIVE_LINKS`) : contre l'inondation d'une boîte depuis de nombreuses adresses. Une demande venue d'une adresse habituelle du compte (cf. `LOGIN_KNOWN_ADDRESS_DAYS`) n'y est pas soumise |
 | `CONSOLE_BASE_URL` | `https://<TIAI_SERVER_NAME>` | URL publique de la console, dans les liens des e-mails (réinitialisation, fiche d'un poste). À renseigner seulement si la console est jointe sous une autre URL (autre port, proxy devant Caddy). Si ni elle ni `TIAI_SERVER_NAME` n'est connue, aucun e-mail de réinitialisation n'est envoyé |
 | `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste — 16 caractères minimum hors `local` |
 | `ENROLLMENT_SECRET_PREVIOUS` | *(vide)* | Ancien secret, encore accepté pendant une rotation (cf. « Enrôlement : approbation et rotation du secret ») |
 | `ENROLLMENT_REENROLL_REQUIRES_APPROVAL` | `true` | Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur |
 | `LOGIN_MAX_FAILED_ATTEMPTS` / `LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Verrouillage d'un compte après N échecs de connexion espacés de moins de cette durée, pour cette durée (voir *Verrouillage des comptes*). Une connexion réussie ou une réinitialisation du mot de passe le lève |
 | `LOGIN_SIEGE_ADDRESSES` / `LOGIN_KNOWN_ADDRESS_DAYS` | `10` / `30` | Pendant un verrou, dès que ce nombre d'adresses distinctes (2 à 1 000) ont échoué sur le compte en `LOGIN_LOCKOUT_MINUTES`, seules les adresses qui ont ouvert ce compte depuis ce nombre de jours (1 à 365) restent admises (voir *Verrouillage des comptes*) |
+| `LOGIN_SLOW_MAX_FAILED_ATTEMPTS` / `LOGIN_SLOW_WINDOW_HOURS` | `20` / `24` | Essais lents : ce nombre d'échecs (au-dessus de `LOGIN_MAX_FAILED_ATTEMPTS`, jusqu'à 1 000), même espacés, en ce nombre d'heures (1 à 168, plus long que `LOGIN_LOCKOUT_MINUTES`) depuis le premier verrouille le compte pour ce même nombre d'heures, et ce verrou n'admet que les adresses habituelles (voir *Verrouillage des comptes*) |
 | `RATE_LIMIT_ENABLED` | `true` | Limitation de débit par adresse (connexion, « mot de passe oublié », enrôlement, e-mail de test). À `false`, elle est coupée, et avec elle le plafond de heartbeats par poste et la limite des changements de mot de passe — **pas** le verrouillage des comptes ni les quotas de logiciels. Une issue de secours, pas un réglage : réservée à un déploiement dont tous les opérateurs arrivent par la même adresse (VPN, proxy) |
 | `AGENT_HEARTBEAT_MAX_PER_MINUTE` | `12` | Heartbeats acceptés par poste et par minute (2 à 600) ; au-delà, 429. L'agent en envoie un par `heartbeat_interval_seconds` (60 s par défaut), plus un au redémarrage : relever cette limite si l'intervalle est abaissé sous 10 s |
 | `SOFTWARE_NEW_ENTRIES_PER_DAY` | `2000` | Nouveaux logiciels qu'un poste peut ajouter au catalogue par 24 h (100 à 1 000 000) ; les logiciels déjà connus ne comptent pas. Une liste coupée par ce quota est signalée sur la fiche du poste (« Relevé partiel »), et le serveur redemande l'inventaire à l'agent dès que le budget le permet (agents à partir de la v1.2.1 ; un agent plus ancien le complète à son prochain redémarrage ou au prochain changement de son inventaire). En dessous de 2 000 (le plus qu'un inventaire transporte), le premier inventaire d'un poste sur un catalogue vide est donc d'abord partiel |
-| `SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET` | `50000` | Nouveaux logiciels que **tous les postes réunis** peuvent ajouter au catalogue par 24 h (1 000 à 10 000 000). Même règle : les logiciels déjà connus ne comptent pas, et une liste coupée est signalée puis redemandée |
+| `SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET` | `50000` | Nouveaux logiciels que **tous les postes réunis** peuvent ajouter au catalogue par 24 h (1 000 à 10 000 000). Même règle : les logiciels déjà connus ne comptent pas, et une liste coupée est signalée puis redemandée. Les deux budgets sont comptés dans PostgreSQL : ils valent pour tous les processus de l'API ensemble et un redémarrage ne les remet pas à zéro ; ce qu'un battement en échec avait réservé est rendu |
 | `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
-| `TRUSTED_PROXIES` | *(vide)* | Réseaux (CIDR, séparés par des virgules) dont l'en-tête `X-Forwarded-For` est cru, en plus de la boucle locale et de `TRUSTED_PROXY_HOSTS`. Toutes les lignes de l'en-tête sont alors lues bout à bout, dans l'ordre, et l'adresse retenue est l'entrée la plus à droite qui n'est pas elle-même un proxy de confiance ; chaque entrée est lue comme une adresse (port et crochets retirés), et une entrée illisible ramène à l'adresse de la connexion. Pour tout autre pair, l'en-tête est ignoré et l'adresse du client — limitation de débit, journal d'audit — est celle de la connexion. À renseigner seulement si un autre proxy que le Caddy de la stack joint directement le backend, et **n'y lister que les proxys** : une plage large (tout le réseau local) laisse un client qui s'y trouve choisir l'adresse sous laquelle il apparaît, ou ramène tous les clients à l'adresse du proxy |
+| `TRUSTED_PROXIES` | *(vide)* | Réseaux (CIDR, séparés par des virgules) dont l'en-tête `X-Forwarded-For` est cru, en plus de la boucle locale et de `TRUSTED_PROXY_HOSTS`. Toutes les lignes de l'en-tête sont alors lues bout à bout, dans l'ordre, et l'adresse retenue est l'entrée la plus à droite qui n'est pas elle-même un proxy de confiance ; chaque entrée est lue comme une adresse (port et crochets retirés), et une entrée illisible ramène à l'adresse de la connexion. Pour tout autre pair, l'en-tête est ignoré et l'adresse du client — limitation de débit, journal d'audit — est celle de la connexion. À renseigner seulement si un autre proxy que le Caddy de la stack joint directement le backend, et **n'y lister que les proxys** : une plage large (tout le réseau local) laisse un client qui s'y trouve choisir l'adresse sous laquelle il apparaît, ou ramène tous les clients à l'adresse du proxy. Le backend **refuse de démarrer** sur une entrée plus large qu'un `/24` (IPv4) ou un `/64` (IPv6), en la nommant, sauf `TRUSTED_PROXIES_ALLOW_WIDE=true` |
+| `TRUSTED_PROXIES_ALLOW_WIDE` | `false` | `true` accepte dans `TRUSTED_PROXIES` un réseau plus large qu'un `/24` ou un `/64`. À réserver à un réseau qui ne contient **que** des proxys : tout autre client qui s'y trouverait choisirait l'adresse sous laquelle la limitation de débit, le verrouillage et le journal d'audit le voient |
 | `TRUSTED_PROXY_HOSTS` | `caddy` | Noms d'hôte dont l'en-tête `X-Forwarded-For` est cru, séparés par des virgules, résolus dans le réseau Compose (au plus une fois par minute). Un nom qui ne se résout pas (hors Docker) n'accorde rien. Le défaut désigne le service Caddy de la stack |
 | `EXPOSE_OPENAPI` | `false` | Sert le schéma OpenAPI (`/api/v1/openapi.json`) et ses pages `/docs` et `/redoc` hors `ENVIRONMENT=local`, où ils le sont toujours. Derrière Caddy, seul `/api/*` atteint le backend : seul le schéma JSON devient joignable, les pages ne le sont que sur le port direct de l'override de dev. Le schéma décrit chaque route et chaque champ : laisser à `false` en production |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
@@ -337,7 +341,7 @@ Il n'est jamais committé.
 | `COMMAND_UNANSWERED_HOURS` | `24` | Une commande remise au poste, ou annoncée en cours, sans verdict au-delà de ce délai (en heures, 1 à 720) est close en **échec « sans réponse du poste »** par le worker : agent arrêté ou mis à jour, poste éteint pendant l'exécution, agent trop ancien. Le serveur ne remet jamais une commande deux fois ; un verdict qui arrive plus tard remplace celui-ci |
 | `AUDIT_RETENTION_DAYS` | `730` | Conservation du journal d'audit, en jours (0 à 3650), purgé chaque matin par le worker. `0` = conserver indéfiniment, si la politique de l'établissement l'exige |
 | `MAINTENANCE_DEFAULT_CYCLE_DAYS` | `90` | Cycle de maintenance par défaut du parc, en jours, **valeur initiale seulement** : la page Paramètres de la console peut en écrire une autre, qui prend alors le dessus. Une salle ou un poste peuvent surcharger le cycle (0 = exclu de la maintenance) et le responsable ; le plus précis gagne |
-| `MAINTENANCE_DUE_SOON_DAYS` | `14` | Fenêtre « à échéance » : un poste est signalé ce nombre de jours avant sa date. Même règle : valeur initiale, modifiable dans Paramètres |
+| `MAINTENANCE_DUE_SOON_DAYS` | `14` | Fenêtre « à échéance » : un poste est signalé ce nombre de jours avant sa date — au plus la moitié de son cycle, pour qu'un cycle court reste « à jour » après une visite. Même règle : valeur initiale, modifiable dans Paramètres |
 | `USAGE_WINDOW_DAYS` | `7` | Fenêtre glissante, en jours (1 à 90), sur laquelle sont comptées les heures allumées des postes. **Valeur initiale seulement**, modifiable dans Paramètres |
 | `USAGE_LOW_HOURS` | `10` | En dessous de ce nombre d'heures sur la fenêtre, un poste est « peu utilisé ». Un poste enrôlé pendant la fenêtre ne l'est jamais. Valeur initiale, modifiable dans Paramètres |
 | `USAGE_HIGH_HOURS` | `30` | Au-dessus, un poste est « toujours allumé ». Valeur initiale, modifiable dans Paramètres |
@@ -395,11 +399,25 @@ un lien « mot de passe oublié » y est utilisé. Un changement de mot de passe
 efface les adresses habituelles de l'ancien, sauf celle d'où le nouveau vient
 d'être choisi.
 
+**Essais lents.** Des échecs espacés de plus de `LOGIN_LOCKOUT_MINUTES` ne
+s'additionnent pas pour le verrou ci-dessus. Un second compteur les prend :
+`LOGIN_SLOW_MAX_FAILED_ATTEMPTS` échecs (20), même espacés, en
+`LOGIN_SLOW_WINDOW_HOURS` heures (24) depuis le premier verrouillent le compte
+pour `LOGIN_SLOW_WINDOW_HOURS` heures, et ce verrou n'admet d'emblée que les
+**adresses habituelles** du compte — les essais ont été espacés pour qu'aucune
+adresse n'ait échoué récemment. Le titulaire dispose des mêmes sorties que
+ci-dessus : son poste habituel (la connexion lève le verrou), « Mot de passe
+oublié », ou une réinitialisation par un administrateur. Ce verrou figure au
+journal d'audit (`user.locked`, avec `via: slow_attempts`). Une connexion
+réussie ne remet pas ce compteur à zéro (seul un nouveau mot de passe le fait) :
+sinon le titulaire qui se connecte chaque matin rendrait chaque jour un budget
+neuf à qui devine lentement.
+
 Adresses en échec et adresses habituelles sont **en base**
 (`user_login_addresses`, purgée chaque matin) : un redémarrage de l'API ne lève
 pas un verrou et n'oublie pas les postes habituels.
 
-Trois limites à connaître :
+Deux limites à connaître :
 
 - Le titulaire qui se présente depuis une adresse **jamais vue**, pendant que
   des essais arrivent de `LOGIN_SIEGE_ADDRESSES` adresses ou plus, est refusé
@@ -411,10 +429,6 @@ Trois limites à connaître :
   absent de `TRUSTED_PROXIES`) partagent le verrou de l'adresse fautive ; et
   derrière un proxy non déclaré, toutes les requêtes semblent venir de lui.
   Déclarer le proxy (`TRUSTED_PROXIES`, `TRUSTED_PROXY_HOSTS`) avant tout.
-- Les échecs espacés de plus de `LOGIN_LOCKOUT_MINUTES` ne verrouillent
-  jamais : quatre essais par quart d'heure restent possibles sans verrou. Ils
-  figurent au journal de sécurité du backend (« login failed »), pas au journal
-  d'audit ; la longueur minimale des mots de passe est ce qui les rend vains.
 
 La page Utilisateurs affiche « Verrouillé » ; une réinitialisation du mot de
 passe par un administrateur lève le verrou. Le verrouillage et la
@@ -606,7 +620,7 @@ Côté serveur :
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `PACKAGES_DIR` | `/data/packages` | Où les fichiers des paquets sont stockés, un par empreinte SHA-256. Monté sur le volume Docker `packages` |
+| `PACKAGES_DIR` | `/data/packages` | Où les fichiers des paquets sont stockés, un par empreinte SHA-256. Monté sur le volume Docker `packages`. Le ménage des fichiers orphelins respecte un dépôt en cours, même mené par un autre processus de l'API (verrou dans PostgreSQL) |
 | `PACKAGE_MAX_BYTES` | `2147483648` (2 Gio) | Taille maximale d'un fichier déposé, en octets (de 1 Mio à 8 Gio) ; au-delà, l'API répond un 413 qui nomme la limite. La console envoie un fichier par requête, et Caddy borne la requête entière sur la seule route de dépôt (cf. « Relever la taille maximale » ci-dessous) |
 | `PACKAGE_METHOD_A_MAX_GB` | `8` | Taille totale, en Gio (1 à 1 024), qu'un paquet **non signé** (méthode A) peut annoncer. À tenir égale à la valeur de registre `DeployMethodAMaxGB` des postes : au-delà, le serveur et la console refusent le déploiement, au lieu de le laisser échouer sur chaque poste |
 | `PACKAGE_MAX_CONCURRENT_DOWNLOADS` | `20` | Téléchargements servis en même temps par le processus de l'API. Au-delà, l'agent est prié de revenir (429) sans que sa commande échoue |
@@ -647,7 +661,18 @@ redémarrage du serveur), puis un par 24 h, au format custom de `pg_dump` (`-Fc`
 compressé), dans `deploy/backups/` sur l'hôte. La rétention est de
 `BACKUP_KEEP_DAYS` jours (défaut 14) et la purge n'a lieu qu'après un dump
 réussi : une base en panne ne fait jamais disparaître les sauvegardes
-existantes.
+existantes. Seuls les dumps quotidiens (`tiai-AAAAMMJJ-HHMMSS.dump`, ou
+`.dump.age` chiffrés) sont purgés : un dump manuel sous un autre nom
+(`tiai-avant-operation.dump`, ci-dessous) ou rangé dans un sous-dossier n'est
+jamais supprimé.
+
+Le service tourne sur une image construite par Compose depuis
+`deploy/backup/Dockerfile` : celle de `db` (`postgres:16-alpine`, donc un
+`pg_dump` de la même version que le serveur) plus l'outil de chiffrement
+[`age`](https://age-encryption.org), installé une fois au build depuis le dépôt
+signé d'Alpine. Le premier `docker compose up` la construit : il faut alors
+joindre le registre Docker et `dl-cdn.alpinelinux.org` (derrière un proxy,
+§ « Hôte Docker derrière un proxy »). `docker compose pull` ne la concerne pas.
 
 Vérifier que ça tourne :
 
@@ -665,24 +690,98 @@ l'hôte qui ferme le dossier. Les dumps contiennent les hachés des mots de pass
 et tout l'inventaire du parc. Les
 commandes de dump manuel ci-dessous posent elles aussi `umask 077` — un `sh -c`
 lancé par `docker compose exec` n'hérite pas de celui du script de sauvegarde.
-Les dumps ne sont **pas chiffrés** — l'image PostgreSQL n'embarque ni `gpg` ni
-`openssl` ; c'est un écart assumé, d'où la consigne qui suit : la copie hors de
-la machine **doit l'être** (archive chiffrée, coffre de sauvegarde,
+Par défaut, les dumps sont **en clair** : quiconque lit le dossier, le
+disque ou une copie lit la base. Les chiffrer est un réglage, décrit au
+paragraphe suivant ; sans lui, la copie hors de la machine **doit** être
+chiffrée par d'autres moyens (archive chiffrée, coffre de sauvegarde,
 `gpg --symmetric`…).
 
 **Un dump sur le serveur ne protège pas du serveur.** Copier régulièrement
-`deploy/backups/` hors de la machine, sous forme chiffrée (rsync, robocopy,
-tâche planifiée — peu importe le moyen, l'important est qu'il existe). Pour pouvoir reconstruire le
-serveur de zéro, trois choses doivent exister ailleurs :
+`deploy/backups/` hors de la machine (rsync, robocopy, tâche planifiée — peu
+importe le moyen, l'important est qu'il existe), chiffré par `age` ou à la
+copie. Pour pouvoir reconstruire le serveur de zéro, trois choses doivent
+exister ailleurs (quatre avec le chiffrement) :
 
 1. un dump récent de `deploy/backups/` ;
 2. le fichier `deploy/.env` (les secrets ne sont dans aucun dump) ;
-3. le certificat `deploy/certs/` (mode C).
+3. le certificat `deploy/certs/` (mode C) ;
+4. avec le chiffrement, la **clé privée** `age` — et jamais sur le serveur.
+
+### Chiffrer les sauvegardes
+
+Optionnel, et recommandé dès que les dumps quittent la machine. Avec
+`BACKUP_ENCRYPT_RECIPIENT`, chaque dump est chiffré **pour une clé publique**
+`age` au moment où il est écrit : `pg_dump` sort dans un tube, `age` chiffre,
+aucun octet en clair ne touche le disque. Le fichier s'appelle
+`tiai-AAAAMMJJ-HHMMSS.dump.age`. Le serveur n'a que la clé publique, qui sait
+chiffrer mais pas déchiffrer : un serveur volé, un disque récupéré, une copie
+hors site interceptée ne livrent rien. La clé privée reste ailleurs, et ne sert
+qu'à restaurer.
+
+> **Le revers : perdre la clé privée, c'est perdre toutes les sauvegardes
+> chiffrées pour elle.** Personne — ni Tia'i, ni l'éditeur d'`age` — ne peut
+> les rouvrir. D'où deux clés, ci-dessous, et un exercice de restauration une
+> fois la clé rangée.
+
+**1. Créer les clés, sur une autre machine que le serveur** (poste
+d'administration). `age` s'installe par `apt install age`, `brew install age`,
+`winget install FiloSottile.age`, ou depuis les
+[releases](https://github.com/FiloSottile/age/releases) :
+
+```bash
+age-keygen -o tiai-sauvegardes.key           # affiche « Public key: age1… »
+age-keygen -o tiai-sauvegardes-secours.key   # une seconde, pour le coffre
+```
+
+Chaque fichier `.key` contient une clé privée (`AGE-SECRET-KEY-1…`, une ligne)
+et, en commentaire, sa clé publique (`age-keygen -y fichier.key` la réaffiche).
+**Ranger les clés privées** hors du serveur et hors des copies de sauvegarde :
+gestionnaire de mots de passe de l'équipe, coffre, clé USB au coffre, voire
+imprimée — la ligne tient sur une feuille. La seconde clé couvre la perte de la
+première (départ d'un administrateur, poste perdu).
+
+**2. Configurer.** Dans `deploy/.env`, les **clés publiques** seules, séparées
+par une espace :
+
+```bash
+BACKUP_ENCRYPT_RECIPIENT=age1… age1…
+```
+
+puis `docker compose up -d db-backup` (la variable change : Compose recrée le
+service, qui fait aussitôt un dump). Le journal le dit :
+
+```bash
+docker compose logs --tail 5 db-backup   # « sauvegarde OK : tiai-….dump.age (…, chiffrée) »
+```
+
+Si le chiffrement est demandé mais impossible — clé illisible, clé privée
+collée par erreur (refusée : la retirer, et la tenir pour compromise), image
+sans `age` —, le service **n'écrit aucun dump**, ni en clair ni chiffré, ne
+purge rien, s'arrête sur une ligne `ECHEC : …` qui dit pourquoi, et redémarre
+en boucle (`docker compose ps` : *Restarting*) jusqu'à correction. Les dumps
+en clair d'avant le réglage restent : les quotidiens partent à leur échéance
+(`BACKUP_KEEP_DAYS`), les manuels sont à effacer à la main, ainsi que leurs
+copies hors site.
+
+**3. Vérifier une sauvegarde.** Sur le serveur, sans clé, on ne peut que voir
+qu'un fichier est chiffré (`head -c 21 backups/tiai-….dump.age` affiche
+`age-encryption.org/v1`). La vraie vérification se fait là où est la clé, de
+préférence sur la copie hors site : `age` authentifie le contenu, un fichier
+tronqué ou altéré est refusé.
+
+```bash
+age -d -i tiai-sauvegardes.key tiai-AAAAMMJJ-HHMMSS.dump.age > /dev/null && echo intègre
+# avec les outils PostgreSQL sur ce poste, la liste des objets du dump :
+age -d -i tiai-sauvegardes.key tiai-AAAAMMJJ-HHMMSS.dump.age | pg_restore -l | head
+```
+
+Pour revenir aux dumps en clair : vider `BACKUP_ENCRYPT_RECIPIENT`, puis
+`docker compose up -d db-backup`.
 
 ### Restaurer
 
 Sur une stack levée (la base peut être vide ou pleine — `--clean` remet à
-plat) :
+plat). Un dump chiffré (`.dump.age`) se déchiffre d'abord, voir plus bas.
 
 ```bash
 cd deploy
@@ -698,6 +797,24 @@ docker compose start backend worker
 depuis un dump antérieur à ce rôle : sans eux, les tables reviendraient au
 superutilisateur et le backend ne pourrait plus y écrire.
 
+**Dump chiffré.** Le déchiffrer dans le conteneur, la clé privée passée par
+l'entrée standard — collée dans le terminal puis Entrée et Ctrl-D, ou
+redirigée (`… < tiai-sauvegardes.key`, à travers `ssh` depuis le poste qui la
+détient) : elle n'est jamais écrite sur le serveur. Puis restaurer le fichier
+obtenu avec la commande ci-dessus, et l'effacer : c'est un dump en clair, et
+aucune purge ne le retirera.
+
+```bash
+docker compose exec -T db-backup sh -c 'umask 077 && age -d -i - \
+   -o /backups/restauration-en-clair.dump /backups/tiai-AAAAMMJJ-HHMMSS.dump.age'
+# … pg_restore de /backups/restauration-en-clair.dump (commande ci-dessus) …
+docker compose exec db-backup rm /backups/restauration-en-clair.dump
+```
+
+Sur un serveur reconstruit de zéro : déposer d'abord la copie hors site du
+`.dump.age` dans `deploy/backups/`, et le `.env` d'origine (sa
+`BACKUP_ENCRYPT_RECIPIENT` comprise).
+
 Au redémarrage, le backend rejoue les migrations Alembic si le dump vient
 d'une version plus ancienne du schéma — restaurer un dump d'hier après une
 montée de version fonctionne donc sans étape supplémentaire. L'inverse (un
@@ -709,6 +826,18 @@ Un dump manuel avant une opération risquée :
 docker compose exec db-backup sh -c \
   'umask 077 && PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" \
    -d "$POSTGRES_DB" -Fc -f /backups/tiai-avant-operation.dump'
+```
+
+Chiffrement activé : la même chose chiffrée pour les clés de
+`BACKUP_ENCRYPT_RECIPIENT`, sans passage en clair sur le disque. Contrôler
+qu'aucune erreur de `pg_dump` ne s'affiche : dans un tube, son échec ne fait
+pas échouer la commande.
+
+```bash
+docker compose exec db-backup sh -c \
+  'umask 077 && PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" \
+   -d "$POSTGRES_DB" -Fc | age $(printf " -r %s" $BACKUP_ENCRYPT_RECIPIENT) \
+   -o /backups/tiai-avant-operation.dump.age'
 ```
 
 > **Faire l'exercice une fois.** Une procédure de restauration jamais jouée
@@ -737,18 +866,20 @@ pas l'effet de bord du prochain `docker compose pull`.
 `Caddyfile` et le script de sauvegarde (`backup/backup.sh`) ne sont pas dans
 les images : les conteneurs `caddy` et `db-backup` les lisent sur l'hôte
 (§ « [Obtenir les fichiers de déploiement](#obtenir-les-fichiers-de-déploiement) »),
-et leurs propres images (`caddy`, `postgres`) ne changent pas d'une release de
-Tia'i à l'autre. Changer `TIAI_VERSION` puis lancer `docker compose pull` et
-`docker compose up -d` ne met donc à jour que le backend, le worker et la
-console : le serveur garderait l'ancien Caddyfile et l'ancien script de
-sauvegarde, sans les corrections que la release y apporte. D'où les étapes 2
-et 5 ci-dessous, à faire à **chaque** mise à jour — ici de la 1.2.0 vers la
-1.2.1 :
+et leurs propres images ne viennent pas du registre de Tia'i — `caddy` est
+tirée telle quelle, `db-backup` construite sur place depuis
+`backup/Dockerfile`. Changer `TIAI_VERSION` puis lancer `docker compose pull`
+et `docker compose up -d` ne met donc à jour que le backend, le worker et la
+console : le serveur garderait l'ancien Caddyfile, l'ancien script et l'image
+de sauvegarde, sans les corrections que la release y apporte. D'où les
+étapes 2 et 5 ci-dessous, à faire à **chaque** mise à jour — ici de la 1.2.0
+vers la 1.2.1 :
 
 ```bash
 cd deploy
 # 1. Un dump juste avant. db-backup en refait un à l'étape 5, mais après les
 #    migrations : celui-ci est le seul qui permette de revenir en arrière.
+#    Chiffrement activé : la variante chiffrée (§ « Restaurer »).
 docker compose exec db-backup sh -c \
   'umask 077 && PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" \
    -d "$POSTGRES_DB" -Fc -f /backups/tiai-avant-mise-a-jour.dump'
@@ -775,13 +906,14 @@ chmod 700 backups
 
 # 5. Les images, puis les services.
 docker compose pull                 # télécharge les images de cette version
+docker compose build --pull db-backup   # postgres:16-alpine à jour (celle de db) + age
 docker compose up -d                # recrée backend, worker et console
 docker compose up -d --force-recreate caddy db-backup   # relisent Caddyfile et backup.sh
 
 # 6. Vérifier.
 docker compose ps                   # tous les services « healthy » en 2 min
 docker compose exec caddy grep max_size /etc/caddy/Caddyfile   # celui de la release (v1.2.1 : 2050MiB et 8MB)
-docker compose logs --tail 5 db-backup   # « sauvegarde OK : … », sans ligne « ATTENTION »
+docker compose logs --tail 5 db-backup   # « sauvegarde OK : … » (« , chiffrée » si configuré), sans « ATTENTION » ni « ECHEC »
 ls -ld .env backups                 # -rw------- et drwx------
 ```
 
@@ -794,7 +926,15 @@ conteneur, celui qui existait à sa création : git le remplace sur l'hôte, le
 conteneur garde l'ancien. Sans cette commande, ni `caddy` ni `db-backup` ne
 voient les fichiers de l'étape 2. La recréation de `caddy` coupe la console et
 les agents quelques secondes (les agents réessaient d'eux-mêmes) ; celle de
-`db-backup` déclenche un dump.
+`db-backup` déclenche un dump (deux si l'image a changé à l'étape 5 : `up -d`
+l'a déjà recréé).
+
+**Pourquoi `build --pull db-backup`.** L'image de sauvegarde n'est pas tirée
+mais construite, et `docker compose up` ne la reconstruit pas d'elle-même
+quand elle existe déjà. `--pull` la refait sur la `postgres:16-alpine` que
+`docker compose pull` vient d'apporter à `db` (même version de `pg_dump` que
+le serveur, correctifs de sécurité compris), avec le `Dockerfile` de la
+version visée. Il faut joindre le registre Docker et `dl-cdn.alpinelinux.org`.
 
 **Les notes de version** (`dev/notes-de-version-v<version>.md`, section « À
 faire avant de mettre à jour ») disent ce qu'une release demande de plus : une
@@ -826,7 +966,7 @@ curl -L https://github.com/Natimai-Solutions/natimai-tiai/archive/refs/tags/v1.2
 **Revenir en arrière** : remettre l'ancienne valeur de `TIAI_VERSION` **et**
 les fichiers de déploiement de l'ancienne version (`git checkout v1.2.0`), puis
 relancer `docker compose up -d` et
-`docker compose up -d --force-recreate caddy db-backup` — tant que la version
+`docker compose up -d --build --force-recreate caddy db-backup` — tant que la version
 quittée n'a pas migré la base. Si elle l'a fait, restaurer le dump pris avant
 la montée (§ « Restaurer ») *puis* redémarrer sur l'ancienne version : un
 schéma plus récent que le code n'est pas supporté.
@@ -1205,6 +1345,7 @@ le secret d'enrôlement, plutôt qu'en clair dans le YAML.
 | `DeploySigners` | `REG_MULTI_SZ` | — (registre seulement) |
 | `DeployPublishers` | `REG_MULTI_SZ` | — (registre seulement) |
 | `DeployMethodAMaxGB` | `REG_DWORD` | — (registre seulement) |
+| `DeployCacheMaxGB` | `REG_DWORD` | — (registre seulement) |
 
 Pour les intervalles, `0` est ignoré et signifie « laisser le défaut ». Une
 `ProxyURL` vide est ignorée de même : pour annuler par GPO un proxy qu'un YAML
@@ -1260,9 +1401,16 @@ script, PowerShell rejette le paramètre inconnu avant la première ligne —
 rien dans `deploy.log`, et aucun poste installé ni mis à jour, à chaque
 démarrage, tant que l'ancien script reste en place.
 
-Les cinq valeurs `Deploy*` règlent le **déploiement logiciel** sur le poste ;
-la dernière, `DeployMethodAMaxGB`, borne la taille d'un paquet non signé et se
-tient égale à `PACKAGE_METHOD_A_MAX_GB` côté serveur.
+Les six valeurs `Deploy*` règlent le **déploiement logiciel** sur le poste ;
+`DeployMethodAMaxGB` borne la taille d'un paquet non signé et se
+tient égale à `PACKAGE_METHOD_A_MAX_GB` côté serveur. `DeployCacheMaxGB`
+(16 par défaut, de 1 à 1 024 Gio) borne la place que les téléchargements
+interrompus ou refusés gardent ensemble dans `C:\ProgramData\Tiai\packages` :
+au démarrage du service et avant chaque téléchargement, l'agent retire les plus
+anciens au-delà de ce plafond (jamais le paquet en cours), en plus de ceux
+inutilisés depuis 7 jours, et note chaque retrait dans `agent.log`. Une valeur
+inutilisable (0, au-delà de 1 024, une chaîne) est signalée dans le journal et
+le défaut s'applique.
 Elles ne se lisent **que dans le registre**, jamais dans le YAML, et sont
 relues à chaque commande. Absentes, tout déploiement est refusé. Leur rôle et
 la façon de les poser sont décrits dans
@@ -1410,7 +1558,10 @@ l'heure des e-mails programmés. L'environnement n'en donne que la valeur de
 départ ; une valeur enregistrée dans la console prend le dessus, et chaque
 changement est inscrit au journal d'audit. Le worker relit l'heure du résumé
 à chaque tour (30 s) et ne renvoie jamais deux fois le résumé du jour, ni le
-rappel de la semaine, quand on déplace leur heure.
+rappel de la semaine, quand on déplace leur heure ou qu'il redémarre. Un worker
+démarré après l'heure du résumé (mise à jour, redémarrage de l'hôte) l'envoie
+aussitôt s'il n'est pas déjà parti ce jour-là ; il ne rattrape jamais celui de
+la veille.
 
 **Utilisation des postes.** Le serveur compte les heures où chaque poste est
 allumé, à partir des battements de l'agent : un écart entre deux battements
@@ -1439,12 +1590,28 @@ lectures viennent de l'agent, sans rien configurer (voir « Paramètres de l'age
 Windows », paragraphe *Annuaire*). Après un changement de `ROOM_SOURCE`,
 « Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc.
 
+La resynchronisation range chaque poste dans la salle que nomme sa dernière
+lecture de l'annuaire (son OU, ou son attribut *Emplacement*), en créant les
+salles qui manquent ; une salle créée à la main du même nom — dans un bâtiment
+ou non — est reprise plutôt que doublée, si une majorité des postes qui la
+réclament s'accordent sur la même OU (sinon ils restent où ils sont et la salle
+est signalée). Un poste dont la lecture ne nomme aucune salle est retiré de la
+sienne ; un poste dont l'agent n'a **jamais** transmis de lecture d'annuaire
+(agent ancien, poste hors domaine) reste où il est, comme lors d'un simple
+inventaire. Elle ne s'exécute pas d'un clic : la console calcule d'abord, sans
+rien écrire, combien de postes changeront de salle et combien de salles seront
+créées, et demande confirmation avant de lancer le reclassement (tracé dans le
+journal d'audit).
+
 **Vérifications et maintenance.** « Mes tâches » réunit, pour chaque compte, les
 vérifications qu'on lui a affectées et les salles et postes dont il est
 responsable de la maintenance. Le cycle et le responsable se règlent au niveau
 du parc (page Paramètres), d'une salle ou d'un poste, le plus précis gagnant ;
 un cycle de 0 exclut. Une séance de maintenance se saisit pour toute une salle
-depuis sa fiche ou depuis « Mes tâches ». Les e-mails suivent le réglage de
+depuis sa fiche ou depuis « Mes tâches », quelle que soit sa taille (la console
+l'envoie par parts de 250 postes, une seule séance) ; une séance où aucun poste
+n'a été fait s'enregistre si elle dit pourquoi, sans toucher les échéances.
+Les e-mails suivent le réglage de
 chaque compte (page « Mon compte »).
 
 ## Dépannage

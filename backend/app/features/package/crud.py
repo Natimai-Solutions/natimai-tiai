@@ -1,20 +1,22 @@
 """Package queries, and the one rule that keeps signatures honest."""
 
+import asyncio
 import base64
 import hashlib
 import json
 import logging
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, update
+from sqlalchemy import Integer, cast, func, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import contains, utcnow
+from app.features.command import crud as command_crud
 from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.inventory.models import MachineSoftware, Software
 from app.features.package import manifest, storage
@@ -82,6 +84,46 @@ async def cancel_pending_installs(
         .where(col(Command.type) == CommandType.PACKAGE_INSTALL.value)
         .where(col(Command.status) == CommandStatus.PENDING.value)
         .values(status=CommandStatus.FAILED, error=RETIRED_ERROR, finished_at=now)
+    )
+    return result.rowcount or 0
+
+
+# What a pending deployment replaced by a newer one says in the console
+# (``supersede_stale_pending``).
+SUPERSEDED_ERROR = "Remplacée par un nouveau déploiement"
+
+
+async def supersede_stale_pending(
+    session: AsyncSession,
+    *,
+    package_id: uuid.UUID,
+    command_type: str,
+    digest: str,
+    machine_ids: Sequence[uuid.UUID],
+    now: datetime,
+) -> int:
+    """Fail the deployments of this package and action still waiting on these
+    postes that were queued for another version of it, and return how many.
+
+    Left pending, each would count as « déjà en attente » for the deployment
+    being queued — which would then send nothing — and fail at delivery as
+    « paquet modifié après la mise en file »: the administrator would have
+    redeployed for nothing. One queued for the version as it stands is kept,
+    and still counts as already pending. A deployment a poste has received is
+    its own: it runs, or fails, to its end. One queued before fingerprints
+    existed (no digest) is delivered as the package stands: current too.
+    The caller holds the package's lock, and commits."""
+    if not machine_ids:
+        return 0
+    result = await session.exec(
+        update(Command)
+        .where(col(Command.package_id) == package_id)
+        .where(col(Command.type) == command_type)
+        .where(col(Command.status) == CommandStatus.PENDING.value)
+        .where(col(Command.machine_id).in_(list(machine_ids)))
+        .where(col(Command.package_digest).is_not(None))
+        .where(col(Command.package_digest) != digest)
+        .values(status=CommandStatus.FAILED, error=SUPERSEDED_ERROR, finished_at=now)
     )
     return result.rowcount or 0
 
@@ -198,14 +240,60 @@ async def sha_in_use(session: AsyncSession, sha256: str) -> bool:
     return held.first() is not None
 
 
+# --- Held files (audit T09) ----------------------------------------------------
+#
+# An upload stores a file before the transaction naming it commits, so the
+# sweep must not take that file for an orphan. Each stored file has an
+# advisory lock in PostgreSQL — seen by every API process, released by the
+# database when the transaction holding it ends, a crashed process's
+# included, so nothing can stay held for ever. The upload holds it shared
+# (``hold_file``) from before the file is under its name until its
+# transaction commits or rolls back; uploads do not wait for one another. The
+# sweep deletes a file only under the same lock taken exclusive, never
+# waiting for it (``_claim_file``), and asks the database again once it holds
+# it: the upload that released it had committed by then, and each statement
+# sees what was committed before it started. An upload that comes while the
+# sweep holds the lock waits, then finds the file deleted or there, and
+# stores it again if need be (``storage.save``).
+
+# The two-key form of the advisory locks: this namespace, then the first 32
+# bits of the file's hash — two files sharing them only make a sweep skip one
+# or an upload wait a moment. "TPKF" in ASCII.
+_FILE_LOCK_SPACE = 0x54504B46
+
+
+def _file_lock(sha256: str) -> tuple[Any, Any]:
+    key = int(sha256[:8], 16)
+    if key >= 1 << 31:
+        key -= 1 << 32
+    return cast(_FILE_LOCK_SPACE, Integer), cast(key, Integer)
+
+
+async def hold_file(session: AsyncSession, sha256: str) -> None:
+    """Keep the stored file ``sha256`` from any sweep, in any API process,
+    until ``session``'s transaction ends. Waits for a sweep that is deleting
+    it. Does not commit."""
+    await session.exec(select(func.pg_advisory_xact_lock_shared(*_file_lock(sha256))))
+
+
+async def _claim_file(session: AsyncSession, sha256: str) -> bool:
+    """Lock the stored file ``sha256`` for deletion until ``session``'s
+    transaction ends; False, at once, when an upload holds it."""
+    claimed = await session.exec(
+        select(func.pg_try_advisory_xact_lock(*_file_lock(sha256)))
+    )
+    return bool(claimed.one())
+
+
 async def sweep_store(session: AsyncSession) -> int:
     """Delete the stored files nothing wants any more (audit S09): replaced or
     removed files once no open deployment needs them, uploads of a request
     that failed halfway. Returns how many went. Never raises: a full or
     read-only volume, or a database error, must not fail the request that
-    triggered the sweep — which has committed by then.
+    triggered the sweep — which has committed by then: the sweep ends the
+    session's transaction after each file it deletes, to release its lock.
 
-    A file an upload in progress holds is kept (``storage.pin``, audit T09).
+    A file an upload in progress holds is kept (``hold_file``, audit T09).
     And nothing goes when the database knows no package at all: packages are
     retired, never deleted, so a store full of files beside an empty catalogue
     means the wrong or an emptied database, not orphans."""
@@ -220,25 +308,52 @@ async def sweep_store(session: AsyncSession) -> int:
             )
             return 0
         for sha in shas:
-            mark = storage.pin_mark()
-            if storage.pinned_since(sha, mark):
-                continue
             if await sha_in_use(session, sha):
                 continue
-            # No await from this check to the deletion: an upload cannot pin
-            # in between, and one that pinned (or committed and unpinned)
-            # while the database was being asked shows here.
-            if storage.pinned_since(sha, mark):
+            if not await _claim_file(session, sha):
                 continue
-            storage.remove_unreferenced(sha)
-            removed += 1
+            # Asked again under the lock: an upload that held the file until
+            # it committed is seen now.
+            if not await sha_in_use(session, sha):
+                storage.remove_unreferenced(sha)
+                removed += 1
+            await session.commit()
         removed += storage.remove_stale_uploads()
-    except OSError:
+    except (OSError, SQLAlchemyError):
         logger.exception("package store sweep failed")
-    except SQLAlchemyError:
-        logger.exception("package store sweep failed")
+        # Also what releases a file the sweep had locked.
         try:
             await session.rollback()
         except SQLAlchemyError:
             logger.exception("rollback after the package store sweep failed")
     return removed
+
+
+# How often the API process sweeps the store on its own (``sweep_periodically``).
+SWEEP_INTERVAL_SECONDS = 3600
+
+
+async def sweep_periodically(
+    session_factory: Callable[[], AsyncSession],
+    interval_seconds: float = SWEEP_INTERVAL_SECONDS,
+) -> None:
+    """Sweep the store every ``interval_seconds``, until cancelled.
+
+    The sweeps the requests trigger — an upload, a verdict, a refusal at
+    delivery — miss the files whose last deployment ended without one: it
+    expired on a poste that stayed off, or was closed unanswered by the
+    worker. On a quiet server those stayed on disk indefinitely. Expired
+    deployments are marked first: a pending one past its TTL still holds its
+    files until something says it expired. Run in the API process, which has
+    the packages volume. Never raises but on cancellation."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            async with session_factory() as session:
+                await command_crud.mark_expired(session)
+                await session.commit()
+                await sweep_store(session)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("periodic package store sweep failed")

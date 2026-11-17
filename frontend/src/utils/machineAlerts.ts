@@ -1,7 +1,7 @@
 import type { MachineTab } from 'src/components/machine/types';
 import type { MachineDetail } from 'src/services/machines';
 import { isAgentOutdated } from './agentVersion';
-import { freePercent, sizeLabel } from './format';
+import { diskThresholds, freePercent, sizeLabel } from './format';
 
 /**
  * What is wrong with a poste, in the order it should be read.
@@ -27,7 +27,10 @@ export interface MachineAlert {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Free space below which Windows Update stops staging cumulative updates. */
+/**
+ * Free space below which Windows Update stops staging cumulative updates —
+ * the default of the parc's setting, which `machineAlerts` takes when given.
+ */
 export const DISK_CRITICAL_PERCENT = 10;
 export const DISK_WARNING_PERCENT = 20;
 /** A full scan older than this is a poste nothing has looked at in depth. */
@@ -54,6 +57,7 @@ export function machineAlerts(
   m: MachineDetail,
   activeThreats: number,
   now: Date = new Date(),
+  lowDiskPercent?: number,
 ): MachineAlert[] {
   const alerts: MachineAlert[] = [];
 
@@ -114,8 +118,9 @@ export function machineAlerts(
 
   // --- Disk: a full C: is the first cause of a poste that stops patching.
   const free = freePercent(m.system_volume_total_mb, m.system_volume_free_mb);
-  if (free != null && free < DISK_WARNING_PERCENT) {
-    const critical = free < DISK_CRITICAL_PERCENT;
+  const disk = diskThresholds(lowDiskPercent);
+  if (free != null && free < disk.warning) {
+    const critical = free < disk.critical;
     alerts.push({
       key: 'disk',
       level: critical ? 'negative' : 'warning',

@@ -89,9 +89,10 @@
             }}
             <span class="text-caption text-muted">
               ({{
-                maintenance.maintenance_cycle_days === null
-                  ? 'défaut du parc'
-                  : 'propre à la salle'
+                originLabel(
+                  maintenance.effective_cycle_origin,
+                  maintenance.maintenance_cycle_days !== null,
+                )
               }})
             </span>
           </div>
@@ -99,13 +100,28 @@
         <div class="row items-center">
           <div class="col-4 text-muted">Responsable</div>
           <div class="col">
+            <!-- The level the resolution took: a room owner deactivated
+                 since leaves the parc's default in charge, and says so. -->
             <template v-if="maintenance.effective_owner">
               {{ maintenance.effective_owner.name }}
-              <span class="text-caption text-muted">
-                ({{ maintenance.maintenance_owner ? 'propre à la salle' : 'défaut du parc' }})
+              <span class="text-caption text-muted" data-test="owner-origin">
+                ({{
+                  originLabel(
+                    maintenance.effective_owner_origin,
+                    maintenance.maintenance_owner !== null,
+                  )
+                }})
               </span>
             </template>
             <span v-else class="text-muted">personne</span>
+            <div
+              v-if="
+                maintenance.maintenance_owner && maintenance.effective_owner_origin === 'global'
+              "
+              class="text-caption text-warn"
+            >
+              Responsable de la salle sans effet : {{ ownerLabel(maintenance.maintenance_owner) }}
+            </div>
           </div>
         </div>
         <div class="row items-center">
@@ -123,15 +139,33 @@
           </div>
         </div>
         <div v-if="sessions.length" class="row">
-          <div class="col-4 text-muted">Dernières séances</div>
-          <div class="col">
+          <div class="col-4 text-muted">Séances</div>
+          <div class="col" data-test="room-sessions">
+            <!-- Every visit, newest first, a page at a time; each opens with
+                 its global note and its postes. -->
             <div v-for="s in sessions" :key="s.id" class="q-mb-xs">
-              {{ formatDateTime(s.performed_at) }} · {{ s.performed_by }} ·
-              {{ s.machine_count }} poste(s)
+              <a
+                href="#"
+                class="row-link"
+                :data-test="`session-${s.id}`"
+                @click.prevent="openSessionView(s.id)"
+              >
+                {{ formatDateTime(s.performed_at) }}
+              </a>
+              · {{ s.performed_by }} · {{ s.machine_count }} poste(s)
               <div v-if="s.note" class="text-caption text-muted" style="white-space: pre-line">
                 {{ s.note }}
               </div>
             </div>
+            <q-btn
+              v-if="sessionsTotal > sessions.length"
+              flat
+              dense
+              no-caps
+              size="sm"
+              :label="`Afficher plus (${sessionsTotal - sessions.length})`"
+              @click="loadMoreSessions"
+            />
           </div>
         </div>
       </q-card-section>
@@ -146,8 +180,69 @@
       hide-pagination
       flat
       bordered
-      @row-click="(_evt, row) => goMachine(row)"
+      :grid="small"
+      card-container-class="q-col-gutter-sm"
+      @row-click="(_evt, row) => !selectingText() && goMachine(row)"
     >
+      <!-- On a phone, a card per poste with its link and « Retirer » in
+           sight, rather than a table to scroll sideways (audit U23). -->
+      <template #item="cell">
+        <div class="col-12" :data-test="`machine-card-${cell.row.id}`">
+          <q-card flat bordered>
+            <q-card-section class="row items-start no-wrap q-py-sm">
+              <div class="col" style="min-width: 0">
+                <div style="overflow-wrap: anywhere">
+                  <q-icon
+                    :name="onlineIcon(cell.row.is_online)"
+                    :color="onlineColor(cell.row.is_online)"
+                    size="16px"
+                    class="q-mr-xs"
+                  />
+                  <router-link
+                    :to="{ name: 'machine-detail', params: { id: cell.row.id } }"
+                    class="row-link text-weight-medium"
+                  >
+                    {{ cell.row.hostname || cell.row.machine_uuid }}
+                  </router-link>
+                </div>
+                <div class="text-caption text-muted" style="overflow-wrap: anywhere">
+                  {{
+                    [cell.row.location ?? 'sans emplacement', cell.row.session_username]
+                      .filter(Boolean)
+                      .join(' · ')
+                  }}
+                  <q-icon
+                    v-if="cell.row.location_mismatch"
+                    name="wrong_location"
+                    color="orange"
+                    size="16px"
+                    aria-label="L'agent déclare un autre emplacement que la salle"
+                  />
+                </div>
+                <div class="q-mt-xs">
+                  <q-badge
+                    v-if="cell.row.maintenance_state"
+                    :color="maintenanceStateColor(cell.row.maintenance_state)"
+                    :label="maintenanceStateLabel(cell.row.maintenance_state)"
+                    class="q-mr-xs"
+                  />
+                  <span class="text-caption text-muted">{{
+                    cell.row.last_seen ? `vu ${timeAgoLabel(cell.row.last_seen)}` : 'jamais vu'
+                  }}</span>
+                </div>
+              </div>
+              <q-btn
+                v-if="canPlace"
+                flat
+                round
+                icon="remove_circle_outline"
+                :aria-label="`Retirer ${cell.row.hostname ?? ''} de la salle`"
+                @click="confirmRemove(cell.row)"
+              />
+            </q-card-section>
+          </q-card>
+        </div>
+      </template>
       <template #body-cell-hostname="cell">
         <q-td :props="cell">
           <q-icon
@@ -200,7 +295,7 @@
             round
             icon="remove_circle_outline"
             :aria-label="`Retirer ${cell.row.hostname ?? ''} de la salle`"
-            @click="remove(cell.row)"
+            @click="confirmRemove(cell.row)"
           >
             <q-tooltip>Retirer de la salle</q-tooltip>
           </q-btn>
@@ -268,8 +363,14 @@
       :room-id="props.id"
       :cycle-days="maintenance?.maintenance_cycle_days ?? null"
       :owner-id="maintenance?.maintenance_owner?.id ?? null"
+      :owner-label="ownerLabel(maintenance?.maintenance_owner)"
       inherit-hint="Vide : le responsable par défaut du parc"
       :save="saveMaintenance"
+    />
+    <MaintenanceSessionViewDialog
+      v-model="sessionViewOpen"
+      :session-id="sessionViewId"
+      @deleted="load"
     />
     <MaintenanceSessionDialog
       v-model="sessionOpen"
@@ -295,6 +396,7 @@ import { useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import RoomFormDialog from 'src/components/room/RoomFormDialog.vue';
 import MaintenanceSessionDialog from 'src/components/maintenance/MaintenanceSessionDialog.vue';
+import MaintenanceSessionViewDialog from 'src/components/maintenance/MaintenanceSessionViewDialog.vue';
 import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import {
@@ -304,6 +406,7 @@ import {
   listSessions,
   maintenanceStateColor,
   maintenanceStateLabel,
+  ownerLabel,
   updateRoomMaintenance,
   type MaintenanceSession,
   type MaintenanceSettingsPayload,
@@ -333,6 +436,8 @@ import {
 const props = defineProps<{ id: string }>();
 
 const $q = useQuasar();
+// A phone: a card per poste rather than a table (audit U23).
+const small = computed(() => $q.screen.lt.sm);
 const router = useRouter();
 const auth = useAuthStore();
 
@@ -381,6 +486,10 @@ const columns: QTableColumn<Machine>[] = [
 const canMaintain = computed(() => auth.can('maintenance', 'write'));
 const maintenance = ref<RoomMaintenance | null>(null);
 const sessions = ref<MaintenanceSession[]>([]);
+const sessionsTotal = ref(0);
+const SESSION_PAGE_SIZE = 5;
+const sessionViewOpen = ref(false);
+const sessionViewId = ref<string | null>(null);
 const maintenanceOpen = ref(false);
 const sessionOpen = ref(false);
 const sessionMachines = computed(() =>
@@ -398,13 +507,45 @@ const sessionMachines = computed(() =>
 async function loadMaintenance() {
   if (!auth.can('maintenance', 'read')) return;
   try {
-    [maintenance.value, sessions.value] = await Promise.all([
+    const [settings, list] = await Promise.all([
       getRoomMaintenance(props.id),
-      listSessions({ room_id: props.id, page_size: 3 }).then((l) => l.items),
+      listSessions({ room_id: props.id, page: 1, page_size: SESSION_PAGE_SIZE }),
     ]);
+    maintenance.value = settings;
+    sessions.value = list.items;
+    sessionsTotal.value = list.total;
   } catch {
     // The card simply stays absent.
   }
+}
+
+/** The next visits, older: none of them is out of reach any more. */
+async function loadMoreSessions() {
+  try {
+    const page = Math.floor(sessions.value.length / SESSION_PAGE_SIZE) + 1;
+    const list = await listSessions({ room_id: props.id, page, page_size: SESSION_PAGE_SIZE });
+    const known = new Set(sessions.value.map((s) => s.id));
+    sessions.value = [...sessions.value, ...list.items.filter((s) => !known.has(s.id))];
+    sessionsTotal.value = list.total;
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Séances indisponibles') });
+  }
+}
+
+function openSessionView(id: string) {
+  sessionViewId.value = id;
+  sessionViewOpen.value = true;
+}
+
+/** « défaut du parc » or « propre à la salle », from the level the server resolved. */
+function originLabel(origin: 'room' | 'global' | undefined, ownSet: boolean): string {
+  const level = origin ?? (ownSet ? 'room' : 'global');
+  return level === 'room' ? 'propre à la salle' : 'défaut du parc';
+}
+
+/** A click that ends a text selection is not a click on the row. */
+function selectingText(): boolean {
+  return (window.getSelection?.()?.toString() ?? '') !== '';
 }
 
 async function saveMaintenance(payload: MaintenanceSettingsPayload) {
@@ -469,6 +610,16 @@ async function loadRefs() {
 
 function goMachine(m: Machine) {
   void router.push({ name: 'machine-detail', params: { id: m.id } });
+}
+
+/** Taking a poste out of the room changes its owner and cycle: asked first. */
+function confirmRemove(m: Machine) {
+  $q.dialog({
+    title: 'Retirer de la salle',
+    message: `Retirer ${m.hostname ?? 'ce poste'} de la salle ${room.value?.name ?? ''} ? Il reste dans le parc, sans salle, et ne suit plus le cycle ni le responsable de la salle.`,
+    cancel: true,
+    ok: { label: 'Retirer', color: 'negative' },
+  }).onOk(() => void remove(m));
 }
 
 async function remove(m: Machine) {

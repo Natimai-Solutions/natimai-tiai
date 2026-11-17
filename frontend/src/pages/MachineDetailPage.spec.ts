@@ -13,6 +13,8 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 type Deferred = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 const machineCalls: Record<string, Deferred[]> = {};
 const calls: string[] = [];
+// GETs answered with a 500 instead, for the specs of a side list failing.
+const failing = new Map<string, number>();
 
 vi.mock('boot/axios', () => {
   const page = { data: { items: [], total: 0 } };
@@ -20,6 +22,15 @@ vi.mock('boot/axios', () => {
     api: {
       get: vi.fn((url: string) => {
         calls.push(url);
+        const status = failing.get(url);
+        if (status) {
+          return Promise.reject(
+            Object.assign(new Error(`HTTP ${status}`), {
+              isAxiosError: true,
+              response: { status },
+            }),
+          );
+        }
         const m = /^\/machines\/([^/]+)$/.exec(url);
         if (m) {
           return new Promise((resolve, reject) => {
@@ -41,10 +52,22 @@ vi.mock('boot/axios', () => {
   };
 });
 
+// Spied on rather than read off the axios mock: the service caches its answer
+// for the session, so only the first mount of the file would reach the server.
+vi.mock('src/services/rooms', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('src/services/rooms')>()),
+  getRoomConfig: vi.fn(() => Promise.resolve({ manual: true })),
+}));
+
 import { api } from 'boot/axios';
+import { getRoomConfig } from 'src/services/rooms';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
+import MachineCommandsCard from 'src/components/machine/MachineCommandsCard.vue';
 import MachineMergeDialog from 'src/components/machine/MachineMergeDialog.vue';
+import MachineStatusCard from 'src/components/machine/MachineStatusCard.vue';
+import MachineThreatsCard from 'src/components/machine/MachineThreatsCard.vue';
+import { QItem } from 'quasar';
 import { tasksVersion } from 'src/composables/useTasksBadge';
 import type { CheckPayload } from 'src/services/checks';
 import { useAuthStore } from 'src/stores/auth';
@@ -73,7 +96,12 @@ function answer(id: string, n = 0, over: Record<string, unknown> = {}) {
   machineCalls[id]![n]!.resolve({ data: { ...detail(id), ...over } });
 }
 
-async function mountPage(id: string, permissions: string[], query = '') {
+async function mountPage(
+  id: string,
+  permissions: string[],
+  query = '',
+  stubs: Record<string, boolean> = {},
+) {
   const pinia = createPinia();
   setActivePinia(pinia);
   useAuthStore().user = { id: 'u', email: 'a@b.c', permissions } as never;
@@ -89,7 +117,7 @@ async function mountPage(id: string, permissions: string[], query = '') {
     shallow: true,
     props: { id },
     // Shallow for speed, but the page sits in a q-page: its content is the slot.
-    global: { plugins: [router, pinia], renderStubDefaultSlot: true },
+    global: { plugins: [router, pinia], renderStubDefaultSlot: true, stubs },
   });
   await flushPromises();
   return wrapper;
@@ -99,6 +127,7 @@ describe('MachineDetailPage', () => {
   beforeEach(() => {
     for (const k of Object.keys(machineCalls)) delete machineCalls[k];
     calls.length = 0;
+    failing.clear();
   });
 
   // Audit T14: machine:read alone opens the fiche, and nothing it may not
@@ -258,6 +287,27 @@ describe('MachineDetailPage', () => {
     expect(tasksVersion.value).toBe(before + 1);
   });
 
+  // Solidity pass: an assignee who no longer reaches the poste is nobody —
+  // the banner says « à prendre », and who had it.
+  it('says a check is free again when its assignee no longer sees the poste', async () => {
+    const w = await mountPage('B', ['machine:read', 'check:write']);
+    answer('B', 0, {
+      open_check: {
+        id: 'c-1',
+        requested_by: 'Alice',
+        assigned_to_id: 'u-2',
+        assigned_to_name: 'Marie',
+        assignee_reachable: false,
+        instructions: null,
+        created_at: '2026-11-10T20:00:00Z',
+      },
+    });
+    await flushPromises();
+    const text = w.text();
+    expect(text).toContain('à prendre (Marie, à qui elle était affectée, ne voit plus ce poste)');
+    expect(text).not.toContain('affectée à Marie.');
+  });
+
   // Audit U19: a poste follows its room's maintenance owner and cycle.
   it('has the tasks badge read again once the poste is moved to another room', async () => {
     vi.mocked(api.post).mockReset();
@@ -309,5 +359,161 @@ describe('MachineDetailPage', () => {
 
     expect(api.post).toHaveBeenCalledTimes(1);
     expect(tasksVersion.value).toBe(before);
+  });
+
+  // Item 1: a side list failing must never read as « nothing there ».
+  describe('a side list that fails', () => {
+    it('flags the threats as unread on the card and on the head of the fiche', async () => {
+      failing.set('/threats', 500);
+      const w = await mountPage('B', ['machine:read', 'threat:read'], '?tab=antivirus');
+      answer('B');
+      await flushPromises();
+
+      expect(w.findComponent(MachineStatusCard).props('threatsFailed')).toBe(true);
+      expect(w.findComponent(MachineThreatsCard).props('failed')).toBe(true);
+
+      // Back online: the next load clears the flag.
+      failing.clear();
+      await w.find('[aria-label="Actualiser"]').trigger('click');
+      await flushPromises();
+      answer('B', 1);
+      await flushPromises();
+      expect(w.findComponent(MachineStatusCard).props('threatsFailed')).toBe(false);
+    });
+
+    it('flags the commands as unread on their card', async () => {
+      failing.set('/commands', 500);
+      const w = await mountPage('B', ['machine:read', 'command:read'], '?tab=commands');
+      answer('B');
+      await flushPromises();
+
+      expect(w.findComponent(MachineCommandsCard).props('failed')).toBe(true);
+      expect(w.findComponent(MachineStatusCard).props('threatsFailed')).toBe(false);
+    });
+  });
+
+  // Item 2 / 11: an id nobody knows — or that is not even an id.
+  it.each([404, 422])(
+    'says « Poste introuvable » for a %i, with no retry and no action',
+    async (status) => {
+      // The journal fails the same way, and must not add a technical toast.
+      failing.set('/machines/pas-un-uuid/interventions', status);
+      const w = await mountPage('pas-un-uuid', [
+        'machine:read',
+        'machine:write',
+        'command:execute',
+        'intervention:read',
+      ]);
+      machineCalls['pas-un-uuid']![0]!.reject({
+        isAxiosError: true,
+        response: {
+          status,
+          data: {
+            error: { code: 'request.validation_error', message: 'Input should be a valid UUID' },
+          },
+        },
+      });
+      await flushPromises();
+
+      expect(w.text()).toContain('Poste introuvable');
+      expect(w.text()).not.toContain('valid UUID');
+      expect(w.findComponent(LoadErrorBanner).exists()).toBe(false);
+      expect(w.find('[label="Action"]').exists()).toBe(false);
+      expect(w.find('[icon="merge"]').exists()).toBe(false);
+      expect(w.find('[label="Révoquer le token"]').exists()).toBe(false);
+      expect(document.body.textContent).not.toContain('Historique indisponible');
+    },
+  );
+
+  // Item 5: a double click on a menu entry queues the command once.
+  it('sends a command once on a double click of its menu entry', async () => {
+    let release: (v: unknown) => void = () => undefined;
+    vi.mocked(api.post).mockReset();
+    vi.mocked(api.post).mockImplementation(() => new Promise((resolve) => (release = resolve)));
+    const w = await mountPage('B', ['machine:read', 'command:execute']);
+    answer('B');
+    await flushPromises();
+
+    const entry = w.findAllComponents(QItem).find((i) => i.text().includes('Vider le cache DNS'))!;
+    // Two clicks before the first answer: the menu has not closed yet.
+    entry.vm.$emit('click');
+    entry.vm.$emit('click');
+    release({ data: { created: ['c'], count: 1 } });
+    await flushPromises();
+
+    expect(vi.mocked(api.post).mock.calls.filter(([url]) => url === '/commands')).toHaveLength(1);
+  });
+
+  // C3: a revoked poste takes no command; the menu says why.
+  it('disables the action menu of a poste whose token is revoked', async () => {
+    const w = await mountPage('B', ['machine:read', 'command:execute']);
+    answer('B', 0, { token_revoked: true });
+    await flushPromises();
+
+    expect(w.find('[label="Action"]').attributes('disable')).toBe('true');
+    expect(w.find('[data-test="action-menu"]').text()).toContain('Token révoqué');
+  });
+
+  // C4: where the standing command is, in the notification.
+  it('says the command is already running on the poste', async () => {
+    vi.mocked(api.post).mockReset();
+    vi.mocked(api.post).mockResolvedValue({
+      data: { created: [], count: 0, skipped: 1, reason: 'running' },
+    });
+    const w = await mountPage('B', ['machine:read', 'command:execute']);
+    answer('B');
+    await flushPromises();
+    const notify = vi.spyOn(w.vm.$q, 'notify').mockImplementation(() => () => undefined);
+
+    w.findAllComponents(QItem)
+      .find((i) => i.text().includes('Vider le cache DNS'))!
+      .vm.$emit('click');
+    await flushPromises();
+
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: '« Vider le cache DNS » est déjà en cours sur ce poste.',
+      }),
+    );
+    notify.mockRestore();
+  });
+
+  // C1: « Confirmer l'identité » beside « Fusionner un doublon ».
+  it('confirms the identity of a poste after a confirmation', async () => {
+    vi.mocked(api.post).mockReset();
+    vi.mocked(api.post).mockResolvedValue({ data: {} });
+    const w = await mountPage('B', ['machine:read', 'machine:write'], '', { QBanner: false });
+    answer('B', 0, { needs_verification: true });
+    await flushPromises();
+    const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({
+      onOk: (fn: () => void) => {
+        fn();
+        return { onCancel: () => undefined };
+      },
+    } as never);
+
+    await w.find('[label="Confirmer l\'identité"]').trigger('click');
+    await flushPromises();
+
+    expect(dialog).toHaveBeenCalled();
+    expect(api.post).toHaveBeenCalledWith('/machines/B/confirm-identity');
+    dialog.mockRestore();
+  });
+
+  it('offers no identity confirmation to an account that may not merge', async () => {
+    const w = await mountPage('B', ['machine:read'], '', { QBanner: false });
+    answer('B', 0, { needs_verification: true });
+    await flushPromises();
+
+    expect(w.find('[label="Confirmer l\'identité"]').exists()).toBe(false);
+  });
+
+  // Item 4: the room settings are asked only of an account that may place postes.
+  it('asks for the room settings only with room:write', async () => {
+    vi.mocked(getRoomConfig).mockClear();
+    await mountPage('B', ['machine:read']);
+    expect(getRoomConfig).not.toHaveBeenCalled();
+    await mountPage('B', ['machine:read', 'room:write']);
+    expect(getRoomConfig).toHaveBeenCalledTimes(1);
   });
 });

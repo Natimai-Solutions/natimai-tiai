@@ -117,6 +117,10 @@ class EmailSettingsOut(BaseModel):
 class SettingsOut(BaseModel):
     maintenance_default_cycle_days: int
     maintenance_default_owner: UserRef | None
+    # The stored default owner when it no longer resolves (deactivated,
+    # rights or scope lost): the card names it rather than showing an empty
+    # field, which saved as « no default owner » (audit item 3).
+    maintenance_default_owner_unavailable: UserRef | None = None
     maintenance_due_soon_days: int
     # What the environment says, for the page to show where a value comes
     # from before the console ever wrote one.
@@ -324,12 +328,28 @@ async def _out(session: SessionDep) -> SettingsOut:
     # patch, the new mail settings apply to the very next queued mail.
     stored = await mail.load_stored(session, values)
     owner = await session.get(User, policy.owner_id) if policy.owner_id else None
+    stored_owner_raw = values.get(crud.KEY_OWNER)
+    stored_owner: User | None = None
+    if isinstance(stored_owner_raw, str) and stored_owner_raw:
+        try:
+            stored_owner_id = uuid.UUID(stored_owner_raw)
+        except ValueError:
+            stored_owner_id = None
+        if stored_owner_id is not None and stored_owner_id != policy.owner_id:
+            stored_owner = await session.get(User, stored_owner_id)
     latest = await session.exec(select(func.max(col(AppSetting.updated_at))))
     updated: datetime | None = latest.one()
     return SettingsOut(
         maintenance_default_cycle_days=policy.cycle_days,
         maintenance_default_owner=(
             UserRef(id=owner.id, name=owner.full_name or owner.email) if owner else None
+        ),
+        maintenance_default_owner_unavailable=(
+            UserRef(
+                id=stored_owner.id, name=stored_owner.full_name or stored_owner.email
+            )
+            if stored_owner
+            else None
         ),
         maintenance_due_soon_days=policy.due_soon_days,
         env_default_cycle_days=env.MAINTENANCE_DEFAULT_CYCLE_DAYS,

@@ -20,11 +20,14 @@
       ouvert à tout le parc.
     </div>
 
+    <LoadErrorBanner v-if="loadError" :error="loadError" :loading="loading" @retry="reload" />
+
     <q-table
       :rows="rows"
       :columns="columns"
       row-key="id"
       :loading="loading"
+      :no-data-label="loadError ? 'Groupes non chargés.' : 'Aucun groupe.'"
       :rows-per-page-options="[0]"
       hide-pagination
       flat
@@ -77,8 +80,8 @@
           <span v-if="props.row.is_admin || !props.row.scope" class="text-muted">Tout le parc</span>
           <template v-else>
             <q-chip
-              v-for="label in scopeLabels(props.row)"
-              :key="label"
+              v-for="(label, i) in scopeLabels(props.row)"
+              :key="`${i}-${label}`"
               dense
               size="sm"
               icon="place"
@@ -99,10 +102,22 @@
             round
             icon="more_vert"
             :aria-label="`Actions pour ${props.row.name}`"
+            @click="rememberTrigger"
           >
             <q-menu>
               <q-list style="min-width: 200px">
-                <q-item v-close-popup clickable @click="openEdit(props.row)">
+                <!-- A group granting more than the caller holds: the server
+                     refuses to edit or delete it (item 4). -->
+                <q-item v-if="beyondMe(props.row)" dense class="text-caption text-muted">
+                  <q-item-section avatar><q-icon name="lock" size="xs" /></q-item-section>
+                  <q-item-section>{{ MORE_RIGHTS_GROUP }}</q-item-section>
+                </q-item>
+                <q-item
+                  v-close-popup
+                  clickable
+                  :disable="beyondMe(props.row)"
+                  @click="openEdit(props.row)"
+                >
                   <q-item-section avatar><q-icon name="edit" /></q-item-section>
                   <q-item-section>Modifier</q-item-section>
                 </q-item>
@@ -111,7 +126,7 @@
                   v-close-popup
                   clickable
                   class="text-negative"
-                  :disable="props.row.builtin_key !== null"
+                  :disable="props.row.builtin_key !== null || beyondMe(props.row)"
                   @click="confirmDelete(props.row)"
                 >
                   <q-item-section avatar><q-icon name="delete" /></q-item-section>
@@ -127,7 +142,7 @@
     <!-- Création / modification : même formulaire. La grille des droits est
          l'objet de la page ; pour les administrateurs elle est affichée cochée
          et verrouillée, leurs droits étant implicites. -->
-    <q-dialog v-model="formOpen">
+    <q-dialog v-model="formOpen" @hide="restoreFocus">
       <q-card style="width: 640px; max-width: 95vw">
         <q-card-section class="text-h6">
           {{ editing ? 'Modifier le groupe' : 'Nouveau groupe' }}
@@ -159,6 +174,10 @@
                 Les administrateurs ont tous les droits, y compris ceux des ressources à venir.
                 Cette grille n'est pas modifiable.
               </q-banner>
+              <div class="text-caption text-muted q-mb-xs">
+                Cocher un droit de modification ou d'exécution coche aussi la consultation dont il a
+                besoin ; décocher une consultation retire les droits qui en dépendent.
+              </div>
               <q-list dense bordered separator>
                 <q-item v-for="row in permissionRows()" :key="row.resource">
                   <q-item-section side top style="min-width: 160px">
@@ -167,12 +186,17 @@
                   <q-item-section>
                     <div v-for="entry in row.entries" :key="entry.key">
                       <q-checkbox
-                        v-model="form.permissions"
+                        :model-value="form.permissions"
                         :val="entry.key"
                         :label="entry.label"
                         dense
-                        :disable="editing?.is_admin === true"
-                      />
+                        :disable="editing?.is_admin === true || cannotGrant(entry.key)"
+                        @update:model-value="onPermissions"
+                      >
+                        <q-tooltip v-if="cannotGrant(entry.key)">
+                          Vous ne détenez pas ce droit : vous ne pouvez pas l'accorder
+                        </q-tooltip>
+                      </q-checkbox>
                       <div v-if="entry.hint" class="text-caption text-muted q-ml-lg q-mb-xs">
                         {{ entry.hint }}
                       </div>
@@ -247,6 +271,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useFocusReturn } from 'src/composables/useFocusReturn';
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
+import { MORE_RIGHTS_GROUP, callerAuthority, exceeds, groupsAuthority } from 'src/utils/authority';
 import { useQuasar, type QTableColumn } from 'quasar';
 import {
   createGroup,
@@ -261,13 +288,33 @@ import { listBuildings, listRooms, type Building, type Room } from 'src/services
 import { escapeHtml } from 'src/utils/html';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
-import { permissionLabel, permissionRows } from 'src/utils/permissions';
+import { applyPermissionChange, permissionLabel, permissionRows } from 'src/utils/permissions';
 
 const $q = useQuasar();
 const auth = useAuthStore();
+// Back to the row's menu button when a dialog opened from it closes (item 12).
+const { remember: rememberTrigger, restore: restoreFocus } = useFocusReturn();
 
 const rows = ref<Group[]>([]);
 const loading = ref(false);
+// What the last load failed with; null once one succeeds (item 2).
+const loadError = ref<unknown>(null);
+
+// What the caller holds: groups granting more are not offered for editing,
+// permissions it lacks are not offered for granting (item 4). Null when it
+// cannot be told — the server decides then.
+const me = computed(() => callerAuthority(auth.user, rows.value));
+function beyondMe(group: Group): boolean {
+  return me.value !== null && exceeds(me.value, groupsAuthority([group]));
+}
+function cannotGrant(key: string): boolean {
+  return me.value !== null && !me.value.isAdmin && !me.value.permissions.has(key);
+}
+
+/** A box ticked or unticked: what it needs follows, and what needs it goes (item 4). */
+function onPermissions(next: string[]) {
+  form.permissions = applyPermissionChange(form.permissions, next);
+}
 const saving = ref(false);
 
 const formOpen = ref(false);
@@ -284,21 +331,55 @@ const locations = ref<string[]>([]);
 const buildings = ref<Building[]>([]);
 const rooms = ref<Room[]>([]);
 const locationOptions = computed(() => locations.value);
+/** A deleted building or room, wherever its id is still named (C6). */
+const DELETED_PLACE = 'Lieu supprimé';
+
+/**
+ * The scope entries of the group being edited, as the server names them: an
+ * entry the listings do not hold — deleted, or not readable without
+ * room:read — keeps a name in its picker (and stays removable) instead of
+ * showing its raw id.
+ */
+function editedLabels(kind: 'building' | 'room'): { label: string; value: string }[] {
+  return (editing.value?.scope_labels ?? [])
+    .filter((l) => l.kind === kind)
+    .map((l) => ({ label: l.exists ? l.label : DELETED_PLACE, value: l.id }));
+}
+
+function withEdited(
+  listed: { label: string; value: string }[],
+  kind: 'building' | 'room',
+): { label: string; value: string }[] {
+  const extra = editedLabels(kind).filter((e) => !listed.some((o) => o.value === e.value));
+  return [...listed, ...extra];
+}
+
 const buildingOptions = computed(() =>
-  buildings.value.map((b) => ({
-    label: b.location ? `${b.name} (${b.location})` : b.name,
-    value: b.id,
-  })),
+  withEdited(
+    buildings.value.map((b) => ({
+      label: b.location ? `${b.name} (${b.location})` : b.name,
+      value: b.id,
+    })),
+    'building',
+  ),
 );
 const roomOptions = computed(() =>
-  rooms.value.map((r) => ({
-    label: r.building ? `${r.name} — ${r.building.name}` : r.name,
-    value: r.id,
-  })),
+  withEdited(
+    rooms.value.map((r) => ({
+      label: r.building ? `${r.name} — ${r.building.name}` : r.name,
+      value: r.id,
+    })),
+    'room',
+  ),
 );
 
 function scopeLabels(group: Group): string[] {
   if (!group.scope) return [];
+  // Named by the server when it can (C6): right for an account without
+  // room:read, which cannot list the rooms, and for a deleted place.
+  if (group.scope_labels) {
+    return group.scope_labels.map((l) => (l.exists ? l.label : DELETED_PLACE));
+  }
   const building = new Map(buildingOptions.value.map((o) => [o.value, o.label]));
   const room = new Map(roomOptions.value.map((o) => [o.value, o.label]));
   return [
@@ -333,18 +414,24 @@ async function reload() {
   try {
     // The places only name the scope chips: their failure must not blank
     // the groups, which the page is about.
+    // Not asked of an account the server would refuse (item 4).
+    const canReadRooms = auth.can('room', 'read');
+    const canReadMachines = auth.can('machine', 'read');
     const [groups, sites, bs, rs] = await Promise.all([
       listGroups(),
-      listLocations().catch(() => []),
-      listBuildings().catch(() => []),
-      listRooms().catch(() => []),
+      canReadMachines ? listLocations().catch(() => []) : Promise.resolve([]),
+      canReadRooms ? listBuildings().catch(() => []) : Promise.resolve([]),
+      canReadRooms ? listRooms().catch(() => []) : Promise.resolve([]),
     ]);
     rows.value = groups;
     locations.value = sites.map((v) => v.name);
     buildings.value = bs;
     rooms.value = rs;
+    loadError.value = null;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
+    // A banner that stays, with « Réessayer », rather than a toast over an
+    // empty table that would read as « aucun groupe » (item 2).
+    loadError.value = e;
   } finally {
     loading.value = false;
   }

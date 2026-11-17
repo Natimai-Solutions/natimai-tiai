@@ -380,3 +380,53 @@ async def test_one_catalogue_entry_is_named(client, db_session):
     ).status_code == 404
     export = await client.get("/api/v1/software/export.csv", headers=headers)
     assert export.status_code == 200
+
+
+# --- Facets matched exactly, and the « À renouveler » list --------------------
+
+
+async def test_a_facet_picked_from_its_dropdown_lists_what_the_dropdown_counted(
+    client, db_session
+):
+    """Solidity pass: « OptiPlex 7010 (1) » in the dropdown listed two postes,
+    the 7010 AIO matching the substring too. ``exact`` names the facets
+    picked from a dropdown; a value typed by hand keeps the substring."""
+    headers = await _admin_headers(client, db_session)
+    await _poste(client, "fleet-exact-a", hw_model="OptiPlex 7010")
+    await _poste(client, "fleet-exact-b", hw_model="OptiPlex 7010 AIO")
+
+    models = (await client.get("/api/v1/machines/models", headers=headers)).json()
+    assert {m["name"]: m["count"] for m in models} == {
+        "OptiPlex 7010": 1,
+        "OptiPlex 7010 AIO": 1,
+    }
+    exact = await client.get(
+        "/api/v1/machines?hw_model=OptiPlex 7010&exact=hw_model", headers=headers
+    )
+    assert exact.status_code == 200, exact.text
+    assert exact.json()["total"] == 1
+    loose = await client.get("/api/v1/machines?hw_model=OptiPlex", headers=headers)
+    assert loose.json()["total"] == 2
+    # The export reads the same filters.
+    export = await client.get(
+        "/api/v1/machines/export.csv?columns=hostname&hw_model=OptiPlex 7010"
+        "&exact=hw_model",
+        headers=headers,
+    )
+    assert len(export.text.strip().splitlines()) == 2
+    unknown = await client.get("/api/v1/machines?exact=hostname", headers=headers)
+    assert unknown.status_code == 422
+
+
+async def test_the_renewal_card_opens_as_a_list(client, db_session):
+    """« À renouveler » on the dashboard counts postes the list can now show."""
+    headers = await _admin_headers(client, db_session)
+    await _poste(client, "fleet-old", bios_date="2015-06-01")
+    await _poste(client, "fleet-new", bios_date="2025-06-01")
+    await _poste(client, "fleet-unknown", bios_date=None)
+
+    stats = (await client.get("/api/v1/stats/overview", headers=headers)).json()
+    listed = await client.get("/api/v1/machines?hardware_aging=true", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["total"] == stats["machines_aging"] == 1
+    assert [r["machine_uuid"] for r in listed.json()["items"]] == ["fleet-old"]

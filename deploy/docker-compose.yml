@@ -57,10 +57,13 @@ services:
       retries: 5
 
   # Sauvegarde quotidienne de la base dans ./backups (cf. DEPLOYMENT.md
-  # § « Sauvegardes et restauration »). Même image que `db` pour garantir un
-  # pg_dump de la même version que le serveur.
+  # § « Sauvegardes et restauration »). Image construite ici (backup/Dockerfile) :
+  # celle de `db`, même tag — un pg_dump de la même version que le serveur —
+  # plus `age`, pour le chiffrement optionnel des dumps. Pas d'`image:` : rien
+  # à tirer d'un registre, `docker compose pull` la saute et `up` la construit.
   db-backup:
-    image: postgres:16-alpine
+    build:
+      context: ./backup
     restart: unless-stopped
     logging: *logging
     environment:
@@ -70,6 +73,8 @@ services:
       # Pour la restauration : les objets restaurés reviennent au rôle applicatif.
       POSTGRES_APP_USER: ${POSTGRES_APP_USER:-tiai_app}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      # Clé(s) publique(s) age (age1…) : dumps chiffrés en .dump.age. Vide : en clair.
+      BACKUP_ENCRYPT_RECIPIENT: ${BACKUP_ENCRYPT_RECIPIENT:-}
     entrypoint: ["sh", "/backup.sh"]
     volumes:
       - ./backup/backup.sh:/backup.sh:ro

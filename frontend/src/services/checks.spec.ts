@@ -10,6 +10,7 @@ import {
   closeCheck,
   createCheck,
   createChecksBulk,
+  listAllChecks,
   listAssignableUsers,
   listChecks,
   updateCheck,
@@ -60,5 +61,39 @@ describe('bulkCheckNotification', () => {
     const n = bulkCheckNotification({ created: 1, skipped: 1 });
     expect(n.type).toBe('warning');
     expect(n.message).toContain('1 poste(s) en avaient déjà');
+  });
+});
+
+describe('listAllChecks (« Mes tâches » cut at 200)', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset();
+  });
+
+  it('reads every page until the total is reached', async () => {
+    const page = (n: number, from: number) => ({
+      data: {
+        items: Array.from({ length: n }, (_, i) => ({ id: `c-${from + i}` })),
+        total: 310,
+        page: 1,
+        page_size: 200,
+      },
+    });
+    vi.mocked(api.get).mockResolvedValueOnce(page(200, 0)).mockResolvedValueOnce(page(110, 200));
+    const res = await listAllChecks({ open: true, assigned_to: 'me' });
+    expect(res.items).toHaveLength(310);
+    expect(res.total).toBe(310);
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(api.get).toHaveBeenLastCalledWith('/checks', {
+      params: { open: true, assigned_to: 'me', page: 2, page_size: 200 },
+    });
+  });
+
+  it('stops on an empty page even if the total says more', async () => {
+    vi.mocked(api.get)
+      .mockResolvedValueOnce({ data: { items: [{ id: 'a' }], total: 5, page: 1, page_size: 200 } })
+      .mockResolvedValueOnce({ data: { items: [], total: 5, page: 2, page_size: 200 } });
+    const res = await listAllChecks();
+    expect(res.items).toHaveLength(1);
+    expect(api.get).toHaveBeenCalledTimes(2);
   });
 });

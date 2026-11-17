@@ -764,44 +764,6 @@ async def test_a_package_retired_after_queueing_is_not_installed(
     assert [c["type"] for c in hb.json()["commands"]] == ["package_uninstall"]
 
 
-def test_a_pinned_file_is_seen_by_a_sweep_that_started_before():
-    """Audit T09: an upload that pinned, committed and unpinned while a sweep
-    was asking the database still shows to that sweep."""
-    from app.features.package import storage
-
-    sha = "ab" * 32
-    mark = storage.pin_mark()
-    assert not storage.pinned_since(sha, mark)
-    storage.pin(sha)
-    storage.pin(sha)
-    storage.unpin(sha)
-    assert storage.pinned_since(sha, mark)
-    storage.unpin(sha)
-    # Released since the mark: a sweep that looked before must not delete.
-    assert storage.pinned_since(sha, mark)
-    # A sweep starting now sees nothing held.
-    assert not storage.pinned_since(sha, storage.pin_mark())
-
-
-async def test_the_sweep_keeps_a_pinned_file(client, db_session, store):
-    """Audit T09, forced interleaving: pinned, the orphan stays; released, it
-    goes."""
-    from app.features.package import crud, storage
-
-    admin = await _admin(client, db_session)
-    await _pronote(client, admin)
-    sha = "cd" * 32
-    (store / sha).write_bytes(b"stored, not committed yet")
-    storage.pin(sha)
-    try:
-        assert await crud.sweep_store(db_session) == 0
-        assert (store / sha).exists()
-    finally:
-        storage.unpin(sha)
-    assert await crud.sweep_store(db_session) == 1
-    assert not (store / sha).exists()
-
-
 def _sweep_before_commit(monkeypatch, engine):
     """Run a sweep from another session between the upload's save and its
     commit — what an agent's verdict or another admin's upload would do."""

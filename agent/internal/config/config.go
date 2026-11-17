@@ -461,6 +461,10 @@ type DeployTrust struct {
 	// MethodAMaxGB caps, in GiB, what an unsigned (method A) manifest may
 	// announce in all (DeployMethodAMaxGB). 0: the agent's default.
 	MethodAMaxGB int
+	// CacheMaxGB caps, in GiB, what the package folders under
+	// C:\ProgramData\Tiai\packages may hold together (DeployCacheMaxGB).
+	// 0: the agent's default.
+	CacheMaxGB int
 }
 
 // MaxDeployMethodAMaxGB is the largest DeployMethodAMaxGB taken: 1 TiB, far
@@ -478,7 +482,19 @@ const MaxDeployMethodAMaxGB = 1024
 // other reading failure (readErr), which is: a value of another type, above
 // all.
 func deployMethodAMaxGB(v uint64, readErr error, absent bool) (gb int, warning string) {
-	const ignored = "config: DeployMethodAMaxGB ignored, method A keeps its default cap: "
+	return deployGiB("DeployMethodAMaxGB", "method A keeps its default cap", v, readErr, absent)
+}
+
+// deployCacheMaxGB decides what a DeployCacheMaxGB registry value sets, by
+// the same rule as DeployMethodAMaxGB and for the same reasons.
+func deployCacheMaxGB(v uint64, readErr error, absent bool) (gb int, warning string) {
+	return deployGiB("DeployCacheMaxGB", "the package cache keeps its default cap", v, readErr, absent)
+}
+
+// deployGiB reads a cap in GiB from the registry value name: 1 to
+// MaxDeployMethodAMaxGB, or 0 and a warning saying what happens instead.
+func deployGiB(name, instead string, v uint64, readErr error, absent bool) (gb int, warning string) {
+	ignored := "config: " + name + " ignored, " + instead + ": "
 	switch {
 	case absent:
 		return 0, ""

@@ -6,7 +6,12 @@ excludes the poste — a server room, a VM — rather than a special flag.
 
     reference = last_maintenance_at ?? first_seen
     due       = reference + cycle days
-    state     = excluded | overdue | due_soon | ok
+    window    = min(due_soon_days, cycle / 2) days
+    state     = excluded | overdue | due_soon (within window of due) | ok
+
+The window is capped at half the cycle: a cycle of 7 days under a window of
+14 would otherwise be « à échéance » the day after its visit, and never
+« à jour ».
 
 Two forms of the same rule: SQL expressions, for the list's filter and sort
 and the dashboard's counts, and a Python resolution, for the payloads. Both
@@ -19,7 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import case, func, literal
+from sqlalchemy import Float, case, cast, func, literal
 from sqlmodel import col
 
 from app.features.machine.models import Machine
@@ -81,6 +86,13 @@ def available(
     return True
 
 
+def due_soon_window(cycle_days: int, policy: MaintenancePolicy) -> timedelta:
+    """How long before its due date a poste is « à échéance »: the parc's
+    window, at most half the cycle — so that a short cycle is « à jour » for
+    its first half at least."""
+    return timedelta(days=min(float(policy.due_soon_days), cycle_days / 2))
+
+
 def resolve(
     machine: Machine, room: Room | None, policy: MaintenancePolicy, now: datetime
 ) -> Resolved:
@@ -107,7 +119,7 @@ def resolve(
     due = reference + timedelta(days=cycle)
     if due < now:
         state = MaintenanceState.OVERDUE
-    elif due - timedelta(days=policy.due_soon_days) <= now:
+    elif due - due_soon_window(cycle, policy) <= now:
         state = MaintenanceState.DUE_SOON
     else:
         state = MaintenanceState.OK
@@ -143,7 +155,12 @@ def state_clause(
 ) -> Any:
     cycle = cycle_expr(policy)
     due = due_expr(policy)
-    soon = now + timedelta(days=policy.due_soon_days)
+    # ``due_soon_window`` in SQL: the window in seconds, at most half the
+    # cycle's — make_interval's last argument is a double.
+    window_seconds = func.least(literal(policy.due_soon_days * 86400), cycle * 43200)
+    soon = literal(now) + func.make_interval(
+        0, 0, 0, 0, 0, 0, cast(window_seconds, Float)
+    )
     if state == MaintenanceState.EXCLUDED:
         return cycle <= 0
     if state == MaintenanceState.OVERDUE:

@@ -156,6 +156,20 @@ foreach ($s in @($doc.install, $doc.uninstall)) {
     }
 }
 
+# An installation that runs msiexec /x removes what it was sent to install:
+# every poste refuses it (agent deploy.MsiExecRemoves), and so does the server
+# (manifest.UNINSTALL_SWITCH, kept equal to this pattern by a backend test).
+# /x and /uninstall, any case (-match ignores it), either prefix, whatever is
+# glued to the switch ("/x{code}").
+$MsiExecUninstallSwitch = '^[/-](x|uninstall)'
+if ($doc.install -and $doc.install.run -ceq 'msiexec') {
+    foreach ($a in @($doc.install.args)) {
+        if ($null -ne $a -and "$a" -match $MsiExecUninstallSwitch) {
+            throw "L'installation lance une desinstallation (msiexec /x ou /uninstall) : manifeste refuse, rien n'a ete signe. Placez cette commande dans la desinstallation du paquet."
+        }
+    }
+}
+
 function Format-Step {
     param($Step)
     if (-not $Step) { return '(aucune)' }

@@ -210,7 +210,7 @@ async def export_software_xlsx(
     session: SessionDep, scope: CurrentScope, search: str | None = None
 ) -> Response:
     """The catalogue as an Excel workbook, honouring the same search."""
-    return xlsx_response(
+    return await xlsx_response(
         "logiciels.xlsx",
         EXPORT_HEADER,
         [

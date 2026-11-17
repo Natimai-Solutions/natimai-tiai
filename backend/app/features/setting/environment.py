@@ -10,13 +10,15 @@ module lists them, in groups and with a line each, so the page can answer
 
 Read-only by construction: the page shows values, it cannot write them. And
 never a secret — the signing key, the enrollment secret, database and mail
-credentials, the first admin's password — nor anything that may carry one
-(a proxy URL). ``_NEVER_SHOWN`` is the list, and a test holds the catalogue
-to it.
+credentials, the first admin's password. ``_NEVER_SHOWN`` is the list, and a
+test holds the catalogue to it. A value that may carry one — the Mailgun
+proxy's URL, ``http://user:password@proxy:3128`` — is shown by its host and
+port alone (``_proxy_host``).
 """
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from app.core.config import Settings, settings
 
@@ -34,7 +36,6 @@ _NEVER_SHOWN = frozenset(
         "POSTGRES_PASSWORD",
         "POSTGRES_DB",
         "MAILGUN_API_KEY",
-        "MAILGUN_PROXY_URL",
         "SMTP_USER",
         "SMTP_PASSWORD",
     }
@@ -75,6 +76,32 @@ def _fmt(value: Any) -> str | None:
     if isinstance(value, list | tuple):
         return ", ".join(str(v) for v in value)
     return str(value)
+
+
+def _proxy_host(url: str | None) -> str | None:
+    """A proxy URL reduced to ``host:port``: what tells a reader where mail
+    goes out through, without the account and password it may embed. An
+    unreadable URL is said to be set, not printed."""
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url)
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        return "défini (illisible)"
+    if not host:
+        return "défini (illisible)"
+    return f"{host}:{port}" if port else host
+
+
+def _bytes(value: int) -> str:
+    """A size as written in ``.env`` and in words: ``2147483648 (2 Gio)``."""
+    for unit, size in (("Gio", 1024**3), ("Mio", 1024**2)):
+        if value >= size:
+            amount = value / size
+            shown = f"{amount:.0f}" if amount == int(amount) else f"{amount:.1f}"
+            return f"{value} ({shown.replace('.', ',')} {unit})"
+    return f"{value} octets"
 
 
 def _item(env: Settings, key: str, description: str, value: Any = ...) -> EnvItem:
@@ -164,6 +191,19 @@ def _email_group(env: Settings) -> EnvGroup:
                 "MAILGUN_API_BASE_URL",
                 "Point d'entrée de l'API Mailgun (EU ou US)" + _MAIL_INITIAL,
             ),
+            _item(
+                env,
+                "MAILGUN_TIMEOUT_SECONDS",
+                "Délai d'attente de l'API Mailgun, en secondes",
+            ),
+            _item(
+                env,
+                "MAILGUN_PROXY_URL",
+                "Proxy HTTP par lequel passent les appels à Mailgun, et eux seuls ; "
+                "vide = connexion directe. Seuls l'hôte et le port sont affichés, "
+                "jamais un identifiant ni un mot de passe",
+                _proxy_host(env.MAILGUN_PROXY_URL),
+            ),
         ]
     items += [
         _item(
@@ -182,6 +222,12 @@ def _email_group(env: Settings) -> EnvGroup:
             env,
             "NOTIFICATION_MAX_ITEMS",
             "Nombre de postes ou de détections détaillés dans un e-mail avant « et N autres »",
+        ),
+        _item(
+            env,
+            "EMAIL_MAX_ATTEMPTS",
+            "Tentatives d'envoi d'un e-mail (de 1 min à 1 h d'écart) avant qu'il "
+            "soit abandonné et gardé avec sa dernière erreur",
         ),
         _item(
             env,
@@ -425,6 +471,12 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 ),
                 _item(
                     env,
+                    "TIAI_SERVER_NAME",
+                    "Nom sous lequel le serveur est joint (site de Caddy, nom du "
+                    "certificat) ; la console en déduit son URL publique",
+                ),
+                _item(
+                    env,
                     "CONSOLE_BASE_URL",
                     "URL publique de la console, dans les liens des e-mails ; "
                     "déduite de TIAI_SERVER_NAME quand elle n'est pas renseignée. "
@@ -460,14 +512,23 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 _item(
                     env,
                     "PASSWORD_RESET_COOLDOWN_MINUTES",
-                    "Minutes pendant lesquelles un compte ne reçoit pas de nouvel "
-                    "e-mail « mot de passe oublié » après le précédent",
+                    "Minutes pendant lesquelles une même adresse ne fait pas "
+                    "envoyer de nouvel e-mail « mot de passe oublié » pour un "
+                    "compte après le précédent qu'elle a demandé",
                 ),
                 _item(
                     env,
                     "PASSWORD_RESET_MAX_LIVE_LINKS",
                     "Nombre de liens de réinitialisation valides à la fois pour un "
-                    "même compte ; une demande n'annule jamais un lien encore valide",
+                    "même compte et une même adresse qui les demande ; une demande "
+                    "n'annule jamais un lien encore valide",
+                ),
+                _item(
+                    env,
+                    "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS",
+                    "Plafond de liens valides à la fois pour un même compte, toutes "
+                    "adresses confondues ; une demande venue d'une adresse "
+                    "habituelle du compte n'y est pas soumise",
                 ),
                 _item(
                     env,
@@ -498,6 +559,19 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 ),
                 _item(
                     env,
+                    "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
+                    "Échecs de connexion, même espacés, en LOGIN_SLOW_WINDOW_HOURS "
+                    "heures qui verrouillent un compte pour ce nombre d'heures ; ce "
+                    "verrou n'admet que les adresses habituelles du compte",
+                ),
+                _item(
+                    env,
+                    "LOGIN_SLOW_WINDOW_HOURS",
+                    "Fenêtre, en heures, de ce second compteur, et durée du verrou "
+                    "qu'il pose ; une réinitialisation du mot de passe le lève",
+                ),
+                _item(
+                    env,
                     "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
                     "Un poste déjà enrôlé qui redemande un token attend l'approbation "
                     "d'un administrateur",
@@ -506,7 +580,7 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "RATE_LIMIT_ENABLED",
                     "Limitation du débit par adresse (connexion, mot de passe oublié, "
-                    "enrôlement), par compte (changement de mot de passe) et par poste "
+                    "enrôlement), par session (changement de mot de passe) et par poste "
                     "(battements) ; non = tout cela est levé, à réserver à des "
                     "opérateurs qui arrivent tous d'une même adresse. Ni le "
                     "verrouillage des comptes ni le budget du catalogue logiciel "
@@ -520,6 +594,13 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 ),
                 _item(
                     env,
+                    "TRUSTED_PROXIES_ALLOW_WIDE",
+                    "oui = TRUSTED_PROXIES peut lister un réseau plus large qu'un /24 "
+                    "(IPv4) ou un /64 (IPv6) ; non = le serveur refuse de démarrer, "
+                    "car tout client de ce réseau pourrait choisir son adresse",
+                ),
+                _item(
+                    env,
                     "TRUSTED_PROXY_HOSTS",
                     "Noms d'hôte de ces proxys, résolus dans le réseau du serveur "
                     "(le service caddy par défaut)",
@@ -529,6 +610,47 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "EXPOSE_OPENAPI",
                     "oui = le schéma OpenAPI et ses pages (/docs, /redoc) sont servis "
                     "hors développement local",
+                ),
+                _item(
+                    env,
+                    "POSTGRES_POOL_SIZE",
+                    "Connexions à la base gardées ouvertes par processus (API, worker)",
+                ),
+                _item(
+                    env,
+                    "POSTGRES_MAX_OVERFLOW",
+                    "Connexions supplémentaires ouvertes au-delà, le temps d'un pic",
+                ),
+                _item(
+                    env,
+                    "POSTGRES_POOL_TIMEOUT",
+                    "Secondes d'attente d'une connexion libre avant qu'une requête "
+                    "échoue",
+                ),
+            ],
+        ),
+        EnvGroup(
+            label="Paquets logiciels",
+            items=[
+                _item(
+                    env,
+                    "PACKAGES_DIR",
+                    "Dossier du serveur où sont rangés les fichiers des paquets "
+                    "(un fichier par empreinte SHA-256)",
+                ),
+                _item(
+                    env,
+                    "PACKAGE_MAX_BYTES",
+                    "Taille maximale d'un fichier de paquet déposé, en octets ; le "
+                    "proxy devant le serveur est dimensionné en conséquence",
+                    _bytes(env.PACKAGE_MAX_BYTES),
+                ),
+                _item(
+                    env,
+                    "PACKAGE_METHOD_A_MAX_GB",
+                    "Poids total, en Gio, au-delà duquel les postes refusent de "
+                    "télécharger un paquet non signé (méthode A) ; doit valoir le "
+                    "DeployMethodAMaxGB de la GPO des agents",
                 ),
             ],
         ),

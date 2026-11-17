@@ -66,16 +66,27 @@
 
     <div class="row q-col-gutter-md q-mb-lg">
       <div v-for="kpi in alertKpis" :key="kpi.label" class="col-6 col-sm-4 col-md">
-        <router-link :to="kpi.to" class="card-link">
-          <q-card v-ripple flat bordered class="cursor-pointer relative-position full-height">
+        <component
+          :is="kpi.to ? RouterLink : 'div'"
+          v-bind="kpi.to ? { to: kpi.to } : {}"
+          class="card-link"
+        >
+          <q-card
+            v-ripple="!!kpi.to"
+            flat
+            bordered
+            class="relative-position full-height"
+            :class="{ 'cursor-pointer': kpi.to }"
+          >
             <q-card-section class="text-center">
               <q-icon :name="kpi.icon" :color="kpi.color" size="28px" />
               <div class="text-h5 q-mt-xs">{{ kpi.value }}</div>
               <div class="text-caption text-muted">{{ kpi.label }}</div>
+              <div v-if="kpi.detail" class="text-caption text-muted">{{ kpi.detail }}</div>
               <div v-if="kpi.caption" class="text-caption text-warn">{{ kpi.caption }}</div>
             </q-card-section>
           </q-card>
-        </router-link>
+        </component>
       </div>
     </div>
 
@@ -135,7 +146,7 @@
               :to="{ name: 'machine-detail', params: { id: t.machine_id } }"
             >
               <q-item-section>
-                <q-item-label>{{ t.threat_name || t.detection_id }}</q-item-label>
+                <q-item-label>{{ threatNameLabel(t.threat_name, t.detection_id) }}</q-item-label>
                 <q-item-label caption>
                   {{ threatSeverityLabel(t.severity) }} — {{ threatStatusLabel(t.status) }}
                 </q-item-label>
@@ -155,7 +166,8 @@
 <script setup lang="ts">
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { computed, onMounted, ref } from 'vue';
-import { type RouteLocationRaw } from 'vue-router';
+import { RouterLink, type RouteLocationRaw } from 'vue-router';
+import { rememberFleetThresholds } from 'src/composables/useFleetThresholds';
 import { useQuasar } from 'quasar';
 import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { getOverview, type StatsOverview } from 'src/services/stats';
@@ -163,7 +175,12 @@ import { listMachines, type Machine } from 'src/services/machines';
 import { listThreats, type Threat } from 'src/services/threats';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
-import { formatDateTime, threatSeverityLabel, threatStatusLabel } from 'src/utils/format';
+import {
+  formatDateTime,
+  threatNameLabel,
+  threatSeverityLabel,
+  threatStatusLabel,
+} from 'src/utils/format';
 
 const $q = useQuasar();
 const stats = ref<StatsOverview | null>(null);
@@ -185,6 +202,11 @@ interface Kpi {
   caption?: string;
   /** A second, quiet line: what the figure was counted against. */
   detail?: string;
+}
+
+/** A card of the last row: a list to open where the list can show it, else a figure. */
+interface AlertKpi extends Omit<Kpi, 'to'> {
+  to?: RouteLocationRaw;
 }
 
 /**
@@ -305,10 +327,34 @@ const priorityKpis = computed<Kpi[]>(() => {
  * encryption and hardware-age counts the API still serves have no such list
  * behind them yet, and a figure nobody can act on is noise on a wall screen.
  */
-const alertKpis = computed<Kpi[]>(() => {
+const alertKpis = computed<AlertKpi[]>(() => {
   const s = stats.value;
   if (!s) return [];
   return [
+    // Enrolment needing a decision: a reinstalled poste asking back in, or a
+    // revoked one. Shown by a server that counts them (older ones do not).
+    ...(s.machines_reenroll_pending !== undefined
+      ? [
+          {
+            label: 'Ré-enrôlements à autoriser',
+            value: s.machines_reenroll_pending,
+            icon: 'key',
+            color: 'orange',
+            to: { name: 'machines', query: { enrollment: 'pending' } },
+          },
+        ]
+      : []),
+    ...(s.machines_token_revoked
+      ? [
+          {
+            label: 'Tokens révoqués',
+            value: s.machines_token_revoked,
+            icon: 'key_off',
+            color: 'negative',
+            to: { name: 'machines', query: { enrollment: 'revoked' } },
+          },
+        ]
+      : []),
     {
       label: 'Identité à confirmer',
       value: s.needs_verification,
@@ -352,6 +398,15 @@ const alertKpis = computed<Kpi[]>(() => {
       color: 'orange',
       to: { name: 'machines', query: { agent_outdated: 'true' } },
       ...(s.agent_latest_version ? { caption: `référence ${s.agent_latest_version}` } : {}),
+    },
+    {
+      // The hardware-age setting, made visible — and the list it counts.
+      label: 'À renouveler',
+      value: s.machines_aging,
+      icon: 'hourglass_bottom',
+      color: 'blue-grey',
+      to: { name: 'machines', query: { hardware_aging: 'true' } },
+      detail: `matériel de plus de ${s.hardware_aging_years} ans`,
     },
   ];
 });
@@ -398,6 +453,8 @@ async function fetchAll() {
   }
   if (s.status === 'rejected') throw s.reason;
   stats.value = s.value;
+  // The fiche and the list colour their disks by the same threshold.
+  rememberFleetThresholds(s.value);
   if (av.status === 'rejected') throw av.reason;
   if (wuBehind.status === 'rejected') throw wuBehind.reason;
   // Same rule for the threats as for the other list: the rows left on screen

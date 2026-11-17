@@ -7,7 +7,13 @@ import {
   updateMe,
   type User,
 } from 'src/services/auth';
-import { accessToken, endSession, onSessionEnd, setAccessToken } from 'src/services/session';
+import {
+  accessToken,
+  endSession,
+  onForbidden,
+  onSessionEnd,
+  setAccessToken,
+} from 'src/services/session';
 import { permissionKey, type Action, type Resource } from 'src/utils/permissions';
 
 // Permissions cached for the router guard, which runs outside any component
@@ -18,7 +24,15 @@ export const PERMISSIONS_KEY = 'tiai_permissions';
 
 interface AuthState {
   user: User | null;
+  /** Why the last profile read failed; null once one succeeds. */
+  profileError: unknown;
 }
+
+/** A 403 re-reads the profile at most this often: a page of ten 403s is one read. */
+export const FORBIDDEN_REFRESH_MIN_MS = 30_000;
+/** And the profile is read again on its own at this pace while the console is open. */
+export const PROFILE_REFRESH_MS = 5 * 60_000;
+let lastForbiddenRefresh = 0;
 
 export function readCachedPermissions(): string[] {
   try {
@@ -41,6 +55,7 @@ function forgetCachedPermissions(): void {
 export const useAuthStore = defineStore('auth', {
   state: (): AuthState => ({
     user: null,
+    profileError: null,
   }),
   getters: {
     /**
@@ -69,8 +84,38 @@ export const useAuthStore = defineStore('auth', {
       await this.fetchMe();
     },
     async fetchMe() {
-      this.user = await getMe();
-      localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(this.user.permissions));
+      try {
+        this.user = await getMe();
+      } catch (e) {
+        this.profileError = e;
+        throw e;
+      }
+      this.profileError = null;
+      try {
+        localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(this.user.permissions));
+      } catch {
+        // Storage disabled: the guard reads the loaded profile anyway.
+      }
+    },
+    /**
+     * Read the profile again in the background — every few minutes, and after
+     * a 403 — so that rights changed by an administrator reach the menus
+     * without F5. Never throws; an older profile stays until a read succeeds.
+     */
+    async refreshProfile() {
+      if (!this.isAuthenticated) return;
+      try {
+        await this.fetchMe();
+      } catch {
+        // Kept: the profile read earlier is still the best guess.
+      }
+    },
+    /** A 403 was answered: read the profile again, once per burst of them. */
+    async onForbidden() {
+      const now = Date.now();
+      if (now - lastForbiddenRefresh < FORBIDDEN_REFRESH_MIN_MS) return;
+      lastForbiddenRefresh = now;
+      await this.refreshProfile();
     },
     /**
      * Load the profile when it is not yet: after a reload, the router's silent
@@ -114,6 +159,8 @@ export const useAuthStore = defineStore('auth', {
      * permissions the router reads). Called through `onSessionEnd`. */
     forgetProfile() {
       this.user = null;
+      this.profileError = null;
+      lastForbiddenRefresh = 0;
       forgetCachedPermissions();
     },
   },
@@ -122,3 +169,5 @@ export const useAuthStore = defineStore('auth', {
 // Wherever the session ends — logout here, or the 401 handler in boot/axios
 // once a refresh fails — the profile goes with it.
 onSessionEnd(() => useAuthStore().forgetProfile());
+// A 403 anywhere: the account's groups may have changed under it.
+onForbidden(() => void useAuthStore().onForbidden());

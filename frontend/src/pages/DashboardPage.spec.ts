@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
-import { createMemoryHistory, createRouter } from 'vue-router';
+import { RouterLink, createMemoryHistory, createRouter } from 'vue-router';
 
 vi.mock('src/services/stats', () => ({ getOverview: vi.fn() }));
 vi.mock('src/services/machines', () => ({ listMachines: vi.fn() }));
@@ -212,5 +212,43 @@ describe('DashboardPage', () => {
     await clickReload(w);
 
     expect(notify).not.toHaveBeenCalled();
+  });
+});
+
+describe('DashboardPage — enrolment and hardware age (C2, item 9)', () => {
+  beforeEach(() => {
+    vi.mocked(getOverview).mockReset();
+    vi.mocked(listMachines).mockResolvedValue(empty as never);
+    vi.mocked(listThreats).mockResolvedValue(empty);
+  });
+
+  it('links the re-enrolments to approve to the list filtered on them', async () => {
+    vi.mocked(getOverview).mockResolvedValue({
+      ...overview,
+      machines_reenroll_pending: 2,
+      machines_token_revoked: 1,
+      machines_aging: 4,
+      hardware_aging_years: 6,
+    });
+    const w = await mountPage();
+    const links = w
+      .findAllComponents(RouterLink)
+      .map((l) => JSON.stringify(l.props('to') as unknown));
+    const text = w.text();
+    expect(text).toContain('Ré-enrôlements à autoriser');
+    expect(text).toContain('Tokens révoqués');
+    expect(text).toContain('À renouveler');
+    expect(text).toContain('matériel de plus de 6 ans');
+    expect(links).toContain(JSON.stringify({ name: 'machines', query: { enrollment: 'pending' } }));
+    // « À renouveler » opens the list it counts.
+    expect(links).toContain(
+      JSON.stringify({ name: 'machines', query: { hardware_aging: 'true' } }),
+    );
+  });
+
+  it('shows no enrolment card for a server that does not count them', async () => {
+    vi.mocked(getOverview).mockResolvedValue(overview);
+    const w = await mountPage();
+    expect(w.text()).not.toContain('Ré-enrôlements');
   });
 });

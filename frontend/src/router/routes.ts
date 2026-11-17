@@ -30,19 +30,19 @@ const routes: RouteRecordRaw[] = [
         path: '',
         name: 'dashboard',
         component: () => import('pages/DashboardPage.vue'),
-        meta: { title: 'Tableau de bord' },
+        meta: { title: 'Tableau de bord', requiresPermission: 'machine:read' },
       },
       {
         path: 'machines',
         name: 'machines',
         component: () => import('pages/MachinesPage.vue'),
-        meta: { title: 'Postes' },
+        meta: { title: 'Postes', requiresPermission: 'machine:read' },
       },
       {
         path: 'software',
         name: 'software',
         component: () => import('pages/SoftwarePage.vue'),
-        meta: { title: 'Logiciels' },
+        meta: { title: 'Logiciels', requiresPermission: 'machine:read' },
       },
       {
         path: 'packages',
@@ -67,7 +67,9 @@ const routes: RouteRecordRaw[] = [
         path: 'tasks',
         name: 'tasks',
         component: () => import('pages/TasksPage.vue'),
-        meta: { title: 'Mes tâches', requiresPermission: 'check:read' },
+        // Either suffices: an account that only owns maintenances is sent
+        // here by its reminders (/tasks), and the page shows what it reads.
+        meta: { title: 'Mes tâches', requiresPermission: ['check:read', 'maintenance:read'] },
       },
       {
         path: 'rooms',
@@ -87,7 +89,7 @@ const routes: RouteRecordRaw[] = [
         name: 'machine-detail',
         component: () => import('pages/MachineDetailPage.vue'),
         props: true,
-        meta: { title: 'Poste' },
+        meta: { title: 'Poste', requiresPermission: 'machine:read' },
       },
       {
         path: 'users',
@@ -112,6 +114,13 @@ const routes: RouteRecordRaw[] = [
         name: 'account',
         component: () => import('pages/AccountPage.vue'),
         meta: { title: 'Mon compte' },
+      },
+      {
+        // Where an account whose groups grant nothing to read lands.
+        path: 'no-access',
+        name: 'no-access',
+        component: () => import('pages/NoAccessPage.vue'),
+        meta: { title: 'Aucune page accessible' },
       },
     ],
   },

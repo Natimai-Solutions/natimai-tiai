@@ -814,3 +814,98 @@ def test_tls_errors_point_at_the_security_mode():
     assert "STARTTLS sur 587" in probe.describe_error(
         ssl.SSLError(1, "wrong version number"), policy
     )
+
+
+# --- What the test send says, against real sockets (acceptance, 2026-11) ----------
+
+
+def _local_policy(port: int, **values):
+    from app.features.setting import email_policy as mail
+
+    return mail.resolve(
+        mail.StoredEmailSettings(
+            values={
+                "provider": "smtp",
+                "smtp_host": "127.0.0.1",
+                "smtp_port": port,
+                "smtp_security": "none",
+                "smtp_timeout_seconds": 1,
+                "from_email": "tiai@lycee.local",
+                **values,
+            }
+        )
+    )
+
+
+async def test_a_silent_server_is_said_not_to_answer():
+    """A server that accepts the connection and never speaks: not « a fermé
+    la connexion », but « n'a pas répondu dans les N s »."""
+    import asyncio
+
+    from app.features.notification import probe
+
+    held: list[asyncio.StreamWriter] = []
+
+    async def silent(reader, writer):
+        held.append(writer)
+        await asyncio.sleep(30)
+
+    server = await asyncio.start_server(silent, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        result = await probe.send_test(_local_policy(port), "a@lycee.local")
+    finally:
+        for writer in held:
+            writer.close()
+        server.close()
+    assert result.ok is False
+    assert "n'a pas répondu dans les 1 s" in result.message, result.message
+    assert "fermé" not in result.message
+
+
+async def test_a_server_wanting_a_login_says_so():
+    """530 to MAIL FROM, with no account configured: authentication is what is
+    missing, not the sender address."""
+    import asyncio
+
+    from app.features.notification import probe
+
+    async def wants_auth(reader, writer):
+        writer.write(b"220 relay ESMTP\r\n")
+        await writer.drain()
+        while line := await reader.readline():
+            verb = line[:4].upper()
+            if verb in (b"EHLO", b"HELO"):
+                writer.write(b"250-relay\r\n250 AUTH PLAIN LOGIN\r\n")
+            elif verb == b"MAIL":
+                writer.write(b"530 5.7.0 Authentication required\r\n")
+            elif verb == b"QUIT":
+                writer.write(b"221 bye\r\n")
+                await writer.drain()
+                break
+            else:
+                writer.write(b"250 ok\r\n")
+            await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(wants_auth, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        result = await probe.send_test(_local_policy(port), "a@lycee.local")
+    finally:
+        server.close()
+    assert result.ok is False
+    assert "exige une authentification" in result.message, result.message
+    assert "renseignez l'utilisateur" in result.message
+    assert "Adresse d'expéditeur" not in result.message
+
+
+def test_a_530_with_an_account_points_at_the_account():
+    from app.features.notification import probe
+
+    policy = _local_policy(25, smtp_user="relay@lycee.local")
+    message = probe.describe_error(
+        smtplib.SMTPSenderRefused(530, b"Authentication required", "t@x.fr"), policy
+    )
+    assert "exige une authentification" in message
+    assert "vérifiez l'utilisateur" in message

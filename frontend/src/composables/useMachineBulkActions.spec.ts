@@ -28,6 +28,7 @@ vi.mock('src/services/commands', async (importOriginal) => ({
 vi.mock('src/services/machines', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/machines')>()),
   wakeMachines: vi.fn(),
+  approveReenroll: vi.fn(),
 }));
 vi.mock('src/services/rooms', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/rooms')>()),
@@ -38,7 +39,7 @@ vi.mock('src/services/rooms', async (importOriginal) => ({
 import { tasksVersion } from 'src/composables/useTasksBadge';
 import { createChecksBulk } from 'src/services/checks';
 import { commandActions, createCommands, type CommandAction } from 'src/services/commands';
-import { wakeMachines, type Machine } from 'src/services/machines';
+import { approveReenroll, wakeMachines, type Machine } from 'src/services/machines';
 import { placeMachines, unassignMachines } from 'src/services/rooms';
 import { useMachineBulkActions } from './useMachineBulkActions';
 
@@ -225,6 +226,41 @@ describe('useMachineBulkActions', () => {
       await placeSelection(null);
       expect(placeMachines).not.toHaveBeenCalled();
       expect(unassignMachines).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('useMachineBulkActions — re-enrolment (C2) and revoked postes (C3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    q.state.onOk = null;
+  });
+
+  it('approves the selection after a confirmation and says what was done', async () => {
+    vi.mocked(approveReenroll).mockResolvedValue({ approved: 1, skipped: 1 });
+    const { selected, reload, reenrollSelection } = setup();
+
+    reenrollSelection();
+    expect(approveReenroll).not.toHaveBeenCalled();
+    q.state.onOk!();
+    await vi.waitFor(() => expect(selected.value).toEqual([]));
+
+    expect(approveReenroll).toHaveBeenCalledWith(['m-1', 'm-2']);
+    expect(q.notify).toHaveBeenCalledWith({
+      type: 'positive',
+      message: 'Ré-enrôlement autorisé pour 1 poste(s) — 1 sans demande en attente, ignoré(s)',
+    });
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it('names the revoked postes a bulk command left alone', async () => {
+    vi.mocked(createCommands).mockResolvedValue({ created: ['c'], count: 1, revoked: 1 });
+    const { runBulk } = setup();
+    runBulk(action((a) => !a.confirm && !a.serverSide && a.bulk));
+    await vi.waitFor(() => expect(q.notify).toHaveBeenCalled());
+    expect(q.notify).toHaveBeenCalledWith({
+      type: 'warning',
+      message: '1 commande(s) envoyée(s) — 1 au token révoqué, ignoré(s)',
     });
   });
 });

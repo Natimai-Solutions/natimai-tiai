@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { QBtn, QForm } from 'quasar';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,7 +10,14 @@ vi.mock('src/services/interventions', async (importOriginal) => ({
   deleteIntervention: vi.fn(),
 }));
 
+vi.mock('src/services/maintenance', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('src/services/maintenance')>()),
+  getSession: vi.fn(),
+}));
+
 import { tasksVersion } from 'src/composables/useTasksBadge';
+import { getSession } from 'src/services/maintenance';
+import { useAuthStore } from 'src/stores/auth';
 import {
   createIntervention,
   deleteIntervention,
@@ -17,7 +25,9 @@ import {
 } from 'src/services/interventions';
 import MachineHistoryCard from './MachineHistoryCard.vue';
 
-function mountCard(items: Intervention[] = []) {
+function mountCard(items: Intervention[] = [], permissions: string[] = []) {
+  setActivePinia(createPinia());
+  useAuthStore().user = { id: 'me', email: 'a@b.c', permissions } as never;
   return mount(MachineHistoryCard, {
     props: { machineId: 'm1', items, total: items.length, loading: false, canWrite: true },
     attachTo: document.body,
@@ -108,5 +118,53 @@ describe('MachineHistoryCard', () => {
       expect(wrapper.emitted('changed')).toBeUndefined();
       wrapper.unmount();
     });
+  });
+});
+
+describe('MachineHistoryCard — a line of a maintenance visit (item 1, C8)', () => {
+  const line = {
+    ...visit,
+    id: 'i2',
+    title: 'Maintenance — A101',
+    note: 'Clavier changé',
+    maintenance_id: 's-1',
+  } as unknown as Intervention;
+
+  beforeEach(() => {
+    vi.mocked(getSession).mockResolvedValue({
+      id: 's-1',
+      room_id: 'r-1',
+      room_name: 'A101',
+      performed_by: 'alice@test.local',
+      performed_at: '2026-11-10T20:00:00Z',
+      note: 'Salle dépoussiérée, vidéoprojecteur à revoir',
+      machine_count: 1,
+      items: [{ intervention_id: 'i2', machine_id: 'm1', hostname: 'PC-01', note: 'Clavier' }],
+      skipped: [{ intervention_id: 'i3', machine_id: 'm2', hostname: 'PC-02', note: 'Absent' }],
+    });
+  });
+
+  it('opens the visit with its global note and the postes done and skipped', async () => {
+    const wrapper = mountCard([line], ['maintenance:read']);
+    // The kind once: « Maintenance — A101 », not « Maintenance — Maintenance — A101 ».
+    expect(wrapper.text()).toContain('Maintenance — A101');
+    expect(wrapper.text()).not.toContain('Maintenance — Maintenance');
+    const open = wrapper.findAllComponents(QBtn).find((b) => b.text().includes('Voir la séance'));
+    expect(open).toBeDefined();
+    await open!.trigger('click');
+    await flushPromises();
+
+    expect(getSession).toHaveBeenCalledWith('s-1');
+    const dialog = document.body.querySelector('.q-dialog')!;
+    expect(dialog.textContent).toContain('Salle dépoussiérée, vidéoprojecteur à revoir');
+    expect(dialog.querySelector('[data-test="visit-done"]')!.textContent).toContain('PC-01');
+    expect(dialog.querySelector('[data-test="visit-skipped"]')!.textContent).toContain('Absent');
+    wrapper.unmount();
+  });
+
+  it('offers no link to whoever cannot read the maintenance', () => {
+    const wrapper = mountCard([line], []);
+    expect(wrapper.text()).not.toContain('Voir la séance');
+    wrapper.unmount();
   });
 });

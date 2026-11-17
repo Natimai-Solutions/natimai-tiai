@@ -11,6 +11,8 @@ export type Origin = 'machine' | 'room' | 'global';
 export interface UserRef {
   id: string;
   name: string;
+  /** false for an account deactivated since it was named (absent: active). */
+  active?: boolean;
 }
 
 export interface Resolved {
@@ -35,6 +37,12 @@ export interface RoomMaintenance {
   maintenance_owner: UserRef | null;
   effective_cycle_days: number;
   effective_owner: UserRef | null;
+  /**
+   * Where each effective value comes from. The room's own owner, deactivated
+   * or out of reach, counts as none: the parc's default applies.
+   */
+  effective_cycle_origin?: 'room' | 'global';
+  effective_owner_origin?: 'room' | 'global';
 }
 
 export interface MaintenanceSettingsPayload {
@@ -57,7 +65,20 @@ export interface DueMachine {
 }
 
 export interface DueRoom {
+  /** The room's id. */
   id: string;
+  /**
+   * The group's own key: a room is one group for the postes following its
+   * owner and cycle, and one more per (owner, cycle) its postes override it
+   * with.
+   */
+  key?: string;
+  /**
+   * 'room': the postes following the room's owner and cycle — taking the
+   * group sets the room's owner. 'machine': postes that override them —
+   * taking the group sets those postes' own owner.
+   */
+  level?: 'room' | 'machine';
   name: string;
   building_name: string | null;
   location: string | null;
@@ -93,8 +114,17 @@ export interface MaintenanceSession {
   performed_by: string;
   performed_at: string;
   note: string | null;
+  /** The postes it still maintains: its remaining maintenance lines. */
   machine_count: number;
   items: SessionItem[];
+  /** Postes left out, with why (and lines turned since into another kind). */
+  skipped?: SessionItem[];
+  /**
+   * Part of the visit lies beyond the reader's scope: its other postes, and —
+   * when the room is not the reader's either — the room and the global note,
+   * which come back null.
+   */
+  partial?: boolean;
 }
 
 export interface SessionList {
@@ -229,6 +259,70 @@ export async function recordSession(payload: SessionPayload): Promise<Maintenanc
   return data;
 }
 
+/** More postes of a visit already recorded — its next part. */
+export async function addSessionLines(
+  id: string,
+  lines: Pick<SessionPayload, 'items' | 'skipped'>,
+): Promise<MaintenanceSession> {
+  const { data } = await api.post<MaintenanceSession>(`/maintenance/${id}/lines`, lines);
+  return data;
+}
+
+/**
+ * Lines (done and left out) per request. The server takes 1,000 of each, and
+ * Caddy 8 MB a body; a note may hold 5,000 characters, so a part of 250 stays
+ * under both whatever was typed.
+ */
+export const SESSION_PART_SIZE = 250;
+
+/** How far a visit sent in parts got: kept by the caller to resume after a failure. */
+export interface SessionProgress {
+  /** The visit, once its first part is recorded. */
+  sessionId: string | null;
+  /** Lines recorded so far, done first then left out, in payload order. */
+  sent: number;
+  total: number;
+}
+
+export function sessionProgress(payload: SessionPayload): SessionProgress {
+  return { sessionId: null, sent: 0, total: payload.items.length + (payload.skipped?.length ?? 0) };
+}
+
+/**
+ * Record a visit of any size as one visit (audit T30): the first part creates
+ * it with the date and the global note, the next ones are added to it. Done
+ * postes go first, so the part that creates the visit carries one whenever
+ * there is any. `progress` moves as each part is recorded: on a failure the
+ * caller keeps it and calls again with the same payload to send the rest —
+ * a part the server recorded but whose answer was lost is passed over there.
+ */
+export async function recordSessionInParts(
+  payload: SessionPayload,
+  progress: SessionProgress = sessionProgress(payload),
+  size: number = SESSION_PART_SIZE,
+): Promise<MaintenanceSession> {
+  const lines = [
+    ...payload.items.map((line) => ({ done: true, line })),
+    ...(payload.skipped ?? []).map((line) => ({ done: false, line })),
+  ];
+  let last: MaintenanceSession | null = null;
+  while (progress.sessionId === null || progress.sent < lines.length) {
+    const part = lines.slice(progress.sent, progress.sent + size);
+    const items = part.filter((p) => p.done).map((p) => p.line);
+    const skipped = part
+      .filter((p) => !p.done)
+      .map((p) => p.line as { machine_id: string; note: string });
+    if (progress.sessionId === null) {
+      last = await recordSession({ ...payload, items, skipped });
+      progress.sessionId = last.id;
+    } else {
+      last = await addSessionLines(progress.sessionId, { items, skipped });
+    }
+    progress.sent += part.length;
+  }
+  return last ?? getSession(progress.sessionId);
+}
+
 export async function listSessions(
   params: { room_id?: string; machine_id?: string; page?: number; page_size?: number } = {},
 ): Promise<SessionList> {
@@ -239,4 +333,18 @@ export async function listSessions(
 export async function getSession(id: string): Promise<MaintenanceSession> {
   const { data } = await api.get<MaintenanceSession>(`/maintenance/${id}`);
   return data;
+}
+
+/**
+ * Remove a visit recorded by mistake, with every journal line it wrote; the
+ * postes' last maintenance goes back to what their journal then says.
+ */
+export async function deleteSession(id: string): Promise<void> {
+  await api.delete(`/maintenance/${id}`);
+}
+
+/** « Responsable » as a level shows it: the name, and « (désactivé) » when it is. */
+export function ownerLabel(owner: UserRef | null | undefined): string {
+  if (!owner) return '';
+  return owner.active === false ? `${owner.name} (désactivé)` : owner.name;
 }

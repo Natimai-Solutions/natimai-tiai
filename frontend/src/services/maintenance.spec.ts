@@ -1,18 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('boot/axios', () => ({
-  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }));
 
 import { api } from 'boot/axios';
 import {
   cycleLabel,
+  deleteSession,
   dueLabel,
   isDue,
   getDue,
   listAssignableOwners,
   maintenanceStateLabel,
+  ownerLabel,
   recordSession,
+  recordSessionInParts,
+  SESSION_PART_SIZE,
+  sessionProgress,
   updateMachineMaintenance,
   updateRoomMaintenance,
 } from './maintenance';
@@ -72,6 +77,70 @@ describe('maintenance service', () => {
   });
 });
 
+describe('a visit sent in parts (audit T30)', () => {
+  beforeEach(() => vi.mocked(api.post).mockReset());
+
+  const ids = (n: number, prefix: string) =>
+    Array.from({ length: n }, (_, i) => ({ machine_id: `${prefix}-${i}`, note: 'x' }));
+
+  it('creates the visit with the first part and adds the others to it', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: { id: 's-1' } });
+    // More than one request takes: 1,000 done and 200 left out.
+    const payload = { room_id: 'r-1', note: 'RAS', items: ids(1000, 'd'), skipped: ids(200, 'k') };
+    const progress = sessionProgress(payload);
+    await recordSessionInParts(payload, progress);
+
+    const calls = vi.mocked(api.post).mock.calls;
+    expect(calls.map((c) => c[0])).toEqual([
+      '/maintenance',
+      '/maintenance/s-1/lines',
+      '/maintenance/s-1/lines',
+      '/maintenance/s-1/lines',
+      '/maintenance/s-1/lines',
+    ]);
+    const parts = calls.map((c) => c[1] as { items: unknown[]; skipped: unknown[] });
+    expect(parts.every((p) => p.items.length + p.skipped.length <= SESSION_PART_SIZE)).toBe(true);
+    // The date and the note go once, with the done postes first.
+    expect(calls[0]![1]).toMatchObject({ room_id: 'r-1', note: 'RAS' });
+    expect(parts[0]!.items).toHaveLength(SESSION_PART_SIZE);
+    expect(calls[1]![1]).not.toHaveProperty('note');
+    expect(parts.flatMap((p) => p.items)).toEqual(payload.items);
+    expect(parts.flatMap((p) => p.skipped)).toEqual(payload.skipped);
+    expect(progress).toEqual({ sessionId: 's-1', sent: 1200, total: 1200 });
+  });
+
+  it('resumes after a failed part without sending the recorded ones again', async () => {
+    vi.mocked(api.post)
+      .mockResolvedValueOnce({ data: { id: 's-1' } })
+      .mockRejectedValueOnce(new Error('réseau'))
+      .mockResolvedValue({ data: { id: 's-1' } });
+    const payload = { room_id: 'r-1', items: ids(600, 'd') };
+    const progress = sessionProgress(payload);
+    await expect(recordSessionInParts(payload, progress)).rejects.toThrow('réseau');
+    expect(progress).toMatchObject({ sessionId: 's-1', sent: 250 });
+
+    await recordSessionInParts(payload, progress);
+    const calls = vi.mocked(api.post).mock.calls.slice(2);
+    expect(calls.map((c) => c[0])).toEqual(['/maintenance/s-1/lines', '/maintenance/s-1/lines']);
+    expect((calls[0]![1] as { items: { machine_id: string }[] }).items[0]!.machine_id).toBe(
+      'd-250',
+    );
+    expect(progress.sent).toBe(600);
+  });
+
+  it('records a visit with nothing done in one request', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: { id: 's-1' } });
+    await recordSessionInParts({ room_id: 'r-1', note: 'Salle fermée', items: [] });
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledWith('/maintenance', {
+      room_id: 'r-1',
+      note: 'Salle fermée',
+      items: [],
+      skipped: [],
+    });
+  });
+});
+
 describe('labels', () => {
   it('names the four states and falls back on the raw value', () => {
     expect(maintenanceStateLabel('overdue')).toBe('En retard');
@@ -105,5 +174,20 @@ describe('due dates (audit U22)', () => {
     expect(isDue('due_soon')).toBe(true);
     expect(isDue('ok')).toBe(false);
     expect(isDue('excluded')).toBe(false);
+  });
+});
+
+describe('a recorded visit (item 6) and its owner labels (item 4)', () => {
+  it('deletes a visit by id', async () => {
+    vi.mocked(api.delete).mockResolvedValue({ data: undefined });
+    await deleteSession('s-1');
+    expect(api.delete).toHaveBeenCalledWith('/maintenance/s-1');
+  });
+
+  it('names a deactivated owner as such, never by id', () => {
+    expect(ownerLabel({ id: 'u', name: 'Marie', active: false })).toBe('Marie (désactivé)');
+    expect(ownerLabel({ id: 'u', name: 'Marie', active: true })).toBe('Marie');
+    expect(ownerLabel({ id: 'u', name: 'Marie' })).toBe('Marie');
+    expect(ownerLabel(null)).toBe('');
   });
 });

@@ -47,11 +47,16 @@ class ErrorCode(enum.StrEnum):
     # Passwords
     PASSWORD_CURRENT_INVALID = "password.current.invalid"
     PASSWORD_RESET_TOKEN_INVALID = "password.reset_token.invalid"
+    # The new password is the one the account already has.
+    PASSWORD_UNCHANGED = "password.unchanged"
     # Resources
     MACHINE_NOT_FOUND = "machine.not_found"
     MACHINE_MERGE_SELF = "machine.merge.self"
     MACHINE_ENROLLMENT_REVOKED = "machine.enrollment.revoked"
     MACHINE_ENROLLMENT_APPROVAL_REQUIRED = "machine.enrollment.approval_required"
+    # The poste's token was revoked: nothing can be queued for it until an
+    # administrator allows its re-enrollment.
+    MACHINE_TOKEN_REVOKED = "machine.token_revoked"
     USER_NOT_FOUND = "user.not_found"
     USER_EMAIL_TAKEN = "user.email.taken"
     USER_SELF_FORBIDDEN = "user.self.forbidden"
@@ -84,6 +89,9 @@ class ErrorCode(enum.StrEnum):
     # ROOM_SOURCE is a directory mode: postes are filed by the directory, and
     # a placement made by hand here would be undone on the next inventory.
     ROOM_PLACEMENT_LOCKED = "room.placement.locked"
+    # A room or a building a group's scope names cannot be deleted: the scope
+    # would name nothing, and dropping the row could widen the group (C11).
+    ROOM_IN_GROUP_SCOPE = "room.in_group_scope"
     INTERVENTION_NOT_FOUND = "intervention.not_found"
     CHECK_NOT_FOUND = "check.not_found"
     CHECK_ALREADY_OPEN = "check.already_open"
@@ -95,12 +103,34 @@ class ErrorCode(enum.StrEnum):
     # The owner given to a poste's or a room's maintenance cannot read and
     # record maintenance, or does not see the poste or the room (audit T32).
     MAINTENANCE_OWNER_OUT_OF_REACH = "maintenance.owner.out_of_reach"
+    # A visit recorded for a room names postes that are not in it.
+    MAINTENANCE_ITEMS_NOT_IN_ROOM = "maintenance.items.not_in_room"
+    # A visit with no poste done that says nothing of why (audit T30).
+    MAINTENANCE_SESSION_EMPTY = "maintenance.session.empty"
+    # Postes added to a visit by someone other than its author.
+    MAINTENANCE_SESSION_NOT_AUTHOR = "maintenance.session.not_author"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     RATE_LIMITED = "request.rate_limited"
     HTTP_NOT_FOUND = "http.not_found"
     HTTP_ERROR = "http.error"
     INTERNAL_SERVER_ERROR = "internal.server_error"
+
+
+def violated_constraint(exc: BaseException) -> str | None:
+    """The name of the unique constraint (or unique index) an
+    ``IntegrityError`` broke, or None for any other integrity failure.
+
+    What turns a race the routes' own checks cannot close — two requests
+    creating the same address at the same instant both find it free — into
+    the 409 the check would have answered, instead of a 500.
+    """
+    orig = getattr(exc, "orig", None)
+    if getattr(orig, "sqlstate", None) != "23505":  # unique_violation
+        return None
+    diag = getattr(orig, "diag", None)
+    name = getattr(diag, "constraint_name", None)
+    return name if isinstance(name, str) else ""
 
 
 class AppError(Exception):

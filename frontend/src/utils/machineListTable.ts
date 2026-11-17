@@ -1,7 +1,7 @@
 import type { LocationQuery } from 'vue-router';
 import type { QTableColumn } from 'quasar';
 import type { Machine, MachineSortField } from 'src/services/machines';
-import { antivirusStatusLabel, protectionLabel } from 'src/utils/format';
+import { antivirusStatusLabel, dash, protectionLabel } from 'src/utils/format';
 import type { MachineColumnKey } from 'src/utils/machineColumns';
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, queryValue } from 'src/utils/machineQuery';
 
@@ -113,7 +113,14 @@ export const MACHINE_TABLE_COLUMNS: QTableColumn<Machine>[] = [
     classes: 'machine-name-cell',
     headerClasses: 'machine-name-cell',
   },
-  { name: 'domain', label: 'Domaine', field: 'domain', align: 'left', sortable: true },
+  {
+    name: 'domain',
+    label: 'Domaine',
+    field: 'domain',
+    align: 'left',
+    sortable: true,
+    format: dash,
+  },
   // Sortable, and grouping is the point: a multi-site parc is read one site at
   // a time. Empty on a parc whose agents name no site.
   {
@@ -122,7 +129,7 @@ export const MACHINE_TABLE_COLUMNS: QTableColumn<Machine>[] = [
     field: 'location',
     align: 'left',
     sortable: true,
-    format: (val: string | null) => val ?? '—',
+    format: dash,
   },
   // The console's placement, sortable so a parc reads one room at a time.
   {
@@ -131,7 +138,7 @@ export const MACHINE_TABLE_COLUMNS: QTableColumn<Machine>[] = [
     field: 'building_name',
     align: 'left',
     sortable: true,
-    format: (val: string | null) => val ?? '—',
+    format: dash,
   },
   { name: 'room', label: 'Salle', field: 'room_name', align: 'left', sortable: true },
   // Where the poste stands on its cycle, sortable by due date: the "what do
@@ -150,9 +157,9 @@ export const MACHINE_TABLE_COLUMNS: QTableColumn<Machine>[] = [
     label: 'Adresse IP',
     field: 'ip_address',
     align: 'left',
-    format: (val: string | null) => val ?? '—',
+    format: dash,
   },
-  { name: 'os_version', label: 'OS', field: 'os_version', align: 'left' },
+  { name: 'os_version', label: 'OS', field: 'os_version', align: 'left', format: dash },
   // The agent's version, flagged when below the parc's reference. In the list
   // because the question it answers — "lesquels n'ont pas encore la nouvelle
   // version" — is asked of the parc, not of one poste. Sortable as a version
@@ -210,7 +217,14 @@ export const MACHINE_TABLE_COLUMNS: QTableColumn<Machine>[] = [
   },
   // The two inventory columns the list is scanned for. The rest of the twenty-five
   // is one machine's business and stays on the fiche.
-  { name: 'model', label: 'Modèle', field: 'hw_model', align: 'left', sortable: true },
+  {
+    name: 'model',
+    label: 'Modèle',
+    field: 'hw_model',
+    align: 'left',
+    sortable: true,
+    format: dash,
+  },
   // Sortable, and the sort is the point: "montre-moi les postes qui n'ont plus
   // de place" is the question this column exists for. The bar carries the
   // percentage, because that is the figure that means something.

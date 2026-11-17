@@ -9,6 +9,7 @@ import {
   createIntervention,
   deleteIntervention,
   INTERVENTION_KINDS,
+  interventionHeading,
   interventionKindLabel,
   listInterventions,
   updateIntervention,
@@ -53,5 +54,31 @@ describe('intervention kinds', () => {
     );
     expect(interventionKindLabel('incident')).toBe('Panne / incident');
     expect(interventionKindLabel('unknown')).toBe('unknown');
+  });
+});
+
+describe('interventionHeading (journal titles without the kind twice)', () => {
+  it('drops a title that only repeats the kind', () => {
+    expect(interventionHeading({ kind: 'verification', title: 'Vérification' })).toBe(
+      'Vérification',
+    );
+    expect(interventionHeading({ kind: 'maintenance', title: 'Maintenance' })).toBe('Maintenance');
+  });
+
+  it('drops the kind at the head of an old title', () => {
+    expect(interventionHeading({ kind: 'maintenance', title: 'Maintenance — A101' })).toBe(
+      'Maintenance — A101',
+    );
+  });
+
+  it('keeps a title of its own, and a word that only starts like the kind', () => {
+    expect(interventionHeading({ kind: 'maintenance', title: 'A101' })).toBe('Maintenance — A101');
+    expect(interventionHeading({ kind: 'maintenance', title: 'Maintenance non faite' })).toBe(
+      'Maintenance — Maintenance non faite',
+    );
+    expect(interventionHeading({ kind: 'other', title: 'Maintenance non faite — B12' })).toBe(
+      'Autre — Maintenance non faite — B12',
+    );
+    expect(interventionHeading({ kind: 'incident', title: null })).toBe('Panne / incident');
   });
 });

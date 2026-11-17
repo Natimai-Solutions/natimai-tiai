@@ -718,8 +718,8 @@ La console n'existe aujourd'hui qu'en français : textes écrits en dur dans les
 | MVP (M0–M1) | **TLS dès le départ** (Caddy + AC interne) ; **auto-enrôlement** : secret d'enrôlement partagé → **token unique par poste** (DPAPI) ; identité = `machine_uuid` ; **auth console JWT** avec rôles `admin` / `readonly`. |
 | Durcissement (M5) | Garde-fou de ré-enrôlement + révocation de token ; journal d'audit ; moindre privilège + limitation de débit sur l'API. ✅ côté console : sessions serveur révocables (jeton d'accès court + jeton de session tournant en cookie `HttpOnly`), pas d'escalade de privilèges par la gestion des comptes, connexion à temps constant. |
 | Durcissement (exploitation) | **Rotation automatique des tokens agents** (livrée) ; rétention du journal d'audit et de l'historique des commandes. |
-| Audit 2026-11 | Fait le 2026-11-11 : les 43 tâches (T01 à T43) sont corrigées, cf. `plan-audit-2026-11.md` §6. Écart : sauvegardes non chiffrées (droits 600, documenté). |
-| Plus tard | mTLS ; attestation d'identité AD à l'enrôlement ; **permissions fines par ressource/table** (lecture/écriture) au-delà des deux rôles. |
+| Audit 2026-11 | Fait le 2026-11-11 : les 43 tâches (T01 à T43) sont corrigées, cf. `plan-audit-2026-11.md` §6. Limites reprises le 2026-11-16 (§6.6), dont le chiffrement facultatif des sauvegardes ; reste l'emplacement déclaré par l'agent (S19, S20). |
+| Plus tard | mTLS ; attestation d'identité AD à l'enrôlement ; **permissions fines par ressource/table** (lecture/écriture) au-delà des deux rôles ; **lecture de l'annuaire par le serveur** pour ne plus croire l'agent sur son emplacement et son OU (S19, S20) — plan dans `plan-lecture-annuaire.md`. |
 
 Points permanents : binaire agent **signé**, validation stricte des entrées API, limitation de débit côté agent pour éviter l'effet « troupeau ».
 

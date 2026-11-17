@@ -71,3 +71,25 @@ describe('MachineStatusCard', () => {
     expect(wrapper.emitted('open-tab')).toEqual([['antivirus'], ['windows_update']]);
   });
 });
+
+describe('MachineStatusCard — threats unread and the parc threshold', () => {
+  it('claims no all-clear when the threats could not be read', async () => {
+    const w = mount(MachineStatusCard, {
+      props: { machine: machineDetail(), activeThreats: 0, threatsFailed: true },
+    });
+    expect(w.text()).not.toContain('Aucune alerte');
+    expect(w.text()).toContain('Impossible de charger les menaces de ce poste');
+    await w.find('button').trigger('click');
+    expect(w.emitted('retry')).toHaveLength(1);
+  });
+
+  // Item 9: the threshold set in « Paramètres », not a hard-coded 10 %.
+  it('raises the disk alert at the parc’s threshold', () => {
+    // Half the system disk free, with the parc's threshold at 51 %.
+    const w = mount(MachineStatusCard, {
+      props: { machine: machineDetail(), activeThreats: 0, lowDiskPercent: 51 },
+    });
+    expect(w.text()).toContain('Disque système presque plein');
+    expect(w.findComponent(QLinearProgress).props('color')).toBe('negative');
+  });
+});

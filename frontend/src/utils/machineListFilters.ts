@@ -6,7 +6,6 @@ import type {
   WindowsUpdateFilter,
 } from 'src/services/machines';
 import {
-  CHASSIS_TYPES,
   MACHINE_STATUSES,
   SCAN_AGE_DAYS,
   SCAN_FILTERS,
@@ -113,6 +112,13 @@ export interface MachineFilters {
    * back arrow from a fiche comes back to the same filtered list.
    */
   softwareId: number | null;
+  /** C2: a re-enrolment waits for approval (`pending`), or the token is revoked. */
+  enrollment: 'pending' | 'revoked' | null;
+  /**
+   * Hardware past the parc's renewal age — the dashboard's « À renouveler »
+   * card, opened as a list. Set by that link, cleared from its chip.
+   */
+  aging: 'true' | null;
 }
 
 /** The whole parc: no search, no facet, both toggles off. */
@@ -145,6 +151,8 @@ export function emptyMachineFilters(): MachineFilters {
     usageAbove: null,
     usageDays: null,
     softwareId: null,
+    enrollment: null,
+    aging: null,
   };
 }
 
@@ -192,6 +200,26 @@ export const SCAN_OPTIONS: FilterOption[] = [
   { label: 'Les 2 scans > 1 sem.', value: 'both:7' },
   { label: 'Les 2 scans > 1 mois', value: 'both:30' },
 ];
+
+export const ENROLLMENT_OPTIONS: FilterOption[] = [
+  { label: 'Enrôlement : tous', value: null },
+  { label: 'Ré-enrôlement à autoriser', value: 'pending' },
+  { label: 'Token révoqué', value: 'revoked' },
+];
+
+/**
+ * A dropdown's entries, plus the value in use when it is none of them — a
+ * link, or a value the fleet listing has not loaded yet. Without it the select
+ * shows nothing for a filter that is narrowing the list.
+ */
+export function optionsWithCurrent(
+  options: FilterOption[],
+  current: string | null,
+  labelOf: (value: string) => string = (value) => value,
+): FilterOption[] {
+  if (current == null || options.some((o) => o.value === current)) return options;
+  return [...options, { label: labelOf(current), value: current }];
+}
 
 export const MISMATCH_OPTIONS: FilterOption[] = [
   { label: 'Emplacement / salle : tous', value: null },
@@ -299,11 +327,15 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
   // which is the upgrade question and the more common of the two.
   const ramMin = queryInt(q.ram_min_gb);
   const ramMax = queryInt(q.ram_max_gb);
+  // The bound alone, while its figure is being retyped: kept in the URL so
+  // that emptying the box does not reset the bound and lock the box (item 8).
+  const ramOpAlone = queryValue(q.ram_op);
+  const enrollment = queryValue(q.enrollment);
   const below = Number(queryValue(q.disk_free_below));
   const days = queryInt(q.usage_days);
   const software = Number(queryValue(q.software_id));
   return {
-    search: queryValue(q.search) ?? '',
+    search: queryValue(q.search)?.trim() ?? '',
     domain: queryValue(q.domain) ?? '',
     location: queryValue(q.location),
     building: queryValue(q.building),
@@ -325,8 +357,16 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
     model: queryValue(q.hw_model),
     manufacturer: queryValue(q.hw_manufacturer),
     processor: queryValue(q.cpu_model),
-    chassis: kind && CHASSIS_TYPES.some((c) => c.value === kind) ? kind : null,
-    ramOp: ramMin !== null ? 'min' : ramMax !== null ? 'max' : null,
+    // Any kind the fleet lists, « chassis-35 » included (item 8).
+    chassis: kind,
+    ramOp:
+      ramMin !== null
+        ? 'min'
+        : ramMax !== null
+          ? 'max'
+          : ramOpAlone === 'min' || ramOpAlone === 'max'
+            ? ramOpAlone
+            : null,
     ramGb: ramMin ?? ramMax,
     // Any whole percentage the settings accept, not only the menu's two.
     diskFree: Number.isInteger(below) && below >= 1 && below <= 99 ? below : null,
@@ -334,6 +374,8 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
     usageAbove: queryFloat(q.usage_hours_above),
     usageDays: days !== null && days <= USAGE_MAX_DAYS ? days : null,
     softwareId: Number.isInteger(software) && software > 0 ? software : null,
+    enrollment: enrollment === 'pending' || enrollment === 'revoked' ? enrollment : null,
+    aging: queryValue(q.hardware_aging) === 'true' ? 'true' : null,
   };
 }
 
@@ -343,7 +385,8 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
  */
 export function machineFiltersToQuery(f: MachineFilters): Record<string, string> {
   const query: Record<string, string> = {};
-  if (f.search) query.search = f.search;
+  const search = f.search.trim();
+  if (search) query.search = search;
   if (f.domain) query.domain = f.domain;
   if (f.location) query.location = f.location;
   if (f.building) query.building = f.building;
@@ -370,6 +413,8 @@ export function machineFiltersToQuery(f: MachineFilters): Record<string, string>
   if (f.chassis) query.hw_chassis_type = f.chassis;
   if (isRamActive(f)) {
     query[f.ramOp === 'min' ? 'ram_min_gb' : 'ram_max_gb'] = String(ramGbValue(f));
+  } else if (f.ramOp) {
+    query.ram_op = f.ramOp;
   }
   if (f.diskFree != null) query.disk_free_below = String(f.diskFree);
   const usage = usageBoundsOf(f);
@@ -377,6 +422,8 @@ export function machineFiltersToQuery(f: MachineFilters): Record<string, string>
   if (usage.above !== null) query.usage_hours_above = String(usage.above);
   if (f.usageDays !== null) query.usage_days = String(f.usageDays);
   if (f.softwareId != null) query.software_id = String(f.softwareId);
+  if (f.enrollment) query.enrollment = f.enrollment;
+  if (f.aging) query.hardware_aging = 'true';
   return query;
 }
 
@@ -387,7 +434,9 @@ export function machineFiltersToQuery(f: MachineFilters): Record<string, string>
  */
 export function machineFiltersToParams(f: MachineFilters): ListMachinesParams {
   const params: ListMachinesParams = {};
-  if (f.search) params.search = f.search;
+  // Trimmed: « PC-01 » pasted with its trailing space found nothing.
+  const search = f.search.trim();
+  if (search) params.search = search;
   if (f.domain) params.domain = f.domain;
   if (f.location) params.location = f.location;
   if (f.building) params.building_id = f.building;
@@ -426,10 +475,30 @@ export function machineFiltersToParams(f: MachineFilters): ListMachinesParams {
   if (usage.above !== null) params.usage_hours_above = usage.above;
   if (f.usageDays !== null) params.usage_days = f.usageDays;
   if (f.softwareId != null) params.software_id = f.softwareId;
+  if (f.enrollment) params.enrollment = f.enrollment;
+  if (f.aging) params.hardware_aging = true;
+  // The console sets these five from dropdowns fed by the fleet's exact
+  // values, with their counts: matched exactly, « OptiPlex 7010 (12) » lists
+  // those 12 postes and not the « OptiPlex 7010 AIO » too. The API keeps the
+  // substring for a value without `exact`.
+  const exact = (
+    [
+      ['antivirus', f.antivirus],
+      ['os_version', f.os],
+      ['hw_model', f.model],
+      ['hw_manufacturer', f.manufacturer],
+      ['cpu_model', f.processor],
+    ] as const
+  )
+    .filter(([, value]) => value)
+    .map(([facet]) => facet);
+  if (exact.length) params.exact = exact.join(',');
   return params;
 }
 
 export type MachineFilterKey =
+  | 'domain'
+  | 'enrollment'
   | 'location'
   | 'building'
   | 'room'
@@ -449,7 +518,8 @@ export type MachineFilterKey =
   | 'disk'
   | 'usage'
   | 'software'
-  | 'agent';
+  | 'agent'
+  | 'aging';
 
 export interface MachineFilterChip {
   key: MachineFilterKey;
@@ -469,6 +539,12 @@ export function machineFilterChips(
 ): MachineFilterChip[] {
   const label = (opts: FilterOption[], v: string) => opts.find((o) => o.value === v)?.label ?? v;
   const chips: MachineFilterChip[] = [];
+  // No dropdown for the domain: it arrives by a link or a hand-typed URL, and
+  // its chip is the only thing on screen that says it narrows the list.
+  if (f.domain) chips.push({ key: 'domain', label: `Domaine : ${f.domain}` });
+  if (f.enrollment) {
+    chips.push({ key: 'enrollment', label: label(ENROLLMENT_OPTIONS, f.enrollment) });
+  }
   if (f.location) chips.push({ key: 'location', label: label(options.location, f.location) });
   if (f.building) chips.push({ key: 'building', label: label(options.building, f.building) });
   if (f.room) chips.push({ key: 'room', label: label(options.room, f.room) });
@@ -512,6 +588,8 @@ export function machineFilterChips(
   if (f.softwareId != null) {
     chips.push({ key: 'software', label: 'Postes portant un logiciel' });
   }
+  // From the dashboard's card, like the software one: the chip says why.
+  if (f.aging) chips.push({ key: 'aging', label: 'Matériel à renouveler' });
   return chips;
 }
 
@@ -521,7 +599,10 @@ export function clearUsageFilter(f: MachineFilters): MachineFilters {
 }
 
 /** The fields each chip stands for — the memory and usage ones are several. */
-const FIELDS_BY_KEY: Record<Exclude<MachineFilterKey, 'ram' | 'usage'>, keyof MachineFilters> = {
+const FIELDS_BY_KEY: Record<
+  Exclude<MachineFilterKey, 'ram' | 'usage' | 'domain'>,
+  keyof MachineFilters
+> = {
   location: 'location',
   building: 'building',
   room: 'room',
@@ -540,11 +621,14 @@ const FIELDS_BY_KEY: Record<Exclude<MachineFilterKey, 'ram' | 'usage'>, keyof Ma
   disk: 'diskFree',
   software: 'softwareId',
   agent: 'agent',
+  enrollment: 'enrollment',
+  aging: 'aging',
 };
 
 /** The filters with one chip's facet off. */
 export function clearMachineFilter(f: MachineFilters, key: MachineFilterKey): MachineFilters {
   if (key === 'ram') return { ...f, ramOp: null, ramGb: null };
   if (key === 'usage') return clearUsageFilter(f);
+  if (key === 'domain') return { ...f, domain: '' };
   return { ...f, [FIELDS_BY_KEY[key]]: null };
 }

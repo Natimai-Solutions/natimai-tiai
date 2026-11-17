@@ -5,6 +5,7 @@ import {
   createUnauthorizedHandler,
   endSession,
   getAccessToken,
+  notifyForbidden,
   setAccessToken,
   singleFlight,
 } from 'src/services/session';
@@ -77,11 +78,29 @@ export default defineBoot(({ app, router }) => {
         if (router.currentRoute.value.name !== 'login') {
           void router.push({
             name: 'login',
-            query: { redirect: router.currentRoute.value.fullPath },
+            // `ended`: the login page says « Votre session a pris fin »
+            // rather than greeting the reader as if they had just arrived.
+            query: { redirect: router.currentRoute.value.fullPath, ended: '1' },
           });
         }
       },
     }),
+  );
+
+  // A 403: the account's rights may have changed since the profile was read.
+  // The store reads it again (throttled), and the menus follow.
+  api.interceptors.response.use(
+    (response) => response,
+    (error: unknown) => {
+      const { response, config } = (error ?? {}) as {
+        response?: { status?: number };
+        config?: { url?: string };
+      };
+      if (response?.status === 403 && !config?.url?.endsWith('/auth/me')) notifyForbidden();
+      // Passed on as it came: the pages read the axios error itself.
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      return Promise.reject(error);
+    },
   );
 });
 

@@ -117,6 +117,12 @@ class Machine(SQLModel, table=True):
     signature_version: str | None = None
     signature_last_updated: datetime | None = utc_field(default=None, nullable=True)
     signature_age_days: int | None = None
+    # When the Defender block carrying ``signature_age_days`` was received. The
+    # age is the poste's figure *at that moment*: read later, it is aged by the
+    # days elapsed since (``status.effective_signature_age``), so a poste that
+    # fell silent does not stay « à jour » on a frozen number. NULL = never
+    # reported, or reported before the column existed.
+    signature_reported_at: datetime | None = utc_field(default=None, nullable=True)
     last_quick_scan: datetime | None = utc_field(default=None, nullable=True)
     last_full_scan: datetime | None = utc_field(default=None, nullable=True)
     # AMRunningMode: Normal / Passive / SxS Passive Mode / EDR Block Mode. What

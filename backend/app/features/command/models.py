@@ -173,6 +173,12 @@ class Command(SQLModel, table=True):
     delivered_at: datetime | None = utc_field(default=None, nullable=True)
     started_at: datetime | None = utc_field(default=None, nullable=True)
     finished_at: datetime | None = utc_field(default=None, nullable=True)
+    # When the poste's own verdict (succeeded / failed) was recorded. Set, the
+    # command is closed for good: a replayed or contradictory verdict is
+    # ignored. NULL on a closure the server made itself — TTL expiry, no
+    # answer, package refused, poste merged — which a late verdict from the
+    # poste still overrides, the poste knowing better what it ran.
+    agent_verdict_at: datetime | None = utc_field(default=None, nullable=True)
     result_output: str | None = None
     error: str | None = None
     # Set on a ``wake_on_lan`` alone: the poste whose agent emitted — or is

@@ -726,6 +726,14 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
   **abandonné sur le premier 401** : l'agent retente alors l'enrôlement avec le
   secret du parc. Tant que la révocation tient, le serveur répond 403 et l'agent
   attend ; dès qu'un admin « autorise le ré-enrôlement », le poste revient seul.
+  Même attente pour un enrôlement **en attente d'approbation** : une tentative
+  d'enrôlement par palier, le premier après une minute, puis le double à chaque
+  fois jusqu'à un plafond de 15 minutes (avec jitter), et retour au premier
+  palier dès que la réponse change. Une approbation donnée depuis la console est
+  ainsi prise en compte dans les minutes qui suivent, et un poste que personne
+  n'approuve coûte au serveur une tentative par quart d'heure. Le journal
+  porte une ligne par palier ; cette attente voulue n'est pas signalée comme un
+  polling bloqué.
 - **Rotation du token.** Un token copié hors du poste (image disque, sauvegarde
   de `%ProgramData%`) ne doit pas fonctionner pour toujours : le serveur le
   renouvelle tous les `AGENT_TOKEN_ROTATE_DAYS` jours (30 par défaut). L'agent
@@ -770,6 +778,15 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
   L'état/les menaces sont reconstruits à chaque heartbeat (pas mis en file), et
   l'état Windows Update reste en cache jusqu'à ce qu'un heartbeat l'ait
   effectivement remis.
+- Dossier des **paquets logiciels** (`C:\ProgramData\Tiai\packages\<id>`) :
+  un téléchargement interrompu y reste pour reprendre là où il s'est arrêté.
+  Ce qui y reste est borné par la date (dossier inutilisé depuis 7 jours) et
+  par la place : `DeployCacheMaxGB` (registre, 16 Gio par défaut, de 1 à
+  1 024 ; valeur inutilisable signalée dans le journal, défaut appliqué). Au
+  démarrage du service et avant chaque téléchargement, les dossiers les plus
+  anciens partent jusqu'à repasser sous le plafond, le paquet à télécharger
+  compté pour sa taille annoncée et jamais retiré (audit S24). Chaque retrait
+  est une ligne `deploy: removed package folder …` de `agent.log`.
 
 ## Build & essai
 

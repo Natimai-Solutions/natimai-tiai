@@ -50,8 +50,11 @@ describe('auditActionLabel', () => {
       'machine.revoke_token',
       'machine.merge',
       'machine.wake_bulk',
+      'machine.identity_confirmed',
+      'machine.enrollment_retried',
       'maintenance.machine_settings',
       'maintenance.room_settings',
+      'maintenance.delete',
       'room.create',
       'room.update',
       'room.delete',
@@ -170,6 +173,11 @@ describe('auditDetailsSummary', () => {
       'a absorbé « u »',
     );
     expect(auditDetailsSummary('machine.merge', { source_id: 'b' })).toBe('a absorbé « b »');
+    // Withheld from a confined reader: the merge is told, not the record.
+    expect(auditDetailsSummary('machine.merge', { hostname: 'PC-A', source_withheld: true })).toBe(
+      'PC-A · a absorbé une fiche hors de votre périmètre',
+    );
+    expect(auditDetailKeyLabel('source_withheld')).toBe('Fiche fusionnée hors de votre périmètre');
   });
 
   it('says whether a reset password was generated or typed — never the password', () => {
@@ -304,5 +312,14 @@ describe('formatTtlMinutes', () => {
     expect(auditDetailsSummary('settings.email_test', { to: 'it@lycee.pf', ok: 'oui' })).toBe(
       'à it@lycee.pf · envoyé',
     );
+  });
+});
+
+describe('auditDetailValue — what triggered a lock', () => {
+  it('names the slow-attempt lock and the password-change closure', () => {
+    expect(auditDetailValue('slow_attempts', 'via')).toBe('essais espacés (24 h)');
+    expect(auditDetailValue('password_change', 'via')).toBe('changement de mot de passe');
+    expect(auditDetailValue('autre', 'via')).toBe('autre');
+    expect(auditDetailKeyLabel('via')).toBe('Déclenché par');
   });
 });

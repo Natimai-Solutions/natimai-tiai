@@ -2,6 +2,9 @@
   <q-card flat bordered class="q-mt-md">
     <q-card-section class="text-subtitle1">Dernières commandes</q-card-section>
     <q-separator />
+    <q-card-section v-if="failed" class="q-pa-sm">
+      <CardLoadError what="les commandes" :loading="loading" @retry="emit('refresh')" />
+    </q-card-section>
     <q-table
       v-model:pagination="pagination"
       :rows="commands"
@@ -10,11 +13,11 @@
       :loading="loading"
       flat
       :rows-per-page-options="[10, 25, 50]"
-      no-data-label="Aucune commande."
+      :no-data-label="failed ? 'Commandes non chargées.' : 'Aucune commande.'"
       @request="onRequest"
     >
       <template #body-cell-type="props">
-        <q-td :props="props">{{ commandTypeLabel(props.value) }}</q-td>
+        <q-td :props="props" class="cell-wrap">{{ commandRowLabel(props.row) }}</q-td>
       </template>
       <template #body-cell-status="props">
         <q-td :props="props">
@@ -61,11 +64,13 @@
 
 <script setup lang="ts">
 import type { QTableColumn } from 'quasar';
+import CardLoadError from 'src/components/CardLoadError.vue';
 import { DEFAULT_PAGE_SIZE, type TablePagination } from './types';
-import { commandTypeLabel, type Command } from 'src/services/commands';
+import { commandRowLabel, type Command } from 'src/services/commands';
 import { formatDateTime } from 'src/utils/format';
 
-defineProps<{ commands: Command[]; loading: boolean }>();
+/** `failed`: the last read of this list failed — the rows, if any, are an earlier read's. */
+defineProps<{ commands: Command[]; loading: boolean; failed?: boolean }>();
 
 const pagination = defineModel<TablePagination>('pagination', { required: true });
 

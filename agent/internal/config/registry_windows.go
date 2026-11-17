@@ -110,6 +110,12 @@ func readDeployKeys(k registry.Key) DeployTrust {
 		log.Print(warning)
 	}
 	t.MethodAMaxGB = gb
+	v, _, err = k.GetIntegerValue("DeployCacheMaxGB")
+	gb, warning = deployCacheMaxGB(v, err, errors.Is(err, registry.ErrNotExist))
+	if warning != "" {
+		log.Print(warning)
+	}
+	t.CacheMaxGB = gb
 	return t
 }
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.features.package import storage
-from app.features.package.models import Package, PackageFile
+from app.features.package.models import Package, PackageFile, PackageKind
 
 FORMAT = "tiai-package-1"
 
@@ -41,6 +41,54 @@ def valid_file_name(name: str) -> bool:
         and not _RESERVED.fullmatch(name)
         and not name.endswith((".", " "))
     )
+
+
+# One character of a file name, as ``_FILE_NAME`` admits it anywhere but first.
+_NAME_CHAR = re.compile(r"[A-Za-z0-9 ._()+\-]")
+ALLOWED_CHARACTERS = "lettres sans accent, chiffres, espaces et . _ - ( ) +"
+
+
+def _shown(char: str) -> str:
+    """A character as a sentence can show it: itself, or its code point when
+    it would not show (a control, a space of another kind)."""
+    return (
+        f"« {char} »"
+        if char.isprintable() and not char.isspace()
+        else f"U+{ord(char):04X}"
+    )
+
+
+def file_name_problem(name: str) -> str | None:
+    """Why ``valid_file_name`` refuses this name, as the console says it after
+    « « nom » refusé : » — None when it is accepted. The same rule, read
+    clause by clause, so that the administrator learns which one: a name made
+    of allowed characters only may still start with one that may not lead, or
+    be a device name (audit: « _config.ini », « nul.txt »)."""
+    if not name:
+        return "nom vide"
+    bad = list(dict.fromkeys(c for c in name if not _NAME_CHAR.fullmatch(c)))
+    if bad:
+        return (
+            "caractère"
+            + ("s" if len(bad) > 1 else "")
+            + " interdit"
+            + ("s" if len(bad) > 1 else "")
+            + " "
+            + ", ".join(_shown(c) for c in bad)
+            + f" (permis : {ALLOWED_CHARACTERS})"
+        )
+    if len(name) > 255:
+        return "plus de 255 caractères"
+    if not name[0].isascii() or not name[0].isalnum():
+        return "le nom doit commencer par une lettre sans accent ou un chiffre"
+    if _RESERVED.fullmatch(name):
+        return (
+            "nom réservé par Windows (CON, PRN, AUX, NUL, COM1 à COM9, LPT1 à "
+            "LPT9, quelle que soit l'extension)"
+        )
+    if name.endswith((".", " ")):
+        return "le nom ne doit finir ni par un point ni par une espace"
+    return None
 
 
 @dataclass(frozen=True)
@@ -70,6 +118,28 @@ def case_duplicates(files: Sequence[PackageFile]) -> list[list[str]]:
     return [sorted(names) for _, names in sorted(groups.items()) if len(names) > 1]
 
 
+# An msiexec switch that removes a product: /x and /uninstall, any case,
+# either prefix msiexec takes, whatever is glued to it ("/x{code}"). No other
+# switch of msiexec starts with x or "uninstall". The agent
+# (deploy.msiexecRemoval) and the signing script ($MsiExecUninstallSwitch)
+# use the same pattern, kept equal by a test.
+UNINSTALL_SWITCH = re.compile(r"^[/-](x|uninstall)", re.IGNORECASE)
+
+
+def msiexec_removes(run: str | None, args: Sequence[str]) -> bool:
+    """Whether a step runs msiexec with a switch that removes a product: an
+    uninstallation, whatever step it is filed under. As an installation every
+    poste refuses it (agent deploy.MsiExecRemoves, and deploy.MethodAStep
+    under method A, which would otherwise rebuild it as ``/x {code}``)."""
+    return run == MSIEXEC and any(UNINSTALL_SWITCH.search(a) for a in args)
+
+
+INSTALL_REMOVES = (
+    "L'installation lance une désinstallation (msiexec /x ou /uninstall) : "
+    "placez cette commande dans la désinstallation du paquet"
+)
+
+
 def by_product_code(package: Package) -> bool:
     """Whether the uninstallation is ``msiexec`` with an MSI product code among
     its arguments: what method A runs as ``/x {code}`` without downloading any
@@ -97,10 +167,17 @@ def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
                 "install_missing", f"« {package.install_run} » n'est pas dans le paquet"
             )
         )
+    elif msiexec_removes(package.install_run, package.install_args):
+        # Refused on write (packages._apply); a row written before that rule
+        # may remain. The uninstallation is not concerned: the agent runs
+        # only the step of the action it was sent.
+        out.append(Problem("install_removes", INSTALL_REMOVES, blocks_uninstall=False))
     if (
         package.uninstall_run
         and package.uninstall_run != MSIEXEC
         and package.uninstall_run not in names
+        # Said once when both steps name the same missing file.
+        and package.uninstall_run != package.install_run
     ):
         out.append(
             Problem(
@@ -187,7 +264,7 @@ def runnable_somewhere(
     product code: the agent rebuilds the command line as ``/x {code} /qn
     /norestart`` and downloads nothing (agent deploy.MethodAStep, audit U04).
     An installation by msiexec is not accepted here under method A: the agent
-    would turn it into that uninstall."""
+    refuses it, since the line it rebuilds is that uninstall."""
     if package.signature is not None:
         return True
     if action == "uninstall":
@@ -207,6 +284,97 @@ def runnable_somewhere(
         f.name != run and Path(f.name.lower()).suffix in LOADABLE_EXTENSIONS
         for f in files
     )
+
+
+def _untrusted(package: Package, files: Sequence[PackageFile], action: str) -> Problem:
+    """Why no poste would run this unsigned step, naming what stands in the
+    way of method A: the file it runs, or the one beside it."""
+    if runnable_somewhere(package, files, action, capped=False):
+        # Method A in every respect but the size: the agent caps what an
+        # unsigned manifest may have it download.
+        gib = method_a_max_bytes() >> 30
+        return Problem(
+            "method_a_too_large",
+            f"Plus de {gib} Gio de fichiers : sans signature de "
+            "l'administrateur, aucun poste ne les téléchargera "
+            "(plafond de la méthode A). Signez le paquet.",
+        )
+    run = (
+        package.uninstall_run if action == "uninstall" else package.install_run
+    ) or ""
+    run_file = next((f for f in files if f.name == run), None)
+    loadable = sorted(
+        (
+            f.name
+            for f in files
+            if f.name != run and Path(f.name.lower()).suffix in LOADABLE_EXTENSIONS
+        ),
+        key=str.lower,
+    )
+    if run == MSIEXEC and action == "uninstall":
+        reason = (
+            "sa désinstallation lance msiexec sans code produit {…} parmi ses "
+            "arguments : la méthode A ne lance msiexec que pour « /x {code produit} »"
+        )
+    elif run == MSIEXEC:
+        reason = (
+            "son installation lance msiexec : la méthode A ne lance qu'un "
+            "exécutable (.exe) signé par un éditeur"
+        )
+    elif not run.lower().endswith(".exe"):
+        reason = (
+            f"« {run} » n'est pas un exécutable (.exe) : la méthode A ne lance "
+            "qu'un .exe signé par un éditeur"
+        )
+    elif run_file is None or not run_file.publisher_name:
+        reason = (
+            f"« {run} » ne porte pas de signature d'éditeur (Authenticode) : la "
+            "méthode A ne le lance pas"
+        )
+    elif loadable:
+        reason = (
+            f"{_quoted(loadable)} "
+            + ("sont" if len(loadable) > 1 else "est")
+            + f" à côté de « {run} » : la méthode A refuse tout fichier que "
+            "Windows pourrait charger ou lancer (.dll, .exe, .msi, scripts…) à "
+            "côté de l'exécutable — retirez-"
+            + ("les" if len(loadable) > 1 else "le")
+            + " du paquet, ou"
+        )
+        return Problem(
+            "untrusted",
+            f"Paquet non signé, et {reason} signez-le : en l'état, aucun poste "
+            "ne l'exécutera.",
+        )
+    else:
+        reason = "la méthode A ne le lance pas"
+    return Problem(
+        "untrusted",
+        f"Paquet non signé, et {reason} : aucun poste ne l'exécutera. Signez le "
+        "paquet.",
+    )
+
+
+def step_blockers(
+    package: Package, files: Sequence[PackageFile], action: str = "install"
+) -> list[Problem]:
+    """What every poste would refuse this step for — what the command route
+    answers 409 ``package.not_ready`` with, and what the package payload says
+    as ``install_blockers``: the problems standing in the step's way, or else,
+    when no poste would trust it, why (audit B30, U04). Empty when some poste
+    could run it; always for a winget package, whose trust is winget's."""
+    if package.kind != PackageKind.FILES:
+        return []
+    found = problems(package, files)
+    if action == "uninstall":
+        found = [p for p in found if p.blocks_uninstall]
+        if not package.uninstall_run:
+            found.append(Problem("no_uninstall", "Pas de désinstallation définie"))
+    if found:
+        return found
+    if runnable_somewhere(package, files, action):
+        return []
+    return [_untrusted(package, files, action)]
 
 
 def build(package: Package, files: Sequence[PackageFile]) -> bytes:

@@ -239,11 +239,11 @@ async def test_a_poste_creates_a_bounded_number_of_catalogue_entries(
     applied again)."""
     from sqlmodel import func, select
 
-    from app.core import ratelimit
+    from app.features.inventory import budget
     from app.features.inventory.models import Software
     from app.features.machine.models import Machine
 
-    monkeypatch.setattr(ratelimit.software_quota, "units", 3)
+    monkeypatch.setattr(budget.software_quota, "units", 3)
     a = await _enroll(client, "pc-a", hostname="A")
     b = await _enroll(client, "pc-b", hostname="B")
 
@@ -415,6 +415,7 @@ async def test_sync_refiles_the_parc_from_stored_readings(
     assert resp.json() == {
         "placed": 1,
         "unplaced": 0,
+        "moved_out": 0,
         "rooms_created": 1,
         "undecided": 0,
         "undecided_rooms": [],
@@ -428,6 +429,7 @@ async def test_sync_refiles_the_parc_from_stored_readings(
     assert resp.json() == {
         "placed": 0,
         "unplaced": 0,
+        "moved_out": 0,
         "rooms_created": 0,
         "undecided": 0,
         "undecided_rooms": [],
@@ -500,6 +502,7 @@ async def test_sync_adopts_nothing_on_a_tie(client, db_session, room_source):
     assert synced.json() == {
         "placed": 0,
         "unplaced": 0,
+        "moved_out": 0,
         "rooms_created": 0,
         "undecided": 2,
         "undecided_rooms": ["B12"],
@@ -557,6 +560,7 @@ async def test_sync_counts_what_it_placed_beside_what_it_left_undecided(
     assert synced.json() == {
         "placed": 1,
         "unplaced": 0,
+        "moved_out": 0,
         "rooms_created": 1,
         "undecided": 2,
         "undecided_rooms": ["B12"],
@@ -630,6 +634,7 @@ async def test_revoked_and_unverified_postes_do_not_vote(
     assert synced.json() == {
         "placed": 3,
         "unplaced": 0,
+        "moved_out": 0,
         "rooms_created": 1,
         "undecided": 0,
         "undecided_rooms": [],
@@ -678,3 +683,145 @@ async def test_sync_applies_the_dn_rule_of_the_heartbeat(
     assert synced.json()["placed"] == 0
     assert (await _machine(client, headers, a))["room_id"] is None
     assert (await client.get("/api/v1/rooms", headers=headers)).json() == []
+
+
+async def test_sync_leaves_a_poste_without_any_reading_where_it_is(
+    client, db_session, room_source
+):
+    """Item 2: the first re-sync took every poste filed by hand without a
+    directory reading out of its room (318 of 340). A poste whose agent never
+    sent the block is left where it is, as a heartbeat without it does; one
+    whose reading names no OU is still taken out."""
+    room_source("manual")
+    headers = await _admin(client, db_session)
+    room = (
+        await client.post("/api/v1/rooms", headers=headers, json={"name": "C3"})
+    ).json()["id"]
+    silent = await _enroll(client, "pc-silent", hostname="S")
+    spoken = await _enroll(client, "pc-spoken", hostname="T")
+    await _report(client, spoken, {"distinguished_name": "CN=PC,DC=corp"})
+    resp = await client.post(
+        f"/api/v1/rooms/{room}/machines",
+        headers=headers,
+        json={"machine_ids": [silent["machine_id"], spoken["machine_id"]]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    room_source("ad_ou")
+    synced = await client.post("/api/v1/rooms/sync-directory", headers=headers)
+    assert synced.status_code == 200, synced.text
+    assert synced.json()["unplaced"] == 1
+    assert synced.json()["moved_out"] == 1
+    assert (await _machine(client, headers, silent))["room_id"] == room
+    assert (await _machine(client, headers, spoken))["room_id"] is None
+
+
+async def test_sync_adopts_a_room_made_by_hand_inside_a_building(
+    client, db_session, room_source
+):
+    """Item 2: a room made by hand in its building is adopted by name, by the
+    majority key, like one outside any building — not doubled by a new
+    building-less « B12 »."""
+    room_source("manual")
+    headers = await _admin(client, db_session)
+    building = (
+        await client.post("/api/v1/buildings", headers=headers, json={"name": "Bât. B"})
+    ).json()["id"]
+    room = (
+        await client.post(
+            "/api/v1/rooms",
+            headers=headers,
+            json={"name": "b12", "building_id": building},
+        )
+    ).json()["id"]
+    honest = []
+    for i in range(2):
+        h = await _enroll(client, f"pc-h{i}", hostname=f"H{i}")
+        await _report(client, h, _dir(ou="B12", ou_dn=_HONEST))
+        honest.append(h)
+    f = await _enroll(client, "pc-forged", hostname="F")
+    await _report(client, f, _dir(ou="B12", ou_dn=_FORGED))
+
+    room_source("ad_ou")
+    synced = await client.post("/api/v1/rooms/sync-directory", headers=headers)
+    assert synced.status_code == 200, synced.text
+    for h in honest:
+        assert (await _machine(client, headers, h))["room_id"] == room
+    rooms = {
+        r["id"]: r for r in (await client.get("/api/v1/rooms", headers=headers)).json()
+    }
+    assert rooms[room]["ad_key"] == _HONEST
+    assert rooms[room]["building"]["id"] == building
+    forged_room = (await _machine(client, headers, f))["room_id"]
+    assert forged_room != room and rooms[forged_room]["building"] is None
+
+
+async def test_two_rooms_made_by_hand_of_one_name_leave_it_undecided(
+    client, db_session, room_source
+):
+    room_source("manual")
+    headers = await _admin(client, db_session)
+    for name in ("Bât. A", "Bât. B"):
+        b = (
+            await client.post("/api/v1/buildings", headers=headers, json={"name": name})
+        ).json()["id"]
+        await client.post(
+            "/api/v1/rooms", headers=headers, json={"name": "B12", "building_id": b}
+        )
+    h = await _enroll(client, "pc-h", hostname="H")
+    await _report(client, h, _dir(ou="B12", ou_dn=_HONEST))
+    room_source("ad_ou")
+    synced = (await client.post("/api/v1/rooms/sync-directory", headers=headers)).json()
+    assert (synced["undecided"], synced["undecided_rooms"]) == (1, ["B12"])
+    assert synced["rooms_created"] == 0
+    assert len((await client.get("/api/v1/rooms", headers=headers)).json()) == 2
+
+
+async def test_a_dry_run_says_what_the_sync_would_do_and_writes_nothing(
+    client, db_session, room_source
+):
+    """C9: ``dry_run=true`` answers the counts of the real run — with
+    ``moved_out``, the postes that would leave their room — and changes
+    nothing: no room, no move, no audit entry."""
+    from sqlmodel import select
+
+    from app.features.audit.models import AuditEntry
+
+    room_source("manual")
+    headers = await _admin(client, db_session)
+    room = (
+        await client.post("/api/v1/rooms", headers=headers, json={"name": "Réserve"})
+    ).json()["id"]
+    a = await _enroll(client, "pc-a", hostname="A")
+    await _report(client, a, _dir(ou="C3", ou_dn="OU=C3,DC=lycee,DC=local"))
+    await client.post(
+        f"/api/v1/rooms/{room}/machines",
+        headers=headers,
+        json={"machine_ids": [a["machine_id"]]},
+    )
+
+    room_source("ad_ou")
+    preview = await client.post(
+        "/api/v1/rooms/sync-directory?dry_run=true", headers=headers
+    )
+    assert preview.status_code == 200, preview.text
+    expected = {
+        "placed": 1,
+        "unplaced": 0,
+        "moved_out": 1,
+        "rooms_created": 1,
+        "undecided": 0,
+        "undecided_rooms": [],
+    }
+    assert preview.json() == expected
+    assert (await _machine(client, headers, a))["room_id"] == room
+    rooms = (await client.get("/api/v1/rooms", headers=headers)).json()
+    assert [r["name"] for r in rooms] == ["Réserve"]
+    audits = await db_session.exec(
+        select(AuditEntry).where(AuditEntry.action == "room.sync_directory")
+    )
+    assert audits.all() == []
+
+    real = await client.post("/api/v1/rooms/sync-directory", headers=headers)
+    assert real.json() == expected
+    assert (await _machine(client, headers, a))["room_name"] == "C3"

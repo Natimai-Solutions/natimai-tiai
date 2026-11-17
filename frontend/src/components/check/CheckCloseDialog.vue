@@ -20,10 +20,31 @@
             autofocus
             hint="Conservé sur la demande et inscrit dans l'historique du poste"
           />
+          <!-- When it was done, if not now: never before the request, never
+               in the future — the server refuses both. -->
+          <q-input
+            v-model="closedAt"
+            label="Date"
+            outlined
+            dense
+            type="datetime-local"
+            stack-label
+            :min="minInput"
+            :max="maxInput"
+            :error="dateError !== null"
+            :error-message="dateError ?? ''"
+            hint="Laisser tel quel pour maintenant ; antidater est permis"
+          />
         </q-card-section>
         <q-card-actions align="right" class="q-px-md q-pb-md">
           <q-btn v-close-popup flat label="Annuler" />
-          <q-btn type="submit" color="primary" label="Clore" :loading="saving" />
+          <q-btn
+            type="submit"
+            color="primary"
+            label="Clore"
+            :disable="dateError !== null"
+            :loading="saving"
+          />
         </q-card-actions>
       </q-form>
     </q-card>
@@ -32,14 +53,15 @@
 
 <script setup lang="ts">
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { closeCheck } from 'src/services/checks';
 import { apiErrorMessage } from 'src/services/errors';
 
 const props = defineProps<{
   modelValue: boolean;
-  check: { id: string; instructions: string | null } | null;
+  /** `created_at`: the earliest date the closing may carry. */
+  check: { id: string; instructions: string | null; created_at?: string } | null;
 }>();
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void;
@@ -49,19 +71,63 @@ const emit = defineEmits<{
 const $q = useQuasar();
 const saving = ref(false);
 const note = ref('');
+// The datetime-local value, in local time; what was there when the dialog
+// opened means « now » and is not sent.
+const closedAt = ref('');
+let openedAt = '';
+
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const minInput = computed(() =>
+  props.check?.created_at ? toLocalInput(new Date(props.check.created_at)) : undefined,
+);
+const maxInput = ref<string | undefined>(undefined);
+
+const dateError = computed<string | null>(() => {
+  if (!closedAt.value || closedAt.value === openedAt) return null;
+  const when = new Date(closedAt.value).getTime();
+  if (Number.isNaN(when)) return 'Date invalide';
+  if (when > Date.now() + 5 * 60 * 1000) return 'Pas dans le futur';
+  // To the minute, as the input shows it: the request's own minute is fine.
+  const created = props.check?.created_at ? new Date(props.check.created_at).getTime() : null;
+  if (created !== null && when < created - (created % 60000)) {
+    return 'Pas avant la demande';
+  }
+  return null;
+});
 
 watch(
   () => props.modelValue,
   (open) => {
-    if (open) note.value = '';
+    if (!open) return;
+    note.value = '';
+    openedAt = toLocalInput(new Date());
+    closedAt.value = openedAt;
+    maxInput.value = openedAt;
   },
 );
+
+/** The instant to send: none when left at « now », else the date picked. */
+function closedAtPayload(): string | null {
+  if (!closedAt.value || closedAt.value === openedAt) return null;
+  const picked = new Date(closedAt.value).getTime();
+  const created = props.check?.created_at ? new Date(props.check.created_at).getTime() : null;
+  // The request's own minute, picked: not a second before the request.
+  return new Date(created !== null && picked < created ? created : picked).toISOString();
+}
 
 async function submit() {
   if (!props.check) return;
   saving.value = true;
   try {
-    await closeCheck(props.check.id, { note: note.value.trim() || null });
+    const at = closedAtPayload();
+    await closeCheck(props.check.id, {
+      note: note.value.trim() || null,
+      ...(at ? { closed_at: at } : {}),
+    });
     $q.notify({ type: 'positive', message: 'Vérification close' });
     emit('update:modelValue', false);
     notifyTasksChanged();

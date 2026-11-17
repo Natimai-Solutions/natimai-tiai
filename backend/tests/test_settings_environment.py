@@ -91,9 +91,16 @@ def test_mail_variables_say_the_console_overrides_them(provider):
         if group.label == "E-mails"
         for i in group.items
         if i.key.startswith(("EMAIL_", "SMTP_", "MAILGUN_"))
-        # The outbox's retention is the server's housekeeping, not the
-        # mail account: the console does not override it.
-        and i.key != "EMAIL_OUTBOX_RETENTION_DAYS"
+        # The outbox's retention and attempts are the server's housekeeping,
+        # Mailgun's timeout and proxy its network: not the mail account, and
+        # the console does not override them.
+        and i.key
+        not in {
+            "EMAIL_OUTBOX_RETENTION_DAYS",
+            "EMAIL_MAX_ATTEMPTS",
+            "MAILGUN_TIMEOUT_SECONDS",
+            "MAILGUN_PROXY_URL",
+        }
     }
     assert "EMAIL_PROVIDER" in mail_keys and len(mail_keys) >= 5
     for key, description in mail_keys.items():
@@ -114,8 +121,12 @@ def test_the_settings_of_the_audit_are_listed():
         "SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET",
         "COMMAND_UNANSWERED_HOURS",
         "TRUSTED_PROXIES",
+        "TRUSTED_PROXIES_ALLOW_WIDE",
         "TRUSTED_PROXY_HOSTS",
         "EXPOSE_OPENAPI",
+        "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
+        "LOGIN_SLOW_WINDOW_HOURS",
+        "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS",
         "WOL_ALLOWED_NETWORKS",
         "WOL_RELAY_MIN_AGE_MINUTES",
         "WOL_RELAY_MIN_AGENT_VERSION",
@@ -142,11 +153,58 @@ def test_the_new_values_are_rendered():
     env = Settings(
         WOL_ALLOWED_NETWORKS="10.4.0.0/16,10.5.0.0/16",
         TRUSTED_PROXIES="172.18.0.0/16",
+        # A /16 is refused at start without it (audit S28).
+        TRUSTED_PROXIES_ALLOW_WIDE=True,
         EXPOSE_OPENAPI=False,
     )
     by_key = {i.key: i.value for i in _items(env)}
     assert by_key["WOL_ALLOWED_NETWORKS"] == "10.4.0.0/16, 10.5.0.0/16"
     assert by_key["TRUSTED_PROXIES"] == "172.18.0.0/16"
+    assert by_key["TRUSTED_PROXIES_ALLOW_WIDE"] == "oui"
     assert by_key["TRUSTED_PROXY_HOSTS"] == "caddy"
     assert by_key["EXPOSE_OPENAPI"] == "non"
     assert by_key["SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET"] == "50000"
+
+
+def test_the_server_settings_name_what_was_missing():
+    """Acceptance, 2026-11: the packages, the outbox's attempts, the database
+    pool, Mailgun's timeout and proxy and the server name are listed."""
+    env = Settings(
+        EMAIL_PROVIDER="mailgun",
+        TIAI_SERVER_NAME="tiai.lycee.pf",
+        PACKAGE_MAX_BYTES=2 * 1024**3,
+    )
+    by_key = {i.key: i.value for i in _items(env)}
+    for key in (
+        "PACKAGE_MAX_BYTES",
+        "PACKAGE_METHOD_A_MAX_GB",
+        "PACKAGES_DIR",
+        "EMAIL_MAX_ATTEMPTS",
+        "POSTGRES_POOL_SIZE",
+        "POSTGRES_MAX_OVERFLOW",
+        "POSTGRES_POOL_TIMEOUT",
+        "MAILGUN_TIMEOUT_SECONDS",
+        "MAILGUN_PROXY_URL",
+        "TIAI_SERVER_NAME",
+    ):
+        assert key in by_key, key
+    assert by_key["PACKAGE_MAX_BYTES"] == "2147483648 (2 Gio)"
+    assert by_key["TIAI_SERVER_NAME"] == "tiai.lycee.pf"
+    assert by_key["MAILGUN_PROXY_URL"] is None
+
+
+@pytest.mark.parametrize(
+    "url,shown",
+    [
+        ("http://proxy.lycee.pf:3128", "proxy.lycee.pf:3128"),
+        ("http://jdupont:s3cr3t-pass@10.0.0.1:3128", "10.0.0.1:3128"),
+        ("https://user@proxy.example", "proxy.example"),
+        ("http://[::1", "défini (illisible)"),
+    ],
+)
+def test_the_mailgun_proxy_shows_its_host_never_its_credentials(url, shown):
+    env = Settings(EMAIL_PROVIDER="mailgun", MAILGUN_PROXY_URL=url)
+    rendered = " ".join(f"{i.key} {i.value or ''} {i.description}" for i in _items(env))
+    assert {i.key: i.value for i in _items(env)}["MAILGUN_PROXY_URL"] == shown
+    for secret in ("jdupont", "s3cr3t-pass", "user@"):
+        assert secret not in rendered

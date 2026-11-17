@@ -454,7 +454,7 @@ describe('browserStaleChunkEnv', () => {
     };
     expect(options.message).toBe(CHUNK_LOAD_FAILED_MESSAGE);
     expect(options.message).toBe(
-      'Impossible de charger cette page (connexion ou mise à jour en cours). Réessayez.',
+      'Impossible de charger cette page (connexion ou mise à jour en cours). Rechargez la page.',
     );
     expect(options.timeout).toBe(0);
     // Not grouped: Quasar would count repeated failures in a badge on it.
@@ -464,5 +464,47 @@ describe('browserStaleChunkEnv', () => {
     expect(retry).toHaveBeenCalledTimes(1);
     if (installed) plugin.create = installed;
     else delete plugin.create;
+  });
+});
+
+describe('back online after an offline click (item 6)', () => {
+  it('reloads once, on the page asked for, when the network comes back', async () => {
+    let backOnline: (() => void) | null = null;
+    const env: StaleChunkEnv = {
+      storage: memoryStorage(),
+      now: () => 1,
+      online: () => false,
+      entryScript: () => null,
+      fetchIndex: () => Promise.resolve(null),
+      currentHref: () => '/console/machines',
+      goTo: vi.fn(),
+      notify: vi.fn(() => () => undefined),
+      logError: vi.fn(),
+      whenOnline: (listener) => {
+        backOnline = listener;
+        return () => (backOnline = null);
+      },
+    };
+    const { recoverFromChunkFailure } = await import('./staleChunks');
+    expect(await recoverFromChunkFailure('/console/software', env)).toBe('notified');
+    // Told offline: the message says the page will come back by itself.
+    expect(env.notify).toHaveBeenCalledWith(expect.any(Function), true);
+    expect(env.goTo).not.toHaveBeenCalled();
+
+    backOnline!();
+    expect(env.goTo).toHaveBeenCalledTimes(1);
+    expect(env.goTo).toHaveBeenCalledWith('/console/software');
+  });
+
+  it('listens to the browser’s « online » event, once', () => {
+    const listener = vi.fn();
+    browserStaleChunkEnv().whenOnline!(listener);
+    window.dispatchEvent(new Event('online'));
+    window.dispatchEvent(new Event('online'));
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks the reader to reload the page', () => {
+    expect(CHUNK_LOAD_FAILED_MESSAGE).toContain('Rechargez la page');
   });
 });

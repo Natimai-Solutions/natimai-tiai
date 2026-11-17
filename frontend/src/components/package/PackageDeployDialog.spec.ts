@@ -6,6 +6,7 @@ import type { Package } from 'src/services/packages';
 const listMachines = vi.fn();
 const listLocations = vi.fn();
 const deployPackage = vi.fn();
+const listPackages = vi.fn();
 
 vi.mock('src/services/machines', async (orig) => ({
   ...(await orig<object>()),
@@ -15,7 +16,7 @@ vi.mock('src/services/machines', async (orig) => ({
 vi.mock('src/services/packages', async (orig) => ({
   ...(await orig<object>()),
   deployPackage: (...a: unknown[]) => deployPackage(...a),
-  listPackages: () => Promise.resolve([]),
+  listPackages: (...a: unknown[]) => listPackages(...a),
 }));
 
 import PackageDeployDialog from './PackageDeployDialog.vue';
@@ -48,6 +49,7 @@ function pkg(over: Partial<Package> = {}): Package {
     method_a_max_bytes: 8 * 1024 ** 3,
     file_max_bytes: 2 * 1024 ** 3,
     problems: [],
+    install_blockers: [],
     installed_count: null,
     created_by: null,
     created_at: '2026-11-04T00:00:00Z',
@@ -79,6 +81,7 @@ describe('PackageDeployDialog', () => {
     listMachines.mockReset().mockResolvedValue({ total: 3, items: [] });
     listLocations.mockReset().mockResolvedValue([{ name: 'Lycée A', count: 3 }]);
     deployPackage.mockReset().mockResolvedValue({ created: [], count: 3, skipped: 0 });
+    listPackages.mockReset().mockResolvedValue([]);
     document.body.innerHTML = '';
   });
 
@@ -237,6 +240,53 @@ describe('PackageDeployDialog', () => {
     expect(deployPackage).toHaveBeenCalledWith('p-1', 'uninstall', {
       target_location: 'Lycée A',
     });
+    w.unmount();
+  });
+
+  it('names what keeps every poste from installing, and does not send it', async () => {
+    const blocker =
+      'Paquet non signé, et « helper.dll » est à côté de « setup.exe » : la méthode A refuse tout fichier…';
+    const sidecar = pkg({
+      files: [
+        { name: 'setup.exe', sha256: 'a'.repeat(64), size: 1, publisher_name: 'TDF' },
+        { name: 'helper.dll', sha256: 'b'.repeat(64), size: 1, publisher_name: null },
+      ],
+      install_blockers: [blocker],
+    });
+    const w = await open({ package: sidecar, machineIds: ['m-1'] });
+    const banner = document.querySelector('.q-banner')?.textContent ?? '';
+    expect(banner).toContain('Aucun poste ne l’installera');
+    expect(banner).toContain('« helper.dll »');
+    expect(banner).not.toContain('Ni signé, ni lancé');
+    expect(sendButton(w).props('disable')).toBe(true);
+    w.unmount();
+  });
+
+  it('tells apart two packages of the same name and version', async () => {
+    listPackages.mockResolvedValue([
+      pkg({ id: 'p-1', created_at: '2026-11-04T10:00:00Z' }),
+      pkg({
+        id: 'p-2',
+        kind: 'winget',
+        winget_id: 'TheDocumentFoundation.LibreOffice',
+        install_run: null,
+        uninstall_run: null,
+        files: [],
+        created_at: '2026-11-05T10:00:00Z',
+      }),
+      pkg({ id: 'p-3', name: '7-Zip', version: '23.01' }),
+    ]);
+    const w = await open({ machineIds: ['m-1'] });
+    const labels = (w.findComponent(QSelect).props('options') as { label: string }[]).map(
+      (o) => o.label,
+    );
+    expect(labels).toHaveLength(3);
+    expect(new Set(labels).size).toBe(3);
+    expect(labels).toContain('7-Zip 23.01');
+    expect(labels.find((l) => l.includes('winget TheDocumentFoundation.LibreOffice'))).toContain(
+      'LibreOffice 24.8 (',
+    );
+    expect(labels.find((l) => l.includes('fichiers, setup.exe'))).toContain('créé le');
     w.unmount();
   });
 });

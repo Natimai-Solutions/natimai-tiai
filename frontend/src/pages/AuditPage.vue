@@ -48,7 +48,7 @@
         :no-data-label="noDataLabel"
         class="audit-table"
         @request="onRequest"
-        @row-click="(_evt, row) => openEntry(row)"
+        @row-click="onRowClick"
       >
         <template #body-cell-at="props">
           <q-td :props="props" class="text-no-wrap">{{ formatDateTime(props.value) }}</q-td>
@@ -137,7 +137,8 @@ import {
   readerTimeZone,
   type AuditFilters,
 } from 'src/utils/auditQuery';
-import { formatDateTime } from 'src/utils/format';
+import { dash, formatDateTime } from 'src/utils/format';
+import { hasTextSelection } from 'src/utils/textSelection';
 
 const $q = useQuasar();
 const route = useRoute();
@@ -160,6 +161,16 @@ const actions = ref<string[]>(Object.keys(AUDIT_ACTION_LABELS));
 const columns: QTableColumn<AuditEntry>[] = [
   { name: 'at', label: 'Date', field: 'at', align: 'left' },
   { name: 'actor', label: 'Auteur', field: 'actor', align: 'left' },
+  // Hidden on a phone, where the five others already fill the width.
+  {
+    name: 'ip',
+    label: 'Adresse',
+    field: 'ip',
+    align: 'left',
+    format: (v: string | null | undefined) => dash(v),
+    classes: 'gt-xs',
+    headerClasses: 'gt-xs',
+  },
   { name: 'action', label: 'Action', field: 'action', align: 'left' },
   { name: 'resource', label: 'Ressource', field: 'resource_type', align: 'left' },
   {
@@ -281,6 +292,12 @@ async function loadActions() {
 
 const selected = ref<AuditEntry | null>(null);
 const detailsOpen = ref(false);
+
+/** A row opens its details — unless the click ended a text selection being copied. */
+function onRowClick(_evt: Event, row: AuditEntry) {
+  if (hasTextSelection()) return;
+  openEntry(row);
+}
 
 function openEntry(entry: AuditEntry) {
   selected.value = entry;

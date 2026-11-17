@@ -122,6 +122,11 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	// word for every file and argument.
 	method := ""
 	var trustNote string
+	// Why method B refused a signed package, kept when method A is tried
+	// next: the administrator signed it, so that refusal — a thumbprint
+	// missing from DeploySigners, a manifest changed since — is the one they
+	// act on, not whatever method A then has to say about it.
+	var methodBErr error
 	if len(policy.Signers) > 0 && pkg.Signature != "" {
 		subject, verr := VerifyAdminSignature(raw, pkg.Signature, pkg.SignatureAlgorithm, pkg.Certificate, policy.Signers)
 		if verr == nil {
@@ -129,6 +134,8 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 			trustNote = "paquet signé par " + subject
 		} else if len(policy.Publishers) == 0 {
 			return Result{}, verr
+		} else {
+			methodBErr = verr
 		}
 	}
 	// refused closes a method A run with a refusal no retry can lift, and
@@ -139,6 +146,9 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	// resumable, and the exit code below.
 	refused := func(err error) (Result, error) {
 		_ = os.RemoveAll(dir)
+		if methodBErr != nil {
+			err = bothMethodsRefused(methodBErr, err)
+		}
 		return Result{}, err
 	}
 	if method == "" {
@@ -149,11 +159,19 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 			return Result{}, errors.New("paquet non signé, et aucun éditeur approuvé sur ce poste (DeployPublishers)")
 		}
 		method = "A"
-		checked, aerr := MethodAStep(*step)
+		checked, aerr := MethodAStep(*step, action)
 		if aerr != nil {
 			return refused(aerr)
 		}
 		step = &checked
+	}
+	// An installation that runs msiexec /x removes what it was sent to
+	// install, and the console would read « Installation … terminée ».
+	// Method A refused any installation by msiexec above (MethodAStep); a
+	// signed manifest gets here, and the server and the signing script refuse
+	// to produce one — what reaches a poste anyway is refused here too.
+	if action == "install" && MsiExecRemoves(*step) {
+		return Result{}, errors.New("l'installation de ce paquet lance une désinstallation (msiexec /x ou /uninstall) : refusée — placez cette commande dans la désinstallation du paquet")
 	}
 
 	files := manifest.Files
@@ -171,8 +189,13 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	}
 
 	// Before this folder is made: the ones earlier runs left and nobody came
-	// back for.
-	PruneStalePackages(env.PackagesDir(), pkg.ID, time.Now())
+	// back for, and, oldest first, whatever stands between the folders and
+	// their cap once this package is downloaded (audit S24).
+	var need int64
+	for _, f := range files {
+		need = addCapped(need, f.Size)
+	}
+	SweepPackages(env.PackagesDir(), pkg.ID, need, policy.CacheMaxBytes(), time.Now())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("dossier du paquet : %w", err)
 	}
@@ -222,19 +245,52 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	}
 	ok, reboot := ExitVerdict(code, manifest.SuccessCodes)
 	if !ok {
-		return Result{}, fmt.Errorf("%s a renvoyé le code %d (%s)", step.Run, code, trustNote)
+		msg := fmt.Sprintf("%s a renvoyé le code %d", step.Run, code)
+		if trustNote != "" {
+			msg += " (" + trustNote + ")"
+		}
+		return Result{}, errors.New(msg)
 	}
 	// The files have done their job; a failed run keeps them for a retry
 	// (PruneDir clears anything the next manifest does not name).
 	_ = os.RemoveAll(dir)
 
 	verb := map[string]string{"install": "Installation", "uninstall": "Désinstallation"}[action]
-	lines := []string{fmt.Sprintf("%s de %s %s terminée (méthode %s, %s)",
-		verb, manifest.Name, manifest.Version, method, trustNote)}
+	// Built from the parts that are there: a package without a version, or a
+	// method A uninstall by product code (no file, so no publisher to name),
+	// must not read « de App  terminée (méthode A, ) ».
+	what := joinNonEmpty(" ", manifest.Name, manifest.Version)
+	if what == "" {
+		what = "paquet " + pkg.ID
+	}
+	lines := []string{fmt.Sprintf("%s de %s terminée (%s)", verb, what,
+		joinNonEmpty(", ", "méthode "+method, trustNote))}
 	if reboot {
 		lines = append(lines, "Redémarrage requis pour terminer.")
 	}
 	return Result{Output: strings.Join(lines, "\n"), RebootRequired: reboot}, nil
+}
+
+// bothMethodsRefused reports a signed package that method B refused and
+// method A refused after it: method B first — the administrator signed the
+// package, its refusal is the cause — then method A.
+func bothMethodsRefused(methodB, methodA error) error {
+	a := methodA.Error()
+	if !strings.HasPrefix(a, "méthode A") {
+		a = "méthode A : " + a
+	}
+	return fmt.Errorf("méthode B : %v ; %s", methodB, a)
+}
+
+// joinNonEmpty joins the parts that are not empty.
+func joinNonEmpty(sep string, parts ...string) string {
+	kept := parts[:0:0]
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, sep)
 }
 
 // resumable tells whether a failed download left something a retry picks up

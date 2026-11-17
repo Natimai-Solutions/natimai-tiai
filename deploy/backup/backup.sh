@@ -1,19 +1,32 @@
 #!/bin/sh
 # Sauvegarde quotidienne de la base Tia'i — tourne dans le conteneur
-# `db-backup` (même image que `db`, donc un pg_dump à la bonne version),
-# écrit dans deploy/backups/ sur l'hôte via le montage /backups.
+# `db-backup` (image de `db` plus `age`, cf. Dockerfile ; donc un pg_dump à la
+# bonne version), écrit dans deploy/backups/ sur l'hôte via le montage /backups.
 #
 # Cycle : un dump au démarrage (donc juste après chaque `docker compose up`,
 # y compris avant une montée de version), puis un par 24 h. Rétention pilotée
 # par BACKUP_KEEP_DAYS — la purge n'a lieu QUE si le dump du jour a réussi :
 # une base injoignable ne doit jamais faire disparaître les sauvegardes
 # existantes.
+#
+# Chiffrement optionnel (audit S27) : si BACKUP_ENCRYPT_RECIPIENT porte une ou
+# plusieurs clés publiques age (age1…, séparées par des espaces), chaque dump
+# est chiffré pour elles AVANT d'arriver sur le disque (tiai-….dump.age) ; la
+# clé privée n'est jamais sur le serveur. Vide : dumps en clair, comme avant.
 set -eu
 
 : "${POSTGRES_USER:?}"
 : "${POSTGRES_PASSWORD:?}"
 : "${POSTGRES_DB:?}"
 KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
+RECIPIENTS="${BACKUP_ENCRYPT_RECIPIENT:-}"
+# Le montage du compose. Variable pour les tests seulement
+# (backend/tests/test_backup_script.py) : le compose ne la pose pas.
+DIR="${BACKUP_DIR:-/backups}"
+# Témoin d'un pg_dump en échec quand il écrit dans un tube vers age : le code
+# de sortie d'un tube est celui de sa dernière commande, et `pipefail` n'est
+# pas POSIX.
+FAILED="${TMPDIR:-/tmp}/tiai-backup.$$.pg_dump-failed"
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
@@ -28,11 +41,67 @@ umask 077
 # journal plutôt que tu : DEPLOYMENT.md annonce un dossier en 700, et c'est
 # alors le `chmod 700 backups` fait sur l'hôte qui le ferme. Rien n'est dit si
 # le dossier est déjà en 700.
-if ! chmod 700 /backups 2>/dev/null \
-  && [ "$(stat -c %a /backups 2>/dev/null)" != 700 ]; then
-  echo "ATTENTION : /backups n'a pas pu être fermé (chmod 700 refusé) — sur l'hôte : chmod 700 deploy/backups" >&2
+if ! chmod 700 "$DIR" 2>/dev/null \
+  && [ "$(stat -c %a "$DIR" 2>/dev/null)" != 700 ]; then
+  echo "ATTENTION : $DIR n'a pas pu être fermé (chmod 700 refusé) — sur l'hôte : chmod 700 deploy/backups" >&2
 fi
-chmod 600 /backups/tiai-*.dump 2>/dev/null || true
+chmod 600 "$DIR"/tiai-*.dump "$DIR"/tiai-*.dump.age 2>/dev/null || true
+
+# Chiffrement demandé mais impossible : arrêt, code 1, AVANT tout dump. Jamais
+# de repli en clair (la configuration dit le contraire), et pas de purge : les
+# sauvegardes existantes restent. Le conteneur redémarre en boucle
+# (« Restarting » dans `docker compose ps`) et répète la raison au journal.
+refuse() {
+  echo "ECHEC : $1 — aucun dump écrit, les sauvegardes existantes sont conservées" >&2
+  exit 1
+}
+AGE_ARGS=""
+if [ -n "$RECIPIENTS" ]; then
+  set -f # pas de développement de chemins sur la valeur, avant contrôle
+  for r in $RECIPIENTS; do
+    case "$r" in
+      AGE-SECRET-KEY-*)
+        refuse "BACKUP_ENCRYPT_RECIPIENT contient une clé PRIVÉE age — elle n'a rien à faire sur le serveur : la retirer du .env, n'y mettre que la clé publique (age1…), et tenir la clé privée pour compromise" ;;
+      age1*[!a-z0-9]* | age1) refuse "BACKUP_ENCRYPT_RECIPIENT : « $r » n'est pas une clé publique age (age1…)" ;;
+      age1*) AGE_ARGS="$AGE_ARGS -r $r" ;;
+      *) refuse "BACKUP_ENCRYPT_RECIPIENT : « $r » n'est pas une clé publique age (age1…)" ;;
+    esac
+  done
+  set +f
+  command -v age >/dev/null 2>&1 \
+    || refuse "BACKUP_ENCRYPT_RECIPIENT est posé mais age est introuvable dans le conteneur — reconstruire l'image : docker compose build --pull db-backup && docker compose up -d --force-recreate db-backup"
+  # Une clé à la somme de contrôle fausse passe le contrôle ci-dessus : c'est
+  # age qui la refuse (son message suit au journal).
+  # shellcheck disable=SC2086 # AGE_ARGS : des mots age1[a-z0-9]*, contrôlés
+  printf 'tiai' | age $AGE_ARGS >/dev/null \
+    || refuse "BACKUP_ENCRYPT_RECIPIENT refusé par age"
+fi
+
+# Écrit le dump dans le fichier $1 : en clair, ou chiffré au fil de l'eau —
+# pg_dump écrit dans un tube, age chiffre, aucun octet en clair ne touche le
+# disque. Réussit seulement si pg_dump ET age ont réussi.
+dump() {
+  if [ -z "$AGE_ARGS" ]; then
+    pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$1"
+    return
+  fi
+  rm -f "$FAILED"
+  status=0
+  # shellcheck disable=SC2086
+  { pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc || : >"$FAILED"; } \
+    | age $AGE_ARGS -o "$1" || status=1
+  if [ -e "$FAILED" ]; then status=1; fi
+  rm -f "$FAILED"
+  return "$status"
+}
+
+if [ -n "$AGE_ARGS" ]; then
+  ext=dump.age
+  how=", chiffrée"
+else
+  ext=dump
+  how=""
+fi
 
 while :; do
   # Un .partial restant vient d'un dump interrompu (conteneur arrêté en cours
@@ -41,22 +110,36 @@ while :; do
   # écriture : plus récent, ce peut être le dump en cours d'une autre instance
   # qui partage le dossier. `|| true` : un dossier en lecture seule ne doit
   # pas arrêter le script (set -e), donc relancer le conteneur en boucle.
-  find /backups -maxdepth 1 -name '.tiai-*.dump.partial' -mmin +60 -delete 2>/dev/null || true
+  # `-exec rm`, pas `-delete` : une option que busybox find n'a pas dans
+  # toutes ses compilations (celle d'Ubuntu, par exemple).
+  find "$DIR" -maxdepth 1 -type f -name '.tiai-*.partial' -mmin +60 \
+    -exec rm -- {} + 2>/dev/null || true
 
   stamp="$(date -u +%Y%m%d-%H%M%S)"
-  tmp="/backups/.tiai-${stamp}.dump.partial"
-  out="/backups/tiai-${stamp}.dump"
+  tmp="$DIR/.tiai-${stamp}.${ext}.partial"
+  out="$DIR/tiai-${stamp}.${ext}"
   # Format custom (-Fc) : compressé, et pg_restore sait en extraire une table
   # seule si besoin. Écrit d'abord en .partial puis renommé : un dump
   # interrompu ne peut jamais être pris pour une sauvegarde valide.
-  if pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$tmp"; then
+  if dump "$tmp"; then
     mv "$tmp" "$out"
-    echo "sauvegarde OK : $(basename "$out") ($(du -h "$out" | cut -f1))"
     # Une purge qui échoue (fichier non supprimable) est signalée sans arrêter
     # le script : sous set -e, le conteneur redémarrerait en boucle, avec un
     # dump de plus à chaque tour.
-    find /backups -name 'tiai-*.dump' -mtime +"$KEEP_DAYS" -delete \
-      || echo "ATTENTION : purge des dumps de plus de $KEEP_DAYS jours incomplète" >&2
+    # Seuls les dumps de ce script, à leur nom exact
+    # (tiai-AAAAMMJJ-HHMMSS.dump, ou .dump.age chiffré) et à la racine du
+    # dossier : un dump manuel (tiai-avant-operation.dump, cf. DEPLOYMENT.md)
+    # ou rangé dans un sous-dossier n'est jamais purgé. Les deux formes, quel
+    # que soit le réglage du jour : les dumps en clair d'avant le chiffrement
+    # partent à leur échéance. Un `find` par forme : pas de \( -o \).
+    for daily in dump dump.age; do
+      find "$DIR" -maxdepth 1 -type f \
+        -name "tiai-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].$daily" \
+        -mtime +"$KEEP_DAYS" -exec rm -- {} + \
+        || echo "ATTENTION : purge des dumps de plus de $KEEP_DAYS jours incomplète" >&2
+    done
+    # En dernier : la ligne qui clôt le tour (les tests l'attendent).
+    echo "sauvegarde OK : $(basename "$out") ($(du -h "$out" | cut -f1)$how)"
   else
     rm -f "$tmp"
     echo "ECHEC de la sauvegarde $stamp — les dumps existants sont conservés" >&2

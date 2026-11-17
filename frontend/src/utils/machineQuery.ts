@@ -124,11 +124,11 @@ export function queryValue(v: unknown): string | null {
  * a broader search, not to a 422.
  *
  * Page and page size are deliberately left to the caller — the list reads its
- * own, while the fiche asks for single-row pages to walk the results.
+ * own, while the fiche's neighbours (`getMachineNeighbours`) take none.
  */
 export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams {
   const params: ListMachinesParams = {};
-  const search = queryValue(q.search);
+  const search = queryValue(q.search)?.trim();
   if (search) params.search = search;
   const domain = queryValue(q.domain);
   if (domain) params.domain = domain;
@@ -165,7 +165,7 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   }
   if (queryValue(q.with_active_threats) === 'true') params.with_active_threats = true;
   if (queryValue(q.online) === 'true') params.online = true;
-  // Inventory facets. Text ones travel as-is (the server matches substrings);
+  // Inventory facets. Text ones travel as-is (matched exactly, below);
   // the numeric ones must parse, or they are dropped like an unknown status.
   const model = queryValue(q.hw_model);
   if (model) params.hw_model = model;
@@ -173,10 +173,11 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   if (manufacturer) params.hw_manufacturer = manufacturer;
   const cpu = queryValue(q.cpu_model);
   if (cpu) params.cpu_model = cpu;
+  // Any kind the fleet listing names, not only the five the console has words
+  // for: an agent reports what Windows says (« chassis-35 »), and a value the
+  // dropdown offers must filter (item 8).
   const chassis = queryValue(q.hw_chassis_type);
-  if (chassis && CHASSIS_TYPES.some((c) => c.value === chassis)) {
-    params.hw_chassis_type = chassis;
-  }
+  if (chassis) params.hw_chassis_type = chassis;
   const ramMin = queryInt(q.ram_min_gb);
   if (ramMin !== null) params.ram_min_gb = ramMin;
   const ramMax = queryInt(q.ram_max_gb);
@@ -190,6 +191,23 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   const agentVersion = queryValue(q.agent_version);
   if (agentVersion) params.agent_version = agentVersion;
   if (queryValue(q.agent_outdated) === 'true') params.agent_outdated = true;
+  const enrollment = queryValue(q.enrollment);
+  if (enrollment === 'pending' || enrollment === 'revoked') params.enrollment = enrollment;
+  if (queryValue(q.hardware_aging) === 'true') params.hardware_aging = true;
+  // The five text facets the list sets from its dropdowns: matched exactly,
+  // as the list asked (``machineFiltersToParams``).
+  const exact = (
+    [
+      ['antivirus', antivirus],
+      ['os_version', os],
+      ['hw_model', model],
+      ['hw_manufacturer', manufacturer],
+      ['cpu_model', cpu],
+    ] as const
+  )
+    .filter(([, value]) => value)
+    .map(([facet]) => facet);
+  if (exact.length) params.exact = exact.join(',');
   // Usage: a window and two bounds in hours, each dropped when it does not
   // parse or falls outside what the server takes.
   const usageDays = queryInt(q.usage_days);

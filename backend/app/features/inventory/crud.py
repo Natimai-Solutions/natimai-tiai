@@ -7,6 +7,7 @@ is excluded from every update set — it is the only historical fact these table
 carry, and re-reporting the same disk every day must not reset it.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -14,12 +15,15 @@ from typing import Any
 
 from sqlalchemy import delete, event, exists, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.orm import Session, SessionTransaction
+from sqlalchemy.util.concurrency import await_only, in_greenlet
 from sqlmodel import SQLModel, col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core import ratelimit
 from app.features.base import utcnow
+from app.features.counter.quota import Grant, engine_of
+from app.features.inventory import budget
 from app.features.inventory.models import (
     Disk,
     Gpu,
@@ -92,24 +96,54 @@ async def _replace_set(
 
 
 # Where a session keeps the catalogue budget it reserved and has not
-# committed yet: (poste key, units) pairs.
+# committed yet: (engine, grant) pairs.
 _RESERVED = "software_entries_reserved"
 
+# Give-backs finished on the event loop (``_give_back_now``), kept referenced
+# until done.
+_giving_back: set[asyncio.Task[None]] = set()
 
-def _reserve_until_commit(session: AsyncSession, machine_key: str, wanted: int) -> int:
+
+def _give_back_now(engine: AsyncEngine, grant: Grant) -> None:
+    """Return ``grant`` to the budgets from a session event, which is sync
+    code: run within the greenlet of the session call that ended the
+    transaction (a rollback, a close), as the driver's own calls are — done
+    before that call returns. Anywhere else, finished on the event loop."""
+    if in_greenlet():
+        await_only(budget.release(engine, grant))
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        security_log.warning(
+            "software catalogue budget not given back (no event loop): %d units",
+            grant.units,
+        )
+        return
+    task = loop.create_task(budget.release(engine, grant))
+    _giving_back.add(task)
+    task.add_done_callback(_giving_back.discard)
+
+
+async def _reserve_until_commit(
+    session: AsyncSession, machine_key: str, wanted: int
+) -> int:
     """Reserve catalogue entries for this poste, charged only if the
     session's transaction commits.
 
-    The budget is taken at once — two heartbeats in flight must not both be
+    The budget is taken at once, committed apart (``budget.reserve``) — two
+    heartbeats in flight, in this process or another, must not both be
     granted the same units — and given back when the transaction ends any
     other way than by a commit: a heartbeat that fails further down rolls
     its catalogue rows back, and must not have paid for them.
     """
-    granted = ratelimit.reserve_software_entries(machine_key, wanted)
-    if not granted:
+    # The transaction whose end decides: begun now if it was not.
+    await session.connection()
+    grant = await budget.reserve(session, machine_key, wanted)
+    if grant is None:
         return 0
     sync = session.sync_session
-    held: list[tuple[str, int]] | None = sync.info.get(_RESERVED)
+    held: list[tuple[AsyncEngine, Grant]] | None = sync.info.get(_RESERVED)
     if held is None:
         held = sync.info[_RESERVED] = []
         reserved = held
@@ -122,15 +156,16 @@ def _reserve_until_commit(session: AsyncSession, machine_key: str, wanted: int) 
         def give_back(_ended: Session, transaction: SessionTransaction) -> None:
             if transaction.parent is not None:
                 return
-            for key, units in reserved:
-                ratelimit.release_software_entries(key, units)
+            pending = list(reserved)
             reserved.clear()
+            for engine, spent in pending:
+                _give_back_now(engine, spent)
 
         # On this session alone, and gone with it.
         event.listen(sync, "after_commit", keep)
         event.listen(sync, "after_transaction_end", give_back)
-    held.append((machine_key, granted))
-    return granted
+    held.append((engine_of(session), grant))
+    return grant.units
 
 
 async def _catalogue_ids(
@@ -143,7 +178,7 @@ async def _catalogue_ids(
     is nearly all of them — so the ids have to be read back.
 
     The entries the catalogue does not hold yet are created within the
-    poste's daily budget and the fleet's (``ratelimit.software_quota``,
+    poste's daily budget and the fleet's (``budget.software_quota``,
     ``software_fleet_quota``): beyond them they are left out — of the
     catalogue and of this poste's list — rather than let one token, or many
     forged ones, grow the shared catalogue without bound (audit S21). The
@@ -170,15 +205,15 @@ async def _catalogue_ids(
     new = [t for t in triples if t not in ids]
     if not new:
         return ids
-    granted = _reserve_until_commit(session, str(machine_id), len(new))
+    granted = await _reserve_until_commit(session, str(machine_id), len(new))
     if granted < len(new):
         security_log.warning(
             "software catalogue budget exhausted for machine %s: %d new entries "
             "left out (budget left: %d for the poste, %d for the fleet)",
             machine_id,
             len(new) - granted,
-            ratelimit.software_quota.remaining(str(machine_id)),
-            ratelimit.software_fleet_budget_left(),
+            await budget.poste_budget_left(session, str(machine_id)),
+            await budget.fleet_budget_left(session),
         )
     if not granted:
         return ids

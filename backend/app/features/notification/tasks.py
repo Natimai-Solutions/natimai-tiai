@@ -17,7 +17,7 @@ Queued through the outbox like everything else; nothing here sends.
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from sqlmodel import col, select
@@ -25,9 +25,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.features.base import utcnow
+from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
 from app.features.machine.models import Machine
 from app.features.maintenance import crud as maintenance_crud
+from app.features.maintenance.crud import DueRoom
 from app.features.maintenance.policy import MaintenanceState, Resolved
 from app.features.notification.outbox import queue_email
 from app.features.room.models import Building, Room
@@ -42,6 +44,23 @@ def _console_link(path: str) -> str | None:
     if not settings.console_base_url:
         return None
     return f"{settings.console_base_url}/#{path}"
+
+
+def mail_date(at: datetime) -> str:
+    """The date a mail is about, as its subject prints it. The server knows
+    no time zone of its readers — the page Paramètres shows the schedule in
+    each browser's own — so the date is the UTC one, and says so: a reader
+    east of Greenwich would otherwise read « hier » as « aujourd'hui »."""
+    return f"{at:%d/%m/%Y} (UTC)"
+
+
+def bullet(text: str, *, indent: int) -> str:
+    """``•`` and ``text`` at ``indent`` spaces, its continuation lines (typed
+    instructions span several) aligned under the text rather than at the
+    margin, where they read as lines of the mail itself."""
+    first, *rest = text.splitlines() or [""]
+    pad = " " * (indent + 2)
+    return "\n".join([f"{' ' * indent}• {first}", *(pad + line for line in rest)])
 
 
 def _wants_mail(user: User) -> bool:
@@ -145,12 +164,22 @@ async def personal_block(
         )
         .order_by(col(MachineCheck.created_at))
     )
-    check_rows = checks.all()
+    # Only what they can still take: a poste moved out of their sight, rights
+    # removed — the request is nobody's now (``check_crud.assignee_reach``),
+    # and its poste and instructions are not theirs to read.
+    reach = await check_crud.assignee_reach(session, [user.id])
+    check_rows = [
+        (check, machine)
+        for check, machine in checks.all()
+        if reach.machine(user.id, machine.location, machine.room_id)
+    ]
     if check_rows:
         lines.append(f"  Vérifications qui vous sont affectées : {len(check_rows)}")
         for check, machine in check_rows[:cap]:
             what = f" — {check.instructions}" if check.instructions else ""
-            lines.append(f"    • {machine.hostname or machine.machine_uuid}{what}")
+            lines.append(
+                bullet(f"{machine.hostname or machine.machine_uuid}{what}", indent=4)
+            )
         if len(check_rows) > cap:
             lines.append(f"    … et {len(check_rows) - cap} autre(s)")
 
@@ -159,7 +188,19 @@ async def personal_block(
     rooms, loose = maintenance_crud.group_due(
         fleet.resolved, fleet.policy, owner_filter=user.id, unowned=False
     )
-    due_rooms = [r for r in rooms if r.overdue or r.due_soon]
+    # One line per room: « Mes tâches » splits a room whose postes resolve to
+    # different cycles (each group is taken on its own), but the mail only
+    # counts, and the same room twice would read as two rooms.
+    merged: dict[uuid.UUID, DueRoom] = {}
+    for r in rooms:
+        if not (r.overdue or r.due_soon):
+            continue
+        if r.room.id not in merged:
+            merged[r.room.id] = replace(r, machines=list(r.machines))
+        else:
+            merged[r.room.id].overdue += r.overdue
+            merged[r.room.id].due_soon += r.due_soon
+    due_rooms = list(merged.values())
     due_loose = [
         (m, res)
         for m, res in loose
@@ -217,18 +258,26 @@ async def send_maintenance_reminders(session: AsyncSession) -> int:
     if not (await email_policy(session)).enabled:
         logger.info("Maintenance reminders: no e-mail provider is configured")
         return 0
+    from app.features.notification.digest import plan_daily_digest
+
     users = await session.exec(select(User).where(col(User.is_active).is_(True)))
     now = utcnow()
+    # The reminder goes out at the digest's hour: an owner whose digest of
+    # this morning already carries « VOS TÂCHES » would read the same block
+    # twice. They have it there; the reminder is for the others.
+    in_digest = {
+        plan.user.id for plan in await plan_daily_digest(session) if plan.personal
+    }
     # Once for the run: the parc, and who reaches what.
     fleet = await fleet_maintenance(session, now)
     queued = 0
     for user in users.all():
-        if not _wants_mail(user):
+        if not _wants_mail(user) or user.id in in_digest:
             continue
         block = await personal_block(session, user, now, fleet=fleet)
         if not any("Maintenances dont vous êtes responsable" in line for line in block):
             continue
-        date = now.strftime("%d/%m/%Y")
+        date = mail_date(now)
         subject = f"{settings.PROJECT_NAME} — vos maintenances au {date}"
         body = [
             "Rappel hebdomadaire de ce qui vous attend.",

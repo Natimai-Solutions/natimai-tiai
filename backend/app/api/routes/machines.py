@@ -1,14 +1,30 @@
 """Console-facing endpoints: list and inspect managed machines."""
 
+import base64
+import json
 import re
 import uuid
+from collections.abc import Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field, computed_field
-from sqlalchemy import Subquery, case, exists, func, or_
+from sqlalchemy import (
+    Subquery,
+    and_,
+    case,
+    exists,
+    false,
+    func,
+    literal,
+    not_,
+    or_,
+    true,
+)
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 from sqlmodel import col, select
 
@@ -42,17 +58,22 @@ from app.features.machine.status import (
     ScanFilter,
     WindowsUpdateFilter,
     agent_outdated_clause,
+    aging_hardware_clause,
     disk_free_percent,
+    effective_signature_age,
+    effective_up_to_date,
     is_online,
     low_disk_clause,
     online_clause,
     ram_clause,
+    reenroll_pending_clause,
     scan_clause,
     status_clause,
     windows_update_clause,
 )
 from app.features.maintenance import policy as maintenance_policy
 from app.features.maintenance.policy import MaintenanceState
+from app.features.package import crud as package_crud
 from app.features.room import crud as room_crud
 from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
@@ -114,6 +135,11 @@ class MachineOut(BaseModel):
     agent_version: str | None
     is_up_to_date: bool | None
     needs_verification: bool
+    # Enrollment states an administrator has to act on, in the list and not
+    # only on the fiche: a re-enrollment held for approval, and a revoked
+    # token (``allow-reenroll`` lifts both).
+    token_revoked: bool = False
+    reenroll_requested: bool = False
     signature_version: str | None
     # Which antivirus guards the poste. In the list and not only in the detail:
     # on a mixed parc it is the column that explains an "outdated" Defender
@@ -171,6 +197,16 @@ def _place(out: MachineOut, machine: Machine, placement: room_crud.Placement) ->
     )
 
 
+def _reenroll_pending(machine: Machine) -> bool:
+    """Python twin of ``status.reenroll_pending_clause``."""
+    return machine.reenroll_requested_at is not None and not machine.token_revoked
+
+
+def _enrollment_state(out: MachineOut, machine: Machine) -> None:
+    """Fill the payload's derived enrollment flag."""
+    out.reenroll_requested = _reenroll_pending(machine)
+
+
 def _machine_out(
     machine: Machine,
     room: Room | None,
@@ -179,14 +215,24 @@ def _machine_out(
     names: dict[uuid.UUID, str] | None = None,
     policy: MaintenancePolicy | None = None,
     now: datetime | None = None,
+    fleet: FleetPolicy | None = None,
+    orphaned: AbstractSet[uuid.UUID] = frozenset(),
 ) -> MachineOut:
     """A list row, with its placement, open request and maintenance standing
     as the joined query and the policy give them."""
     out = MachineOut.model_validate(machine)
+    _enrollment_state(out, machine)
+    if fleet is not None:
+        # Judged now, not at the last heartbeat (``effective_up_to_date``).
+        out.is_up_to_date = effective_up_to_date(
+            machine, now or utcnow(), fleet.signature_max_age_days
+        )
     _place(out, machine, room_crud.Placement(room=room, building=building))
     if check is not None:
         out.check_open = True
-        if check.assigned_to_id and names:
+        # An assignee who no longer reaches the poste is nobody: the request
+        # is « à prendre » here as in « Mes tâches » (``orphaned_open_checks``).
+        if check.assigned_to_id and names and check.id not in orphaned:
             out.check_assigned_to = names.get(check.assigned_to_id)
     if policy is not None:
         res = maintenance_policy.resolve(machine, room, policy, now or utcnow())
@@ -197,6 +243,18 @@ def _machine_out(
             names.get(res.owner_id) if names and res.owner_id else None
         )
     return out
+
+
+async def _orphaned_checks(session: SessionDep, rows: Sequence[Any]) -> set[uuid.UUID]:
+    """The rows' open requests whose assignee no longer reaches the poste."""
+    return await check_crud.orphaned_open_checks(
+        session,
+        check_ids=[
+            check.id
+            for _m, _room, _b, check, _seconds in rows
+            if check is not None and check.assigned_to_id
+        ],
+    )
 
 
 def _owner_ids(rows: list[Any], policy: MaintenancePolicy) -> set[uuid.UUID]:
@@ -353,6 +411,9 @@ class OpenCheckOut(BaseModel):
     requested_by: str
     assigned_to_id: uuid.UUID | None
     assigned_to_name: str | None
+    # False when the assignee no longer reaches the poste: the request is
+    # « à prendre », and the fiche says who had it and why it is free again.
+    assignee_reachable: bool = True
     instructions: str | None
     created_at: datetime
 
@@ -651,6 +712,14 @@ def _search_clause(search: str) -> ColumnElement[bool]:
     return or_(*clauses)
 
 
+ExactFacet = Literal[
+    "antivirus", "os_version", "hw_model", "hw_manufacturer", "cpu_model"
+]
+_EXACT_FACETS: frozenset[str] = frozenset(
+    ("antivirus", "os_version", "hw_model", "hw_manufacturer", "cpu_model")
+)
+
+
 @dataclass(frozen=True)
 class MachineFilters:
     """Every facet the machine list understands.
@@ -712,6 +781,33 @@ class MachineFilters:
     usage_days: int | None = None
     usage_hours_below: float | None = None
     usage_hours_above: float | None = None
+    # Enrollment waiting on an administrator: a re-enrollment held for
+    # approval ("pending"), or a revoked token ("revoked").
+    enrollment: Literal["pending", "revoked"] | None = None
+    # Hardware older than the parc's renewal threshold (``hardware_aging_years``)
+    # — the dashboard's « À renouveler » card, as a list.
+    hardware_aging: bool | None = None
+    # The text facets matched exactly rather than as a substring. The console
+    # asks it for a value picked from its dropdown, so that « OptiPlex 7010
+    # (12) » lists those 12 postes and not the « OptiPlex 7010 AIO » too; a
+    # value typed by hand keeps the substring that gathers a whole range.
+    exact: frozenset[ExactFacet] = frozenset()
+
+
+def _exact_facets(raw: str | None) -> frozenset[ExactFacet]:
+    """``exact=hw_model,cpu_model`` → the facets named; an unknown one is a 422
+    rather than a filter silently broader than asked."""
+    if not raw:
+        return frozenset()
+    names = {part.strip() for part in raw.split(",") if part.strip()}
+    unknown = sorted(names - _EXACT_FACETS)
+    if unknown:
+        raise AppError(
+            code=ErrorCode.REQUEST_VALIDATION_ERROR,
+            status_code=422,
+            message=f"Unknown facet in exact: {', '.join(unknown)}",
+        )
+    return frozenset(names)  # type: ignore[arg-type]
 
 
 def machine_filters(
@@ -746,6 +842,13 @@ def machine_filters(
     usage_days: int | None = Query(None, ge=1, le=90),
     usage_hours_below: float | None = Query(None, ge=0),
     usage_hours_above: float | None = Query(None, ge=0),
+    enrollment: Literal["pending", "revoked"] | None = None,
+    hardware_aging: bool | None = None,
+    exact: str | None = Query(
+        None,
+        description="Comma-separated facets matched exactly: antivirus, "
+        "os_version, hw_model, hw_manufacturer, cpu_model",
+    ),
 ) -> MachineFilters:
     """The list's facets as query parameters, shared by the list and the exports.
 
@@ -784,11 +887,19 @@ def machine_filters(
         usage_days=usage_days,
         usage_hours_below=usage_hours_below,
         usage_hours_above=usage_hours_above,
+        enrollment=enrollment,
+        hardware_aging=hardware_aging,
+        exact=_exact_facets(exact),
         scope=scope,
     )
 
 
 FiltersDep = Annotated[MachineFilters, Depends(machine_filters)]
+
+
+def _facet(column: Any, value: str, exact: bool) -> Any:
+    """One text facet: the value itself when ``exact``, else a substring."""
+    return col(column) == value if exact else contains(col(column), value)
 
 
 def _room_location() -> Any:
@@ -889,24 +1000,40 @@ def _filtered_machines(
         # feeds it exact names from the fleet, but a hand-typed "eset" must find
         # "ESET Endpoint Security" too — vendors rename their products between
         # versions and a parc runs several at once.
-        stmt = stmt.where(contains(col(Machine.av_product_name), filters.antivirus))
+        stmt = stmt.where(
+            _facet(
+                Machine.av_product_name, filters.antivirus, "antivirus" in filters.exact
+            )
+        )
     if filters.os_version:
         # Substring like the antivirus filter, and for the same reason: the
         # dropdown feeds exact values, but "Windows 10" typed by hand must
         # gather every build of it.
-        stmt = stmt.where(contains(col(Machine.os_version), filters.os_version))
+        stmt = stmt.where(
+            _facet(
+                Machine.os_version, filters.os_version, "os_version" in filters.exact
+            )
+        )
     if filters.hw_model:
         # Substring again: "OptiPlex" has to gather the 7010 and the 7020, which
         # is how a parc is actually reasoned about.
-        stmt = stmt.where(contains(col(Machine.hw_model), filters.hw_model))
+        stmt = stmt.where(
+            _facet(Machine.hw_model, filters.hw_model, "hw_model" in filters.exact)
+        )
     if filters.hw_manufacturer:
         stmt = stmt.where(
-            contains(col(Machine.hw_manufacturer), filters.hw_manufacturer)
+            _facet(
+                Machine.hw_manufacturer,
+                filters.hw_manufacturer,
+                "hw_manufacturer" in filters.exact,
+            )
         )
     if filters.cpu_model:
         # Substring like the model: "i5-8" gathers a whole generation, which is
         # the granularity a renewal plan reasons at.
-        stmt = stmt.where(contains(col(Machine.cpu_model), filters.cpu_model))
+        stmt = stmt.where(
+            _facet(Machine.cpu_model, filters.cpu_model, "cpu_model" in filters.exact)
+        )
     if filters.hw_chassis_type:
         # Equality: the agent normalises the kind to a short closed vocabulary
         # (desktop, laptop…), and "desktop" as a substring of nothing else.
@@ -928,8 +1055,20 @@ def _filtered_machines(
         )
     if filters.status is not None:
         stmt = stmt.where(
-            status_clause(filters.status, utcnow(), fleet.inactive_after_days)
+            status_clause(
+                filters.status,
+                utcnow(),
+                fleet.inactive_after_days,
+                fleet.signature_max_age_days,
+            )
         )
+    if filters.hardware_aging is not None:
+        aging = aging_hardware_clause(utcnow(), fleet.hardware_aging_years)
+        stmt = stmt.where(aging if filters.hardware_aging else not_(aging))
+    if filters.enrollment == "pending":
+        stmt = stmt.where(reenroll_pending_clause())
+    elif filters.enrollment == "revoked":
+        stmt = stmt.where(col(Machine.token_revoked).is_(True))
     if filters.online is not None:
         # Its own axis, not a MachineStatus value: "allumé maintenant" must stay
         # combinable with the antivirus statuses — the everyday question is
@@ -993,10 +1132,13 @@ async def list_machines(
     rows = await session.exec(stmt.offset((page - 1) * page_size).limit(page_size))
     page_rows = rows.all()
     names = await setting_crud.user_names(session, _owner_ids(page_rows, policy))
+    orphaned = await _orphaned_checks(session, page_rows)
     now = utcnow()
     items = []
     for m, room, building, check, seconds in page_rows:
-        out = _machine_out(m, room, building, check, names, policy, now)
+        out = _machine_out(
+            m, room, building, check, names, policy, now, policies.fleet, orphaned
+        )
         out.usage_hours = usage_crud.usage_hours(seconds, m.first_seen, usage.start)
         items.append(out)
     return MachineList(
@@ -1008,6 +1150,377 @@ async def list_machines(
         usage_days=usage.days,
         usage_low_hours=usage.low_hours,
         usage_high_hours=usage.high_hours,
+    )
+
+
+# --- neighbours: the fiche's previous/next ----------------------------------
+#
+# The fiche walks the list it was opened from (audit T31). The neighbours are
+# computed here, by keyset comparisons on the list's own ORDER BY, rather than
+# by the console reading the list in blocks: a block-reader cannot see a poste
+# that moved into a block it already read, and has to give up somewhere.
+
+
+@dataclass(frozen=True)
+class _OrderKey:
+    """One component of the list's ORDER BY, as data the keyset reads."""
+
+    expr: Any
+    descending: bool
+    # Where NULL sorts. ``list_machines`` writes no NULLS clause on its
+    # tie-breakers, so they take PostgreSQL's default: last ascending, first
+    # descending.
+    nulls_last: bool
+
+    def clause(self, *, reverse: bool = False) -> UnaryExpression[Any]:
+        descending = self.descending != reverse
+        nulls_last = self.nulls_last != reverse
+        ordered: UnaryExpression[Any] = (
+            self.expr.desc() if descending else self.expr.asc()
+        )
+        return ordered.nulls_last() if nulls_last else ordered.nulls_first()
+
+
+def _list_order(
+    sort_by: MachineSortField | None,
+    sort_desc: bool,
+    policy: MaintenancePolicy,
+    versions: FleetVersions,
+    usage: UsageWindow,
+) -> list[_OrderKey]:
+    """``list_machines``'s ORDER BY, component by component: the sort column
+    (``_sort_clause``: NULLs last both ways), then last contact descending,
+    then id. Kept in step with it by ``test_api_machines_neighbours``, which
+    walks every sort field against the list's pages."""
+    tie_breakers = [
+        _OrderKey(col(Machine.last_seen), descending=True, nulls_last=False),
+        _OrderKey(col(Machine.id), descending=False, nulls_last=True),
+    ]
+    if sort_by is None:
+        return tie_breakers
+    key = _sort_key(sort_by, policy, versions, usage)
+    return [_OrderKey(key, descending=sort_desc, nulls_last=True), *tie_breakers]
+
+
+@dataclass(frozen=True)
+class _Known:
+    """A position component known in Python (from a cursor), not in SQL."""
+
+    value: Any
+
+
+def _bound(column: Any, value: Any) -> Any:
+    """A cursor's value as a parameter of the column's type (a bare ``True``
+    would not compare with ``<``)."""
+    return literal(value, type_=column.type)
+
+
+def _is_null(x: Any) -> Any:
+    if isinstance(x, _Known):
+        return true() if x.value is None else false()
+    return x.is_(None)
+
+
+def _not_null(x: Any) -> Any:
+    if isinstance(x, _Known):
+        return false() if x.value is None else true()
+    return x.is_not(None)
+
+
+def _same(a: Any, b: Any) -> Any:
+    """``a IS NOT DISTINCT FROM b``; a cursor's NULL needs no typed parameter."""
+    if isinstance(a, _Known):
+        a, b = b, a
+    if isinstance(b, _Known):
+        return a.is_(None) if b.value is None else a == _bound(a, b.value)
+    return a.is_not_distinct_from(b)
+
+
+def _less(a: Any, b: Any, descending: bool) -> Any:
+    """``a`` strictly ahead of ``b`` in one direction, NULLs aside."""
+    if descending:
+        a, b = b, a
+    if isinstance(b, _Known):
+        return false() if b.value is None else a < _bound(a, b.value)
+    if isinstance(a, _Known):
+        return false() if a.value is None else b > _bound(b, a.value)
+    return a < b
+
+
+def _ahead(a: Sequence[Any], b: Sequence[Any], order: Sequence[_OrderKey]) -> Any:
+    """Whether position ``a`` sorts strictly before position ``b``.
+
+    The row comparison ``(k0, k1, …) < (p0, p1, …)`` spelled out per
+    component, since each has its own direction and NULL placement: equal on
+    every component before, and ahead on this one — NULL included, which is
+    ahead of a value when NULLs sort first and behind it when they sort last.
+    """
+    terms = []
+    for i, key in enumerate(order):
+        if key.nulls_last:
+            ahead = or_(
+                and_(_not_null(a[i]), _is_null(b[i])), _less(a[i], b[i], key.descending)
+            )
+        else:
+            ahead = or_(
+                and_(_is_null(a[i]), _not_null(b[i])), _less(a[i], b[i], key.descending)
+            )
+        terms.append(and_(*(_same(a[j], b[j]) for j in range(i)), ahead))
+    return or_(*terms)
+
+
+def _cursor_value(value: Any) -> Any:
+    """One position component as JSON, its Python type kept."""
+    if isinstance(value, datetime):
+        return {"t": value.isoformat()}
+    if isinstance(value, Decimal):
+        return {"n": str(value)}
+    if isinstance(value, float):
+        return {"f": repr(value)}
+    if isinstance(value, uuid.UUID):
+        return {"u": str(value)}
+    return value
+
+
+def _cursor_decode_value(raw: Any) -> Any:
+    if isinstance(raw, dict) and len(raw) == 1:
+        tag, text = next(iter(raw.items()))
+        if isinstance(text, str):
+            if tag == "t":
+                return datetime.fromisoformat(text)
+            if tag == "n":
+                return Decimal(text)
+            if tag == "f":
+                return float(text)
+            if tag == "u":
+                return uuid.UUID(text)
+    if raw is None or isinstance(raw, bool | int | str):
+        return raw
+    raise ValueError("unknown cursor value")
+
+
+def _encode_cursor(sort_by: str | None, sort_desc: bool, values: Sequence[Any]) -> str:
+    """Where a poste stood in a sort, to walk from there later: the values of
+    every ORDER BY component but the id (which the route names)."""
+    payload = {
+        "s": sort_by or "",
+        "d": sort_desc,
+        "v": [_cursor_value(v) for v in values],
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_cursor(
+    cursor: str, sort_by: str | None, sort_desc: bool, width: int
+) -> list[Any] | None:
+    """The values a cursor carries, or None when it belongs to another sort.
+
+    Malformed is a 422; another sort's (or a version rank against a raw
+    version, the day a parc's first versions come in) is not this walk's and
+    is ignored — the poste's own place is used instead.
+    """
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode()))
+        values = [_cursor_decode_value(v) for v in payload["v"]]
+        same_sort = payload["s"] == (sort_by or "") and payload["d"] is sort_desc
+    except (ValueError, TypeError, KeyError) as exc:
+        raise AppError(
+            code=ErrorCode.REQUEST_VALIDATION_ERROR,
+            status_code=422,
+            message="Malformed cursor",
+        ) from exc
+    if not same_sort or len(values) != width:
+        return None
+    return values
+
+
+# The Python kind each sort column reads back as: a cursor whose value is of
+# another kind cannot be compared in SQL (a varchar against an integer is an
+# error, not a false), and is ignored like another sort's.
+_KEY_KINDS: dict[str, tuple[type, ...]] = {
+    **dict.fromkeys(_CASEFOLD_SORT_FIELDS, (str,)),
+    "building": (str,),
+    "room": (str,),
+    "maintenance_due_at": (datetime,),
+    "last_seen": (datetime,),
+    "wu_pending_count": (int,),
+    "ram_total_mb": (int,),
+    "session_user_present": (bool,),
+    "disk_free_percent": (int, float, Decimal),
+    "usage_hours": (int, float, Decimal),
+}
+
+
+def _cursor_fits(
+    values: Sequence[Any], sort_by: MachineSortField | None, versions: FleetVersions
+) -> bool:
+    fields: list[str] = [] if sort_by is None else [sort_by]
+    fields.append("last_seen")
+    for field, value in zip(fields, values, strict=True):
+        if value is None:
+            continue
+        if field == "agent_version":
+            # A rank once the parc has versions (``_agent_version_rank``).
+            kinds: tuple[type, ...] = (int,) if versions.counts else (str,)
+        else:
+            kinds = _KEY_KINDS[field]
+        if bool not in kinds and isinstance(value, bool):
+            return False
+        if not isinstance(value, kinds):
+            return False
+    return True
+
+
+class NeighbourOut(BaseModel):
+    """A poste next to the open one in the list: enough to label the arrow
+    and go there, and where it stands, to walk on from that place."""
+
+    id: uuid.UUID
+    hostname: str | None
+    machine_uuid: str
+    cursor: str
+
+
+class MachineNeighbours(BaseModel):
+    """The open poste's place in the list it was opened from."""
+
+    previous: NeighbourOut | None
+    next: NeighbourOut | None
+    # 0-based, among the list's ``total`` postes; None (and no neighbours)
+    # when the poste no longer belongs to that list — a filter it left since.
+    rank: int | None
+    total: int
+    # Where this poste stands, to send back as ``cursor`` on a later visit.
+    cursor: str | None
+
+
+# Two segments, so ``/{machine_id}`` cannot swallow it whatever the order;
+# declared next to the list whose query it reads.
+@router.get("/{machine_id}/neighbours", response_model=MachineNeighbours)
+async def machine_neighbours(
+    machine_id: uuid.UUID,
+    session: SessionDep,
+    filters: FiltersDep,
+    sort_by: MachineSortField | None = None,
+    sort_desc: bool = True,
+    cursor: str | None = Query(None, max_length=2048),
+) -> MachineNeighbours:
+    """The postes before and after this one in the list — same filters, same
+    scope, same sort as ``GET /machines`` — its rank and the list's size.
+
+    One statement: the filtered list as a CTE (read once), the poste's place
+    in it, a count of the rows ahead of that place, and the nearest row on
+    either side by keyset comparison on the list's exact ORDER BY.
+
+    ``cursor`` (from a previous answer's ``previous``/``next``/``cursor``) puts
+    the walk where the poste stood when it was reached, rather than where it
+    stands now: on the default sort, the last contact, the open poste's own
+    heartbeat would otherwise send its neighbours to the top of the list
+    (audit B18). The neighbours are those of that place in the list as it is
+    now. A poste no longer in the list answers ``rank: null`` and no
+    neighbours; one that does not exist, or is out of the caller's scope, 404.
+    """
+    versions = await fleet_versions(session)
+    policies = await setting_crud.policies(session)
+    policy = policies.maintenance
+    usage = _usage_window(policies.usage, filters.usage_days)
+    order = _list_order(sort_by, sort_desc, policy, versions, usage)
+    width = len(order) - 1  # every component but the id
+
+    rows = (
+        _filtered_machines(
+            filters, usage, versions.outdated, policy, fleet=policies.fleet
+        )
+        .with_only_columns(
+            col(Machine.id).label("id"),
+            col(Machine.hostname).label("hostname"),
+            col(Machine.machine_uuid).label("machine_uuid"),
+            *(key.expr.label(f"k{i}") for i, key in enumerate(order)),
+        )
+        .cte("nav_rows")
+    )
+    row_keys = [rows.c[f"k{i}"] for i in range(len(order))]
+    nav_order = [
+        _OrderKey(row_keys[i], key.descending, key.nulls_last)
+        for i, key in enumerate(order)
+    ]
+    own = [
+        select(row_keys[i]).where(rows.c.id == machine_id).scalar_subquery()
+        for i in range(width)
+    ]
+    known = _decode_cursor(cursor, sort_by, sort_desc, width) if cursor else None
+    if known is not None and not _cursor_fits(known, sort_by, versions):
+        known = None
+    place: list[Any] = [_Known(v) for v in known] if known is not None else list(own)
+    place.append(_Known(machine_id))
+
+    others = rows.c.id != machine_id
+    before = and_(others, _ahead(row_keys, place, nav_order))
+    after = and_(others, _ahead(place, row_keys, nav_order))
+    shown = [rows.c.id, rows.c.hostname, rows.c.machine_uuid, *row_keys[:width]]
+    previous = (
+        select(*shown)
+        .where(before)
+        .order_by(*(k.clause(reverse=True) for k in nav_order))
+        .limit(1)
+        .subquery("nav_previous")
+    )
+    following = (
+        select(*shown)
+        .where(after)
+        .order_by(*(k.clause() for k in nav_order))
+        .limit(1)
+        .subquery("nav_next")
+    )
+    stats = (
+        select(
+            func.count().label("total"),
+            func.count().filter(before).label("rank"),
+            func.coalesce(func.bool_or(rows.c.id == machine_id), false()).label(
+                "present"
+            ),
+        )
+        .select_from(rows)
+        .subquery("nav_stats")
+    )
+    stmt = select(
+        stats.c.total,
+        stats.c.rank,
+        stats.c.present,
+        *(c.label(f"p_{c.key}") for c in previous.c),
+        *(c.label(f"n_{c.key}") for c in following.c),
+        *(own[i].label(f"own{i}") for i in range(width)),
+    ).select_from(stats.outerjoin(previous, true()).outerjoin(following, true()))
+    result: Any = (await session.exec(stmt)).one()
+    data = result._mapping
+
+    if not data["present"]:
+        # Out of the list, or not a poste this caller may see at all.
+        await _require_machine(session, machine_id, filters.scope)
+        return MachineNeighbours(
+            previous=None, next=None, rank=None, total=data["total"], cursor=None
+        )
+
+    def neighbour(prefix: str) -> NeighbourOut | None:
+        if data[f"{prefix}_id"] is None:
+            return None
+        values = [data[f"{prefix}_k{i}"] for i in range(width)]
+        return NeighbourOut(
+            id=data[f"{prefix}_id"],
+            hostname=data[f"{prefix}_hostname"],
+            machine_uuid=data[f"{prefix}_machine_uuid"],
+            cursor=_encode_cursor(sort_by, sort_desc, values),
+        )
+
+    values = known if known is not None else [data[f"own{i}"] for i in range(width)]
+    return MachineNeighbours(
+        previous=neighbour("p"),
+        next=neighbour("n"),
+        rank=data["rank"],
+        total=data["total"],
+        cursor=_encode_cursor(sort_by, sort_desc, values),
     )
 
 
@@ -1258,6 +1771,7 @@ async def _export_rows(
     rows = await session.exec(stmt)
     all_rows = rows.all()
     names = await setting_crud.user_names(session, _owner_ids(all_rows, policy))
+    orphaned = await _orphaned_checks(session, all_rows)
     now = utcnow()
     return [
         machine_export.ExportRow(
@@ -1267,7 +1781,7 @@ async def _export_rows(
             check=check,
             check_assigned_to=(
                 names.get(check.assigned_to_id)
-                if check and check.assigned_to_id
+                if check and check.assigned_to_id and check.id not in orphaned
                 else None
             ),
             maintenance=maintenance_policy.resolve(m, room, policy, now),
@@ -1277,6 +1791,8 @@ async def _export_rows(
                 else None
             ),
             usage_hours=usage_crud.usage_hours(seconds, m.first_seen, usage.start),
+            signature_max_age_days=policies.fleet.signature_max_age_days,
+            taken_at=now,
         )
         for m, room, building, check, seconds in all_rows
     ], usage
@@ -1329,7 +1845,7 @@ async def export_machines_xlsx(
     chosen = machine_export.resolve_columns(columns)
     zone = machine_export.resolve_timezone(tz)
     machines, usage = await _export_rows(session, filters)
-    return xlsx_response(
+    return await xlsx_response(
         "parc.xlsx",
         machine_export.headers(chosen, usage_days=usage.days),
         [
@@ -1564,9 +2080,19 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
         .order_by(severity_rank, col(WindowsUpdate.title))
     )
     detail = MachineDetailOut.model_validate(machine)
+    _enrollment_state(detail, machine)
     detail.software_truncated = machine.software_truncated_at is not None
     _place(detail, machine, await room_crud.placement(session, machine.room_id))
     policies = await setting_crud.policies(session)
+    # The age as it stands now, and the verdict on it — what the list and
+    # the dashboard say about the same poste.
+    now = utcnow()
+    detail.signature_age_days = effective_signature_age(
+        machine.signature_age_days, machine.signature_reported_at, now
+    )
+    detail.is_up_to_date = effective_up_to_date(
+        machine, now, policies.fleet.signature_max_age_days
+    )
     # The same figure as the machine's list row, over the console's window.
     usage = _usage_window(policies.usage, None)
     detail.usage_days = usage.days
@@ -1593,14 +2119,17 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
             if open_check.assigned_to_id
             else None
         )
-        detail.check_assigned_to = (
-            (assignee.full_name or assignee.email) if assignee else None
+        assignee_name = (assignee.full_name or assignee.email) if assignee else None
+        reachable = assignee is None or open_check.id not in (
+            await check_crud.orphaned_open_checks(session, check_ids=[open_check.id])
         )
+        detail.check_assigned_to = assignee_name if reachable else None
         detail.open_check = OpenCheckOut(
             id=open_check.id,
             requested_by=open_check.requested_by,
             assigned_to_id=open_check.assigned_to_id,
-            assigned_to_name=detail.check_assigned_to,
+            assigned_to_name=assignee_name,
+            assignee_reachable=reachable,
             instructions=open_check.instructions,
             created_at=open_check.created_at,
         )
@@ -1790,7 +2319,9 @@ def _duplicate_candidate(
     """A machine as a merge candidate, tagged with what makes it one."""
     # ``is_online`` is derived from ``last_seen`` at serialization time, so it is
     # dropped here rather than fed back in as an input.
-    base = MachineOut.model_validate(machine).model_dump(exclude={"is_online"})
+    out = MachineOut.model_validate(machine)
+    _enrollment_state(out, machine)
+    base = out.model_dump(exclude={"is_online"})
     return DuplicateCandidateOut(
         **base, first_seen=machine.first_seen, match_reason=reason
     )
@@ -1928,6 +2459,13 @@ async def allow_reenroll(
     token on the first 401, and retries a held enrollment by itself).
     """
     machine = await _require_machine(session, machine_id, scope)
+    _allow_reenroll(session, machine, user)
+    await session.commit()
+    return {"status": "reenroll-allowed"}
+
+
+def _allow_reenroll(session: SessionDep, machine: Machine, user: User) -> None:
+    """Clear the way for the poste's next enrollment, and audit it."""
     details = {"hostname": machine.hostname, "machine_uuid": machine.machine_uuid}
     if machine.reenroll_requested_at is not None:
         details["requested_at"] = machine.reenroll_requested_at.isoformat()
@@ -1946,8 +2484,90 @@ async def allow_reenroll(
         resource_id=str(machine.id),
         details=details,
     )
+
+
+class ApproveReenrollRequest(BaseModel):
+    """The postes whose held re-enrollment to approve, from the list."""
+
+    machine_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+class ApproveReenrollResponse(BaseModel):
+    approved: int
+    # Not pending (nothing held, or revoked — a revocation is lifted one
+    # poste at a time, from its fiche), unknown, or outside the caller's
+    # scope: told apart from none of the others, as for a single poste.
+    skipped: int
+
+
+@router.post(
+    "/approve-reenroll",
+    response_model=ApproveReenrollResponse,
+    dependencies=[Depends(require_permission(Resource.MACHINE, Action.WRITE))],
+)
+async def approve_reenroll(
+    payload: ApproveReenrollRequest,
+    session: SessionDep,
+    scope: CurrentScope,
+    user: CurrentUser,
+) -> ApproveReenrollResponse:
+    """Approve the held re-enrollments of a selection at once — a room
+    reinstalled over the holidays asks for thirty. Each poste is approved and
+    audited exactly as from its fiche (``allow-reenroll``)."""
+    requested = list(dict.fromkeys(payload.machine_ids))
+    rows = await session.exec(
+        restrict(
+            select(Machine)
+            .where(col(Machine.id).in_(requested))
+            .where(reenroll_pending_clause())
+            .order_by(col(Machine.id))
+            .with_for_update(of=Machine),
+            machine_clause(scope),
+        )
+    )
+    machines = rows.all()
+    for machine in machines:
+        _allow_reenroll(session, machine, user)
     await session.commit()
-    return {"status": "reenroll-allowed"}
+    return ApproveReenrollResponse(
+        approved=len(machines), skipped=len(requested) - len(machines)
+    )
+
+
+@router.post(
+    "/{machine_id}/confirm-identity",
+    response_model=MachineDetailOut,
+    dependencies=[Depends(require_permission(Resource.MACHINE, Action.WRITE))],
+)
+async def confirm_identity(
+    machine_id: uuid.UUID, session: SessionDep, scope: CurrentScope, user: CurrentUser
+) -> MachineDetailOut:
+    """Clear « identité à confirmer » without a merge.
+
+    The flag says the poste's hardware anchor changed, or that another record
+    shares it: a reinstall, a motherboard swap, a clone — or nothing at all,
+    and then the administrator who checked says so here. Audited with the
+    fingerprint they vouched for. Sticky again if the anchor moves again.
+    """
+    machine = await _require_machine(session, machine_id, scope)
+    machine.needs_verification = False
+    machine.updated_at = utcnow()
+    audit.record(
+        session,
+        actor=user.email,
+        action="machine.identity_confirmed",
+        resource_type="machine",
+        resource_id=str(machine.id),
+        details={
+            "hostname": machine.hostname,
+            "machine_uuid": machine.machine_uuid,
+            "smbios_uuid": machine.smbios_uuid,
+            "tpm_ek_hash": machine.tpm_ek_hash,
+        },
+    )
+    await session.commit()
+    await session.refresh(machine)
+    return await _machine_detail(session, machine)
 
 
 class MergeRequest(BaseModel):
@@ -1982,6 +2602,13 @@ async def merge_machine(
             status_code=400,
             message="Cannot merge a machine into itself",
         )
+    # Both rows locked, in id order: two merges of the same pair in opposite
+    # directions (A←B, B←A) would otherwise each delete the other's kept
+    # record. The second one waits, then finds its pair broken: 404.
+    for locked_id in sorted((machine_id, payload.source_id)):
+        await session.exec(
+            select(Machine.id).where(col(Machine.id) == locked_id).with_for_update()
+        )
     target = await _require_machine(session, machine_id, scope)
     source = await _require_machine(session, payload.source_id, scope)
     audit.record(
@@ -1996,9 +2623,18 @@ async def merge_machine(
             "source_id": str(source.id),
             "source_hostname": source.hostname,
             "source_machine_uuid": source.machine_uuid,
+            # Where the merged record stood: the row is deleted, and a
+            # confined reader of this entry is shown its identity only if it
+            # would have seen it (``routes/audit.py``, audit S17).
+            "source_location": source.location,
+            "source_room_id": str(source.room_id) if source.room_id else None,
         },
     )
-    await machine_crud.merge_into(session, target=target, source=source)
+    held_files = await machine_crud.merge_into(session, target=target, source=source)
     await session.commit()
+    if held_files:
+        # A deployment the merge cancelled may have been the last one holding
+        # a file replaced in its package since (audit S09).
+        await package_crud.sweep_store(session)
     await session.refresh(target)
     return await _machine_detail(session, target)

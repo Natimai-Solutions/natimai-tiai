@@ -12,7 +12,7 @@ import enum
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, false, func, or_
+from sqlalchemy import Integer, and_, cast, extract, false, func, literal, not_, or_
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
@@ -92,6 +92,98 @@ def _third_party_protects(
     return signatures_up_to_date is not False
 
 
+_SECONDS_PER_DAY = 86400
+
+
+def effective_signature_age(
+    age_days: int | None, reported_at: datetime | None, now: datetime
+) -> int | None:
+    """The signature age as it stands *now*, not as it stood when reported.
+
+    The agent reports Defender's own figure, which is only true on the day it
+    is sent: a poste that falls silent keeps its signatures — and they keep
+    getting older. Aged here by the whole days elapsed since the report, so
+    the list, the fiche, the filters and the dashboard all read the same,
+    current number. Never younger than reported: a clock moving backwards
+    adds nothing. Unknown stays unknown; a report without a date (stored
+    before the date was) is taken as is.
+    """
+    if age_days is None:
+        return None
+    if reported_at is None:
+        return age_days
+    elapsed = int((now - reported_at).total_seconds() // _SECONDS_PER_DAY)
+    return age_days + max(0, elapsed)
+
+
+def effective_up_to_date(
+    machine: Machine, now: datetime, max_age_days: int
+) -> bool | None:
+    """``is_up_to_date`` as it stands now: the stored verdict, decayed.
+
+    The stored verdict was right at the last heartbeat. What time alone can
+    change is the Defender path: its signatures age while the poste is silent.
+    So a « à jour » whose aged signature age is now past the threshold, with
+    no third-party antivirus to qualify it instead, reads « périmé ». Nothing
+    else moves on read — and NULL stays NULL: a poste that never reported an
+    antivirus block at all is « inconnu », and no threshold makes it
+    « périmé ».
+    """
+    if machine.is_up_to_date is not True:
+        return machine.is_up_to_date
+    age = effective_signature_age(
+        machine.signature_age_days, machine.signature_reported_at, now
+    )
+    if (
+        age is not None
+        and age > max_age_days
+        and not _third_party_protects(
+            enabled=machine.av_product_enabled,
+            signatures_up_to_date=machine.av_product_signatures_up_to_date,
+            is_defender=machine.av_product_is_defender,
+        )
+    ):
+        return False
+    return True
+
+
+def signature_age_expr(now: datetime) -> ColumnElement[Any]:
+    """SQL twin of ``effective_signature_age``."""
+    elapsed = func.floor(
+        extract("epoch", literal(now) - col(Machine.signature_reported_at))
+        / _SECONDS_PER_DAY
+    )
+    # Whole days, as an integer: ``floor`` over an epoch is a double, and a
+    # reader would otherwise see « 30.0 j ».
+    return col(Machine.signature_age_days) + cast(
+        func.coalesce(func.greatest(elapsed, 0), 0), Integer
+    )
+
+
+def up_to_date_clause(now: datetime, max_age_days: int) -> ColumnElement[bool]:
+    """SQL twin of ``effective_up_to_date`` being true."""
+    third_party = and_(
+        col(Machine.av_product_is_defender).is_(False),
+        col(Machine.av_product_enabled).is_(True),
+        col(Machine.av_product_signatures_up_to_date).is_not(False),
+    )
+    aged_out = and_(
+        col(Machine.signature_age_days).is_not(None),
+        signature_age_expr(now) > max_age_days,
+        not_(third_party),
+    )
+    return and_(col(Machine.is_up_to_date).is_(True), not_(aged_out))
+
+
+def reenroll_pending_clause() -> ColumnElement[bool]:
+    """A re-enrollment is held for approval. Not on a revoked poste: that one
+    is « révoqué », and approving a request must not lift a revocation."""
+    return and_(
+        col(Machine.reenroll_requested_at).is_not(None),
+        col(Machine.token_revoked).is_(False),
+    )
+
+
 def is_online(last_seen: datetime, now: datetime, offline_after_seconds: int) -> bool:
     """Whether the machine is powered on with its agent reaching the server.
 
@@ -134,14 +226,27 @@ class MachineStatus(enum.StrEnum):
 
 
 def status_clause(
-    status: MachineStatus, now: datetime, inactive_after_days: int
+    status: MachineStatus,
+    now: datetime,
+    inactive_after_days: int,
+    max_age_days: int | None = None,
 ) -> ColumnElement[bool]:
-    """Build the SQL predicate selecting machines in the given status."""
+    """Build the SQL predicate selecting machines in the given status.
+
+    With ``max_age_days`` (the fleet's ``signature_max_age_days``), the
+    antivirus statuses are judged on the signature age as it stands now
+    (``up_to_date_clause``); without it, on the flag stored at the last
+    heartbeat — which a silent poste never refreshes.
+    """
     match status:
         case MachineStatus.UP_TO_DATE:
+            if max_age_days is not None:
+                return up_to_date_clause(now, max_age_days)
             return col(Machine.is_up_to_date).is_(True)
         case MachineStatus.OUTDATED:
             # Includes explicit False and unknown (NULL): the machines to act on.
+            if max_age_days is not None:
+                return not_(up_to_date_clause(now, max_age_days))
             return col(Machine.is_up_to_date).is_not(True)
         case MachineStatus.NEEDS_VERIFICATION:
             return col(Machine.needs_verification).is_(True)

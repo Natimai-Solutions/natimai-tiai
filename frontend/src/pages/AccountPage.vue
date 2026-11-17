@@ -135,6 +135,16 @@
         />
       </q-card-section>
       <q-separator />
+      <!-- The list could not be read: said here, with « Réessayer », and never
+           as « Aucune session ouverte » — the one sentence that would hide a
+           stranger's session (item 2). -->
+      <q-card-section v-if="sessionsError" class="q-pa-sm">
+        <CardLoadError
+          what="vos sessions ouvertes"
+          :loading="sessionsLoading"
+          @retry="loadSessions"
+        />
+      </q-card-section>
       <q-list separator>
         <q-item v-for="s in sessions" :key="s.id">
           <q-item-section avatar>
@@ -165,7 +175,7 @@
             />
           </q-item-section>
         </q-item>
-        <q-item v-if="!sessionsLoading && sessions.length === 0">
+        <q-item v-if="!sessionsLoading && !sessionsError && sessions.length === 0">
           <q-item-section class="text-muted">Aucune session ouverte.</q-item-section>
         </q-item>
       </q-list>
@@ -176,6 +186,7 @@
 <script setup lang="ts">
 import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { onMounted, ref, watch } from 'vue';
+import CardLoadError from 'src/components/CardLoadError.vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import {
@@ -274,17 +285,16 @@ async function onSubmit() {
 
 const sessions = ref<AuthSession[]>([]);
 const sessionsLoading = ref(false);
+const sessionsError = ref<unknown>(null);
 const closing = ref<string | null>(null);
 
 async function loadSessions() {
   sessionsLoading.value = true;
   try {
     sessions.value = await listSessions();
+    sessionsError.value = null;
   } catch (e) {
-    $q.notify({
-      type: 'negative',
-      message: apiErrorMessage(e, 'Impossible de lire les sessions ouvertes'),
-    });
+    sessionsError.value = e;
   } finally {
     sessionsLoading.value = false;
   }

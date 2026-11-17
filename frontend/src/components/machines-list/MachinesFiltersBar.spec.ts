@@ -196,3 +196,22 @@ describe('MachinesFiltersBar', () => {
     });
   });
 });
+
+describe('MachinesFiltersBar — every filter the URL carries has a chip (item 8)', () => {
+  it('names a hand-typed domain and clears everything from the folded bar', async () => {
+    const w = mountBar({ domain: 'CORP' });
+    expect(w.findAllComponents(QChip).map((c) => c.find('.q-chip__content').text())).toContain(
+      'Domaine : CORP',
+    );
+    const clearAll = w.findAllComponents(QBtn).find((b) => b.text().includes('Tout effacer'))!;
+    await clearAll.trigger('click');
+    expect(emitted(w).at(-1)).toEqual(emptyMachineFilters());
+  });
+
+  it('trims the search when the box is left', async () => {
+    const w = mountBar({ search: ' PC-01  ' });
+    w.findComponent(QInput).vm.$emit('blur');
+    await flushPromises();
+    expect(emitted(w).at(-1)!.search).toBe('PC-01');
+  });
+});

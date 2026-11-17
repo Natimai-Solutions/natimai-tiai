@@ -10,6 +10,13 @@
             <div class="text-caption text-muted">Supervision du parc</div>
           </q-card-section>
 
+          <!-- Sent here by a request that found the session over: said once,
+               here, whatever the page that hit it managed to show. -->
+          <q-banner v-if="sessionEnded" class="surface-orange q-mx-md" rounded dense role="status">
+            <template #avatar><q-icon name="schedule" /></template>
+            Votre session a pris fin : reconnectez-vous pour reprendre où vous en étiez.
+          </q-banner>
+
           <q-form @submit="onSubmit">
             <q-card-section class="q-gutter-md">
               <q-input
@@ -57,11 +64,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useAuthStore } from 'src/stores/auth';
 import { apiErrorMessage } from 'src/services/errors';
+import { safeRedirect } from 'src/router/access';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -73,13 +81,13 @@ const password = ref('');
 const loading = ref(false);
 
 const required = (v: string) => !!v || 'Requis';
+const sessionEnded = computed(() => route.query.ended === '1');
 
 async function onSubmit() {
   loading.value = true;
   try {
     await auth.login(email.value, password.value);
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/';
-    await router.push(redirect);
+    await router.push(safeRedirect(route.query.redirect) ?? '/');
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Identifiants invalides') });
   } finally {

@@ -8,7 +8,7 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
 }));
 
 import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
-import { tasksVersion } from 'src/composables/useTasksBadge';
+import { notifyTasksChanged, tasksVersion } from 'src/composables/useTasksBadge';
 import {
   getMachineMaintenance,
   updateMachineMaintenance,
@@ -76,5 +76,45 @@ describe('MachineMaintenanceCard', () => {
     expect(updateMachineMaintenance).toHaveBeenCalledWith('m1', { maintenance_owner_id: 'u2' });
     expect(tasksVersion.value).toBe(before + 1);
     expect(wrapper.emitted('changed')).toHaveLength(1);
+  });
+});
+
+describe('MachineMaintenanceCard — after a change to the journal (item 10)', () => {
+  beforeEach(() => {
+    vi.mocked(getMachineMaintenance).mockReset();
+    vi.mocked(getMachineMaintenance).mockResolvedValue(info);
+  });
+
+  it('reads the maintenance again when a line is added, edited or deleted', async () => {
+    const wrapper = mountCard();
+    await flushPromises();
+    expect(wrapper.text()).toContain('jamais');
+    // Cards mounted by earlier tests listen too: count from here.
+    const before = vi.mocked(getMachineMaintenance).mock.calls.length;
+    vi.mocked(getMachineMaintenance).mockResolvedValue({
+      ...info,
+      resolved: { ...info.resolved, last_maintenance_at: '2026-11-10T20:00:00Z' },
+    });
+
+    // What the history card does after any save or delete.
+    notifyTasksChanged();
+    await flushPromises();
+
+    expect(vi.mocked(getMachineMaintenance).mock.calls.length).toBeGreaterThan(before);
+    expect(wrapper.text()).not.toContain('jamais');
+    wrapper.unmount();
+  });
+
+  it('names a deactivated owner to the settings dialog (item 4)', async () => {
+    vi.mocked(getMachineMaintenance).mockResolvedValue({
+      ...info,
+      maintenance_owner: { id: 'u-gone', name: 'Marie', active: false },
+    });
+    const wrapper = mountCard();
+    await flushPromises();
+    expect(wrapper.findComponent(MaintenanceSettingsDialog).props('ownerLabel')).toBe(
+      'Marie (désactivé)',
+    );
+    wrapper.unmount();
   });
 });

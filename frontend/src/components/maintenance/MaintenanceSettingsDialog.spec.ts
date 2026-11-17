@@ -15,7 +15,10 @@ import { listAssignableUsers } from 'src/services/checks';
 import { listAssignableOwners } from 'src/services/maintenance';
 import MaintenanceSettingsDialog from './MaintenanceSettingsDialog.vue';
 
-function mountDialog(level: { machineId?: string; roomId?: string }) {
+function mountDialog(
+  level: { machineId?: string; roomId?: string; ownerId?: string; ownerLabel?: string },
+  save = vi.fn(),
+) {
   return mount(MaintenanceSettingsDialog, {
     props: {
       modelValue: false,
@@ -23,7 +26,7 @@ function mountDialog(level: { machineId?: string; roomId?: string }) {
       cycleDays: null,
       ownerId: null,
       inheritHint: 'Vide : hérite',
-      save: vi.fn(),
+      save,
       ...level,
     },
     attachTo: document.body,
@@ -79,6 +82,26 @@ describe('MaintenanceSettingsDialog — who can be named owner', () => {
     await flushPromises();
 
     expect(listAssignableOwners).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+});
+
+describe('MaintenanceSettingsDialog — an owner deactivated since (item 4)', () => {
+  beforeEach(() => {
+    vi.mocked(listAssignableOwners).mockReset();
+    vi.mocked(listAssignableOwners).mockResolvedValue([{ id: 'u-1', name: 'Alice' }]);
+  });
+
+  it('names the current owner instead of showing its id, and keeps it on save', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const wrapper = mountDialog(
+      { roomId: 'r-1', ownerId: 'u-gone', ownerLabel: 'Marie (désactivé)' },
+      save,
+    );
+    expect(await ownersOffered(wrapper)).toEqual([
+      { label: 'Marie (désactivé)', value: 'u-gone' },
+      { label: 'Alice', value: 'u-1' },
+    ]);
     wrapper.unmount();
   });
 });

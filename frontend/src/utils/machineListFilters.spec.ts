@@ -47,6 +47,8 @@ function everything(): MachineFilters {
     usageAbove: 10,
     usageDays: 30,
     softwareId: 42,
+    enrollment: 'pending',
+    aging: 'true',
   };
 }
 
@@ -86,6 +88,8 @@ describe('machineFiltersToQuery / machineFiltersFromQuery', () => {
       usage_hours_above: '10',
       usage_days: '30',
       software_id: '42',
+      enrollment: 'pending',
+      hardware_aging: 'true',
     });
     expect(machineFiltersFromQuery(query)).toEqual(everything());
   });
@@ -96,9 +100,12 @@ describe('machineFiltersToQuery / machineFiltersFromQuery', () => {
     expect(machineFiltersFromQuery(query).agent).toBe(AGENT_OUTDATED);
   });
 
-  it('carries a memory bound only once both halves are set', () => {
+  it('carries a memory filter only once both halves are set (the bound alone as ram_op)', () => {
     const half = { ...emptyMachineFilters(), ramOp: 'max' as const };
-    expect(machineFiltersToQuery(half)).toEqual({});
+    // The bound alone filters nothing, but stays in the URL so the box it
+    // unlocks is not locked again by the round trip (item 8).
+    expect(machineFiltersToQuery(half)).toEqual({ ram_op: 'max' });
+    expect(machineFiltersToParams(half)).toEqual({});
     // QInput hands back what was typed: a string is as good as a number.
     expect(machineFiltersToQuery({ ...half, ramGb: '8' })).toEqual({ ram_max_gb: '8' });
   });
@@ -116,7 +123,6 @@ describe('machineFiltersToQuery / machineFiltersFromQuery', () => {
       status: 'shiny',
       wu_status: 'later',
       scan_type: 'deep',
-      hw_chassis_type: 'spaceship',
       disk_free_below: '150',
       usage_days: '365',
       software_id: '-3',
@@ -155,6 +161,25 @@ describe('machineFiltersToParams', () => {
         machineListParamsFromQuery(machineFiltersToQuery(f)),
       );
     }
+  });
+
+  it('asks the dropdown facets matched exactly, and only those set', () => {
+    // « OptiPlex 7010 (12) » must list those 12, not the 7010 AIO as well.
+    expect(
+      machineFiltersToParams({
+        ...emptyMachineFilters(),
+        model: 'OptiPlex 7010',
+        os: 'Windows 11',
+      }),
+    ).toEqual({
+      hw_model: 'OptiPlex 7010',
+      os_version: 'Windows 11',
+      exact: 'os_version,hw_model',
+    });
+    expect(machineFiltersToParams(everything()).exact).toBe(
+      'antivirus,os_version,hw_model,hw_manufacturer,cpu_model',
+    );
+    expect(machineFiltersToParams(emptyMachineFilters()).exact).toBeUndefined();
   });
 
   it('turns the « Sans salle » entry into its own flag', () => {
@@ -196,6 +221,8 @@ describe('machineFilterChips', () => {
       7,
     );
     expect(chips.map((c) => c.key)).toEqual([
+      'domain',
+      'enrollment',
       'location',
       'building',
       'room',
@@ -216,6 +243,7 @@ describe('machineFilterChips', () => {
       'disk',
       'usage',
       'software',
+      'aging',
     ]);
     const label = (key: string) => chips.find((c) => c.key === key)!.label;
     expect(label('location')).toBe('Papeete (40)');
@@ -227,6 +255,7 @@ describe('machineFilterChips', () => {
     expect(label('disk')).toBe('Moins de 10 % libres');
     expect(label('usage')).toBe('Allumés moins de 50 h sur 7 j');
     expect(label('software')).toBe('Postes portant un logiciel');
+    expect(label('aging')).toBe('Matériel à renouveler');
   });
 
   it('names a memory ceiling with its own sign', () => {
@@ -266,5 +295,46 @@ describe('clearMachineFilter', () => {
     const f = everything();
     clearMachineFilter(f, 'os');
     expect(f).toEqual(everything());
+  });
+});
+
+describe('item 8 and C2: what the URL can carry', () => {
+  it('keeps a chassis kind the console has no word for', () => {
+    expect(machineFiltersFromQuery({ hw_chassis_type: 'chassis-35' }).chassis).toBe('chassis-35');
+    expect(machineListParamsFromQuery({ hw_chassis_type: 'chassis-35' }).hw_chassis_type).toBe(
+      'chassis-35',
+    );
+  });
+
+  it('keeps the memory bound while its figure is emptied', () => {
+    const typed = { ...emptyMachineFilters(), ramOp: 'min' as const, ramGb: '' };
+    const query = machineFiltersToQuery(typed);
+    expect(query).toEqual({ ram_op: 'min' });
+    expect(machineFiltersFromQuery(query).ramOp).toBe('min');
+    expect(machineFiltersToParams(machineFiltersFromQuery(query))).toEqual({});
+  });
+
+  it('trims the search', () => {
+    const f = { ...emptyMachineFilters(), search: '  PC-01 ' };
+    expect(machineFiltersToParams(f).search).toBe('PC-01');
+    expect(machineFiltersToQuery(f).search).toBe('PC-01');
+    expect(machineListParamsFromQuery({ search: ' PC-01 ' }).search).toBe('PC-01');
+  });
+
+  it('names a hand-typed domain in a chip, and clears it', () => {
+    const f = machineFiltersFromQuery({ domain: 'CORP' });
+    const chips = machineFilterChips(f, initialFleetOptions(), 7);
+    expect(chips).toEqual([{ key: 'domain', label: 'Domaine : CORP' }]);
+    expect(clearMachineFilter(f, 'domain')).toEqual(emptyMachineFilters());
+  });
+
+  it('carries the enrolment filter from the dashboard card to the API, with its chip', () => {
+    const f = machineFiltersFromQuery({ enrollment: 'revoked' });
+    expect(machineFiltersToParams(f)).toEqual({ enrollment: 'revoked' });
+    expect(machineListParamsFromQuery({ enrollment: 'revoked' }).enrollment).toBe('revoked');
+    expect(machineFilterChips(f, initialFleetOptions(), 7)).toEqual([
+      { key: 'enrollment', label: 'Token révoqué' },
+    ]);
+    expect(machineFiltersFromQuery({ enrollment: 'nope' }).enrollment).toBeNull();
   });
 });

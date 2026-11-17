@@ -73,3 +73,44 @@ func TestReadDeployKeysSaysWhenMethodAMaxGBIsUnusable(t *testing.T) {
 		})
 	}
 }
+
+// DeployCacheMaxGB, by the same rule as DeployMethodAMaxGB: a number from 1 to
+// 1024 is taken, anything else is said in the log and the default kept.
+func TestReadDeployKeysSaysWhenCacheMaxGBIsUnusable(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		set   func(k registry.Key) error
+		want  int
+		warns bool
+	}{
+		{name: "not set", set: func(registry.Key) error { return nil }},
+		{name: "in range", set: func(k registry.Key) error { return k.SetDWordValue("DeployCacheMaxGB", 32) }, want: 32},
+		{name: "zero", set: func(k registry.Key) error { return k.SetDWordValue("DeployCacheMaxGB", 0) }, warns: true},
+		{name: "above the ceiling", set: func(k registry.Key) error { return k.SetDWordValue("DeployCacheMaxGB", 2048) }, warns: true},
+		{name: "a string", set: func(k registry.Key) error { return k.SetStringValue("DeployCacheMaxGB", "32") }, warns: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			k := scratchKey(t)
+			if err := c.set(k); err != nil {
+				t.Fatalf("set the value: %v", err)
+			}
+			var buf bytes.Buffer
+			out := log.Writer()
+			log.SetOutput(&buf)
+			t.Cleanup(func() { log.SetOutput(out) })
+
+			trust := readDeployKeys(k)
+
+			if trust.CacheMaxGB != c.want {
+				t.Errorf("CacheMaxGB = %d, want %d (0: the agent's default)", trust.CacheMaxGB, c.want)
+			}
+			logged := buf.String()
+			if c.warns != strings.Contains(logged, "DeployCacheMaxGB") {
+				t.Errorf("logged %q, want a line about the value: %v", logged, c.warns)
+			}
+			if n := strings.Count(logged, "\n"); c.warns && n != 1 {
+				t.Errorf("%d line(s) logged, want exactly one:\n%s", n, logged)
+			}
+		})
+	}
+}

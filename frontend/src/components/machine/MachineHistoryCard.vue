@@ -29,8 +29,7 @@
         </q-item-section>
         <q-item-section>
           <q-item-label>
-            <span class="text-weight-medium">{{ interventionKindLabel(item.kind) }}</span>
-            <span v-if="item.title"> — {{ item.title }}</span>
+            <span class="text-weight-medium">{{ interventionHeading(item) }}</span>
           </q-item-label>
           <q-item-label caption>
             {{ formatDateTime(item.performed_at) }} · {{ item.performed_by }}
@@ -38,6 +37,21 @@
           </q-item-label>
           <q-item-label v-if="item.note" class="q-mt-xs" style="white-space: pre-line">
             {{ item.note }}
+          </q-item-label>
+          <!-- A line of a maintenance visit: the visit holds the global note
+               and the other postes, one click away. -->
+          <q-item-label v-if="item.maintenance_id && canReadMaintenance" class="q-mt-xs">
+            <q-btn
+              flat
+              dense
+              no-caps
+              size="sm"
+              color="primary"
+              icon="event_note"
+              label="Voir la séance"
+              class="q-px-xs"
+              @click="openSession(item.maintenance_id)"
+            />
           </q-item-label>
         </q-item-section>
         <q-item-section v-if="canWrite" side top>
@@ -62,6 +76,12 @@
     <q-card-section v-if="total > items.length" class="row justify-center q-pt-none">
       <q-btn flat dense label="Afficher plus" :loading="loading" @click="emit('more')" />
     </q-card-section>
+
+    <MaintenanceSessionViewDialog
+      v-model="sessionOpen"
+      :session-id="sessionId"
+      @deleted="emit('changed')"
+    />
 
     <q-dialog v-model="formOpen">
       <q-card style="width: 520px; max-width: 95vw">
@@ -112,21 +132,23 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { useQuasar } from 'quasar';
+import MaintenanceSessionViewDialog from 'src/components/maintenance/MaintenanceSessionViewDialog.vue';
 import {
   createIntervention,
   deleteIntervention,
   INTERVENTION_KINDS,
+  interventionHeading,
   interventionKindColor,
   interventionKindIcon,
-  interventionKindLabel,
   updateIntervention,
   type Intervention,
   type InterventionKind,
 } from 'src/services/interventions';
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { apiErrorMessage } from 'src/services/errors';
+import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime } from 'src/utils/format';
 
 const props = defineProps<{
@@ -139,6 +161,14 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'changed'): void; (e: 'more'): void }>();
 
 const $q = useQuasar();
+const auth = useAuthStore();
+const canReadMaintenance = computed(() => auth.can('maintenance', 'read'));
+const sessionOpen = ref(false);
+const sessionId = ref<string | null>(null);
+function openSession(id: string) {
+  sessionId.value = id;
+  sessionOpen.value = true;
+}
 const formOpen = ref(false);
 const saving = ref(false);
 const editing = ref<Intervention | null>(null);
@@ -217,7 +247,7 @@ async function submit() {
 function confirmDelete(item: Intervention) {
   $q.dialog({
     title: "Supprimer l'intervention",
-    message: `Supprimer « ${interventionKindLabel(item.kind)}${item.title ? ` — ${item.title}` : ''} » du ${formatDateTime(item.performed_at)} ? La suppression est tracée dans le journal d'audit.`,
+    message: `Supprimer « ${interventionHeading(item)} » du ${formatDateTime(item.performed_at)} ? La suppression est tracée dans le journal d'audit.`,
     cancel: true,
     ok: { label: 'Supprimer', color: 'negative' },
   }).onOk(() => {

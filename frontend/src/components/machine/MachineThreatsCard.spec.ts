@@ -69,3 +69,40 @@ describe('MachineThreatsCard', () => {
     expect(wrapper.emitted('refresh')).toHaveLength(1);
   });
 });
+
+describe('MachineThreatsCard — unread list and blank names', () => {
+  it('says the threats could not be read instead of « Aucune menace »', () => {
+    const w = mount(MachineThreatsCard, {
+      props: {
+        threats: [],
+        loading: false,
+        failed: true,
+        pagination: { page: 1, rowsPerPage: 10, rowsNumber: 0 },
+      },
+    });
+    expect(w.text()).toContain('Impossible de charger les menaces');
+    expect(w.text()).not.toContain('Aucune menace');
+    expect(w.findAllComponents(QBtn).some((b) => b.text().includes('Réessayer'))).toBe(true);
+  });
+
+  it('retries through the page’s refresh', async () => {
+    const w = mount(MachineThreatsCard, {
+      props: {
+        threats: [],
+        loading: false,
+        failed: true,
+        pagination: { page: 1, rowsPerPage: 10, rowsNumber: 0 },
+      },
+    });
+    await w
+      .findAllComponents(QBtn)
+      .find((b) => b.text().includes('Réessayer'))!
+      .trigger('click');
+    expect(w.emitted('refresh')).toHaveLength(1);
+  });
+
+  it('names a threat Defender reported without a name « (sans nom) »', () => {
+    const w = mountCard([threat({ threat_name: '  ' })]);
+    expect(w.text()).toContain('(sans nom)');
+  });
+});

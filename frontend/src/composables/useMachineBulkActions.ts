@@ -9,7 +9,13 @@ import {
 } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
-import { wakeMachines, wakeNotification, type Machine } from 'src/services/machines';
+import {
+  approveReenroll,
+  approveReenrollNotification,
+  wakeMachines,
+  wakeNotification,
+  type Machine,
+} from 'src/services/machines';
 import { placeMachines, placementNotification, unassignMachines } from 'src/services/rooms';
 import { ROOM_NONE } from 'src/utils/machineListFilters';
 
@@ -116,5 +122,33 @@ export function useMachineBulkActions(options: {
     }
   }
 
-  return { askOpen, placeOpen, askSelection, placeSelection, runBulk };
+  /** C2: allow the re-enrolment of the selection, after a confirmation. */
+  function reenrollSelection() {
+    const ids = selectedIds();
+    if (!ids.length) return;
+    $q.dialog({
+      title: 'Autoriser le ré-enrôlement',
+      message:
+        `Autoriser le ré-enrôlement de ${ids.length} poste(s) ? Les postes sans demande en ` +
+        'attente ni token révoqué sont ignorés. Chaque poste revient de lui-même à sa prochaine ' +
+        "tentative d'enrôlement.",
+      cancel: { flat: true, noCaps: true, label: 'Annuler' },
+      ok: { unelevated: true, noCaps: true, label: 'Autoriser' },
+      persistent: true,
+    }).onOk(() => {
+      void doReenroll(ids);
+    });
+  }
+
+  async function doReenroll(ids: string[]) {
+    try {
+      $q.notify(approveReenrollNotification(await approveReenroll(ids)));
+      selected.value = [];
+      await reload();
+    } catch (e) {
+      $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'autorisation") });
+    }
+  }
+
+  return { askOpen, placeOpen, askSelection, placeSelection, runBulk, reenrollSelection };
 }

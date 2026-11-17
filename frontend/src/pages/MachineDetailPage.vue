@@ -14,7 +14,7 @@
           {{ fromSearch ? 'Retour aux résultats de la recherche' : 'Retour aux postes' }}
         </q-tooltip>
       </q-btn>
-      <h1 class="text-h5 q-my-none row items-center no-wrap">
+      <h1 class="text-h5 q-my-none row items-center no-wrap break-anywhere" style="min-width: 0">
         <!-- Leading, same dot as the list: the fiche answers « allumé ? » at a glance too. -->
         <q-icon
           v-if="machine"
@@ -28,7 +28,7 @@
             {{ timeAgoLabel(machine.last_seen) }}
           </q-tooltip>
         </q-icon>
-        {{ title }}
+        <span class="break-anywhere" style="min-width: 0">{{ title }}</span>
       </h1>
       <!-- Only when the fiche was opened from a list query: elsewhere there is
            no search to walk, and dead arrows would be worse than none. -->
@@ -88,115 +88,135 @@
       >
         <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
       </q-btn>
-      <q-btn-dropdown
-        v-if="actionGroups.length"
-        color="primary"
-        dense
-        label="Action"
-        icon="bolt"
-        :disable="!machine"
-      >
-        <q-list>
-          <template v-for="section in actionGroups" :key="section.group">
-            <q-item-label header class="q-py-xs">{{ section.label }}</q-item-label>
-            <q-item
-              v-for="action in section.actions"
-              :key="action.type"
-              v-close-popup
-              clickable
-              @click="runOne(action)"
-            >
-              <q-item-section avatar><q-icon :name="action.icon" /></q-item-section>
-              <q-item-section>{{ action.label }}</q-item-section>
-            </q-item>
-          </template>
-        </q-list>
-      </q-btn-dropdown>
-      <q-btn
-        v-if="canDeploy"
-        flat
-        dense
-        no-caps
-        color="primary"
-        icon="install_desktop"
-        label="Logiciel"
-        class="q-ml-sm"
-        :disable="!machine"
-        @click="deployOpen = true"
-      >
-        <q-tooltip>Installer ou désinstaller un paquet sur ce poste</q-tooltip>
-      </q-btn>
-      <!-- check:write: ask somebody to go and look. One open at a time, so
+      <!-- The poste's own actions only once it is known: under « Poste
+           introuvable » they could only fail. -->
+      <template v-if="machine">
+        <!-- Wrapped: a disabled button shows no tooltip of its own, and the
+             one saying why it is disabled needs an element to hang on. -->
+        <div v-if="actionGroups.length" class="inline-block" data-test="action-menu">
+          <q-btn-dropdown
+            color="primary"
+            dense
+            label="Action"
+            icon="bolt"
+            :disable="!!machine.token_revoked"
+          >
+            <q-list>
+              <template v-for="section in actionGroups" :key="section.group">
+                <q-item-label header class="q-py-xs">{{ section.label }}</q-item-label>
+                <q-item
+                  v-for="action in section.actions"
+                  :key="action.type"
+                  v-close-popup
+                  clickable
+                  :disable="sending"
+                  @click="runOne(action)"
+                >
+                  <q-item-section avatar><q-icon :name="action.icon" /></q-item-section>
+                  <q-item-section>{{ action.label }}</q-item-section>
+                </q-item>
+              </template>
+            </q-list>
+          </q-btn-dropdown>
+          <q-tooltip v-if="machine.token_revoked">
+            Token révoqué : aucune commande ne peut atteindre ce poste tant que son ré-enrôlement
+            n'est pas autorisé.
+          </q-tooltip>
+        </div>
+        <q-btn
+          v-if="canDeploy"
+          flat
+          dense
+          no-caps
+          color="primary"
+          icon="install_desktop"
+          label="Logiciel"
+          class="q-ml-sm"
+          :disable="!machine"
+          @click="deployOpen = true"
+        >
+          <q-tooltip>Installer ou désinstaller un paquet sur ce poste</q-tooltip>
+        </q-btn>
+        <!-- check:write: ask somebody to go and look. One open at a time, so
            the button reads as the state. -->
-      <q-btn
-        v-if="auth.can('check', 'write') && machine && !machine.check_open"
-        flat
-        dense
-        color="primary"
-        icon="fact_check"
-        label="Demander une vérification"
-        class="q-ml-sm"
-        @click="askOpen = true"
-      />
-      <!-- room:write: where the console files the poste. -->
-      <q-btn
-        v-if="canPlace"
-        flat
-        dense
-        color="primary"
-        icon="meeting_room"
-        :label="machine?.room_name ? 'Changer de salle' : 'Affecter à une salle'"
-        class="q-ml-sm"
-        :disable="!machine"
-        @click="openPlace"
-      />
-      <!-- machine:write only: the merge endpoint requires it, so for anyone
+        <q-btn
+          v-if="auth.can('check', 'write') && machine && !machine.check_open"
+          flat
+          dense
+          color="primary"
+          icon="fact_check"
+          label="Demander une vérification"
+          class="q-ml-sm"
+          @click="askOpen = true"
+        />
+        <!-- room:write: where the console files the poste. -->
+        <q-btn
+          v-if="canPlace"
+          flat
+          dense
+          color="primary"
+          icon="meeting_room"
+          :label="machine?.room_name ? 'Changer de salle' : 'Affecter à une salle'"
+          class="q-ml-sm"
+          :disable="!machine"
+          @click="openPlace"
+        />
+        <!-- machine:write only: the merge endpoint requires it, so for anyone
            else the button could only ever open a dialog and 403.
            The count rides in the label — "Fusionner" said nothing about whether
            there was anything to fuse, which is what made it look inert. -->
-      <q-btn
-        v-if="canManage"
-        flat
-        dense
-        color="primary"
-        icon="merge"
-        :label="mergeLabel"
-        class="q-ml-sm"
-        :disable="!machine"
-        @click="openMerge"
-      >
-        <q-tooltip>{{ mergeHint }}</q-tooltip>
-      </q-btn>
-      <!-- One slot, two states: revoking and lifting the revocation are the
+        <q-btn
+          v-if="canManage"
+          flat
+          dense
+          color="primary"
+          icon="merge"
+          :label="mergeLabel"
+          class="q-ml-sm"
+          :disable="!machine"
+          @click="openMerge"
+        >
+          <q-tooltip>{{ mergeHint }}</q-tooltip>
+        </q-btn>
+        <!-- One slot, two states: revoking and lifting the revocation are the
            two halves of the same kill-switch, and showing both at once would
            read as a choice when only one ever applies. -->
-      <q-btn
-        v-if="canManage && machine?.token_revoked"
-        flat
-        dense
-        color="positive"
-        icon="key"
-        label="Autoriser le ré-enrôlement"
-        class="q-ml-sm"
-        @click="confirmAllowReenroll"
-      />
-      <q-btn
-        v-else-if="canManage"
-        flat
-        dense
-        color="negative"
-        icon="key_off"
-        label="Révoquer le token"
-        class="q-ml-sm"
-        :disable="!machine"
-        @click="confirmRevoke"
-      />
+        <q-btn
+          v-if="canManage && machine?.token_revoked"
+          flat
+          dense
+          color="positive"
+          icon="key"
+          label="Autoriser le ré-enrôlement"
+          class="q-ml-sm"
+          @click="confirmAllowReenroll"
+        />
+        <q-btn
+          v-else-if="canManage"
+          flat
+          dense
+          color="negative"
+          icon="key_off"
+          label="Révoquer le token"
+          class="q-ml-sm"
+          @click="confirmRevoke"
+        />
+      </template>
     </div>
 
     <!-- Also after an earlier success: walking to the next poste empties the
          page first, and a failure there must not leave it blank (audit U01). -->
+    <!-- An id nobody knows (or outside this account's places, which the
+         server answers alike): no « Réessayer », which could only fail again. -->
+    <q-banner v-if="notFound && !machine" role="alert" class="surface-orange q-mb-md" rounded>
+      <template #avatar><q-icon name="search_off" /></template>
+      Poste introuvable : il a peut-être été fusionné ou supprimé, ou le lien est incomplet.
+      <template #action>
+        <q-btn flat no-caps label="Retour aux postes" :to="{ name: 'machines' }" />
+      </template>
+    </q-banner>
     <LoadErrorBanner
-      v-if="lastError && (!lastRefreshedAt || !machine)"
+      v-else-if="lastError && (!lastRefreshedAt || !machine)"
       :error="lastError"
       :loading="loading"
       @retry="load"
@@ -252,6 +272,15 @@
       Empreinte divergente : ce poste nécessite une vérification manuelle (clone, swap matériel ou
       ré-image).
       <template #action>
+        <q-btn
+          v-if="canManage"
+          flat
+          dense
+          no-caps
+          label="Confirmer l'identité"
+          :loading="confirmingIdentity"
+          @click="askConfirmIdentity"
+        />
         <q-btn v-if="canManage" flat dense label="Fusionner un doublon" @click="openMerge" />
       </template>
     </q-banner>
@@ -261,8 +290,16 @@
       <div>
         <span class="text-weight-medium">Vérification demandée</span>
         par {{ machine.open_check.requested_by }} {{ timeAgoLabel(machine.open_check.created_at) }},
-        <template v-if="machine.open_check.assigned_to_name">
+        <template
+          v-if="
+            machine.open_check.assigned_to_name && machine.open_check.assignee_reachable !== false
+          "
+        >
           affectée à {{ machine.open_check.assigned_to_name }}.
+        </template>
+        <template v-else-if="machine.open_check.assigned_to_name">
+          à prendre ({{ machine.open_check.assigned_to_name }}, à qui elle était affectée, ne voit
+          plus ce poste).
         </template>
         <template v-else>à prendre.</template>
       </div>
@@ -331,8 +368,11 @@
       v-if="machine"
       :machine="machine"
       :active-threats="activeThreats"
+      :threats-failed="threatsFailed"
+      :low-disk-percent="lowDiskPercent"
       class="q-mb-md"
       @open-tab="tab = $event"
+      @retry="load"
     />
 
     <template v-if="machine">
@@ -389,6 +429,7 @@
             v-model:pagination="threatPagination"
             :threats="threats"
             :loading="loading"
+            :failed="threatsFailed"
             @refresh="load"
           />
         </q-tab-panel>
@@ -403,7 +444,7 @@
         <q-tab-panel name="hardware" class="q-px-none">
           <div class="row q-col-gutter-md">
             <MachineHardwareCard :machine="machine" />
-            <MachineStorageCard :machine="machine" />
+            <MachineStorageCard :machine="machine" :low-disk-percent="lowDiskPercent" />
             <MachineMemoryCard :machine="machine" />
             <MachineGpuCard :machine="machine" />
           </div>
@@ -437,6 +478,7 @@
             v-model:pagination="commandPagination"
             :commands="commands"
             :loading="loading"
+            :failed="commandsFailed"
             @refresh="load"
             @show-detail="showDetail"
           />
@@ -499,6 +541,7 @@ import {
 import { queryValue } from 'src/utils/machineQuery';
 import {
   allowReenroll,
+  confirmIdentity,
   getDuplicates,
   getMachine,
   revokeToken,
@@ -514,10 +557,12 @@ import {
   commandConfirm,
   createCommands,
   listCommands,
+  singleSendNotification,
   type Command,
   type CommandAction,
 } from 'src/services/commands';
-import { apiErrorMessage } from 'src/services/errors';
+import { apiErrorCode, apiErrorMessage } from 'src/services/errors';
+import { useFleetThresholds } from 'src/composables/useFleetThresholds';
 import { listInterventions, type Intervention } from 'src/services/interventions';
 import {
   getRoomConfig,
@@ -579,6 +624,11 @@ const tab = computed<MachineTab>({
   },
 });
 const commands = ref<Command[]>([]);
+// The last read of either list failed: its card says so, and no « aucune
+// menace » / « aucune alerte » is claimed off a list nobody could read.
+const threatsFailed = ref(false);
+const commandsFailed = ref(false);
+const { lowDiskPercent } = useFleetThresholds();
 const loading = ref(false);
 const mergeOpen = ref(false);
 const duplicates = ref<DuplicateCandidate[]>([]);
@@ -637,7 +687,11 @@ const openCheckAsCheck = computed<Check | null>(() => {
     requested_by: c.requested_by,
     assigned_to:
       c.assigned_to_id && c.assigned_to_name
-        ? { id: c.assigned_to_id, name: c.assigned_to_name }
+        ? {
+            id: c.assigned_to_id,
+            name: c.assigned_to_name,
+            ...(c.assignee_reachable === false ? { reachable: false } : {}),
+          }
         : null,
     instructions: c.instructions,
     created_at: c.created_at,
@@ -693,7 +747,12 @@ async function loadInterventions(page: number) {
     interventionTotal.value = res.total;
     interventionPage.value = page;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Historique indisponible') });
+    // A poste that does not exist (or an id that is not one): the page says
+    // « Poste introuvable » once; a second, technical message is noise.
+    const status = (e as { response?: { status?: number } } | null)?.response?.status;
+    if (status !== 404 && status !== 422) {
+      $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Historique indisponible') });
+    }
   } finally {
     interventionsLoading.value = false;
   }
@@ -703,13 +762,22 @@ async function loadInterventions(page: number) {
 // when the server is not in a directory mode.
 const manualMode = ref(true);
 const canPlace = computed(() => auth.can('room', 'write') && manualMode.value);
-void getRoomConfig()
-  .then((c) => {
-    manualMode.value = c.manual;
-  })
-  .catch(() => {
-    // Assumed manual: the worst case is a 409 the notification explains.
-  });
+// Asked only of an account that may place postes: without room:write the
+// answer changes nothing, and without room:read the server refuses it.
+watch(
+  () => auth.can('room', 'write'),
+  (allowed) => {
+    if (!allowed) return;
+    void getRoomConfig()
+      .then((c) => {
+        manualMode.value = c.manual;
+      })
+      .catch(() => {
+        // Assumed manual: the worst case is a 409 the notification explains.
+      });
+  },
+  { immediate: true },
+);
 const ROOM_NONE = 'none';
 const placeOpen = ref(false);
 const placing = ref(false);
@@ -806,10 +874,14 @@ async function fetchAll() {
     threatPagination.value = { ...threatPagination.value, rowsNumber: t.value.total };
   }
   if (active.status === 'fulfilled' && active.value) activeThreats.value = active.value.total;
+  // Either threat read failing leaves the count unknown: said on the card and
+  // on the head of the fiche, never read as zero (an all-clear).
+  threatsFailed.value = t.status === 'rejected' || active.status === 'rejected';
   if (c.status === 'fulfilled' && c.value) {
     commands.value = c.value.items;
     commandPagination.value = { ...commandPagination.value, rowsNumber: c.value.total };
   }
+  commandsFailed.value = c.status === 'rejected';
   // Not awaited with the rest: the count on the merge button is worth showing,
   // but never worth holding the page for.
   void fetchDuplicates();
@@ -851,6 +923,16 @@ async function load() {
   }
 }
 
+/**
+ * The poste does not exist for this account: an unknown id (404), or one that
+ * is not even an id (422 on a mistyped link). Retrying cannot change either.
+ */
+const notFound = computed(() => {
+  const e = lastError.value as { response?: { status?: number } } | null;
+  const status = e?.response?.status;
+  return status === 404 || status === 422 || apiErrorCode(lastError.value) === 'machine.not_found';
+});
+
 const lastRefreshLabel = computed(() =>
   lastRefreshedAt.value ? lastRefreshedAt.value.toLocaleTimeString('fr-FR') : '',
 );
@@ -859,40 +941,61 @@ const autoRefreshHint = `Actualiser — automatique toutes les ${Math.round(
   AUTO_REFRESH_INTERVAL_MS / 1000,
 )} s`;
 
+// One action at a time: a double click on a menu entry fires its click twice
+// before the menu has closed, and used to queue the command twice. Held from
+// the click until the server has answered (or the confirmation is dismissed).
+const sending = ref(false);
+
 function runOne(action: CommandAction) {
+  if (sending.value) return;
+  sending.value = true;
   if (!action.confirm) {
     void send(action);
     return;
   }
-  $q.dialog(commandConfirm(action, 1, machine.value?.session_user_present ? 1 : 0)).onOk(() => {
-    void send(action);
-  });
+  $q.dialog(commandConfirm(action, 1, machine.value?.session_user_present ? 1 : 0))
+    .onOk(() => {
+      void send(action);
+    })
+    .onCancel(() => {
+      sending.value = false;
+    });
+}
+
+/** A failed send in the console's words: a vanished poste is not « Ressource introuvable ». */
+function sendErrorMessage(e: unknown, fallback: string): string {
+  const status = (e as { response?: { status?: number } } | null)?.response?.status;
+  if (status === 404) return 'Poste introuvable';
+  return apiErrorMessage(e, fallback);
 }
 
 async function send(action: CommandAction) {
-  // The wake is not a command: the poste is off, so there is nothing to queue
-  // for an agent that is not running. Same menu entry, same confirmation path,
-  // a different call.
-  if (action.serverSide) {
-    await sendWake();
-    return;
-  }
+  sending.value = true;
   try {
-    const res = await createCommands({ type: action.type, machine_ids: [props.id] });
-    if (res.count === 0) {
-      // The server de-duplicates per (poste, type). Saying "envoyée" here would
-      // have the administrator watch a history that never grows a row.
-      $q.notify({
-        type: 'warning',
-        message: `« ${action.label} » est déjà en attente sur ce poste.`,
-      });
-    } else {
-      $q.notify({ type: 'positive', message: 'Commande envoyée' });
+    // The wake is not a command: the poste is off, so there is nothing to queue
+    // for an agent that is not running. Same menu entry, same confirmation path,
+    // a different call.
+    if (action.serverSide) {
+      await sendWake();
+      return;
     }
-    await load();
-  } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'envoi de la commande") });
+    try {
+      const res = await createCommands({ type: action.type, machine_ids: [props.id] });
+      // The server de-duplicates per (poste, type), and says where the
+      // standing one is. Saying "envoyée" here would have the administrator
+      // watch a history that never grows a row.
+      $q.notify(singleSendNotification(action, res));
+    } catch (e) {
+      $q.notify({
+        type: 'negative',
+        message: sendErrorMessage(e, "Échec de l'envoi de la commande"),
+      });
+      return;
+    }
+  } finally {
+    sending.value = false;
   }
+  await load();
 }
 
 async function sendWake() {
@@ -904,7 +1007,7 @@ async function sendWake() {
     // its agent reports — a minute or so after it has actually booted.
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec du réveil') });
+    $q.notify({ type: 'negative', message: sendErrorMessage(e, 'Échec du réveil') });
   }
 }
 
@@ -953,6 +1056,38 @@ async function doAllowReenroll() {
     await load();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'autorisation") });
+  }
+}
+
+// --- « Identité à confirmer » lifted by hand (a hardware swap, a re-image):
+// nothing merged, the poste keeps its record and its history.
+const confirmingIdentity = ref(false);
+
+function askConfirmIdentity() {
+  $q.dialog({
+    title: "Confirmer l'identité",
+    message:
+      "L'empreinte du poste a changé (carte mère, TPM ou réinstallation). Si c'est bien le même " +
+      "poste, confirmez : l'alerte est levée et la nouvelle empreinte devient la référence. " +
+      'Si un autre enregistrement décrit ce poste, fusionnez plutôt le doublon.',
+    cancel: { flat: true, noCaps: true, label: 'Annuler' },
+    ok: { unelevated: true, noCaps: true, label: "Confirmer l'identité" },
+    persistent: true,
+  }).onOk(() => {
+    void doConfirmIdentity();
+  });
+}
+
+async function doConfirmIdentity() {
+  confirmingIdentity.value = true;
+  try {
+    await confirmIdentity(props.id);
+    $q.notify({ type: 'positive', message: 'Identité du poste confirmée' });
+    await load();
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec de la confirmation') });
+  } finally {
+    confirmingIdentity.value = false;
   }
 }
 

@@ -177,18 +177,26 @@ async def test_a_broadcast_stays_on_the_site(client, db_session):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["count"] == 1
-    # A listed poste of the other site is dropped like an unknown id.
+    # A listed poste of the other site is dropped like an unknown id: named
+    # alone, it is « poste introuvable » (404); in a list, it is left out.
     resp = await client.post(
         "/api/v1/commands",
         headers=t.scoped,
         json={"type": "flush_dns", "machine_ids": [str(t.b.id)]},
     )
-    assert resp.json()["count"] == 0
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["error"]["code"] == "machine.not_found"
+    resp = await client.post(
+        "/api/v1/commands",
+        headers=t.scoped,
+        json={"type": "flush_dns", "machine_ids": [str(t.a.id), str(t.b.id)]},
+    )
+    assert resp.json()["count"] == 1
     rows = (await db_session.exec(select(Command))).all()
     assert {c.machine_id for c in rows} == {t.a.id}
 
     listed = await client.get("/api/v1/commands", headers=t.scoped)
-    assert listed.json()["total"] == 1
+    assert listed.json()["total"] == 2
 
 
 async def test_threats_and_dashboard_are_the_sites(client, db_session):
@@ -295,6 +303,89 @@ async def test_a_visit_across_two_sites_shows_only_the_sites_postes(client, db_s
 
     full = await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.admin)
     assert len(full.json()["items"]) == 2
+
+
+async def test_a_visit_seen_through_one_poste_keeps_its_room_and_note(
+    client, db_session
+):
+    """Audit S06, residue: a poste of site A filed in a room of site B makes
+    the visit of that room visible to site A — its poste only. The room's name
+    and the global note belong to the room and all its postes: withheld, and
+    the visit marked partial. A visit wholly of site A reads in full."""
+    t = await two_sites(client, db_session)
+    r = await client.post(
+        "/api/v1/rooms", headers=t.admin, json={"name": "B-Secret", "location": SITE_B}
+    )
+    assert r.status_code == 201, r.text
+    room_b = r.json()["id"]
+    # Seen by site A through its own reported site, filed in a room of B.
+    stray = await machine(
+        db_session, "PC-A-IN-B", location=SITE_A, room_id=uuid.UUID(room_b)
+    )
+    other = await machine(
+        db_session, "PC-B2", location=SITE_B, room_id=uuid.UUID(room_b)
+    )
+    r = await client.post(
+        "/api/v1/maintenance",
+        headers=t.admin,
+        json={
+            "room_id": room_b,
+            "note": "Note globale B",
+            "items": [
+                {"machine_id": str(stray.id)},
+                {"machine_id": str(other.id)},
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    visit_id = r.json()["id"]
+
+    detail = await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.scoped)
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert [i["machine_id"] for i in body["items"]] == [str(stray.id)]
+    assert body["room_id"] is None and body["room_name"] is None
+    assert body["note"] is None and body["partial"] is True
+    assert "B-Secret" not in detail.text and "Note globale B" not in detail.text
+
+    listed = await client.get("/api/v1/maintenance", headers=t.scoped)
+    (row,) = listed.json()["items"]
+    assert (row["room_name"], row["note"], row["partial"]) == (None, None, True)
+    assert "B-Secret" not in listed.text and "Note globale B" not in listed.text
+    by_poste = await client.get(
+        f"/api/v1/maintenance?machine_id={stray.id}", headers=t.scoped
+    )
+    assert "Note globale B" not in by_poste.text
+
+    # Removing it would remove the note and lines it does not see.
+    r = await client.delete(f"/api/v1/maintenance/{visit_id}", headers=t.scoped)
+    assert r.status_code == 403, r.text
+
+    full = (await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.admin)).json()
+    assert (full["room_name"], full["note"], full["partial"]) == (
+        "B-Secret",
+        "Note globale B",
+        False,
+    )
+
+    # A room of site A whose postes are all of site A: the whole visit.
+    r = await client.post(
+        "/api/v1/rooms", headers=t.admin, json={"name": "A-Room", "location": SITE_A}
+    )
+    room_a = r.json()["id"]
+    own = await machine(db_session, "PC-A2", location=SITE_A, room_id=uuid.UUID(room_a))
+    r = await client.post(
+        "/api/v1/maintenance",
+        headers=t.scoped,
+        json={"room_id": room_a, "note": "RAS", "items": [{"machine_id": str(own.id)}]},
+    )
+    assert r.status_code == 201, r.text
+    mine = r.json()
+    assert (mine["room_name"], mine["note"], mine["partial"]) == (
+        "A-Room",
+        "RAS",
+        False,
+    )
 
 
 async def test_the_due_list_is_the_sites(client, db_session):
@@ -608,6 +699,59 @@ async def test_the_audit_log_is_the_sites(client, db_session):
     )
     everything = (await client.get("/api/v1/audit", headers=t.admin)).json()["items"]
     assert str(t.b.id) in {e["resource_id"] for e in everything}
+
+
+async def test_a_merge_from_another_site_keeps_the_merged_record_out_of_sight(
+    client, db_session
+):
+    """Audit S17, residue: a merge on a poste of site A is site A's to read,
+    but the record merged into it stood on site B — its name, UUID and id are
+    withheld from site A's reader. One merged from site A reads whole; an
+    entry that never noted where its source stood is withheld."""
+    from app.features.audit import crud as audit_crud
+
+    t = await two_sites(client, db_session)
+    twin = await machine(db_session, "PC-A-TWIN", location=SITE_A)
+    r = await client.post(
+        f"/api/v1/machines/{t.a.id}/merge",
+        headers=t.admin,
+        json={"source_id": str(t.b.id)},
+    )
+    assert r.status_code == 200, r.text
+    r = await client.post(
+        f"/api/v1/machines/{t.a.id}/merge",
+        headers=t.admin,
+        json={"source_id": str(twin.id)},
+    )
+    assert r.status_code == 200, r.text
+    # As written before the merge noted its source's place.
+    audit_crud.record(
+        db_session,
+        actor="admin@test.local",
+        action="machine.merge",
+        resource_type="machine",
+        resource_id=str(t.a.id),
+        details={"hostname": "PC-A", "source_hostname": "PC-OLD"},
+    )
+    await db_session.commit()
+
+    r = await client.get("/api/v1/audit?action=machine.merge", headers=t.scoped)
+    assert r.status_code == 200, r.text
+    assert "PC-B" not in r.text and str(t.b.id) not in r.text
+    assert t.b.machine_uuid not in r.text and SITE_B not in r.text
+    assert "PC-OLD" not in r.text
+    by_source = {
+        e["details"].get("source_hostname"): e["details"] for e in r.json()["items"]
+    }
+    assert set(by_source) == {"PC-A-TWIN", None}
+    assert by_source["PC-A-TWIN"]["source_id"] == str(twin.id)
+    withheld = [e for e in r.json()["items"] if e["details"].get("source_withheld")]
+    assert len(withheld) == 2
+    assert all(e["details"]["hostname"] == "PC-A" for e in withheld)
+
+    full = await client.get("/api/v1/audit?action=machine.merge", headers=t.admin)
+    assert "PC-B" in full.text and "PC-OLD" in full.text
+    assert not any(e["details"].get("source_withheld") for e in full.json()["items"])
 
 
 async def test_a_check_goes_only_to_who_sees_the_poste(client, db_session):

@@ -32,6 +32,12 @@ SECRET_MIN_LENGTHS = {
 }
 
 
+# An address as the console accepts one (``app.api.fields.Email``, which
+# reuses this): one @, a dotted domain, no spaces — special-use domains such
+# as ``.local`` included.
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
 class Settings(BaseSettings):
     """Application settings, loaded from environment / .env."""
 
@@ -80,7 +86,10 @@ class Settings(BaseSettings):
     # reset, a poste's fiche). Explicit when the console is reached under
     # something other than https://<TIAI_SERVER_NAME> — another port, a proxy
     # in front of Caddy; otherwise derived, see ``console_base_url``.
-    CONSOLE_BASE_URL: str | None = None
+    # An http(s) URL when set (the empty string reads as unset).
+    CONSOLE_BASE_URL: str | None = Field(
+        default=None, pattern=r"^(|https?://[^\s/]+(/\S*)?)$"
+    )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -170,11 +179,25 @@ class Settings(BaseSettings):
     # opened the account within LOGIN_KNOWN_ADDRESS_DAYS (audit S03).
     LOGIN_SIEGE_ADDRESSES: int = Field(default=10, ge=2, le=1000)
     LOGIN_KNOWN_ADDRESS_DAYS: int = Field(default=30, ge=1, le=365)
-    # « Mot de passe oublié » (audit S14): no new mail for an account within
-    # this many minutes of the last one, and at most this many links alive at
-    # once. A request never voids a link still valid.
+    # Slow guessing (audit T06): failures spaced more than
+    # LOGIN_LOCKOUT_MINUTES apart never add up to the lock above — four
+    # guesses a quarter of an hour, forever. This many failures within
+    # LOGIN_SLOW_WINDOW_HOURS of the first one lock the account for that many
+    # hours, and that lock admits only the account's usual addresses.
+    LOGIN_SLOW_MAX_FAILED_ATTEMPTS: int = Field(default=20, ge=2, le=1000)
+    LOGIN_SLOW_WINDOW_HOURS: int = Field(default=24, ge=1, le=24 * 7)
+    # « Mot de passe oublié » (audit S14, T34): counted per account *and*
+    # requesting address — no new mail within this many minutes of the last
+    # one asked from that address, at most this many links alive from it — so
+    # a third party spending their own budget leaves the owner's whole.
+    # A request never voids a link still valid.
     PASSWORD_RESET_COOLDOWN_MINUTES: int = Field(default=5, ge=0, le=60)
     PASSWORD_RESET_MAX_LIVE_LINKS: int = Field(default=3, ge=1, le=10)
+    # ... and, whatever the addresses, at most this many links alive for one
+    # account: the inbox is not flooded from a botnet. A request from one of
+    # the account's usual addresses (LOGIN_KNOWN_ADDRESS_DAYS) is held to its
+    # own budget only.
+    PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS: int = Field(default=10, ge=1, le=100)
     # Heartbeats one poste may send per minute (429 beyond). The agent sends
     # one per heartbeat_interval_seconds (60 by default), plus one at a
     # restart (audit S21).
@@ -224,8 +247,8 @@ class Settings(BaseSettings):
     # Async connection pool (psycopg 3). Load is light (~1–3 req/s for 1000
     # endpoints, plan §2.2) but the backend and the worker share Postgres, so
     # the pool is tunable per deployment.
-    POSTGRES_POOL_SIZE: int = 20
-    POSTGRES_MAX_OVERFLOW: int = 10
+    POSTGRES_POOL_SIZE: int = Field(default=20, ge=1)
+    POSTGRES_MAX_OVERFLOW: int = Field(default=10, ge=0)
     POSTGRES_POOL_TIMEOUT: int = 30
 
     @computed_field  # type: ignore[prop-decorator]
@@ -265,7 +288,11 @@ class Settings(BaseSettings):
     # Sender shared by both providers. The MAILGUN_FROM_* names below still
     # work and take over when these are empty, so a deployment written before
     # SMTP existed does not have to be renamed.
-    EMAIL_FROM_EMAIL: str | None = None
+    # Same shape check as the console's « Adresse d'expéditeur » (``api.fields.
+    # Email``): a typo here would otherwise surface as every mail refused.
+    EMAIL_FROM_EMAIL: str | None = Field(
+        default=None, pattern=f"^(|{EMAIL_PATTERN.strip('^$')})$"
+    )
     EMAIL_FROM_NAME: str | None = None
 
     # --- Mailgun ---
@@ -298,7 +325,8 @@ class Settings(BaseSettings):
     # cannot verify (self-signed, private CA not mounted). Credentials still
     # travel encrypted; what is lost is the proof of who is at the other end.
     SMTP_VERIFY_TLS: bool = True
-    SMTP_TIMEOUT_SECONDS: int = 10
+    # The console's bounds for the same field (``email_policy.TIMEOUT_MIN``…).
+    SMTP_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=120)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -339,11 +367,11 @@ class Settings(BaseSettings):
     # backoff (1 min doubling to a 1 h ceiling). After this many attempts —
     # roughly 14 hours, enough to ride out a night-long proxy or mail-provider
     # outage — the row is marked abandoned and kept with its last error.
-    EMAIL_MAX_ATTEMPTS: int = 20
+    EMAIL_MAX_ATTEMPTS: int = Field(default=20, ge=1)
     # How long sent and abandoned rows stay in the table before the daily purge
     # drops them. Pending rows are never purged: a mail still owed is not
     # clutter, whatever its age.
-    EMAIL_OUTBOX_RETENTION_DAYS: int = 30
+    EMAIL_OUTBOX_RETENTION_DAYS: int = Field(default=30, ge=0)
 
     # --- Notifications sent to console accounts ---
     # Hour (UTC) the daily digest goes out. The parc this console was built for
@@ -364,13 +392,14 @@ class Settings(BaseSettings):
     # back on "… et N autres". A digest is a nudge to open the console, not a
     # report to work from — and a fleet-wide outage must not send a mail with
     # three hundred lines in it.
-    NOTIFICATION_MAX_ITEMS: int = 10
+    NOTIFICATION_MAX_ITEMS: int = Field(default=10, ge=1)
 
     # --- Defender freshness policy ---
     # A machine is "up to date" if signatures are younger than this many days.
-    SIGNATURE_MAX_AGE_DAYS: int = 3
+    # Bounded like the page Paramètres bounds the setting that overrides it.
+    SIGNATURE_MAX_AGE_DAYS: int = Field(default=3, ge=0, le=365)
     # A machine is considered inactive after this many days without heartbeat.
-    INACTIVE_AFTER_DAYS: int = 30
+    INACTIVE_AFTER_DAYS: int = Field(default=30, ge=1, le=3650)
     # A machine counts as *online* (powered on, agent reachable) when its last
     # heartbeat is younger than this. Three times the agent's 60 s default poll,
     # not one: a single missed beat — a network blip, a server restart, the
@@ -385,7 +414,7 @@ class Settings(BaseSettings):
     # where Windows Update starts failing to stage a cumulative update — the
     # symptom being a poste that quietly stops patching, which is the other
     # module's problem and this one's early warning.
-    LOW_DISK_FREE_PERCENT: int = 10
+    LOW_DISK_FREE_PERCENT: int = Field(default=10, ge=1, le=99)
     # Past this age — read off the BIOS date, the only age a poste knows about
     # itself — a machine is counted as due for renewal. Five years is a default,
     # not a policy: parcs amortise on their own schedule, hence a setting.
@@ -455,9 +484,9 @@ class Settings(BaseSettings):
     # address — which is the only source that can be right on a parc where /16
     # and /24 segments coexist. This applies to a poste whose agent predates that
     # reporting, or whose adapter did not expose a mask: 192.168.1.42 at /24 →
-    # 192.168.1.255. /32 degrades to a unicast to the address itself, which only
-    # wakes a poste whose ARP entry is still alive upstream.
-    WOL_SUBNET_PREFIXLEN: int = 24
+    # 192.168.1.255. Bounded to /8–/30: a /31 or /32 has no broadcast address
+    # to aim at, and wider than /8 is a typo.
+    WOL_SUBNET_PREFIXLEN: int = Field(default=24, ge=8, le=30)
     # Explicit broadcast addresses, comma-separated. When set they *replace* the
     # derived one and every poste is woken through all of them — the answer for a
     # server that must reach segments it has no address on, and the only way to
@@ -468,10 +497,10 @@ class Settings(BaseSettings):
     # UDP/9 (discard) by convention. The port is immaterial to the hardware — a
     # NIC in standby matches the magic pattern anywhere in the frame — so this
     # only ever matters to a firewall on the way.
-    WOL_PORT: int = 9
+    WOL_PORT: int = Field(default=9, ge=1, le=65535)
     # UDP over a broadcast is unacknowledged and dropped without notice; three
     # copies cost three datagrams and remove the single-loss case.
-    WOL_PACKET_COUNT: int = 3
+    WOL_PACKET_COUNT: int = Field(default=3, ge=1, le=20)
 
     # --- Wake-on-LAN relayed by an agent ---
     # For a server that is nowhere near the postes — hosted off-site, or in a
@@ -529,6 +558,10 @@ class Settings(BaseSettings):
     TRUSTED_PROXY_HOSTS: Annotated[list[str] | str, BeforeValidator(parse_list)] = [
         "caddy"
     ]
+    # A TRUSTED_PROXIES entry wider than a /24 (IPv4) or a /64 (IPv6) is
+    # refused at start: every client inside it could name its own address
+    # (audit S28). True accepts it, for a network made of proxies only.
+    TRUSTED_PROXIES_ALLOW_WIDE: bool = False
     # The OpenAPI schema and its pages (/docs, /redoc): a map of every route
     # and field, served only in local development unless asked (audit S36).
     EXPOSE_OPENAPI: bool = False
@@ -581,6 +614,79 @@ class Settings(BaseSettings):
                 f"USAGE_HIGH_HOURS ({self.USAGE_HIGH_HOURS}) exceeds the "
                 f"{24 * self.USAGE_WINDOW_DAYS} hours of USAGE_WINDOW_DAYS"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _account_limits_hold_together(self) -> Self:
+        """The slow-guessing lock must sit beyond the quick one, and the
+        account-wide reset ceiling at or above one address's budget: the other
+        way round, the one meant to be generous would be the one that bites
+        (audit T06, T34)."""
+        if self.LOGIN_SLOW_MAX_FAILED_ATTEMPTS <= self.LOGIN_MAX_FAILED_ATTEMPTS:
+            raise ValueError(
+                "LOGIN_SLOW_MAX_FAILED_ATTEMPTS must be above "
+                f"LOGIN_MAX_FAILED_ATTEMPTS ({self.LOGIN_SLOW_MAX_FAILED_ATTEMPTS} "
+                f"<= {self.LOGIN_MAX_FAILED_ATTEMPTS})"
+            )
+        if self.LOGIN_SLOW_WINDOW_HOURS * 60 <= self.LOGIN_LOCKOUT_MINUTES:
+            raise ValueError(
+                "LOGIN_SLOW_WINDOW_HOURS must be longer than LOGIN_LOCKOUT_MINUTES "
+                f"({self.LOGIN_SLOW_WINDOW_HOURS} h <= "
+                f"{self.LOGIN_LOCKOUT_MINUTES} min)"
+            )
+        if self.PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS < (
+            self.PASSWORD_RESET_MAX_LIVE_LINKS
+        ):
+            raise ValueError(
+                "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS must be at least "
+                "PASSWORD_RESET_MAX_LIVE_LINKS "
+                f"({self.PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS} < "
+                f"{self.PASSWORD_RESET_MAX_LIVE_LINKS})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _trusted_proxies_are_proxies(self) -> Self:
+        """Refuse to start on a TRUSTED_PROXIES entry wider than a /24 (IPv4)
+        or a /64 (IPv6), unless TRUSTED_PROXIES_ALLOW_WIDE says so.
+
+        Whoever sits inside a trusted network writes the X-Forwarded-For the
+        API believes: a whole school LAN listed there let any poste on it pick
+        the address it is rate-limited, locked out and audited under (audit
+        S28). A proxy is one address, a handful at most. An IPv6 entry inside
+        the IPv4-mapped range (::ffff:0:0/96) is measured as the IPv4 network
+        it covers. Unreadable entries are left to ``net.trusted_proxy``, which
+        grants them nothing.
+        """
+        if self.TRUSTED_PROXIES_ALLOW_WIDE:
+            return self
+        entries = (
+            [self.TRUSTED_PROXIES]
+            if isinstance(self.TRUSTED_PROXIES, str)
+            else self.TRUSTED_PROXIES
+        )
+        mapped = ipaddress.IPv6Network("::ffff:0:0/96")
+        for entry in entries:
+            try:
+                network = ipaddress.ip_network(entry, strict=False)
+            except ValueError:
+                continue
+            prefix, floor = network.prefixlen, 24
+            if isinstance(network, ipaddress.IPv6Network):
+                if network.subnet_of(mapped):
+                    prefix -= 96
+                elif mapped.subnet_of(network):
+                    prefix = 0
+                else:
+                    floor = 64
+            if prefix < floor:
+                raise ValueError(
+                    f"TRUSTED_PROXIES: {entry!r} is wider than a /{floor}: every "
+                    "client in it could choose the address the API sees. List "
+                    "the proxies' own addresses (or use TRUSTED_PROXY_HOSTS), or "
+                    "set TRUSTED_PROXIES_ALLOW_WIDE=true if that whole network "
+                    "is made of proxies"
+                )
         return self
 
     @model_validator(mode="after")

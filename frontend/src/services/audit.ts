@@ -21,6 +21,11 @@ export interface AuditEntry {
   resource_id: string;
   /** Free-form context recorded with the action (names, changed fields…). */
   details: Record<string, unknown>;
+  /**
+   * The address the action came from, as the server saw it. Optional: an
+   * older server does not send it, and older entries may not have it.
+   */
+  ip?: string | null;
 }
 
 export interface AuditList {

@@ -5,6 +5,7 @@ import { defineComponent, h } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
 const listCalls: unknown[] = [];
+const getCalls: string[] = [];
 
 // The list against a fake server: three postes out of a long search, and the
 // rest of what the page asks for at mount answered empty or refused (the
@@ -12,6 +13,7 @@ const listCalls: unknown[] = [];
 vi.mock('boot/axios', () => ({
   api: {
     get: vi.fn((url: string, cfg?: { params?: unknown }) => {
+      getCalls.push(url);
       if (url === '/machines') {
         listCalls.push(cfg?.params);
         const items = ['a', 'b', 'c'].map((id) => ({ id, hostname: id, machine_uuid: id }));
@@ -47,13 +49,13 @@ import MachinesPage from './MachinesPage.vue';
 
 const Stub = defineComponent({ render: () => h('div') });
 
-async function mountList(path: string) {
+async function mountList(path: string, permissions = ['machine:read', 'command:execute']) {
   const pinia = createPinia();
   setActivePinia(pinia);
   useAuthStore().user = {
     id: 'u',
     email: 'a@b.c',
-    permissions: ['machine:read', 'command:execute'],
+    permissions,
     preferences: {},
   } as never;
   const router = createRouter({
@@ -116,5 +118,24 @@ describe('MachinesPage — selection (audit B05)', () => {
     await flushPromises();
 
     expect(wrapper.findComponent(MachinesBulkBar).props('count')).toBe(2);
+  });
+});
+
+describe('MachinesPage — what a read-only account is offered (item 4)', () => {
+  beforeEach(() => {
+    getCalls.length = 0;
+  });
+
+  it('offers no selection column and asks for no room listing without the rights', async () => {
+    const { wrapper } = await mountList('/machines', ['machine:read']);
+
+    expect(wrapper.findComponent(MachinesTable).props('selectable')).toBe(false);
+    expect(wrapper.findComponent(MachinesFiltersBar).props('canReadRooms')).toBe(false);
+    expect(getCalls.filter((u) => u.startsWith('/rooms'))).toEqual([]);
+  });
+
+  it('keeps the selection for an account with a bulk action to run', async () => {
+    const { wrapper } = await mountList('/machines', ['machine:read', 'command:execute']);
+    expect(wrapper.findComponent(MachinesTable).props('selectable')).toBe(true);
   });
 });

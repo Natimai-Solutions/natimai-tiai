@@ -2,6 +2,15 @@
   <q-page padding>
     <h1 class="text-h5 q-mb-md">Paramètres</h1>
 
+    <!-- The settings could not be read: said once, with « Réessayer », rather
+         than a toast over cards with nothing in them (item 2). -->
+    <LoadErrorBanner
+      v-if="loadError && !settings"
+      :error="loadError"
+      :loading="reloading"
+      @retry="retryLoad"
+    />
+
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
         Maintenance
@@ -49,7 +58,7 @@
           label="Fenêtre « à échéance »"
           outlined
           dense
-          :hint="`Un poste est signalé à échéance ce nombre de jours avant sa date · variable d'environnement : ${settings.env_due_soon_days} jours`"
+          :hint="`Un poste est signalé à échéance ce nombre de jours avant sa date — au plus la moitié de son cycle · variable d'environnement : ${settings.env_due_soon_days} jours`"
           :disable="!canWrite"
         />
       </q-card-section>
@@ -618,8 +627,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { onBeforeRouteLeave } from 'vue-router';
 import { useQuasar } from 'quasar';
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
+import { rememberFleetThresholds } from 'src/composables/useFleetThresholds';
+import { formSnapshot } from 'src/utils/formSnapshot';
 import { listAssignableOwners } from 'src/services/maintenance';
 import { apiErrorMessage } from 'src/services/errors';
 import {
@@ -661,6 +674,10 @@ const settings = ref<ConsoleSettings | null>(null);
 const saving = ref(false);
 const form = reactive({ cycle: 90, ownerId: null as string | null, dueSoon: 14 });
 const ownerOptions = ref<{ label: string; value: string }[]>([]);
+// The owner as loaded: sent back only when the operator picks another — a
+// default owner deactivated since was shown empty, and saving the card
+// cleared it for good (item 3).
+let loadedOwnerId: string | null = null;
 const canWrite = computed(() => auth.can('settings', 'write'));
 
 // The usage card's own form. `number | string`: an emptied box hands back ''.
@@ -678,6 +695,7 @@ function fillUsageForm(s: ConsoleSettings) {
   usageForm.windowDays = s.usage_window_days;
   usageForm.lowHours = s.usage_low_hours;
   usageForm.highHours = s.usage_high_hours;
+  saved.usage = formSnapshot(usageForm);
 }
 
 // The parc thresholds card. The agent version is a string: '' = automatic.
@@ -724,6 +742,9 @@ function fillFleetForm(s: ConsoleSettings) {
   fleetForm.hardwareAgingYears = s.hardware_aging_years;
   fleetForm.agentExpectedVersion = s.agent_expected_version ?? '';
   fleetForm.commandDefaultTtlMinutes = s.command_default_ttl_minutes;
+  saved.fleet = formSnapshot(fleetForm);
+  // The fiche and the list colour their disks by this threshold.
+  rememberFleetThresholds(s);
 }
 
 // The mail schedule card, and when each mail lands for the reader.
@@ -746,6 +767,7 @@ const reminderHint = computed(() =>
 function fillScheduleForm(s: ConsoleSettings) {
   scheduleForm.digestHourUtc = s.digest_hour_utc;
   scheduleForm.reminderWeekday = s.maintenance_reminder_weekday;
+  saved.schedule = formSnapshot(scheduleForm);
 }
 
 // The mail card's own form, filled from what the console stored.
@@ -816,7 +838,47 @@ function secretHint(state: string, clearing: boolean): string {
 
 function fillEmailForm(s: ConsoleSettings) {
   Object.assign(emailForm, emailFormFrom(s.email));
+  saved.email = formSnapshot(emailForm);
 }
+
+// --- Unsaved changes (item 12). Each card's form as last filled from the
+// server; a card whose form differs holds changes « Enregistrer » has not
+// sent. The maintenance card keeps its own rules.
+const saved = reactive({ usage: '', fleet: '', schedule: '', email: '' });
+const unsavedCards = computed(() => {
+  if (!settings.value || !canWrite.value) return [];
+  const cards: string[] = [];
+  if (formSnapshot(usageForm) !== saved.usage) cards.push('Utilisation');
+  if (formSnapshot(fleetForm) !== saved.fleet) cards.push('Seuils du parc');
+  if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('Calendrier des e-mails');
+  if (formSnapshot(emailForm) !== saved.email) cards.push('Envoi des e-mails');
+  return cards;
+});
+
+onBeforeRouteLeave(() => {
+  const cards = unsavedCards.value;
+  if (!cards.length) return true;
+  return new Promise<boolean>((resolve) => {
+    $q.dialog({
+      title: 'Modifications non enregistrées',
+      message: `Les changements de « ${cards.join(' », « ')} » n'ont pas été enregistrés. Quitter la page les perd.`,
+      cancel: { flat: true, noCaps: true, label: 'Rester sur la page' },
+      ok: { unelevated: true, noCaps: true, label: 'Quitter sans enregistrer', color: 'negative' },
+      persistent: true,
+    })
+      .onOk(() => resolve(true))
+      .onCancel(() => resolve(false));
+  });
+});
+
+// A reload or a closed tab: the browser's own question.
+function onBeforeUnload(event: BeforeUnloadEvent) {
+  if (!unsavedCards.value.length) return;
+  event.preventDefault();
+  event.returnValue = '';
+}
+window.addEventListener('beforeunload', onBeforeUnload);
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload));
 
 // The environment card, narrowed by the search box: on the variable's name,
 // its value and its description alike, since a reader may know any of the
@@ -835,11 +897,28 @@ const environmentGroups = computed<EnvGroup[]>(() => {
     .filter((g) => g.items.length);
 });
 
+// The first read failed: the banner above, with « Réessayer » (item 2).
+const loadError = ref<unknown>(null);
+const reloading = ref(false);
+async function retryLoad() {
+  reloading.value = true;
+  try {
+    await load();
+  } finally {
+    reloading.value = false;
+  }
+}
+
 async function load() {
   try {
     settings.value = await getSettings();
+    loadError.value = null;
     form.cycle = settings.value.maintenance_default_cycle_days;
-    form.ownerId = settings.value.maintenance_default_owner?.id ?? null;
+    // The stored owner that no longer resolves (deactivated, rights lost) is
+    // named and kept as the value, not shown as an empty field.
+    const unavailable = settings.value.maintenance_default_owner_unavailable ?? null;
+    form.ownerId = settings.value.maintenance_default_owner?.id ?? unavailable?.id ?? null;
+    loadedOwnerId = form.ownerId;
     form.dueSoon = settings.value.maintenance_due_soon_days;
     fillUsageForm(settings.value);
     fillFleetForm(settings.value);
@@ -847,12 +926,21 @@ async function load() {
     fillEmailForm(settings.value);
     // Only the accounts the server accepts as default owner: maintenance
     // rights over the whole parc.
-    ownerOptions.value = (await listAssignableOwners()).map((u) => ({
+    // Asked only of an account that may change the owner: a read-only one got
+    // a 403 and a toast for a list it cannot use (item 4).
+    const options = (canWrite.value ? await listAssignableOwners() : []).map((u) => ({
       label: u.name,
       value: u.id,
     }));
+    if (unavailable && !options.some((o) => o.value === unavailable.id)) {
+      options.unshift({ label: `Compte désactivé : ${unavailable.name}`, value: unavailable.id });
+    }
+    ownerOptions.value = options;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
+    // Before the settings: nothing to show, the banner says why. After them
+    // (the owner list): the cards are shown, the toast names what is missing.
+    if (!settings.value) loadError.value = e;
+    else $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
   }
 }
 
@@ -862,9 +950,10 @@ async function save() {
   try {
     settings.value = await updateSettings({
       maintenance_default_cycle_days: Number(form.cycle),
-      maintenance_default_owner_id: form.ownerId,
+      ...(form.ownerId !== loadedOwnerId ? { maintenance_default_owner_id: form.ownerId } : {}),
       maintenance_due_soon_days: Number(form.dueSoon),
     });
+    loadedOwnerId = form.ownerId;
     $q.notify({ type: 'positive', message: 'Paramètres enregistrés' });
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });

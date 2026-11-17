@@ -27,18 +27,24 @@ from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.machine.status import (
     MachineStatus,
+    signature_age_expr,
     status_clause,
     windows_update_clause,
 )
 from app.features.machine.status import WindowsUpdateFilter as WUFilter
 from app.features.notification.outbox import queue_email
 from app.features.notification.recipients import users_for
-from app.features.notification.tasks import fleet_maintenance, personal_block
+from app.features.notification.tasks import (
+    fleet_maintenance,
+    mail_date,
+    personal_block,
+)
 from app.features.setting import crud as setting_crud
 from app.features.setting.email_policy import email_policy
 from app.features.threat.models import Threat
 from app.features.user import crud as user_crud
 from app.features.user.models import EmailPreference, User
+from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import Scope, machine_clause, machine_ids_clause, restrict
 from app.features.windows_update.models import WindowsUpdate
 
@@ -123,7 +129,11 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
     covers, for an account confined to some sites (``user/scope.py``)."""
     in_scope = machine_clause(scope)
     now = utcnow()
-    days = (await setting_crud.fleet_policy(session)).inactive_after_days
+    fleet = await setting_crud.fleet_policy(session)
+    days = fleet.inactive_after_days
+    # Judged on the signature age as it stands now, as the console does: a
+    # poste silent for a month is not « à jour » in the mail either.
+    max_age = fleet.signature_max_age_days
     cap = settings.NOTIFICATION_MAX_ITEMS
 
     total = await _count(session, None, in_scope)
@@ -132,7 +142,7 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
     online = await _count(session, col(Machine.last_seen) > online_since, in_scope)
 
     outdated = await _count(
-        session, status_clause(MachineStatus.OUTDATED, now, days), in_scope
+        session, status_clause(MachineStatus.OUTDATED, now, days, max_age), in_scope
     )
     needs_verification = await _count(
         session, status_clause(MachineStatus.NEEDS_VERIFICATION, now, days), in_scope
@@ -186,10 +196,10 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
 
     # --- machines whose antivirus is not doing its job, named ---
     outdated_rows = await session.exec(
-        select(Machine.hostname, Machine.machine_uuid, Machine.signature_age_days)
-        .where(status_clause(MachineStatus.OUTDATED, now, days))
+        select(Machine.hostname, Machine.machine_uuid, signature_age_expr(now))
+        .where(status_clause(MachineStatus.OUTDATED, now, days, max_age))
         .where(in_scope if in_scope is not None else true())
-        .order_by(col(Machine.signature_age_days).desc().nulls_last())
+        .order_by(signature_age_expr(now).desc().nulls_last())
         .limit(cap)
     )
     outdated_lines = [
@@ -252,14 +262,33 @@ def _bullet_block(title: str, lines: list[MachineLine], total: int) -> list[str]
     return out
 
 
-def render_digest(digest: Digest) -> tuple[str, str]:
-    """The digest as (subject, plain-text body).
+_FOOTER = (
+    "Vous recevez ce message parce que votre compte est réglé sur un résumé "
+    "quotidien. Changez-le dans la console, page « Mon compte »."
+)
+
+
+def _ending(personal: list[str]) -> list[str]:
+    """What every digest ends with: the recipient's own tasks, the console's
+    address, then — last — why they receive it."""
+    out = list(personal)
+    if settings.console_base_url:
+        out.append(f"Ouvrir la console : {settings.console_base_url}")
+        out.append("")
+    out.append(_FOOTER)
+    return out
+
+
+def render_digest(digest: Digest, personal: list[str] | None = None) -> tuple[str, str]:
+    """The digest as (subject, plain-text body), ``personal`` — the
+    recipient's « VOS TÂCHES » block (``tasks.personal_block``) — after the
+    parc and before the footer.
 
     The subject carries the headline so the mail can be triaged without being
     opened — a list of "Tia'i — résumé quotidien" in an inbox says nothing about
     which morning had a threat on it.
     """
-    date = digest.generated_at.strftime("%d/%m/%Y")
+    date = mail_date(digest.generated_at)
     if digest.with_active_threats:
         headline = f"{digest.with_active_threats} poste(s) avec menace active"
     elif digest.with_high_severity_updates:
@@ -326,14 +355,75 @@ def render_digest(digest: Digest) -> tuple[str, str]:
         "ANTIVIRUS À REPRENDRE", digest.outdated_lines, digest.outdated_antivirus
     )
 
-    if settings.console_base_url:
-        body.append(f"Ouvrir la console : {settings.console_base_url}")
-    body.append("")
-    body.append(
-        "Vous recevez ce message parce que votre compte est réglé sur un résumé "
-        "quotidien. Changez-le dans la console, page « Mon compte »."
-    )
+    body += _ending(personal or [])
     return subject, "\n".join(body)
+
+
+def render_tasks_digest(personal: list[str], now: datetime) -> tuple[str, str]:
+    """The digest of an account that reads no poste (no ``machine:read``):
+    nothing of the parc, only its own tasks."""
+    date = mail_date(now)
+    subject = f"{settings.PROJECT_NAME} — vos tâches au {date}"
+    return subject, "\n".join([f"Vos tâches au {date}.", "", *_ending(personal)])
+
+
+@dataclass
+class PlannedDigest:
+    """Who gets a digest today, and what goes in it."""
+
+    user: User
+    # The parc as this account may read it; None for an account without
+    # machine:read, whose digest is its tasks alone.
+    digest: Digest | None
+    personal: list[str]
+
+
+async def plan_daily_digest(session: AsyncSession) -> list[PlannedDigest]:
+    """Every digest the run would queue, without queueing anything — what the
+    weekly reminder asks to know which owners already have their tasks in
+    today's digest.
+
+    The parc's sections go only to accounts that read postes
+    (``machine:read``), confined to their scope: an account that may only
+    read the settings is not mailed the names of the postes. An account that
+    reads none is mailed its tasks when it has some, and nothing otherwise.
+    """
+    wants_daily = await users_for(session, [EmailPreference.DIGEST_DAILY])
+    wants_events = await users_for(session, [EmailPreference.DIGEST_EVENTS])
+    users = sorted(
+        {u.id: u for u in [*wants_daily, *wants_events]}.values(),
+        key=lambda u: u.email,
+    )
+    if not users:
+        return []
+
+    now = utcnow()
+    # The parc's maintenance is resolved once for the run, not per recipient.
+    fleet = await fleet_maintenance(session, now)
+    # One digest per distinct scope: an account confined to a site is told
+    # about that site, and "events only" is decided on what *it* would read.
+    # Most installations have one scope — everybody's — hence one build.
+    digests: dict[Scope | None, Digest] = {}
+    planned: list[PlannedDigest] = []
+    for user in users:
+        authority = await user_crud.user_authority(session, user.id)
+        personal = await personal_block(session, user, now, fleet=fleet)
+        if not has_permission(
+            authority.permissions, Resource.MACHINE.value, Action.READ.value
+        ):
+            if personal:
+                planned.append(PlannedDigest(user, None, personal))
+            continue
+        scope = authority.scope
+        if scope not in digests:
+            digests[scope] = await build_digest(session, scope)
+        digest = digests[scope]
+        if user.email_preference == EmailPreference.DIGEST_EVENTS and not (
+            digest.has_events
+        ):
+            continue
+        planned.append(PlannedDigest(user, digest, personal))
+    return planned
 
 
 async def send_daily_digest(session: AsyncSession) -> int:
@@ -348,29 +438,8 @@ async def send_daily_digest(session: AsyncSession) -> int:
     instead of losing it. The body is a dated snapshot ("État du parc au …"),
     so a retried digest stays truthful about the morning it describes.
     """
-    wants_daily = await users_for(session, [EmailPreference.DIGEST_DAILY])
-    wants_events = await users_for(session, [EmailPreference.DIGEST_EVENTS])
-
-    # One digest per distinct scope: an account confined to a site is told
-    # about that site, and "events only" is decided on what *it* would read.
-    # Most installations have one scope — everybody's — hence one build.
-    digests: dict[Scope | None, Digest] = {}
-    chosen: list[tuple[User, Digest]] = []
-    for user in sorted(
-        {u.id: u for u in [*wants_daily, *wants_events]}.values(),
-        key=lambda u: u.email,
-    ):
-        scope = await user_crud.user_scope(session, user.id)
-        if scope not in digests:
-            digests[scope] = await build_digest(session, scope)
-        digest = digests[scope]
-        if user.email_preference == EmailPreference.DIGEST_EVENTS and not (
-            digest.has_events
-        ):
-            continue
-        chosen.append((user, digest))
-    recipients = [user for user, _ in chosen]
-    if not recipients:
+    planned = await plan_daily_digest(session)
+    if not planned:
         # Not a misconfiguration to work around: either nobody asked for a
         # digest, or nobody had anything to hear about today. Both are answers.
         logger.info("Daily digest: no recipient today, nothing sent")
@@ -384,16 +453,15 @@ async def send_daily_digest(session: AsyncSession) -> int:
         return 0
 
     queued = 0
-    # The parc's maintenance is resolved once for the run, not per recipient.
-    fleet = await fleet_maintenance(session, chosen[0][1].generated_at)
-    for user, digest in chosen:
-        subject, text = render_digest(digest)
-        # The same parc for everyone, then what is *theirs*: the verifications
-        # they were handed, the maintenances they own that are due.
-        personal = await personal_block(session, user, digest.generated_at, fleet=fleet)
-        body = text if not personal else text + "\n\n" + "\n".join(personal)
-        if queue_email(session, to=user.email, subject=subject, text=body):
+    for plan in planned:
+        # The same parc for everyone who reads it, then what is *theirs*: the
+        # verifications they were handed, the maintenances they own that are due.
+        if plan.digest is not None:
+            subject, body = render_digest(plan.digest, plan.personal)
+        else:
+            subject, body = render_tasks_digest(plan.personal, utcnow())
+        if queue_email(session, to=plan.user.email, subject=subject, text=body):
             queued += 1
     await session.commit()
-    logger.info("Daily digest queued for %d/%d recipient(s)", queued, len(recipients))
+    logger.info("Daily digest queued for %d/%d recipient(s)", queued, len(planned))
     return queued

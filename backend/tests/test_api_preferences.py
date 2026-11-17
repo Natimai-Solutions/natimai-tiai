@@ -111,3 +111,39 @@ async def test_the_document_is_bounded(client, db_session):
     # The refused write left the document as it was.
     me = (await client.get("/api/v1/auth/me", headers=headers)).json()
     assert set(me["preferences"]) == {"blob"}
+
+
+async def test_concurrent_writes_of_distinct_keys_all_stick(client, db_session):
+    """Eight pages saving eight different keys at the same instant: every key
+    is kept. Each write is merged by the database on the row as it stands,
+    not on the copy its request had read."""
+    import asyncio
+
+    headers = await _login(client, db_session, "busy@test.local")
+    responses = await asyncio.gather(
+        *(
+            client.patch(
+                "/api/v1/auth/me",
+                headers=headers,
+                json={"preferences": {f"page{i}": [i]}},
+            )
+            for i in range(8)
+        )
+    )
+    assert [r.status_code for r in responses] == [200] * 8
+    me = (await client.get("/api/v1/auth/me", headers=headers)).json()
+    assert me["preferences"] == {f"page{i}": [i] for i in range(8)}
+
+
+async def test_a_null_key_is_removed_by_the_database_merge(client, db_session):
+    headers = await _login(client, db_session, "tidy@test.local")
+    await client.patch(
+        "/api/v1/auth/me", headers=headers, json={"preferences": {"a": 1, "b": 2}}
+    )
+    resp = await client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"preferences": {"a": None, "c": {"x": [1, 2]}}},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["preferences"] == {"b": 2, "c": {"x": [1, 2]}}
