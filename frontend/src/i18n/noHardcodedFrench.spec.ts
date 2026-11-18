@@ -34,24 +34,6 @@ const PENDING = new Set<string>([
   'utils/agentVersion.ts',
   'utils/machineAlerts.ts',
 
-  // --- Lot B : liste des postes
-  'components/machine/MachineColumnsDialog.vue',
-  'components/machines-list/MachinePlaceDialog.vue',
-  'components/machines-list/MachinesBulkBar.vue',
-  'components/machines-list/MachinesFilterPanel.vue',
-  'components/machines-list/MachinesFiltersBar.vue',
-  'components/machines-list/MachinesTable.vue',
-  'components/machines-list/MachinesToolbar.vue',
-  'composables/useMachineBulkActions.ts',
-  'composables/useMachineColumnLayout.ts',
-  'composables/useMachineFleetOptions.ts',
-  'pages/MachinesPage.vue',
-  'services/machines.ts',
-  'utils/machineListFilters.ts',
-  'utils/machineListTable.ts',
-  'utils/machineQuery.ts',
-  'utils/usageFilter.ts',
-
   // --- Lot C1 : Paramètres
   'pages/SettingsPage.vue',
   'utils/emailSettings.ts',

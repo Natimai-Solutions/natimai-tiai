@@ -4,7 +4,7 @@
        all of it read as a strip of look-alike icons stuck together, so each
        button carries a label and a colour of its own. -->
   <div class="row items-center q-col-gutter-md q-mb-sm">
-    <h1 class="text-h5 q-my-none col-auto">Postes</h1>
+    <h1 class="text-h5 q-my-none col-auto">{{ t('machines.toolbar.title') }}</h1>
     <q-space />
     <div class="col-auto">
       <q-btn
@@ -12,10 +12,10 @@
         no-caps
         color="primary"
         icon="view_column"
-        label="Colonnes"
+        :label="t('machines.toolbar.columns')"
         @click="emit('columns')"
       >
-        <q-tooltip>Colonnes affichées et leur ordre — enregistrés sur votre compte</q-tooltip>
+        <q-tooltip>{{ t('machines.toolbar.columnsHint') }}</q-tooltip>
       </q-btn>
     </div>
     <div class="col-auto">
@@ -24,14 +24,16 @@
         no-caps
         color="positive"
         icon="download"
-        label="Exporter"
+        :label="t('machines.toolbar.export')"
         @click="emit('export')"
       >
-        <q-tooltip>Exporter le parc filtré (Excel ou CSV, colonnes au choix)</q-tooltip>
+        <q-tooltip>{{ t('machines.toolbar.exportHint') }}</q-tooltip>
       </q-btn>
     </div>
     <div v-if="lastRefreshedAt" class="text-caption text-muted col-auto">
-      Actualisé à {{ lastRefreshedAt.toLocaleTimeString(intlTag()) }}
+      {{
+        t('machines.toolbar.refreshedAt', { time: lastRefreshedAt.toLocaleTimeString(intlTag()) })
+      }}
     </div>
     <div class="col-auto">
       <q-btn
@@ -39,7 +41,7 @@
         round
         color="primary"
         icon="refresh"
-        aria-label="Actualiser"
+        :aria-label="t('machines.toolbar.refresh')"
         :loading="loading"
         @click="emit('refresh')"
       >
@@ -50,7 +52,8 @@
 </template>
 
 <script setup lang="ts">
-import { intlTag } from 'src/i18n';
+import { computed } from 'vue';
+import { intlTag, t } from 'src/i18n';
 import { AUTO_REFRESH_INTERVAL_MS } from 'src/composables/useAutoRefresh';
 
 defineProps<{
@@ -61,7 +64,7 @@ defineProps<{
 
 const emit = defineEmits<{ columns: []; export: []; refresh: [] }>();
 
-const autoRefreshHint = `Actualiser — automatique toutes les ${Math.round(
-  AUTO_REFRESH_INTERVAL_MS / 1000,
-)} s, en pause pendant une sélection`;
+const autoRefreshHint = computed(() =>
+  t('machines.toolbar.autoRefreshHint', { seconds: Math.round(AUTO_REFRESH_INTERVAL_MS / 1000) }),
+);
 </script>

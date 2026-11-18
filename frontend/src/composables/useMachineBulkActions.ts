@@ -1,5 +1,6 @@
 import { ref, type Ref } from 'vue';
 import { useQuasar } from 'quasar';
+import { t } from 'src/i18n';
 import { bulkCheckNotification, createChecksBulk, type CheckPayload } from 'src/services/checks';
 import {
   bulkSendNotification,
@@ -74,7 +75,7 @@ export function useMachineBulkActions(options: {
       await reload();
       onPlaced();
     } catch (e) {
-      $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
+      $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machines.bulk.placeFailed')) });
     }
   }
 
@@ -116,7 +117,7 @@ export function useMachineBulkActions(options: {
       } catch (e) {
         $q.notify({
           type: 'negative',
-          message: apiErrorMessage(e, "Échec de l'envoi des commandes"),
+          message: apiErrorMessage(e, t('machines.bulk.sendFailed')),
         });
       }
     } finally {
@@ -129,7 +130,7 @@ export function useMachineBulkActions(options: {
       $q.notify(wakeNotification(await wakeMachines(ids)));
       selected.value = [];
     } catch (e) {
-      $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec du réveil') });
+      $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machines.bulk.wakeFailed')) });
     }
   }
 
@@ -138,13 +139,10 @@ export function useMachineBulkActions(options: {
     const ids = selectedIds();
     if (!ids.length) return;
     $q.dialog({
-      title: 'Autoriser le ré-enrôlement',
-      message:
-        `Autoriser le ré-enrôlement de ${ids.length} poste(s) ? Les postes sans demande en ` +
-        'attente ni token révoqué sont ignorés. Chaque poste revient de lui-même à sa prochaine ' +
-        "tentative d'enrôlement.",
-      cancel: { flat: true, noCaps: true, label: 'Annuler' },
-      ok: { unelevated: true, noCaps: true, label: 'Autoriser' },
+      title: t('machines.bulk.reenrollTitle'),
+      message: t('machines.bulk.reenrollMessage', { count: ids.length }, ids.length),
+      cancel: { flat: true, noCaps: true, label: t('machines.bulk.cancel') },
+      ok: { unelevated: true, noCaps: true, label: t('machines.bulk.allow') },
       persistent: true,
     }).onOk(() => {
       void doReenroll(ids);
@@ -157,7 +155,10 @@ export function useMachineBulkActions(options: {
       selected.value = [];
       await reload();
     } catch (e) {
-      $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'autorisation") });
+      $q.notify({
+        type: 'negative',
+        message: apiErrorMessage(e, t('machines.bulk.reenrollFailed')),
+      });
     }
   }
 

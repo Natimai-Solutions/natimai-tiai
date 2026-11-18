@@ -26,8 +26,12 @@
             class="q-mr-sm"
           >
             <q-tooltip>
-              {{ onlineLabel(props.row.is_online) }} — dernier contact
-              {{ timeAgoLabel(props.row.last_seen) }}
+              {{
+                t('machines.table.onlineHint', {
+                  state: onlineLabel(props.row.is_online),
+                  ago: timeAgoLabel(props.row.last_seen),
+                })
+              }}
             </q-tooltip>
           </q-icon>
           <!-- The name is the way into the fiche, and the only one: a link,
@@ -52,10 +56,10 @@
             class="q-ml-xs"
           >
             <q-tooltip>
-              Vérification demandée{{
+              {{
                 props.row.check_assigned_to
-                  ? `, affectée à ${props.row.check_assigned_to}`
-                  : ', à prendre'
+                  ? t('machines.table.checkAssigned', { name: props.row.check_assigned_to })
+                  : t('machines.table.checkUnassigned')
               }}
             </q-tooltip>
           </q-icon>
@@ -69,7 +73,7 @@
             class="q-ml-xs"
             data-test="token-revoked"
           >
-            <q-tooltip>Token révoqué : le poste est coupé du serveur</q-tooltip>
+            <q-tooltip>{{ t('machines.table.tokenRevoked') }}</q-tooltip>
           </q-icon>
           <q-icon
             v-else-if="props.row.reenroll_requested"
@@ -79,9 +83,7 @@
             class="q-ml-xs"
             data-test="reenroll-requested"
           >
-            <q-tooltip
-              >Ré-enrôlement demandé : à autoriser depuis la fiche ou la sélection</q-tooltip
-            >
+            <q-tooltip>{{ t('machines.table.reenrollRequested') }}</q-tooltip>
           </q-icon>
           <q-icon
             v-if="props.row.needs_verification"
@@ -90,9 +92,7 @@
             size="16px"
             class="q-ml-xs"
           >
-            <q-tooltip
-              >Identité à confirmer — empreinte matérielle divergente (doublon possible)</q-tooltip
-            >
+            <q-tooltip>{{ t('machines.table.needsVerification') }}</q-tooltip>
           </q-icon>
         </div>
       </q-td>
@@ -107,8 +107,10 @@
           <q-tooltip>
             {{
               props.row.maintenance_due_at
-                ? `Due le ${dueDate(props.row.maintenance_due_at)}`
-                : 'Exclu de la maintenance'
+                ? t('machines.table.maintenanceDue', {
+                    date: dueDate(props.row.maintenance_due_at),
+                  })
+                : t('machines.table.maintenanceExcluded')
             }}
             {{ props.row.maintenance_owner ? ` · ${props.row.maintenance_owner}` : '' }}
           </q-tooltip>
@@ -126,8 +128,12 @@
           class="q-ml-xs"
         >
           <q-tooltip>
-            Emplacement divergent : l'agent déclare « {{ props.row.location }} », la salle est à «
-            {{ props.row.room_location }} »
+            {{
+              t('machines.table.locationMismatch', {
+                agent: props.row.location,
+                room: props.row.room_location,
+              })
+            }}
           </q-tooltip>
         </q-icon>
       </q-td>
@@ -142,7 +148,7 @@
           size="16px"
           class="q-ml-xs"
         >
-          <q-tooltip>Agent obsolète — référence du parc : {{ agentLatest }}</q-tooltip>
+          <q-tooltip>{{ t('machines.table.agentOutdated', { version: agentLatest }) }}</q-tooltip>
         </q-icon>
       </q-td>
     </template>
@@ -168,13 +174,17 @@
           size="18px"
           class="q-ml-xs"
         >
-          <q-tooltip>Redémarrage requis</q-tooltip>
+          <q-tooltip>{{ t('machines.table.rebootRequired') }}</q-tooltip>
         </q-icon>
         <q-tooltip>
           {{
             props.row.wu_pending_count === null
-              ? 'Windows Update jamais remonté par l’agent'
-              : `${props.row.wu_pending_count} mise(s) à jour en attente`
+              ? t('machines.table.wuNever')
+              : t(
+                  'machines.table.wuPending',
+                  { count: props.row.wu_pending_count },
+                  props.row.wu_pending_count,
+                )
           }}
         </q-tooltip>
       </q-td>
@@ -199,11 +209,15 @@
             style="width: 90px"
           />
           <div class="text-caption text-muted">
-            {{ sizeLabel(props.row.system_volume_free_mb) }} libres
+            {{ t('machines.table.diskFree', { free: sizeLabel(props.row.system_volume_free_mb) }) }}
           </div>
           <q-tooltip>
-            {{ sizeLabel(props.row.system_volume_free_mb) }} libres sur
-            {{ sizeLabel(props.row.system_volume_total_mb) }}
+            {{
+              t('machines.table.diskFreeOf', {
+                free: sizeLabel(props.row.system_volume_free_mb),
+                total: sizeLabel(props.row.system_volume_total_mb),
+              })
+            }}
           </q-tooltip>
         </template>
         <span v-else class="text-muted">—</span>
@@ -214,20 +228,27 @@
         <q-badge :color="sessionColor(props.row.session_user_present)">
           {{ sessionLabel(props.row.session_user_present, props.row.session_username) }}
         </q-badge>
-        <q-tooltip>Au dernier contact : {{ formatDateTime(props.row.last_seen) }}</q-tooltip>
+        <q-tooltip>
+          {{ t('machines.table.sessionAt', { date: formatDateTime(props.row.last_seen) }) }}
+        </q-tooltip>
       </q-td>
     </template>
     <template #body-cell-usage="props">
       <q-td :props="props">
-        <span v-if="props.row.usage_hours === null" class="text-muted">récent</span>
+        <span v-if="props.row.usage_hours === null" class="text-muted">
+          {{ t('machines.table.usageRecent') }}
+        </span>
         <span v-else :class="{ 'text-muted': props.row.usage_hours === 0 }">
           {{ hoursLabel(props.row.usage_hours) }}
         </span>
         <q-tooltip>
           {{
             props.row.usage_hours === null
-              ? `Enrôlé il y a moins de ${usageWindowDays} jours : pas encore de fenêtre complète`
-              : `Allumé ${hoursLabel(props.row.usage_hours)} sur les ${usageWindowDays} derniers jours`
+              ? t('machines.table.usageRecentHint', { days: usageWindowDays })
+              : t('machines.table.usageHint', {
+                  hours: hoursLabel(props.row.usage_hours),
+                  days: usageWindowDays,
+                })
           }}
         </q-tooltip>
       </q-td>
@@ -241,6 +262,7 @@
 <script setup lang="ts">
 import type { QTableColumn, QTableProps } from 'quasar';
 import type { RouteLocationRaw } from 'vue-router';
+import { t } from 'src/i18n';
 import type { Machine } from 'src/services/machines';
 import { dueDate, maintenanceStateColor, maintenanceStateLabel } from 'src/services/maintenance';
 import { isAgentOutdated } from 'src/utils/agentVersion';

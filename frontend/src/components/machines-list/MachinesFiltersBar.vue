@@ -2,13 +2,13 @@
   <div class="row items-center q-col-gutter-md q-mb-sm">
     <div class="col-12 col-sm">
       <q-input
-        aria-label="Rechercher un poste"
+        :aria-label="t('machines.bar.searchLabel')"
         :model-value="modelValue.search"
         dense
         outlined
         clearable
         debounce="300"
-        placeholder="Nom, IP, MAC, antivirus ou UUID…"
+        :placeholder="t('machines.bar.searchPlaceholder')"
         style="max-width: 480px"
         @update:model-value="(v) => set({ search: v == null ? '' : String(v) })"
         @blur="trimSearch"
@@ -23,17 +23,17 @@
       <q-toggle
         :model-value="modelValue.onlineOnly"
         dense
-        label="Allumés"
+        :label="t('machines.bar.online')"
         @update:model-value="(v: boolean) => set({ onlineOnly: v })"
       >
-        <q-tooltip>Postes allumés — agent en contact ces dernières minutes</q-tooltip>
+        <q-tooltip>{{ t('machines.bar.onlineHint') }}</q-tooltip>
       </q-toggle>
     </div>
     <div class="col-auto">
       <q-toggle
         :model-value="modelValue.threatsOnly"
         dense
-        label="Menaces actives"
+        :label="t('machines.bar.threats')"
         @update:model-value="(v: boolean) => set({ threatsOnly: v })"
       />
     </div>
@@ -44,7 +44,7 @@
         no-caps
         color="secondary"
         icon="filter_list"
-        label="Filtres"
+        :label="t('machines.bar.filters')"
         @click="filtersOpen = !filtersOpen"
       >
         <q-badge v-if="!filtersOpen && chips.length" color="primary" floating>
@@ -94,7 +94,7 @@
       size="sm"
       color="primary"
       icon="filter_list_off"
-      label="Tout effacer"
+      :label="t('machines.bar.clearAll')"
       class="q-ml-xs"
       @click="clearAll"
     />
@@ -111,13 +111,14 @@
   >
     <div v-for="u in unmatched" :key="u.key">
       <q-icon name="info" size="16px" class="q-mr-xs" />
-      {{ u.facet }} « {{ u.value }} » : valeur exacte — aucune correspondance dans le parc.
+      {{ t('machines.bar.unmatched', { facet: u.facet, value: u.value }) }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { t } from 'src/i18n';
 import { getSoftware, softwareLabel } from 'src/services/software';
 import MachinesFilterPanel from './MachinesFilterPanel.vue';
 import {
@@ -183,7 +184,7 @@ watch(
 const chips = computed(() =>
   machineFilterChips(props.modelValue, props.options, props.usageWindowDays).map((c) =>
     c.key === 'software' && softwareName.value
-      ? { ...c, label: `Logiciel : ${softwareName.value}` }
+      ? { ...c, label: t('machines.bar.softwareChip', { name: softwareName.value }) }
       : c,
   ),
 );
