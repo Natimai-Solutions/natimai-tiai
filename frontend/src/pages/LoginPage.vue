@@ -7,14 +7,14 @@
           <q-card-section class="text-center">
             <q-icon name="shield" size="48px" color="primary" />
             <div class="text-h6 q-mt-sm">Tia'i — Console</div>
-            <div class="text-caption text-muted">Supervision du parc</div>
+            <div class="text-caption text-muted">{{ t('auth.login.subtitle') }}</div>
           </q-card-section>
 
           <!-- Sent here by a request that found the session over: said once,
                here, whatever the page that hit it managed to show. -->
           <q-banner v-if="sessionEnded" class="surface-orange q-mx-md" rounded dense role="status">
             <template #avatar><q-icon name="schedule" /></template>
-            Votre session a pris fin : reconnectez-vous pour reprendre où vous en étiez.
+            {{ t('auth.login.sessionEnded') }}
           </q-banner>
 
           <q-form @submit="onSubmit">
@@ -23,7 +23,7 @@
                 v-model="email"
                 autocomplete="username"
                 type="email"
-                label="E-mail"
+                :label="t('auth.email')"
                 outlined
                 dense
                 autofocus
@@ -33,7 +33,7 @@
                 v-model="password"
                 autocomplete="current-password"
                 type="password"
-                label="Mot de passe"
+                :label="t('auth.login.password')"
                 outlined
                 dense
                 :rules="[required]"
@@ -45,14 +45,14 @@
                 type="submit"
                 color="primary"
                 class="full-width"
-                label="Se connecter"
+                :label="t('auth.login.submit')"
                 :loading="loading"
               />
               <q-btn
                 flat
                 dense
                 class="full-width"
-                label="Mot de passe oublié ?"
+                :label="t('auth.login.forgot')"
                 :to="{ name: 'forgot-password' }"
               />
             </q-card-actions>
@@ -67,6 +67,7 @@
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
+import { t } from 'src/i18n';
 import { useAuthStore } from 'src/stores/auth';
 import { apiErrorMessage } from 'src/services/errors';
 import { safeRedirect } from 'src/router/access';
@@ -80,7 +81,7 @@ const email = ref('');
 const password = ref('');
 const loading = ref(false);
 
-const required = (v: string) => !!v || 'Requis';
+const required = (v: string) => !!v || t('auth.required');
 const sessionEnded = computed(() => route.query.ended === '1');
 
 async function onSubmit() {
@@ -89,7 +90,7 @@ async function onSubmit() {
     await auth.login(email.value, password.value);
     await router.push(safeRedirect(route.query.redirect) ?? '/');
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Identifiants invalides') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('auth.login.failed')) });
   } finally {
     loading.value = false;
   }

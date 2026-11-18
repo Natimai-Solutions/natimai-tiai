@@ -89,21 +89,6 @@ const PENDING = new Set<string>([
   'services/maintenance.ts',
   'services/rooms.ts',
 
-  // --- Lot E1 : coquille, connexion, tableau de bord, logiciels, mise en forme
-  'components/CardLoadError.vue',
-  'components/LoadErrorBanner.vue',
-  'layouts/MainLayout.vue',
-  'pages/DashboardPage.vue',
-  'pages/ErrorNotFound.vue',
-  'pages/ForgotPasswordPage.vue',
-  'pages/LoginPage.vue',
-  'pages/NoAccessPage.vue',
-  'pages/ResetPasswordPage.vue',
-  'pages/SoftwarePage.vue',
-  'router/routes.ts',
-  'utils/format.ts',
-  'utils/staleChunks.ts',
-
   // --- Lot E2 : paquets
   'components/package/PackageDeployDialog.vue',
   'pages/PackageDetailPage.vue',

@@ -1,7 +1,7 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-md q-mb-md">
-      <h1 class="text-h5 q-my-none col-auto">Logiciels du parc</h1>
+      <h1 class="text-h5 q-my-none col-auto">{{ t('software.title') }}</h1>
       <q-space />
       <div class="col-auto">
         <!-- Excel or CSV, as the fleet export offers: the same catalogue, and
@@ -11,20 +11,20 @@
           no-caps
           color="positive"
           icon="download"
-          label="Exporter"
+          :label="t('software.export')"
           :loading="exporting"
         >
           <q-list>
             <q-item v-close-popup clickable @click="doExport('xlsx')">
               <q-item-section avatar><q-icon name="table_chart" /></q-item-section>
-              <q-item-section>Excel (.xlsx)</q-item-section>
+              <q-item-section>{{ t('software.exportExcel') }}</q-item-section>
             </q-item>
             <q-item v-close-popup clickable @click="doExport('csv')">
               <q-item-section avatar><q-icon name="description" /></q-item-section>
-              <q-item-section>CSV</q-item-section>
+              <q-item-section>{{ t('software.exportCsv') }}</q-item-section>
             </q-item>
           </q-list>
-          <q-tooltip>Télécharger le catalogue filtré (Excel ou CSV)</q-tooltip>
+          <q-tooltip>{{ t('software.exportHint') }}</q-tooltip>
         </q-btn-dropdown>
       </div>
       <div class="col-auto">
@@ -33,7 +33,7 @@
           round
           color="primary"
           icon="refresh"
-          aria-label="Actualiser"
+          :aria-label="t('software.refresh')"
           :loading="loading"
           @click="load"
         />
@@ -46,12 +46,12 @@
       <q-card-section>
         <q-input
           v-model="search"
-          aria-label="Rechercher un logiciel"
+          :aria-label="t('software.search')"
           dense
           outlined
           clearable
           debounce="300"
-          placeholder="Nom ou éditeur…"
+          :placeholder="t('software.searchPlaceholder')"
           @update:model-value="onSearch"
         >
           <template #prepend><q-icon name="search" /></template>
@@ -79,7 +79,7 @@
               dense
               no-caps
               color="primary"
-              :label="`${props.value} poste(s)`"
+              :label="t('software.machineCount', { count: props.value }, props.value)"
               :to="{ name: 'machines', query: { software_id: props.row.id } }"
             />
           </q-td>
@@ -93,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { intlTag } from 'src/i18n';
+import { intlTag, t } from 'src/i18n';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
@@ -130,24 +130,43 @@ const pagination = ref({
   descending: true,
 });
 
-const columns: QTableColumn<SoftwareEntry>[] = [
-  { name: 'name', label: 'Nom', field: 'name', align: 'left', sortable: true },
-  { name: 'version', label: 'Version', field: 'version', align: 'left', sortable: true },
-  { name: 'publisher', label: 'Éditeur', field: 'publisher', align: 'left', sortable: true },
+// A computed: the headers follow a change of language.
+const columns = computed<QTableColumn<SoftwareEntry>[]>(() => [
+  {
+    name: 'name',
+    label: t('software.columns.name'),
+    field: 'name',
+    align: 'left',
+    sortable: true,
+  },
+  {
+    name: 'version',
+    label: t('software.columns.version'),
+    field: 'version',
+    align: 'left',
+    sortable: true,
+  },
+  {
+    name: 'publisher',
+    label: t('software.columns.publisher'),
+    field: 'publisher',
+    align: 'left',
+    sortable: true,
+  },
   {
     name: 'machine_count',
-    label: 'Postes',
+    label: t('software.columns.machines'),
     field: 'machine_count',
     align: 'right',
     sortable: true,
   },
   {
     name: 'first_seen',
-    label: 'Vu depuis',
+    label: t('software.columns.firstSeen'),
     field: 'first_seen',
     align: 'left',
   },
-];
+]);
 
 const SORT_FIELDS: SoftwareSortField[] = ['name', 'version', 'publisher', 'machine_count'];
 
@@ -206,9 +225,9 @@ function localDate(value: string | null): string {
 
 // Three different empty tables, three different sentences (audit U09).
 const noDataLabel = computed(() => {
-  if (loadError.value) return 'Le catalogue n’a pas pu être chargé.';
-  if (search.value) return `Aucun logiciel ne correspond à « ${search.value} ».`;
-  return "Aucun logiciel inventorié pour l'instant.";
+  if (loadError.value) return t('software.empty.loadFailed');
+  if (search.value) return t('software.empty.noMatch', { search: search.value });
+  return t('software.empty.none');
 });
 
 // Which load is the current one: a search typed while the previous one is in
@@ -276,9 +295,9 @@ async function doExport(format: SoftwareExportFormat) {
   exporting.value = true;
   try {
     const blob = await exportSoftware(format, search.value ? { search: search.value } : {});
-    downloadBlob(blob, `logiciels.${format}`);
+    downloadBlob(blob, `${t('software.exportFileName')}.${format}`);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'export") });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('software.exportFailed')) });
   } finally {
     exporting.value = false;
   }
