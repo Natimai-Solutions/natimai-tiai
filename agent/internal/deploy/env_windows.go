@@ -13,6 +13,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"tiai/agent/internal/msg"
 )
 
 // Supported tells whether this platform can deploy at all.
@@ -32,7 +34,7 @@ func (e *SystemEnv) VerifyAuthenticode(path string) (string, error) {
 		if err2 := winVerifyTrust(path, windows.WTD_REVOKE_NONE); err2 != nil {
 			return "", err2
 		}
-		return "révocation non vérifiable hors ligne", nil
+		return RevocationOffline, nil
 	}
 	return "", err
 }
@@ -98,7 +100,7 @@ func (e *SystemEnv) WingetPath() (string, error) {
 	}
 	best := LatestWingetDir(withWinget)
 	if best == "" {
-		return "", errors.New("winget absent de ce poste (App Installer non installé — fréquent sur LTSC et Windows Server) : utiliser un paquet de fichiers")
+		return "", msg.Err("deploy.winget_missing", nil)
 	}
 	return filepath.Join(best, "winget.exe"), nil
 }

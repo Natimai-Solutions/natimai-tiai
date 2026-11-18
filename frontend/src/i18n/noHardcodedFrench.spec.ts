@@ -110,11 +110,6 @@ const PENDING = new Set<string>([
   'pages/PackagesPage.vue',
   'services/packages.ts',
 
-  // --- Lot F : commandes
-  'components/machine/CommandOutputDialog.vue',
-  'components/machine/MachineCommandsCard.vue',
-  'services/commands.ts',
-
   // --- Lot G : exports
   'components/machine/MachineExportDialog.vue',
 ]);

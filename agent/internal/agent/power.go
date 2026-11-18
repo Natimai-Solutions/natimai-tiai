@@ -8,6 +8,7 @@ import (
 
 	"tiai/agent/internal/collector"
 	"tiai/agent/internal/logging"
+	"tiai/agent/internal/msg"
 )
 
 // Rationing the power actions — the two commands in the catalogue whose effect
@@ -95,11 +96,11 @@ func (g *powerGuard) allow(now time.Time) error {
 
 	if !g.scheduled.IsZero() {
 		if since := now.Sub(g.scheduled); since < minPowerActionInterval {
-			return fmt.Errorf(
-				"%w : un %s a déjà été programmé sur ce poste il y a %s "+
-					"(délai minimum %s)",
-				errPowerActionTooSoon, g.kind, humanAge(since),
-				humanAge(minPowerActionInterval))
+			return msg.Wrap("power.too_soon", msg.Params{
+				"action": powerActionCode(g.kind),
+				"ago":    humanAge(since),
+				"min":    humanAge(minPowerActionInterval),
+			}, errPowerActionTooSoon)
 		}
 	}
 
@@ -113,10 +114,10 @@ func (g *powerGuard) allow(now time.Time) error {
 		return nil
 	}
 	if up < minPowerActionInterval {
-		return fmt.Errorf(
-			"%w : ce poste a démarré il y a %s (délai minimum %s avant de l'arrêter "+
-				"ou de le redémarrer à nouveau)",
-			errPowerActionTooSoon, humanAge(up), humanAge(minPowerActionInterval))
+		return msg.Wrap("power.too_soon_boot", msg.Params{
+			"ago": humanAge(up),
+			"min": humanAge(minPowerActionInterval),
+		}, errPowerActionTooSoon)
 	}
 	return nil
 }
@@ -148,6 +149,15 @@ func (g *powerGuard) pending(now time.Time) string {
 		return ""
 	}
 	return g.kind
+}
+
+// powerActionCode names an operation for the console (msg): "reboot" or
+// "shutdown", what the command types call them.
+func powerActionCode(kind string) string {
+	if kind == actionShutdown {
+		return "shutdown"
+	}
+	return "reboot"
 }
 
 // humanAge renders a duration the way the console message needs it.

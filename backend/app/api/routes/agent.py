@@ -5,10 +5,11 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from ipaddress import ip_address
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlmodel import col, select
@@ -23,6 +24,7 @@ from app.core.net import client_ip
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.command import crud as command_crud
+from app.features.command import texts as command_texts
 from app.features.command.models import (
     AGENT_REPORTABLE_STATUSES,
     PACKAGE_COMMAND_TYPES,
@@ -512,6 +514,24 @@ class CommandResult(BaseModel):
     status: CommandStatus
     output: str | None = None
     error: str | None = None
+    # What the console words the agent's own message from (plan console
+    # bilingue, I5): the ``error`` of a failed result, the ``output`` of a
+    # succeeded one. Optional — an older agent sends neither, and its text
+    # reads as before — and dropped if malformed (``texts.clean_message``),
+    # the text staying. Typed loosely on purpose: a value of the wrong shape
+    # is dropped, never a reason to refuse the verdict.
+    message_code: Any = None
+    message_params: Any = None
+
+    @model_validator(mode="after")
+    def _clean_message(self) -> "CommandResult":
+        code, params = command_texts.clean_message(
+            self.message_code, self.message_params
+        )
+        if code is None and self.message_code is not None:
+            logger.info("agent result: message code dropped (malformed)")
+        self.message_code, self.message_params = code, params
+        return self
 
     @field_validator("status")
     @classmethod
@@ -534,7 +554,7 @@ class CommandResult(BaseModel):
         """Cap the reported text rather than 422 it — a truncated verdict beats none."""
         if value is None or len(value) <= RESULT_TEXT_MAX:
             return value
-        return value[:RESULT_TEXT_MAX] + "\n[…] sortie tronquée par le serveur"
+        return value[:RESULT_TEXT_MAX] + command_texts.TRUNCATED_NOTE
 
 
 # --- Routes ----------------------------------------------------------------
@@ -1007,7 +1027,7 @@ async def heartbeat(
         session, {c.package_id for c in pending if c.package_id is not None}
     )
 
-    def refusal(c: Command) -> str | None:
+    def refusal(c: Command) -> command_texts.Verdict | None:
         """Why a deployment cannot go out: its package was deleted, or it
         changed since the deployment was queued — what was approved is not
         what would run (audit S08) — or, for an installation, it was retired
@@ -1016,14 +1036,11 @@ async def heartbeat(
         if c.type not in PACKAGE_COMMAND_TYPES:
             return None
         if c.package_id not in deliveries:
-            return "Paquet supprimé avant l'exécution"
+            return command_texts.package_deleted()
         if c.type == CommandType.PACKAGE_INSTALL and c.package_id in retired:
-            return "Paquet retiré après la mise en file : installation annulée"
+            return command_texts.package_retired_after_queue()
         if c.package_digest is not None and c.package_digest != digests[c.package_id]:
-            return (
-                "Paquet modifié après la mise en file (fichiers, ligne de commande "
-                "ou signature) : relancez le déploiement pour envoyer la nouvelle version"
-            )
+            return command_texts.package_changed_after_queue()
         return None
 
     commands: list[CommandOut] = []
@@ -1034,7 +1051,9 @@ async def heartbeat(
         reason = refusal(c)
         if reason is not None:
             c.status = CommandStatus.FAILED
-            c.error = reason
+            c.error = reason.text
+            c.result_code = reason.code
+            c.result_params = reason.params
             c.finished_at = now
             refused_held_files = refused_held_files or bool(c.package_files)
             continue
@@ -1151,15 +1170,22 @@ async def command_result(
     cmd.status = payload.status
     cmd.result_output = payload.output
     cmd.error = payload.error
+    # The agent's code, or none: a late verdict replacing a closure the
+    # server made replaces its code too.
+    cmd.result_code = payload.message_code
+    cmd.result_params = payload.message_params
     if relayed:
         # Signed by the relay: the row sits on the target's history, where a
         # verdict that does not say which poste emitted would read as if the
         # sleeping machine had written it.
         who = wol_relay.relay_label(machine)
         if cmd.result_output:
-            cmd.result_output = f"Relayé par {who} — {cmd.result_output}"
+            cmd.result_output = command_texts.relayed(who, cmd.result_output)
         if cmd.error:
-            cmd.error = f"Relayé par {who} — {cmd.error}"
+            cmd.error = command_texts.relayed(who, cmd.error)
+        if cmd.result_code is not None:
+            # The console signs the worded verdict the same way.
+            cmd.result_params = {**(cmd.result_params or {}), "relay": who}
     cmd.finished_at = utcnow()
     cmd.agent_verdict_at = cmd.finished_at
     held_files = bool(cmd.package_files)

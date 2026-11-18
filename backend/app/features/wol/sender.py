@@ -8,9 +8,11 @@ can watch what would have gone out without putting anything on the wire.
 import asyncio
 import logging
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from app.core.config import settings
+from app.features.command import texts
 from app.features.wol.packet import (
     NoDestination,
     destinations_for,
@@ -40,6 +42,14 @@ class WakeOutcome:
 
     ok: bool
     detail: str
+    # What the console words ``detail`` from (``command.texts``), stored
+    # beside it in ``result_code`` and ``result_params``.
+    code: str | None = None
+    params: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def of(cls, ok: bool, verdict: texts.Verdict) -> "WakeOutcome":
+        return cls(ok=ok, detail=verdict.text, code=verdict.code, params=verdict.params)
 
 
 def _emit(destinations: list[str], port: int, payload: bytes, count: int) -> None:
@@ -53,7 +63,7 @@ def _emit(destinations: list[str], port: int, payload: bytes, count: int) -> Non
                 sock.sendto(payload, (destination, port))
 
 
-def _no_destination_detail(ip: str | None, prefix_length: int | None) -> str:
+def _no_destination(ip: str | None, prefix_length: int | None) -> texts.Verdict:
     """Why the server found no broadcast address, naming the setting to change.
 
     Three different situations, and three different things to do about them:
@@ -61,36 +71,18 @@ def _no_destination_detail(ip: str | None, prefix_length: int | None) -> str:
     whose subnet reaches beyond what it allows.
     """
     reason = no_destination_reason(ip)
-    if reason is NoDestination.NO_IPV4:
-        return (
-            "Aucune adresse de diffusion pour ce poste : sa dernière adresse IP "
-            "connue est absente ou n'est pas de l'IPv4. Renseigner "
-            "WOL_BROADCAST_ADDRESSES côté serveur pour émettre malgré tout."
-        )
+    if reason is NoDestination.NO_IPV4 or ip is None:
+        return texts.wake_no_ipv4()
+    # None: the default, the private ranges, which the sentence names.
     allowed = (
         ", ".join(settings.WOL_ALLOWED_NETWORKS)
         if settings.WOL_ALLOWED_NETWORKS
-        else "les plages privées 10.0.0.0/8, 172.16.0.0/12 et 192.168.0.0/16"
+        else None
     )
     if reason is NoDestination.ADDRESS_NOT_ALLOWED:
-        return (
-            f"Réveil refusé : la dernière adresse IP connue du poste ({ip}) est "
-            "hors des réseaux sur lesquels le serveur peut émettre un réveil "
-            f"({allowed}). Ajouter le réseau du poste à WOL_ALLOWED_NETWORKS côté "
-            "serveur, ou renseigner WOL_BROADCAST_ADDRESSES."
-        )
-    default = f"/{settings.WOL_SUBNET_PREFIXLEN} de WOL_SUBNET_PREFIXLEN"
-    masks = (
-        f"masque /{prefix_length} remonté par le poste, à défaut {default}"
-        if prefix_length is not None
-        else f"masque {default}"
-    )
-    return (
-        f"Réveil refusé : l'adresse du poste ({ip}) est autorisée, mais son "
-        f"sous-réseau ({masks}) n'est pas contenu en entier dans les réseaux "
-        f"sur lesquels le serveur peut émettre un réveil ({allowed}). Élargir "
-        "WOL_ALLOWED_NETWORKS au sous-réseau entier du poste, ou renseigner "
-        "WOL_BROADCAST_ADDRESSES."
+        return texts.wake_address_not_allowed(ip, allowed)
+    return texts.wake_subnet_not_allowed(
+        ip, prefix_length, settings.WOL_SUBNET_PREFIXLEN, allowed
     )
 
 
@@ -109,15 +101,7 @@ async def wake(
     """
     target = normalize_mac(mac)
     if target is None:
-        return WakeOutcome(
-            ok=False,
-            detail=(
-                "Aucune adresse MAC connue pour ce poste : son agent n'en a jamais "
-                "remonté (agent antérieur à la fonction, ou carte réseau sans "
-                "adresse exploitable). Un poste ne peut être réveillé qu'après au "
-                "moins une remontée de son agent."
-            ),
-        )
+        return WakeOutcome.of(False, texts.wake_no_mac())
 
     destinations = destinations_for(
         ip,
@@ -126,7 +110,7 @@ async def wake(
         reported_prefixlen=prefix_length,
     )
     if not destinations:
-        return WakeOutcome(ok=False, detail=_no_destination_detail(ip, prefix_length))
+        return WakeOutcome.of(False, _no_destination(ip, prefix_length))
 
     port = settings.WOL_PORT
     count = settings.WOL_PACKET_COUNT
@@ -138,17 +122,7 @@ async def wake(
         await asyncio.to_thread(_emit, destinations, port, payload, count)
     except OSError as exc:
         logger.warning("wol: sending to %s failed: %s", destinations, exc)
-        return WakeOutcome(
-            ok=False,
-            detail=f"Émission du paquet magique impossible : {exc}",
-        )
+        return WakeOutcome.of(False, texts.wake_send_failed(str(exc)))
 
     targets = ", ".join(f"{d}:{port}" for d in destinations)
-    return WakeOutcome(
-        ok=True,
-        detail=(
-            f"Paquet magique émis vers {target} — {count} copie(s) sur {targets}.\n"
-            "L'émission ne prouve pas le réveil : le protocole n'accuse rien, et le "
-            "poste ne réapparaîtra dans la console qu'à la remontée de son agent."
-        ),
-    )
+    return WakeOutcome.of(True, texts.wake_sent(target, count, targets))

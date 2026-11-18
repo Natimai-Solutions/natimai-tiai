@@ -9,6 +9,8 @@ import (
 	"io"
 	"math/big"
 	"os"
+
+	"tiai/agent/internal/msg"
 )
 
 // SignerName reads the name of the Authenticode signer of a PE file: the
@@ -41,7 +43,7 @@ func SignerName(path string) (string, error) {
 	return cert.Subject.String(), nil
 }
 
-var errNotSigned = errors.New("fichier non signé (pas de signature Authenticode)")
+var errNotSigned = msg.Err("deploy.not_signed", nil)
 
 func readAt(r io.ReaderAt, off int64, n int) ([]byte, error) {
 	if off < 0 || n < 0 || n > 64<<20 {

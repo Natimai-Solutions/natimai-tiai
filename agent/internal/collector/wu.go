@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/msg"
 )
 
 // Windows Update: reading what a machine is missing, and installing it on
@@ -450,19 +451,24 @@ type rawWUInstall struct {
 
 // wuResultLabel names an OperationResultCode in the console's language.
 func wuResultLabel(code int) string {
+	return msg.WUResults[wuResultKey(code)]
+}
+
+// wuResultKey names an OperationResultCode for the console (msg.WUResults).
+func wuResultKey(code int) string {
 	switch code {
 	case wuResultSucceeded:
-		return "installée"
+		return "succeeded"
 	case wuResultSucceededWithErrors:
-		return "installée avec des erreurs"
+		return "succeeded_with_errors"
 	case wuResultFailed:
-		return "échec"
+		return "failed"
 	case wuResultAborted:
-		return "abandonnée"
+		return "aborted"
 	case wuResultInProgress:
-		return "encore en cours"
+		return "in_progress"
 	default:
-		return "non démarrée"
+		return "not_started"
 	}
 }
 
@@ -527,14 +533,14 @@ func summarizeInstall(data []byte) (string, error) {
 
 	output := strings.Join(lines, "\n")
 	if failed > 0 {
-		return output, fmt.Errorf("%d mise(s) à jour sur %d n'ont pas été installées",
-			failed, raw.Selected)
+		return output, msg.Err("wu.install_incomplete",
+			msg.Params{"failed": failed, "selected": raw.Selected})
 	}
 	// The global code is checked last: it can report an overall failure even
 	// when every individual update went through (an aborted batch, typically).
 	if raw.Installed > 0 && !wuResultOK(raw.ResultCode) {
-		return output, fmt.Errorf("installation %s (code %d)",
-			wuResultLabel(raw.ResultCode), raw.ResultCode)
+		return output, msg.Err("wu.install_result",
+			msg.Params{"result": wuResultKey(raw.ResultCode), "code": raw.ResultCode})
 	}
 	return output, nil
 }
@@ -567,29 +573,28 @@ func formatInstalledUpdate(u rawWUInstallUpdate) string {
 // Only documented codes are translated, like the maintenance verdicts: anything
 // else is reported raw rather than guessed at, because a confidently wrong
 // diagnosis on a console screen costs more than a bare number.
-var wuErrorHints = []struct {
-	code string
-	hint string
-}{
-	{"0x80070422", "le service Windows Update (wuauserv) est désactivé sur ce poste"},
-	{"0x8024402c", "la source de mises à jour est injoignable : le poste ne résout pas le nom de son serveur WSUS (ou de Windows Update)"},
-	{"0x80072ee2", "délai dépassé en joignant la source de mises à jour : réseau, proxy ou serveur WSUS indisponible"},
-	{"0x8024002e", "l'accès à Windows Update est interdit par stratégie : ce poste doit passer par son serveur WSUS"},
-	{"0x80248014", "service de mises à jour inconnu : la configuration WSUS du poste pointe vers un service qui n'existe pas"},
-	{"0x80244022", "le serveur de mises à jour a répondu « service indisponible » (HTTP 503)"},
-	{"0x80240016", "une autre installation est déjà en cours (TrustedInstaller occupé) : réessayer plus tard"},
-	{"0x80240438", "aucune source de mises à jour n'est configurée sur ce poste"},
+//
+// The sentences are in msg.WUHints, the console's catalogue beside them; this
+// list fixes the order they are looked for in.
+var wuErrorHints = []string{
+	"0x80070422", "0x8024402c", "0x80072ee2", "0x8024002e",
+	"0x80248014", "0x80244022", "0x80240016", "0x80240438",
+}
+
+// wuErrorCode returns the known WU failure code in message, or "".
+func wuErrorCode(message string) string {
+	lower := strings.ToLower(message)
+	for _, code := range wuErrorHints {
+		if strings.Contains(lower, code) {
+			return code
+		}
+	}
+	return ""
 }
 
 // wuErrorHint returns an actionable sentence for a known WU failure, or "".
 func wuErrorHint(message string) string {
-	lower := strings.ToLower(message)
-	for _, h := range wuErrorHints {
-		if strings.Contains(lower, h.code) {
-			return h.hint
-		}
-	}
-	return ""
+	return msg.WUHints[wuErrorCode(message)]
 }
 
 // wrapWUError adds the hint above to a raw WUA failure, keeping the original
@@ -598,8 +603,8 @@ func wrapWUError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if hint := wuErrorHint(err.Error()); hint != "" {
-		return fmt.Errorf("%s (%w)", hint, err)
+	if code := wuErrorCode(err.Error()); code != "" {
+		return msg.Wrap("wu.known_error", msg.Params{"hresult": code}, err)
 	}
 	return err
 }

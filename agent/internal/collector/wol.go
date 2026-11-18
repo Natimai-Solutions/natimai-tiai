@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net"
 	"strings"
+
+	"tiai/agent/internal/msg"
 )
 
 // Relaying a Wake-on-LAN from a poste that is on, for a poste that is off.
@@ -64,36 +65,35 @@ var (
 // A success means the datagrams left this poste, nothing more: Wake-on-LAN is
 // unacknowledged, and the poste that never wakes looks exactly like the one
 // that does.
-func RelayWake(ctx context.Context, mac string) (string, error) {
+func RelayWake(ctx context.Context, mac string) (msg.Message, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return msg.Message{}, err
 	}
 	hw, err := parseWakeMAC(mac)
 	if err != nil {
-		return "", err
+		return msg.Message{}, err
 	}
 	subnets, err := wolLocalSubnets()
 	if err != nil {
-		return "", fmt.Errorf("lecture des cartes réseau de ce poste : %w", err)
+		return msg.Message{}, msg.Wrap("wol.relay.nic_failed", nil, err)
 	}
 	destinations := broadcastAddresses(subnets)
 	if len(destinations) == 0 {
-		return "", errors.New(
-			"ce poste n'a aucun sous-réseau IPv4 sur lequel diffuser le paquet magique")
+		return msg.Message{}, msg.Err("wol.relay.no_subnet", nil)
 	}
 	payload := magicPacket(hw)
 	if err := wolSend(ctx, destinations, wolPort, payload, wolCopies); err != nil {
-		return "", fmt.Errorf("émission du paquet magique impossible : %w", err)
+		return msg.Message{}, msg.Wrap("wol.relay.send_failed", nil, err)
 	}
 	targets := make([]string, 0, len(destinations))
 	for _, d := range destinations {
 		targets = append(targets, fmt.Sprintf("%s:%d", d, wolPort))
 	}
-	return fmt.Sprintf(
-		"Paquet magique émis vers %s depuis ce poste — %d copie(s) sur %s.\n"+
-			"L'émission ne prouve pas le réveil : le protocole n'accuse rien, et le "+
-			"poste visé ne réapparaîtra dans la console qu'à la remontée de son agent.",
-		formatMAC(hw), wolCopies, strings.Join(targets, ", ")), nil
+	return msg.New("wol.relay.sent", msg.Params{
+		"mac":     formatMAC(hw),
+		"copies":  wolCopies,
+		"targets": strings.Join(targets, ", "),
+	}), nil
 }
 
 // parseWakeMAC accepts the notations a MAC is written in — colons (what the
@@ -103,17 +103,18 @@ func RelayWake(ctx context.Context, mac string) (string, error) {
 // broadcast address. A refusal is a `failed` in the console, worded for the
 // administrator who will read it there.
 func parseWakeMAC(value string) (net.HardwareAddr, error) {
+	invalid := msg.Err("wol.relay.bad_mac", msg.Params{"mac": msg.Quote(value)})
 	cleaned := strings.NewReplacer(":", "", "-", "", ".", "", " ", "").Replace(strings.TrimSpace(value))
 	if len(cleaned) != macLength*2 {
-		return nil, fmt.Errorf("adresse MAC à réveiller invalide : %q", value)
+		return nil, invalid
 	}
 	raw, err := hex.DecodeString(cleaned)
 	if err != nil {
-		return nil, fmt.Errorf("adresse MAC à réveiller invalide : %q", value)
+		return nil, invalid
 	}
 	hw := net.HardwareAddr(raw)
 	if bytes.Equal(hw, make([]byte, macLength)) || bytes.Equal(hw, bytes.Repeat([]byte{0xFF}, macLength)) {
-		return nil, fmt.Errorf("adresse MAC à réveiller invalide : %q", value)
+		return nil, invalid
 	}
 	return hw, nil
 }

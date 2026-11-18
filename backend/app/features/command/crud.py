@@ -9,6 +9,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
+from app.features.command import texts
 from app.features.command.models import (
     TERMINAL_STATUSES,
     Command,
@@ -141,18 +142,12 @@ async def create_for_machines(
     return [c.id for c in commands], skipped
 
 
-UNANSWERED_ERROR = (
-    "Sans réponse du poste {hours} h après la remise : commande considérée comme "
-    "perdue (poste éteint, agent arrêté ou mis à jour pendant l'exécution). "
-    "Relancez-la si besoin."
-)
-
-
 async def close_unanswered(session: AsyncSession, *, hours: int) -> int:
     """Close as FAILED the commands delivered or started more than ``hours``
     ago that never got a verdict (audit B10). The caller commits."""
     cutoff = utcnow() - timedelta(hours=hours)
     now = utcnow()
+    verdict = texts.unanswered(hours)
     result = await session.exec(
         update(Command)
         .where(
@@ -170,7 +165,9 @@ async def close_unanswered(session: AsyncSession, *, hours: int) -> int:
         )
         .values(
             status=CommandStatus.FAILED,
-            error=UNANSWERED_ERROR.format(hours=hours),
+            error=verdict.text,
+            result_code=verdict.code,
+            result_params=verdict.params,
             finished_at=now,
         )
     )

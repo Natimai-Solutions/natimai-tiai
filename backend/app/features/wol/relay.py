@@ -45,6 +45,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.features.base import utcnow
+from app.features.command import texts
 from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.machine.agent_version import version_key
 from app.features.machine.models import Machine
@@ -137,11 +138,12 @@ def peer_key(target: Machine) -> tuple[str, str] | None:
     return None
 
 
-def _site_label(target: Machine) -> str:
-    """How the message names the set of possible relays."""
+def _site(target: Machine) -> tuple[str, str]:
+    """How the message names the set of possible relays: the kind of name
+    (``location`` or ``domain``) and the name."""
     if target.location:
-        return f"l'emplacement « {target.location} »"
-    return f"le domaine « {target.domain} »"
+        return ("location", target.location)
+    return ("domain", target.domain or "")
 
 
 @dataclass(frozen=True)
@@ -309,16 +311,15 @@ async def open_wake_for(
     return rows.first()
 
 
+def _elapsed_minutes(since: datetime, now: datetime) -> int:
+    """Whole minutes since ``since`` — the sentence says a duration rather
+    than a clock time (``texts.elapsed``)."""
+    return max(0, int((now - since).total_seconds() // 60))
+
+
 def _elapsed(since: datetime, now: datetime) -> str:
-    """« 12 min », « 1 h 05 » — a duration rather than a clock time: the
-    server's clock is UTC and the console reads local time, and an hour
-    printed in one zone is read in the other (« depuis 07:45 UTC »)."""
-    minutes = max(0, int((now - since).total_seconds() // 60))
-    if minutes < 1:
-        return "moins d'une minute"
-    if minutes < 60:
-        return f"{minutes} min"
-    return f"{minutes // 60} h {minutes % 60:02d}"
+    """« 12 min », « 1 h 05 »: that duration, as the sentence writes it."""
+    return texts.elapsed(_elapsed_minutes(since, now))
 
 
 async def queue_relayed_wake(
@@ -348,30 +349,11 @@ async def queue_relayed_wake(
     mac = normalize_mac(target.mac_address)
     if mac is None:
         return _closed(
-            session,
-            target,
-            created_by,
-            now,
-            ok=False,
-            detail=(
-                "Aucune adresse MAC connue pour ce poste : son agent n'en a jamais "
-                "remonté (agent antérieur à la fonction, ou carte réseau sans "
-                "adresse exploitable). Un poste ne peut être réveillé qu'après au "
-                "moins une remontée de son agent."
-            ),
+            session, target, created_by, now, ok=False, verdict=texts.wake_no_mac()
         )
     if peer_clause(target) is None:
         return _closed(
-            session,
-            target,
-            created_by,
-            now,
-            ok=False,
-            detail=(
-                "Ce poste n'a ni emplacement ni domaine connu : le serveur ne peut "
-                "désigner aucun poste voisin pour relayer le réveil. Renseigner "
-                "l'emplacement dans la configuration de l'agent (location)."
-            ),
+            session, target, created_by, now, ok=False, verdict=texts.wake_no_site()
         )
 
     if batch is not None and batch.open_wakes is not None:
@@ -381,21 +363,16 @@ async def queue_relayed_wake(
     if already is not None:
         # Not a new row: the one waiting is the one that will be emitted, and
         # its own history line is the record.
-        state = (
-            "déjà transmis à un poste relais"
-            if already.status == CommandStatus.DELIVERED.value
-            else "déjà en attente d'un poste relais"
-        )
-        return WakeOutcome(
-            ok=True,
-            detail=(
-                f"Réveil {state} depuis {_elapsed(already.created_at, now)} ; rien "
-                "de nouveau n'a été mis en file."
+        return WakeOutcome.of(
+            True,
+            texts.wake_relay_already(
+                already.status == CommandStatus.DELIVERED.value,
+                _elapsed_minutes(already.created_at, now),
             ),
         )
 
     peers = await count_online_peers(session, target, now, batch=batch)
-    site = _site_label(target)
+    site_kind, site = _site(target)
     if peers == 0:
         return _closed(
             session,
@@ -403,13 +380,7 @@ async def queue_relayed_wake(
             created_by,
             now,
             ok=False,
-            detail=(
-                f"Aucun poste allumé sur {site} pour relayer le réveil : le "
-                "paquet magique doit partir d'un poste du même réseau que la "
-                "cible, et aucun poste habilité à relayer (agent à jour, inscrit "
-                "depuis assez longtemps, identité confirmée) n'est en contact "
-                "avec le serveur en ce moment."
-            ),
+            verdict=texts.wake_no_relay(site_kind, site),
         )
 
     ttl = timedelta(minutes=settings.WOL_RELAY_TTL_MINUTES)
@@ -425,17 +396,9 @@ async def queue_relayed_wake(
     if batch is not None and batch.open_wakes is not None:
         # The same poste twice in one selection: the second finds this one.
         batch.open_wakes[target.id] = queued
-    return WakeOutcome(
-        ok=True,
-        detail=(
-            f"Réveil confié aux postes de {site} : {peers} poste(s) allumé(s) "
-            "peuvent relayer le paquet magique, le premier à contacter le serveur "
-            f"s'en charge (sous {settings.WOL_RELAY_TTL_MINUTES} min, sinon le "
-            "réveil expire).\n"
-            "L'émission ne prouvera pas le réveil : le protocole n'accuse rien, "
-            "et le poste ne réapparaîtra dans la console qu'à la remontée de son "
-            "agent."
-        ),
+    return WakeOutcome.of(
+        True,
+        texts.wake_relay_queued(site_kind, site, peers, settings.WOL_RELAY_TTL_MINUTES),
     )
 
 
@@ -446,7 +409,7 @@ def _closed(
     now: datetime,
     *,
     ok: bool,
-    detail: str,
+    verdict: texts.Verdict,
 ) -> WakeOutcome:
     """Record an outcome decided here and now, as the server-side path does."""
     status = CommandStatus.SUCCEEDED if ok else CommandStatus.FAILED
@@ -460,11 +423,13 @@ def _closed(
             expires_at=now,
             started_at=now,
             finished_at=now,
-            result_output=detail if ok else None,
-            error=None if ok else detail,
+            result_output=verdict.text if ok else None,
+            error=None if ok else verdict.text,
+            result_code=verdict.code,
+            result_params=verdict.params,
         )
     )
-    return WakeOutcome(ok=ok, detail=detail)
+    return WakeOutcome.of(ok, verdict)
 
 
 def trusted_relay(relay: Machine, now: datetime) -> bool:
@@ -613,10 +578,10 @@ async def close_wakes_for_awake_machine(
     for command in rows.all():
         command.status = CommandStatus.SUCCEEDED.value
         command.finished_at = now
-        command.result_output = (
-            "Poste revenu en ligne : son agent a contacté le serveur — le seul "
-            "accusé de réception qu'un réveil puisse avoir."
-        )
+        back = texts.wake_back_online()
+        command.result_output = back.text
+        command.result_code = back.code
+        command.result_params = back.params
         closed += 1
     return closed
 

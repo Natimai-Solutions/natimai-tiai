@@ -43,6 +43,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"tiai/agent/internal/msg"
 )
 
 // Policy is the trust a GPO granted on this poste.
@@ -120,8 +122,8 @@ var (
 	wingetVersion  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}$`)
 	packageID      = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	productCode    = regexp.MustCompile(`^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$`)
-	errNotEnabled  = errors.New("déploiement non activé sur ce poste (aucune clé Deploy* posée par GPO)")
-	errNoMsiInMode = errors.New("méthode A : msiexec n'est accepté que pour désinstaller un code produit")
+	errNotEnabled  = msg.Err("deploy.not_enabled", nil)
+	errNoMsiInMode = msg.Err("deploy.method_a.msiexec", nil)
 )
 
 const cryptoSHA256 = crypto.SHA256
@@ -136,12 +138,12 @@ func ValidPackageID(id string) bool {
 // right under root.
 func PackageDir(root, id string) (string, error) {
 	if !ValidPackageID(id) {
-		return "", fmt.Errorf("identifiant de paquet refusé : %q", id)
+		return "", msg.Err("deploy.package_id_refused", msg.Params{"id": msg.Quote(id)})
 	}
 	dir := filepath.Join(root, id)
 	rel, err := filepath.Rel(root, dir)
 	if err != nil || rel != id {
-		return "", fmt.Errorf("identifiant de paquet refusé : %q", id)
+		return "", msg.Err("deploy.package_id_refused", msg.Params{"id": msg.Quote(id)})
 	}
 	return dir, nil
 }
@@ -399,13 +401,13 @@ func MethodAFiles(files []FileRef, run string, maxBytes int64) error {
 	for _, f := range files {
 		total += f.Size
 		if f.Size > maxBytes || total > maxBytes {
-			return fmt.Errorf("méthode A : le manifeste annonce plus de %d Gio à télécharger — signez le paquet (méthode B)", maxBytes>>30)
+			return msg.Err("deploy.method_a.too_large", msg.Params{"gib": maxBytes >> 30})
 		}
 		if run != MsiExec && strings.EqualFold(f.Name, run) {
 			continue
 		}
 		if loadableExt[strings.ToLower(filepath.Ext(f.Name))] {
-			return fmt.Errorf("méthode A : %q ne peut pas accompagner l'exécutable (fichier que Windows pourrait charger ou lancer) — signez le paquet (méthode B)", f.Name)
+			return msg.Err("deploy.method_a.loadable", msg.Params{"file": msg.Quote(f.Name)})
 		}
 	}
 	return nil
@@ -590,11 +592,11 @@ func NormalizeThumbprint(t string) string {
 // the signer's subject for the result line.
 func VerifyAdminSignature(manifest []byte, sigB64, algorithm, certB64 string, signers []string) (string, error) {
 	if sigB64 == "" || certB64 == "" {
-		return "", errors.New("paquet non signé")
+		return "", msg.Err("deploy.signature.unsigned", nil)
 	}
 	der, err := base64.StdEncoding.DecodeString(certB64)
 	if err != nil {
-		return "", errors.New("certificat de signature mal encodé")
+		return "", msg.Err("deploy.signature.bad_certificate", nil)
 	}
 	sum := sha256.Sum256(der)
 	thumb := strings.ToUpper(hex.EncodeToString(sum[:]))
@@ -606,34 +608,34 @@ func VerifyAdminSignature(manifest []byte, sigB64, algorithm, certB64 string, si
 		}
 	}
 	if !trusted {
-		return "", fmt.Errorf("certificat de signature non approuvé sur ce poste (empreinte %s absente de DeploySigners)", thumb)
+		return "", msg.Err("deploy.signature.untrusted", msg.Params{"thumbprint": thumb})
 	}
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
-		return "", fmt.Errorf("certificat de signature illisible : %w", err)
+		return "", msg.Wrap("deploy.signature.unreadable_certificate", nil, err)
 	}
 	sig, err := base64.StdEncoding.DecodeString(sigB64)
 	if err != nil {
-		return "", errors.New("signature mal encodée")
+		return "", msg.Err("deploy.signature.bad_signature", nil)
 	}
 	digest := sha256.Sum256(manifest)
 	switch key := cert.PublicKey.(type) {
 	case *rsa.PublicKey:
 		if algorithm != "rsa-pkcs1-sha256" {
-			return "", errors.New("algorithme incompatible avec la clé")
+			return "", msg.Err("deploy.signature.algorithm_mismatch", nil)
 		}
 		if err := rsa.VerifyPKCS1v15(key, cryptoSHA256, digest[:], sig); err != nil {
-			return "", errors.New("signature invalide : le manifeste a changé depuis sa signature")
+			return "", msg.Err("deploy.signature.invalid", nil)
 		}
 	case *ecdsa.PublicKey:
 		if algorithm != "ecdsa-sha256" {
-			return "", errors.New("algorithme incompatible avec la clé")
+			return "", msg.Err("deploy.signature.algorithm_mismatch", nil)
 		}
 		if !verifyECDSA(key, digest[:], sig) {
-			return "", errors.New("signature invalide : le manifeste a changé depuis sa signature")
+			return "", msg.Err("deploy.signature.invalid", nil)
 		}
 	default:
-		return "", errors.New("type de clé non pris en charge")
+		return "", msg.Err("deploy.signature.unsupported_key", nil)
 	}
 	return cert.Subject.String(), nil
 }
@@ -770,7 +772,7 @@ func MethodAStep(step Step, action string) (Step, error) {
 		return Step{}, errNoMsiInMode
 	}
 	if !strings.HasSuffix(strings.ToLower(step.Run), ".exe") {
-		return Step{}, errors.New("méthode A : seul un exécutable (.exe) signé par un éditeur approuvé peut être lancé — signez le paquet (méthode B)")
+		return Step{}, msg.Err("deploy.method_a.exe_only", nil)
 	}
 	return step, nil
 }
@@ -795,10 +797,10 @@ func ExitVerdict(code int64, success []int64) (ok bool, rebootRequired bool) {
 // WingetAllowed checks a winget identifier against the policy.
 func WingetAllowed(id string, p Policy) error {
 	if !p.Winget {
-		return errors.New("winget non activé sur ce poste (valeur DeployWinget absente ou à 0)")
+		return msg.Err("deploy.winget_not_enabled", nil)
 	}
 	if !wingetID.MatchString(id) {
-		return fmt.Errorf("identifiant winget refusé : %q", id)
+		return msg.Err("deploy.winget_refused", msg.Params{"id": msg.Quote(id)})
 	}
 	if len(p.WingetAllow) == 0 {
 		return nil
@@ -813,7 +815,7 @@ func WingetAllowed(id string, p Policy) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("identifiant winget %q absent de DeployWingetAllow", id)
+	return msg.Err("deploy.winget_not_allowed", msg.Params{"id": msg.Quote(id)})
 }
 
 // WingetArgs builds the winget command line. Every option is the agent's:
@@ -821,7 +823,7 @@ func WingetAllowed(id string, p Policy) error {
 // checked against strict patterns so that neither can read as an option.
 func WingetArgs(action, id, version string) ([]string, error) {
 	if !wingetID.MatchString(id) {
-		return nil, fmt.Errorf("identifiant winget refusé : %q", id)
+		return nil, msg.Err("deploy.winget_refused", msg.Params{"id": msg.Quote(id)})
 	}
 	var args []string
 	switch action {
@@ -831,7 +833,7 @@ func WingetArgs(action, id, version string) ([]string, error) {
 			"--accept-source-agreements", "--disable-interactivity"}
 		if version != "" {
 			if !wingetVersion.MatchString(version) {
-				return nil, fmt.Errorf("version winget refusée : %q", version)
+				return nil, msg.Err("deploy.winget_version_refused", msg.Params{"version": msg.Quote(version)})
 			}
 			args = append(args, "--version", version)
 		}
@@ -854,16 +856,28 @@ const (
 
 // WingetVerdict reads winget's exit code: ok, and a sentence for the console.
 func WingetVerdict(code int64) (bool, string) {
+	ok, note := wingetVerdict(code)
+	return ok, note.Text
+}
+
+// wingetVerdict is WingetVerdict with its sentence as a message (msg): none
+// on a plain success, the note « déjà installé » on a success with nothing
+// to do, the refusal otherwise.
+func wingetVerdict(code int64) (bool, msg.Message) {
 	switch uint32(code) {
 	case 0:
-		return true, ""
+		return true, msg.Message{}
 	case wingetAlreadyInstalled, wingetNoApplicableUpdate:
-		return true, "déjà installé, rien à faire"
+		return true, msg.Plain(wingetAlreadyNote)
 	case wingetNoPackageFound:
-		return false, "aucun paquet winget ne correspond à cet identifiant"
+		return false, msg.New("deploy.winget_no_match", nil)
 	}
-	return false, fmt.Sprintf("winget a échoué (code 0x%08X)", uint32(code))
+	return false, msg.New("deploy.winget_failed", msg.Params{"code": fmt.Sprintf("0x%08X", uint32(code))})
 }
+
+// wingetAlreadyNote closes « winget install X : terminé » when there was
+// nothing to do (msg's deploy.winget_done, already).
+const wingetAlreadyNote = "déjà installé, rien à faire"
 
 // LatestWingetDir picks, among DesktopAppInstaller folders, the one with the
 // highest version — their names read Microsoft.DesktopAppInstaller_<version>_<arch>__<publisher>.

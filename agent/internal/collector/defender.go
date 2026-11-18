@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"tiai/agent/internal/msg"
 )
 
 // ErrWMIUnavailable is returned, without waiting, by every WMI read while a
@@ -176,6 +178,9 @@ const powerShellWaitDelay = 10 * time.Second
 // defenderAction is one of the three Defender commands: the script PowerShell
 // runs, and how to talk about it when it does not finish.
 type defenderAction struct {
+	// code names the action's messages for the console (msg): its timeout
+	// is code+".timeout", its interruption code+".interrupted".
+	code   string
 	script string
 	// label names the action inside a French sentence ("l'analyse rapide
 	// Defender"), so every message about it reads the same.
@@ -187,6 +192,7 @@ type defenderAction struct {
 
 var (
 	defenderQuickScan = defenderAction{
+		code:   "defender.quick_scan",
 		script: "Start-MpScan -ScanType QuickScan",
 		label:  "l'analyse rapide Defender",
 		advice: "L'analyse peut se poursuivre sur le poste : vérifier la date de " +
@@ -194,6 +200,7 @@ var (
 			"signale un moteur Defender bloqué (redémarrer le poste).",
 	}
 	defenderFullScan = defenderAction{
+		code:   "defender.full_scan",
 		script: "Start-MpScan -ScanType FullScan",
 		label:  "l'analyse complète Defender",
 		advice: "L'analyse peut se poursuivre sur le poste : vérifier la date de " +
@@ -203,6 +210,7 @@ var (
 			"(registre : DefenderFullScanTimeoutSeconds).",
 	}
 	defenderSignatureUpdate = defenderAction{
+		code:   "defender.signatures",
 		script: "Update-MpSignature",
 		label:  "la mise à jour des signatures Defender",
 		advice: "Vérifier que le poste joint sa source de signatures (WSUS, " +
@@ -215,14 +223,20 @@ var (
 // the scan was given ten minutes or ten hours, and that is the first thing to
 // know before raising it.
 func (a defenderAction) timeoutError(budget time.Duration) error {
-	return fmt.Errorf("délai dépassé : %s ne s'est pas terminée en %s. %s",
-		a.label, frDuration(budget), a.advice)
+	if a.code == "" {
+		return fmt.Errorf("délai dépassé : %s ne s'est pas terminée en %s. %s",
+			a.label, frDuration(budget), a.advice)
+	}
+	return msg.Err(a.code+".timeout", msg.Params{"budget": frDuration(budget)})
 }
 
 // interruptedError is the verdict for an action cut short by the service
 // stopping — not a Defender problem, and nothing for anyone to fix.
 func (a defenderAction) interruptedError() error {
-	return fmt.Errorf("%s a été interrompue (arrêt de l'agent) : à relancer", a.label)
+	if a.code == "" {
+		return fmt.Errorf("%s a été interrompue (arrêt de l'agent) : à relancer", a.label)
+	}
+	return msg.Err(a.code+".interrupted", nil)
 }
 
 // frDuration renders a budget for a French console message: "8 h", "1 h 30 min",

@@ -1,0 +1,192 @@
+[
+ {
+  "code": "command.unanswered",
+  "params": {
+   "hours": 6
+  },
+  "message": "Sans réponse du poste 6 h après la remise : commande considérée comme perdue (poste éteint, agent arrêté ou mis à jour pendant l'exécution). Relancez-la si besoin."
+ },
+ {
+  "code": "command.unanswered",
+  "params": {
+   "hours": 48
+  },
+  "message": "Sans réponse du poste 48 h après la remise : commande considérée comme perdue (poste éteint, agent arrêté ou mis à jour pendant l'exécution). Relancez-la si besoin."
+ },
+ {
+  "code": "command.merged",
+  "params": {},
+  "message": "Poste fusionné : commande annulée"
+ },
+ {
+  "code": "package.deleted",
+  "params": {},
+  "message": "Paquet supprimé avant l'exécution"
+ },
+ {
+  "code": "package.retired_after_queue",
+  "params": {},
+  "message": "Paquet retiré après la mise en file : installation annulée"
+ },
+ {
+  "code": "package.changed_after_queue",
+  "params": {},
+  "message": "Paquet modifié après la mise en file (fichiers, ligne de commande ou signature) : relancez le déploiement pour envoyer la nouvelle version"
+ },
+ {
+  "code": "package.retired",
+  "params": {},
+  "message": "Paquet retiré : installation annulée"
+ },
+ {
+  "code": "package.superseded",
+  "params": {},
+  "message": "Remplacée par un nouveau déploiement"
+ },
+ {
+  "code": "wol.no_mac",
+  "params": {},
+  "message": "Aucune adresse MAC connue pour ce poste : son agent n'en a jamais remonté (agent antérieur à la fonction, ou carte réseau sans adresse exploitable). Un poste ne peut être réveillé qu'après au moins une remontée de son agent."
+ },
+ {
+  "code": "wol.no_ipv4",
+  "params": {},
+  "message": "Aucune adresse de diffusion pour ce poste : sa dernière adresse IP connue est absente ou n'est pas de l'IPv4. Renseigner WOL_BROADCAST_ADDRESSES côté serveur pour émettre malgré tout."
+ },
+ {
+  "code": "wol.address_not_allowed",
+  "params": {
+   "ip": "8.8.8.8",
+   "allowed": null
+  },
+  "message": "Réveil refusé : la dernière adresse IP connue du poste (8.8.8.8) est hors des réseaux sur lesquels le serveur peut émettre un réveil (les plages privées 10.0.0.0/8, 172.16.0.0/12 et 192.168.0.0/16). Ajouter le réseau du poste à WOL_ALLOWED_NETWORKS côté serveur, ou renseigner WOL_BROADCAST_ADDRESSES."
+ },
+ {
+  "code": "wol.subnet_not_allowed",
+  "params": {
+   "ip": "10.4.7.5",
+   "prefix_length": null,
+   "default_prefix_length": 24,
+   "allowed": "10.4.7.0/25, 192.168.1.0/24"
+  },
+  "message": "Réveil refusé : l'adresse du poste (10.4.7.5) est autorisée, mais son sous-réseau (masque /24 de WOL_SUBNET_PREFIXLEN) n'est pas contenu en entier dans les réseaux sur lesquels le serveur peut émettre un réveil (10.4.7.0/25, 192.168.1.0/24). Élargir WOL_ALLOWED_NETWORKS au sous-réseau entier du poste, ou renseigner WOL_BROADCAST_ADDRESSES."
+ },
+ {
+  "code": "wol.subnet_not_allowed",
+  "params": {
+   "ip": "10.4.7.5",
+   "prefix_length": 16,
+   "default_prefix_length": 24,
+   "allowed": "10.4.7.0/24"
+  },
+  "message": "Réveil refusé : l'adresse du poste (10.4.7.5) est autorisée, mais son sous-réseau (masque /16 remonté par le poste, à défaut /24 de WOL_SUBNET_PREFIXLEN) n'est pas contenu en entier dans les réseaux sur lesquels le serveur peut émettre un réveil (10.4.7.0/24). Élargir WOL_ALLOWED_NETWORKS au sous-réseau entier du poste, ou renseigner WOL_BROADCAST_ADDRESSES."
+ },
+ {
+  "code": "wol.send_failed",
+  "params": {
+   "detail": "[Errno 101] Network is unreachable"
+  },
+  "message": "Émission du paquet magique impossible : [Errno 101] Network is unreachable"
+ },
+ {
+  "code": "wol.sent",
+  "params": {
+   "mac": "AA:BB:CC:DD:EE:FF",
+   "copies": 3,
+   "targets": "10.4.7.255:9, 255.255.255.255:9"
+  },
+  "message": "Paquet magique émis vers AA:BB:CC:DD:EE:FF — 3 copie(s) sur 10.4.7.255:9, 255.255.255.255:9.\nL'émission ne prouve pas le réveil : le protocole n'accuse rien, et le poste ne réapparaîtra dans la console qu'à la remontée de son agent."
+ },
+ {
+  "code": "wol.sent",
+  "params": {
+   "mac": "AA:BB:CC:DD:EE:FF",
+   "copies": 1,
+   "targets": "10.4.7.255:9"
+  },
+  "message": "Paquet magique émis vers AA:BB:CC:DD:EE:FF — 1 copie(s) sur 10.4.7.255:9.\nL'émission ne prouve pas le réveil : le protocole n'accuse rien, et le poste ne réapparaîtra dans la console qu'à la remontée de son agent."
+ },
+ {
+  "code": "wol.no_site",
+  "params": {},
+  "message": "Ce poste n'a ni emplacement ni domaine connu : le serveur ne peut désigner aucun poste voisin pour relayer le réveil. Renseigner l'emplacement dans la configuration de l'agent (location)."
+ },
+ {
+  "code": "wol.no_relay",
+  "params": {
+   "site_kind": "location",
+   "site": "Lycée Victor Hugo"
+  },
+  "message": "Aucun poste allumé sur l'emplacement « Lycée Victor Hugo » pour relayer le réveil : le paquet magique doit partir d'un poste du même réseau que la cible, et aucun poste habilité à relayer (agent à jour, inscrit depuis assez longtemps, identité confirmée) n'est en contact avec le serveur en ce moment."
+ },
+ {
+  "code": "wol.no_relay",
+  "params": {
+   "site_kind": "domain",
+   "site": "ac-test.local"
+  },
+  "message": "Aucun poste allumé sur le domaine « ac-test.local » pour relayer le réveil : le paquet magique doit partir d'un poste du même réseau que la cible, et aucun poste habilité à relayer (agent à jour, inscrit depuis assez longtemps, identité confirmée) n'est en contact avec le serveur en ce moment."
+ },
+ {
+  "code": "wol.relay_queued",
+  "params": {
+   "site_kind": "location",
+   "site": "Bâtiment A",
+   "peers": 3,
+   "ttl_minutes": 10
+  },
+  "message": "Réveil confié aux postes de l'emplacement « Bâtiment A » : 3 poste(s) allumé(s) peuvent relayer le paquet magique, le premier à contacter le serveur s'en charge (sous 10 min, sinon le réveil expire).\nL'émission ne prouvera pas le réveil : le protocole n'accuse rien, et le poste ne réapparaîtra dans la console qu'à la remontée de son agent."
+ },
+ {
+  "code": "wol.relay_queued",
+  "params": {
+   "site_kind": "domain",
+   "site": "ac-test.local",
+   "peers": 1,
+   "ttl_minutes": 60
+  },
+  "message": "Réveil confié aux postes de le domaine « ac-test.local » : 1 poste(s) allumé(s) peuvent relayer le paquet magique, le premier à contacter le serveur s'en charge (sous 60 min, sinon le réveil expire).\nL'émission ne prouvera pas le réveil : le protocole n'accuse rien, et le poste ne réapparaîtra dans la console qu'à la remontée de son agent."
+ },
+ {
+  "code": "wol.relay_already",
+  "params": {
+   "state": "delivered",
+   "minutes": 0
+  },
+  "message": "Réveil déjà transmis à un poste relais depuis moins d'une minute ; rien de nouveau n'a été mis en file."
+ },
+ {
+  "code": "wol.relay_already",
+  "params": {
+   "state": "pending",
+   "minutes": 12
+  },
+  "message": "Réveil déjà en attente d'un poste relais depuis 12 min ; rien de nouveau n'a été mis en file."
+ },
+ {
+  "code": "wol.relay_already",
+  "params": {
+   "state": "delivered",
+   "minutes": 65
+  },
+  "message": "Réveil déjà transmis à un poste relais depuis 1 h 05 ; rien de nouveau n'a été mis en file."
+ },
+ {
+  "code": "wol.relay_already",
+  "params": {
+   "state": "pending",
+   "minutes": 600
+  },
+  "message": "Réveil déjà en attente d'un poste relais depuis 10 h 00 ; rien de nouveau n'a été mis en file."
+ },
+ {
+  "code": "wol.back_online",
+  "params": {},
+  "message": "Poste revenu en ligne : son agent a contacté le serveur — le seul accusé de réception qu'un réveil puisse avoir."
+ },
+ {
+  "code": "wol.unknown_machine",
+  "params": {},
+  "message": "Poste introuvable : il a été supprimé ou fusionné."
+ }
+]

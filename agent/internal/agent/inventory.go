@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"math/rand/v2"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"tiai/agent/internal/collector"
 	"tiai/agent/internal/logging"
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/msg"
 )
 
 // inventoryFirstCollectDelay keeps the first collection off the boot path, like
@@ -161,16 +161,16 @@ func (a *Agent) resendInventory(justSent bool) {
 // hash says. Somebody asked; an answer of "nothing changed, so the console still
 // shows last week's reading" would be indistinguishable from the command having
 // silently failed.
-func (a *Agent) runInventoryScan(ctx context.Context) (string, error) {
+func (a *Agent) runInventoryScan(ctx context.Context) (msg.Message, error) {
 	a.inventoryOp.Lock()
 	defer a.inventoryOp.Unlock()
 
 	inv, err := readInventory(ctx, a.cfg.ReportsSoftware())
 	if err != nil {
-		return "", err
+		return msg.Message{}, err
 	}
 	if inv == nil {
-		return "", fmt.Errorf("inventaire indisponible sur cette plateforme")
+		return msg.Message{}, msg.Err("inventory.unavailable", nil)
 	}
 	a.inventorySent = inv.Hash
 	a.inventory.store(inv)
@@ -182,11 +182,11 @@ func (a *Agent) runInventoryScan(ctx context.Context) (string, error) {
 // It names the software count only when software is actually collected: "0
 // logiciel" on a poste whose collection is switched off by GPO reads as a failed
 // read, when it is a policy working exactly as intended.
-func inventoryScanSummary(inv *models.InventoryState, withSoftware bool) string {
-	summary := fmt.Sprintf("%d disque(s), %d volume(s), %d carte(s) réseau",
-		len(inv.Disks), len(inv.Volumes), len(inv.Nics))
+func inventoryScanSummary(inv *models.InventoryState, withSoftware bool) msg.Message {
+	params := msg.Params{"disks": len(inv.Disks), "volumes": len(inv.Volumes), "nics": len(inv.Nics)}
 	if withSoftware {
-		return fmt.Sprintf("%s, %d logiciel(s).", summary, len(inv.Software))
+		params["software"] = len(inv.Software)
+		return msg.New("inventory.scan", params)
 	}
-	return summary + ", inventaire logiciel désactivé sur ce poste."
+	return msg.New("inventory.scan_without_software", params)
 }
