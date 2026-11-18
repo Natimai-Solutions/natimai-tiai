@@ -13,27 +13,6 @@ import { scanSource } from './scan';
  * list is empty.
  */
 const PENDING = new Set<string>([
-  // --- Lot A : fiche d’un poste
-  'components/machine/MachineAntivirusCard.vue',
-  'components/machine/MachineDefenderCard.vue',
-  'components/machine/MachineGpuCard.vue',
-  'components/machine/MachineHardwareCard.vue',
-  'components/machine/MachineIdentityCard.vue',
-  'components/machine/MachineMemoryCard.vue',
-  'components/machine/MachineMergeDialog.vue',
-  'components/machine/MachineNetworkCard.vue',
-  'components/machine/MachinePendingUpdatesCard.vue',
-  'components/machine/MachineSoftwareCard.vue',
-  'components/machine/MachineStatusCard.vue',
-  'components/machine/MachineStorageCard.vue',
-  'components/machine/MachineThreatsCard.vue',
-  'components/machine/MachineUsageCard.vue',
-  'components/machine/MachineWindowsUpdateCard.vue',
-  'composables/useMachineNavigation.ts',
-  'pages/MachineDetailPage.vue',
-  'utils/agentVersion.ts',
-  'utils/machineAlerts.ts',
-
   // --- Lot B : liste des postes
   'components/machine/MachineColumnsDialog.vue',
   'components/machines-list/MachinePlaceDialog.vue',

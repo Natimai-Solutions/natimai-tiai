@@ -3,7 +3,7 @@
     <!-- The five facts read on the way to an action, one glance each. -->
     <q-card-section class="row q-col-gutter-md">
       <div class="col-6 col-sm-4 col-md">
-        <div class="text-caption text-muted">Antivirus</div>
+        <div class="text-caption text-muted">{{ t('machine.status.antivirus') }}</div>
         <!-- Grey « Non relevé », red « Aucun » (U28); a named product takes
              the protection state's colour, as in the machine list. -->
         <q-badge
@@ -15,7 +15,7 @@
         <div class="text-caption q-mt-xs">{{ protectionLabel(machine.is_up_to_date) }}</div>
       </div>
       <div class="col-6 col-sm-4 col-md">
-        <div class="text-caption text-muted">Windows Update</div>
+        <div class="text-caption text-muted">{{ t('machine.status.windowsUpdate') }}</div>
         <q-badge :color="wuPendingColor(machine.wu_pending_count)" class="q-mt-xs">
           {{ wuPendingLabel(machine.wu_pending_count) }}
         </q-badge>
@@ -26,14 +26,14 @@
           size="18px"
           class="q-ml-xs"
         >
-          <q-tooltip>Redémarrage requis</q-tooltip>
+          <q-tooltip>{{ t('machine.status.rebootRequired') }}</q-tooltip>
         </q-icon>
         <div class="text-caption q-mt-xs">
-          {{ machine.wu_pending_count ? 'en attente' : 'mises à jour' }}
+          {{ machine.wu_pending_count ? t('machine.status.pending') : t('machine.status.updates') }}
         </div>
       </div>
       <div class="col-6 col-sm-4 col-md">
-        <div class="text-caption text-muted">Disque système</div>
+        <div class="text-caption text-muted">{{ t('machine.status.systemDisk') }}</div>
         <template v-if="machine.system_volume_total_mb">
           <q-linear-progress
             :value="usedRatio"
@@ -44,13 +44,20 @@
             style="max-width: 140px"
           />
           <div class="text-caption q-mt-xs">
-            {{ sizeLabel(machine.system_volume_free_mb) }} libres ({{ free }} %)
+            {{
+              t('machine.status.free', {
+                size: sizeLabel(machine.system_volume_free_mb),
+                percent: free,
+              })
+            }}
           </div>
         </template>
-        <div v-else class="text-caption text-muted q-mt-xs">Non relevé</div>
+        <div v-else class="text-caption text-muted q-mt-xs">
+          {{ t('machine.status.notReported') }}
+        </div>
       </div>
       <div class="col-6 col-sm-4 col-md">
-        <div class="text-caption text-muted">Session</div>
+        <div class="text-caption text-muted">{{ t('machine.status.session') }}</div>
         <q-badge :color="sessionColor(machine.session_user_present)" class="q-mt-xs status-badge">
           {{ sessionLabel(machine.session_user_present, machine.session_username) }}
         </q-badge>
@@ -59,7 +66,7 @@
         </div>
       </div>
       <div class="col-6 col-sm-4 col-md">
-        <div class="text-caption text-muted">Dernier contact</div>
+        <div class="text-caption text-muted">{{ t('machine.status.lastContact') }}</div>
         <div class="q-mt-xs">
           <q-icon
             :name="onlineIcon(machine.is_online)"
@@ -80,7 +87,7 @@
     <!-- Threats that could not be read: the findings below are incomplete,
          and an empty list must not turn into the green all-clear. -->
     <q-card-section v-if="threatsFailed" class="q-pa-sm">
-      <CardLoadError what="les menaces de ce poste" @retry="emit('retry')" />
+      <CardLoadError :what="t('machine.status.threatsWhat')" @retry="emit('retry')" />
     </q-card-section>
     <q-list v-if="alerts.length" dense>
       <q-item
@@ -102,13 +109,14 @@
     </q-list>
     <q-card-section v-else-if="!threatsFailed" class="row items-center text-ok">
       <q-icon name="check_circle" class="q-mr-sm" />
-      Aucune alerte sur ce poste.
+      {{ t('machine.status.noAlert') }}
     </q-card-section>
   </q-card>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { t } from 'src/i18n';
 import CardLoadError from 'src/components/CardLoadError.vue';
 import type { MachineTab } from './types';
 import type { MachineDetail } from 'src/services/machines';
