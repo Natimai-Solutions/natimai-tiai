@@ -643,16 +643,19 @@ def csv_value(
 ) -> object:
     """A cell for the CSV: text throughout, dates in ISO order so they sort.
 
-    Decimals with a comma: the file is ``;``-separated for a French Excel,
-    which reads « 4.9 » as text (or as the 4th of September) and « 4,9 » as
-    the number it is. The workbook keeps real numbers (``xlsx_value``).
+    Decimals in the language's own writing: the French file is ``;``-separated
+    for a French Excel, which reads « 4.9 » as text (or as the 4th of
+    September) and « 4,9 » as the number it is; the English file is
+    ``,``-separated with a decimal point, as an English Excel expects
+    (``csv_export.DELIMITERS``). The workbook keeps real numbers
+    (``xlsx_value``).
     """
     if value is None:
         return None
     if column.kind == "bool":
         return EXPORT_TEXTS[language].yes_no.get(bool(value), "")
     if column.kind == "float" and isinstance(value, float):
-        return str(value).replace(".", ",")
+        return str(value) if language == Language.EN else str(value).replace(".", ",")
     if column.kind == "datetime" and isinstance(value, datetime):
         return value.astimezone(tz).strftime("%Y-%m-%d %H:%M")
     if column.kind == "date" and isinstance(value, date):

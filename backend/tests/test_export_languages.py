@@ -10,6 +10,7 @@ The route tests require TIAI_TEST_DATABASE_URL; the words of the values are
 pure functions over an ``ExportRow``.
 """
 
+import csv as _csv
 import io
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
@@ -133,11 +134,11 @@ async def test_the_english_file(client, db_session):
     )
     assert csv.status_code == 200, csv.text
     assert 'filename="fleet.csv"' in csv.headers["content-disposition"]
-    lines = csv.text.lstrip("﻿").splitlines()
-    assert lines[0] == ALL_EN
-    # The same separator, BOM and decimal comma as the French file: the
-    # dialect follows the spreadsheet, not the reader's language.
+    rows = list(_csv.reader(io.StringIO(csv.text.lstrip("﻿")), delimiter=","))
+    # Comma-separated, as an English Excel reads it; the BOM is kept.
+    assert rows[0] == ALL_EN.split(";")
     assert csv.text.startswith("﻿")
+    assert csv.text.lstrip("﻿").startswith("Name,Domain,Location,")
 
     xlsx = await client.get(
         "/api/v1/machines/export.xlsx?columns=hostname,ram_total_gb,secure_boot&lang=en",
@@ -199,6 +200,17 @@ def _cells(language: Language, keys: str, **machine) -> list[object]:
     row = _row(language, **machine)
     utc = ZoneInfo("UTC")
     return [csv_value(c, c.read(row), utc, language) for c in resolve_columns(keys)]
+
+
+def test_a_decimal_is_written_as_the_files_language_writes_it():
+    """« 4,9 » in the semicolon-separated French file, « 4.9 » in the English
+    one: each as the Excel of that language reads a number."""
+    from app.api.machine_export import csv_value, resolve_columns
+
+    (column,) = resolve_columns("usage_hours")
+    utc = ZoneInfo("UTC")
+    assert csv_value(column, 4.9, utc, Language.FR) == "4,9"
+    assert csv_value(column, 4.9, utc, Language.EN) == "4.9"
 
 
 KEYS = "hw_chassis_type,session,av_product_name,maintenance_state,hw_is_virtual"
@@ -301,8 +313,8 @@ async def test_the_software_export_in_both_languages(client, db_session):
     english = await client.get("/api/v1/software/export.csv?lang=en", headers=headers)
     assert 'filename="software.csv"' in english.headers["content-disposition"]
     lines = english.text.lstrip("﻿").splitlines()
-    assert lines[0] == "Name;Version;Publisher;Computers;First seen"
-    assert lines[1].startswith("Café Tool;1.0;Acme;1;")
+    assert lines[0] == "Name,Version,Publisher,Computers,First seen"
+    assert lines[1].startswith("Café Tool,1.0,Acme,1,")
 
     xlsx = await client.get("/api/v1/software/export.xlsx?lang=en", headers=headers)
     assert 'filename="software.xlsx"' in xlsx.headers["content-disposition"]

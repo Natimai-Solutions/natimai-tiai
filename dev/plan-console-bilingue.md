@@ -162,9 +162,11 @@ serveur à jour traduit le code. Rien ne change pour un agent non mis à jour.
   - les **groupes intégrés** sont nommés dans la langue du lecteur tant qu'ils
     gardent le nom et la description de l'installation (`builtin_key` sur les
     références de groupe, `utils/groupText.ts`) ;
-  - le **CSV anglais** garde le séparateur `;` et la virgule décimale : le
-    séparateur qu'Excel attend suit les réglages régionaux du poste, pas la
-    langue de la console ; le format par défaut, XLSX, n'est pas concerné ;
+  - le **CSV anglais** est séparé par des virgules, avec le point décimal,
+    comme l'Excel d'un poste réglé en anglais le lit ; le CSV français garde
+    `;` et la virgule décimale, octet pour octet. Un lecteur de la console
+    anglaise sur un poste réglé en français prend le format par défaut, XLSX,
+    qui n'a pas de séparateur à deviner (décision revue le 18 novembre) ;
   - les **refus propres à Pydantic** (champ manquant, longueur…) gardent leur
     message anglais, comme avant ;
   - restent en texte, sans code : la sortie des outils Windows (y compris

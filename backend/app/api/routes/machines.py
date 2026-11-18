@@ -1908,6 +1908,7 @@ async def export_machines_csv(
             [machine_export.csv_value(c, c.read(m), zone, lang) for c in chosen]
             for m in machines
         ],
+        lang,
     )
 
 

@@ -232,6 +232,7 @@ async def export_software(
             )
             for entry, count in await _export_rows(session, search, scope)
         ],
+        lang,
     )
 
 
