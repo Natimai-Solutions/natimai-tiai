@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlmodel import col, select
@@ -183,6 +183,10 @@ class SessionCreate(BaseModel):
     or off that day is simply left out. A visit where nothing was done is
     recorded too, as long as it says why (audit T30)."""
 
+    # Chosen by the console, so that this request can be sent again: when its
+    # answer was lost, the second one gets the visit the first created
+    # instead of creating its twin. Absent: the server chooses, as before.
+    id: uuid.UUID | None = None
     room_id: uuid.UUID | None = None
     # Not in the future: it would push the cycle out of reach (audit B06).
     performed_at: intervention_crud.PastDatetime | None = None
@@ -673,8 +677,13 @@ async def _reach(
 ) -> dict[uuid.UUID, _Reach]:
     """A confined account sees a visit through one poste of it (audit S06);
     the room's name is the room's, and the note is about the room and all
-    its postes, so neither follows that one poste. A room-less visit (no room,
-    or the room deleted since) is named by its postes alone."""
+    its postes, so neither follows that one poste. A visit recorded without
+    a room is named by its postes alone.
+
+    A visit whose room was deleted since is never whole for a confined
+    account: whether that room was in its scope can no longer be told, and a
+    visit whose name and note were withheld must not hand them over — nor
+    become the account's to delete — the day the room goes."""
     if scope is None:
         return {v.id: _FULL for v in visits}
     room_ids = {v.room_id for v in visits if v.room_id is not None}
@@ -693,7 +702,12 @@ async def _reach(
     for v in visits:
         total, seen = lines[v.id]
         postes = seen == total
-        room = postes if v.room_id is None else v.room_id in rooms
+        if v.room_id is None:
+            # The name is kept on the visit when its room goes: it tells a
+            # room deleted from a visit that never had one.
+            room = postes and v.room_name is None
+        else:
+            room = v.room_id in rooms
         out[v.id] = _Reach(room=room, whole=room and postes)
     return out
 
@@ -778,10 +792,14 @@ async def _resolve_lines(
         )
         every = list(found.all())
     if len(every) != len(wanted):
+        # Named, among those the caller sent: a visit sent in parts must be
+        # able to leave out the poste deleted, or merged, since it started.
+        missing = wanted - {m.id for m in every}
         raise AppError(
             code=ErrorCode.MACHINE_NOT_FOUND,
             status_code=404,
             message="Machine not found",
+            details={"machine_ids": sorted(str(i) for i in missing)},
         )
     if room_id is not None:
         # A visit of a room is the visit of its postes: a poste filed
@@ -809,14 +827,45 @@ async def _resolve_lines(
     )
 
 
+async def _already_recorded(
+    session: SessionDep, visit_id: uuid.UUID, author: str, scope: Scope | None
+) -> SessionOut | None:
+    """The visit a creating request names by ``id``, when it exists already:
+    the caller's own is given back as it stands — whatever this second
+    request carries, nothing is written; somebody else's is a conflict."""
+    visit = await session.get(Maintenance, visit_id)
+    if visit is None:
+        return None
+    if visit.performed_by != author:
+        raise AppError(
+            code=ErrorCode.MAINTENANCE_SESSION_ID_TAKEN,
+            status_code=409,
+            message="This id is the visit of another account",
+        )
+    return await _session_out(session, visit, with_items=True, scope=scope)
+
+
 @router.post("", response_model=SessionOut, status_code=201, dependencies=[_WRITE])
 async def record_session(
     payload: SessionCreate,
+    response: Response,
     session: SessionDep,
     scope: CurrentScope,
     current: CurrentUser,
 ) -> SessionOut:
-    """Record a visit: the global note, and one journal line per poste done."""
+    """Record a visit: the global note, and one journal line per poste done.
+
+    With an ``id``, the request may be sent again: once the visit exists, it
+    is returned (200, nothing written) rather than created a second time — a
+    large room's first part, like its next ones (``/lines``), survives a lost
+    answer. Checked before the postes are: a retry is answered even if one
+    of them has left the room since."""
+    author = current.email
+    if payload.id is not None:
+        recorded = await _already_recorded(session, payload.id, author, scope)
+        if recorded is not None:
+            response.status_code = 200
+            return recorded
     room = (
         await _require_room(session, payload.room_id, scope)
         if payload.room_id
@@ -841,11 +890,22 @@ async def record_session(
         room=room,
         machines=lines.machines,
         notes=lines.notes,
-        performed_by=current.email,
+        performed_by=author,
         performed_at=payload.performed_at or utcnow(),
         note=note,
         skipped=lines.skipped,
+        visit_id=payload.id,
     )
+    if visit is None:
+        # The same request, served at the same time, created the visit while
+        # this one was checking its postes: committed by now, it is the answer.
+        assert payload.id is not None
+        recorded = await _already_recorded(session, payload.id, author, scope)
+        if recorded is None:
+            # Created, then deleted, within this request: nothing to return.
+            raise _session_not_found()
+        response.status_code = 200
+        return recorded
     await session.commit()
     await session.refresh(visit)
     return await _session_out(session, visit, with_items=True, scope=scope)
@@ -874,25 +934,32 @@ async def add_session_lines(
             message="Only the author of a visit adds postes to it",
         )
     # Serialise the parts of one visit: two retries at once would each find
-    # the poste unlined and write it twice.
-    await session.exec(
-        select(col(Maintenance.id))
-        .where(col(Maintenance.id) == visit.id)
-        .with_for_update()
+    # the poste unlined and write it twice. Its deletion takes the same lock:
+    # a part that waited behind it finds the visit gone.
+    if not await crud.lock_session(session, visit.id):
+        raise _session_not_found()
+    # Passed over before they are checked: the retry of a part already
+    # recorded succeeds even if one of its postes has changed room, or left
+    # the caller's scope, since — its line is written, there is nothing to ask.
+    known = await crud.lined_machines(
+        session,
+        visit.id,
+        {i.machine_id for i in payload.items} | {i.machine_id for i in payload.skipped},
     )
     room = await session.get(Room, visit.room_id) if visit.room_id else None
     lines = await _resolve_lines(
-        session, scope, room.id if room else None, payload.items, payload.skipped
-    )
-    known = await crud.lined_machines(
-        session, visit.id, {m.id for m in lines.machines} | set(lines.skipped)
+        session,
+        scope,
+        room.id if room else None,
+        [i for i in payload.items if i.machine_id not in known],
+        [i for i in payload.skipped if i.machine_id not in known],
     )
     await crud.add_lines(
         session,
         visit,
-        machines=[m for m in lines.machines if m.id not in known],
+        machines=lines.machines,
         notes=lines.notes,
-        skipped={k: v for k, v in lines.skipped.items() if k not in known},
+        skipped=lines.skipped,
     )
     await session.commit()
     await session.refresh(visit)
@@ -909,6 +976,10 @@ async def list_sessions(
     page_size: int = Query(25, ge=1, le=200),
 ) -> SessionList:
     """Visits, newest first, for a room, a poste, or the parc."""
+    if machine_id is not None and not await machine_visible(session, machine_id, scope):
+        # As for a poste that does not exist: a visit the caller sees through
+        # one poste must not say which of the postes it cannot see were in it.
+        return SessionList(items=[], total=0, page=page, page_size=page_size)
     rows, total = await crud.list_sessions(
         session,
         room_id=room_id,
@@ -929,6 +1000,14 @@ async def list_sessions(
     )
 
 
+def _session_not_found() -> AppError:
+    return AppError(
+        code=ErrorCode.MAINTENANCE_NOT_FOUND,
+        status_code=404,
+        message="Maintenance session not found",
+    )
+
+
 async def _require_session(
     session: SessionDep, maintenance_id: uuid.UUID, scope: Scope | None
 ) -> Maintenance:
@@ -945,11 +1024,7 @@ async def _require_session(
         ).first()
         is None
     ):
-        raise AppError(
-            code=ErrorCode.MAINTENANCE_NOT_FOUND,
-            status_code=404,
-            message="Maintenance session not found",
-        )
+        raise _session_not_found()
     return visit
 
 
@@ -974,6 +1049,13 @@ async def delete_session(
     line it wrote. The postes' last maintenance goes back to what their
     journal then says. Audited, with what was removed."""
     visit = await _require_session(session, maintenance_id, scope)
+    # Before its lines are read: a part being added (``/lines``) holds this
+    # lock until it is committed — the deletion waits for it, then reads its
+    # lines with the others — and a part arriving behind the deletion waits
+    # in turn, and finds the visit gone. Every line goes with the visit;
+    # none is left detached from it.
+    if not await crud.lock_session(session, visit.id):
+        raise _session_not_found()
     lines = await crud.session_items(session, visit.id)
     # Every line is removed, and the global note with them: a confined account
     # may only remove a visit wholly in its scope — its room and every poste

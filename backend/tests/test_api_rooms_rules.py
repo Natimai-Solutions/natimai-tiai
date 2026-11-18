@@ -161,3 +161,120 @@ async def test_a_place_in_a_group_scope_cannot_be_deleted(client, db_session):
     free = await _post(client, admin, "rooms", {"name": "A2", "building_id": b["id"]})
     resp = await client.delete(f"/api/v1/rooms/{free['id']}", headers=admin)
     assert resp.status_code == 204
+
+
+@pytest.mark.parametrize("path", ["rooms", "buildings"])
+async def test_one_name_created_several_times_at_once_is_created_once(
+    client, db_session, path
+):
+    """The name rule is a read before the write: requests served together
+    all found the name free. The database now holds the rule — one name per
+    parent whatever its case — and the losers get the 409 the read would
+    have answered, not a 500."""
+    import asyncio
+
+    admin = await _admin(client, db_session)
+    for names in (("Twin", "twin", "TWIN", "tWin"), ("Same",) * 4):
+        answers = await asyncio.gather(
+            *[
+                client.post(f"/api/v1/{path}", headers=admin, json={"name": name})
+                for name in names
+            ]
+        )
+        assert sorted(r.status_code for r in answers) == [201, 409, 409, 409], [
+            r.text[:200] for r in answers
+        ]
+        code = "room.name.taken" if path == "rooms" else "building.name.taken"
+        assert {r.json()["error"]["code"] for r in answers if r.status_code == 409} == {
+            code
+        }
+    listed = (await client.get(f"/api/v1/{path}", headers=admin)).json()
+    assert sorted(row["name"].lower() for row in listed) == ["same", "twin"]
+
+
+@pytest.mark.parametrize("path", ["rooms", "buildings"])
+async def test_a_name_taken_while_the_request_is_served_is_a_409(
+    client, db_session, engine, path
+):
+    """A twin written by a request still in its transaction: no read sees it.
+    A creation and a rename to that name wait on the index, and answer 409
+    once the twin is committed."""
+    import asyncio
+
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.features.room.models import Building, Room
+
+    admin = await _admin(client, db_session)
+    mine = await _post(client, admin, path, {"name": "A101"})
+    async with AsyncSession(engine) as other:
+        other.add((Room if path == "rooms" else Building)(name="LABO"))
+        await other.flush()
+        rename = asyncio.create_task(
+            client.patch(
+                f"/api/v1/{path}/{mine['id']}", headers=admin, json={"name": "Labo"}
+            )
+        )
+        create = asyncio.create_task(
+            client.post(f"/api/v1/{path}", headers=admin, json={"name": "labo"})
+        )
+        await asyncio.sleep(0.5)
+        waiting = not rename.done() and not create.done()
+        await other.commit()
+    answers = [await rename, await create]
+    assert waiting, [r.text[:200] for r in answers]
+    assert [r.status_code for r in answers] == [409, 409], [
+        r.text[:200] for r in answers
+    ]
+    code = "room.name.taken" if path == "rooms" else "building.name.taken"
+    assert {r.json()["error"]["code"] for r in answers} == {code}
+    listed = (await client.get(f"/api/v1/{path}", headers=admin)).json()
+    assert sorted(row["name"] for row in listed) == ["A101", "LABO"]
+
+
+@pytest.mark.parametrize("path", ["rooms", "buildings"])
+async def test_names_are_compared_as_the_database_folds_them(client, db_session, path):
+    """« İ » lower-cases to one character for PostgreSQL and to two for
+    Python: compared across the two, the name was found free, and its exact
+    twin then met the table's own constraint (a 500)."""
+    admin = await _admin(client, db_session)
+    await _post(client, admin, path, {"name": "İle"})
+    body = await _post(client, admin, path, {"name": "İle"}, status=409)
+    assert body["error"]["code"].endswith(".name.taken")
+
+
+@pytest.mark.parametrize("path", ["rooms", "buildings"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "​",  # zero-width space
+        "​ ⁠﻿",  # with a word joiner and a byte-order mark
+        "­‍",  # soft hyphen, zero-width joiner
+        "‎‮",  # direction marks
+        "ㅤ",  # Hangul filler: a letter that draws nothing
+        "⠀ ͏",  # blank Braille pattern, combining grapheme joiner
+        "\x1f",  # a control character
+    ],
+)
+async def test_a_name_made_of_invisible_characters_is_blank(
+    client, db_session, path, name
+):
+    """A name nobody can see is no name: it listed as an empty row that could
+    not be told from another."""
+    admin = await _admin(client, db_session)
+    body = await _post(client, admin, path, {"name": name}, status=422)
+    assert body["error"]["code"] == "request.validation_error"
+    assert body["error"]["details"]["errors"][0]["loc"] == ["body", "name"]
+    made = await _post(client, admin, path, {"name": "Salle"})
+    resp = await client.patch(
+        f"/api/v1/{path}/{made['id']}", headers=admin, json={"name": name}
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_an_invisible_character_inside_a_name_is_kept(client, db_session):
+    """Only the name made of nothing else is refused: a joiner inside a word
+    is part of how some scripts are written."""
+    admin = await _admin(client, db_session)
+    made = await _post(client, admin, "rooms", {"name": "Salle‍A"})
+    assert made["name"] == "Salle‍A"

@@ -109,6 +109,8 @@ class ErrorCode(enum.StrEnum):
     MAINTENANCE_SESSION_EMPTY = "maintenance.session.empty"
     # Postes added to a visit by someone other than its author.
     MAINTENANCE_SESSION_NOT_AUTHOR = "maintenance.session.not_author"
+    # The id a console chose for a new visit is another account's visit.
+    MAINTENANCE_SESSION_ID_TAKEN = "maintenance.session.id_taken"
     # Request / generic
     REQUEST_VALIDATION_ERROR = "request.validation_error"
     RATE_LIMITED = "request.rate_limited"

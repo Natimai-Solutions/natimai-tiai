@@ -24,33 +24,34 @@
       >
       <q-form :class="small ? 'col column no-wrap' : ''" @submit="submit">
         <q-card-section class="q-gutter-md" :class="small ? 'col scroll' : ''">
-          <q-banner v-if="pending" rounded class="surface-blue" data-test="session-pending">
-            Séance enregistrée en partie : {{ pending.progress.sent }} poste(s) sur
-            {{ pending.progress.total }}. « Reprendre l'envoi » envoie le reste dans la même séance.
-          </q-banner>
-          <div class="row q-col-gutter-md">
-            <q-input
-              v-model="performedAt"
-              label="Date"
-              outlined
-              dense
-              type="datetime-local"
-              stack-label
-              class="col-12 col-sm-5"
-              hint="Antidater est permis"
-              :disable="!!pending"
-            />
-            <q-input
-              v-model="note"
-              label="Observation générale"
-              outlined
-              dense
-              autogrow
-              type="textarea"
-              maxlength="5000"
-              class="col-12 col-sm-7"
-              :disable="!!pending"
-            />
+          <!-- In a block of its own: the row's column gutter is a negative
+               margin, which the section's gutter would otherwise replace —
+               the two fields then sat against the card's left edge. -->
+          <div>
+            <div class="row q-col-gutter-md">
+              <q-input
+                v-model="performedAt"
+                label="Date"
+                outlined
+                dense
+                type="datetime-local"
+                stack-label
+                class="col-12 col-sm-5"
+                hint="Antidater est permis"
+                :disable="!!pending"
+              />
+              <q-input
+                v-model="note"
+                label="Observation générale"
+                outlined
+                dense
+                autogrow
+                type="textarea"
+                maxlength="5000"
+                class="col-12 col-sm-7"
+                :disable="!!pending"
+              />
+            </div>
           </div>
           <!-- A phone gets a list: the name, then its note below at full
                width, rather than a table whose note column sits off screen. -->
@@ -147,8 +148,49 @@
           </div>
         </q-card-section>
         <q-separator v-if="small" />
+        <!-- Where a sending stopped, said beside the buttons that act on it
+             — not above a list of a thousand postes, scrolled out of sight. -->
+        <q-card-section v-if="pending" class="q-gutter-sm q-pb-none">
+          <q-banner rounded class="surface-blue" data-test="session-pending">
+            <template v-if="pending.progress.sessionId">
+              Séance enregistrée en partie : {{ pending.progress.sent }} poste(s) sur
+              {{ pending.progress.total }}. « Reprendre l'envoi » envoie le reste dans la même
+              séance.
+            </template>
+            <!-- The part that creates the visit got no answer: recorded or
+                 not, nobody knows — sent again, it cannot create a second. -->
+            <template v-else>
+              L'envoi s'est interrompu sans réponse du serveur : la séance est peut-être déjà
+              enregistrée, en partie. « Reprendre l'envoi » la termine, sans en créer une seconde.
+            </template>
+          </q-banner>
+          <!-- Postes the server refuses the next part for: named, and left
+               out at a click — the rest of the visit must not wait on them. -->
+          <q-banner v-if="refused" rounded class="surface-orange" data-test="session-refused">
+            {{
+              refused.reason === 'moved'
+                ? 'Ces postes ne sont plus dans la salle depuis le début de la saisie'
+                : 'Ces postes n’existent plus, ou ne vous sont plus visibles'
+            }}
+            : {{ refusedNames }}. Ils ne peuvent pas être ajoutés à la séance.
+            <template #action>
+              <q-btn
+                flat
+                no-caps
+                color="primary"
+                label="Retirer ces postes et reprendre l'envoi"
+                :disable="saving"
+                data-test="session-drop"
+                @click="dropRefused"
+              />
+            </template>
+          </q-banner>
+        </q-card-section>
         <q-card-actions align="right" class="q-px-md q-pb-md" :class="small ? 'q-pt-md' : ''">
-          <q-btn flat label="Annuler" @click="cancel" />
+          <!-- Not while a part is on its way: closing would not stop the
+               sending, only hide where it stops. Once it has stopped, the
+               pending state says what is recorded and offers to abandon. -->
+          <q-btn flat label="Annuler" :disable="saving" @click="cancel" />
           <q-btn
             type="submit"
             color="primary"
@@ -167,8 +209,12 @@ import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import {
+  dropUnsentLines,
+  isRefusal,
   recordSessionInParts,
+  refusedMachines,
   sessionProgress,
+  type RefusedMachines,
   type SessionPayload,
   type SessionProgress,
 } from 'src/services/maintenance';
@@ -202,10 +248,17 @@ const performedAt = ref('');
 const rows = ref<
   { id: string; hostname: string; hint: string | undefined; done: boolean; note: string }[]
 >([]);
-// A visit larger than one request whose sending stopped half-way: what was
-// sent, frozen, and how far it got — « Reprendre l'envoi » sends the rest
-// into the same visit rather than a second one.
+// A visit whose sending stopped half-way — or whose first part got no answer,
+// and may be recorded: what was sent, frozen, and how far it got. « Reprendre
+// l'envoi » sends the rest into the same visit rather than a second one.
 const pending = ref<{ payload: SessionPayload; progress: SessionProgress } | null>(null);
+// The postes the server named in refusing the part the sending stopped on.
+const refused = ref<RefusedMachines | null>(null);
+const refusedNames = computed(() =>
+  (refused.value?.ids ?? [])
+    .map((id) => rows.value.find((r) => r.id === id)?.hostname ?? id)
+    .join(', '),
+);
 
 const doneCount = computed(() => rows.value.filter((r) => r.done).length);
 const allDone = computed<boolean | null>(() =>
@@ -247,6 +300,7 @@ function reset() {
     note: '',
   }));
   pending.value = null;
+  refused.value = null;
   pristine = snapshot();
   filledFor = `${props.roomId ?? ''}|${props.machines.map((m) => m.id).join(',')}`;
 }
@@ -267,14 +321,21 @@ function close() {
 
 /** Annuler, or Échap: straight away when nothing was typed, else confirmed. */
 function cancel() {
+  // Échap while a part is on its way: the sending would go on behind a
+  // closed dialog, and « Abandonner » would have abandoned nothing.
+  if (saving.value) return;
   if (pending.value) {
-    // Part of the visit is recorded already: closing keeps that part, and
-    // the page must show it.
+    // Part of the visit is recorded already — or may be: closing keeps that
+    // part, and the page must show it.
+    const { sessionId, sent, total } = pending.value.progress;
     $q.dialog({
       title: "Abandonner l'envoi ?",
-      message:
-        `${pending.value.progress.sent} poste(s) sur ${pending.value.progress.total} sont ` +
-        'enregistrés dans la séance ; les autres ne le seront pas.',
+      message: sessionId
+        ? `${sent} poste(s) sur ${total} sont enregistrés dans la séance ; les autres ne le ` +
+          'seront pas.'
+        : 'Le serveur n’a pas répondu : la séance est peut-être enregistrée, avec une partie ' +
+          'de ses postes. Les autres ne le seront pas ; la liste des séances, rechargée, dira ' +
+          'ce qu’il en est.',
       cancel: { flat: true, noCaps: true, label: "Reprendre l'envoi" },
       ok: { flat: true, noCaps: true, label: 'Abandonner', color: 'negative' },
       persistent: true,
@@ -316,13 +377,34 @@ function payloadOf(): SessionPayload {
   };
 }
 
+function newJob(): { payload: SessionPayload; progress: SessionProgress } {
+  const payload = payloadOf();
+  return { payload, progress: sessionProgress(payload) };
+}
+
+/** Leave the postes the server refused out of what remains, and send it. */
+async function dropRefused() {
+  if (!pending.value || !refused.value) return;
+  const ids = refused.value.ids;
+  dropUnsentLines(pending.value.payload, pending.value.progress, ids);
+  for (const row of rows.value) {
+    if (ids.includes(row.id)) {
+      row.done = false;
+      row.hint = 'Retiré de cette séance';
+    }
+  }
+  await submit();
+}
+
 async function submit() {
-  const job = pending.value ?? { payload: payloadOf(), progress: sessionProgress(payloadOf()) };
-  const done = job.payload.items.length;
+  if (saving.value) return;
+  const job = pending.value ?? newJob();
   saving.value = true;
+  refused.value = null;
   try {
     // A room of any size is one visit: sent in parts under the server's cap.
     await recordSessionInParts(job.payload, job.progress);
+    const done = job.payload.items.length;
     $q.notify({
       type: 'positive',
       message: done
@@ -333,8 +415,13 @@ async function submit() {
     notifyTasksChanged();
     emit('recorded');
   } catch (e) {
-    // Some parts went through: keep them, and offer to send the rest.
-    if (job.progress.sessionId) pending.value = job;
+    // Some parts went through: keep them, and offer to send the rest. So
+    // does a first part left without an answer — it may be recorded, and
+    // sent again it returns the visit it created. Only a first part the
+    // server refused is known to have written nothing: the form is the
+    // user's again, to correct.
+    pending.value = job.progress.sessionId || !isRefusal(e) ? job : null;
+    refused.value = pending.value ? refusedMachines(e) : null;
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
   } finally {
     saving.value = false;

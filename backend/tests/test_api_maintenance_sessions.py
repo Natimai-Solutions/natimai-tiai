@@ -557,3 +557,158 @@ async def test_a_large_room_is_sent_in_parts_as_one_visit(client, db_session):
         json={"items": [{"machine_id": d}] * 1001},
     )
     assert resp.status_code == 422
+
+
+async def test_the_creating_part_sent_again_returns_the_visit_it_created(
+    client, db_session
+):
+    """The answer to the part that creates the visit is lost: sent again with
+    the id the console chose, it gets that visit back — no twin, no second
+    line on its postes. Another account's id is a conflict; without an id the
+    server chooses, as before."""
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "Amphi")
+    a = await _machine(db_session, "A", room_id=room)
+    b = await _machine(db_session, "B", room_id=room)
+    chosen = str(uuid.uuid4())
+    body = {
+        "id": chosen,
+        "room_id": room,
+        "note": "Tout l'amphi",
+        "items": [{"machine_id": a}],
+        "skipped": [{"machine_id": b, "note": "HS"}],
+    }
+    first = await client.post("/api/v1/maintenance", headers=admin, json=body)
+    assert first.status_code == 201, first.text
+    assert first.json()["id"] == chosen
+
+    again = await client.post("/api/v1/maintenance", headers=admin, json=body)
+    assert again.status_code == 200, again.text
+    assert again.json() == first.json()
+    listed = (await client.get("/api/v1/maintenance", headers=admin)).json()
+    assert listed["total"] == 1
+    assert len(await _journal(client, admin, a)) == 1
+    assert len(await _journal(client, admin, b)) == 1
+
+    # Answered before its postes are checked: one of them has left the room
+    # since, and the retry of what is recorded must still go through.
+    other = await _room(client, admin, "B12")
+    resp = await client.post(
+        f"/api/v1/rooms/{other}/machines", headers=admin, json={"machine_ids": [a]}
+    )
+    assert resp.status_code == 200, resp.text
+    again = await client.post("/api/v1/maintenance", headers=admin, json=body)
+    assert again.status_code == 200, again.text
+    assert again.json()["id"] == chosen
+    # The next part goes to it like to any other visit.
+    c = await _machine(db_session, "C", room_id=room)
+    resp = await client.post(
+        f"/api/v1/maintenance/{chosen}/lines",
+        headers=admin,
+        json={"items": [{"machine_id": c}]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["machine_count"] == 2
+
+    # Somebody else's id: refused, and nothing of the visit is told.
+    tech, _ = await _tech(client, db_session)
+    d = await _machine(db_session, "D", room_id=room)
+    resp = await client.post(
+        "/api/v1/maintenance",
+        headers=tech,
+        json={"id": chosen, "room_id": room, "items": [{"machine_id": d}]},
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["error"]["code"] == "maintenance.session.id_taken"
+    assert "Tout l'amphi" not in resp.text
+    assert await _journal(client, tech, d) == []
+    # An older console sends no id.
+    resp = await client.post(
+        "/api/v1/maintenance",
+        headers=tech,
+        json={"room_id": room, "items": [{"machine_id": d}]},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["id"] != chosen
+
+
+async def test_a_resumed_part_passes_over_a_poste_that_changed_room_since(
+    client, db_session
+):
+    """A part already recorded is retried after one of its postes moved to
+    another room: its line is written, the poste is passed over before the
+    room is checked. A poste not yet lined that left the room is refused by
+    name — it alone — and the part goes through without it."""
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "R1")
+    other = await _room(client, admin, "R2")
+    a = await _machine(db_session, "A", room_id=room)
+    b = await _machine(db_session, "B", room_id=room)
+    c = await _machine(db_session, "C", room_id=room)
+    visit = await _visit(client, admin, room, [a], skipped=[b])
+
+    for moved in (a, b):
+        resp = await client.post(
+            f"/api/v1/rooms/{other}/machines",
+            headers=admin,
+            json={"machine_ids": [moved]},
+        )
+        assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/maintenance/{visit['id']}/lines",
+        headers=admin,
+        json={
+            "items": [{"machine_id": a}],
+            "skipped": [{"machine_id": b, "note": "Absent"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["machine_count"] == 1
+    assert len(await _journal(client, admin, a)) == 1
+    assert len(await _journal(client, admin, b)) == 1
+
+    d = await _machine(db_session, "D", room_id=other)
+    part = {"items": [{"machine_id": m} for m in (a, c, d)]}
+    resp = await client.post(
+        f"/api/v1/maintenance/{visit['id']}/lines", headers=admin, json=part
+    )
+    assert resp.status_code == 422, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == "maintenance.items.not_in_room"
+    # The one to leave out, not the one already recorded.
+    assert error["details"] == {"machine_ids": [d], "hostnames": ["D"]}
+    assert await _journal(client, admin, c) == []
+    resp = await client.post(
+        f"/api/v1/maintenance/{visit['id']}/lines",
+        headers=admin,
+        json={"items": [{"machine_id": m} for m in (a, c)]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert [i["hostname"] for i in resp.json()["items"]] == ["A", "C"]
+
+
+async def test_a_part_names_the_postes_that_no_longer_exist(client, db_session):
+    """A poste deleted (or merged) since the visit started: the part is
+    refused, and says which of the postes sent are gone, so that the console
+    can leave them out and send the rest."""
+    from app.features.machine.models import Machine
+
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "R1")
+    a = await _machine(db_session, "A", room_id=room)
+    b = await _machine(db_session, "B", room_id=room)
+    c = await _machine(db_session, "C", room_id=room)
+    visit = await _visit(client, admin, room, [a])
+    await db_session.delete(await db_session.get(Machine, uuid.UUID(b)))
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/maintenance/{visit['id']}/lines",
+        headers=admin,
+        json={"items": [{"machine_id": b}, {"machine_id": c}]},
+    )
+    assert resp.status_code == 404, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == "machine.not_found"
+    assert error["details"] == {"machine_ids": [b]}
+    assert await _journal(client, admin, c) == []

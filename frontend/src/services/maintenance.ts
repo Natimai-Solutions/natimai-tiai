@@ -1,4 +1,6 @@
+import type { AxiosError } from 'axios';
 import { api } from 'boot/axios';
+import type { ApiErrorBody } from './errors';
 
 /**
  * Maintenance: a cycle and an owner resolved over three levels (the poste,
@@ -135,6 +137,11 @@ export interface SessionList {
 }
 
 export interface SessionPayload {
+  /**
+   * The visit's id, chosen by the console: the request sent again (its answer
+   * was lost) gets the visit it created back instead of creating a second.
+   */
+  id?: string;
   room_id?: string | null;
   performed_at?: string | null;
   note?: string | null;
@@ -277,15 +284,93 @@ export const SESSION_PART_SIZE = 250;
 
 /** How far a visit sent in parts got: kept by the caller to resume after a failure. */
 export interface SessionProgress {
-  /** The visit, once its first part is recorded. */
+  /**
+   * The id the part that creates the visit carries. Chosen once, here: that
+   * part sent again — its answer never came — finds the visit it created.
+   */
+  clientId: string;
+  /** The visit, once its first part is known to be recorded. */
   sessionId: string | null;
   /** Lines recorded so far, done first then left out, in payload order. */
   sent: number;
   total: number;
 }
 
+/** A random UUID (v4), also where `crypto.randomUUID` is missing (a page served without TLS). */
+export function newSessionId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6]! & 0x0f) | 0x40;
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  const hex = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export function sessionProgress(payload: SessionPayload): SessionProgress {
-  return { sessionId: null, sent: 0, total: payload.items.length + (payload.skipped?.length ?? 0) };
+  return {
+    clientId: newSessionId(),
+    sessionId: null,
+    sent: 0,
+    total: payload.items.length + (payload.skipped?.length ?? 0),
+  };
+}
+
+/**
+ * Whether the server answered, and refused: nothing of that request is
+ * recorded. Anything else — no answer at all, a 5xx from the API or from the
+ * proxy in front of it — leaves it unknown.
+ */
+export function isRefusal(err: unknown): boolean {
+  const status = (err as AxiosError)?.response?.status;
+  return typeof status === 'number' && status >= 400 && status < 500;
+}
+
+/** Postes a part was refused for, as the server names them. */
+export interface RefusedMachines {
+  ids: string[];
+  /** 'moved': no longer in the room visited. 'gone': deleted, merged, or out of sight. */
+  reason: 'moved' | 'gone';
+}
+
+/**
+ * The postes the server refused a part for, when it names them: those that
+ * left the room since the visit started, or that no longer exist. Left out
+ * (`dropUnsentLines`), the rest of the visit can be sent.
+ */
+export function refusedMachines(err: unknown): RefusedMachines | null {
+  const error = (err as AxiosError<ApiErrorBody>)?.response?.data?.error;
+  const reason =
+    error?.code === 'maintenance.items.not_in_room'
+      ? 'moved'
+      : error?.code === 'machine.not_found'
+        ? 'gone'
+        : null;
+  const ids = error?.details?.machine_ids;
+  if (!reason || !Array.isArray(ids) || !ids.length) return null;
+  return { ids: ids.map(String), reason };
+}
+
+/**
+ * Leave postes out of what remains to send of a visit. Only lines not yet
+ * recorded are removed — `progress.sent` counts lines in payload order, and
+ * must keep pointing at the first one to send. Returns how many were removed.
+ */
+export function dropUnsentLines(
+  payload: SessionPayload,
+  progress: SessionProgress,
+  machineIds: string[],
+): number {
+  const drop = new Set(machineIds);
+  const skipped = payload.skipped ?? [];
+  const keep = (offset: number) => (line: { machine_id: string }, index: number) =>
+    offset + index < progress.sent || !drop.has(line.machine_id);
+  const items = payload.items.filter(keep(0));
+  const left = skipped.filter(keep(payload.items.length));
+  const removed = payload.items.length + skipped.length - items.length - left.length;
+  payload.items = items;
+  if (payload.skipped) payload.skipped = left;
+  progress.total -= removed;
+  return removed;
 }
 
 /**
@@ -294,7 +379,9 @@ export function sessionProgress(payload: SessionPayload): SessionProgress {
  * postes go first, so the part that creates the visit carries one whenever
  * there is any. `progress` moves as each part is recorded: on a failure the
  * caller keeps it and calls again with the same payload to send the rest —
- * a part the server recorded but whose answer was lost is passed over there.
+ * a part the server recorded but whose answer was lost is passed over there,
+ * the creating one included: it carries `progress.clientId`, and sent again
+ * gets back the visit it created.
  */
 export async function recordSessionInParts(
   payload: SessionPayload,
@@ -313,7 +400,7 @@ export async function recordSessionInParts(
       .filter((p) => !p.done)
       .map((p) => p.line as { machine_id: string; note: string });
     if (progress.sessionId === null) {
-      last = await recordSession({ ...payload, items, skipped });
+      last = await recordSession({ ...payload, id: progress.clientId, items, skipped });
       progress.sessionId = last.id;
     } else {
       last = await addSessionLines(progress.sessionId, { items, skipped });

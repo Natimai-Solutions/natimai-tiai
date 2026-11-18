@@ -9,19 +9,21 @@ Placing a poste by hand is always allowed here; the directory-driven mode
 (``ROOM_SOURCE``, next milestone) will lock it.
 """
 
+import unicodedata
 import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import AfterValidator, BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.api.fields import not_null
 from app.api.routes.agent import clean_location
 from app.core.config import settings
-from app.core.errors import AppError, ErrorCode
+from app.core.errors import AppError, ErrorCode, violated_constraint
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.machine.models import Machine
@@ -51,11 +53,30 @@ rooms_router = APIRouter(prefix="/rooms", tags=["rooms"], dependencies=[_READ])
 # --- Schemas ----------------------------------------------------------------
 
 
+# Characters that draw nothing without being spaces or format characters
+# for Unicode: the Hangul fillers (letters), the blank Braille pattern (a
+# symbol), the combining grapheme joiner (a mark).
+_BLANK_GLYPHS = frozenset("\u115f\u1160\u3164\uffa0\u2800\u034f")
+
+
+def _invisible(char: str) -> bool:
+    """Whether ``char`` shows nothing: a space, a control or format character
+    (zero-width space and joiners, soft hyphen, direction marks, byte-order
+    mark…), or one of the glyphs drawn blank."""
+    return (
+        char.isspace()
+        or unicodedata.category(char) in {"Cc", "Cf", "Zs", "Zl", "Zp"}
+        or char in _BLANK_GLYPHS
+    )
+
+
 def _name(value: str) -> str:
     """A building's or a room's name, its spaces collapsed: « » or «   » is
-    no name (it was stored as one, and listed as a blank row)."""
+    no name (it was stored as one, and listed as a blank row) — nor is one
+    made only of characters nobody sees, a zero-width space for instance.
+    Inside a name they are left alone: some scripts are written with them."""
     cleaned = " ".join(value.split())
-    if not cleaned:
+    if all(_invisible(char) for char in cleaned):
         raise ValueError("le nom ne peut pas être vide")
     return cleaned
 
@@ -275,6 +296,22 @@ async def _require_room(
     return room
 
 
+def _building_name_taken() -> AppError:
+    return AppError(
+        code=ErrorCode.BUILDING_NAME_TAKEN,
+        status_code=409,
+        message="A building of this name already exists on this site",
+    )
+
+
+def _room_name_taken() -> AppError:
+    return AppError(
+        code=ErrorCode.ROOM_NAME_TAKEN,
+        status_code=409,
+        message="A room of this name already exists in this building",
+    )
+
+
 async def _reject_building_name_taken(
     session: SessionDep,
     location: str | None,
@@ -284,11 +321,7 @@ async def _reject_building_name_taken(
 ) -> None:
     existing = await crud.building_by_name(session, location, name)
     if existing is not None and existing.id != exclude:
-        raise AppError(
-            code=ErrorCode.BUILDING_NAME_TAKEN,
-            status_code=409,
-            message="A building of this name already exists on this site",
-        )
+        raise _building_name_taken()
 
 
 async def _reject_room_name_taken(
@@ -300,11 +333,31 @@ async def _reject_room_name_taken(
 ) -> None:
     existing = await crud.room_by_name(session, building_id, name)
     if existing is not None and existing.id != exclude:
-        raise AppError(
-            code=ErrorCode.ROOM_NAME_TAKEN,
-            status_code=409,
-            message="A room of this name already exists in this building",
-        )
+        raise _room_name_taken()
+
+
+# The constraints that refuse a second place of a name under one parent: the
+# name as typed, and the name whatever its case.
+_NAME_CONSTRAINTS = {
+    "uq_buildings_location_name": _building_name_taken,
+    "ix_buildings_location_name_lower": _building_name_taken,
+    "uq_rooms_building_name": _room_name_taken,
+    "ix_rooms_building_name_lower": _room_name_taken,
+}
+
+
+async def _flush_name(session: SessionDep) -> None:
+    """Write the pending building or room now, turning a name taken by a
+    concurrent request since ``_reject_*_name_taken`` read it free into the
+    409 that read would have answered, rather than a 500."""
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        taken = _NAME_CONSTRAINTS.get(violated_constraint(exc) or "")
+        if taken is None:
+            raise
+        await session.rollback()
+        raise taken() from None
 
 
 def _clean_name(name: str) -> str:
@@ -468,7 +521,7 @@ async def create_building(
     await _reject_building_name_taken(session, location, name)
     building = Building(name=name, location=location, notes=payload.notes)
     session.add(building)
-    await session.flush()
+    await _flush_name(session)
     audit.record(
         session,
         actor=current.email,
@@ -509,6 +562,7 @@ async def update_building(
     _reject_out_of_scope(_building_writable(building, scope))
     building.updated_at = utcnow()
     session.add(building)
+    await _flush_name(session)
     audit.record(
         session,
         actor=current.email,
@@ -665,7 +719,7 @@ async def create_room(
         notes=payload.notes,
     )
     session.add(room)
-    await session.flush()
+    await _flush_name(session)
     _reject_out_of_scope(await _room_writable(session, room.id, scope))
     audit.record(
         session,
@@ -728,6 +782,8 @@ async def update_room(
         # A room in a building is where its building is; a site of its own
         # would only be a second answer.
         room.location = None
+    # Written here, before any read of this session flushes it unguarded.
+    await _flush_name(session)
     _reject_out_of_scope(
         _site_move_allowed(scope, site_before, await _room_site(session, room))
     )
