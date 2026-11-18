@@ -4,6 +4,7 @@ the « Sessions ouvertes » list, and every event that ends sessions early.
 DB-backed: requires TIAI_TEST_DATABASE_URL.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import timedelta
@@ -716,3 +717,139 @@ async def test_purge_drops_expired_and_revoked_sessions_only(client, db_session)
         ]
     )
     assert await auth_sessions.purge_expired_sessions(db_session) == 0
+
+
+# --- One order for the rows a request locks (verification of v1.2.1, F3) --------
+#
+# The account's row, then its sessions', then its addresses': every request
+# that locks more than one takes them in that order. Each test below holds
+# one request between two of its locks while another, which used to take
+# them the other way round, runs into it: a deadlock, and a 500 for one.
+
+
+async def _operator_session(client, db_session, ip: str = "10.0.0.10"):
+    """An account logged in from ``ip``: its id, its bearer, its cookie."""
+    user_id = await _account(db_session)
+    resp = await _login(client, **{"X-Forwarded-For": ip})
+    cookie = resp.cookies[COOKIE]
+    client.cookies.clear()
+    return user_id, _bearer(resp), cookie
+
+
+async def _admin_headers(client, db_session) -> dict[str, str]:
+    await _account(db_session, "admin@test.local", admin=True)
+    resp = await _login(client, "admin@test.local", **{"X-Forwarded-For": "10.0.0.1"})
+    client.cookies.clear()
+    return _bearer(resp)
+
+
+def _linger(
+    monkeypatch, owner, name: str, *, before: bool, seconds: float = 0.3
+) -> asyncio.Event:
+    """Make ``owner.name`` signal, then wait a moment — before doing its
+    work or after it. The first call only: the request under test's."""
+    reached = asyncio.Event()
+    real = getattr(owner, name)
+
+    async def lingering(*args, **kwargs):
+        first = not reached.is_set()
+        if first and before:
+            reached.set()
+            await asyncio.sleep(seconds)
+        result = await real(*args, **kwargs)
+        if first and not before:
+            reached.set()
+            await asyncio.sleep(seconds)
+        return result
+
+    monkeypatch.setattr(owner, name, lingering)
+    return reached
+
+
+async def test_an_admin_reset_and_a_failing_login_do_not_deadlock(
+    client, db_session, monkeypatch
+):
+    """The reset holds the account's row and forgets its addresses; a wrong
+    password from one of them used to lock the address's row, then wait for
+    the account's."""
+    from app.features.user import crud
+
+    admin = await _admin_headers(client, db_session)
+    user_id, _, _ = await _operator_session(client, db_session)
+    reading = _linger(monkeypatch, crud, "user_authority", before=False)
+
+    async def guess():
+        await reading.wait()
+        return await client.post(
+            "/api/v1/auth/login",
+            data={"username": "op@test.local", "password": "wrong-password-here"},
+            headers={"X-Forwarded-For": "10.0.0.10"},
+        )
+
+    reset, refused = await asyncio.gather(
+        client.post(f"/api/v1/users/{user_id}/reset-password", headers=admin, json={}),
+        guess(),
+    )
+    assert reset.status_code == 200, reset.text
+    assert refused.status_code == 401
+
+
+async def test_an_admin_reset_and_a_wrong_current_password_do_not_deadlock(
+    client, db_session, monkeypatch
+):
+    """The reset holds the account's row and ends its sessions; a wrong
+    current password typed through one of them used to lock the session's
+    row, then wait for the account's."""
+    from app.core import security
+
+    admin = await _admin_headers(client, db_session)
+    user_id, headers, _ = await _operator_session(client, db_session)
+    checking = _linger(monkeypatch, security, "check_password", before=True)
+
+    async def reset():
+        await checking.wait()
+        return await client.post(
+            f"/api/v1/users/{user_id}/reset-password", headers=admin, json={}
+        )
+
+    wrong, done = await asyncio.gather(
+        client.post(
+            "/api/v1/auth/password",
+            headers=headers,
+            json={"current_password": "guess-guess", "new_password": "x" * 20},
+        ),
+        reset(),
+    )
+    assert wrong.status_code == 400
+    assert done.status_code == 200, done.text
+
+
+async def test_an_admin_reset_and_a_refresh_do_not_deadlock(
+    client, db_session, monkeypatch
+):
+    """A refresh holds its session's row, then writes its address's; the
+    reset used to forget the addresses, then end the sessions."""
+    from app.features.user import addresses
+
+    admin = await _admin_headers(client, db_session)
+    user_id, _, cookie = await _operator_session(client, db_session)
+    # The address is written at most once a day by a refresh: make it due.
+    monkeypatch.setattr(addresses, "_SUCCESS_REFRESH", timedelta(0))
+    # Long enough for the reset to hash its password and reach its writes.
+    noting = _linger(monkeypatch, addresses, "note_success", before=True, seconds=1)
+
+    async def reset():
+        await noting.wait()
+        return await client.post(
+            f"/api/v1/users/{user_id}/reset-password", headers=admin, json={}
+        )
+
+    refreshed, done = await asyncio.gather(
+        client.post(
+            "/api/v1/auth/refresh",
+            headers={"Cookie": f"{COOKIE}={cookie}", "X-Forwarded-For": "10.0.0.10"},
+        ),
+        reset(),
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    assert done.status_code == 200, done.text

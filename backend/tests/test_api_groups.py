@@ -387,10 +387,38 @@ async def test_a_blank_or_long_group_name_is_a_422(client, db_session):
     assert resp.status_code == 422
 
 
-async def test_concurrent_creations_of_one_group_name_answer_409(client, db_session):
+def _all_check_before_any_writes(monkeypatch, requests: int) -> None:
+    """Hold every request at « is this name free? » until all of them have
+    asked. Left to themselves the requests may well run one after the other
+    — the first on the pool's warm connection while the others open theirs —
+    and the later ones are then refused by that check, race or no race."""
+    import asyncio
+
+    from app.features.user import crud
+
+    asked = 0
+    all_asked = asyncio.Event()
+    lookup = crud.get_group_by_name
+
+    async def lookup_then_wait(*args, **kwargs):
+        nonlocal asked
+        found = await lookup(*args, **kwargs)
+        asked += 1
+        if asked >= requests:
+            all_asked.set()
+        await asyncio.wait_for(all_asked.wait(), 10)
+        return found
+
+    monkeypatch.setattr(crud, "get_group_by_name", lookup_then_wait)
+
+
+async def test_concurrent_creations_of_one_group_name_answer_409(
+    client, db_session, monkeypatch
+):
     import asyncio
 
     admin = await _admin(client, db_session)
+    _all_check_before_any_writes(monkeypatch, 6)
     results = await asyncio.gather(
         *(
             client.post(
@@ -403,6 +431,39 @@ async def test_concurrent_creations_of_one_group_name_answer_409(client, db_sess
     )
     codes = sorted(r.status_code for r in results)
     assert codes == [201] + [409] * 5, [r.text for r in results]
+
+
+async def test_concurrent_renames_to_one_group_name_answer_409(
+    client, db_session, monkeypatch
+):
+    """The other half of the same race: six groups renamed at once to one
+    name, in two capitalisations. All pass the check that the name is free;
+    the index lets one through, and the five others are told the name is
+    taken — a 409, where the unique violation used to surface as a 500."""
+    import asyncio
+
+    admin = await _admin(client, db_session)
+    ids = []
+    for i in range(6):
+        created = await client.post(
+            "/api/v1/groups", headers=admin, json={"name": f"G{i}", "permissions": []}
+        )
+        ids.append(created.json()["id"])
+    _all_check_before_any_writes(monkeypatch, len(ids))
+    results = await asyncio.gather(
+        *(
+            client.patch(
+                f"/api/v1/groups/{gid}",
+                headers=admin,
+                json={"name": "Cible" if i % 2 else "CIBLE"},
+            )
+            for i, gid in enumerate(ids)
+        )
+    )
+    codes = sorted(r.status_code for r in results)
+    assert codes == [200] + [409] * 5, [r.text for r in results]
+    refused = next(r for r in results if r.status_code == 409)
+    assert refused.json()["error"]["code"] == "group.name.taken"
 
 
 async def test_a_group_names_its_scope_for_any_reader(client, db_session):

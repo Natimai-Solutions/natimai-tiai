@@ -19,7 +19,7 @@ Create Date: 2026-11-16
 
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 import sqlalchemy as sa
 from alembic import op
@@ -45,37 +45,48 @@ def grant_technicians_package_read(conn: sa.Connection) -> int:
     return result.rowcount or 0
 
 
-def _suffixed(name: str, n: int, taken: set[str]) -> str:
-    """``name (n)``, cut to the column and free whatever its case."""
+def _suffixed(name: str) -> Iterator[str]:
+    """``name (2)``, ``name (3)``… each cut to the column."""
+    n = 2
     while True:
         suffix = f" ({n})"
-        candidate = name[: NAME_MAX_LENGTH - len(suffix)].rstrip() + suffix
-        if candidate.lower() not in taken:
-            return candidate
+        yield name[: NAME_MAX_LENGTH - len(suffix)].rstrip() + suffix
         n += 1
 
 
 def rename_case_twins(conn: sa.Connection) -> list[tuple[str, str]]:
     """Give every group whose name equals another's but for the case a name
     of its own. The built-in groups, then the oldest, keep theirs. Returns
-    ``(old, new)`` for each renamed group."""
+    ``(old, new)`` for each renamed group.
+
+    « But for the case » is what the index will say, so it is asked of the
+    database: its ``lower()`` and Python's disagree on a few letters (a
+    capital sigma ending a word, a dotted capital I), and twins found with
+    Python's left names the index then refused — the upgrade aborted.
+    """
     rows = conn.execute(
         sa.text(
-            "SELECT id, name FROM groups ORDER BY builtin_key IS NULL, created_at, id"
+            "SELECT id, name, lower(name) FROM groups "
+            "ORDER BY builtin_key IS NULL, created_at, id"
         )
     ).all()
     # Every name some group keeps is reserved first, so that a suffixed name
     # never lands on one of them (« Atelier (2) » created by hand).
     keepers: dict[str, object] = {}
-    for group_id, name in rows:
-        keepers.setdefault(name.lower(), group_id)
+    for group_id, _name, folded in rows:
+        keepers.setdefault(folded, group_id)
     taken = set(keepers)
     renamed: list[tuple[str, str]] = []
-    for group_id, name in rows:
-        if keepers[name.lower()] == group_id:
+    for group_id, name, folded in rows:
+        if keepers[folded] == group_id:
             continue
-        new = _suffixed(name, 2, taken)
-        taken.add(new.lower())
+        for new in _suffixed(name):
+            new_folded = conn.execute(
+                sa.text("SELECT lower(CAST(:name AS text))"), {"name": new}
+            ).scalar_one()
+            if new_folded not in taken:
+                break
+        taken.add(new_folded)
         conn.execute(
             sa.text("UPDATE groups SET name = :name WHERE id = :id"),
             {"name": new, "id": group_id},

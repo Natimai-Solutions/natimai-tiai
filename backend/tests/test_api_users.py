@@ -1266,10 +1266,14 @@ async def test_the_new_password_must_differ_from_the_current_one(client, db_sess
     assert (await client.get("/api/v1/auth/me", headers=headers)).status_code == 200
 
 
+async def _check_link(client, token: str):
+    return await client.post("/api/v1/auth/password-reset/check", json={"token": token})
+
+
 async def test_a_reset_link_can_be_checked_without_being_spent(
     client, db_session, monkeypatch
 ):
-    """GET /auth/password-reset/check: 204 while the link is usable, the
+    """POST /auth/password-reset/check: 204 while the link is usable, the
     confirm route's 400 otherwise, and checking never consumes it."""
     from app.features.user import crud
     from app.features.user.permissions import BuiltinGroup
@@ -1284,13 +1288,9 @@ async def test_a_reset_link_can_be_checked_without_being_spent(
     await db_session.commit()
 
     for _ in range(2):
-        resp = await client.get(
-            "/api/v1/auth/password-reset/check", params={"token": token}
-        )
+        resp = await _check_link(client, token)
         assert resp.status_code == 204, resp.text
-    resp = await client.get(
-        "/api/v1/auth/password-reset/check", params={"token": "nope"}
-    )
+    resp = await _check_link(client, "nope")
     assert resp.status_code == 400
     assert _code(resp) == "password.reset_token.invalid"
 
@@ -1300,20 +1300,99 @@ async def test_a_reset_link_can_be_checked_without_being_spent(
         json={"token": token, "new_password": "a-brand-new-passphrase"},
     )
     assert resp.status_code == 204, resp.text
-    resp = await client.get(
-        "/api/v1/auth/password-reset/check", params={"token": token}
-    )
+    resp = await _check_link(client, token)
     assert resp.status_code == 400
 
 
+async def test_a_reset_link_is_never_checked_through_a_url(client, db_session):
+    """Verification of v1.2.1, F8: the check took the token in the query
+    string, and the access log wrote it down — a link still good for an
+    hour, in a file its owner never sees. It travels in a body, like the
+    confirmation; the GET is gone, not kept beside it."""
+    from app.features.user import crud
+
+    user = await crud.create_user(db_session, email="url@test.local", password=STRONG)
+    token = await crud.create_reset_token(db_session, user)
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/v1/auth/password-reset/check", params={"token": token}
+    )
+    assert resp.status_code == 405
+    # Nor from the query string of a POST: only the body is read.
+    resp = await client.post(
+        "/api/v1/auth/password-reset/check", params={"token": token}
+    )
+    assert resp.status_code == 422
+    assert (await _check_link(client, token)).status_code == 204
+    # An empty or oversized token is a dead link like any other.
+    assert (await _check_link(client, "")).status_code == 400
+    assert (await _check_link(client, "a" * 6000)).status_code == 400
+
+
 async def test_checking_reset_links_is_rate_limited(client, db_session):
-    statuses = [
-        (
-            await client.get(
-                "/api/v1/auth/password-reset/check", params={"token": f"t{i}"}
-            )
-        ).status_code
-        for i in range(21)
-    ]
+    statuses = [(await _check_link(client, f"t{i}")).status_code for i in range(21)]
     assert statuses[:20] == [400] * 20
     assert statuses[20] == 429
+
+
+@pytest.mark.parametrize("write", ["patch", "reset_password"])
+async def test_an_edit_racing_a_deletion_does_not_fail(
+    client, db_session, monkeypatch, write
+):
+    """An account edited (or its password reset) while another administrator
+    deletes it: the edit had read the row, the deletion committed, and the
+    edit's write then matched nothing — a 500. The row is locked as it is
+    read: the two are answered one after the other, each in full."""
+    from app.features.user import crud
+
+    admin = await _admin(client, db_session)
+    created = await client.post(
+        "/api/v1/users",
+        headers=admin,
+        json={"email": "going@test.local", "password": STRONG},
+    )
+    user_id = created.json()["id"]
+
+    deleted = asyncio.Event()
+    authority = crud.user_authority
+    calls = 0
+
+    async def authority_then_wait(*args, **kwargs):
+        # Called by each route right after it has read the account. The
+        # first caller is the edit: it gives the deletion half a second to
+        # go through — which it does when nothing holds the row.
+        nonlocal calls
+        calls += 1
+        first = calls == 1
+        found = await authority(*args, **kwargs)
+        if first:
+            try:
+                await asyncio.wait_for(deleted.wait(), 0.5)
+            except TimeoutError:
+                pass
+        return found
+
+    monkeypatch.setattr(crud, "user_authority", authority_then_wait)
+
+    async def edit():
+        if write == "patch":
+            return await client.patch(
+                f"/api/v1/users/{user_id}", headers=admin, json={"full_name": "Parti"}
+            )
+        return await client.post(
+            f"/api/v1/users/{user_id}/reset-password", headers=admin, json={}
+        )
+
+    async def delete():
+        while calls == 0:
+            await asyncio.sleep(0.01)
+        resp = await client.delete(f"/api/v1/users/{user_id}", headers=admin)
+        deleted.set()
+        return resp
+
+    edited, gone = await asyncio.gather(edit(), delete())
+    assert (edited.status_code, gone.status_code) == (200, 204)
+    assert (
+        await client.get(f"/api/v1/users/{user_id}", headers=admin)
+    ).status_code == 404

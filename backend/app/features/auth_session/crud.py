@@ -210,6 +210,27 @@ def revoke(session: AsyncSession, row: AuthSession) -> None:
         session.add(row)
 
 
+async def lock_row(session: AsyncSession, row: AuthSession) -> AuthSession | None:
+    """Lock the session's row until the transaction ends, and return it as
+    the database has it now (None if it is gone). Does not commit.
+
+    What « changer mon mot de passe » takes before it checks anything: the
+    guesses made through one session are answered one after the other, each
+    reading the failures the previous ones counted. Its place in the order
+    every request locks rows in is after the account's row and before an
+    address's (``user.crud.lock_account``) — where a refresh takes it too.
+    """
+    result = await session.exec(
+        select(AuthSession)
+        .where(col(AuthSession.id) == row.id)
+        .with_for_update()
+        # ``row`` is in this session already, read before the lock: without
+        # this the query would hand back its stale attributes.
+        .execution_options(populate_existing=True)
+    )
+    return result.one_or_none()
+
+
 async def note_password_failure(session: AsyncSession, row: AuthSession) -> int:
     """Count one wrong current password typed through this session, and
     return how many it has now. In the database, so that concurrent guesses

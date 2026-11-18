@@ -193,13 +193,23 @@ describe('updateMe', () => {
 });
 
 describe('checkPasswordResetToken (C7)', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset();
+    vi.mocked(api.post).mockReset();
+  });
+
   it('reads 204 as valid, 400 as invalid, and anything else as unknown', async () => {
-    vi.mocked(api.get).mockResolvedValueOnce({ status: 204, data: '' });
+    vi.mocked(api.post).mockResolvedValueOnce({ status: 204, data: '' });
     expect(await checkPasswordResetToken('t')).toBe('valid');
-    expect(api.get).toHaveBeenCalledWith('/auth/password-reset/check', { params: { token: 't' } });
-    vi.mocked(api.get).mockRejectedValueOnce({ response: { status: 400 } });
+    // In the body, never in the URL: a query string is what an access log keeps.
+    expect(api.post).toHaveBeenCalledWith('/auth/password-reset/check', { token: 't' });
+    expect(api.get).not.toHaveBeenCalled();
+    vi.mocked(api.post).mockRejectedValueOnce({ response: { status: 400 } });
     expect(await checkPasswordResetToken('t')).toBe('invalid');
-    vi.mocked(api.get).mockRejectedValueOnce({ response: { status: 404 } });
+    // An older server (404, 405) or no answer at all: the form decides.
+    vi.mocked(api.post).mockRejectedValueOnce({ response: { status: 405 } });
+    expect(await checkPasswordResetToken('t')).toBe('unknown');
+    vi.mocked(api.post).mockRejectedValueOnce(new Error('Network Error'));
     expect(await checkPasswordResetToken('t')).toBe('unknown');
   });
 });

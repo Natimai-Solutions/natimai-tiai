@@ -79,7 +79,8 @@ async def create_user(
 @dataclass(frozen=True)
 class Lock:
     """A lock a failure just set: until when, and whether the slow counter
-    set it (``slow``: it admits only the account's usual addresses)."""
+    set it (``slow``: it shuts out the addresses that failed since the slow
+    window began, until it ends — a successful login does not lift it)."""
 
     until: datetime
     slow: bool = False
@@ -105,6 +106,41 @@ class AccountLockedError(Exception):
         self.slow = slow
 
 
+async def lock_account(session: AsyncSession, user: User) -> User | None:
+    """Lock the account's row until the transaction ends and return it as
+    the database has it now (None if it is gone). Does not commit.
+
+    The order of the rows a request locks, everywhere: **the account's,
+    then its sessions', then its addresses'**. A password reset takes all
+    three (``set_password``); a failed login the account's and an
+    address's; a refresh a session's and an address's; a wrong current
+    password all three. Taken in any other order by one of them, two
+    requests at the same instant can each hold what the other waits for,
+    and one is answered a 500.
+
+    ``FOR NO KEY UPDATE``: what an UPDATE of the row takes — a login
+    opening a session for the account (a row that refers to this one) does
+    not wait for it.
+    """
+    result = await session.exec(
+        select(User)
+        .where(col(User.id) == user.id)
+        .with_for_update(key_share=True)
+        # ``user`` is in this session already, read before the lock.
+        .execution_options(populate_existing=True)
+    )
+    return result.one_or_none()
+
+
+def slow_lock_since(user: User, now: datetime) -> datetime | None:
+    """The start of the slow window whose lock is running on ``user``, None
+    when no slow lock is: what ``addresses.shut_out`` reads the failures
+    since."""
+    if user.slow_locked_until is None or user.slow_locked_until <= now:
+        return None
+    return user.slow_window_started_at
+
+
 async def authenticate(
     session: AsyncSession, email: str, password: str, ip: str = ""
 ) -> User | None:
@@ -123,8 +159,10 @@ async def authenticate(
     then shuts out every address but those that opened the account recently,
     so spreading the guesses buys no more of them. Guesses spaced out to
     dodge that count — LOGIN_SLOW_MAX_FAILED_ATTEMPTS within
-    LOGIN_SLOW_WINDOW_HOURS — lock it for LOGIN_SLOW_WINDOW_HOURS, to every
-    address but the usual ones (audit T06). Which addresses failed and
+    LOGIN_SLOW_WINDOW_HOURS — set a second lock, for LOGIN_SLOW_WINDOW_HOURS,
+    on the same terms over that longer window (audit T06): shut to the
+    addresses that failed since the window began, and to every address but
+    the usual ones once many did. Which addresses failed and
     which ones opened the account is in the database: a restart changes
     nothing to a lock. Raises
     ``AccountLockedError`` on the failure that locks it (to audit) and on an
@@ -137,35 +175,37 @@ async def authenticate(
         await security.burn_password_check_async(password)
         return None
     now = utcnow()
-    if (
-        user.locked_until is not None
-        and user.locked_until > now
-        and await addresses.shut_out(
-            session, user.id, ip, now, known_only=user.lock_admits_known_only
-        )
+    quick = user.locked_until is not None and user.locked_until > now
+    slow_since = slow_lock_since(user, now)
+    if (quick or slow_since is not None) and await addresses.shut_out(
+        session, user.id, ip, now, slow_since=slow_since
     ):
         await security.burn_password_check_async(password)
+        until = [
+            end
+            for end in (user.locked_until, user.slow_locked_until)
+            if end is not None and end > now
+        ]
         raise AccountLockedError(
-            user,
-            user.locked_until,
-            just_locked=False,
-            slow=user.lock_admits_known_only,
+            user, max(until), just_locked=False, slow=slow_since is not None
         )
     if not await security.check_password(password, user.hashed_password):
         lock = await record_failure(session, user, ip)
         if lock is not None:
             raise AccountLockedError(user, lock.until, just_locked=True, slow=lock.slow)
         return None
-    await addresses.note_success(session, user.id, ip, now)
-    # The slow counter is left alone: the owner logging in every morning
-    # would otherwise hand a slow guesser a fresh budget every day. Twenty
-    # typos of their own in a day is not a thing that happens.
+    # The slow counter, its window and its lock are left alone: the owner
+    # logging in every morning would otherwise hand a slow guesser a fresh
+    # budget every day (and the addresses the lock shuts out, a way back
+    # in). Twenty typos of their own in a day is not a thing that happens.
     if user.failed_login_attempts or user.locked_until is not None:
         user.failed_login_attempts = 0
         user.last_failed_login_at = None
         user.locked_until = None
-        user.lock_admits_known_only = False
         session.add(user)
+        # Written now: the account's row before the address's (``lock_account``).
+        await session.flush()
+    await addresses.note_success(session, user.id, ip, now)
     return user
 
 
@@ -175,27 +215,38 @@ async def record_failure(session: AsyncSession, user: User, ip: str) -> Lock | N
     this failure set it — of concurrent ones past a threshold, exactly one
     does. Does not commit.
 
-    Two counters move together. The quick one: a failure more than
-    LOGIN_LOCKOUT_MINUTES after the previous one counts as the first, so old
-    failures do not add up; LOGIN_MAX_FAILED_ATTEMPTS lock the account for
-    LOGIN_LOCKOUT_MINUTES. The slow one (audit T06): failures within
-    LOGIN_SLOW_WINDOW_HOURS of the first of its window, however far apart —
-    the quick counter let four guesses a quarter of an hour through for
-    ever. LOGIN_SLOW_MAX_FAILED_ATTEMPTS lock the account for
-    LOGIN_SLOW_WINDOW_HOURS, and that lock admits only the account's usual
-    addresses: its guesser waited out every quick lock, so which addresses
-    failed lately says nothing. The holder's ways out are those of a lock
-    under siege — a usual poste, a reset link, an administrator.
+    Two counters move together, each with its lock. The quick one: a failure
+    more than LOGIN_LOCKOUT_MINUTES after the previous one counts as the
+    first, so old failures do not add up; LOGIN_MAX_FAILED_ATTEMPTS lock the
+    account for LOGIN_LOCKOUT_MINUTES. The slow one (audit T06): failures
+    within LOGIN_SLOW_WINDOW_HOURS of the first of its window, however far
+    apart — the quick counter let four guesses a quarter of an hour through
+    for ever. LOGIN_SLOW_MAX_FAILED_ATTEMPTS set the slow lock, for
+    LOGIN_SLOW_WINDOW_HOURS, once per window.
+
+    The slow window is not restarted while its lock runs, nor by anything
+    but a failure past both: the count stays at or above the threshold for
+    as long as the lock does, so neither the lock ending early nor a login
+    of the holder's hands the guesser a new budget before the lock's end,
+    and "the addresses that failed since the window began" means the same
+    thing from the first guess to the last hour of the lock. When both
+    locks trip on one failure, the slow one is reported: it is the wider.
     """
     now = utcnow()
-    await addresses.note_failure(session, user.id, ip, now)
     stale = now - timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
     slow_stale = now - timedelta(hours=settings.LOGIN_SLOW_WINDOW_HOURS)
     last = col(User.last_failed_login_at)
     slow_start = col(User.slow_window_started_at)
+    slow_locked_until = col(User.slow_locked_until)
     # Every right-hand side reads the row as it was: the window's start is
     # tested against the old value in both assignments.
-    new_window = or_(slow_start.is_(None), slow_start < slow_stale)
+    new_window = or_(
+        slow_start.is_(None),
+        and_(
+            slow_start < slow_stale,
+            or_(slow_locked_until.is_(None), slow_locked_until <= now),
+        ),
+    )
     failures, slow_failures = (
         await session.exec(
             update(User)
@@ -217,7 +268,11 @@ async def record_failure(session: AsyncSession, user: User, ip: str) -> Lock | N
             )
         )
     ).one()
-    locked_until = col(User.locked_until)
+    # The address after the account, the order every request locks them in
+    # (``lock_account``): a reset of the password holds the account's row
+    # and forgets its addresses, and would deadlock with the reverse.
+    await addresses.note_failure(session, user.id, ip, now)
+    slow_lock: Lock | None = None
     if slow_failures >= settings.LOGIN_SLOW_MAX_FAILED_ATTEMPTS:
         until = now + timedelta(hours=settings.LOGIN_SLOW_WINDOW_HOURS)
         slow_locked = (
@@ -227,26 +282,22 @@ async def record_failure(session: AsyncSession, user: User, ip: str) -> Lock | N
                     col(User.id) == user.id,
                     col(User.slow_failed_login_attempts)
                     >= settings.LOGIN_SLOW_MAX_FAILED_ATTEMPTS,
-                )
-                .values(
-                    failed_login_attempts=0,
-                    slow_failed_login_attempts=0,
-                    slow_window_started_at=None,
-                    locked_until=func.greatest(
-                        func.coalesce(locked_until, until), until
+                    # Once per window: a lock set during this window ends
+                    # after the window began, an older one before.
+                    or_(
+                        slow_locked_until.is_(None),
+                        slow_locked_until <= slow_start,
                     ),
-                    lock_admits_known_only=True,
                 )
-                .returning(locked_until)
+                .values(slow_locked_until=until)
+                .returning(slow_locked_until)
             )
         ).first()
         if slow_locked is not None:
-            return Lock(until=slow_locked[0], slow=True)
+            slow_lock = Lock(until=slow_locked[0], slow=True)
     if failures < settings.LOGIN_MAX_FAILED_ATTEMPTS:
-        return None
-    until = now + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
-    # A quick lock inside a slow one neither shortens it nor narrows it.
-    running = and_(locked_until.is_not(None), locked_until > now)
+        return slow_lock
+    locked_until = col(User.locked_until)
     locked = (
         await session.exec(
             update(User)
@@ -256,16 +307,13 @@ async def record_failure(session: AsyncSession, user: User, ip: str) -> Lock | N
             )
             .values(
                 failed_login_attempts=0,
-                locked_until=case(
-                    (running, func.greatest(locked_until, until)), else_=until
-                ),
-                lock_admits_known_only=case(
-                    (running, col(User.lock_admits_known_only)), else_=False
-                ),
+                locked_until=now + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES),
             )
             .returning(locked_until)
         )
     ).first()
+    if slow_lock is not None:
+        return slow_lock
     return Lock(until=locked[0]) if locked is not None else None
 
 
@@ -331,13 +379,16 @@ async def set_password(
     user.locked_until = None
     user.slow_failed_login_attempts = 0
     user.slow_window_started_at = None
-    user.lock_admits_known_only = False
+    user.slow_locked_until = None
+    session.add(user)
+    # The account's row, then its sessions', then its addresses': the order
+    # every request locks them in (``lock_account``).
+    await session.flush()
+    await auth_sessions.revoke_all(session, user.id)
     await addresses.forget_known(session, user.id, keep=chosen_from)
     await addresses.forget_failures(session, user.id)
     if chosen_from is not None:
         await addresses.note_success(session, user.id, chosen_from, utcnow())
-    session.add(user)
-    await auth_sessions.revoke_all(session, user.id)
 
 
 async def delete_user(session: AsyncSession, user: User) -> None:
@@ -364,7 +415,9 @@ async def delete_user(session: AsyncSession, user: User) -> None:
 # links alive for the account are capped too, generously
 # (PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS), against a botnet filling the
 # inbox; a request from one of the owner's usual addresses is not held to
-# that ceiling.
+# that ceiling, and nobody's is while the slow lock runs: the link is then
+# the way back in of a holder the lock refuses, and ten addresses keeping
+# the ceiling full would close it — an inbox filled is the lesser harm.
 
 
 async def reset_request_allowed(
@@ -373,7 +426,8 @@ async def reset_request_allowed(
     """Whether a new link may be issued and mailed to ``user`` now, asked
     from ``ip``: none asked from that address within the cooldown, fewer than
     PASSWORD_RESET_MAX_LIVE_LINKS of its links still usable, and the
-    account's ceiling not reached (unless ``ip`` is a usual address).
+    account's ceiling not reached (unless ``ip`` is a usual address, or the
+    account is under its slow lock).
 
     Locks the account's row first, for the rest of the transaction: two
     requests for one account at the same instant are answered one after the
@@ -381,7 +435,10 @@ async def reset_request_allowed(
     insert are not atomic otherwise (audit T34). The caller ends the
     transaction (a commit, or the session closing) to release it.
     """
-    await session.exec(select(User.id).where(col(User.id) == user.id).with_for_update())
+    locked = await session.exec(
+        select(User.slow_locked_until).where(col(User.id) == user.id).with_for_update()
+    )
+    slow_locked_until = locked.one_or_none()
     now = utcnow()
     found = await session.exec(
         select(PasswordResetToken.created_at, PasswordResetToken.requested_ip)
@@ -398,6 +455,8 @@ async def reset_request_allowed(
     if any(created > now - cooldown for created in mine):
         return False
     if len(live) >= settings.PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS:
+        if slow_locked_until is not None and slow_locked_until > now:
+            return True
         return await addresses.is_known(session, user.id, ip, now)
     return True
 
