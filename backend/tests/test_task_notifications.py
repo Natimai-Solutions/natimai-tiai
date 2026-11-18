@@ -491,6 +491,47 @@ async def test_the_reminder_morning_carries_the_block_once(
     assert "(UTC)" in by_address["instant@test.local"][0]
 
 
+async def test_a_failing_fleet_digest_does_not_cost_the_reminder(
+    client, db_session, engine, mailgun_configured, monkeypatch
+):
+    """The reminder asks the digest who already has « VOS TÂCHES » this
+    morning. A digest that cannot be planned — a query of the fleet's
+    sections failing — took the week's reminder down with it; the reminder
+    now goes to every owner, and the worker's transaction survives the
+    failed query (the week it records, the mails it queues)."""
+    from sqlalchemy import text
+
+    from app.core import worker
+    from app.features.notification import digest
+    from app.features.setting import crud as setting_crud
+
+    admin, _ = await _admin(client, db_session)
+    _, daily_id = await _tech(client, db_session)
+    m = await _machine(db_session, "PC-D", first_seen_days_ago=200)
+    await client.patch(
+        f"/api/v1/machines/{m}/maintenance",
+        headers=admin,
+        json={"maintenance_owner_id": daily_id},
+    )
+    await _clear_outbox(db_session)
+
+    async def broken_plan(session):
+        await session.exec(text("SELECT 1 / 0"))  # a real failed statement
+
+    monkeypatch.setattr(digest, "plan_daily_digest", broken_plan)
+    monkeypatch.setattr(worker, "engine", engine)
+    assert await worker.send_maintenance_reminders() == 1
+    queued = await _queued(db_session)
+    # On the daily digest, and reminded all the same: better told twice than
+    # not at all.
+    assert [q.to_address for q in queued] == ["tech@test.local"]
+    assert "vos maintenances" in queued[0].subject
+    week = await setting_crud.get_value(
+        db_session, worker.LAST_RUN_KEYS["maintenance_reminders"]
+    )
+    assert week == worker._iso_week(worker.utcnow())
+
+
 def test_a_bullet_keeps_its_continuation_lines_inside():
     from app.features.notification.tasks import bullet
 

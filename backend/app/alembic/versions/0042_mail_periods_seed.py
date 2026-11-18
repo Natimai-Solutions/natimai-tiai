@@ -19,7 +19,7 @@ The cost, accepted: a server upgraded in the very minute of its digest, the
 old worker stopped before it could send, has no digest that day.
 
 Revision ID: 0042_mail_periods_seed
-Revises: 0040_shared_counters
+Revises: 0041_enrollment_token_unused
 Create Date: 2026-11-18
 
 """
@@ -33,7 +33,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0042_mail_periods_seed"
-down_revision: str | None = "0040_shared_counters"
+down_revision: str | None = "0041_enrollment_token_unused"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

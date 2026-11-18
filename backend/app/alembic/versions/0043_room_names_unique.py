@@ -15,7 +15,7 @@ dropped. Names are folded by the database's own ``lower()``, the function
 the index is built on, so that what the repair leaves the index accepts.
 
 Revision ID: 0043_room_names_unique
-Revises: 0040_shared_counters
+Revises: 0042_mail_periods_seed
 Create Date: 2026-11-18
 
 """
@@ -27,7 +27,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0043_room_names_unique"
-down_revision: str | None = "0040_shared_counters"
+down_revision: str | None = "0042_mail_periods_seed"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
