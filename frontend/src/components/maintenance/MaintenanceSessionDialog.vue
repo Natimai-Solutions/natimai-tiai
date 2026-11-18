@@ -13,10 +13,11 @@
   >
     <!-- Échap is ours to handle: a persistent dialog only shakes. On a phone
          the whole screen, the list scrolling between a fixed title and fixed
-         buttons (audit U23). -->
+         buttons (audit U23); on a wider screen too, within the window's
+         height: where a sending stopped stays in view beside its buttons. -->
     <q-card
-      :class="small ? 'column no-wrap' : ''"
-      :style="small ? undefined : 'width: 720px; max-width: 95vw'"
+      class="column no-wrap"
+      :style="small ? undefined : 'width: 720px; max-width: 95vw; max-height: calc(100vh - 48px)'"
       data-test="session-card"
     >
       <q-card-section class="text-h6">{{
@@ -24,8 +25,8 @@
           ? t('maintenance.session.titleIn', { room: roomName })
           : t('maintenance.session.title')
       }}</q-card-section>
-      <q-form :class="small ? 'col column no-wrap' : ''" @submit="submit">
-        <q-card-section class="q-gutter-md" :class="small ? 'col scroll' : ''">
+      <q-form class="col column no-wrap" style="min-height: 0" @submit="submit">
+        <q-card-section class="col scroll q-gutter-md" data-test="session-list">
           <!-- In a block of its own: the row's column gutter is a negative
                margin, which the section's gutter would otherwise replace —
                the two fields then sat against the card's left edge. -->
@@ -152,11 +153,11 @@
             {{ t('maintenance.session.nothingDone') }}
           </div>
         </q-card-section>
-        <q-separator v-if="small" />
+        <q-separator />
         <!-- Where a sending stopped, said beside the buttons that act on it
              — not above a list of a thousand postes, scrolled out of sight. -->
-        <q-card-section v-if="pending" class="q-gutter-sm q-pb-none">
-          <q-banner rounded class="surface-blue" data-test="session-pending">
+        <q-card-section v-if="pending || refused" class="q-gutter-sm q-pb-none">
+          <q-banner v-if="pending" rounded class="surface-blue" data-test="session-pending">
             <template v-if="pending.progress.sessionId">
               {{
                 t('maintenance.session.partlySent', {
@@ -171,8 +172,10 @@
               {{ t('maintenance.session.noAnswer') }}
             </template>
           </q-banner>
-          <!-- Postes the server refuses the next part for: named, and left
-               out at a click — the rest of the visit must not wait on them. -->
+          <!-- Postes the server refuses a part for: named, and left out at a
+               click — the rest of the visit must not wait on them. The part
+               that creates the visit too: nothing is recorded, and the form,
+               editable again, is sent anew without them. -->
           <q-banner v-if="refused" rounded class="surface-orange" data-test="session-refused">
             {{
               refused.reason === 'moved'
@@ -224,7 +227,7 @@ import {
   type SessionPayload,
   type SessionProgress,
 } from 'src/services/maintenance';
-import { apiErrorMessage } from 'src/services/errors';
+import { apiErrorMessage, someNames } from 'src/services/errors';
 import { t } from 'src/i18n';
 
 export interface SessionMachine {
@@ -269,10 +272,12 @@ function hintOf(row: { id: string; removed: boolean }): string | undefined {
 const pending = ref<{ payload: SessionPayload; progress: SessionProgress } | null>(null);
 // The postes the server named in refusing the part the sending stopped on.
 const refused = ref<RefusedMachines | null>(null);
+// The first few, then how many more: fifty names would push the buttons off
+// a phone's screen.
 const refusedNames = computed(() =>
-  (refused.value?.ids ?? [])
-    .map((id) => rows.value.find((r) => r.id === id)?.hostname ?? id)
-    .join(', '),
+  someNames(
+    (refused.value?.ids ?? []).map((id) => rows.value.find((r) => r.id === id)?.hostname ?? id),
+  ),
 );
 
 const doneCount = computed(() => rows.value.filter((r) => r.done).length);
@@ -285,7 +290,7 @@ const canSave = computed(
   () =>
     !!pending.value ||
     doneCount.value > 0 ||
-    rows.value.some((r) => !r.done && r.note.trim()) ||
+    rows.value.some((r) => !r.done && !r.removed && r.note.trim()) ||
     (!!props.roomId && !!note.value.trim()),
 );
 
@@ -383,8 +388,9 @@ function payloadOf(): SessionPayload {
     items: rows.value
       .filter((r) => r.done)
       .map((r) => ({ machine_id: r.id, note: r.note.trim() || null })),
+    // A poste left out after a refusal is not sent at all, its note kept.
     skipped: rows.value
-      .filter((r) => !r.done && r.note.trim())
+      .filter((r) => !r.done && !r.removed && r.note.trim())
       .map((r) => ({ machine_id: r.id, note: r.note.trim() })),
   };
 }
@@ -394,11 +400,14 @@ function newJob(): { payload: SessionPayload; progress: SessionProgress } {
   return { payload, progress: sessionProgress(payload) };
 }
 
-/** Leave the postes the server refused out of what remains, and send it. */
+/**
+ * Leave the postes the server refused out of what remains, and send it — or,
+ * the part that creates the visit refused, out of the form, sent anew.
+ */
 async function dropRefused() {
-  if (!pending.value || !refused.value) return;
+  if (!refused.value) return;
   const ids = refused.value.ids;
-  dropUnsentLines(pending.value.payload, pending.value.progress, ids);
+  if (pending.value) dropUnsentLines(pending.value.payload, pending.value.progress, ids);
   for (const row of rows.value) {
     if (ids.includes(row.id)) {
       row.done = false;
@@ -431,9 +440,9 @@ async function submit() {
     // does a first part left without an answer — it may be recorded, and
     // sent again it returns the visit it created. Only a first part the
     // server refused is known to have written nothing: the form is the
-    // user's again, to correct.
+    // user's again, to correct — and the postes it names offered for removal.
     pending.value = job.progress.sessionId || !isRefusal(e) ? job : null;
-    refused.value = pending.value ? refusedMachines(e) : null;
+    refused.value = refusedMachines(e);
     $q.notify({
       type: 'negative',
       message: apiErrorMessage(e, t('maintenance.session.saveFailed')),

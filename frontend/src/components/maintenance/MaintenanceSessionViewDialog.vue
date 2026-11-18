@@ -24,7 +24,9 @@
       <q-card-section v-if="loading" class="row justify-center">
         <q-spinner size="32px" />
       </q-card-section>
-      <q-card-section v-else-if="error" class="text-negative">{{ error }}</q-card-section>
+      <q-card-section v-else-if="error" class="text-negative">{{
+        apiErrorMessage(error.cause, t('maintenance.view.loadFailed'))
+      }}</q-card-section>
       <div v-else-if="visit" :class="small ? 'col scroll' : ''">
         <!-- Seen through a poste of the reader's scope: the rest of the visit
              — other postes, and the room and its note when the room is not
@@ -128,7 +130,9 @@ const canDelete = computed(() => auth.can('maintenance', 'write'));
 const visit = ref<MaintenanceSession | null>(null);
 const loading = ref(false);
 const deleting = ref(false);
-const error = ref<string | null>(null);
+// The failure itself, worded at render: a language changed while the dialog
+// is open shows in it too.
+const error = ref<{ cause: unknown } | null>(null);
 
 watch(
   () => [props.modelValue, props.sessionId] as const,
@@ -145,7 +149,7 @@ async function load(id: string) {
   try {
     visit.value = await getSession(id);
   } catch (e) {
-    error.value = apiErrorMessage(e, t('maintenance.view.loadFailed'));
+    error.value = { cause: e };
   } finally {
     loading.value = false;
   }

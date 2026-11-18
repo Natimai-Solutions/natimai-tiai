@@ -55,6 +55,19 @@ function fieldLabel(field: string): string {
   return label === key ? field : label;
 }
 
+/** How many postes a refusal names before « et N autre(s) ». */
+export const NAMES_SHOWN = 5;
+
+/**
+ * The first few names of a list, then how many more: a refusal of 50 postes
+ * stays a sentence, not a page that hides the buttons under it.
+ */
+export function someNames(names: string[]): string {
+  const named = names.slice(0, NAMES_SHOWN).join(t('errors.listSeparator'));
+  const rest = names.length - NAMES_SHOWN;
+  return rest > 0 ? t('errors.namesAndOthers', { names: named, count: rest }, rest) : named;
+}
+
 interface ValidationItem {
   loc?: (string | number)[];
   msg?: string;
@@ -147,8 +160,7 @@ export function apiErrorMessage(err: unknown, fallback: string = t('errors.gener
     if (code === 'maintenance.items.not_in_room') {
       const names = body?.error?.details?.hostnames;
       if (Array.isArray(names) && names.length) {
-        const detail = names.map(String).join(t('errors.listSeparator'));
-        return t('errors.withDetail', { label, detail });
+        return t('errors.withDetail', { label, detail: someNames(names.map(String)) });
       }
     }
     if (code === 'package.not_ready') {

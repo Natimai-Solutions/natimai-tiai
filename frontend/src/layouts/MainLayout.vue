@@ -18,8 +18,18 @@
           <q-icon name="shield" class="q-mr-sm" />
           Tia'i — Console
         </q-toolbar-title>
-        <!-- Not on a phone: it pushed the title down to « Tia'i … » (U29). -->
-        <div v-if="auth.user" class="text-caption q-mr-sm gt-xs">{{ auth.user.email }}</div>
+        <!-- Not on a phone: it pushed the title down to « Tia'i … » (U29). On a
+             tablet a long address is cut short, whole in its tooltip: the
+             title keeps its room. -->
+        <div
+          v-if="auth.user"
+          class="text-caption q-mr-sm gt-xs ellipsis"
+          style="max-width: 40vw"
+          :title="auth.user.email"
+          data-test="header-email"
+        >
+          {{ auth.user.email }}
+        </div>
         <q-btn
           flat
           dense
@@ -154,6 +164,9 @@ const router = useRouter();
 // of checks — and one count that fails says nothing about the other.
 const myTasks = ref(0);
 const myOverdue = ref(0);
+function isForbidden(e: unknown): boolean {
+  return (e as { response?: { status?: number } } | null)?.response?.status === 403;
+}
 async function countMyChecks() {
   // A right withdrawn during the session takes its count with it.
   if (!auth.can('check', 'read')) {
@@ -162,8 +175,10 @@ async function countMyChecks() {
   }
   try {
     myTasks.value = (await listChecks({ open: true, assigned_to: 'me', page_size: 1 })).total;
-  } catch {
-    // The badge is a hint; the page says the truth.
+  } catch (e) {
+    // The badge is a hint; the page says the truth. A 403 is the right
+    // withdrawn before the profile says so: the count goes with it.
+    if (isForbidden(e)) myTasks.value = 0;
   }
 }
 async function countMyOverdue() {
@@ -173,8 +188,9 @@ async function countMyOverdue() {
   }
   try {
     myOverdue.value = (await getDue('me')).overdue;
-  } catch {
+  } catch (e) {
     // As above.
+    if (isForbidden(e)) myOverdue.value = 0;
   }
 }
 async function countMyTasks() {
@@ -239,8 +255,10 @@ const mainEl = ref<HTMLElement | null>(null);
 function skipToContent() {
   mainEl.value?.focus();
 }
+// The account, and its two rights: one withdrawn or given during the session
+// (the profile read again) recounts at once, not at the next navigation.
 watch(
-  () => auth.user?.id,
+  [() => auth.user?.id, () => auth.can('check', 'read'), () => auth.can('maintenance', 'read')],
   () => void countMyTasks(),
   { immediate: true },
 );

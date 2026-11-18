@@ -431,6 +431,96 @@ describe('MaintenanceSessionDialog (audit T29, U14)', () => {
     wrapper.unmount();
   });
 
+  // Review gap-1-2: the part that creates the visit refused for a poste.
+  it('names a poste gone before the first part, and sends the visit anew without it', async () => {
+    vi.mocked(recordSessionInParts)
+      .mockRejectedValueOnce(refusal(404, 'machine.not_found', { machine_ids: ['b'] }))
+      .mockResolvedValue({} as never);
+    const wrapper = await open();
+    await typeNote('PC-B', 'une note');
+    await submitForm();
+
+    // Nothing is recorded: no pending sending, the form is the user's again.
+    expect(document.querySelector('[data-test="session-pending"]')).toBeNull();
+    expect(submitButton().textContent).toContain('Enregistrer');
+    const banner = inDialog('[data-test="session-refused"]').textContent.replace(/\s+/g, ' ');
+    expect(banner).toContain('n’existent plus');
+    expect(banner).toContain('PC-B');
+    inDialog<HTMLElement>('[data-test="session-drop"]').click();
+    await flushPromises();
+
+    const [first, second] = vi.mocked(recordSessionInParts).mock.calls;
+    // A new visit, without the poste — done or left out with its note.
+    expect(second![0]).toMatchObject({ items: [{ machine_id: 'a', note: null }], skipped: [] });
+    expect((second![1] as SessionProgress).clientId).not.toBe(
+      (first![1] as SessionProgress).clientId,
+    );
+    expect(closes(wrapper)).toBe(1);
+    wrapper.unmount();
+  });
+
+  it('offers to remove a poste refused when an interrupted first part is resumed', async () => {
+    vi.mocked(recordSessionInParts)
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockRejectedValueOnce(
+        refusal(422, 'maintenance.items.not_in_room', { machine_ids: ['b'], hostnames: ['PC-B'] }),
+      )
+      // Sent without PC-B, it stops again: the list says what was left out.
+      .mockRejectedValueOnce(new Error('Network Error'));
+    const wrapper = await open();
+    await submitForm();
+    expect(submitButton().textContent).toContain("Reprendre l'envoi");
+    await submitForm();
+
+    const banner = inDialog('[data-test="session-refused"]').textContent.replace(/\s+/g, ' ');
+    expect(banner).toContain('ne sont plus dans la salle');
+    expect(banner).toContain('PC-B');
+    inDialog<HTMLElement>('[data-test="session-drop"]').click();
+    await flushPromises();
+
+    expect(vi.mocked(recordSessionInParts).mock.calls[2]![0].items).toEqual([
+      { machine_id: 'a', note: null },
+    ]);
+    const row = [...document.querySelectorAll<HTMLElement>('.q-dialog tbody tr')].find((r) =>
+      r.textContent?.includes('PC-B'),
+    )!;
+    expect(row.querySelector('[aria-label="PC-B : fait"]')!.getAttribute('aria-checked')).toBe(
+      'false',
+    );
+    expect(row.textContent).toContain('Retiré de cette séance');
+    wrapper.unmount();
+  });
+
+  // Review gap2-2-1: fifty postes refused stay a sentence.
+  it('names the first few postes refused, then how many more', async () => {
+    const ids = ['b', ...Array.from({ length: 49 }, (_, i) => `x${i + 1}`)];
+    vi.mocked(recordSessionInParts).mockImplementationOnce(async (_payload, progress) => {
+      progress!.sessionId = 's-1';
+      progress!.sent = 1;
+      throw refusal(422, 'maintenance.items.not_in_room', { machine_ids: ids });
+    });
+    const wrapper = await open();
+    await submitForm();
+    const banner = inDialog('[data-test="session-refused"]').textContent.replace(/\s+/g, ' ');
+    expect(banner).toContain(
+      'Ces postes ne sont plus dans la salle depuis le début de la saisie : PC-B, x1, x2, x3, x4 et 45 autre(s). Ils ne peuvent pas être ajoutés à la séance.',
+    );
+    expect(banner).not.toContain('x5');
+    wrapper.unmount();
+  });
+
+  // Review gap-1-4: on a wider screen too, the list scrolls between a fixed
+  // title and the fixed state and buttons of a sending that stopped.
+  it('keeps the card within the window, its list scrolling', async () => {
+    const wrapper = await open();
+    const card = inDialog<HTMLElement>('[data-test="session-card"]');
+    expect(card.classList).toContain('column');
+    // Bounded by the window (jsdom folds `max-height` into its own spelling).
+    expect(card.getAttribute('style')).toContain('100vh');
+    expect(inDialog('[data-test="session-list"]').classList).toContain('scroll');
+    wrapper.unmount();
+  });
+
   describe('on a phone (audit U23)', () => {
     beforeEach(() => {
       Screen.lt.sm = true;

@@ -13,6 +13,8 @@ const fr = {
   groups: '{label} (groupe(s) : {groups})',
   quoted: '« {name} »',
   listSeparator: ', ',
+  /** A long list of postes, cut after the first few names. */
+  namesAndOthers: '{names} et {count} autre(s)',
   problemSeparator: ' ; ',
   /** The request fields a validation error most often names, as the forms call them. */
   fields: {
@@ -74,6 +76,7 @@ const en: Translation<typeof fr> = {
   groups: '{label} (group(s): {groups})',
   quoted: '“{name}”',
   listSeparator: ', ',
+  namesAndOthers: '{names} and {count} other | {names} and {count} others',
   problemSeparator: '; ',
   fields: {
     name: 'name',

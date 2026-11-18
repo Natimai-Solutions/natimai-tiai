@@ -189,3 +189,31 @@ describe('apiErrorMessage — package causes (plan console bilingue, I2)', () =>
     ).toBe('This package cannot be deployed yet: Nouveau problème');
   });
 });
+
+describe('postes a visit is refused for (maintenance.items.not_in_room)', () => {
+  afterEach(() => setLocale('fr'));
+  function notInRoom(count: number) {
+    const hostnames = Array.from({ length: count }, (_, i) => `PC-${i + 1}`);
+    const details = { hostnames };
+    return { response: { data: { error: { code: 'maintenance.items.not_in_room', details } } } };
+  }
+
+  it('names a few postes as before', () => {
+    expect(apiErrorMessage(notInRoom(5))).toBe(
+      'Ces postes ne sont pas dans la salle de la séance : PC-1, PC-2, PC-3, PC-4, PC-5',
+    );
+  });
+
+  it('names the first five of fifty, then how many more, in both languages', () => {
+    expect(apiErrorMessage(notInRoom(50))).toBe(
+      'Ces postes ne sont pas dans la salle de la séance : PC-1, PC-2, PC-3, PC-4, PC-5 et 45 autre(s)',
+    );
+    setLocale('en');
+    expect(apiErrorMessage(notInRoom(50))).toBe(
+      'These computers are not in the session’s room: PC-1, PC-2, PC-3, PC-4, PC-5 and 45 others',
+    );
+    expect(apiErrorMessage(notInRoom(6))).toBe(
+      'These computers are not in the session’s room: PC-1, PC-2, PC-3, PC-4, PC-5 and 1 other',
+    );
+  });
+});
