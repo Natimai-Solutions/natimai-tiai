@@ -332,11 +332,24 @@ export function splitArgs(line: string): string[] {
   return out;
 }
 
+/**
+ * One argument written so that `splitArgs` reads it back unchanged. A quote
+ * becomes `\"`; a backslash right before a quote stays a plain backslash
+ * there, since `splitArgs` only reads `\"` as special. Trailing backslashes
+ * go after the closing quote: inside, the last one would join that quote
+ * into a literal `\"` (`/D="C:\Mon dossier\"` would lose its end).
+ */
+function quoteArg(arg: string): string {
+  let end = arg.length;
+  while (end > 0 && arg.charAt(end - 1) === '\\') end--;
+  let body = '';
+  for (const c of arg.slice(0, end)) body += c === '"' ? '\\"' : c;
+  return `"${body}"${arg.slice(end)}`;
+}
+
 /** The inverse of `splitArgs`, for showing a stored list in one field. */
 export function joinArgs(args: string[]): string {
-  return args
-    .map((a) => (a === '' || /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a))
-    .join(' ');
+  return args.map((a) => (a === '' || /[\s"]/.test(a) ? quoteArg(a) : a)).join(' ');
 }
 
 export function formatSize(bytes: number): string {

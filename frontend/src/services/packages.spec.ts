@@ -84,6 +84,12 @@ describe('command line fields', () => {
     const args = ['-s', '-f1{dir}\\Client PRONOTE.iss', '', 'x"y'];
     expect(splitArgs(joinArgs(args))).toEqual(args);
   });
+
+  it('joins back an argument ending in a backslash, or with one before a quote', () => {
+    const args = ['/D=C:\\Mon dossier\\', 'C:\\a b\\\\', 'say \\"hi\\"', 'a\\" b', '\\ \\'];
+    expect(splitArgs(joinArgs(args))).toEqual(args);
+    expect(joinArgs(['/D=C:\\Mon dossier\\'])).toBe('"/D=C:\\Mon dossier"\\');
+  });
 });
 
 describe('trust method', () => {
