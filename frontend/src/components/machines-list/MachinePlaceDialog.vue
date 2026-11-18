@@ -3,9 +3,9 @@
        postes now disagree on the site rather than refusing them. -->
   <q-dialog v-model="open">
     <q-card style="width: 420px; max-width: 90vw">
-      <q-card-section class="text-h6">Affecter à une salle</q-card-section>
+      <q-card-section class="text-h6">{{ t('machines.place.title') }}</q-card-section>
       <q-card-section class="q-pt-none text-body2 text-muted">
-        {{ count }} poste(s) sélectionné(s)
+        {{ t('machines.selection.count', { count }, count) }}
       </q-card-section>
       <q-card-section>
         <q-select
@@ -13,17 +13,17 @@
           :options="roomOptions"
           emit-value
           map-options
-          label="Salle"
+          :label="t('machines.place.room')"
           outlined
           dense
           autofocus
         />
       </q-card-section>
       <q-card-actions align="right" class="q-px-md q-pb-md">
-        <q-btn v-close-popup flat label="Annuler" />
+        <q-btn v-close-popup flat :label="t('machines.place.cancel')" />
         <q-btn
           color="primary"
-          label="Affecter"
+          :label="t('machines.place.submit')"
           :loading="placing"
           :disable="!roomId"
           @click="submit"
@@ -35,6 +35,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { t } from 'src/i18n';
 import { roomLabel, type Room } from 'src/services/rooms';
 import { ROOM_NONE } from 'src/utils/machineListFilters';
 
@@ -58,7 +59,7 @@ const roomId = ref<string | null>(null);
 
 // « Sans salle » first: it is the one entry that is not a room.
 const roomOptions = computed(() => [
-  { label: 'Sans salle (retirer de la salle)', value: ROOM_NONE },
+  { label: t('machines.place.none'), value: ROOM_NONE },
   ...props.rooms.map((r) => ({ label: roomLabel(r), value: r.id })),
 ]);
 

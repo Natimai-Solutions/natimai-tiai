@@ -62,7 +62,7 @@
       v-model="askOpen"
       :check="null"
       :machine-ids="selected.map((m) => m.id)"
-      :subtitle="`${selected.length} poste(s) sélectionné(s)`"
+      :subtitle="t('machines.selection.count', { count: selected.length }, selected.length)"
       :save="askSelection"
     />
 
@@ -96,6 +96,7 @@
 <script setup lang="ts">
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { computed, onMounted, ref, watch } from 'vue';
+import { t } from 'src/i18n';
 import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
 import MachineColumnsDialog from 'src/components/machine/MachineColumnsDialog.vue';

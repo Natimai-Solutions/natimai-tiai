@@ -1,4 +1,5 @@
 import { api } from 'boot/axios';
+import { t } from 'src/i18n';
 
 export type MachineStatus = 'up_to_date' | 'outdated' | 'needs_verification' | 'inactive';
 
@@ -727,15 +728,15 @@ export function approveReenrollNotification(res: ApproveReenrollResponse): {
   message: string;
 } {
   if (res.approved === 0) {
-    return {
-      type: 'warning',
-      message: 'Aucun ré-enrôlement à autoriser parmi les postes sélectionnés.',
-    };
+    return { type: 'warning', message: t('machines.reenroll.none') };
   }
-  const done = `Ré-enrôlement autorisé pour ${res.approved} poste(s)`;
+  const done = t('machines.reenroll.done', { count: res.approved }, res.approved);
   return {
     type: 'positive',
-    message: res.skipped > 0 ? `${done} — ${res.skipped} sans demande en attente, ignoré(s)` : done,
+    message:
+      res.skipped > 0
+        ? t('machines.reenroll.doneSkipped', { done, skipped: res.skipped }, res.skipped)
+        : done,
   };
 }
 
@@ -815,26 +816,29 @@ export function wakeNotification(res: WakeResponse): {
 } {
   if (res.woken === 0) {
     // One poste failing has a reason worth quoting; thirty have thirty, and the
-    // detail of each is in its own line of the machine's command history.
+    // detail of each is in its own line of the machine's command history. The
+    // detail is the server's own sentence (in French), quoted as it comes.
     const only = res.failed === 1 ? res.results.find((r) => !r.ok) : undefined;
     return {
       type: 'negative',
       message: only
-        ? `Réveil impossible : ${only.detail}`
-        : `Réveil impossible sur ${res.failed} poste(s) : aucun paquet émis.`,
+        ? t('machines.wake.failedOne', { detail: only.detail })
+        : t('machines.wake.failedAll', { count: res.failed }, res.failed),
     };
   }
   // In relay mode the packet has not left anywhere yet: a poste of the site
   // will emit it on its next contact with the server, and the sentence must
   // not claim more than that.
-  const sent = res.relayed
-    ? `Réveil confié aux postes voisins de ${res.woken} poste(s)`
-    : `Paquet de réveil émis vers ${res.woken} poste(s)`;
+  const sent = t(
+    res.relayed ? 'machines.wake.relayed' : 'machines.wake.sent',
+    { count: res.woken },
+    res.woken,
+  );
   if (res.failed > 0) {
-    const left = res.relayed ? 'sans cible ni relais' : 'sans cible connue';
-    return { type: 'warning', message: `${sent} — ${res.failed} ${left}` };
+    const left = res.relayed ? 'machines.wake.leftRelayed' : 'machines.wake.leftDirect';
+    return { type: 'warning', message: t(left, { sent, failed: res.failed }) };
   }
-  return { type: 'positive', message: `${sent} — le poste remontera à son prochain démarrage` };
+  return { type: 'positive', message: t('machines.wake.done', { sent }) };
 }
 
 /** Merge `sourceId` into `targetId` (kept); returns the updated target. */

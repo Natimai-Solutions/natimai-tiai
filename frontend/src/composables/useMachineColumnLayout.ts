@@ -1,5 +1,6 @@
 import { computed, ref, watch, type Ref } from 'vue';
 import { useQuasar } from 'quasar';
+import { t } from 'src/i18n';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import {
@@ -49,7 +50,7 @@ export function useMachineColumnLayout(usageWindowDays: Ref<number>) {
     } catch (e) {
       $q.notify({
         type: 'negative',
-        message: apiErrorMessage(e, "Impossible d'enregistrer les colonnes"),
+        message: apiErrorMessage(e, t('machines.columnsDialog.saveFailed')),
       });
       throw e;
     }

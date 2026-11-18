@@ -11,11 +11,14 @@ import {
   type FleetValue,
 } from 'src/services/machines';
 import { getRoomConfig, listBuildings, listRooms, roomLabel, type Room } from 'src/services/rooms';
+import { t } from 'src/i18n';
 import { CHASSIS_TYPES } from 'src/utils/machineQuery';
 import {
   AGENT_OUTDATED,
   ROOM_NONE,
+  fleetAllOption,
   initialFleetOptions,
+  liveOption,
   type MachineFleetOptions,
 } from 'src/utils/machineListFilters';
 
@@ -63,7 +66,7 @@ export function useMachineFleetOptions(
       const all = options.value[key][0]!;
       options.value[key] = [
         all,
-        ...values.map((v) => ({ label: `${labelOf(v.name)} (${v.count})`, value: v.name })),
+        ...values.map((v) => liveOption(() => `${labelOf(v.name)} (${v.count})`, v.name)),
       ];
     } catch {
       // See above.
@@ -77,7 +80,7 @@ export function useMachineFleetOptions(
     try {
       const products = await listAntivirusProducts();
       options.value.antivirus = [
-        { label: 'Tous les antivirus', value: null },
+        fleetAllOption('antivirus'),
         ...products.map((p) => ({ label: `${p.name} (${p.count})`, value: p.name })),
       ];
     } catch {
@@ -91,7 +94,7 @@ export function useMachineFleetOptions(
     try {
       const versions = await listOsVersions();
       options.value.os = [
-        { label: 'Tous les OS', value: null },
+        fleetAllOption('os'),
         ...versions.map((v) => ({ label: `${v.name} (${v.count})`, value: v.name })),
       ];
     } catch {
@@ -107,12 +110,20 @@ export function useMachineFleetOptions(
       const fleet = await listAgentVersions();
       const behind = fleet.versions.filter((v) => v.outdated).reduce((n, v) => n + v.count, 0);
       options.value.agent = [
-        { label: 'Agent : toutes versions', value: null },
-        { label: `Agent obsolète (${behind})`, value: AGENT_OUTDATED },
-        ...fleet.versions.map((v) => ({
-          label: `Agent ${v.name}${v.name === fleet.latest ? ' · référence' : ''} (${v.count})`,
-          value: v.name,
-        })),
+        fleetAllOption('agent'),
+        liveOption(() => t('machines.options.agentOutdated', { count: behind }), AGENT_OUTDATED),
+        ...fleet.versions.map((v) =>
+          liveOption(
+            () =>
+              t(
+                v.name === fleet.latest
+                  ? 'machines.options.agentReference'
+                  : 'machines.options.agentVersion',
+                { version: v.name, count: v.count },
+              ),
+            v.name,
+          ),
+        ),
       ];
     } catch {
       // Degrades to « toutes versions ».
@@ -140,16 +151,13 @@ export function useMachineFleetOptions(
     try {
       rooms.value = await listRooms();
       options.value.room = [
-        { label: 'Toutes les salles', value: null },
-        { label: 'Sans salle', value: ROOM_NONE },
-        ...rooms.value.map((r) => ({
-          label: `${roomLabel(r)} (${r.machine_count})`,
-          value: r.id,
-        })),
+        fleetAllOption('room'),
+        liveOption(() => t('machines.options.roomNone'), ROOM_NONE),
+        ...rooms.value.map((r) => liveOption(() => `${roomLabel(r)} (${r.machine_count})`, r.id)),
       ];
       const buildings = await listBuildings();
       options.value.building = [
-        { label: 'Tous les bâtiments', value: null },
+        fleetAllOption('building'),
         ...buildings.map((b) => ({
           label: `${b.name}${b.location ? ` — ${b.location}` : ''} (${b.machine_count})`,
           value: b.id,
