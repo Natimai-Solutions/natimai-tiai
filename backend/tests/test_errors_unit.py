@@ -1,6 +1,7 @@
 """Unit tests for the error handlers (no app/DB needed)."""
 
 import json
+import re
 from typing import cast
 
 from fastapi import Request
@@ -110,23 +111,97 @@ def test_every_code_has_a_message_in_the_console():
     assert missing == []
 
 
+_TS_TOKEN = re.compile(
+    r"""\s+|//[^\n]*|/\*.*?\*/"""
+    r"""|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`"""
+    r"""|[A-Za-z_$][\w$]*|[{}:,]|.""",
+    re.S,
+)
+
+
+def _catalogue_texts(source: str, declaration: str) -> set[str]:
+    """The texts of one language of a console catalogue
+    (``frontend/src/i18n/messages/<domain>.ts``), as dotted paths:
+    ``const fr = { actions: { machine: { merge: '…' } } }`` gives
+    ``actions.machine.merge``. Enough of TypeScript for an object literal of
+    strings: keys bare or quoted, comments, trailing commas."""
+    start = source.index("{", source.index(declaration))
+    tokens = [
+        t
+        for t in _TS_TOKEN.findall(source, start)
+        if t.strip() and not t.startswith(("//", "/*"))
+    ]
+    texts: set[str] = set()
+    stack: list[str] = []
+    key = ""
+    expect_value = False
+    for tok in tokens:
+        if tok == "{":
+            stack.append(key if expect_value else "")
+            key, expect_value = "", False
+        elif tok == "}":
+            stack.pop()
+            if not stack:
+                break
+        elif tok == ":":
+            expect_value = True
+        elif tok == ",":
+            key, expect_value = "", False
+        elif expect_value:
+            if tok[0] in "'\"`":
+                texts.add(".".join([*filter(None, stack), key]))
+            expect_value = False
+        else:
+            key = tok.strip("'\"")
+    return texts
+
+
+def test_catalogue_texts_reads_nested_keys_in_each_language():
+    source = """
+    const fr = {
+      // a comment { with braces }
+      actions: { machine: { merge: 'Fusion', 'quoted_key': "a {x} b" } },
+      /** doc */
+      resourceTypes: { machine: 'Poste', },
+    };
+    const en: Translation<typeof fr> = {
+      actions: { machine: { merge: 'Merged' } },
+      resourceTypes: {},
+    };
+    """
+    assert _catalogue_texts(source, "const fr =") == {
+        "actions.machine.merge",
+        "actions.machine.quoted_key",
+        "resourceTypes.machine",
+    }
+    assert _catalogue_texts(source, "const en:") == {"actions.machine.merge"}
+
+
 def test_every_audit_action_has_a_label_in_the_console():
     """Audit B25: an action recorded server-side is named, and filterable,
-    in the journal's page."""
-    import re
+    in the journal's page — in French and in English: the console's audit
+    catalogue (``i18n/messages/audit.ts``) holds a label per action and per
+    resource type in each language. Skipped where the frontend is not
+    checked out."""
     from pathlib import Path
 
+    import pytest
+
     root = Path(__file__).resolve().parents[1]
-    actions = set()
+    catalogue = root.parent / "frontend/src/i18n/messages/audit.ts"
+    if not catalogue.exists():
+        pytest.skip("frontend sources not available")
+    source = catalogue.read_text(encoding="utf-8")
+    actions: set[str] = set()
+    resource_types: set[str] = set()
     for path in (root / "app").rglob("*.py"):
-        actions |= set(re.findall(r'action="([a-z_]+\.[a-z_.]+)"', path.read_text()))
-    labels = (root.parent / "frontend/src/utils/auditLabels.ts").read_text()
-    missing = sorted(a for a in actions if f"'{a}'" not in labels)
-    assert missing == []
-    resource_types = set()
-    for path in (root / "app").rglob("*.py"):
-        resource_types |= set(
-            re.findall(r'resource_type="([a-z_]+)"', path.read_text())
-        )
-    block = labels.split("AUDIT_RESOURCE_TYPE_LABELS", 1)[1].split("};", 1)[0]
-    assert sorted(t for t in resource_types if f"  {t}:" not in block) == []
+        text = path.read_text()
+        actions |= set(re.findall(r'action="([a-z_]+\.[a-z_.]+)"', text))
+        resource_types |= set(re.findall(r'resource_type="([a-z_]+)"', text))
+    assert actions and resource_types
+    for declaration in ("const fr =", "const en:"):
+        texts = _catalogue_texts(source, declaration)
+        missing = sorted(a for a in actions if f"actions.{a}" not in texts)
+        assert missing == [], declaration
+        missing = sorted(t for t in resource_types if f"resourceTypes.{t}" not in texts)
+        assert missing == [], declaration

@@ -2,10 +2,9 @@
   <q-page padding>
     <div class="row items-center q-col-gutter-md q-mb-md">
       <div class="col-auto">
-        <h1 class="text-h5 q-my-none">Journal d'audit</h1>
+        <h1 class="text-h5 q-my-none">{{ t('audit.page.title') }}</h1>
         <div class="text-caption text-muted">
-          Actions administratives, de la plus récente à la plus ancienne. Heures affichées dans
-          votre fuseau ({{ timeZone }}).
+          {{ t('audit.page.intro', { zone: timeZone }) }}
         </div>
       </div>
       <q-space />
@@ -18,11 +17,11 @@
           round
           color="primary"
           icon="refresh"
-          aria-label="Actualiser"
+          :aria-label="t('audit.page.refresh')"
           :loading="loading"
           @click="load"
         >
-          <q-tooltip>Actualiser</q-tooltip>
+          <q-tooltip>{{ t('audit.page.refresh') }}</q-tooltip>
         </q-btn>
       </div>
     </div>
@@ -88,10 +87,10 @@
               dense
               round
               icon="visibility"
-              aria-label="Voir le détail"
+              :aria-label="t('audit.page.viewDetails')"
               @click="openEntry(props.row)"
             >
-              <q-tooltip>Voir le détail</q-tooltip>
+              <q-tooltip>{{ t('audit.page.viewDetails') }}</q-tooltip>
             </q-btn>
           </q-td>
         </template>
@@ -110,6 +109,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
+import { t } from 'src/i18n';
 import AuditDetailsDialog from 'src/components/audit/AuditDetailsDialog.vue';
 import AuditFiltersBar from 'src/components/audit/AuditFiltersBar.vue';
 import { listAudit, listAuditActions, type AuditEntry } from 'src/services/audit';
@@ -153,43 +153,49 @@ const pagination = ref({ page: 1, rowsPerPage: AUDIT_DEFAULT_PAGE_SIZE, rowsNumb
 // (or if it fails) the known catalogue stands in — the filter keeps working.
 const actions = ref<string[]>(Object.keys(AUDIT_ACTION_LABELS));
 
-const columns: QTableColumn<AuditEntry>[] = [
-  { name: 'at', label: 'Date', field: 'at', align: 'left' },
-  { name: 'actor', label: 'Auteur', field: 'actor', align: 'left' },
+// A computed: the labels follow the language, which can change on the page.
+const columns = computed<QTableColumn<AuditEntry>[]>(() => [
+  { name: 'at', label: t('audit.page.columns.at'), field: 'at', align: 'left' },
+  { name: 'actor', label: t('audit.page.columns.actor'), field: 'actor', align: 'left' },
   // Hidden on a phone, where the five others already fill the width.
   {
     name: 'ip',
-    label: 'Adresse',
+    label: t('audit.page.columns.ip'),
     field: 'ip',
     align: 'left',
     format: (v: string | null | undefined) => dash(v),
     classes: 'gt-xs',
     headerClasses: 'gt-xs',
   },
-  { name: 'action', label: 'Action', field: 'action', align: 'left' },
-  { name: 'resource', label: 'Ressource', field: 'resource_type', align: 'left' },
+  { name: 'action', label: t('audit.page.columns.action'), field: 'action', align: 'left' },
+  {
+    name: 'resource',
+    label: t('audit.page.columns.resource'),
+    field: 'resource_type',
+    align: 'left',
+  },
   {
     name: 'summary',
-    label: 'Détails',
+    label: t('audit.page.columns.summary'),
     field: (row) => auditDetailsSummary(row.action, row.details),
     align: 'left',
   },
   { name: 'open', label: '', field: 'id', align: 'right' },
-];
+]);
 
 const noDataLabel = computed(() =>
   loadFailed.value
-    ? 'Impossible de charger le journal.'
+    ? t('audit.page.empty.failed')
     : hasAuditFilters(filters.value)
-      ? 'Aucune action ne correspond à ces filtres.'
-      : "Aucune action administrative enregistrée pour l'instant.",
+      ? t('audit.page.empty.filtered')
+      : t('audit.page.empty.none'),
 );
 
 // Le pack de langue français écrit « 1-50 sur N » avec un trait d'union ; le
 // journal garde le tiret demi-cadratin, qui est le signe d'un intervalle. Les
 // autres libellés du tableau (lignes par page, chargement) viennent du pack.
 function paginationLabel(first: number, end: number, total: number): string {
-  return `${first}–${end} sur ${total}`;
+  return t('audit.page.pagination', { first, end, total });
 }
 
 /** A UUID shortened to its first block — the tooltip carries the whole id. */
@@ -270,7 +276,7 @@ async function load() {
     loadFailed.value = true;
     rows.value = [];
     pagination.value = { ...pagination.value, rowsNumber: 0 };
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec du chargement du journal') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('audit.page.loadFailed')) });
   } finally {
     if (id === requestId) loading.value = false;
   }

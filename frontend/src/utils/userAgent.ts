@@ -8,6 +8,8 @@
  * shown beside it says more about where a session really comes from.
  */
 
+import { t } from 'src/i18n';
+
 // Order matters: Edge and Opera announce Chrome too, and Chrome announces
 // Safari — the most specific token has to be tried first.
 const BROWSERS: [RegExp, string][] = [
@@ -32,12 +34,13 @@ function firstMatch(value: string, table: [RegExp, string][]): string | null {
   return table.find(([pattern]) => pattern.test(value))?.[1] ?? null;
 }
 
+/** The device in a few words, in the reader's language. */
 export function describeUserAgent(userAgent: string | null | undefined): string {
-  if (!userAgent) return 'Appareil inconnu';
+  if (!userAgent) return t('account.device.unknown');
   const browser = firstMatch(userAgent, BROWSERS);
   const system = firstMatch(userAgent, SYSTEMS);
-  if (browser && system) return `${browser} sur ${system}`;
+  if (browser && system) return t('account.device.browserOn', { browser, system });
   if (browser) return browser;
-  if (system) return `Navigateur sur ${system}`;
-  return 'Appareil inconnu';
+  if (system) return t('account.device.someBrowserOn', { system });
+  return t('account.device.unknown');
 }
