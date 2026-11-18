@@ -20,6 +20,7 @@ import {
 import { placeMachines, placementNotification, unassignMachines } from 'src/services/rooms';
 import { ROOM_NONE } from 'src/utils/machineListFilters';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 /**
  * What the machine list does to its selection: a command, a verification
@@ -50,7 +51,7 @@ export function useMachineBulkActions(options: {
     // Checks handed out change what « Mes tâches » counts — the asker's own
     // when the requests are theirs: the menu badge reads again (audit U19).
     notifyTasksChanged();
-    $q.notify(bulkCheckNotification(res));
+    notify($q, () => bulkCheckNotification(res));
     selected.value = [];
     await reload();
   }
@@ -70,13 +71,16 @@ export function useMachineBulkActions(options: {
       // A poste follows its room's maintenance owner and cycle: moved, it
       // enters or leaves somebody's « Mes tâches » (audit U19).
       notifyTasksChanged();
-      $q.notify(placementNotification(res));
+      notify($q, () => placementNotification(res));
       placeOpen.value = false;
       selected.value = [];
       await reload();
       onPlaced();
     } catch (e) {
-      $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machines.bulk.placeFailed')) });
+      notify($q, () => ({
+        type: 'negative',
+        message: apiErrorMessage(e, t('machines.bulk.placeFailed')),
+      }));
     }
   }
 
@@ -115,13 +119,13 @@ export function useMachineBulkActions(options: {
       }
       try {
         const res = await createCommands({ type: action.type, machine_ids: ids });
-        $q.notify(bulkSendNotification(res));
+        notify($q, () => bulkSendNotification(res));
         selected.value = [];
       } catch (e) {
-        $q.notify({
+        notify($q, () => ({
           type: 'negative',
           message: apiErrorMessage(e, t('machines.bulk.sendFailed')),
-        });
+        }));
       }
     } finally {
       sending.delete(action.type);
@@ -130,10 +134,14 @@ export function useMachineBulkActions(options: {
 
   async function wakeBulk(ids: string[]) {
     try {
-      $q.notify(wakeNotification(await wakeMachines(ids)));
+      const res = await wakeMachines(ids);
+      notify($q, () => wakeNotification(res));
       selected.value = [];
     } catch (e) {
-      $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machines.bulk.wakeFailed')) });
+      notify($q, () => ({
+        type: 'negative',
+        message: apiErrorMessage(e, t('machines.bulk.wakeFailed')),
+      }));
     }
   }
 
@@ -154,14 +162,15 @@ export function useMachineBulkActions(options: {
 
   async function doReenroll(ids: string[]) {
     try {
-      $q.notify(approveReenrollNotification(await approveReenroll(ids)));
+      const res = await approveReenroll(ids);
+      notify($q, () => approveReenrollNotification(res));
       selected.value = [];
       await reload();
     } catch (e) {
-      $q.notify({
+      notify($q, () => ({
         type: 'negative',
         message: apiErrorMessage(e, t('machines.bulk.reenrollFailed')),
-      });
+      }));
     }
   }
 

@@ -290,6 +290,7 @@ import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { applyPermissionChange, permissionLabel, permissionRows } from 'src/utils/permissions';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -523,7 +524,7 @@ async function submitForm() {
           ? {}
           : { permissions: form.permissions, scope: scopeOrNull(form.scope) }),
       });
-      $q.notify({ type: 'positive', message: t('groups.notify.updated') });
+      notify($q, () => ({ type: 'positive', message: t('groups.notify.updated') }));
     } else {
       await createGroup({
         name: form.name.trim(),
@@ -531,14 +532,17 @@ async function submitForm() {
         permissions: form.permissions,
         scope: scopeOrNull(form.scope),
       });
-      $q.notify({ type: 'positive', message: t('groups.notify.created') });
+      notify($q, () => ({ type: 'positive', message: t('groups.notify.created') }));
     }
     formOpen.value = false;
     await reload();
     // One's own rights may just have changed: the menus follow the profile.
     await auth.fetchMe();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('groups.notify.saveFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('groups.notify.saveFailed')),
+    }));
   } finally {
     saving.value = false;
   }
@@ -557,14 +561,14 @@ function confirmDelete(group: Group) {
     void (async () => {
       try {
         await deleteGroup(group.id);
-        $q.notify({ type: 'positive', message: t('groups.notify.deleted') });
+        notify($q, () => ({ type: 'positive', message: t('groups.notify.deleted') }));
         await reload();
         await auth.fetchMe();
       } catch (e) {
-        $q.notify({
+        notify($q, () => ({
           type: 'negative',
           message: apiErrorMessage(e, t('groups.notify.deleteFailed')),
-        });
+        }));
       }
     })();
   });

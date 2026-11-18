@@ -117,6 +117,7 @@ import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime } from 'src/utils/format';
 import { t } from 'src/i18n';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{ modelValue: boolean; sessionId: string | null }>();
 const emit = defineEmits<{
@@ -174,16 +175,16 @@ function confirmDelete() {
       deleting.value = true;
       try {
         await deleteSession(v.id);
-        $q.notify({ type: 'positive', message: t('maintenance.view.deleted') });
+        notify($q, () => ({ type: 'positive', message: t('maintenance.view.deleted') }));
         // The postes' due dates moved: « Mes tâches » and its badge too.
         notifyTasksChanged();
         emit('update:modelValue', false);
         emit('deleted');
       } catch (e) {
-        $q.notify({
+        notify($q, () => ({
           type: 'negative',
           message: apiErrorMessage(e, t('maintenance.view.deleteFailed')),
-        });
+        }));
       } finally {
         deleting.value = false;
       }

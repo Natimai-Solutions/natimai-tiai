@@ -632,6 +632,7 @@ import {
   timeAgoLabel,
 } from 'src/utils/format';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{ id: string }>();
 const $q = useQuasar();
@@ -768,14 +769,14 @@ const openCheckAsCheck = computed<Check | null>(() => {
 async function askCheck(payload: CheckPayload) {
   await createCheck(props.id, payload);
   notifyTasksChanged();
-  $q.notify({ type: 'positive', message: t('machine.check.requestedNotify') });
+  notify($q, () => ({ type: 'positive', message: t('machine.check.requestedNotify') }));
   await load();
 }
 async function editCheck(payload: CheckPayload) {
   if (!machine.value?.open_check) return;
   await updateCheck(machine.value.open_check.id, payload);
   notifyTasksChanged();
-  $q.notify({ type: 'positive', message: t('machine.check.updatedNotify') });
+  notify($q, () => ({ type: 'positive', message: t('machine.check.updatedNotify') }));
   await load();
 }
 async function onMaintenanceChanged() {
@@ -859,10 +860,10 @@ async function openPlace() {
   try {
     rooms.value = await listRooms();
   } catch (e) {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('machine.place.roomsUnavailable')),
-    });
+    }));
   }
 }
 
@@ -877,11 +878,14 @@ async function savePlace() {
     // The poste now follows another room's maintenance owner and cycle, which
     // moves it in or out of somebody's « Mes tâches » (audit U19).
     notifyTasksChanged();
-    $q.notify(placementNotification(res));
+    notify($q, () => placementNotification(res));
     placeOpen.value = false;
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machine.place.failed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('machine.place.failed')),
+    }));
   } finally {
     placing.value = false;
   }
@@ -984,12 +988,13 @@ async function load() {
   } finally {
     loading.value = false;
   }
-  if (lastError.value && machine.value) {
-    $q.notify({
+  const error = lastError.value;
+  if (error && machine.value) {
+    notify($q, () => ({
       type: 'negative',
-      message: apiErrorMessage(lastError.value, t('machine.actions.refreshFailed')),
+      message: apiErrorMessage(error, t('machine.actions.refreshFailed')),
       caption: t('machine.actions.refreshFailedCaption'),
-    });
+    }));
   }
 }
 
@@ -1062,12 +1067,12 @@ async function send(action: CommandAction) {
       // The server de-duplicates per (poste, type), and says where the
       // standing one is. Saying "envoyée" here would have the administrator
       // watch a history that never grows a row.
-      $q.notify(singleSendNotification(action, res));
+      notify($q, () => singleSendNotification(action, res));
     } catch (e) {
-      $q.notify({
+      notify($q, () => ({
         type: 'negative',
         message: sendErrorMessage(e, t('machine.actions.sendFailed')),
-      });
+      }));
       return;
     }
   } finally {
@@ -1080,13 +1085,16 @@ async function send(action: CommandAction) {
 async function sendWake() {
   try {
     const res = await wakeMachines([props.id]);
-    $q.notify(wakeNotification(res));
+    notify($q, () => wakeNotification(res));
     // Reloaded for the history, not for the machine's state: the wake is
     // recorded as a command row, while the poste itself will not reappear until
     // its agent reports — a minute or so after it has actually booted.
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: sendErrorMessage(e, t('machine.actions.wakeFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: sendErrorMessage(e, t('machine.actions.wakeFailed')),
+    }));
   }
 }
 
@@ -1105,10 +1113,13 @@ function confirmRevoke() {
 async function doRevoke() {
   try {
     await revokeToken(props.id);
-    $q.notify({ type: 'positive', message: t('machine.actions.revoked') });
+    notify($q, () => ({ type: 'positive', message: t('machine.actions.revoked') }));
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machine.actions.revokeFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('machine.actions.revokeFailed')),
+    }));
   }
 }
 
@@ -1127,10 +1138,13 @@ function confirmAllowReenroll() {
 async function doAllowReenroll() {
   try {
     await allowReenroll(props.id);
-    $q.notify({ type: 'positive', message: t('machine.actions.allowed') });
+    notify($q, () => ({ type: 'positive', message: t('machine.actions.allowed') }));
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machine.actions.allowFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('machine.actions.allowFailed')),
+    }));
   }
 }
 
@@ -1154,13 +1168,13 @@ async function doConfirmIdentity() {
   confirmingIdentity.value = true;
   try {
     await confirmIdentity(props.id);
-    $q.notify({ type: 'positive', message: t('machine.actions.identityConfirmed') });
+    notify($q, () => ({ type: 'positive', message: t('machine.actions.identityConfirmed') }));
     await load();
   } catch (e) {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('machine.actions.identityFailed')),
-    });
+    }));
   } finally {
     confirmingIdentity.value = false;
   }

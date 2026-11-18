@@ -170,6 +170,7 @@ import {
   type PackageKind,
 } from 'src/services/packages';
 import { useAuthStore } from 'src/stores/auth';
+import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
 const router = useRouter();
@@ -224,7 +225,10 @@ async function reload() {
   try {
     rows.value = await listPackages(showRetired.value);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('packagePages.list.loadFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('packagePages.list.loadFailed')),
+    }));
   } finally {
     loading.value = false;
   }
@@ -251,10 +255,10 @@ async function submitCreate() {
     createOpen.value = false;
     open(created);
   } catch (e) {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('packagePages.list.createFailed')),
-    });
+    }));
   } finally {
     saving.value = false;
   }

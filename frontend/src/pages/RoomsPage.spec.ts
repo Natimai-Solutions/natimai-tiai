@@ -137,10 +137,12 @@ describe('RoomsPage — re-sync from the directory', () => {
 
     const notify = await resync(wrapper);
 
-    expect(notify).toHaveBeenCalledWith({
-      type: 'positive',
-      message: '12 poste(s) rangé(s), 0 retiré(s), 1 salle(s) créée(s)',
-    });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'positive',
+        message: '12 poste(s) rangé(s), 0 retiré(s), 1 salle(s) créée(s)',
+      }),
+    );
   });
 });
 

@@ -6,11 +6,12 @@ import { nextTick } from 'vue';
 vi.mock('src/services/rooms', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/rooms')>()),
   createBuilding: vi.fn(),
+  updateBuilding: vi.fn(),
   createRoom: vi.fn(),
 }));
 
 import { setLocale } from 'src/i18n';
-import { createBuilding, createRoom, type Building } from 'src/services/rooms';
+import { createBuilding, createRoom, updateBuilding, type Building } from 'src/services/rooms';
 import BuildingFormDialog from './BuildingFormDialog.vue';
 import RoomFormDialog from './RoomFormDialog.vue';
 
@@ -65,7 +66,37 @@ describe('BuildingFormDialog in English', () => {
       .querySelector('.q-dialog form')!
       .dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
     await flushPromises();
-    expect(notify).toHaveBeenCalledWith({ type: 'positive', message: 'Building created' });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'positive', message: 'Building created' }),
+    );
+    wrapper.unmount();
+  });
+});
+
+describe('BuildingFormDialog: its notification and a change of language', () => {
+  it('rewords « Bâtiment mis à jour » on screen, after the dialog let the building go', async () => {
+    vi.mocked(updateBuilding).mockReset().mockResolvedValue(building);
+    const wrapper = mount(BuildingFormDialog, {
+      props: { modelValue: false, building, locations: [] },
+      attachTo: document.body,
+    });
+    await wrapper.setProps({ modelValue: true });
+    await flushPromises();
+    const notify = vi.spyOn(wrapper.vm.$q, 'notify').mockImplementation(() => () => undefined);
+    document
+      .querySelector('.q-dialog form')!
+      .dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+    await flushPromises();
+    expect(notify).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'positive', message: 'Bâtiment mis à jour' }),
+    );
+
+    // The page closes the dialog and forgets the building; then the language changes.
+    await wrapper.setProps({ modelValue: false, building: null });
+    setLocale('en');
+    expect(notify).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'positive', message: 'Building updated' }),
+    );
     wrapper.unmount();
   });
 });

@@ -1,9 +1,9 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { DialogChainObject, QDialogOptions, QNotifyCreateOptions } from 'quasar';
+import type { DialogChainObject, QDialogOptions } from 'quasar';
 import { setLocale, t } from 'src/i18n';
-import { liveDialog, liveNotify } from './liveDialog';
+import { liveDialog } from './liveDialog';
 
 afterEach(() => setLocale('fr'));
 
@@ -39,39 +39,6 @@ describe('liveDialog', () => {
   });
 });
 
-describe('liveNotify', () => {
-  it('rewords a notification that stays, until it is dismissed', () => {
-    const update = vi.fn();
-    let options: QNotifyCreateOptions | undefined;
-    const notify = vi.fn((o: QNotifyCreateOptions) => {
-      options = o;
-      return update;
-    });
-    const onDismiss = vi.fn();
-    const returned = liveNotify(notify, () => ({
-      message: t('layout.staleChunk.close'),
-      timeout: 0,
-      onDismiss,
-    }));
-    expect(returned).toBe(update);
-    expect(options).toMatchObject({ message: t('layout.staleChunk.close'), group: false });
-    const french = options!.message;
-
-    setLocale('en');
-    expect(update).toHaveBeenCalledTimes(1);
-    const english = (update.mock.calls[0] as [QNotifyCreateOptions])[0];
-    expect(english).toMatchObject({ timeout: 0, group: false });
-    expect(english.message).not.toBe(french);
-    expect(english.message).toBe(t('layout.staleChunk.close'));
-
-    // Dismissed: the caller's own onDismiss runs, and no update follows.
-    options!.onDismiss!();
-    expect(onDismiss).toHaveBeenCalledTimes(1);
-    setLocale('fr');
-    expect(update).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe('the console’s confirmations', () => {
   it('all open through liveDialog', () => {
     const src = new URL('..', import.meta.url).pathname;
@@ -84,6 +51,26 @@ describe('the console’s confirmations', () => {
     const plain = sources(src).filter(
       (path) =>
         !path.endsWith('liveDialog.ts') && readFileSync(path, 'utf-8').includes('$q.dialog('),
+    );
+    expect(plain).toEqual([]);
+  });
+
+  it('all notify through src/utils/notify.ts', () => {
+    const src = new URL('..', import.meta.url).pathname;
+    const sources = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) return sources(path);
+        return /\.(vue|ts)$/.test(name) && !name.endsWith('.spec.ts') ? [path] : [];
+      });
+    // The one way in from outside a component, handed to notify itself.
+    const adapter = '{ notify: (options) => Notify.create(options) }';
+    const plain = sources(src).filter(
+      (path) =>
+        !path.endsWith(join('utils', 'notify.ts')) &&
+        /\$q\.notify\(|useQuasar\(\)\.notify\(|Notify\.create\(/.test(
+          readFileSync(path, 'utf-8').split(adapter).join(''),
+        ),
     );
     expect(plain).toEqual([]);
   });

@@ -203,10 +203,12 @@ describe('RoomDetailPage in English', () => {
     );
     ok!();
     await flushPromises();
-    expect(notify).toHaveBeenCalledWith({
-      type: 'positive',
-      message: 'PC-01 removed from the room',
-    });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'positive',
+        message: 'PC-01 removed from the room',
+      }),
+    );
     wrapper.unmount();
   });
 

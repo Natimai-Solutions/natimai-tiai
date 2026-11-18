@@ -384,6 +384,7 @@ import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { timeAgoLabel } from 'src/utils/format';
 import { t } from 'src/i18n';
+import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -475,25 +476,28 @@ async function takeRoom(r: DueRoom) {
       for (const m of r.machines) {
         await updateMachineMaintenance(m.id, { maintenance_owner_id: me });
       }
-      $q.notify({
+      notify($q, () => ({
         type: 'positive',
         message: t(
           'tasks.maintenance.machinesTaken',
           { count: r.machines.length, room: r.name },
           r.machines.length,
         ),
-      });
+      }));
     } else {
       await updateRoomMaintenance(r.id, { maintenance_owner_id: me });
-      $q.notify({ type: 'positive', message: t('tasks.maintenance.roomTaken', { room: r.name }) });
+      notify($q, () => ({
+        type: 'positive',
+        message: t('tasks.maintenance.roomTaken', { room: r.name }),
+      }));
     }
     notifyTasksChanged();
     await reload();
   } catch (e) {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('tasks.maintenance.takeFailed')),
-    });
+    }));
   }
 }
 
@@ -506,13 +510,16 @@ async function openHandOver(r: DueRoom) {
     handOverRoom.value = r;
     handOverOpen.value = true;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('tasks.maintenance.roomFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('tasks.maintenance.roomFailed')),
+    }));
   }
 }
 async function saveHandOver(payload: MaintenanceSettingsPayload) {
   if (!handOverRoom.value) return;
   await updateRoomMaintenance(handOverRoom.value.id, payload);
-  $q.notify({ type: 'positive', message: t('tasks.maintenance.handedOver') });
+  notify($q, () => ({ type: 'positive', message: t('tasks.maintenance.handedOver') }));
   notifyTasksChanged();
   await reload();
 }
@@ -527,7 +534,10 @@ async function loadDue() {
   try {
     due.value = await getDue(scope.value === 'all' ? undefined : scope.value);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('tasks.maintenance.loadFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('tasks.maintenance.loadFailed')),
+    }));
   }
 }
 
@@ -547,7 +557,10 @@ async function reload() {
     rows.value = res.items;
     checksTotal.value = res.total;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('tasks.checks.loadFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('tasks.checks.loadFailed')),
+    }));
   } finally {
     loading.value = false;
   }
@@ -571,7 +584,7 @@ function openEdit(check: Check) {
 async function saveEdit(payload: CheckPayload) {
   if (!editing.value) return;
   await updateCheck(editing.value.id, payload);
-  $q.notify({ type: 'positive', message: t('tasks.checks.updated') });
+  notify($q, () => ({ type: 'positive', message: t('tasks.checks.updated') }));
   notifyTasksChanged();
   await reload();
 }
@@ -579,11 +592,14 @@ async function takeOver(check: Check) {
   if (!auth.user) return;
   try {
     await updateCheck(check.id, { assigned_to_id: auth.user.id });
-    $q.notify({ type: 'positive', message: t('tasks.checks.taken') });
+    notify($q, () => ({ type: 'positive', message: t('tasks.checks.taken') }));
     notifyTasksChanged();
     await reload();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('tasks.checks.takeFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('tasks.checks.takeFailed')),
+    }));
   }
 }
 

@@ -67,10 +67,12 @@ describe('useMachineColumnLayout', () => {
 
     await expect(saveColumns(['hostname'])).rejects.toThrow('down');
 
-    expect(q.notify).toHaveBeenCalledWith({
-      type: 'negative',
-      message: "Impossible d'enregistrer les colonnes",
-    });
+    expect(q.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'negative',
+        message: "Impossible d'enregistrer les colonnes",
+      }),
+    );
     expect(columnOrder.value).toEqual(DEFAULT_MACHINE_COLUMNS);
   });
 });

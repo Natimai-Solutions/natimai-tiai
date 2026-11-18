@@ -77,6 +77,7 @@ import { useQuasar } from 'quasar';
 import { t } from 'src/i18n';
 import { requestPasswordReset } from 'src/services/auth';
 import { apiErrorMessage } from 'src/services/errors';
+import { notify } from 'src/utils/notify';
 
 const { resetExpiry } = usePasswordPolicy();
 
@@ -94,7 +95,7 @@ async function onSubmit() {
     await requestPasswordReset(email.value);
     sent.value = true;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('auth.forgot.failed')) });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('auth.forgot.failed')) }));
   } finally {
     loading.value = false;
   }

@@ -146,6 +146,7 @@ import {
   type AuditFilters,
 } from 'src/utils/auditQuery';
 import { dash, formatDateTime } from 'src/utils/format';
+import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
 const route = useRoute();
@@ -288,7 +289,10 @@ async function load() {
     loadFailed.value = true;
     rows.value = [];
     pagination.value = { ...pagination.value, rowsNumber: 0 };
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('audit.page.loadFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('audit.page.loadFailed')),
+    }));
   } finally {
     if (id === requestId) loading.value = false;
   }

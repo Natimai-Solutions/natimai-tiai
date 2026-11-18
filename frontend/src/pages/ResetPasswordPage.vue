@@ -90,6 +90,7 @@ import { useQuasar } from 'quasar';
 import { t } from 'src/i18n';
 import { checkPasswordResetToken, confirmPasswordReset } from 'src/services/auth';
 import { apiErrorCode, apiErrorMessage } from 'src/services/errors';
+import { notify } from 'src/utils/notify';
 
 const { passwordMin } = usePasswordPolicy();
 
@@ -118,7 +119,7 @@ async function onSubmit() {
   loading.value = true;
   try {
     await confirmPasswordReset(token.value, password.value);
-    $q.notify({ type: 'positive', message: t('auth.reset.done') });
+    notify($q, () => ({ type: 'positive', message: t('auth.reset.done') }));
     await router.push({ name: 'login' });
   } catch (e) {
     // The link died while the form was open (or the check was not available):
@@ -127,7 +128,7 @@ async function onSubmit() {
       linkState.value = 'invalid';
       return;
     }
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('auth.reset.failed')) });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('auth.reset.failed')) }));
   } finally {
     loading.value = false;
   }

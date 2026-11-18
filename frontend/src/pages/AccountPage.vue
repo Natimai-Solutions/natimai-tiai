@@ -251,6 +251,7 @@ import {
 } from 'src/utils/format';
 import { describeUserAgent } from 'src/utils/userAgent';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const { passwordMin } = usePasswordPolicy();
 
@@ -273,9 +274,9 @@ async function saveLanguage(choice: string) {
   savingLanguage.value = true;
   try {
     await auth.saveLanguage(choice === BROWSER ? null : (choice as AccountLanguage));
-    $q.notify({ type: 'positive', message: t('common.language.saved') });
+    notify($q, () => ({ type: 'positive', message: t('common.language.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e) });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e) }));
   } finally {
     savingLanguage.value = false;
   }
@@ -305,15 +306,15 @@ async function savePreference(choice: EmailPreference) {
     const user = await updateMe({ email_preference: choice });
     auth.user = user;
     emailPreference.value = user.email_preference;
-    $q.notify({ type: 'positive', message: t('account.notifications.saved') });
+    notify($q, () => ({ type: 'positive', message: t('account.notifications.saved') }));
   } catch (e) {
     // Rolled back to what the server still holds: leaving the radio on a choice
     // that was never saved would have the user believe they had changed it.
     emailPreference.value = previous;
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('account.notifications.saveFailed')),
-    });
+    }));
   } finally {
     savingPreference.value = false;
   }
@@ -348,13 +349,16 @@ async function onSubmit() {
     // clears the refresh cookie) rather than letting the next call fail with
     // a confusing 401.
     await auth.logout();
-    $q.notify({
+    notify($q, () => ({
       type: 'positive',
       message: t('account.password.changed'),
-    });
+    }));
     await router.push({ name: 'login' });
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('account.password.failed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('account.password.failed')),
+    }));
   } finally {
     loading.value = false;
   }
@@ -408,12 +412,12 @@ async function closeOne(session: AuthSession) {
     }
     await closeSession(session.id);
     sessions.value = sessions.value.filter((s) => s.id !== session.id);
-    $q.notify({ type: 'positive', message: t('account.sessions.closed') });
+    notify($q, () => ({ type: 'positive', message: t('account.sessions.closed') }));
   } catch (e) {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('account.sessions.closeFailed')),
-    });
+    }));
     // Closed elsewhere in the meantime, or not: the server's list is the truth.
     void loadSessions();
   } finally {

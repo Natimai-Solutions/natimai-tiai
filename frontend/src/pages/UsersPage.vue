@@ -360,6 +360,7 @@ import type { EmailPreference } from 'src/services/auth';
 import { useAuthStore } from 'src/stores/auth';
 import { EMAIL_PREFERENCE_OPTIONS, emailPreferenceLabel, formatDateTime } from 'src/utils/format';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const { passwordMin } = usePasswordPolicy();
 
@@ -401,10 +402,10 @@ async function loadGroups() {
   try {
     groups.value = await listGroups();
   } catch (e) {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('users.notify.groupsUnavailable')),
-    });
+    }));
   }
 }
 
@@ -590,7 +591,7 @@ async function submitForm() {
         ...(isSelf(editing.value) ? {} : { group_ids: form.group_ids }),
         email_preference: form.email_preference,
       });
-      $q.notify({ type: 'positive', message: t('users.notify.updated') });
+      notify($q, () => ({ type: 'positive', message: t('users.notify.updated') }));
     } else {
       await createUser({
         email: form.email,
@@ -598,12 +599,15 @@ async function submitForm() {
         full_name: form.full_name || null,
         group_ids: form.group_ids,
       });
-      $q.notify({ type: 'positive', message: t('users.notify.created') });
+      notify($q, () => ({ type: 'positive', message: t('users.notify.created') }));
     }
     formOpen.value = false;
     await reload();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('users.notify.saveFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('users.notify.saveFailed')),
+    }));
   } finally {
     saving.value = false;
   }
@@ -633,7 +637,10 @@ async function submitReset() {
     rows.value = rows.value.map((u) => (u.id === targetId ? { ...u, locked_until: null } : u));
     resetOpen.value = true;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('users.notify.resetFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('users.notify.resetFailed')),
+    }));
   } finally {
     resetting.value = false;
   }
@@ -643,20 +650,21 @@ async function copyResult() {
   if (!resetResult.value) return;
   try {
     await copyToClipboard(resetResult.value);
-    $q.notify({ type: 'positive', message: t('users.notify.copied') });
+    notify($q, () => ({ type: 'positive', message: t('users.notify.copied') }));
   } catch {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: t('users.notify.copyFailed'),
-    });
+    }));
   }
 }
 
 async function toggleActive(user: ConsoleUser) {
   try {
-    await updateUser(user.id, { is_active: !user.is_active });
-    $q.notify(
-      user.is_active
+    const deactivated = user.is_active;
+    await updateUser(user.id, { is_active: !deactivated });
+    notify($q, () =>
+      deactivated
         ? {
             type: 'positive',
             message: t('users.notify.deactivated'),
@@ -667,7 +675,10 @@ async function toggleActive(user: ConsoleUser) {
     );
     await reload();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('users.notify.editFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('users.notify.editFailed')),
+    }));
   }
 }
 
@@ -684,13 +695,13 @@ function confirmDelete(user: ConsoleUser) {
     void (async () => {
       try {
         await deleteUser(user.id);
-        $q.notify({ type: 'positive', message: t('users.notify.deleted') });
+        notify($q, () => ({ type: 'positive', message: t('users.notify.deleted') }));
         await reload();
       } catch (e) {
-        $q.notify({
+        notify($q, () => ({
           type: 'negative',
           message: apiErrorMessage(e, t('users.notify.deleteFailed')),
-        });
+        }));
       }
     })();
   });

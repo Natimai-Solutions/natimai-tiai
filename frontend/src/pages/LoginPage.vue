@@ -73,6 +73,7 @@ import { t } from 'src/i18n';
 import { useAuthStore } from 'src/stores/auth';
 import { apiErrorMessage } from 'src/services/errors';
 import { safeRedirect } from 'src/router/access';
+import { notify } from 'src/utils/notify';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -92,7 +93,7 @@ async function onSubmit() {
     await auth.login(email.value, password.value);
     await router.push(safeRedirect(route.query.redirect) ?? '/');
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('auth.login.failed')) });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('auth.login.failed')) }));
   } finally {
     loading.value = false;
   }

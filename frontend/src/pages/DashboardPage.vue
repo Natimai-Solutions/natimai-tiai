@@ -204,6 +204,7 @@ import {
   threatSeverityLabel,
   threatStatusLabel,
 } from 'src/utils/format';
+import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
 const stats = ref<StatsOverview | null>(null);
@@ -519,12 +520,13 @@ async function reload() {
   // The banner covers a page that never loaded; over figures already shown, a
   // requested reload that fails says so rather than leaving them to pass for
   // fresh ones (audit T20). The automatic refresh stays quiet.
-  if (lastError.value && lastRefreshedAt.value) {
-    $q.notify({
+  const error = lastError.value;
+  if (error && lastRefreshedAt.value) {
+    notify($q, () => ({
       type: 'negative',
-      message: apiErrorMessage(lastError.value, t('dashboard.refreshFailed')),
+      message: apiErrorMessage(error, t('dashboard.refreshFailed')),
       caption: t('dashboard.refreshFailedCaption'),
-    });
+    }));
   }
 }
 

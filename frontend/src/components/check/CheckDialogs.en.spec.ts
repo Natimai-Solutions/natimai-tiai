@@ -83,7 +83,9 @@ describe('CheckCloseDialog in English', () => {
       .querySelector('.q-dialog form')!
       .dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
     await flushPromises();
-    expect(notify).toHaveBeenCalledWith({ type: 'positive', message: 'Check closed' });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'positive', message: 'Check closed' }),
+    );
     wrapper.unmount();
   });
 
