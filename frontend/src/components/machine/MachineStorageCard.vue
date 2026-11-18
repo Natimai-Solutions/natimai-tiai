@@ -2,9 +2,9 @@
   <div class="col-12 col-md-6">
     <q-card flat bordered>
       <q-card-section class="text-subtitle1">
-        Stockage
+        {{ t('machine.storage.title') }}
         <div class="text-caption text-muted">
-          Occupation relevée au dernier inventaire — « Rafraîchir l'inventaire » force un relevé.
+          {{ t('machine.storage.caption') }}
         </div>
       </q-card-section>
       <q-separator />
@@ -15,7 +15,12 @@
             <q-item-label>
               {{ v.letter }}
               <span v-if="v.label" class="text-muted"> — {{ v.label }}</span>
-              <q-badge v-if="v.is_system" color="primary" class="q-ml-sm" label="Système" />
+              <q-badge
+                v-if="v.is_system"
+                color="primary"
+                class="q-ml-sm"
+                :label="t('machine.storage.system')"
+              />
               <q-badge
                 :color="encryptionColor(v.encryption_status)"
                 class="q-ml-sm"
@@ -33,9 +38,14 @@
               class="q-mt-xs"
             />
             <q-item-label caption>
-              {{ sizeLabel(v.free_mb) }} libres sur {{ sizeLabel(v.total_mb) }}
+              {{
+                t('machine.storage.freeOf', {
+                  free: sizeLabel(v.free_mb),
+                  total: sizeLabel(v.total_mb),
+                })
+              }}
               <span v-if="freePercent(v.total_mb, v.free_mb) != null">
-                ({{ freePercent(v.total_mb, v.free_mb) }} %)
+                {{ t('machine.storage.percent', { percent: freePercent(v.total_mb, v.free_mb) }) }}
               </span>
               <span v-if="v.filesystem" class="text-muted"> — {{ v.filesystem }}</span>
             </q-item-label>
@@ -43,12 +53,14 @@
         </q-item>
       </q-list>
       <q-card-section v-else class="text-caption text-muted">
-        Aucun volume relevé sur ce poste.
+        {{ t('machine.storage.noVolume') }}
       </q-card-section>
 
       <template v-if="machine.disks.length">
         <q-separator />
-        <q-card-section class="text-caption text-muted q-pb-none">Disques physiques</q-card-section>
+        <q-card-section class="text-caption text-muted q-pb-none">{{
+          t('machine.storage.disks')
+        }}</q-card-section>
         <q-list dense>
           <q-item v-for="d in machine.disks" :key="d.id">
             <q-item-section>
@@ -57,7 +69,9 @@
                 {{ mediaTypeLabel(d.media_type) }}
                 <span v-if="d.bus_type"> — {{ d.bus_type }}</span>
                 — {{ sizeLabel(d.size_mb) }}
-                <span v-if="d.serial" class="text-muted"> — n° {{ d.serial }}</span>
+                <span v-if="d.serial" class="text-muted">
+                  — {{ t('machine.storage.serial', { serial: d.serial }) }}</span
+                >
               </q-item-label>
             </q-item-section>
             <q-item-section side>
@@ -78,6 +92,7 @@
 </template>
 
 <script setup lang="ts">
+import { t } from 'src/i18n';
 import type { MachineDetail, Volume } from 'src/services/machines';
 import {
   diskColor,

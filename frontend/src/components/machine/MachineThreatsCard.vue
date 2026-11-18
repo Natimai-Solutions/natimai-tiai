@@ -1,9 +1,13 @@
 <template>
   <q-card flat bordered class="q-mt-md">
-    <q-card-section class="text-subtitle1">Historique des menaces</q-card-section>
+    <q-card-section class="text-subtitle1">{{ t('machine.threats.title') }}</q-card-section>
     <q-separator />
     <q-card-section v-if="failed" class="q-pa-sm">
-      <CardLoadError what="les menaces" :loading="loading" @retry="emit('refresh')" />
+      <CardLoadError
+        :what="t('machine.threats.what')"
+        :loading="loading"
+        @retry="emit('refresh')"
+      />
     </q-card-section>
     <q-table
       v-model:pagination="pagination"
@@ -13,7 +17,7 @@
       :loading="loading"
       flat
       :rows-per-page-options="[10, 25, 50]"
-      :no-data-label="failed ? 'Menaces non chargées.' : 'Aucune menace détectée.'"
+      :no-data-label="failed ? t('machine.threats.notLoaded') : t('machine.threats.none')"
       @request="onRequest"
     >
       <template #body-cell-severity="props">
@@ -38,7 +42,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { QTableColumn } from 'quasar';
+import { t } from 'src/i18n';
 import CardLoadError from 'src/components/CardLoadError.vue';
 import { DEFAULT_PAGE_SIZE, type TablePagination } from './types';
 import type { Threat } from 'src/services/threats';
@@ -60,19 +66,30 @@ const pagination = defineModel<TablePagination>('pagination', { required: true }
 // state QTable writes to, the page holds the request that goes with it.
 const emit = defineEmits<{ refresh: [] }>();
 
-const columns: QTableColumn<Threat>[] = [
+// A computed: the headers follow the language when it changes.
+const columns = computed<QTableColumn<Threat>[]>(() => [
   {
     name: 'threat_name',
-    label: 'Menace',
+    label: t('machine.threats.columns.name'),
     field: 'threat_name',
     align: 'left',
     format: (v: string | null) => threatNameLabel(v),
     classes: 'cell-wrap',
   },
-  { name: 'severity', label: 'Sévérité', field: 'severity', align: 'left' },
-  { name: 'status', label: 'Statut', field: 'status', align: 'left' },
-  { name: 'detected_at', label: 'Détectée le', field: 'detected_at', align: 'left' },
-];
+  {
+    name: 'severity',
+    label: t('machine.threats.columns.severity'),
+    field: 'severity',
+    align: 'left',
+  },
+  { name: 'status', label: t('machine.threats.columns.status'), field: 'status', align: 'left' },
+  {
+    name: 'detected_at',
+    label: t('machine.threats.columns.detectedAt'),
+    field: 'detected_at',
+    align: 'left',
+  },
+]);
 
 /** Turn a page of the threat history (server-side). */
 function onRequest(evt: { pagination: { page?: number; rowsPerPage?: number } }) {

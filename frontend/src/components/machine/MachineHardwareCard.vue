@@ -1,8 +1,8 @@
 <template>
-  <MachineInfoCard title="Matériel" :caption="caption" :rows="rows">
+  <MachineInfoCard :title="t('machine.hardware.title')" :caption="caption" :rows="rows">
     <template #side>
       <q-badge v-if="machine.hw_is_virtual" color="blue-grey-8" class="q-ml-sm">
-        {{ machine.hw_hypervisor || 'Machine virtuelle' }}
+        {{ machine.hw_hypervisor || t('machine.hardware.virtual') }}
       </q-badge>
     </template>
   </MachineInfoCard>
@@ -10,6 +10,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { t } from 'src/i18n';
 import MachineInfoCard from './MachineInfoCard.vue';
 import type { InfoRow } from './types';
 import type { MachineDetail } from 'src/services/machines';
@@ -31,34 +32,40 @@ const props = defineProps<{ machine: MachineDetail }>();
  */
 const caption = computed(() =>
   props.machine.inventory_last_seen
-    ? `Relevé le ${formatDateTime(props.machine.inventory_last_seen)}`
-    : "Aucun inventaire relevé — l'agent de ce poste est antérieur au module, ou n'a pas encore tourné.",
+    ? t('machine.hardware.readAt', { date: formatDateTime(props.machine.inventory_last_seen) })
+    : t('machine.hardware.noInventory'),
 );
 
 const rows = computed<InfoRow[]>(() => {
   const m = props.machine;
   const rows: InfoRow[] = [
-    { label: 'Constructeur', value: m.hw_manufacturer ?? '—' },
-    { label: 'Modèle', value: m.hw_model ?? '—' },
-    { label: 'N° de série', value: m.hw_serial ?? '—' },
-    { label: 'Châssis', value: chassisLabel(m.hw_chassis_type) },
-    { label: 'Carte mère', value: motherboard(m) },
-    { label: 'BIOS', value: bios(m) },
-    { label: 'Processeur', value: cpuLabel(m.cpu_model, m.cpu_cores, m.cpu_threads, m.cpu_count) },
-    { label: 'Mémoire', value: ramLabel(m.ram_total_mb, m.ram_slots_used, m.ram_slots_total) },
-    { label: 'Architecture', value: m.os_architecture ?? '—' },
-    { label: 'Windows installé le', value: formatDateTime(m.os_install_date) },
-    { label: 'Dernier démarrage', value: formatDateTime(m.last_boot_time) },
+    { label: t('machine.hardware.manufacturer'), value: m.hw_manufacturer ?? '—' },
+    { label: t('machine.hardware.model'), value: m.hw_model ?? '—' },
+    { label: t('machine.hardware.serial'), value: m.hw_serial ?? '—' },
+    { label: t('machine.hardware.chassis'), value: chassisLabel(m.hw_chassis_type) },
+    { label: t('machine.hardware.motherboard'), value: motherboard(m) },
+    { label: t('machine.hardware.bios'), value: bios(m) },
+    {
+      label: t('machine.hardware.cpu'),
+      value: cpuLabel(m.cpu_model, m.cpu_cores, m.cpu_threads, m.cpu_count),
+    },
+    {
+      label: t('machine.hardware.memory'),
+      value: ramLabel(m.ram_total_mb, m.ram_slots_used, m.ram_slots_total),
+    },
+    { label: t('machine.hardware.architecture'), value: m.os_architecture ?? '—' },
+    { label: t('machine.hardware.osInstalled'), value: formatDateTime(m.os_install_date) },
+    { label: t('machine.hardware.lastBoot'), value: formatDateTime(m.last_boot_time) },
   ];
   // Secure Boot and the TPM are shown only where they mean something. A machine
   // with no UEFI has no Secure Boot to have off, and a virtual one has no TPM
   // chip — printing "Non" for either would read as a finding rather than as an
   // absence, and it is the sort of finding that generates a ticket.
   if (m.secure_boot != null) {
-    rows.push({ label: 'Secure Boot', value: boolLabel(m.secure_boot) });
+    rows.push({ label: t('machine.hardware.secureBoot'), value: boolLabel(m.secure_boot) });
   }
   if (m.tpm_version) {
-    rows.push({ label: 'TPM', value: m.tpm_version });
+    rows.push({ label: t('machine.hardware.tpm'), value: m.tpm_version });
   }
   return rows;
 });

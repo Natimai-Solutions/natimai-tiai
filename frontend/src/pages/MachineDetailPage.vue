@@ -2,7 +2,7 @@
   <q-page padding>
     <div class="row items-center q-mb-md">
       <q-btn
-        aria-label="Retour à la liste des postes"
+        :aria-label="t('machine.page.backAria')"
         flat
         dense
         round
@@ -11,7 +11,7 @@
         class="q-mr-sm"
       >
         <q-tooltip>
-          {{ fromSearch ? 'Retour aux résultats de la recherche' : 'Retour aux postes' }}
+          {{ fromSearch ? t('machine.page.backToResults') : t('machine.page.backToComputers') }}
         </q-tooltip>
       </q-btn>
       <h1 class="text-h5 q-my-none row items-center no-wrap break-anywhere" style="min-width: 0">
@@ -24,8 +24,12 @@
           class="q-mr-sm"
         >
           <q-tooltip>
-            {{ onlineLabel(machine.is_online) }} — dernier contact
-            {{ timeAgoLabel(machine.last_seen) }}
+            {{
+              t('machine.page.onlineTooltip', {
+                state: onlineLabel(machine.is_online),
+                ago: timeAgoLabel(machine.last_seen),
+              })
+            }}
           </q-tooltip>
         </q-icon>
         <span class="break-anywhere" style="min-width: 0">{{ title }}</span>
@@ -34,7 +38,7 @@
            no search to walk, and dead arrows would be worse than none. -->
       <template v-if="fromSearch">
         <q-btn
-          aria-label="Poste précédent"
+          :aria-label="t('machine.page.previousAria')"
           flat
           dense
           round
@@ -46,13 +50,15 @@
           <q-tooltip>
             {{
               previousMachine
-                ? `Précédent : ${previousMachine.hostname || previousMachine.machine_uuid}`
-                : 'Premier résultat'
+                ? t('machine.page.previous', {
+                    name: previousMachine.hostname || previousMachine.machine_uuid,
+                  })
+                : t('machine.page.firstResult')
             }}
           </q-tooltip>
         </q-btn>
         <q-btn
-          aria-label="Poste suivant"
+          :aria-label="t('machine.page.nextAria')"
           flat
           dense
           round
@@ -63,8 +69,8 @@
           <q-tooltip>
             {{
               nextMachine
-                ? `Suivant : ${nextMachine.hostname || nextMachine.machine_uuid}`
-                : 'Dernier résultat'
+                ? t('machine.page.next', { name: nextMachine.hostname || nextMachine.machine_uuid })
+                : t('machine.page.lastResult')
             }}
           </q-tooltip>
         </q-btn>
@@ -74,10 +80,10 @@
       </template>
       <q-space />
       <div v-if="lastRefreshedAt && machine" class="text-caption text-muted q-mr-sm">
-        Actualisé à {{ lastRefreshLabel }}
+        {{ t('machine.page.refreshedAt', { time: lastRefreshLabel }) }}
       </div>
       <q-btn
-        aria-label="Actualiser"
+        :aria-label="t('machine.page.refresh')"
         flat
         dense
         round
@@ -97,7 +103,7 @@
           <q-btn-dropdown
             color="primary"
             dense
-            label="Action"
+            :label="t('machine.page.actionMenu')"
             icon="bolt"
             :disable="!!machine.token_revoked"
           >
@@ -119,8 +125,7 @@
             </q-list>
           </q-btn-dropdown>
           <q-tooltip v-if="machine.token_revoked">
-            Token révoqué : aucune commande ne peut atteindre ce poste tant que son ré-enrôlement
-            n'est pas autorisé.
+            {{ t('machine.page.revokedTooltip') }}
           </q-tooltip>
         </div>
         <q-btn
@@ -130,12 +135,12 @@
           no-caps
           color="primary"
           icon="install_desktop"
-          label="Logiciel"
+          :label="t('machine.page.software')"
           class="q-ml-sm"
           :disable="!machine"
           @click="deployOpen = true"
         >
-          <q-tooltip>Installer ou désinstaller un paquet sur ce poste</q-tooltip>
+          <q-tooltip>{{ t('machine.page.softwareTooltip') }}</q-tooltip>
         </q-btn>
         <!-- check:write: ask somebody to go and look. One open at a time, so
            the button reads as the state. -->
@@ -145,7 +150,7 @@
           dense
           color="primary"
           icon="fact_check"
-          label="Demander une vérification"
+          :label="t('machine.page.requestCheck')"
           class="q-ml-sm"
           @click="askOpen = true"
         />
@@ -156,7 +161,7 @@
           dense
           color="primary"
           icon="meeting_room"
-          :label="machine?.room_name ? 'Changer de salle' : 'Affecter à une salle'"
+          :label="machine?.room_name ? t('machine.page.changeRoom') : t('machine.page.assignRoom')"
           class="q-ml-sm"
           :disable="!machine"
           @click="openPlace"
@@ -187,7 +192,7 @@
           dense
           color="positive"
           icon="key"
-          label="Autoriser le ré-enrôlement"
+          :label="t('machine.page.allowReenroll')"
           class="q-ml-sm"
           @click="confirmAllowReenroll"
         />
@@ -197,7 +202,7 @@
           dense
           color="negative"
           icon="key_off"
-          label="Révoquer le token"
+          :label="t('machine.page.revokeToken')"
           class="q-ml-sm"
           @click="confirmRevoke"
         />
@@ -210,9 +215,9 @@
          server answers alike): no « Réessayer », which could only fail again. -->
     <q-banner v-if="notFound && !machine" role="alert" class="surface-orange q-mb-md" rounded>
       <template #avatar><q-icon name="search_off" /></template>
-      Poste introuvable : il a peut-être été fusionné ou supprimé, ou le lien est incomplet.
+      {{ t('machine.page.notFound') }}
       <template #action>
-        <q-btn flat no-caps label="Retour aux postes" :to="{ name: 'machines' }" />
+        <q-btn flat no-caps :label="t('machine.page.backToComputers')" :to="{ name: 'machines' }" />
       </template>
     </q-banner>
     <LoadErrorBanner
@@ -222,19 +227,18 @@
       @retry="load"
     />
     <div v-else-if="!machine" class="row justify-center q-pa-xl">
-      <q-spinner size="lg" color="primary" aria-label="Chargement du poste" />
+      <q-spinner size="lg" color="primary" :aria-label="t('machine.page.loadingAria')" />
     </div>
 
     <q-banner v-if="machine?.token_revoked" class="surface-red q-mb-md" rounded>
       <template #avatar><q-icon name="key_off" color="negative" /></template>
-      Token révoqué : le poste est coupé du serveur et ne peut plus se ré-enrôler, même avec le
-      secret du parc, tant que le ré-enrôlement n'est pas autorisé ici.
+      {{ t('machine.page.revokedBanner') }}
       <template #action>
         <q-btn
           v-if="canManage"
           flat
           dense
-          label="Autoriser le ré-enrôlement"
+          :label="t('machine.page.allowReenroll')"
           @click="confirmAllowReenroll"
         />
       </template>
@@ -250,18 +254,22 @@
       rounded
     >
       <template #avatar><q-icon name="key" color="orange" /></template>
-      Ré-enrôlement demandé le {{ formatDateTime(machine.reenroll_requested_at) }}
+      {{
+        t('machine.page.reenrollRequested', {
+          date: formatDateTime(machine.reenroll_requested_at),
+        })
+      }}
       <template v-if="machine.reenroll_requested_ip">
-        depuis {{ machine.reenroll_requested_ip }}</template
-      >, alors que ce poste a encore un token valide. Si le poste a été réinstallé, autorisez-le ;
-      sinon, quelqu'un tente de prendre sa place — n'autorisez rien et le poste garde son token.
+        {{ t('machine.page.reenrollFrom', { ip: machine.reenroll_requested_ip }) }}</template>{{
+        t('machine.page.reenrollWarning')
+      }}
       <template #action>
         <q-btn
           v-if="canManage"
           flat
           dense
           no-caps
-          label="Autoriser le ré-enrôlement"
+          :label="t('machine.page.allowReenroll')"
           @click="confirmAllowReenroll"
         />
       </template>
@@ -269,46 +277,61 @@
 
     <q-banner v-if="machine?.needs_verification" class="surface-orange q-mb-md" rounded>
       <template #avatar><q-icon name="warning" color="orange" /></template>
-      Empreinte divergente : ce poste nécessite une vérification manuelle (clone, swap matériel ou
-      ré-image).
+      {{ t('machine.page.fingerprintMismatch') }}
       <template #action>
         <q-btn
           v-if="canManage"
           flat
           dense
           no-caps
-          label="Confirmer l'identité"
+          :label="t('machine.page.confirmIdentity')"
           :loading="confirmingIdentity"
           @click="askConfirmIdentity"
         />
-        <q-btn v-if="canManage" flat dense label="Fusionner un doublon" @click="openMerge" />
+        <q-btn
+          v-if="canManage"
+          flat
+          dense
+          :label="t('machine.page.mergeDuplicate')"
+          @click="openMerge"
+        />
       </template>
     </q-banner>
 
     <q-banner v-if="machine?.open_check" class="surface-blue q-mb-md" rounded>
       <template #avatar><q-icon name="fact_check" color="primary" /></template>
       <div>
-        <span class="text-weight-medium">Vérification demandée</span>
-        par {{ machine.open_check.requested_by }} {{ timeAgoLabel(machine.open_check.created_at) }},
+        <span class="text-weight-medium">{{ t('machine.check.requested') }}</span>
+        {{
+          t('machine.check.by', {
+            name: machine.open_check.requested_by,
+            ago: timeAgoLabel(machine.open_check.created_at),
+          })
+        }}
         <template
           v-if="
             machine.open_check.assigned_to_name && machine.open_check.assignee_reachable !== false
           "
         >
-          affectée à {{ machine.open_check.assigned_to_name }}.
+          {{ t('machine.check.assignedTo', { name: machine.open_check.assigned_to_name }) }}
         </template>
         <template v-else-if="machine.open_check.assigned_to_name">
-          à prendre ({{ machine.open_check.assigned_to_name }}, à qui elle était affectée, ne voit
-          plus ce poste).
+          {{ t('machine.check.unreachable', { name: machine.open_check.assigned_to_name }) }}
         </template>
-        <template v-else>à prendre.</template>
+        <template v-else>{{ t('machine.check.open') }}</template>
       </div>
       <div v-if="machine.open_check.instructions" class="q-mt-xs" style="white-space: pre-line">
         {{ machine.open_check.instructions }}
       </div>
       <template v-if="auth.can('check', 'write')" #action>
-        <q-btn flat dense label="Réaffecter / modifier" @click="editCheckOpen = true" />
-        <q-btn flat dense color="primary" label="Clore" @click="closeCheckOpen = true" />
+        <q-btn flat dense :label="t('machine.check.edit')" @click="editCheckOpen = true" />
+        <q-btn
+          flat
+          dense
+          color="primary"
+          :label="t('machine.check.close')"
+          @click="closeCheckOpen = true"
+        />
       </template>
     </q-banner>
 
@@ -333,30 +356,39 @@
 
     <q-banner v-if="machine?.location_mismatch" class="surface-orange q-mb-md" rounded>
       <template #avatar><q-icon name="wrong_location" color="orange" /></template>
-      Emplacement divergent : l'agent déclare « {{ machine.location }} », mais la salle
-      {{ machine.room_name }} est à « {{ machine.room_location }} ». Une GPO mal ciblée, ou un poste
-      déplacé sans sa salle.
+      {{
+        t('machine.page.locationMismatch', {
+          location: machine.location,
+          room: machine.room_name,
+          roomLocation: machine.room_location,
+        })
+      }}
     </q-banner>
 
     <!-- Placing the poste: one room, or none. -->
     <q-dialog v-model="placeOpen">
       <q-card style="width: 420px; max-width: 90vw">
-        <q-card-section class="text-h6">Salle du poste</q-card-section>
+        <q-card-section class="text-h6">{{ t('machine.place.title') }}</q-card-section>
         <q-card-section>
           <q-select
             v-model="placeRoomId"
             :options="placeRoomOptions"
             emit-value
             map-options
-            label="Salle"
+            :label="t('machine.place.room')"
             outlined
             dense
             autofocus
           />
         </q-card-section>
         <q-card-actions align="right" class="q-px-md q-pb-md">
-          <q-btn v-close-popup flat label="Annuler" />
-          <q-btn color="primary" label="Enregistrer" :loading="placing" @click="savePlace" />
+          <q-btn v-close-popup flat :label="t('machine.place.cancel')" />
+          <q-btn
+            color="primary"
+            :label="t('machine.place.save')"
+            :loading="placing"
+            @click="savePlace"
+          />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -385,24 +417,34 @@
         active-color="primary"
         indicator-color="primary"
       >
-        <q-tab name="identity" icon="badge" label="Identité" />
-        <q-tab name="antivirus" icon="shield" label="Antivirus">
+        <q-tab name="identity" icon="badge" :label="t('machine.tabs.identity')" />
+        <q-tab name="antivirus" icon="shield" :label="t('machine.tabs.antivirus')">
           <q-badge v-if="activeThreats" color="negative" floating>{{ activeThreats }}</q-badge>
         </q-tab>
-        <q-tab name="windows_update" icon="system_update" label="Windows Update">
+        <q-tab name="windows_update" icon="system_update" :label="t('machine.tabs.windowsUpdate')">
           <q-badge v-if="machine.wu_pending_count" color="orange" floating>
             {{ machine.wu_pending_count }}
           </q-badge>
         </q-tab>
-        <q-tab name="hardware" icon="memory" label="Matériel" />
-        <q-tab name="software" icon="apps" label="Logiciels">
+        <q-tab name="hardware" icon="memory" :label="t('machine.tabs.hardware')" />
+        <q-tab name="software" icon="apps" :label="t('machine.tabs.software')">
           <!-- « 212+ » : a partial list is not counted as a whole one. -->
           <q-badge v-if="machine.software.length" color="grey-7" floating>
             {{ machine.software.length }}{{ machine.software_truncated ? '+' : '' }}
           </q-badge>
         </q-tab>
-        <q-tab v-if="canReadCommands" name="commands" icon="history" label="Commandes" />
-        <q-tab v-if="canSeeHistory" name="history" icon="handyman" label="Historique">
+        <q-tab
+          v-if="canReadCommands"
+          name="commands"
+          icon="history"
+          :label="t('machine.tabs.commands')"
+        />
+        <q-tab
+          v-if="canSeeHistory"
+          name="history"
+          icon="handyman"
+          :label="t('machine.tabs.history')"
+        >
           <q-badge v-if="interventionTotal" color="grey-7" floating>{{
             interventionTotal
           }}</q-badge>
@@ -508,7 +550,7 @@
 </template>
 
 <script setup lang="ts">
-import { intlTag } from 'src/i18n';
+import { intlTag, t } from 'src/i18n';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -725,14 +767,14 @@ const openCheckAsCheck = computed<Check | null>(() => {
 async function askCheck(payload: CheckPayload) {
   await createCheck(props.id, payload);
   notifyTasksChanged();
-  $q.notify({ type: 'positive', message: 'Vérification demandée' });
+  $q.notify({ type: 'positive', message: t('machine.check.requestedNotify') });
   await load();
 }
 async function editCheck(payload: CheckPayload) {
   if (!machine.value?.open_check) return;
   await updateCheck(machine.value.open_check.id, payload);
   notifyTasksChanged();
-  $q.notify({ type: 'positive', message: 'Demande mise à jour' });
+  $q.notify({ type: 'positive', message: t('machine.check.updatedNotify') });
   await load();
 }
 async function onMaintenanceChanged() {
@@ -806,7 +848,7 @@ const placing = ref(false);
 const placeRoomId = ref<string | null>(null);
 const rooms = ref<Room[]>([]);
 const placeRoomOptions = computed(() => [
-  { label: 'Sans salle', value: ROOM_NONE },
+  { label: t('machine.place.none'), value: ROOM_NONE },
   ...rooms.value.map((r) => ({ label: roomLabel(r), value: r.id })),
 ]);
 
@@ -816,7 +858,10 @@ async function openPlace() {
   try {
     rooms.value = await listRooms();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Salles indisponibles') });
+    $q.notify({
+      type: 'negative',
+      message: apiErrorMessage(e, t('machine.place.roomsUnavailable')),
+    });
   }
 }
 
@@ -835,13 +880,15 @@ async function savePlace() {
     placeOpen.value = false;
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machine.place.failed')) });
   } finally {
     placing.value = false;
   }
 }
 
-const title = computed(() => machine.value?.hostname || machine.value?.machine_uuid || 'Poste');
+const title = computed(
+  () => machine.value?.hostname || machine.value?.machine_uuid || t('machine.page.title'),
+);
 // The tab says which poste, once known — the router could only say « Poste ».
 watch(title, (value) => {
   document.title = documentTitle(value);
@@ -939,8 +986,8 @@ async function load() {
   if (lastError.value && machine.value) {
     $q.notify({
       type: 'negative',
-      message: apiErrorMessage(lastError.value, 'Actualisation impossible'),
-      caption: 'Les informations affichées sont celles du dernier chargement réussi.',
+      message: apiErrorMessage(lastError.value, t('machine.actions.refreshFailed')),
+      caption: t('machine.actions.refreshFailedCaption'),
     });
   }
 }
@@ -959,9 +1006,9 @@ const lastRefreshLabel = computed(() =>
   lastRefreshedAt.value ? lastRefreshedAt.value.toLocaleTimeString(intlTag()) : '',
 );
 
-const autoRefreshHint = `Actualiser — automatique toutes les ${Math.round(
-  AUTO_REFRESH_INTERVAL_MS / 1000,
-)} s`;
+const autoRefreshHint = computed(() =>
+  t('machine.page.autoRefreshHint', { seconds: Math.round(AUTO_REFRESH_INTERVAL_MS / 1000) }),
+);
 
 // One action at a time: a double click on a menu entry fires its click twice
 // before the menu has closed, and used to queue the command twice. Held from
@@ -987,7 +1034,7 @@ function runOne(action: CommandAction) {
 /** A failed send in the console's words: a vanished poste is not « Ressource introuvable ». */
 function sendErrorMessage(e: unknown, fallback: string): string {
   const status = (e as { response?: { status?: number } } | null)?.response?.status;
-  if (status === 404) return 'Poste introuvable';
+  if (status === 404) return t('machine.actions.notFound');
   return apiErrorMessage(e, fallback);
 }
 
@@ -1018,7 +1065,7 @@ async function send(action: CommandAction) {
     } catch (e) {
       $q.notify({
         type: 'negative',
-        message: sendErrorMessage(e, "Échec de l'envoi de la commande"),
+        message: sendErrorMessage(e, t('machine.actions.sendFailed')),
       });
       return;
     }
@@ -1038,18 +1085,16 @@ async function sendWake() {
     // its agent reports — a minute or so after it has actually booted.
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: sendErrorMessage(e, 'Échec du réveil') });
+    $q.notify({ type: 'negative', message: sendErrorMessage(e, t('machine.actions.wakeFailed')) });
   }
 }
 
 function confirmRevoke() {
   $q.dialog({
-    title: 'Révoquer le token',
-    message:
-      'Le poste sera coupé du serveur et ne pourra pas revenir — même avec le secret du parc — ' +
-      'tant que le ré-enrôlement ne sera pas autorisé depuis cette page. Continuer ?',
-    cancel: { flat: true, noCaps: true, label: 'Annuler' },
-    ok: { unelevated: true, noCaps: true, label: 'Révoquer', color: 'negative' },
+    title: t('machine.actions.revokeTitle'),
+    message: t('machine.actions.revokeMessage'),
+    cancel: { flat: true, noCaps: true, label: t('machine.actions.cancel') },
+    ok: { unelevated: true, noCaps: true, label: t('machine.actions.revokeOk'), color: 'negative' },
     persistent: true,
   }).onOk(() => {
     void doRevoke();
@@ -1059,21 +1104,19 @@ function confirmRevoke() {
 async function doRevoke() {
   try {
     await revokeToken(props.id);
-    $q.notify({ type: 'positive', message: 'Token révoqué' });
+    $q.notify({ type: 'positive', message: t('machine.actions.revoked') });
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec de la révocation') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machine.actions.revokeFailed')) });
   }
 }
 
 function confirmAllowReenroll() {
   $q.dialog({
-    title: 'Autoriser le ré-enrôlement',
-    message:
-      "L'ancien token reste invalide ; le poste reviendra de lui-même à sa prochaine tentative " +
-      "d'enrôlement, dans les minutes qui suivent s'il est allumé. Continuer ?",
-    cancel: { flat: true, noCaps: true, label: 'Annuler' },
-    ok: { unelevated: true, noCaps: true, label: 'Autoriser' },
+    title: t('machine.actions.allowTitle'),
+    message: t('machine.actions.allowMessage'),
+    cancel: { flat: true, noCaps: true, label: t('machine.actions.cancel') },
+    ok: { unelevated: true, noCaps: true, label: t('machine.actions.allowOk') },
     persistent: true,
   }).onOk(() => {
     void doAllowReenroll();
@@ -1083,10 +1126,10 @@ function confirmAllowReenroll() {
 async function doAllowReenroll() {
   try {
     await allowReenroll(props.id);
-    $q.notify({ type: 'positive', message: 'Ré-enrôlement autorisé' });
+    $q.notify({ type: 'positive', message: t('machine.actions.allowed') });
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'autorisation") });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machine.actions.allowFailed')) });
   }
 }
 
@@ -1096,13 +1139,10 @@ const confirmingIdentity = ref(false);
 
 function askConfirmIdentity() {
   $q.dialog({
-    title: "Confirmer l'identité",
-    message:
-      "L'empreinte du poste a changé (carte mère, TPM ou réinstallation). Si c'est bien le même " +
-      "poste, confirmez : l'alerte est levée et la nouvelle empreinte devient la référence. " +
-      'Si un autre enregistrement décrit ce poste, fusionnez plutôt le doublon.',
-    cancel: { flat: true, noCaps: true, label: 'Annuler' },
-    ok: { unelevated: true, noCaps: true, label: "Confirmer l'identité" },
+    title: t('machine.actions.identityTitle'),
+    message: t('machine.actions.identityMessage'),
+    cancel: { flat: true, noCaps: true, label: t('machine.actions.cancel') },
+    ok: { unelevated: true, noCaps: true, label: t('machine.actions.identityOk') },
     persistent: true,
   }).onOk(() => {
     void doConfirmIdentity();
@@ -1113,10 +1153,13 @@ async function doConfirmIdentity() {
   confirmingIdentity.value = true;
   try {
     await confirmIdentity(props.id);
-    $q.notify({ type: 'positive', message: 'Identité du poste confirmée' });
+    $q.notify({ type: 'positive', message: t('machine.actions.identityConfirmed') });
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec de la confirmation') });
+    $q.notify({
+      type: 'negative',
+      message: apiErrorMessage(e, t('machine.actions.identityFailed')),
+    });
   } finally {
     confirmingIdentity.value = false;
   }
@@ -1125,13 +1168,15 @@ async function doConfirmIdentity() {
 // The count in the label, so the button says whether it has anything to offer
 // before it is pressed — its silence on that is what made it look broken.
 const mergeLabel = computed(() =>
-  duplicates.value.length ? `Fusionner (${duplicates.value.length})` : 'Fusionner',
+  duplicates.value.length
+    ? t('machine.page.mergeCount', { count: duplicates.value.length })
+    : t('machine.page.merge'),
 );
 
 const mergeHint = computed(() =>
   duplicates.value.length
-    ? `${duplicates.value.length} doublon(s) possible(s) détecté(s)`
-    : 'Aucun doublon détecté — la recherche manuelle reste possible',
+    ? t('machine.page.mergeHint', { count: duplicates.value.length }, duplicates.value.length)
+    : t('machine.page.mergeHintNone'),
 );
 
 /** Candidates for the button's count, refreshed with the page. machine:write

@@ -1,3 +1,5 @@
+import { t } from 'src/i18n';
+
 /**
  * Whether a poste's agent is behind the parc's reference version.
  *
@@ -47,6 +49,7 @@ export function isAgentOutdated(version: string | null, latest: string | null): 
 export function agentVersionLabel(version: string | null, latest: string | null): string {
   if (!version) return '—';
   if (!latest) return version;
-  if (isAgentOutdated(version, latest)) return `${version} — obsolète (référence ${latest})`;
-  return `${version} — à jour`;
+  if (isAgentOutdated(version, latest))
+    return t('machine.agentVersion.outdated', { version, latest });
+  return t('machine.agentVersion.upToDate', { version });
 }

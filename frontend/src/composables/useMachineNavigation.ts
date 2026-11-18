@@ -1,5 +1,6 @@
 import { computed, onScopeDispose, ref, watch, type Ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { t } from 'src/i18n';
 import { getMachineNeighbours, type MachineNeighbour } from 'src/services/machines';
 import { DEFAULT_PAGE_SIZE, machineListParamsFromQuery, queryValue } from 'src/utils/machineQuery';
 
@@ -82,7 +83,7 @@ export function useMachineNavigation(): MachineNavigation {
   const positionLabel = computed(() =>
     index.value === null || total.value === null
       ? ''
-      : `Poste ${index.value + 1} sur ${total.value}`,
+      : t('machine.navigation.position', { index: index.value + 1, total: total.value }),
   );
 
   /**

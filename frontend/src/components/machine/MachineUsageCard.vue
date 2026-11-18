@@ -3,10 +3,9 @@
     <q-card flat bordered>
       <q-card-section class="row items-start no-wrap">
         <div class="col">
-          <div class="text-subtitle1">Utilisation</div>
+          <div class="text-subtitle1">{{ t('machine.usage.title') }}</div>
           <div class="text-caption text-muted">
-            Heures allumées par jour sur les {{ DAYS }} derniers jours, comptées à partir des
-            battements de l'agent, dans votre fuseau horaire.
+            {{ t('machine.usage.caption', { days: DAYS }) }}
           </div>
         </div>
         <q-btn
@@ -17,18 +16,18 @@
           size="sm"
           color="primary"
           :icon="showTable ? 'bar_chart' : 'table_rows'"
-          :label="showTable ? 'Graphique' : 'Tableau'"
+          :label="showTable ? t('machine.usage.chart') : t('machine.usage.table')"
           @click="showTable = !showTable"
         />
       </q-card-section>
       <q-separator />
 
       <q-card-section v-if="!usage && failed" class="q-pa-sm">
-        <CardLoadError what="l'utilisation de ce poste" :loading="retrying" @retry="retry" />
+        <CardLoadError :what="t('machine.usage.what')" :loading="retrying" @retry="retry" />
       </q-card-section>
-      <q-card-section v-else-if="!usage" class="text-caption text-muted"
-        >Chargement…</q-card-section
-      >
+      <q-card-section v-else-if="!usage" class="text-caption text-muted">{{
+        t('machine.usage.loading')
+      }}</q-card-section>
 
       <template v-else>
         <!-- The figures first: the window's, which is the list's own column,
@@ -41,20 +40,20 @@
             <div class="text-caption text-muted">
               {{
                 machine.usage_hours === null
-                  ? `enrôlé il y a moins de ${machine.usage_days} jours`
-                  : `sur les ${machine.usage_days} derniers jours`
+                  ? t('machine.usage.enrolledRecently', { days: machine.usage_days })
+                  : t('machine.usage.lastDays', { days: machine.usage_days })
               }}
             </div>
           </div>
           <div>
             <div class="text-h5">{{ hoursLabel(usage.total_hours) }}</div>
             <div class="text-caption text-muted">
-              sur {{ DAYS }} jours, dont {{ measured }} mesuré{{ measured > 1 ? 's' : '' }}
+              {{ t('machine.usage.measured', { days: DAYS, count: measured }, measured) }}
             </div>
           </div>
           <div v-if="measured">
             <div class="text-h5">{{ hoursLabel(average) }}</div>
-            <div class="text-caption text-muted">par jour mesuré, en moyenne</div>
+            <div class="text-caption text-muted">{{ t('machine.usage.average') }}</div>
           </div>
         </q-card-section>
 
@@ -70,7 +69,7 @@
               class="usage-grid"
               :style="{ bottom: `${(tick / 24) * 100}%` }"
             >
-              <span class="usage-tick">{{ tick }} h</span>
+              <span class="usage-tick">{{ t('machine.usage.tick', { hours: tick }) }}</span>
             </div>
             <div class="usage-bars">
               <div
@@ -82,7 +81,7 @@
                   'usage-col--unmeasured': !bar.counted,
                 }"
                 tabindex="0"
-                :aria-label="`${bar.label} : ${bar.counted ? hoursLabel(bar.hours) : 'non mesuré'}`"
+                :aria-label="barValue(bar)"
               >
                 <div
                   v-if="bar.counted && bar.hours > 0"
@@ -91,7 +90,7 @@
                 />
                 <q-tooltip>
                   <div class="text-weight-bold">
-                    {{ bar.counted ? hoursLabel(bar.hours) : 'non mesuré' }}
+                    {{ bar.counted ? hoursLabel(bar.hours) : t('machine.usage.notMeasured') }}
                   </div>
                   <div>{{ bar.label }}</div>
                 </q-tooltip>
@@ -104,9 +103,9 @@
             </div>
           </div>
           <div class="text-caption text-muted q-mt-sm">
-            Fonds grisés : samedis et dimanches.
+            {{ t('machine.usage.weekends') }}
             <template v-if="bars.some((b) => !b.counted)">
-              Hachures : jours antérieurs au début du comptage.
+              {{ t('machine.usage.hatched') }}
             </template>
           </div>
         </q-card-section>
@@ -115,15 +114,15 @@
           <q-markup-table flat dense separator="horizontal">
             <thead>
               <tr>
-                <th class="text-left">Jour</th>
-                <th class="text-right">Heures allumées</th>
+                <th class="text-left">{{ t('machine.usage.day') }}</th>
+                <th class="text-right">{{ t('machine.usage.hoursOn') }}</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="bar in [...bars].reverse()" :key="bar.date">
                 <td class="text-left">{{ bar.label }}</td>
                 <td class="text-right" :class="{ 'text-muted': !bar.counted }">
-                  {{ bar.counted ? hoursLabel(bar.hours) : 'non mesuré' }}
+                  {{ bar.counted ? hoursLabel(bar.hours) : t('machine.usage.notMeasured') }}
                 </td>
               </tr>
             </tbody>
@@ -137,8 +136,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import CardLoadError from 'src/components/CardLoadError.vue';
+import { t } from 'src/i18n';
 import { getMachineUsage, type MachineDetail, type MachineUsage } from 'src/services/machines';
-import { measuredDays, usageBars } from 'src/utils/usageChart';
+import { measuredDays, usageBars, type UsageBar } from 'src/utils/usageChart';
 import { hoursLabel } from 'src/utils/usageFilter';
 
 const props = defineProps<{ machine: MachineDetail }>();
@@ -161,11 +161,21 @@ const average = computed(() =>
     ? Math.round((usage.value.total_hours / measured.value) * 10) / 10
     : 0,
 );
-const ariaLabel = computed(
-  () =>
-    `Heures allumées par jour sur ${DAYS} jours : ${hoursLabel(usage.value?.total_hours ?? 0)}, ` +
-    `${measured.value} jours mesurés. Le bouton Tableau donne chaque jour.`,
+const ariaLabel = computed(() =>
+  t('machine.usage.chartAria', {
+    days: DAYS,
+    total: hoursLabel(usage.value?.total_hours ?? 0),
+    measured: measured.value,
+  }),
 );
+
+/** One column's accessible name: its day, and its hours or « non mesuré ». */
+function barValue(bar: UsageBar): string {
+  return t('machine.usage.barAria', {
+    day: bar.label,
+    value: bar.counted ? hoursLabel(bar.hours) : t('machine.usage.notMeasured'),
+  });
+}
 
 function axisLabel(date: string): string {
   const [, m, d] = date.split('-');

@@ -2,10 +2,9 @@
   <q-card flat bordered class="q-mt-md">
     <q-card-section class="text-subtitle1 row items-center">
       <div>
-        Logiciels installés
+        {{ t('machine.software.title') }}
         <div class="text-caption text-muted">
-          Lus dans le registre du poste, comme « Applications et fonctionnalités ». Les correctifs
-          Windows n'y figurent pas : ils ont leur propre carte.
+          {{ t('machine.software.caption') }}
         </div>
       </div>
       <q-space />
@@ -20,8 +19,7 @@
          for a poste with few programs. -->
     <q-banner v-if="machine.software_truncated" class="surface-orange" dense>
       <template #avatar><q-icon name="hourglass_top" color="orange" /></template>
-      Relevé partiel : le plafond quotidien de nouveaux logiciels a été atteint ; le poste
-      complétera son relevé automatiquement.
+      {{ t('machine.software.truncated') }}
     </q-banner>
     <q-table
       :rows="machine.software"
@@ -31,17 +29,17 @@
       :filter="filter"
       flat
       :rows-per-page-options="[10, 25, 50, 0]"
-      no-data-label="Aucun logiciel relevé — l'inventaire logiciel est peut-être désactivé sur ce poste."
+      :no-data-label="t('machine.software.none')"
     >
       <template #top-right>
         <q-input
           v-model="filter"
-          aria-label="Filtrer les logiciels"
+          :aria-label="t('machine.software.filterAria')"
           dense
           outlined
           clearable
           debounce="200"
-          placeholder="Filtrer…"
+          :placeholder="t('machine.software.filterPlaceholder')"
         >
           <template #prepend><q-icon name="search" /></template>
         </q-input>
@@ -52,7 +50,7 @@
           <!-- The drill-down that makes an inventory a fleet tool: from one
                poste's program to every poste that carries it. -->
           <q-btn
-            aria-label="Voir les postes qui l'ont"
+            :aria-label="t('machine.software.whoHasIt')"
             flat
             dense
             round
@@ -62,7 +60,7 @@
             class="q-ml-xs"
             :to="{ name: 'machines', query: { software_id: props.row.software_id } }"
           >
-            <q-tooltip>Voir les postes qui l'ont</q-tooltip>
+            <q-tooltip>{{ t('machine.software.whoHasIt') }}</q-tooltip>
           </q-btn>
         </q-td>
       </template>
@@ -74,7 +72,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import { t } from 'src/i18n';
 import type { QTableColumn } from 'quasar';
 import type { InstalledSoftware, MachineDetail } from 'src/services/machines';
 import { formatDate } from 'src/utils/format';
@@ -86,19 +85,44 @@ defineProps<{ machine: MachineDetail; loading: boolean }>();
 // trip per keystroke would buy nothing.
 const filter = ref('');
 
-const columns: QTableColumn<InstalledSoftware>[] = [
-  { name: 'name', label: 'Nom', field: 'name', align: 'left', sortable: true },
-  { name: 'version', label: 'Version', field: 'version', align: 'left', sortable: true },
-  { name: 'publisher', label: 'Éditeur', field: 'publisher', align: 'left', sortable: true },
+// A computed: the headers follow the language when it changes.
+const columns = computed<QTableColumn<InstalledSoftware>[]>(() => [
+  {
+    name: 'name',
+    label: t('machine.software.columns.name'),
+    field: 'name',
+    align: 'left',
+    sortable: true,
+  },
+  {
+    name: 'version',
+    label: t('machine.software.columns.version'),
+    field: 'version',
+    align: 'left',
+    sortable: true,
+  },
+  {
+    name: 'publisher',
+    label: t('machine.software.columns.publisher'),
+    field: 'publisher',
+    align: 'left',
+    sortable: true,
+  },
   {
     name: 'install_date',
-    label: 'Installé le',
+    label: t('machine.software.columns.installDate'),
     field: 'install_date',
     align: 'left',
     sortable: true,
   },
   // Which registry view it came from. Kept because "why does this program show
   // up as x86 on a 64-bit poste" is answered by it, and nowhere else.
-  { name: 'arch', label: 'Arch.', field: 'arch', align: 'left', sortable: true },
-];
+  {
+    name: 'arch',
+    label: t('machine.software.columns.arch'),
+    field: 'arch',
+    align: 'left',
+    sortable: true,
+  },
+]);
 </script>
