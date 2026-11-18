@@ -378,6 +378,38 @@ describe('MaintenanceSessionDialog (audit T29, U14)', () => {
     wrapper.unmount();
   });
 
+  it('shows a dropped poste unticked and removed when the resumed send stops again', async () => {
+    vi.mocked(recordSessionInParts)
+      .mockImplementationOnce(async (_payload, progress) => {
+        progress!.sessionId = 's-1';
+        progress!.sent = 1;
+        throw refusal(422, 'maintenance.items.not_in_room', {
+          machine_ids: ['b'],
+          hostnames: ['PC-B'],
+        });
+      })
+      // The send without PC-B stops too: the dialog stays, and its list must
+      // say what the visit now holds.
+      .mockRejectedValueOnce(new Error('Network Error'));
+    const wrapper = await open();
+    await submitForm();
+    expect(inDialog('.q-card').textContent).toContain('2 poste(s) coché(s)');
+    inDialog<HTMLElement>('[data-test="session-drop"]').click();
+    await flushPromises();
+
+    expect(closes(wrapper)).toBe(0);
+    const row = [...document.querySelectorAll<HTMLElement>('.q-dialog tbody tr')].find((r) =>
+      r.textContent?.includes('PC-B'),
+    )!;
+    expect(row.querySelector('[aria-label="PC-B : fait"]')!.getAttribute('aria-checked')).toBe(
+      'false',
+    );
+    expect(row.textContent).toContain('Retiré de cette séance');
+    // One fewer poste ticked: what the visit records now.
+    expect(inDialog('.q-card').textContent).toContain('1 poste(s) coché(s)');
+    wrapper.unmount();
+  });
+
   it('names a poste that no longer exists, and leaves it out the same way', async () => {
     vi.mocked(recordSessionInParts)
       .mockImplementationOnce(async (_payload, progress) => {

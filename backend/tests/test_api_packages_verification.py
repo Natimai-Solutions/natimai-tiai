@@ -503,6 +503,11 @@ async def test_delivery_still_refuses_an_install_of_a_retired_package(
     cmd = await _command(client, admin, machine_id)
     assert cmd["status"] == "failed"
     assert cmd["error"] == "Paquet retiré après la mise en file : installation annulée"
+    # The code beside the French text: what the English console reads.
+    assert (cmd["result_code"], cmd["result_params"]) == (
+        "package.retired_after_queue",
+        {},
+    )
 
 
 # --- 5. what a signer cannot see (T38) -------------------------------------------

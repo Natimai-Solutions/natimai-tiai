@@ -83,3 +83,20 @@ async def test_a_built_in_group_is_named_with_its_key(client, db_session):
             "builtin_key": "readonly",
         }
     ]
+
+
+async def test_the_users_list_names_built_in_groups_with_their_key(client, db_session):
+    """Same for the accounts list: without the key there, the English Users
+    page would show « Lecture seule » for the read-only group."""
+    from tests.test_api_users import _admin, _readonly
+
+    headers = await _admin(client, db_session, "lang-admin@test.local")
+    await _readonly(client, db_session, "lang-ro@test.local")
+    resp = await client.get("/api/v1/users", headers=headers)
+    assert resp.status_code == 200, resp.text
+    groups = {
+        u["email"]: [(g["name"], g["builtin_key"]) for g in u["groups"]]
+        for u in resp.json()["items"]
+    }
+    assert groups["lang-ro@test.local"] == [("Lecture seule", "readonly")]
+    assert groups["lang-admin@test.local"] == [("Administrateurs", "admin")]

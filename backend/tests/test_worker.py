@@ -895,6 +895,26 @@ async def test_the_upgrade_day_does_not_send_the_digest_again(
     assert runs == ["sent", "sent", "sent"]
 
 
+@pytest.mark.parametrize("minute", [0, 30])
+async def test_an_upgrade_during_the_digest_hour_records_it(
+    engine, db_session, monkeypatch, minute
+):
+    """v1.2.0 sends at HH:00 sharp: upgraded at 18:00 or 18:30 with an 18:00
+    digest, the day's digest — and on its day the week's reminder — is
+    already out. Recorded only from 19:00, the new worker's first run would
+    send them again. (At 17:59 nothing is recorded: the test above.)"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DIGEST_HOUR_UTC", 18)
+    monkeypatch.setattr(settings, "MAINTENANCE_REMINDER_WEEKDAY", 0)
+    await _an_account(db_session)
+    monday = datetime(2026, 10, 5, 18, minute, tzinfo=UTC)
+    assert await _seed(engine, monday) == {
+        "worker.last_run.daily_digest": "2026-10-05",
+        "worker.last_run.maintenance_reminders": "2026-W41",
+    }
+
+
 async def test_the_migration_seeds_when_it_is_run(engine, db_session, monkeypatch):
     """`alembic upgrade` itself, on the clock: with a schedule of Monday
     00:00, every instant of the week is past both the digest's hour and the
