@@ -853,11 +853,19 @@ mot, ce que vérifient de part et d'autre les cas partagés
 `internal/msg/testdata/messages_fr.json` (à régénérer après un changement de
 formulation : `go test ./internal/msg -update`).
 
+Quand le `detail` d'un message est lui-même un message codé de l'agent (un
+téléchargement refusé parce que le serveur est occupé, une signature refusée
+parce que le fichier n'est pas signé), `msg.Wrap` transmet son code et ses
+paramètres : `detail_code` et `detail_<nom>`. La console écrit alors le
+détail dans la langue du lecteur.
+
 Restent sans code, en texte seul : la **sortie des outils Windows** (`ipconfig`,
 `gpresult`, `sfc`…, dans la langue du poste, citée telle quelle — y compris
 dans un paramètre `detail` ou `summary`), le compte rendu détaillé d'une
-installation Windows Update et d'une réinitialisation Windows Update, et les
-phrases composées de deux refus (méthode B puis méthode A). Un message dont
+installation Windows Update et d'une réinitialisation Windows Update, les
+échecs partiels du spouleur, la phrase « Redémarrage requis pour finaliser
+l'opération. » ajoutée à la sortie de DISM, et les phrases composées de deux
+refus (méthode B puis méthode A). Un message dont
 les paramètres dépassent ce que le serveur garde (16 clés, 1 024 caractères
 par texte) part aussi sans code. La note « […] sortie tronquée à N Kio par
 l'agent » n'est pas un code : la console la reconnaît en fin de texte.

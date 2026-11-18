@@ -116,7 +116,8 @@ monte aussi en anglais et vérifie qu'aucun texte français connu n'y reste.
   `params`, ou un code que la console ne connaît pas, s'affiche avec la
   phrase du serveur.
 - **Noms et descriptions des groupes intégrés** : ce sont des données, que
-  l'administrateur peut modifier ; ils restent tels qu'enregistrés.
+  l'administrateur peut modifier. La console les traduit tant qu'ils gardent
+  ceux donnés à l'installation (§8).
 
 ## 6. Agent
 
@@ -142,12 +143,15 @@ serveur à jour traduit le code. Rien ne change pour un agent non mis à jour.
   ensuite. Le garde-fou `src/i18n/noHardcodedFrench.spec.ts` (heuristique
   `scan.ts`) refuse tout texte d'interface français hors des catalogues ; sa
   liste `PENDING` est vide.
-- **Le français de la console est celui d'avant, mot pour mot** : aucun test
-  existant n'a été modifié. Là où le serveur écrivait la phrase, un jeu de cas
-  partagé, écrit et vérifié par le backend, est relu par la console :
+- **Le français de la console est celui d'avant, mot pour mot** : aucune
+  attente française des tests existants n'a été modifiée (quelques tests ont
+  reçu des assertions de plus). Là où le serveur écrivait la phrase, un jeu
+  de cas partagé, écrit et vérifié par le backend, est relu par la console :
   `backend/tests/data/package_texts_fr.json`, `validation_texts_fr.json`,
-  `settings_texts_fr.json`, `command_texts_fr.json`, `journal_texts_fr.json`,
-  `mail_texts.json` ; côté agent, `agent/internal/msg/testdata/messages_fr.json`.
+  `settings_texts_fr.json`, `command_texts_fr.json`, `journal_texts_fr.json` ;
+  côté agent, `agent/internal/msg/testdata/messages_fr.json`. Les e-mails, que
+  seul le serveur écrit, ont le leur : `backend/tests/data/mail_texts.json`,
+  qui fige leur français d'avant et leur anglais.
 - **Changement de langue en direct** : aucun texte n'est traduit au chargement
   d'un module ; colonnes, listes d'options et titres d'onglet sont recalculés.
   Testé page par page, et de bout en bout (`frontend/e2e/language.spec.ts`).
@@ -163,7 +167,11 @@ serveur à jour traduit le code. Rien ne change pour un agent non mis à jour.
     langue de la console ; le format par défaut, XLSX, n'est pas concerné ;
   - les **refus propres à Pydantic** (champ manquant, longueur…) gardent leur
     message anglais, comme avant ;
-  - restent en texte, sans code : la sortie des outils Windows, le rapport
-    détaillé d'installation des mises à jour Windows, les étapes de la
-    réinitialisation de Windows Update, les échecs partiels du spouleur et le
-    refus combiné « méthode B … ; méthode A … » de l'agent.
+  - restent en texte, sans code : la sortie des outils Windows (y compris
+    citée dans un détail), le rapport détaillé d'installation des mises à
+    jour Windows, les étapes de la réinitialisation de Windows Update, les
+    échecs partiels du spouleur, le refus combiné « méthode B … ; méthode
+    A … » et la phrase « Redémarrage requis… » ajoutée à la sortie de DISM ;
+  - une cause elle-même codée, citée dans le détail d'un autre message de
+    l'agent, transmet son code (`detail_code`, `detail_<nom>`) : la console
+    l'écrit dans la langue du lecteur (vérification du 18 novembre).
