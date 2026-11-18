@@ -3,6 +3,8 @@ package deploy
 import (
 	"context"
 	"errors"
+	"maps"
+	"strings"
 	"testing"
 
 	"tiai/agent/internal/models"
@@ -80,5 +82,31 @@ func TestBothMethodsRefusedHasNoCode(t *testing.T) {
 	}
 	if !errors.Is(err, err) || err.Error() == "" {
 		t.Error("the text stays")
+	}
+}
+
+// A publisher check that carried a note the console has no words for: the
+// verdict keeps the note in its text and drops its code — worded from the
+// code, the console would lose the note. Without a note, the code stays.
+func TestNotedDropsTheCodeForAnUnknownNote(t *testing.T) {
+	plain := msg.Params{"trust": "publisher", "by": "ACME SAS"}
+	withNote := msg.Params{"trust": "publisher", "by": "ACME SAS", "note": "chaîne non vérifiée"}
+	params := func(trust msg.Params) msg.Params {
+		p := msg.Params{"action": "install", "name": "App 1.0", "package_id": "p1", "method": "A",
+			"file": "setup.exe", "code": 1}
+		maps.Copy(p, trust)
+		return p
+	}
+	for _, code := range []string{"deploy.done", "deploy.exit_code"} {
+		if m := noted(msg.New(code, params(plain)), plain); m.Code != code {
+			t.Errorf("%s: without a note the code stays, got %+v", code, m)
+		}
+		m := noted(msg.New(code, params(withNote)), withNote)
+		if m.Code != "" || m.Params != nil {
+			t.Errorf("%s: an unknown note must drop the code, got %+v", code, m)
+		}
+		if !strings.Contains(m.Text, "éditeur approuvé : ACME SAS (chaîne non vérifiée)") {
+			t.Errorf("%s: the note is lost: %q", code, m.Text)
+		}
 	}
 }
