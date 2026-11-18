@@ -305,22 +305,19 @@ describe('RoomDetailPage — acceptance fixes', () => {
     wrapper.unmount();
   });
 
-  it('does not open a poste when the click ends a text selection (item 15)', async () => {
+  it('opens a poste by its name only: the rest of the row is text to select', async () => {
     const wrapper = await mountPage();
-    const router = wrapper.vm.$router;
-    const push = vi.spyOn(router, 'push');
-    const selection = vi
-      .spyOn(window, 'getSelection')
-      .mockReturnValue({ toString: () => 'PC-01' } as Selection);
-    await wrapper.find('tbody tr').trigger('click');
+    const push = vi.spyOn(wrapper.vm.$router, 'push');
+    const row = wrapper.find('tbody tr');
+    const cell = row.findAll('td').at(1)!;
+    // The two clicks of a double-click on a word, then the double-click.
+    await cell.trigger('click');
+    await cell.trigger('click');
+    await cell.trigger('dblclick');
     await flushPromises();
     expect(push).not.toHaveBeenCalled();
-
-    selection.mockReturnValue({ toString: () => '' } as Selection);
-    await wrapper.find('tbody tr').trigger('click');
-    await flushPromises();
-    expect(push).toHaveBeenCalledWith({ name: 'machine-detail', params: { id: 'm-1' } });
-    selection.mockRestore();
+    expect(row.classes()).not.toContain('cursor-pointer');
+    expect(row.find('a.row-link').attributes('href')).toBe('/machines/m-1');
     wrapper.unmount();
   });
 });

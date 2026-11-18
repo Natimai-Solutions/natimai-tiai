@@ -63,7 +63,6 @@
           bordered
           :grid="small"
           card-container-class="q-col-gutter-sm"
-          @row-click="(_evt, row) => !selectingText() && goRoom(row)"
         >
           <!-- On a phone, a card per room — its name, place, postes and
                maintenance in sight, its actions as buttons — rather than a
@@ -152,7 +151,6 @@
                 <router-link
                   :to="{ name: 'room-detail', params: { id: props.row.id } }"
                   class="row-link"
-                  @click.stop
                 >
                   {{ props.row.name }}
                 </router-link>
@@ -355,7 +353,6 @@
 <script setup lang="ts">
 import { escapeHtml } from 'src/utils/html';
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import BuildingFormDialog from 'src/components/room/BuildingFormDialog.vue';
 import RoomFormDialog from 'src/components/room/RoomFormDialog.vue';
@@ -383,7 +380,6 @@ import { useAuthStore } from 'src/stores/auth';
 const $q = useQuasar();
 // A phone: cards rather than tables (audit U23).
 const small = computed(() => $q.screen.lt.sm);
-const router = useRouter();
 const auth = useAuthStore();
 
 const tab = ref<'rooms' | 'buildings'>('rooms');
@@ -406,11 +402,6 @@ async function loadCreation() {
   } catch {
     // Kept as is: the routes still refuse what the scope does not allow.
   }
-}
-
-/** A click that ends a text selection is not a click on the row. */
-function selectingText(): boolean {
-  return (window.getSelection?.()?.toString() ?? '') !== '';
 }
 
 const config = ref<RoomConfig | null>(null);
@@ -512,10 +503,6 @@ async function loadLocations() {
   } catch {
     // Free entry still works without the suggestions.
   }
-}
-
-function goRoom(room: Room) {
-  void router.push({ name: 'room-detail', params: { id: room.id } });
 }
 
 function openRoomForm(room: Room | null) {

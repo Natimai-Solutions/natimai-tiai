@@ -45,7 +45,6 @@
       bordered
       no-data-label="Rien à faire."
       :grid="$q.screen.lt.sm"
-      @row-click="(_evt, row) => !selectingText() && goMachine(row)"
     >
       <!-- On a phone, a card per check with « Clore » in sight, rather than
            a table to scroll sideways (audit U23). -->
@@ -104,7 +103,6 @@
             <router-link
               :to="{ name: 'machine-detail', params: { id: props.row.machine_id } }"
               class="row-link"
-              @click.stop
             >
               {{ props.row.machine?.hostname ?? 'Poste' }}
             </router-link>
@@ -330,7 +328,6 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import CheckCloseDialog from 'src/components/check/CheckCloseDialog.vue';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
@@ -366,7 +363,6 @@ import { useAuthStore } from 'src/stores/auth';
 import { timeAgoLabel } from 'src/utils/format';
 
 const $q = useQuasar();
-const router = useRouter();
 const auth = useAuthStore();
 
 const scope = ref<'me' | 'none' | 'all'>('me');
@@ -380,11 +376,6 @@ const checksTotal = ref(0);
 const loading = ref(false);
 const canWrite = computed(() => auth.can('check', 'write'));
 const canReadChecks = computed(() => auth.can('check', 'read'));
-
-/** A click that ends a text selection is not a click on the row. */
-function selectingText(): boolean {
-  return (window.getSelection?.()?.toString() ?? '') !== '';
-}
 
 const columns: QTableColumn<Check>[] = [
   { name: 'machine', label: 'Poste', field: (r) => r.machine?.hostname ?? '', align: 'left' },
@@ -517,10 +508,6 @@ async function reload() {
   } finally {
     loading.value = false;
   }
-}
-
-function goMachine(check: Check) {
-  void router.push({ name: 'machine-detail', params: { id: check.machine_id } });
 }
 
 // --- Closing

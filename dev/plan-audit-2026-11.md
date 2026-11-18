@@ -422,7 +422,7 @@ Les limites acceptées après la troisième passe ont été reprises le 2026-11-
 - **Limiteur d'enrôlement et grandes salles** (B33) : au-delà d'environ 130 postes en attente d'approbation derrière une même adresse (NAT, proxy), le limiteur d'enrôlement (30 par 5 minutes et par adresse) se remplit de nouveau ; les postes approuvés reprennent alors plus lentement.
 - **E-mail en vol à l'arrêt du worker** : un envoi qui dépasse les 8 secondes de grâce est abandonné « en attente » ; si le serveur de messagerie l'accepte quand même, il repart au démarrage suivant.
 - **Verrou des essais lents** (T06) : une adresse non habituelle qui se trompe une fois pendant ce verrou est refusée jusqu'à sa fin ; l'issue est « Mot de passe oublié », dont le plafond par compte est levé pendant le verrou.
-- **Non exécutés** : le script de signature et le script GPO (PowerShell), le MSI (compilé au prochain tag seulement), la construction de l'image `db-backup` (faite par l'e2e de la CI). `backup.sh` tourne désormais sous busybox `sh` dans les tests.
+- **Non exécutés** : le script de signature (PowerShell), le MSI (compilé au prochain tag seulement), la construction de l'image `db-backup` (faite par l'e2e de la CI). `backup.sh` tourne désormais sous busybox `sh` dans les tests. Le script GPO est validé sur le parc (retour du 2026-11-18).
 
 ### 6.5 Recette de solidité du 2026-11-16
 

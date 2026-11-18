@@ -182,7 +182,6 @@
       bordered
       :grid="small"
       card-container-class="q-col-gutter-sm"
-      @row-click="(_evt, row) => !selectingText() && goMachine(row)"
     >
       <!-- On a phone, a card per poste with its link and « Retirer » in
            sight, rather than a table to scroll sideways (audit U23). -->
@@ -254,7 +253,6 @@
           <router-link
             :to="{ name: 'machine-detail', params: { id: cell.row.id } }"
             class="row-link"
-            @click.stop
           >
             {{ cell.value || cell.row.machine_uuid }}
           </router-link>
@@ -392,7 +390,6 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import RoomFormDialog from 'src/components/room/RoomFormDialog.vue';
 import MaintenanceSessionDialog from 'src/components/maintenance/MaintenanceSessionDialog.vue';
@@ -438,7 +435,6 @@ const props = defineProps<{ id: string }>();
 const $q = useQuasar();
 // A phone: a card per poste rather than a table (audit U23).
 const small = computed(() => $q.screen.lt.sm);
-const router = useRouter();
 const auth = useAuthStore();
 
 const room = ref<Room | null>(null);
@@ -543,11 +539,6 @@ function originLabel(origin: 'room' | 'global' | undefined, ownSet: boolean): st
   return level === 'room' ? 'propre à la salle' : 'défaut du parc';
 }
 
-/** A click that ends a text selection is not a click on the row. */
-function selectingText(): boolean {
-  return (window.getSelection?.()?.toString() ?? '') !== '';
-}
-
 async function saveMaintenance(payload: MaintenanceSettingsPayload) {
   maintenance.value = await updateRoomMaintenance(props.id, payload);
   // Another owner or cycle moves the room in or out of somebody's « Mes
@@ -606,10 +597,6 @@ async function loadRefs() {
   } catch {
     // Assumed manual: the worst case is a 409 the notification explains.
   }
-}
-
-function goMachine(m: Machine) {
-  void router.push({ name: 'machine-detail', params: { id: m.id } });
 }
 
 /** Taking a poste out of the room changes its owner and cycle: asked first. */

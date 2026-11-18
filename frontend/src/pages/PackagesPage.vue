@@ -31,11 +31,17 @@
       flat
       bordered
       no-data-label="Aucun paquet pour l'instant"
-      @row-click="(_evt, row) => open(row)"
     >
+      <!-- The name opens the fiche, as a link; the rest of the row is text to
+           select and copy (a SHA-256, a winget id), double-click included. -->
       <template #body-cell-name="props">
         <q-td :props="props">
-          <div class="text-weight-medium">{{ props.row.name }}</div>
+          <router-link
+            :to="{ name: 'package-detail', params: { id: props.row.id } }"
+            class="row-link break-anywhere"
+          >
+            {{ props.row.name }}
+          </router-link>
           <div class="text-caption text-muted">
             {{ props.row.kind === 'winget' ? props.row.winget_id : fileSummary(props.row) }}
           </div>

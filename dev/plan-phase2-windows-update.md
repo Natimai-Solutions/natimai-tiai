@@ -220,7 +220,9 @@ là où ce plan laissait le choix ouvert ou s'est révélé inexact.
    `LastInstallationSuccessDate` lues, pilotes correctement typés. Cycle de fond
    à 2 min confirmant l'upsert **en place** (`first_seen` conservé, `last_seen`
    avancé) et la retenue du bloc : **18 heartbeats, 2 écritures**.
-3. **Reste à valider sur poste réel** — une installation effective
+3. **Validé sur le parc** (retour de l'exploitant, 2026-11-18) — Windows
+   Update fonctionne de bout en bout, installation comprise. *Note d'origine :*
+   restaient à valider une installation effective
    (`wu_install` / `wu_install_full`) et un `reboot`. Ce sont les deux seules
    branches qu'on ne peut pas exercer sans patcher ou redémarrer une machine ;
    la syntaxe des scripts, le filtrage par variante et la lecture des

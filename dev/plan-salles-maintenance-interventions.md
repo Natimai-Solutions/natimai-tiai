@@ -4,8 +4,8 @@
 > livrés** (groupes de droits, commandes à risque, bâtiments et salles,
 > classement depuis l'annuaire, journal des interventions, vérifications
 > demandées, maintenance, notifications, documentation) — voir §11. **Chantier
-> livré** ; reste la validation du bind ADSI sur un domaine réel (§11, J3) et,
-> plus tard, la portée par emplacement (§12).
+> livré**, portée par emplacement comprise (§12, livrée le 2026-11-03) ; reste
+> la validation du bind ADSI sur un domaine réel (§11, J3).
 >
 > **Audit du 2026-11-10 : deux corrections immédiates sur la portée**
 > (T03, T04), et des échéances de maintenance à fiabiliser. Voir §13.

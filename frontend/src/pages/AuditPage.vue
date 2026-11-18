@@ -48,7 +48,6 @@
         :no-data-label="noDataLabel"
         class="audit-table"
         @request="onRequest"
-        @row-click="onRowClick"
       >
         <template #body-cell-at="props">
           <q-td :props="props" class="text-no-wrap">{{ formatDateTime(props.value) }}</q-td>
@@ -65,13 +64,10 @@
           <q-td :props="props">
             {{ auditResourceTypeLabel(props.row.resource_type) }}
             <template v-if="props.row.resource_id">
-              <!-- The fiche of a poste is the next click; `.stop` so following
-                   the link does not also open the details. -->
               <router-link
                 v-if="auditResourceLink(props.row.resource_type, props.row.resource_id)"
                 :to="auditResourceLink(props.row.resource_type, props.row.resource_id)!"
                 class="audit-id q-ml-xs"
-                @click.stop
               >
                 {{ shortId(props.row.resource_id) }}
               </router-link>
@@ -93,7 +89,7 @@
               round
               icon="visibility"
               aria-label="Voir le détail"
-              @click.stop="openEntry(props.row)"
+              @click="openEntry(props.row)"
             >
               <q-tooltip>Voir le détail</q-tooltip>
             </q-btn>
@@ -138,7 +134,6 @@ import {
   type AuditFilters,
 } from 'src/utils/auditQuery';
 import { dash, formatDateTime } from 'src/utils/format';
-import { hasTextSelection } from 'src/utils/textSelection';
 
 const $q = useQuasar();
 const route = useRoute();
@@ -293,12 +288,8 @@ async function loadActions() {
 const selected = ref<AuditEntry | null>(null);
 const detailsOpen = ref(false);
 
-/** A row opens its details — unless the click ended a text selection being copied. */
-function onRowClick(_evt: Event, row: AuditEntry) {
-  if (hasTextSelection()) return;
-  openEntry(row);
-}
-
+/** The eye button opens an entry's details; the rest of the row is text to
+ *  select and copy, double-click included — no row click to guess against. */
 function openEntry(entry: AuditEntry) {
   selected.value = entry;
   detailsOpen.value = true;
@@ -317,9 +308,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.audit-table :deep(tbody tr) {
-  cursor: pointer;
-}
 .audit-id {
   font-family: monospace;
   font-size: 12px;

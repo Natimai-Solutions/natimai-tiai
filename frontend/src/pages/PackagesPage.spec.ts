@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils';
+import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils';
 import { QForm } from 'quasar';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Package } from 'src/services/packages';
@@ -61,7 +61,7 @@ function pkg(over: Partial<Package> = {}): Package {
 async function mountPage() {
   const w = mount(PackagesPage, {
     attachTo: document.body,
-    global: { stubs: { QPage: { template: '<div><slot /></div>' } } },
+    global: { stubs: { QPage: { template: '<div><slot /></div>' }, RouterLink: RouterLinkStub } },
   });
   await flushPromises();
   return w;
@@ -88,6 +88,24 @@ describe('PackagesPage', () => {
     expect(unsigned).toContain(blocker);
     expect(unsigned).not.toContain('Prêt');
     expect(rows.find((r) => r.includes('Prêt pour de bon'))).toContain('Prêt');
+    w.unmount();
+  });
+
+  it('opens a package by its name only: the rest of the row is text to select', async () => {
+    listPackages.mockResolvedValue([pkg({ id: 'p-9', name: 'Outil', kind: 'files' })]);
+    const w = await mountPage();
+    const row = w.find('tbody tr');
+    const cell = row.findAll('td').at(-1)!;
+    // The two clicks of a double-click on a word, then the double-click.
+    await cell.trigger('click');
+    await cell.trigger('click');
+    await cell.trigger('dblclick');
+    await flushPromises();
+    expect(push).not.toHaveBeenCalled();
+    expect(row.classes()).not.toContain('cursor-pointer');
+    const link = row.findComponent(RouterLinkStub);
+    expect(link.text()).toBe('Outil');
+    expect(link.props('to')).toEqual({ name: 'package-detail', params: { id: 'p-9' } });
     w.unmount();
   });
 

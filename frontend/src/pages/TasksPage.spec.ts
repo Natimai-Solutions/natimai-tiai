@@ -268,22 +268,16 @@ describe('TasksPage — acceptance fixes', () => {
     expect(updateMachineMaintenance).not.toHaveBeenCalled();
   });
 
-  it('does not open a poste when the click ends a text selection (item 15)', async () => {
+  it('opens a poste by its name only: a click on the row navigates nowhere', async () => {
     const check = { id: 'c-1', machine_id: 'm-1', machine: null } as unknown as Check;
     vi.mocked(listAllChecks).mockResolvedValue({ items: [check], total: 1, page: 1, page_size: 1 });
     const wrapper = await mountPage({ rooms: [], machines: [], overdue: 0, due_soon: 0 });
     const push = vi.spyOn(wrapper.vm.$router, 'push');
-    const selection = vi
-      .spyOn(window, 'getSelection')
-      .mockReturnValue({ toString: () => 'PC-01' } as Selection);
     const table = wrapper.findComponent({ name: 'QTable' });
+    // No handler at all: a double-click on a word in the row stays a selection.
+    expect(table.vm.$attrs).not.toHaveProperty('onRowClick');
     table.vm.$emit('row-click', new Event('click'), check);
     await flushPromises();
     expect(push).not.toHaveBeenCalled();
-    selection.mockReturnValue({ toString: () => '' } as Selection);
-    table.vm.$emit('row-click', new Event('click'), check);
-    await flushPromises();
-    expect(push).toHaveBeenCalledWith({ name: 'machine-detail', params: { id: 'm-1' } });
-    selection.mockRestore();
   });
 });

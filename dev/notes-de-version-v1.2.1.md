@@ -172,7 +172,7 @@ Chaque correction a un test qui échoue sans elle. La vérification du 17 novemb
 
 - Quand une partie de la fiche ne peut pas être chargée (menaces, commandes, utilisation, historique, maintenance), la carte le dit et propose « Réessayer » ; la fiche n'affiche plus « Aucune alerte » sur des données manquantes. Un chargement initial en échec affiche un bandeau permanent (Utilisateurs, Groupes, Paramètres, Mon compte, profil). Un poste inexistant affiche « Poste introuvable », sans bouton d'action.
 - La console ne propose plus que ce que le compte peut consulter : menu et page d'accueil adaptés, cases à cocher et actions groupées masquées sans droit d'action, actions sur les comptes et groupes plus puissants désactivées. Cocher un droit de modification coche sa consultation. Des droits modifiés par un administrateur sont pris en compte sans recharger la page.
-- Un double clic sur une action de la fiche n'envoie plus la commande deux fois. Sélectionner du texte dans un tableau n'ouvre plus la ligne. Dans la liste des postes, la fiche s'ouvre par le nom du poste (lien souligné) ; le reste de la ligne est du texte que l'on sélectionne et copie, double-clic compris.
+- Un double clic sur une action de la fiche n'envoie plus la commande deux fois. Sélectionner du texte dans un tableau n'ouvre plus la ligne. Dans les tableaux (postes, salles, postes d'une salle, Mes tâches, paquets), la fiche s'ouvre par le nom, souligné ; le reste de la ligne est du texte que l'on sélectionne et copie, double-clic compris. Dans le journal d'audit, le détail s'ouvre par le bouton en bout de ligne.
 - Après un clic hors connexion, la page demandée se recharge d'elle-même au retour du réseau. Quand la session prend fin, la page de connexion l'indique.
 - Filtres des postes : tout type de poste est accepté, la mémoire garde son opérateur, la recherche ignore les espaces, un domaine passé dans l'adresse a sa puce.
 - Le seuil « disque presque plein » réglé dans Paramètres s'applique à la fiche et aux barres de la liste ; le tableau de bord montre les postes à renouveler.
@@ -265,9 +265,8 @@ Ces corrections n'agissent qu'après la diffusion du nouvel agent.
 
 - Un e-mail en cours d'envoi qui dépasse les 8 secondes de grâce à l'arrêt du worker est abandonné « en attente » ; si le serveur de messagerie l'accepte quand même, il repart au démarrage suivant.
 - Pendant un verrou des essais lents, une adresse non habituelle qui se trompe une fois est refusée jusqu'à la fin du verrou ; l'issue est « Mot de passe oublié ».
-- Un double-clic ouvre encore la ligne dans le journal d'audit et les pages Salles, Mes tâches et Paquets (seule la liste des postes a changé).
 - La construction de l'image `db-backup` se fait sur l'hôte et demande le miroir Alpine ; l'image n'est pas publiée avec la release.
-- Non exécutés ici : les commandes Docker de la documentation, les scripts PowerShell, le MSI et tout ce qui demande Windows.
+- Non exécutés ici : les commandes Docker de la documentation, le script de signature, le MSI et ce qui demande Windows. Le script GPO, les commandes à distance et l'installation des mises à jour Windows sont validés sur le parc (retour du 18 novembre 2026).
 
 ---
 

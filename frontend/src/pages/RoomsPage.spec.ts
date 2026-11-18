@@ -222,19 +222,20 @@ describe('RoomsPage — what the scope lets create, and selecting text (items 14
     expect(buttons(wrapper).some((t) => t.includes('Nouveau bâtiment'))).toBe(false);
   });
 
-  it('does not open a room when the click ends a text selection', async () => {
+  it('opens a room by its name only: the rest of the row is text to select', async () => {
     vi.mocked(getRoomCreation).mockResolvedValue({ rooms: true, buildings: true });
     const wrapper = await mountPage();
     const push = vi.spyOn(wrapper.vm.$router, 'push');
-    const selection = vi
-      .spyOn(window, 'getSelection')
-      .mockReturnValue({ toString: () => 'B12' } as Selection);
-    await wrapper.find('tbody tr').trigger('click');
+    const row = wrapper.find('tbody tr');
+    const cell = row.findAll('td').at(-1)!;
+    // The two clicks of a double-click on a word, then the double-click.
+    await cell.trigger('click');
+    await cell.trigger('click');
+    await cell.trigger('dblclick');
+    await flushPromises();
     expect(push).not.toHaveBeenCalled();
-    selection.mockReturnValue({ toString: () => '' } as Selection);
-    await wrapper.find('tbody tr').trigger('click');
-    expect(push).toHaveBeenCalledWith({ name: 'room-detail', params: { id: 'r-1' } });
-    selection.mockRestore();
+    expect(row.classes()).not.toContain('cursor-pointer');
+    expect(row.find('a.row-link').attributes('href')).toBe('/rooms/r-1');
   });
 });
 
