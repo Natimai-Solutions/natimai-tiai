@@ -234,7 +234,7 @@ export function machineAlerts(
       key: 'inventory-stale',
       level: 'info',
       icon: 'inventory',
-      text: t('machine.alerts.inventoryStale', { days: inventoryAge }),
+      text: t('machine.alerts.inventoryStale', { days: inventoryAge }, inventoryAge),
       tab: 'hardware',
     });
   }
@@ -269,7 +269,11 @@ function antivirusOutdatedText(m: MachineDetail): string {
     return t('machine.alerts.defenderDisabled');
   }
   if (m.signature_age_days != null) {
-    return t('machine.alerts.defenderSignatures', { days: m.signature_age_days });
+    return t(
+      'machine.alerts.defenderSignatures',
+      { days: m.signature_age_days },
+      m.signature_age_days,
+    );
   }
   return t('machine.alerts.avOutdated');
 }

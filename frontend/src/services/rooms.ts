@@ -317,6 +317,10 @@ export function placementNotification(res: PlacementResult): {
   if (!res.mismatched.length) return { type: 'positive', message: moved };
   return {
     type: 'warning',
-    message: t('rooms.placement.mismatch', { moved, count: res.mismatched.length }),
+    message: t(
+      'rooms.placement.mismatch',
+      { moved, count: res.mismatched.length },
+      res.mismatched.length,
+    ),
   };
 }

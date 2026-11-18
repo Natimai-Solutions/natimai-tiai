@@ -674,6 +674,10 @@ async def send_test_email(
             # Which fields were tried unsaved — names only, never values.
             "unsaved": ", ".join(sorted(unsaved)) or None,
             "message": result.message,
+            # What the console words the message from, in its reader's
+            # language (plan console bilingue): the same as the page's.
+            "message_code": result.code,
+            "message_params": result.params,
         },
     )
     await session.commit()

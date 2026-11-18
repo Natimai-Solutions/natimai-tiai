@@ -185,7 +185,7 @@ describe('MachineDetailPage — English', () => {
     expect(text).toContain('Fingerprint mismatch: this computer needs a manual check');
     expect(text).toContain('Check requested');
     expect(text).toContain(
-      'to be picked up (Paul, who it was assigned to, can no longer see this computer).',
+      'to take (Paul, who it was assigned to, can no longer see this computer).',
     );
     expect(text).toContain(
       'Location mismatch: the agent reports “Building A”, but room Lab 1 is at “Building B”.',

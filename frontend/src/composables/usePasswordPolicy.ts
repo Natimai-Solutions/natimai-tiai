@@ -34,7 +34,7 @@ export function durationLabel(minutes: number): string {
       ? t('account.passwordPolicy.oneHour')
       : t('account.passwordPolicy.hours', { count: h });
   }
-  return t('account.passwordPolicy.minutes', { count: minutes });
+  return t('account.passwordPolicy.minutes', { count: minutes }, minutes);
 }
 
 export function usePasswordPolicy() {

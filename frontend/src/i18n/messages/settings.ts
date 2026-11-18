@@ -313,12 +313,12 @@ const en: Translation<typeof fr> = {
   usage: {
     title: 'Computer usage',
     caption:
-      'What the dashboard’s “Little used” and “Always on” cards count, and the Usage filter of the computer list.',
+      'What the dashboard’s “Rarely used” and “Always on” cards count, and the Usage filter of the computer list.',
     windowDays: 'Observation window',
     windowHint: 'Hours are counted over this many rolling days · environment variable: {days} days',
-    lowHours: 'Computer little used below',
+    lowHours: 'Computer rarely used below',
     lowHint:
-      'A computer enrolled during the window is never counted as little used · environment variable: {hours} hours',
+      'A computer enrolled during the window is never counted as rarely used · environment variable: {hours} hours',
     highHours: 'Computer always on above',
     highHint: 'environment variable: {hours} hours',
   },

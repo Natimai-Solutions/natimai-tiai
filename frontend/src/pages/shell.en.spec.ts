@@ -178,7 +178,7 @@ describe('the pages without an account, in English', () => {
     for (const words of [
       'Fleet monitoring',
       'Your session has ended',
-      'Email',
+      'E-mail',
       'Password',
       'Sign in',
       'Forgotten your password?',

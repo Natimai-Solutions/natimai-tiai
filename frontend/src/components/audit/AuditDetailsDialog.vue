@@ -82,6 +82,8 @@
 </template>
 
 <script setup lang="ts">
+import { testResultText } from 'src/utils/emailSettings';
+import type { EmailTestResult } from 'src/services/settings';
 import { computed } from 'vue';
 import { useQuasar } from 'quasar';
 import type { AuditEntry } from 'src/services/audit';
@@ -111,17 +113,36 @@ const resourceLink = computed(() =>
   props.entry ? auditResourceLink(props.entry.resource_type, props.entry.resource_id) : null,
 );
 
+// A test e-mail's outcome carries its code and parameters beside its French
+// message: the message is worded from them, as the Settings page words it,
+// and they are not rows of their own. An older entry keeps its message.
+const WORDING_KEYS = ['message_code', 'message_params'];
+
+function detailValue(key: string, raw: unknown, details: Record<string, unknown>): string {
+  if (key === 'message' && typeof raw === 'string' && typeof details.message_code === 'string') {
+    return testResultText({
+      ok: details.ok === 'oui', // i18n-ignore — the value the server stores
+      message: raw,
+      code: details.message_code,
+      params: (details.message_params as Record<string, unknown> | null) ?? {},
+    } as EmailTestResult);
+  }
+  return auditDetailValue(raw, key);
+}
+
 const detailRows = computed(() =>
-  Object.entries(props.entry?.details ?? {}).map(([key, raw]) => {
-    const value = auditDetailValue(raw, key);
-    return {
-      key,
-      label: auditDetailKeyLabel(key),
-      value,
-      multiline: value.includes('\n'),
-      link: key === 'machine_id' ? auditResourceLink('machine', String(raw)) : null,
-    };
-  }),
+  Object.entries(props.entry?.details ?? {})
+    .filter(([key]) => !WORDING_KEYS.includes(key))
+    .map(([key, raw]) => {
+      const value = detailValue(key, raw, props.entry?.details ?? {});
+      return {
+        key,
+        label: auditDetailKeyLabel(key),
+        value,
+        multiline: value.includes('\n'),
+        link: key === 'machine_id' ? auditResourceLink('machine', String(raw)) : null,
+      };
+    }),
 );
 
 const rawJson = computed(() => JSON.stringify(props.entry ?? {}, null, 2));

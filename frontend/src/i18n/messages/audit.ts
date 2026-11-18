@@ -323,7 +323,7 @@ const en: Translation<typeof fr> = {
       revoke_token: 'Computer token revoked',
       merge: 'Two computer pages merged',
       reenroll_requested: 'Computer re-enrolment requested',
-      wake_bulk: 'Computers woken in bulk',
+      wake_bulk: 'Bulk wake of computers',
       identity_confirmed: 'Computer identity confirmed',
       enrollment_retried: 'Computer enrolment resumed (lost response)',
     },
@@ -352,7 +352,7 @@ const en: Translation<typeof fr> = {
     },
     settings: {
       update: 'Settings changed',
-      email_test: 'Test e-mail sent',
+      email_test: 'Test e-mail',
     },
     user: {
       create: 'Account created',

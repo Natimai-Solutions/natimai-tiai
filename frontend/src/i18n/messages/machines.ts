@@ -485,7 +485,7 @@ const en: Translation<typeof fr> = {
   table: {
     onlineHint: '{state} — last contact {ago}',
     checkAssigned: 'Check requested, assigned to {name}',
-    checkUnassigned: 'Check requested, not taken yet',
+    checkUnassigned: 'Check requested, to take',
     tokenRevoked: 'Token revoked: the computer is cut off from the server',
     reenrollRequested:
       'Re-enrolment requested: allow it from the computer’s page or from the selection',

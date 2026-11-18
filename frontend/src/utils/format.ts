@@ -609,8 +609,8 @@ export function cpuLabel(
   if (!model) return '—';
   const parts: string[] = [];
   if (count && count > 1) parts.push(t('format.cpu.processors', { count }));
-  if (cores) parts.push(t('format.cpu.cores', { count: cores }));
-  if (threads) parts.push(t('format.cpu.threads', { count: threads }));
+  if (cores) parts.push(t('format.cpu.cores', { count: cores }, cores));
+  if (threads) parts.push(t('format.cpu.threads', { count: threads }, threads));
   if (!parts.length) return model;
   return t('format.cpu.line', { model, parts: parts.join(t('format.cpu.partSeparator')) });
 }

@@ -429,9 +429,8 @@ const en: Translation<typeof fr> = {
     requested: 'Check requested',
     by: 'by {name} {ago},',
     assignedTo: 'assigned to {name}.',
-    unreachable:
-      'to be picked up ({name}, who it was assigned to, can no longer see this computer).',
-    open: 'to be picked up.',
+    unreachable: 'to take ({name}, who it was assigned to, can no longer see this computer).',
+    open: 'to take.',
     edit: 'Reassign / edit',
     close: 'Close',
     requestedNotify: 'Check requested',
@@ -517,13 +516,15 @@ const en: Translation<typeof fr> = {
     agentOutdated: 'Agent {version} outdated: the fleet reference is {latest}',
     contact: 'No contact for {days} days',
     inventoryNone: 'No hardware inventory reported for this computer',
-    inventoryStale: 'Inventory {days} days old on a computer seen today',
+    inventoryStale:
+      'Inventory {days} day old on a computer seen today | Inventory {days} days old on a computer seen today',
     unencrypted: 'System disk not encrypted (BitLocker)',
     productDisabled: '{product}: protection disabled',
     productSignatures: '{product}: outdated signatures',
     productUnconfirmed: '{product}: protection not confirmed',
     defenderDisabled: 'Defender: protection disabled',
-    defenderSignatures: 'Defender: signatures {days} days old',
+    defenderSignatures:
+      'Defender: signatures {days} day old | Defender: signatures {days} days old',
     avOutdated: 'Antivirus not up to date',
   },
   agentVersion: {
@@ -657,7 +658,7 @@ const en: Translation<typeof fr> = {
   },
   storage: {
     title: 'Storage',
-    caption: 'Usage as of the last inventory — “Refresh inventory” takes a new reading.',
+    caption: 'Usage as of the last inventory — “Refresh the inventory” takes a new reading.',
     system: 'System',
     freeOf: '{free} free of {total}',
     percent: '({percent}%)',

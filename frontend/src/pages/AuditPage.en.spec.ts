@@ -152,6 +152,54 @@ describe('AuditDetailsDialog in English', () => {
   });
 });
 
+describe('AuditDetailsDialog — a test e-mail recorded with its code', () => {
+  // Verification of 2026-11-18: the outcome showed the server's French.
+  async function mountEntry(details: Record<string, unknown>) {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/machines/:id', name: 'machine-detail', component: Stub }],
+    });
+    const w = mount(AuditDetailsDialog, {
+      attachTo: document.body,
+      props: {
+        modelValue: true,
+        entry: { ...entries[0]!, action: 'settings.email_test', details },
+      },
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+    return w;
+  }
+  const sent = {
+    to: 'admin@lycee.pf',
+    ok: 'oui',
+    message: 'E-mail de test envoyé à admin@lycee.pf par le serveur SMTP smtp.x.fr:587.',
+    message_code: 'sent',
+    message_params: { to: 'admin@lycee.pf', provider: 'smtp', host: 'smtp.x.fr', port: 587 },
+  };
+
+  it('words the outcome in English, without rows for its code', async () => {
+    setLocale('en');
+    const w = await mountEntry(sent);
+    // The rows, not the raw JSON below them: that one shows what is stored.
+    const rows = [...document.querySelectorAll('tr')].map((r) => r.textContent ?? '').join('\n');
+    expect(rows).not.toContain('E-mail de test envoyé');
+    expect(rows).toContain('smtp.x.fr:587');
+    expect(rows).not.toContain('message_code');
+    w.unmount();
+  });
+
+  it('reads the server’s French in French, and keeps an older entry’s message', async () => {
+    let w = await mountEntry(sent);
+    expect(document.body.textContent).toContain(sent.message);
+    w.unmount();
+    setLocale('en');
+    w = await mountEntry({ to: 'a@b.c', ok: 'non', message: 'Ancien message' });
+    expect(document.body.textContent).toContain('Ancien message');
+    w.unmount();
+  });
+});
+
 describe('AuditFiltersBar in English', () => {
   it('labels its fields, and follows a change of language', async () => {
     const w = mount(AuditFiltersBar, {

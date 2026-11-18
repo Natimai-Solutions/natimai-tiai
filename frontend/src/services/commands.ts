@@ -749,6 +749,8 @@ function filled(code: string, p: Params): { named: Params; plural?: number } {
       return { named };
     case 'wu.scan':
       return { named, plural: count(p.count) };
+    case 'wu.install_incomplete':
+      return { named, plural: count(p.failed) };
     case 'wu.known_error':
       named.hint = wordFrom(words.wuHints, 'commands.words.wuHints', `h${text(p.hresult)}`);
       return { named };

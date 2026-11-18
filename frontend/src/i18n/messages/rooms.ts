@@ -212,7 +212,8 @@ const en: Translation<typeof fr> = {
   },
   placement: {
     moved: '1 computer placed | {count} computers placed',
-    mismatch: '{moved} — of which {count} report another location than the room',
+    mismatch:
+      '{moved} — of which {count} reports another location than the room | {moved} — of which {count} report another location than the room',
   },
   list: {
     title: 'Rooms',

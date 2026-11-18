@@ -279,7 +279,7 @@ describe('the computer cards — English', () => {
     });
     const storage = mount(MachineStorageCard, { props: { machine: m } }).text();
     expect(storage).toContain('Storage');
-    expect(storage).toContain('“Refresh inventory” takes a new reading.');
+    expect(storage).toContain('“Refresh the inventory” takes a new reading.');
     expect(storage).toMatch(/free of .+ \(50%\)/);
     expect(storage).toContain('Physical disks');
     expect(storage).toContain('S/N S123');

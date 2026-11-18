@@ -250,7 +250,7 @@ const en: Translation<typeof fr> = {
       'Day of the weekly reminder sent to owners (0 = Monday … 6 = Sunday), at the time of the digest — initial value: the setting saved above takes precedence',
     USAGE_WINDOW_DAYS:
       'Observation window, in days — initial value: the setting saved above takes precedence',
-    USAGE_LOW_HOURS: 'Hours switched on below which a computer is “little used” — same rule',
+    USAGE_LOW_HOURS: 'Hours switched on below which a computer is “rarely used” — same rule',
     USAGE_HIGH_HOURS: 'Hours switched on above which a computer is “always on” — same rule',
     USAGE_RETENTION_DAYS: 'How long the hourly usage counters are kept, in days',
     ROOM_SOURCE:

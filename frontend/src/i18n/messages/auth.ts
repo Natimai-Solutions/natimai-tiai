@@ -41,7 +41,7 @@ const fr = {
 
 const en: Translation<typeof fr> = {
   required: 'Required',
-  email: 'Email',
+  email: 'E-mail',
   backToLogin: 'Back to sign-in',
   login: {
     subtitle: 'Fleet monitoring',

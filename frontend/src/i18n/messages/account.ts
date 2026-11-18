@@ -122,7 +122,7 @@ const en: Translation<typeof fr> = {
   passwordPolicy: {
     oneHour: 'one hour',
     hours: '{count} hours',
-    minutes: '{count} minutes',
+    minutes: '{count} minute | {count} minutes',
   },
 };
 

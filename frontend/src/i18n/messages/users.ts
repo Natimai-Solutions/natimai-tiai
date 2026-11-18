@@ -161,7 +161,7 @@ const en: Translation<typeof fr> = {
     copyFailed: 'Could not copy: select the password and copy it by hand',
     deactivated: 'Account disabled',
     deactivatedCaption:
-      'While the account stays disabled, its checks go to “To pick up” and its rooms and computers go back to the owner one level up (the room, then the fleet’s default owner).',
+      'While the account stays disabled, its checks go to “To take” and its rooms and computers go back to the owner one level up (the room, then the fleet’s default owner).',
     reactivated: 'Account re-enabled',
     editFailed: 'Could not change the account',
     deleted: 'Account deleted',

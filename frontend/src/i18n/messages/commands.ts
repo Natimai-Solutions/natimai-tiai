@@ -607,7 +607,8 @@ const en: Translation<typeof fr> = {
       timeout: 'time limit exceeded for the Windows Update operation',
       interrupted: 'Windows Update operation interrupted (agent stopping)',
       known_error: '{hint} ({detail})',
-      install_incomplete: '{failed} of {selected} updates were not installed',
+      install_incomplete:
+        '{failed} of {selected} updates was not installed | {failed} of {selected} updates were not installed',
       install_result: 'installation {result} (code {code})',
     },
     inventory: {

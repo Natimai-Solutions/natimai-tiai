@@ -306,8 +306,8 @@ const en: Translation<typeof fr> = {
     line: '{model} ({parts})',
     partSeparator: ', ',
     processors: '{count} processors',
-    cores: '{count} cores',
-    threads: '{count} threads',
+    cores: '{count} core | {count} cores',
+    threads: '{count} thread | {count} threads',
   },
   ram: '{size} ({used} of {total} slots used)',
 };

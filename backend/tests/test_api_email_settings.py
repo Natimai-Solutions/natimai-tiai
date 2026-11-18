@@ -354,6 +354,9 @@ async def test_test_send_uses_the_stored_smtp_settings(client, db_session, fake_
     (entry,) = await _audit(db_session, "settings.email_test")
     assert entry.details["ok"] == "oui"
     assert entry.details["to"] == "admin@test.local"
+    # The console words the journal's message from these, as the page does.
+    assert entry.details["message_code"] == "sent"
+    assert entry.details["message_params"]["to"] == "admin@test.local"
     assert "pw-stored" not in str(entry.details)
 
 
