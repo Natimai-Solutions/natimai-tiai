@@ -1,13 +1,20 @@
 <template>
   <q-page padding>
     <div class="row items-center q-mb-md">
-      <q-btn flat dense round icon="arrow_back" aria-label="Retour" :to="{ name: 'rooms' }" />
+      <q-btn
+        flat
+        dense
+        round
+        icon="arrow_back"
+        :aria-label="t('rooms.actions.back')"
+        :to="{ name: 'rooms' }"
+      />
       <h1 class="text-h5 q-my-none q-ml-sm">
         <template v-if="room">
           <span v-if="room.building" class="text-muted">{{ room.building.name }} › </span
           >{{ room.name }}
         </template>
-        <span v-else>Salle</span>
+        <span v-else>{{ t('rooms.detail.room') }}</span>
       </h1>
       <q-space />
       <template v-if="room && canWrite">
@@ -17,18 +24,25 @@
           dense
           color="primary"
           icon="playlist_add"
-          label="Ajouter des postes"
+          :label="t('rooms.detail.addMachines')"
           class="q-mr-sm"
           @click="openAdd"
         />
-        <q-btn flat dense icon="edit" label="Modifier" class="q-mr-sm" @click="formOpen = true" />
+        <q-btn
+          flat
+          dense
+          icon="edit"
+          :label="t('rooms.actions.edit')"
+          class="q-mr-sm"
+          @click="formOpen = true"
+        />
       </template>
       <q-btn
         v-if="room && canMaintain && machines.length"
         dense
         color="primary"
         icon="build"
-        label="Effectuer la maintenance"
+        :label="t('rooms.detail.doMaintenance')"
         @click="sessionOpen = true"
       />
     </div>
@@ -36,29 +50,29 @@
     <q-card v-if="room" flat bordered class="q-mb-md" style="max-width: 640px">
       <q-card-section class="q-gutter-xs">
         <div class="row items-center">
-          <div class="col-4 text-muted">Emplacement</div>
+          <div class="col-4 text-muted">{{ t('rooms.detail.location') }}</div>
           <div class="col">
             {{ room.effective_location ?? '—' }}
             <span v-if="room.building && room.effective_location" class="text-caption text-muted">
-              (hérité du bâtiment)
+              {{ t('rooms.detail.fromBuilding') }}
             </span>
           </div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-muted">Postes</div>
+          <div class="col-4 text-muted">{{ t('rooms.detail.machines') }}</div>
           <div class="col">
             {{ room.machine_count }}
             <q-badge v-if="room.mismatch_count" color="orange" class="q-ml-sm">
-              {{ room.mismatch_count }} divergent(s)
+              {{ t('rooms.detail.mismatched', { count: room.mismatch_count }) }}
             </q-badge>
           </div>
         </div>
         <div v-if="room.ad_key" class="row items-center">
-          <div class="col-4 text-muted">Annuaire</div>
+          <div class="col-4 text-muted">{{ t('rooms.detail.directory') }}</div>
           <div class="col text-caption">{{ room.ad_key }}</div>
         </div>
         <div v-if="room.notes" class="row">
-          <div class="col-4 text-muted">Notes</div>
+          <div class="col-4 text-muted">{{ t('rooms.detail.notes') }}</div>
           <div class="col" style="white-space: pre-line">{{ room.notes }}</div>
         </div>
       </q-card-section>
@@ -66,26 +80,30 @@
 
     <q-card v-if="room && maintenance" flat bordered class="q-mb-md" style="max-width: 640px">
       <q-card-section class="row items-center text-subtitle1">
-        Maintenance
+        {{ t('rooms.detail.maintenance') }}
         <q-space />
         <q-btn
           v-if="canMaintain"
           flat
           dense
           icon="tune"
-          label="Régler"
+          :label="t('rooms.detail.adjust')"
           @click="maintenanceOpen = true"
         />
       </q-card-section>
       <q-separator />
       <q-card-section class="q-gutter-xs">
         <div class="row items-center">
-          <div class="col-4 text-muted">Cycle</div>
+          <div class="col-4 text-muted">{{ t('rooms.detail.cycle') }}</div>
           <div class="col">
             {{
               maintenance.effective_cycle_days > 0
-                ? `${maintenance.effective_cycle_days} jours`
-                : 'exclue'
+                ? t(
+                    'rooms.detail.cycleDays',
+                    { days: maintenance.effective_cycle_days },
+                    maintenance.effective_cycle_days,
+                  )
+                : t('rooms.detail.excluded')
             }}
             <span class="text-caption text-muted">
               ({{
@@ -98,7 +116,7 @@
           </div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-muted">Responsable</div>
+          <div class="col-4 text-muted">{{ t('rooms.detail.owner') }}</div>
           <div class="col">
             <!-- The level the resolution took: a room owner deactivated
                  since leaves the parc's default in charge, and says so. -->
@@ -113,33 +131,37 @@
                 }})
               </span>
             </template>
-            <span v-else class="text-muted">personne</span>
+            <span v-else class="text-muted">{{ t('rooms.detail.nobody') }}</span>
             <div
               v-if="
                 maintenance.maintenance_owner && maintenance.effective_owner_origin === 'global'
               "
               class="text-caption text-warn"
             >
-              Responsable de la salle sans effet : {{ ownerLabel(maintenance.maintenance_owner) }}
+              {{
+                t('rooms.detail.ownerIgnored', {
+                  owner: ownerLabel(maintenance.maintenance_owner),
+                })
+              }}
             </div>
           </div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-muted">Postes</div>
+          <div class="col-4 text-muted">{{ t('rooms.detail.machines') }}</div>
           <div class="col">
             <q-badge v-if="room.maintenance_overdue" color="negative" class="q-mr-xs">
-              {{ room.maintenance_overdue }} en retard
+              {{ t('rooms.detail.overdue', { count: room.maintenance_overdue }) }}
             </q-badge>
             <q-badge v-if="room.maintenance_due_soon" color="orange" class="q-mr-xs">
-              {{ room.maintenance_due_soon }} à échéance
+              {{ t('rooms.detail.dueSoon', { count: room.maintenance_due_soon }) }}
             </q-badge>
             <span v-if="!room.maintenance_overdue && !room.maintenance_due_soon" class="text-muted">
-              rien à faire
+              {{ t('rooms.detail.nothingToDo') }}
             </span>
           </div>
         </div>
         <div v-if="sessions.length" class="row">
-          <div class="col-4 text-muted">Séances</div>
+          <div class="col-4 text-muted">{{ t('rooms.detail.sessions') }}</div>
           <div class="col" data-test="room-sessions">
             <!-- Every visit, newest first, a page at a time; each opens with
                  its global note and its postes. -->
@@ -152,7 +174,8 @@
               >
                 {{ formatDateTime(s.performed_at) }}
               </a>
-              · {{ s.performed_by }} · {{ s.machine_count }} poste(s)
+              · {{ s.performed_by }} ·
+              {{ t('rooms.detail.sessionMachines', { count: s.machine_count }, s.machine_count) }}
               <div v-if="s.note" class="text-caption text-muted" style="white-space: pre-line">
                 {{ s.note }}
               </div>
@@ -163,7 +186,7 @@
               dense
               no-caps
               size="sm"
-              :label="`Afficher plus (${sessionsTotal - sessions.length})`"
+              :label="t('rooms.detail.showMore', { count: sessionsTotal - sessions.length })"
               @click="loadMoreSessions"
             />
           </div>
@@ -206,7 +229,7 @@
                 </div>
                 <div class="text-caption text-muted" style="overflow-wrap: anywhere">
                   {{
-                    [cell.row.location ?? 'sans emplacement', cell.row.session_username]
+                    [cell.row.location ?? t('rooms.detail.noLocation'), cell.row.session_username]
                       .filter(Boolean)
                       .join(' · ')
                   }}
@@ -215,7 +238,7 @@
                     name="wrong_location"
                     color="orange"
                     size="16px"
-                    aria-label="L'agent déclare un autre emplacement que la salle"
+                    :aria-label="t('rooms.detail.mismatch')"
                   />
                 </div>
                 <div class="q-mt-xs">
@@ -226,7 +249,9 @@
                     class="q-mr-xs"
                   />
                   <span class="text-caption text-muted">{{
-                    cell.row.last_seen ? `vu ${timeAgoLabel(cell.row.last_seen)}` : 'jamais vu'
+                    cell.row.last_seen
+                      ? t('rooms.detail.seen', { ago: timeAgoLabel(cell.row.last_seen) })
+                      : t('rooms.detail.neverSeen')
                   }}</span>
                 </div>
               </div>
@@ -235,7 +260,7 @@
                 flat
                 round
                 icon="remove_circle_outline"
-                :aria-label="`Retirer ${cell.row.hostname ?? ''} de la salle`"
+                :aria-label="t('rooms.detail.removeAria', { name: cell.row.hostname ?? '' })"
                 @click="confirmRemove(cell.row)"
               />
             </q-card-section>
@@ -268,7 +293,7 @@
             size="16px"
             class="q-ml-xs"
           >
-            <q-tooltip>L'agent déclare un autre emplacement que la salle</q-tooltip>
+            <q-tooltip>{{ t('rooms.detail.mismatch') }}</q-tooltip>
           </q-icon>
         </q-td>
       </template>
@@ -292,10 +317,10 @@
             dense
             round
             icon="remove_circle_outline"
-            :aria-label="`Retirer ${cell.row.hostname ?? ''} de la salle`"
+            :aria-label="t('rooms.detail.removeAria', { name: cell.row.hostname ?? '' })"
             @click="confirmRemove(cell.row)"
           >
-            <q-tooltip>Retirer de la salle</q-tooltip>
+            <q-tooltip>{{ t('rooms.detail.removeTooltip') }}</q-tooltip>
           </q-btn>
         </q-td>
       </template>
@@ -305,7 +330,7 @@
          ones come first, but a poste of another room can be moved here too. -->
     <q-dialog v-model="addOpen">
       <q-card style="width: 560px; max-width: 95vw">
-        <q-card-section class="text-h6">Ajouter des postes</q-card-section>
+        <q-card-section class="text-h6">{{ t('rooms.detail.addMachines') }}</q-card-section>
         <q-card-section class="q-pt-none">
           <q-select
             v-model="picked"
@@ -316,7 +341,7 @@
             input-debounce="300"
             option-value="id"
             :option-label="candidateLabel"
-            label="Rechercher un poste (nom, IP, utilisateur…)"
+            :label="t('rooms.detail.searchMachine')"
             outlined
             dense
             autofocus
@@ -327,8 +352,10 @@
                 <q-item-section>
                   <q-item-label>{{ scope.opt.hostname ?? scope.opt.machine_uuid }}</q-item-label>
                   <q-item-label caption>
-                    {{ scope.opt.location ?? 'sans emplacement' }}
-                    <span v-if="scope.opt.room_name"> · déjà en {{ scope.opt.room_name }}</span>
+                    {{ scope.opt.location ?? t('rooms.detail.noLocation') }}
+                    <span v-if="scope.opt.room_name">
+                      · {{ t('rooms.detail.alreadyIn', { room: scope.opt.room_name }) }}</span
+                    >
                     <span v-if="scope.opt.session_username">
                       · {{ scope.opt.session_username }}</span
                     >
@@ -338,15 +365,20 @@
             </template>
           </q-select>
           <div v-if="pickedMismatch.length" class="text-caption text-warn q-mt-sm">
-            {{ pickedMismatch.length }} poste(s) sélectionné(s) déclarent un autre emplacement que
-            la salle ({{ room?.effective_location }}) : ils seront affectés et signalés.
+            {{
+              t(
+                'rooms.detail.pickedMismatch',
+                { count: pickedMismatch.length, site: room?.effective_location ?? '' },
+                pickedMismatch.length,
+              )
+            }}
           </div>
         </q-card-section>
         <q-card-actions align="right" class="q-px-md q-pb-md">
-          <q-btn v-close-popup flat label="Annuler" />
+          <q-btn v-close-popup flat :label="t('rooms.actions.cancel')" />
           <q-btn
             color="primary"
-            label="Ajouter"
+            :label="t('rooms.actions.add')"
             :disable="!picked.length"
             :loading="adding"
             @click="addPicked"
@@ -362,7 +394,7 @@
       :cycle-days="maintenance?.maintenance_cycle_days ?? null"
       :owner-id="maintenance?.maintenance_owner?.id ?? null"
       :owner-label="ownerLabel(maintenance?.maintenance_owner)"
-      inherit-hint="Vide : le responsable par défaut du parc"
+      :inherit-hint="t('rooms.detail.inheritHint')"
       :save="saveMaintenance"
     />
     <MaintenanceSessionViewDialog
@@ -422,6 +454,7 @@ import {
 } from 'src/services/rooms';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
+import { t } from 'src/i18n';
 import {
   documentTitle,
   formatDateTime,
@@ -456,27 +489,49 @@ const canWrite = computed(() => auth.can('room', 'write'));
 const manualMode = ref(true);
 const canPlace = computed(() => canWrite.value && manualMode.value);
 
-const columns: QTableColumn<Machine>[] = [
-  { name: 'hostname', label: 'Nom', field: 'hostname', align: 'left', sortable: true },
-  { name: 'location', label: 'Emplacement (agent)', field: 'location', align: 'left' },
+const columns = computed<QTableColumn<Machine>[]>(() => [
+  {
+    name: 'hostname',
+    label: t('rooms.detail.columns.name'),
+    field: 'hostname',
+    align: 'left',
+    sortable: true,
+  },
+  {
+    name: 'location',
+    label: t('rooms.detail.columns.location'),
+    field: 'location',
+    align: 'left',
+  },
   {
     name: 'ip_address',
-    label: 'Adresse IP',
+    label: t('rooms.detail.columns.ip'),
     field: 'ip_address',
     align: 'left',
     format: (v: string | null) => v ?? '—',
   },
   {
     name: 'session',
-    label: 'Session',
+    label: t('rooms.detail.columns.session'),
     field: 'session_username',
     align: 'left',
     format: (v: string | null) => v ?? '—',
   },
-  { name: 'maintenance', label: 'Maintenance', field: 'maintenance_state', align: 'center' },
-  { name: 'last_seen', label: 'Vu', field: 'last_seen', align: 'left', sortable: true },
+  {
+    name: 'maintenance',
+    label: t('rooms.detail.columns.maintenance'),
+    field: 'maintenance_state',
+    align: 'center',
+  },
+  {
+    name: 'last_seen',
+    label: t('rooms.detail.columns.lastSeen'),
+    field: 'last_seen',
+    align: 'left',
+    sortable: true,
+  },
   { name: 'actions', label: '', field: 'id', align: 'right' },
-];
+]);
 
 // Maintenance of the room: its settings, its last visits, the postes done.
 const canMaintain = computed(() => auth.can('maintenance', 'write'));
@@ -493,7 +548,9 @@ const sessionMachines = computed(() =>
     id: m.id,
     hostname: m.hostname ?? m.machine_uuid,
     hint: `${maintenanceStateLabel(m.maintenance_state)}${
-      m.last_maintenance_at ? ` · dernière le ${dueDate(m.last_maintenance_at)}` : ''
+      m.last_maintenance_at
+        ? ` · ${t('rooms.detail.lastMaintenance', { date: dueDate(m.last_maintenance_at) })}`
+        : ''
     }`,
     // Ticked: what is due; a poste excluded from the cycle never (audit B09).
     preselect: isDue(m.maintenance_state),
@@ -524,7 +581,7 @@ async function loadMoreSessions() {
     sessions.value = [...sessions.value, ...list.items.filter((s) => !known.has(s.id))];
     sessionsTotal.value = list.total;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Séances indisponibles') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.detail.sessionsFailed')) });
   }
 }
 
@@ -536,7 +593,7 @@ function openSessionView(id: string) {
 /** « défaut du parc » or « propre à la salle », from the level the server resolved. */
 function originLabel(origin: 'room' | 'global' | undefined, ownSet: boolean): string {
   const level = origin ?? (ownSet ? 'room' : 'global');
-  return level === 'room' ? 'propre à la salle' : 'défaut du parc';
+  return level === 'room' ? t('rooms.detail.ownOrigin') : t('rooms.detail.globalOrigin');
 }
 
 async function saveMaintenance(payload: MaintenanceSettingsPayload) {
@@ -544,7 +601,7 @@ async function saveMaintenance(payload: MaintenanceSettingsPayload) {
   // Another owner or cycle moves the room in or out of somebody's « Mes
   // tâches »: the menu badge reads again (audit U19).
   notifyTasksChanged();
-  $q.notify({ type: 'positive', message: 'Réglages de maintenance enregistrés' });
+  $q.notify({ type: 'positive', message: t('rooms.detail.settingsSaved') });
   await load();
 }
 
@@ -577,7 +634,7 @@ async function load() {
     machines.value = all;
     void loadMaintenance();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.detail.loadFailed')) });
   } finally {
     loading.value = false;
   }
@@ -602,10 +659,13 @@ async function loadRefs() {
 /** Taking a poste out of the room changes its owner and cycle: asked first. */
 function confirmRemove(m: Machine) {
   $q.dialog({
-    title: 'Retirer de la salle',
-    message: `Retirer ${m.hostname ?? 'ce poste'} de la salle ${room.value?.name ?? ''} ? Il reste dans le parc, sans salle, et ne suit plus le cycle ni le responsable de la salle.`,
+    title: t('rooms.detail.removeTitle'),
+    message: t('rooms.detail.removeAsk', {
+      name: m.hostname ?? t('rooms.detail.thisMachine'),
+      room: room.value?.name ?? '',
+    }),
     cancel: true,
-    ok: { label: 'Retirer', color: 'negative' },
+    ok: { label: t('rooms.detail.remove'), color: 'negative' },
   }).onOk(() => void remove(m));
 }
 
@@ -615,10 +675,15 @@ async function remove(m: Machine) {
     // Out of the room, the poste leaves its maintenance owner's « Mes tâches »:
     // the menu badge reads again (audit U19).
     notifyTasksChanged();
-    $q.notify({ type: 'positive', message: `${m.hostname ?? 'Poste'} retiré de la salle` });
+    $q.notify({
+      type: 'positive',
+      message: m.hostname
+        ? t('rooms.detail.removed', { name: m.hostname })
+        : t('rooms.detail.machineRemoved'),
+    });
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Retrait impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.detail.removeFailed')) });
   }
 }
 
@@ -680,7 +745,7 @@ async function addPicked() {
     addOpen.value = false;
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.detail.placeFailed')) });
   } finally {
     adding.value = false;
   }

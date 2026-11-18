@@ -1,8 +1,124 @@
 import type { Translation } from './types';
 
-/** Mes tâches (lot D du plan console bilingue). */
-const fr = {};
+/** Mes tâches (lot D du plan console bilingue): the checks and maintenances to do. */
+const fr = {
+  title: 'Mes tâches',
+  scopes: {
+    me: 'Les miennes',
+    none: 'À prendre',
+    all: 'Toutes',
+  },
+  intro:
+    "Les vérifications demandées sur des postes et les maintenances à faire : les vôtres, celles que personne n'a encore prises, ou toutes.",
+  checks: {
+    title: 'Vérifications',
+    total: '{count} vérification(s)',
+    nothing: 'Rien à faire.',
+    machine: 'Poste',
+    toTake: 'à prendre',
+    toTakeWhy: 'à prendre ({why})',
+    by: 'par {name}',
+    takeOver: "Me l'affecter",
+    edit: 'Modifier',
+    close: 'Clore',
+    moreActions: 'Autres actions',
+    reassign: 'Réaffecter / modifier',
+    noRoom: 'sans salle',
+    columns: {
+      machine: 'Poste',
+      instructions: 'Consignes',
+      assignedTo: 'Affectée à',
+      requested: 'Demandée',
+    },
+    updated: 'Demande mise à jour',
+    taken: 'Vérification affectée à vous',
+    takeFailed: 'Affectation impossible',
+    loadFailed: 'Chargement impossible',
+  },
+  maintenance: {
+    title: 'Maintenances à faire',
+    counts: '{overdue} en retard · {dueSoon} à échéance',
+    summary: '{count} poste(s) · cycle {days} jours · {owner}',
+    noOwner: 'sans responsable',
+    ownSettings: 'postes à réglage propre',
+    overdue: '{count} en retard',
+    dueSoon: '{count} à échéance',
+    upToDate: 'à jour',
+    takeOver: "Me l'affecter",
+    handOver: 'Transmettre…',
+    viewRoom: 'Voir la salle',
+    doMaintenance: 'Effectuer la maintenance',
+    noRoom: 'sans salle · {owner}',
+    nothing: 'Rien à faire.',
+    inheritHint: 'Vide : le responsable par défaut du parc',
+    machinesTaken: '{count} poste(s) de {room} affecté(s) à vous',
+    roomTaken: 'Salle {room} affectée à vous',
+    takeFailed: 'Affectation impossible',
+    roomFailed: 'Salle indisponible',
+    handedOver: 'Salle transmise',
+    loadFailed: 'Maintenances indisponibles',
+  },
+};
 
-const en: Translation<typeof fr> = {};
+const en: Translation<typeof fr> = {
+  title: 'My tasks',
+  scopes: {
+    me: 'Mine',
+    none: 'To take',
+    all: 'All',
+  },
+  intro:
+    'Checks requested on computers and maintenance to do: yours, those nobody has taken yet, or all of them.',
+  checks: {
+    title: 'Checks',
+    total: '1 check | {count} checks',
+    nothing: 'Nothing to do.',
+    machine: 'Computer',
+    toTake: 'to take',
+    toTakeWhy: 'to take ({why})',
+    by: 'by {name}',
+    takeOver: 'Assign to me',
+    edit: 'Edit',
+    close: 'Close',
+    moreActions: 'More actions',
+    reassign: 'Reassign / edit',
+    noRoom: 'no room',
+    columns: {
+      machine: 'Computer',
+      instructions: 'Instructions',
+      assignedTo: 'Assigned to',
+      requested: 'Requested',
+    },
+    updated: 'Request updated',
+    taken: 'Check assigned to you',
+    takeFailed: 'Could not assign',
+    loadFailed: 'Could not load',
+  },
+  maintenance: {
+    title: 'Maintenance to do',
+    counts: '{overdue} overdue · {dueSoon} due soon',
+    summary:
+      '1 computer · {days}-day cycle · {owner} | {count} computers · {days}-day cycle · {owner}',
+    noOwner: 'no owner',
+    ownSettings: 'computers with their own settings',
+    overdue: '{count} overdue',
+    dueSoon: '{count} due soon',
+    upToDate: 'up to date',
+    takeOver: 'Assign to me',
+    handOver: 'Hand over…',
+    viewRoom: 'View the room',
+    doMaintenance: 'Carry out maintenance',
+    noRoom: 'no room · {owner}',
+    nothing: 'Nothing to do.',
+    inheritHint: "Empty: the fleet's default owner",
+    machinesTaken:
+      '1 computer of {room} assigned to you | {count} computers of {room} assigned to you',
+    roomTaken: 'Room {room} assigned to you',
+    takeFailed: 'Could not assign',
+    roomFailed: 'Room unavailable',
+    handedOver: 'Room handed over',
+    loadFailed: 'Maintenance unavailable',
+  },
+};
 
 export default { fr, en };

@@ -19,24 +19,6 @@ const PENDING = new Set<string>([
   'utils/numberField.ts',
   'utils/settingsSchedule.ts',
 
-  // --- Lot D : salles, maintenance, vérifications, tâches
-  'components/check/CheckCloseDialog.vue',
-  'components/check/CheckRequestDialog.vue',
-  'components/machine/MachineHistoryCard.vue',
-  'components/machine/MachineMaintenanceCard.vue',
-  'components/maintenance/MaintenanceSessionDialog.vue',
-  'components/maintenance/MaintenanceSessionViewDialog.vue',
-  'components/maintenance/MaintenanceSettingsDialog.vue',
-  'components/room/BuildingFormDialog.vue',
-  'components/room/RoomFormDialog.vue',
-  'pages/RoomDetailPage.vue',
-  'pages/RoomsPage.vue',
-  'pages/TasksPage.vue',
-  'services/checks.ts',
-  'services/interventions.ts',
-  'services/maintenance.ts',
-  'services/rooms.ts',
-
   // --- Lot F : commandes
   'components/machine/CommandOutputDialog.vue',
   'components/machine/MachineCommandsCard.vue',

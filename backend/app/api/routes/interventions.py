@@ -9,6 +9,7 @@ is a record, and a record that vanishes must leave a trace.
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.exceptions import RequestValidationError
@@ -42,6 +43,11 @@ class InterventionOut(BaseModel):
     machine_id: uuid.UUID
     kind: str
     title: str | None
+    # Set when the server wrote the title itself (« Maintenance non faite —
+    # A101 »): the console words it from the code and its parameters, in the
+    # reader's language, ``title`` keeping the French. Null on a typed title.
+    title_code: str | None = None
+    title_params: dict[str, Any] | None = None
     note: str | None
     performed_by: str
     performed_at: datetime
@@ -202,6 +208,9 @@ async def update_intervention(
         row.kind = payload.kind.value if payload.kind else row.kind
     if "title" in fields:
         row.title = _clean(fields["title"])
+        # Typed by someone now: no longer the server's words.
+        row.title_code = None
+        row.title_params = None
     if "note" in fields:
         row.note = _clean(fields["note"])
     if "performed_at" in fields and fields["performed_at"] is not None:
