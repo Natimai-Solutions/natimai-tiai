@@ -112,6 +112,29 @@ func cases() []Message {
 		New("deploy.publisher_not_approved", Params{"publisher": Quote("Contoso Ltd")}),
 		New("deploy.download_failed", Params{"file": "setup.exe", "detail": "serveur occupé (429)"}),
 		New("deploy.launch_failed", Params{"file": "setup.exe", "detail": "The system cannot find the file specified."}),
+		New("deploy.manifest.unreadable", Params{"detail": "json: unknown field \"x\""}),
+		New("deploy.manifest.trailing_data", nil),
+		New("deploy.manifest.unknown_format", Params{"format": Quote("tiai-package-9")}),
+		New("deploy.manifest.other_package", nil),
+		New("deploy.manifest.no_file", nil),
+		New("deploy.manifest.bad_name", Params{"name": Quote("nul.txt")}),
+		New("deploy.manifest.bad_hash", Params{"name": Quote("setup.exe")}),
+		New("deploy.manifest.not_in_package", Params{"file": Quote("setup.exe")}),
+		New("deploy.manifest.bad_argument", nil),
+		New("deploy.unknown_kind", Params{"kind": Quote("zip")}),
+		New("deploy.package_dir", Params{"detail": "mkdir C:\\ProgramData\\Tiai: Access is denied."}),
+		New("deploy.hash_mismatch", nil),
+		New("deploy.launch_timeout", Params{"detail": "context deadline exceeded"}),
+		New("deploy.download.restart", nil),
+		New("deploy.download.busy", Params{"status": 429}),
+		New("deploy.download.size_announced", Params{"path": "/api/v1/agent/packages/p/files/f", "announced": 2048, "expected": 1024}),
+		New("deploy.download.too_long", Params{"path": "/api/v1/agent/packages/p/files/f", "size": 1024}),
+		New("deploy.download.interrupted", Params{"detail": "unexpected EOF"}),
+		New("spooler.state_timeout", Params{"timeout": "30s"}),
+		// A coded cause inside a coded sentence: its code goes along.
+		Wrap("deploy.download_failed", Params{"file": "setup.exe"}, Err("deploy.hash_mismatch", nil)).Message,
+		Wrap("deploy.download_failed", Params{"file": "setup.exe"}, Err("deploy.download.busy", Params{"status": 503})).Message,
+		Wrap("deploy.authenticode_refused", Params{"file": "setup.exe"}, Err("deploy.not_signed", nil)).Message,
 		New("deploy.exit_code", Params{"file": "setup.exe", "code": 1603}),
 		New("deploy.exit_code", Params{"file": "setup.exe", "code": 1603, "trust": "signer", "by": "CN=Lycée Test"}),
 		New("deploy.exit_code", Params{"file": "setup.exe", "code": 2, "trust": "publisher", "by": "Igor Pavlov"}),
@@ -323,6 +346,14 @@ func TestOfReadsOnlyAWholeCodedMessage(t *testing.T) {
 		t.Error("no error, no code")
 	}
 	// Too long for the server: the text goes alone.
+	nested := Wrap("deploy.download_failed", Params{"file": "a.exe"}, Err("deploy.download.busy", Params{"status": 429}))
+	if nested.Params["detail_code"] != "deploy.download.busy" || nested.Params["detail_status"] != 429 ||
+		nested.Params["detail"] != "serveur occupé (429)" {
+		t.Errorf("a coded cause hands on its code and parameters: %#v", nested.Params)
+	}
+	if plainCause := Wrap("deploy.download_failed", nil, errors.New("x")); plainCause.Params["detail_code"] != nil {
+		t.Errorf("an uncoded cause has no detail_code: %#v", plainCause.Params)
+	}
 	long := Wrap("wol.relay.send_failed", nil, errors.New(strings.Repeat("x", 2000)))
 	if code, params := Of(long); code != "" || params != nil {
 		t.Errorf("an oversized message kept its code %q", code)

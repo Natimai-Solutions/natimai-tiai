@@ -438,34 +438,34 @@ func ValidFileName(name string) bool {
 // PowerShell's ConvertFrom-Json reads neither the same way.
 func ParseManifest(raw []byte, packageID string) (*Manifest, error) {
 	if err := checkKeys(raw, reflect.TypeFor[Manifest]()); err != nil {
-		return nil, fmt.Errorf("manifeste illisible : %w", err)
+		return nil, msg.Wrap("deploy.manifest.unreadable", nil, err)
 	}
 	var m Manifest
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&m); err != nil {
-		return nil, fmt.Errorf("manifeste illisible : %w", err)
+		return nil, msg.Wrap("deploy.manifest.unreadable", nil, err)
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return nil, errors.New("manifeste illisible : données après le document")
+		return nil, msg.Err("deploy.manifest.trailing_data", nil)
 	}
 	if m.Format != manifestFormat {
-		return nil, fmt.Errorf("format de manifeste inconnu %q", m.Format)
+		return nil, msg.Err("deploy.manifest.unknown_format", msg.Params{"format": msg.Quote(m.Format)})
 	}
 	if m.PackageID != packageID {
-		return nil, errors.New("le manifeste ne décrit pas ce paquet")
+		return nil, msg.Err("deploy.manifest.other_package", nil)
 	}
 	if len(m.Files) == 0 {
-		return nil, errors.New("manifeste sans fichier")
+		return nil, msg.Err("deploy.manifest.no_file", nil)
 	}
 	seen := map[string]bool{}
 	for _, f := range m.Files {
 		if !ValidFileName(f.Name) || seen[strings.ToLower(f.Name)] {
-			return nil, fmt.Errorf("nom de fichier refusé dans le manifeste : %q", f.Name)
+			return nil, msg.Err("deploy.manifest.bad_name", msg.Params{"name": msg.Quote(f.Name)})
 		}
 		seen[strings.ToLower(f.Name)] = true
 		if !sha256Hex.MatchString(f.SHA256) || f.Size < 0 {
-			return nil, fmt.Errorf("empreinte invalide pour %q", f.Name)
+			return nil, msg.Err("deploy.manifest.bad_hash", msg.Params{"name": msg.Quote(f.Name)})
 		}
 	}
 	for _, s := range []*Step{m.Install, m.Uninstall} {
@@ -473,11 +473,11 @@ func ParseManifest(raw []byte, packageID string) (*Manifest, error) {
 			continue
 		}
 		if s.Run != MsiExec && !seen[strings.ToLower(s.Run)] {
-			return nil, fmt.Errorf("%q n'est pas un fichier du paquet", s.Run)
+			return nil, msg.Err("deploy.manifest.not_in_package", msg.Params{"file": msg.Quote(s.Run)})
 		}
 		for _, a := range s.Args {
 			if strings.ContainsRune(a, 0) {
-				return nil, errors.New("argument invalide")
+				return nil, msg.Err("deploy.manifest.bad_argument", nil)
 			}
 		}
 	}

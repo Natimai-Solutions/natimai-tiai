@@ -807,6 +807,17 @@ export function commandMessage(
   if (!code || !knownCode(code)) return null;
   const p = params ?? {};
   const { named, plural } = filled(code, p);
+  // A detail that is itself one of the agent's coded messages (detail_code,
+  // its parameters as detail_<name>): worded too, not quoted in French.
+  if (typeof p.detail_code === 'string') {
+    const inner = Object.fromEntries(
+      Object.entries(p)
+        .filter(([k]) => k.startsWith('detail_') && k !== 'detail_code')
+        .map(([k, v]) => [k.slice('detail_'.length), v]),
+    );
+    const detail = commandMessage(p.detail_code, inner);
+    if (detail !== null) named.detail = detail;
+  }
   const sentence = word(`commands.results.${code}`, named, plural);
   const relay = typeof p.relay === 'string' ? p.relay : '';
   return relay ? word('commands.relayed', { relay, text: sentence }) : sentence;

@@ -622,6 +622,158 @@
   "message": "lancement de setup.exe : The system cannot find the file specified."
  },
  {
+  "code": "deploy.manifest.unreadable",
+  "params": {
+   "detail": "json: unknown field \"x\""
+  },
+  "message": "manifeste illisible : json: unknown field \"x\""
+ },
+ {
+  "code": "deploy.manifest.trailing_data",
+  "params": {},
+  "message": "manifeste illisible : données après le document"
+ },
+ {
+  "code": "deploy.manifest.unknown_format",
+  "params": {
+   "format": "\"tiai-package-9\""
+  },
+  "message": "format de manifeste inconnu \"tiai-package-9\""
+ },
+ {
+  "code": "deploy.manifest.other_package",
+  "params": {},
+  "message": "le manifeste ne décrit pas ce paquet"
+ },
+ {
+  "code": "deploy.manifest.no_file",
+  "params": {},
+  "message": "manifeste sans fichier"
+ },
+ {
+  "code": "deploy.manifest.bad_name",
+  "params": {
+   "name": "\"nul.txt\""
+  },
+  "message": "nom de fichier refusé dans le manifeste : \"nul.txt\""
+ },
+ {
+  "code": "deploy.manifest.bad_hash",
+  "params": {
+   "name": "\"setup.exe\""
+  },
+  "message": "empreinte invalide pour \"setup.exe\""
+ },
+ {
+  "code": "deploy.manifest.not_in_package",
+  "params": {
+   "file": "\"setup.exe\""
+  },
+  "message": "\"setup.exe\" n'est pas un fichier du paquet"
+ },
+ {
+  "code": "deploy.manifest.bad_argument",
+  "params": {},
+  "message": "argument invalide"
+ },
+ {
+  "code": "deploy.unknown_kind",
+  "params": {
+   "kind": "\"zip\""
+  },
+  "message": "type de paquet inconnu \"zip\""
+ },
+ {
+  "code": "deploy.package_dir",
+  "params": {
+   "detail": "mkdir C:\\ProgramData\\Tiai: Access is denied."
+  },
+  "message": "dossier du paquet : mkdir C:\\ProgramData\\Tiai: Access is denied."
+ },
+ {
+  "code": "deploy.hash_mismatch",
+  "params": {},
+  "message": "empreinte SHA-256 différente de celle du manifeste : fichier rejeté"
+ },
+ {
+  "code": "deploy.launch_timeout",
+  "params": {
+   "detail": "context deadline exceeded"
+  },
+  "message": "délai dépassé : context deadline exceeded"
+ },
+ {
+  "code": "deploy.download.restart",
+  "params": {},
+  "message": "reprise refusée, nouveau départ"
+ },
+ {
+  "code": "deploy.download.busy",
+  "params": {
+   "status": 429
+  },
+  "message": "serveur occupé (429)"
+ },
+ {
+  "code": "deploy.download.size_announced",
+  "params": {
+   "announced": 2048,
+   "expected": 1024,
+   "path": "/api/v1/agent/packages/p/files/f"
+  },
+  "message": "GET /api/v1/agent/packages/p/files/f : 2048 octets annoncés, 1024 attendus"
+ },
+ {
+  "code": "deploy.download.too_long",
+  "params": {
+   "path": "/api/v1/agent/packages/p/files/f",
+   "size": 1024
+  },
+  "message": "GET /api/v1/agent/packages/p/files/f : le serveur envoie plus que les 1024 octets annoncés"
+ },
+ {
+  "code": "deploy.download.interrupted",
+  "params": {
+   "detail": "unexpected EOF"
+  },
+  "message": "transfert interrompu : unexpected EOF"
+ },
+ {
+  "code": "spooler.state_timeout",
+  "params": {
+   "timeout": "30s"
+  },
+  "message": "le service n'a pas atteint l'état attendu en 30s"
+ },
+ {
+  "code": "deploy.download_failed",
+  "params": {
+   "detail": "empreinte SHA-256 différente de celle du manifeste : fichier rejeté",
+   "detail_code": "deploy.hash_mismatch",
+   "file": "setup.exe"
+  },
+  "message": "téléchargement de setup.exe : empreinte SHA-256 différente de celle du manifeste : fichier rejeté"
+ },
+ {
+  "code": "deploy.download_failed",
+  "params": {
+   "detail": "serveur occupé (503)",
+   "detail_code": "deploy.download.busy",
+   "detail_status": 503,
+   "file": "setup.exe"
+  },
+  "message": "téléchargement de setup.exe : serveur occupé (503)"
+ },
+ {
+  "code": "deploy.authenticode_refused",
+  "params": {
+   "detail": "fichier non signé (pas de signature Authenticode)",
+   "detail_code": "deploy.not_signed",
+   "file": "setup.exe"
+  },
+  "message": "signature de setup.exe refusée par Windows : fichier non signé (pas de signature Authenticode)"
+ },
+ {
   "code": "deploy.exit_code",
   "params": {
    "code": 1603,

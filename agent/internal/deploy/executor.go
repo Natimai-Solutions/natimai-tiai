@@ -73,7 +73,7 @@ func Execute(ctx context.Context, env Env, policy Policy, cmdType string, pkg *m
 	case "files":
 		return executeFiles(ctx, env, policy, action, pkg)
 	}
-	return Result{}, fmt.Errorf("type de paquet inconnu %q", pkg.Kind)
+	return Result{}, msg.Err("deploy.unknown_kind", msg.Params{"kind": msg.Quote(pkg.Kind)})
 }
 
 func executeWinget(ctx context.Context, env Env, policy Policy, action string, pkg *models.PackageDelivery) (Result, error) {
@@ -215,12 +215,12 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	}
 	SweepPackages(env.PackagesDir(), pkg.ID, need, policy.CacheMaxBytes(), time.Now())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return Result{}, fmt.Errorf("dossier du paquet : %w", err)
+		return Result{}, msg.Wrap("deploy.package_dir", nil, err)
 	}
 	// Whatever an earlier attempt left that this manifest does not name goes
 	// before anything runs: a failed run must not leave a file for the next.
 	if err := PruneDir(dir, files); err != nil {
-		return Result{}, fmt.Errorf("dossier du paquet : %w", err)
+		return Result{}, msg.Wrap("deploy.package_dir", nil, err)
 	}
 	// What gets downloaded is what the manifest names — by hash. Under method
 	// A an unsigned manifest names them too, but the file that runs is then

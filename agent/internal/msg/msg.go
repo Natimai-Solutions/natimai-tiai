@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -79,11 +80,25 @@ func Err(code string, params Params) *Error {
 
 // Wrap is the error of a code reporting on cause, whose own text the
 // sentence quotes as params["detail"] (set here when absent).
+//
+// A cause that is itself a coded message of the agent's hands on its code
+// and parameters too — "detail_code", and each parameter as "detail_<name>"
+// — so that the console words the detail in its reader's language, as it
+// words the sentence around it (verification of 2026-11-18: it showed the
+// French text inside an English sentence).
 func Wrap(code string, params Params, cause error) *Error {
 	p := Params{}
 	maps.Copy(p, params)
 	if _, ok := p["detail"]; !ok && cause != nil {
 		p["detail"] = cause.Error()
+		if inner, innerParams := Of(cause); inner != "" {
+			p["detail_code"] = inner
+			for k, v := range innerParams {
+				if !strings.HasPrefix(k, "detail") {
+					p["detail_"+k] = v
+				}
+			}
+		}
 	}
 	return &Error{Message: New(code, p), cause: cause}
 }

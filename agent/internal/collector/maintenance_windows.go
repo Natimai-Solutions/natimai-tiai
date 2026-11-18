@@ -252,7 +252,7 @@ func setServiceState(ctx context.Context, s *mgr.Service, control svc.Cmd, want 
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("le service n'a pas atteint l'état attendu en %s", serviceStateTimeout)
+			return msg.Err("spooler.state_timeout", msg.Params{"timeout": serviceStateTimeout.String()})
 		}
 	}
 }

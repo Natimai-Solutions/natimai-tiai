@@ -5,7 +5,6 @@ package deploy
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,7 +68,7 @@ func (e *SystemEnv) Run(ctx context.Context, exe string, args []string, dir stri
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 	err := cmd.Run()
 	if ctx.Err() != nil {
-		return 0, fmt.Errorf("délai dépassé : %w", ctx.Err())
+		return 0, msg.Wrap("deploy.launch_timeout", nil, ctx.Err())
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {

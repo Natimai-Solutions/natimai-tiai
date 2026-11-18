@@ -157,6 +157,9 @@ var french = map[string]func(Params) string{
 	"spooler.start_failed": func(p Params) string {
 		return "démarrage du spouleur : " + str(p, "detail")
 	},
+	"spooler.state_timeout": func(p Params) string {
+		return "le service n'a pas atteint l'état attendu en " + str(p, "timeout")
+	},
 	"spooler.purge_failed": func(p Params) string {
 		return "purge de la file d'impression : " + str(p, "detail")
 	},
@@ -266,6 +269,64 @@ var french = map[string]func(Params) string{
 	},
 	"deploy.launch_failed": func(p Params) string {
 		return fmt.Sprintf("lancement de %s : %s", str(p, "file"), str(p, "detail"))
+	},
+	// The manifest's refusals (deploy.ParseManifest), and the package's
+	// folder and files on the poste: the agent's own words, coded since the
+	// verification of 2026-11-18 (they used to reach an English console in
+	// French). Quoted values are quoted as %q quoted them.
+	"deploy.manifest.unreadable": func(p Params) string {
+		return "manifeste illisible : " + str(p, "detail")
+	},
+	"deploy.manifest.trailing_data": func(Params) string {
+		return "manifeste illisible : données après le document"
+	},
+	"deploy.manifest.unknown_format": func(p Params) string {
+		return "format de manifeste inconnu " + str(p, "format")
+	},
+	"deploy.manifest.other_package": func(Params) string {
+		return "le manifeste ne décrit pas ce paquet"
+	},
+	"deploy.manifest.no_file": func(Params) string {
+		return "manifeste sans fichier"
+	},
+	"deploy.manifest.bad_name": func(p Params) string {
+		return "nom de fichier refusé dans le manifeste : " + str(p, "name")
+	},
+	"deploy.manifest.bad_hash": func(p Params) string {
+		return "empreinte invalide pour " + str(p, "name")
+	},
+	"deploy.manifest.not_in_package": func(p Params) string {
+		return str(p, "file") + " n'est pas un fichier du paquet"
+	},
+	"deploy.manifest.bad_argument": func(Params) string {
+		return "argument invalide"
+	},
+	"deploy.unknown_kind": func(p Params) string {
+		return "type de paquet inconnu " + str(p, "kind")
+	},
+	"deploy.package_dir": func(p Params) string {
+		return "dossier du paquet : " + str(p, "detail")
+	},
+	"deploy.hash_mismatch": func(Params) string {
+		return "empreinte SHA-256 différente de celle du manifeste : fichier rejeté"
+	},
+	"deploy.launch_timeout": func(p Params) string {
+		return "délai dépassé : " + str(p, "detail")
+	},
+	"deploy.download.restart": func(Params) string {
+		return "reprise refusée, nouveau départ"
+	},
+	"deploy.download.busy": func(p Params) string {
+		return fmt.Sprintf("serveur occupé (%s)", str(p, "status"))
+	},
+	"deploy.download.size_announced": func(p Params) string {
+		return fmt.Sprintf("GET %s : %s octets annoncés, %s attendus", str(p, "path"), str(p, "announced"), str(p, "expected"))
+	},
+	"deploy.download.too_long": func(p Params) string {
+		return fmt.Sprintf("GET %s : le serveur envoie plus que les %s octets annoncés", str(p, "path"), str(p, "size"))
+	},
+	"deploy.download.interrupted": func(p Params) string {
+		return "transfert interrompu : " + str(p, "detail")
 	},
 	"deploy.exit_code": func(p Params) string {
 		text := fmt.Sprintf("%s a renvoyé le code %v", str(p, "file"), p["code"])
