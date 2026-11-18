@@ -45,11 +45,22 @@ class EnvItemOut(BaseModel):
     key: str
     # None = not set (the page shows a dash); otherwise already rendered —
     # booleans in words, lists joined — so every client prints the same thing.
+    # In French, like the description.
     value: str | None
     description: str
+    # For a console that words the line in its reader's language (plan
+    # ``dev/plan-console-bilingue.md``, I2): the value as the environment
+    # holds it — never a secret —, how ``value`` words it, and the variable
+    # parts of that wording (``app.features.setting.environment.EnvItem``).
+    raw: Any = None
+    format: str = "plain"
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class EnvGroupOut(BaseModel):
+    # Stable: « fleet », « maintenance », « usage », « rooms », « email »,
+    # « wol », « console », « packages ». The label is its French name.
+    code: str
     label: str
     items: list[EnvItemOut]
 
@@ -107,6 +118,9 @@ class EmailSettingsOut(BaseModel):
     effective_provider: Literal["mailgun", "smtp"]
     configured: bool
     missing: list[str]
+    # The same, as codes, in the same order (``email_policy.MISSING_LABELS``,
+    # and ``smtp_password_retype``): for a console in another language.
+    missing_codes: list[str] = Field(default_factory=list)
     # The environment's secrets not sent because the console points at
     # another server than the environment's ("smtp_password",
     # "mailgun_api_key"): to be typed in the console.
@@ -263,6 +277,7 @@ def _email_out(stored: mail.StoredEmailSettings) -> EmailSettingsOut:
     v = stored.values
     held_back = mail.withheld(stored)
     missing = policy.missing()
+    missing_codes = policy.missing_codes()
     # An SMTP account without its password logs in with an empty one: the
     # send fails. The page says what to do rather than « configuré ».
     smtp_login_broken = (
@@ -271,10 +286,8 @@ def _email_out(stored: mail.StoredEmailSettings) -> EmailSettingsOut:
         and bool(policy.smtp_user)
     )
     if smtp_login_broken:
-        missing.append(
-            "le mot de passe SMTP (celui du .env ne sert que pour le serveur "
-            "du .env : à ressaisir ici)"
-        )
+        missing.append(mail.MISSING_LABELS["smtp_password_retype"])
+        missing_codes.append("smtp_password_retype")
     return EmailSettingsOut(
         provider=v.get("provider"),
         from_email=v.get("from_email"),
@@ -294,6 +307,7 @@ def _email_out(stored: mail.StoredEmailSettings) -> EmailSettingsOut:
         effective_provider=policy.provider,
         configured=policy.enabled and not smtp_login_broken,
         missing=missing,
+        missing_codes=missing_codes,
         withheld=held_back,
         env=EmailEnvOut(
             provider=from_env.provider,
@@ -380,9 +394,17 @@ async def _out(session: SessionDep) -> SettingsOut:
         email=_email_out(stored),
         environment=[
             EnvGroupOut(
+                code=group.code,
                 label=group.label,
                 items=[
-                    EnvItemOut(key=i.key, value=i.value, description=i.description)
+                    EnvItemOut(
+                        key=i.key,
+                        value=i.value,
+                        description=i.description,
+                        raw=i.raw,
+                        format=i.format,
+                        params=i.params,
+                    )
                     for i in group.items
                 ],
             )
@@ -603,8 +625,13 @@ class EmailTestIn(BaseModel):
 
 class EmailTestOut(BaseModel):
     ok: bool
-    # Readable as is: what went out, or what to fix.
+    # Readable as is, in French: what went out, or what to fix.
     message: str
+    # The same as a code and its parameters, for a console that words it in
+    # its reader's language (``app.features.notification.probe``). Null from
+    # nothing this server sends; a console falls back to ``message``.
+    code: str | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 # Each accepted call sends a real mail, to an address the caller chooses:
@@ -650,4 +677,6 @@ async def send_test_email(
         },
     )
     await session.commit()
-    return EmailTestOut(ok=result.ok, message=result.message)
+    return EmailTestOut(
+        ok=result.ok, message=result.message, code=result.code, params=result.params
+    )

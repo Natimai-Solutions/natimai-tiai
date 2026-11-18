@@ -12,7 +12,8 @@ import asyncio
 import smtplib
 import socket
 import ssl
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
@@ -36,7 +37,18 @@ SMTP_AUTH_REQUIRED = 530
 @dataclass(frozen=True)
 class ProbeResult:
     ok: bool
+    # In French, as the page has always shown it.
     message: str
+    # The same outcome as a code and the parts of its sentence, for a console
+    # that words it in its reader's language (plan
+    # ``dev/plan-console-bilingue.md``, I2). The server's own words — an SMTP
+    # reply, a system error — stay as they came, in ``params``.
+    code: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+def _failed(code: str, message: str, **params: Any) -> ProbeResult:
+    return ProbeResult(ok=False, message=message, code=code, params=params)
 
 
 def _server_text(exc: smtplib.SMTPResponseException) -> str:
@@ -48,6 +60,11 @@ def _server_text(exc: smtplib.SMTPResponseException) -> str:
 def describe_error(exc: BaseException, policy: EmailPolicy) -> str:
     """A failure as the page shows it: what went wrong, in French, and the
     server's own words where it gave any."""
+    return explain_error(exc, policy).message
+
+
+def explain_error(exc: BaseException, policy: EmailPolicy) -> ProbeResult:
+    """A failure as a code, its parameters and its French sentence."""
     smtp_where = f"{policy.smtp_host}:{policy.smtp_port}"
     if (
         isinstance(exc, smtplib.SMTPResponseException)
@@ -56,10 +73,13 @@ def describe_error(exc: BaseException, policy: EmailPolicy) -> str:
     ):
         # Security « Aucune » on a server that only talks encrypted (587):
         # the field to change is the security mode, not the account.
-        return (
+        return _failed(
+            "smtp_starttls_required",
             f"Le serveur {smtp_where} exige une connexion chiffrée avant tout "
             "envoi — choisissez la sécurité « STARTTLS » "
-            f"(réponse : {_server_text(exc)})"
+            f"(réponse : {_server_text(exc)})",
+            where=smtp_where,
+            response=_server_text(exc),
         )
     if (
         isinstance(exc, smtplib.SMTPResponseException)
@@ -73,70 +93,118 @@ def describe_error(exc: BaseException, policy: EmailPolicy) -> str:
             if policy.smtp_user
             else "renseignez l'utilisateur et le mot de passe SMTP"
         )
-        return (
+        return _failed(
+            "smtp_auth_required",
             f"Le serveur {smtp_where} exige une authentification — {account} "
-            f"(réponse : {_server_text(exc)})"
+            f"(réponse : {_server_text(exc)})",
+            where=smtp_where,
+            response=_server_text(exc),
+            has_user=bool(policy.smtp_user),
         )
     if isinstance(exc, smtplib.SMTPServerDisconnected) and _timed_out(exc):
         # smtplib turns a read that timed out into « connection unexpectedly
         # closed »: the server accepted the connection and said nothing.
-        return (
+        return _failed(
+            "smtp_silent",
             f"Le serveur {smtp_where} a accepté la connexion mais n'a pas répondu "
             f"dans les {policy.smtp_timeout_seconds} s. Est-ce bien un serveur "
-            "SMTP, et le mode de sécurité correspond-il au port (TLS sur 465) ?"
+            "SMTP, et le mode de sécurité correspond-il au port (TLS sur 465) ?",
+            where=smtp_where,
+            seconds=policy.smtp_timeout_seconds,
         )
     if isinstance(exc, smtplib.SMTPAuthenticationError):
-        return (
+        return _failed(
+            "smtp_auth_failed",
             "Identifiants refusés par le serveur SMTP — vérifiez l'utilisateur et "
-            f"le mot de passe (réponse : {_server_text(exc)})"
+            f"le mot de passe (réponse : {_server_text(exc)})",
+            response=_server_text(exc),
         )
     if isinstance(exc, smtplib.SMTPSenderRefused):
-        return (
+        return _failed(
+            "smtp_sender_refused",
             f"Adresse d'expéditeur {policy.from_email} refusée par le serveur — avec "
             "un compte authentifié, elle doit en général être celle du compte "
-            f"(réponse : {_server_text(exc)})"
+            f"(réponse : {_server_text(exc)})",
+            from_email=policy.from_email,
+            response=_server_text(exc),
         )
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
-        details = "; ".join(
-            f"{address} : {code} "
-            + (text.decode(errors="replace") if isinstance(text, bytes) else str(text))
+        recipients = [
+            {
+                "address": address,
+                "code": code,
+                "text": (
+                    text.decode(errors="replace")
+                    if isinstance(text, bytes)
+                    else str(text)
+                ),
+            }
             for address, (code, text) in exc.recipients.items()
+        ]
+        details = "; ".join(
+            f"{r['address']} : {r['code']} {r['text']}" for r in recipients
         )
-        return f"Destinataire refusé par le serveur SMTP ({details})"
+        return _failed(
+            "smtp_recipients_refused",
+            f"Destinataire refusé par le serveur SMTP ({details})",
+            recipients=recipients,
+        )
     if isinstance(exc, smtplib.SMTPNotSupportedError):
-        return (
+        return _failed(
+            "smtp_not_supported",
             "Le serveur SMTP ne propose pas ce que la configuration lui demande "
-            f"(STARTTLS ou authentification) : {exc}. Essayez une autre sécurité."
+            f"(STARTTLS ou authentification) : {exc}. Essayez une autre sécurité.",
+            error=str(exc),
         )
     if isinstance(exc, smtplib.SMTPServerDisconnected):
-        return (
+        return _failed(
+            "smtp_disconnected",
             f"Le serveur {smtp_where} a fermé la connexion. Le mode de sécurité "
-            "correspond-il au port (STARTTLS sur 587, TLS sur 465) ?"
+            "correspond-il au port (STARTTLS sur 587, TLS sur 465) ?",
+            where=smtp_where,
         )
     if isinstance(exc, smtplib.SMTPResponseException):
-        return f"Le serveur SMTP a répondu par une erreur : {_server_text(exc)}"
+        return _failed(
+            "smtp_error_response",
+            f"Le serveur SMTP a répondu par une erreur : {_server_text(exc)}",
+            response=_server_text(exc),
+        )
     if isinstance(exc, smtplib.SMTPException):
-        return f"Erreur SMTP : {exc}"
+        return _failed("smtp_error", f"Erreur SMTP : {exc}", error=str(exc))
     if isinstance(exc, ssl.SSLCertVerificationError):
-        return (
+        return _failed(
+            "tls_certificate_refused",
             f"Certificat du serveur {smtp_where} refusé ({exc.verify_message}). "
-            "Pour un relais interne à certificat privé, désactivez la vérification."
+            "Pour un relais interne à certificat privé, désactivez la vérification.",
+            where=smtp_where,
+            reason=str(exc.verify_message),
         )
     if isinstance(exc, ssl.SSLError):
-        return (
-            f"Échec de la négociation TLS avec {smtp_where} ({getattr(exc, 'reason', None) or exc}). "
-            "Le mode de sécurité correspond-il au port (STARTTLS sur 587, TLS sur 465) ?"
+        reason = str(getattr(exc, "reason", None) or exc)
+        return _failed(
+            "tls_failed",
+            f"Échec de la négociation TLS avec {smtp_where} ({reason}). "
+            "Le mode de sécurité correspond-il au port (STARTTLS sur 587, TLS sur 465) ?",
+            where=smtp_where,
+            reason=reason,
         )
     if isinstance(exc, socket.gaierror):
-        return f"Serveur SMTP introuvable : {policy.smtp_host} ne se résout pas"
+        return _failed(
+            "smtp_host_unknown",
+            f"Serveur SMTP introuvable : {policy.smtp_host} ne se résout pas",
+            host=policy.smtp_host,
+        )
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
         if status == 401:
-            return "Clé API Mailgun refusée (401)"
+            return _failed("mailgun_key_refused", "Clé API Mailgun refusée (401)")
         if status in (403, 404):
-            return (
+            return _failed(
+                "mailgun_domain_unknown",
                 f"Mailgun ne connaît pas le domaine {policy.mailgun_domain} ({status}) "
-                "— vérifiez le domaine et la région de l'API (EU ou US)"
+                "— vérifiez le domaine et la région de l'API (EU ou US)",
+                domain=policy.mailgun_domain,
+                status=status,
             )
         # Only Mailgun's own message field: the URL may point anywhere, and
         # a page body is not the console's to repeat (audit S10).
@@ -146,36 +214,69 @@ def describe_error(exc: BaseException, policy: EmailPolicy) -> str:
             data = None
         body = data.get("message") if isinstance(data, dict) else None
         body = body.strip()[:200] if isinstance(body, str) else ""
-        return f"Mailgun a répondu {status}" + (f" : {body}" if body else "")
+        return _failed(
+            "mailgun_status",
+            f"Mailgun a répondu {status}" + (f" : {body}" if body else ""),
+            status=status,
+            body=body,
+        )
     if isinstance(exc, httpx.TimeoutException):
-        return "Mailgun n'a pas répondu dans le délai imparti"
+        return _failed(
+            "mailgun_timeout", "Mailgun n'a pas répondu dans le délai imparti"
+        )
     if isinstance(exc, httpx.RequestError):
-        return f"Impossible de joindre Mailgun : {exc}"
+        return _failed(
+            "mailgun_unreachable",
+            f"Impossible de joindre Mailgun : {exc}",
+            error=str(exc),
+        )
     if isinstance(exc, TimeoutError) and _step_timed_out(exc, policy):
         if "handshake" in str(exc):
             # Implicit TLS: the connection was accepted and the handshake
             # never answered — the silent server of the branch above, met
             # before smtplib has anything to turn it into.
-            return (
+            return _failed(
+                "smtp_handshake_silent",
                 f"Le serveur {smtp_where} a accepté la connexion mais n'a pas "
                 f"répondu dans les {policy.smtp_timeout_seconds} s. Est-ce bien un "
                 "serveur SMTP, et le mode de sécurité correspond-il au port "
-                "(STARTTLS sur 587, TLS sur 465) ?"
+                "(STARTTLS sur 587, TLS sur 465) ?",
+                where=smtp_where,
+                seconds=policy.smtp_timeout_seconds,
             )
-        return (
+        return _failed(
+            "timeout",
             f"Le serveur {smtp_where} n'a pas répondu dans le délai imparti "
-            f"({policy.smtp_timeout_seconds} s)"
+            f"({policy.smtp_timeout_seconds} s)",
+            where=smtp_where,
+            seconds=policy.smtp_timeout_seconds,
         )
     if isinstance(exc, TimeoutError):
-        return (
+        return _failed(
+            "timeout",
             f"Le serveur {_where(policy)} n'a pas répondu dans le délai imparti "
-            f"({_OVERALL_TIMEOUT_SECONDS} s)"
+            f"({_OVERALL_TIMEOUT_SECONDS} s)",
+            where=_where(policy),
+            seconds=_OVERALL_TIMEOUT_SECONDS,
         )
     if isinstance(exc, ConnectionRefusedError):
-        return f"Connexion refusée par {smtp_where} — le port est-il le bon ?"
+        return _failed(
+            "connection_refused",
+            f"Connexion refusée par {smtp_where} — le port est-il le bon ?",
+            where=smtp_where,
+        )
     if isinstance(exc, OSError):
-        return f"Impossible de joindre {_where(policy)} : {exc.strerror or exc}"
-    return f"Erreur inattendue : {type(exc).__name__}: {exc}"
+        return _failed(
+            "unreachable",
+            f"Impossible de joindre {_where(policy)} : {exc.strerror or exc}",
+            where=_where(policy),
+            error=str(exc.strerror or exc),
+        )
+    return _failed(
+        "unexpected",
+        f"Erreur inattendue : {type(exc).__name__}: {exc}",
+        error=f"{type(exc).__name__}: {exc}",
+    )
 
 
 def _timed_out(exc: BaseException) -> bool:
@@ -209,6 +310,17 @@ def _scrub(message: str, policy: EmailPolicy) -> str:
     return message[:_MAX_MESSAGE]
 
 
+def _scrub_params(value: Any, policy: EmailPolicy) -> Any:
+    """``_scrub`` on every text of a failure's parameters."""
+    if isinstance(value, str):
+        return _scrub(value, policy)
+    if isinstance(value, dict):
+        return {k: _scrub_params(v, policy) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_scrub_params(v, policy) for v in value]
+    return value
+
+
 async def send_test(
     policy: EmailPolicy, to: str, *, language: str | None = None
 ) -> ProbeResult:
@@ -220,7 +332,10 @@ async def send_test(
     if not policy.enabled:
         missing = ", ".join(policy.missing())
         return ProbeResult(
-            ok=False, message=f"Configuration incomplète : il manque {missing}."
+            ok=False,
+            message=f"Configuration incomplète : il manque {missing}.",
+            code="incomplete",
+            params={"missing": policy.missing_codes()},
         )
     bounded = policy.bounded(PROBE_TIMEOUT_SECONDS)
     via = (
@@ -236,9 +351,29 @@ async def send_test(
             timeout=_OVERALL_TIMEOUT_SECONDS,
         )
     except Exception as exc:
-        return ProbeResult(
-            ok=False, message=_scrub(describe_error(exc, bounded), policy)
+        failure = explain_error(exc, bounded)
+        return _failed(
+            failure.code,
+            _scrub(failure.message, policy),
+            **_scrub_params(failure.params, policy),
         )
     if not sent:  # pragma: no cover - enabled and a recipient: the senders send
-        return ProbeResult(ok=False, message="Aucun e-mail n'est parti.")
-    return ProbeResult(ok=True, message=f"E-mail de test envoyé à {to} par {via}.")
+        return _failed("not_sent", "Aucun e-mail n'est parti.")
+    return ProbeResult(
+        ok=True,
+        message=f"E-mail de test envoyé à {to} par {via}.",
+        code="sent",
+        params=sent_params(bounded, to),
+    )
+
+
+def sent_params(policy: EmailPolicy, to: str) -> dict[str, Any]:
+    """Where the test mail went out through, for the console's sentence."""
+    if policy.provider == "smtp":
+        return {
+            "to": to,
+            "provider": "smtp",
+            "host": policy.smtp_host,
+            "port": policy.smtp_port,
+        }
+    return {"to": to, "provider": "mailgun", "domain": policy.mailgun_domain}

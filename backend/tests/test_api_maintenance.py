@@ -566,6 +566,11 @@ async def test_settings_are_admin_material_and_reject_a_dead_owner(client, db_se
     }
     assert groups["Salles"]["ROOM_SOURCE"].startswith("manual")
     assert groups["Postes et seuils"]["SIGNATURE_MAX_AGE_DAYS"] == "3"
+    # And what a console in another language words it from (I2).
+    rooms = next(g for g in got["environment"] if g["code"] == "rooms")
+    assert rooms["label"] == "Salles"
+    assert rooms["items"][0]["raw"] == "manual"
+    assert rooms["items"][0]["format"] == "room_source"
     listed = {key for items in groups.values() for key in items}
     assert not listed & {
         "SECRET_KEY",

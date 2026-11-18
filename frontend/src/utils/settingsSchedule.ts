@@ -1,4 +1,4 @@
-import { intlTag } from 'src/i18n';
+import { intlTag, t } from 'src/i18n';
 /**
  * The page Paramètres' mail schedule and agent version field, as pure functions.
  *
@@ -10,7 +10,24 @@ import { intlTag } from 'src/i18n';
  * leave to be discovered.
  */
 
-/** 0 = Monday … 6 = Sunday, as the server numbers them. */
+/** 0 = Monday … 6 = Sunday, as the server numbers them: their catalogue keys. */
+export const WEEKDAY_KEYS = [
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+  'sunday',
+] as const;
+
+/** The day the server numbers `day` (0 = Monday), in the reader's language. */
+export function weekdayName(day: number): string {
+  const key = WEEKDAY_KEYS[day];
+  return key ? t(`settings.weekdays.${key}`) : String(day);
+}
+
+/** The same days in French, as the server writes them. */
 export const WEEKDAYS_FR = [
   'lundi',
   'mardi',
@@ -66,7 +83,7 @@ export function localTimeOfUtcHour(hour: number, timeZone: string, ref: Date = n
 export function digestSummary(hour: number, timeZone: string, ref: Date = new Date()): string {
   const instant = utcInstant(hour, null, ref);
   const { time } = localParts(instant, timeZone);
-  return `chaque jour à ${time} (${timeZone})`;
+  return t('settings.schedule.digestSummary', { time, zone: timeZone });
 }
 
 /**
@@ -80,7 +97,7 @@ export function reminderSummary(
   ref: Date = new Date(),
 ): string {
   const { weekday: localDay, time } = localParts(utcInstant(hour, weekday, ref), timeZone);
-  return `le ${localDay} à ${time} (${timeZone})`;
+  return t('settings.schedule.reminderSummary', { day: localDay, time, zone: timeZone });
 }
 
 // An agent version as the release workflow stamps it ("1.0.2", "v1.0.2",

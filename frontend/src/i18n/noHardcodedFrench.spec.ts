@@ -13,12 +13,6 @@ import { scanSource } from './scan';
  * list is empty.
  */
 const PENDING = new Set<string>([
-  // --- Lot C1 : Paramètres
-  'pages/SettingsPage.vue',
-  'utils/emailSettings.ts',
-  'utils/numberField.ts',
-  'utils/settingsSchedule.ts',
-
   // --- Lot F : commandes
   'components/machine/CommandOutputDialog.vue',
   'components/machine/MachineCommandsCard.vue',
