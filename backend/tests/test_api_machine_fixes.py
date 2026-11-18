@@ -689,6 +689,11 @@ async def test_a_lone_surrogate_from_a_poste_is_stripped_like_a_nul(client, db_s
         (b'{"hostname": "PC\\udc00-2\\u0000"}', "PC-2"),
         (b'{"hostname": "PC\\uD83D\\uDE00-3"}', "PC\U0001f600-3"),
         (b'{"hostname": "PC\\ud83d-4\\ud83d\\ude00\\ude00"}', "PC-4\U0001f600"),
+        # Its three bytes as they come, unescaped: not UTF-8, yet read by the
+        # JSON parser into the same character.
+        (b'{"hostname": "PC-\xed\xa0\x805"}', "PC-5"),
+        (b'{"hostname": "PC-6", "os_version": "Win\xed\xb0\x80"}', "PC-6"),
+        ('{"hostname": "PC-\U0001f600-7é"}'.encode(), "PC-\U0001f600-7é"),
     ):
         hb = await client.post("/api/v1/agent/heartbeat", headers=auth, content=body)
         assert hb.status_code == 200, (body, hb.text)

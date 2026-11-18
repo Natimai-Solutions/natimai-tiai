@@ -1363,6 +1363,12 @@ _INT4_MIN, _INT4_MAX = -(2**31), 2**31 - 1
 # Far past any percentage or number of hours, and far within what a double
 # and a numeric both take: the derived sort keys are compared as either.
 _NUMBER_MAX = 10**15
+# And far from what either refuses at the other end: a numeric holds no
+# more than 16383 digits after the point (``0E-20000`` « overflows » it),
+# a double nothing finer than about 1e-308 (a smaller numeric cast to it is
+# « out of range »). No percentage or number of hours needs either.
+_NUMBER_EXPONENT_MIN = -1000
+_NUMBER_ADJUSTED_MIN = -300
 
 
 def _value_fits(value: Any, kinds: tuple[type, ...]) -> bool:
@@ -1389,7 +1395,12 @@ def _value_fits(value: Any, kinds: tuple[type, ...]) -> bool:
     if isinstance(value, float):
         return math.isfinite(value) and abs(value) <= _NUMBER_MAX
     if isinstance(value, Decimal):
-        return value.is_finite() and abs(value) <= _NUMBER_MAX
+        return (
+            value.is_finite()
+            and abs(value) <= _NUMBER_MAX
+            and int(value.as_tuple().exponent) >= _NUMBER_EXPONENT_MIN
+            and (value == 0 or value.adjusted() >= _NUMBER_ADJUSTED_MIN)
+        )
     if isinstance(value, datetime):
         # Every stored instant is aware; a naive one would be read in the
         # database session's time zone, which is nobody's intent.

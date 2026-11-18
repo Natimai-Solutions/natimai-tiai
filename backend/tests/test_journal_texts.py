@@ -108,6 +108,26 @@ async def test_a_skipped_line_carries_its_code_until_its_title_is_retyped(
     assert resp.status_code == 200, resp.text
     assert resp.json()["title_code"] == "maintenance.skipped"
 
+    # So does one that sends the whole line back, its title as it was (an
+    # older console, a script) — spaces around it included.
+    for title in (line["title"], f"  {line['title']} "):
+        resp = await client.patch(
+            f"/api/v1/interventions/{line['id']}",
+            headers=admin,
+            json={
+                "kind": line["kind"],
+                "title": title,
+                "note": "Malade, revenu jeudi",
+                "performed_at": line["performed_at"],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        kept = resp.json()
+        assert kept["note"] == "Malade, revenu jeudi"
+        assert kept["title"] == "Maintenance non faite — B12"
+        assert kept["title_code"] == "maintenance.skipped"
+        assert kept["title_params"] == {"room": "B12"}
+
     # A title typed by someone is theirs: the code goes.
     resp = await client.patch(
         f"/api/v1/interventions/{line['id']}",
