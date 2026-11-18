@@ -200,11 +200,24 @@ def test_the_server_settings_name_what_was_missing():
         ("http://jdupont:s3cr3t-pass@10.0.0.1:3128", "10.0.0.1:3128"),
         ("https://user@proxy.example", "proxy.example"),
         ("http://[::1", "défini (illisible)"),
+        ("http://[fd00::1]:3128", "[fd00::1]:3128"),
+        ("HTTP://Proxy.Lycee.PF:3128/", "proxy.lycee.pf:3128"),
+        # Verification of v1.2.1, F9: a password holding « / », « # » or « ? »
+        # ends the authority early for the parser, which then took the
+        # account — and the digits opening the password — for host and port.
+        ("http://jdupont:123/abc@proxy:3128", "défini (illisible)"),
+        ("http://jdupont:12345#x@proxy:3128", "défini (illisible)"),
+        ("http://jdupont:9?s3cr3t-pass@proxy:3128", "défini (illisible)"),
+        ("http://jdu/pont:s3cr3t-pass@proxy:3128", "défini (illisible)"),
+        ("http://jdupont:s3cr3t-pass@proxy:3128@other", "défini (illisible)"),
+        ("jdupont:s3cr3t-pass@proxy:3128", "défini (illisible)"),
+        ("http://pro xy:3128", "défini (illisible)"),
+        ("http://proxy:99999", "défini (illisible)"),
     ],
 )
 def test_the_mailgun_proxy_shows_its_host_never_its_credentials(url, shown):
     env = Settings(EMAIL_PROVIDER="mailgun", MAILGUN_PROXY_URL=url)
     rendered = " ".join(f"{i.key} {i.value or ''} {i.description}" for i in _items(env))
     assert {i.key: i.value for i in _items(env)}["MAILGUN_PROXY_URL"] == shown
-    for secret in ("jdupont", "s3cr3t-pass", "user@"):
+    for secret in ("jdupont", "jdu/", "s3cr3t-pass", "user@"):
         assert secret not in rendered

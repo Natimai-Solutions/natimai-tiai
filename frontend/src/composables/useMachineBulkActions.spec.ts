@@ -100,6 +100,29 @@ describe('useMachineBulkActions', () => {
       await vi.waitFor(() => expect(createCommands).toHaveBeenCalledOnce());
     });
 
+    // Review: the confirmation accepted twice in the same instant, or the
+    // menu entry clicked twice before the first answer, sends once.
+    it('sends once when asked twice before the server has answered', async () => {
+      let release: (v: unknown) => void = () => undefined;
+      vi.mocked(createCommands).mockImplementation(
+        () => new Promise((resolve) => (release = resolve)) as never,
+      );
+      const { selected, runBulk } = setup();
+      const costly = action((a) => a.confirm && !a.serverSide && a.bulk);
+      runBulk(costly);
+      q.state.onOk!();
+      q.state.onOk!();
+      runBulk(action((a) => !a.confirm && !a.serverSide && a.bulk));
+      expect(createCommands).toHaveBeenCalledTimes(1);
+
+      release({ count: 2, skipped: 0 });
+      await vi.waitFor(() => expect(selected.value).toEqual([]));
+      // Free again for the next selection.
+      selected.value = [{ id: 'm-3' } as Machine];
+      runBulk(action((a) => !a.confirm && !a.serverSide && a.bulk));
+      expect(createCommands).toHaveBeenCalledTimes(2);
+    });
+
     it('wakes through the server rather than queueing a command', async () => {
       vi.mocked(wakeMachines).mockResolvedValue({ results: [] } as never);
       const { selected, runBulk } = setup();
@@ -118,6 +141,8 @@ describe('useMachineBulkActions', () => {
       const { selected, runBulk } = setup();
 
       runBulk(action((a) => !a.confirm && !a.serverSide && a.bulk));
+      // One send at a time: the second action once the first was refused.
+      await vi.waitFor(() => expect(q.notify).toHaveBeenCalledTimes(1));
       runBulk({ ...action((a) => !!a.serverSide), confirm: false });
       await vi.waitFor(() => expect(q.notify).toHaveBeenCalledTimes(2));
 

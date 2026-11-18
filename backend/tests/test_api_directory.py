@@ -825,3 +825,84 @@ async def test_a_dry_run_says_what_the_sync_would_do_and_writes_nothing(
     real = await client.post("/api/v1/rooms/sync-directory", headers=headers)
     assert real.json() == expected
     assert (await _machine(client, headers, a))["room_name"] == "C3"
+
+
+async def test_a_resync_beside_heartbeats_filing_the_same_postes_does_not_deadlock(
+    client, db_session, room_source
+):
+    """A re-sync (its dry run, then the real one) while the postes report
+    their directory block: the heartbeat holds its poste and goes on to the
+    room its OU names, the sync used to hold that room — created a moment
+    earlier, not committed — and go on to the poste. One of the two died of
+    the deadlock: a 500 for the administrator when it was the sync. The sync
+    now takes its postes first, like the heartbeat."""
+    import asyncio
+
+    headers = await _admin(client, db_session)
+    enrolled = [await _enroll(client, f"pc-{i}", hostname=f"H{i}") for i in range(30)]
+
+    def reading(i):
+        return _dir(ou=f"R{i % 10}", ou_dn=f"OU=R{i % 10},DC=lycee,DC=local")
+
+    # Stored in manual mode: nothing is filed yet, every room is to create.
+    room_source("manual")
+    for i, e in enumerate(enrolled):
+        await _report(client, e, reading(i))
+    room_source("ad_ou")
+
+    async def beat(i, e):
+        return await client.post(
+            "/api/v1/agent/heartbeat",
+            headers={"Authorization": f"Bearer {e['token']}"},
+            json={"inventory": {"hash": "h2", "directory": reading(i)}},
+        )
+
+    answers = await asyncio.gather(
+        client.post("/api/v1/rooms/sync-directory?dry_run=true", headers=headers),
+        *[beat(i, e) for i, e in enumerate(enrolled)],
+        client.post("/api/v1/rooms/sync-directory?dry_run=true", headers=headers),
+        client.post("/api/v1/rooms/sync-directory", headers=headers),
+    )
+    assert [r.status_code for r in answers] == [200] * len(answers), [
+        r.text[:300] for r in answers if r.status_code != 200
+    ]
+    rooms = (await client.get("/api/v1/rooms", headers=headers)).json()
+    assert sorted(r["name"] for r in rooms) == [f"R{i}" for i in range(10)]
+    assert sum(r["machine_count"] for r in rooms) == 30
+
+
+async def test_postes_reporting_a_new_ou_at_the_same_time_are_all_filed(
+    client, db_session, room_source
+):
+    """Thirty postes report ten OUs that have no room yet, together. One
+    request creates each room; the others, which had not seen it either,
+    used to fail on the room's unique key — the heartbeat went through, the
+    poste stayed unfiled until its next inventory. They now take the room
+    the first one created."""
+    import asyncio
+
+    headers = await _admin(client, db_session)
+    enrolled = [await _enroll(client, f"pc-{i}", hostname=f"H{i}") for i in range(30)]
+    room_source("ad_ou")
+    answers = await asyncio.gather(
+        *[
+            client.post(
+                "/api/v1/agent/heartbeat",
+                headers={"Authorization": f"Bearer {e['token']}"},
+                json={
+                    "inventory": {
+                        "hash": "h1",
+                        "directory": _dir(
+                            ou=f"R{i % 10}", ou_dn=f"OU=R{i % 10},DC=lycee,DC=local"
+                        ),
+                    }
+                },
+            )
+            for i, e in enumerate(enrolled)
+        ]
+    )
+    assert {r.status_code for r in answers} == {200}
+    rooms = (await client.get("/api/v1/rooms", headers=headers)).json()
+    assert sorted((r["name"], r["machine_count"]) for r in rooms) == [
+        (f"R{i}", 3) for i in range(10)
+    ]

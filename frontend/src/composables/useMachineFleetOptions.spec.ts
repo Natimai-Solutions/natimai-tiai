@@ -149,6 +149,26 @@ describe('useMachineFleetOptions', () => {
     // Assumed manual: the worst case is a refusal the notification explains.
     expect(manualMode.value).toBe(true);
   });
+
+  // Review finding 5: the server answers `/rooms/config` with room:read, and
+  // only an account that places postes (room:write) has a use for it. A group
+  // holding the write alone got a 403 on every load of the list.
+  it.each([
+    { read: true, write: true, asked: 1 },
+    { read: false, write: true, asked: 0 },
+    { read: true, write: false, asked: 0 },
+    { read: false, write: false, asked: 0 },
+  ])('asks for the placement mode with both room rights ($read / $write)', async (c) => {
+    vi.mocked(rooms.getRoomConfig).mockClear();
+    const { loadRooms, manualMode } = useMachineFleetOptions({
+      canReadRooms: () => c.read,
+      canPlaceRooms: () => c.write,
+    });
+    await loadRooms();
+    expect(rooms.getRoomConfig).toHaveBeenCalledTimes(c.asked);
+    // Not asked: assumed manual, the worst case is a refusal that is explained.
+    expect(manualMode.value).toBe(c.asked === 0);
+  });
 });
 
 describe('chassisLabelOf', () => {

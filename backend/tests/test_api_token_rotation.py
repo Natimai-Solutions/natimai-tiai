@@ -77,6 +77,22 @@ def test_promotion_retires_the_current_token_and_restarts_the_clock():
     assert machine.token_issued_at == NOW
 
 
+def test_a_promoted_token_is_never_an_unused_enrollment_token():
+    """The clock restarts, the fact does not: the request promoting the token
+    is using it, on a poste that was heartbeating before — the enrollment
+    retry must not take it for a token nobody received."""
+    from app.features.machine.token_rotation import promote_pending
+
+    machine = _machine(
+        token_hash="old",
+        pending_token_hash="new",
+        token_issued_at=NOW - timedelta(days=40),
+        enrollment_token_unused=True,
+    )
+    promote_pending(machine, NOW)
+    assert machine.enrollment_token_unused is False
+
+
 # --- Through the API ---------------------------------------------------------------
 
 

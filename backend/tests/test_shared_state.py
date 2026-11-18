@@ -69,6 +69,31 @@ async def test_the_sweep_keeps_a_file_another_process_holds(
     assert not (store / sha).exists()
 
 
+async def test_uploads_of_one_content_do_not_wait_for_one_another(
+    client, db_session, store, other_process
+):
+    """The hold is shared: two uploads storing the same bytes — in two
+    packages, in two processes — each go on without waiting for the other's
+    transaction to end, and the file stays while either holds it."""
+    from app.features.package import crud
+
+    admin = await _admin(client, db_session)
+    await _pronote(client, admin)
+    sha = "ca" * 32
+    (store / sha).write_bytes(b"the same installer, sent twice")
+    async with (
+        AsyncSession(other_process) as first,
+        AsyncSession(db_session.bind) as second,
+    ):
+        await crud.hold_file(first, sha)
+        await asyncio.wait_for(crud.hold_file(second, sha), 2)
+        await first.rollback()
+        assert await crud.sweep_store(db_session) == 0
+        assert (store / sha).exists()
+        await second.rollback()
+    assert await crud.sweep_store(db_session) == 1
+
+
 async def test_a_hold_ends_with_the_process_that_took_it(
     client, db_session, store, other_process
 ):
@@ -381,6 +406,98 @@ async def test_concurrent_heartbeats_do_not_exceed_the_fleet_budget(
     )
     created = await db_session.scalar(select(func.count()).select_from(Software))
     assert created == 25
+
+
+async def test_a_grant_never_waits_for_a_connection_of_the_requests_pool(
+    engine, budgets
+):
+    """The grant's connection is not one of the application pool's: a
+    process whose every pooled connection is held by a request in flight —
+    each asking for a grant — would otherwise wait for itself until the
+    pool's timeout. Here the pool has one connection, and the request holds
+    it."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.features.inventory import crud
+
+    budgets(10, 100)
+    tight = create_async_engine(engine.url, pool_size=1, max_overflow=0, pool_timeout=1)
+    try:
+        async with AsyncSession(tight) as session:
+            await session.connection()
+            assert tight.pool.checkedout() == 1
+            granted = await asyncio.wait_for(
+                crud._reserve_until_commit(session, "a", 4), 5
+            )
+            assert granted == 4
+            # Given back the same way, the request's connection still held.
+            await asyncio.wait_for(session.rollback(), 5)
+        assert await _left(engine, "a") == (10, 100)
+    finally:
+        await tight.dispose()
+
+
+async def test_a_grant_gives_up_on_a_database_that_does_not_answer(monkeypatch):
+    """A server that takes the connection and says nothing — a database
+    being restored, a firewall that drops: the grant is given up within the
+    connect timeout, as ``Unavailable``, and said once however many ask."""
+    import time
+
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.features.counter import quota
+
+    async def mute(_reader, writer):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(mute, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    silent = create_async_engine(f"postgresql+psycopg://tiai:tiai@127.0.0.1:{port}/x")
+    monkeypatch.setattr(quota, "CONNECT_TIMEOUT_SECONDS", 2)
+    monkeypatch.setattr(quota, "_take_failures", quota._Failures())
+    budget = quota.Quota(name="probe", units=10, window_seconds=3600)
+    started = time.monotonic()
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(quota.take(silent, [(budget, "a")], 1) for _ in range(3)),
+                return_exceptions=True,
+            ),
+            15,
+        )
+    finally:
+        server.close()
+        await silent.dispose()
+    assert [type(r) for r in results] == [quota.Unavailable] * 3
+    assert time.monotonic() - started < 8
+    assert quota._take_failures.unsaid == 2
+
+
+async def test_a_give_back_does_not_wait_for_a_lock_either(
+    engine, other_process, budgets, monkeypatch
+):
+    """A give-back runs when a transaction ends — a rollback, a close: it
+    never raises, and does not make that call wait for a row another
+    transaction holds."""
+    from app.features.counter import quota
+    from app.features.inventory import budget
+
+    budgets(10, 100)
+    monkeypatch.setattr(quota, "LOCK_TIMEOUT_MS", 300)
+    monkeypatch.setattr(quota, "_give_back_failures", quota._Failures())
+    async with AsyncSession(engine) as session:
+        grant = await budget.reserve(session, "a", 4)
+    assert grant is not None
+    async with AsyncSession(other_process) as holder:
+        await holder.exec(text("SELECT * FROM shared_counter FOR UPDATE"))
+        await asyncio.wait_for(budget.release(engine, grant), 5)
+        await holder.rollback()
+    # Not given back: spent for the window, the safe side.
+    assert await _left(engine, "a") == (6, 96)
+    assert quota._give_back_failures.logged_at is not None
 
 
 @pytest.mark.parametrize("ending", ["rollback", "close"])

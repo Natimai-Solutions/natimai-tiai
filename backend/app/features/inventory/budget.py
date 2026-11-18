@@ -54,11 +54,17 @@ async def budget_left(session: AsyncSession, machine_key: str) -> int:
     )
 
 
+# The budgets could not be asked (``quota.take``): to be read as nothing
+# granted, never as a failure of the request.
+Unavailable = quota.Unavailable
+
+
 async def reserve(session: AsyncSession, machine_key: str, wanted: int) -> Grant | None:
     """Take up to ``wanted`` new catalogue entries from both budgets at once,
     committed apart from ``session``'s transaction. To be given back with
     ``release`` when the transaction that was to create them does not
-    commit."""
+    commit. None when the budgets have nothing left; ``Unavailable`` when
+    they could not be asked."""
     return await quota.take(
         quota.engine_of(session),
         [(software_quota, machine_key), (software_fleet_quota, FLEET)],

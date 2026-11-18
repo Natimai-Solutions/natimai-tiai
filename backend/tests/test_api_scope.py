@@ -388,6 +388,178 @@ async def test_a_visit_seen_through_one_poste_keeps_its_room_and_note(
     )
 
 
+async def test_a_visit_of_ones_room_is_partial_once_a_poste_left_the_scope(
+    client, db_session
+):
+    """Audit S06 (T04): a visit is whole only when its room *and every poste*
+    are in scope. A poste of site B filed in a room of site A is seen through
+    that room; once it leaves the room, the visit that maintained it holds a
+    line the account no longer sees — its global note is withheld, and the
+    account can no longer delete it."""
+    from sqlalchemy import update
+
+    from app.features.machine.models import Machine
+
+    t = await two_sites(client, db_session)
+    r = await client.post(
+        "/api/v1/rooms", headers=t.admin, json={"name": "A-Room", "location": SITE_A}
+    )
+    assert r.status_code == 201, r.text
+    room_a = r.json()["id"]
+    own = await machine(db_session, "PC-A2", location=SITE_A, room_id=uuid.UUID(room_a))
+    guest = await machine(
+        db_session, "PC-B-IN-A", location=SITE_B, room_id=uuid.UUID(room_a)
+    )
+    r = await client.post(
+        "/api/v1/maintenance",
+        headers=t.admin,
+        json={
+            "room_id": room_a,
+            "note": "Note A",
+            "items": [
+                {"machine_id": str(own.id)},
+                {"machine_id": str(guest.id), "note": "n"},
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    visit_id = r.json()["id"]
+    body = (
+        await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.scoped)
+    ).json()
+    assert (body["note"], body["partial"], body["machine_count"]) == (
+        "Note A",
+        False,
+        2,
+    )
+
+    await db_session.exec(
+        update(Machine).where(Machine.id == guest.id).values(room_id=None)  # type: ignore[arg-type]
+    )
+    await db_session.commit()
+
+    body = (
+        await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.scoped)
+    ).json()
+    # The room is still the account's: named. The note speaks for a poste it
+    # no longer sees.
+    assert body["room_name"] == "A-Room"
+    assert (body["note"], body["partial"], body["machine_count"]) == (None, True, 1)
+    assert [i["machine_id"] for i in body["items"]] == [str(own.id)]
+    (row,) = (await client.get("/api/v1/maintenance", headers=t.scoped)).json()["items"]
+    assert (row["note"], row["partial"]) == (None, True)
+    r = await client.delete(f"/api/v1/maintenance/{visit_id}", headers=t.scoped)
+    assert r.status_code == 403, r.text
+    assert r.json()["error"]["code"] == "auth.scope.restricted"
+    full = (await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.admin)).json()
+    assert (full["note"], full["partial"], full["machine_count"]) == (
+        "Note A",
+        False,
+        2,
+    )
+
+
+async def test_a_visit_whose_room_was_deleted_stays_partial_for_a_confined_account(
+    client, db_session
+):
+    """A visit of a room of site B, seen from site A through its one poste —
+    every line of it is in scope, only the room is not. Deleting the room
+    must not turn it whole: whether the room was the account's can no longer
+    be told, so the name and the note withheld the day before stay withheld,
+    and the visit is not the account's to delete. A visit that never had a
+    room keeps its rule: whole when every poste is in scope."""
+    t = await two_sites(client, db_session)
+    r = await client.post(
+        "/api/v1/rooms", headers=t.admin, json={"name": "B-Secret", "location": SITE_B}
+    )
+    assert r.status_code == 201, r.text
+    room_b = r.json()["id"]
+    stray = await machine(
+        db_session, "PC-A-IN-B", location=SITE_A, room_id=uuid.UUID(room_b)
+    )
+    r = await client.post(
+        "/api/v1/maintenance",
+        headers=t.admin,
+        json={
+            "room_id": room_b,
+            "note": "Note globale B",
+            "items": [{"machine_id": str(stray.id)}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    visit_id = r.json()["id"]
+    body = (
+        await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.scoped)
+    ).json()
+    assert (body["room_name"], body["note"], body["partial"]) == (None, None, True)
+
+    r = await client.delete(f"/api/v1/rooms/{room_b}", headers=t.admin)
+    assert r.status_code == 204, r.text
+
+    detail = await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.scoped)
+    body = detail.json()
+    assert (body["room_id"], body["room_name"]) == (None, None)
+    assert (body["note"], body["partial"]) == (None, True)
+    assert [i["machine_id"] for i in body["items"]] == [str(stray.id)]
+    assert "Note globale B" not in detail.text
+    listed = await client.get("/api/v1/maintenance", headers=t.scoped)
+    assert "Note globale B" not in listed.text
+    r = await client.delete(f"/api/v1/maintenance/{visit_id}", headers=t.scoped)
+    assert r.status_code == 403, r.text
+    # The unrestricted account still reads, and removes, the whole of it.
+    full = (await client.get(f"/api/v1/maintenance/{visit_id}", headers=t.admin)).json()
+    assert (full["room_name"], full["note"], full["partial"]) == (
+        "B-Secret",
+        "Note globale B",
+        False,
+    )
+    r = await client.delete(f"/api/v1/maintenance/{visit_id}", headers=t.admin)
+    assert r.status_code == 204, r.text
+
+    # Never had a room, every poste in scope: whole, and the account's.
+    r = await client.post(
+        "/api/v1/maintenance",
+        headers=t.admin,
+        json={"note": "Tournée", "items": [{"machine_id": str(t.a.id)}]},
+    )
+    assert r.status_code == 201, r.text
+    loose_id = r.json()["id"]
+    body = (
+        await client.get(f"/api/v1/maintenance/{loose_id}", headers=t.scoped)
+    ).json()
+    assert (body["note"], body["partial"]) == ("Tournée", False)
+    r = await client.delete(f"/api/v1/maintenance/{loose_id}", headers=t.scoped)
+    assert r.status_code == 204, r.text
+
+
+async def test_the_visits_of_a_poste_out_of_scope_are_not_listed(client, db_session):
+    """A visit across two sites is visible to site A through its own poste.
+    Listing the visits *of the other site's poste* must then answer as for a
+    poste that does not exist: the filter told a confined account which
+    postes it cannot see took part in a visit it can."""
+    t = await two_sites(client, db_session)
+    r = await client.post(
+        "/api/v1/maintenance",
+        headers=t.admin,
+        json={"items": [{"machine_id": str(t.a.id)}, {"machine_id": str(t.b.id)}]},
+    )
+    assert r.status_code == 201, r.text
+
+    def listed(headers, machine_id):
+        return client.get(
+            f"/api/v1/maintenance?machine_id={machine_id}", headers=headers
+        )
+
+    own = (await listed(t.scoped, t.a.id)).json()
+    assert own["total"] == 1 and len(own["items"]) == 1
+    other = await listed(t.scoped, t.b.id)
+    unknown = await listed(t.scoped, uuid.uuid4())
+    assert other.status_code == unknown.status_code == 200
+    assert other.json() == unknown.json()
+    assert other.json()["total"] == 0 and other.json()["items"] == []
+    assert (await listed(t.admin, t.b.id)).json()["total"] == 1
+
+
 async def test_the_due_list_is_the_sites(client, db_session):
     t = await two_sites(client, db_session)
 

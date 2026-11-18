@@ -27,7 +27,8 @@ PROBE_TIMEOUT_SECONDS = 15
 _OVERALL_TIMEOUT_SECONDS = PROBE_TIMEOUT_SECONDS + 10
 _MAX_MESSAGE = 400
 # « 530 5.7.0 Authentication required »: the server wants a login before it
-# accepts a sender.
+# accepts a sender. The same code carries « 530 5.7.0 Must issue a STARTTLS
+# command first », which no account answers: told apart by its text.
 SMTP_AUTH_REQUIRED = 530
 
 
@@ -47,6 +48,18 @@ def describe_error(exc: BaseException, policy: EmailPolicy) -> str:
     """A failure as the page shows it: what went wrong, in French, and the
     server's own words where it gave any."""
     smtp_where = f"{policy.smtp_host}:{policy.smtp_port}"
+    if (
+        isinstance(exc, smtplib.SMTPResponseException)
+        and exc.smtp_code == SMTP_AUTH_REQUIRED
+        and "starttls" in _server_text(exc).lower()
+    ):
+        # Security « Aucune » on a server that only talks encrypted (587):
+        # the field to change is the security mode, not the account.
+        return (
+            f"Le serveur {smtp_where} exige une connexion chiffrée avant tout "
+            "envoi — choisissez la sécurité « STARTTLS » "
+            f"(réponse : {_server_text(exc)})"
+        )
     if (
         isinstance(exc, smtplib.SMTPResponseException)
         and exc.smtp_code == SMTP_AUTH_REQUIRED
@@ -137,6 +150,21 @@ def describe_error(exc: BaseException, policy: EmailPolicy) -> str:
         return "Mailgun n'a pas répondu dans le délai imparti"
     if isinstance(exc, httpx.RequestError):
         return f"Impossible de joindre Mailgun : {exc}"
+    if isinstance(exc, TimeoutError) and _step_timed_out(exc, policy):
+        if "handshake" in str(exc):
+            # Implicit TLS: the connection was accepted and the handshake
+            # never answered — the silent server of the branch above, met
+            # before smtplib has anything to turn it into.
+            return (
+                f"Le serveur {smtp_where} a accepté la connexion mais n'a pas "
+                f"répondu dans les {policy.smtp_timeout_seconds} s. Est-ce bien un "
+                "serveur SMTP, et le mode de sécurité correspond-il au port "
+                "(STARTTLS sur 587, TLS sur 465) ?"
+            )
+        return (
+            f"Le serveur {smtp_where} n'a pas répondu dans le délai imparti "
+            f"({policy.smtp_timeout_seconds} s)"
+        )
     if isinstance(exc, TimeoutError):
         return (
             f"Le serveur {_where(policy)} n'a pas répondu dans le délai imparti "
@@ -154,6 +182,16 @@ def _timed_out(exc: BaseException) -> bool:
     raises it from the timeout, which stays attached as its context."""
     cause = exc.__cause__ or exc.__context__
     return isinstance(cause, TimeoutError) or "timed out" in str(exc)
+
+
+def _step_timed_out(exc: TimeoutError, policy: EmailPolicy) -> bool:
+    """Whether a timeout is one SMTP network step running out of the socket's
+    delay (``smtp_timeout_seconds``, bounded for the test) rather than the
+    whole test running out of its own: ``asyncio.wait_for`` raises its
+    timeout from the cancellation it caused."""
+    return policy.provider == "smtp" and not isinstance(
+        exc.__cause__, asyncio.CancelledError
+    )
 
 
 def _where(policy: EmailPolicy) -> str:

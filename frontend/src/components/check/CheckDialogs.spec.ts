@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { QForm, QInput, QSelect } from 'quasar';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,12 +9,15 @@ vi.mock('src/services/checks', async (importOriginal) => ({
   listAssignableUsers: vi.fn(),
 }));
 
+import type { User } from 'src/services/auth';
 import { closeCheck, listAssignableUsers, type Check } from 'src/services/checks';
+import { useAuthStore } from 'src/stores/auth';
 import CheckCloseDialog from './CheckCloseDialog.vue';
 import CheckRequestDialog from './CheckRequestDialog.vue';
 
 describe('CheckRequestDialog — an assignee deactivated since (item 4)', () => {
   beforeEach(() => {
+    setActivePinia(createPinia());
     vi.mocked(listAssignableUsers).mockResolvedValue([{ id: 'u-1', name: 'Alice' }]);
   });
 
@@ -43,6 +47,10 @@ describe('CheckRequestDialog — an assignee deactivated since (item 4)', () => 
 describe('CheckRequestDialog — a session that ends mid-form (solidity item 7)', () => {
   beforeEach(() => {
     window.sessionStorage.clear();
+    // A draft is kept for an account: the one logged in (the walk with two
+    // accounts is in CheckRequestDialog.draft.spec.ts).
+    setActivePinia(createPinia());
+    useAuthStore().user = { id: 'u-me', email: 'me@x', permissions: [] } as unknown as User;
     vi.mocked(listAssignableUsers).mockResolvedValue([]);
   });
 

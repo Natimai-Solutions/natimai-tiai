@@ -14,6 +14,7 @@ new refresh token with it. ``POST /auth/logout`` ends the session for good.
 import asyncio
 import json
 import logging
+import math
 import time
 import uuid
 from datetime import datetime
@@ -36,6 +37,7 @@ from app.api.deps import (
 from app.api.fields import Email, Password
 from app.core import ratelimit, security
 from app.core.config import settings
+from app.core.control_chars import refuse_nul_in_form
 from app.core.errors import AppError, ErrorCode
 from app.core.net import client_ip
 from app.features.audit import crud as audit
@@ -157,7 +159,15 @@ async def _profile(
         email=user.email,
         full_name=user.full_name,
         email_preference=user.email_preference,
-        preferences=dict(user.preferences or {}),
+        # A value stored before its depth was bounded is left out rather
+        # than served: the response would fail on it, and with it the whole
+        # profile. The key stays in the database, where a write replaces or
+        # removes it like any other.
+        preferences={
+            key: value
+            for key, value in (user.preferences or {}).items()
+            if unservable(value) is None
+        },
         groups=[GroupRef.model_validate(g) for g in groups],
         permissions=sorted(permissions),
     )
@@ -166,7 +176,13 @@ async def _profile(
 @router.post(
     "/login",
     response_model=Token,
-    dependencies=[Depends(ratelimit.rate_limit(ratelimit.login_limiter, "auth.login"))],
+    dependencies=[
+        Depends(ratelimit.rate_limit(ratelimit.login_limiter, "auth.login")),
+        # The form is accepted as multipart too, which the control-character
+        # middleware does not read: a NUL in it is refused here, not by the
+        # database.
+        Depends(refuse_nul_in_form),
+    ],
 )
 async def login(
     request: Request,
@@ -186,8 +202,8 @@ async def login(
             details = {"locked_until": exc.locked_until.isoformat()}
             if exc.slow:
                 # Failures spaced out over hours (audit T06): the audit log
-                # says which counter locked, since this lock admits only the
-                # account's usual addresses.
+                # says which counter locked, since this lock lasts
+                # LOGIN_SLOW_WINDOW_HOURS and no login lifts it.
                 details["via"] = "slow_attempts"
             audit.record(
                 session,
@@ -428,6 +444,40 @@ async def me(
 PREFERENCES_MAX_KEYS = 50
 PREFERENCES_MAX_BYTES = 16 * 1024
 PREFERENCES_KEY_MAX_LENGTH = 64
+# …and so many levels of lists and objects inside one value. A list of
+# column names is one level; a value nested hundreds deep fits in the byte
+# budget, was stored, and could not be served back: every ``GET /auth/me``
+# of the account then failed, and its console no longer loaded.
+PREFERENCES_MAX_DEPTH = 8
+
+
+def unservable(value: Any) -> str | None:
+    """Why a preference value cannot be stored and handed back, None when
+    it can: nested beyond PREFERENCES_MAX_DEPTH, or holding what a JSON
+    document cannot — a string that is not Unicode text (a lone surrogate,
+    which ``"\\ud83d"`` in a body decodes to), a number that is not one
+    (``NaN``, ``Infinity``: Python reads them, PostgreSQL refuses them).
+
+    Walked with a stack, not by recursion: the depth is the caller's.
+    """
+    pending: list[tuple[Any, int]] = [(value, 0)]
+    while pending:
+        item, depth = pending.pop()
+        if isinstance(item, dict | list):
+            if depth >= PREFERENCES_MAX_DEPTH:
+                return f"nested more than {PREFERENCES_MAX_DEPTH} levels deep"
+            children = (
+                [*item.keys(), *item.values()] if isinstance(item, dict) else item
+            )
+            pending.extend((child, depth + 1) for child in children)
+        elif isinstance(item, str):
+            try:
+                item.encode("utf-8")
+            except UnicodeEncodeError:
+                return "a string that is not valid Unicode text"
+        elif isinstance(item, float) and not math.isfinite(item):
+            return "a number that is not finite"
+    return None
 
 
 class ProfileUpdate(BaseModel):
@@ -446,11 +496,16 @@ class ProfileUpdate(BaseModel):
     def _bounded_keys(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
         if value is None:
             return None
-        for key in value:
+        for key, item in value.items():
             if not key or len(key) > PREFERENCES_KEY_MAX_LENGTH:
                 raise ValueError(
                     f"preference keys must be 1–{PREFERENCES_KEY_MAX_LENGTH} characters"
                 )
+            # Checked on what is sent, not on the merged document: an account
+            # must never be able to store what its profile cannot serve.
+            reason = unservable(key) or unservable(item)
+            if reason is not None:
+                raise ValueError(f"preference {key!a}: {reason}")
         return value
 
 
@@ -560,6 +615,33 @@ async def change_password(
     ratelimit.check_account(
         ratelimit.password_change_limiter, str(current.id), "auth.password"
     )
+    # That limiter is this process's, and can be switched off: the budget
+    # that holds is the count on the session's row, read under its lock
+    # before any check. Guesses sent together through one session queue
+    # here; once five have failed, the others find the session ended and
+    # cost no bcrypt. The rows are locked in the order every request takes
+    # them in (``crud.lock_account``) — the account's, the session's, and
+    # later the address's: a wrong password used to take them the other way
+    # round, and could deadlock with a refresh of the same session from
+    # another tab, or with a reset of the password.
+    account = await crud.lock_account(session, user)
+    locked = (
+        await auth_sessions.lock_row(session, current) if account is not None else None
+    )
+    if (
+        locked is None
+        or not auth_sessions.is_live(locked)
+        or locked.password_failures >= PASSWORD_CHANGE_SESSION_FAILURES
+    ):
+        if locked is not None:
+            auth_sessions.revoke(session, locked)
+            await session.commit()
+        raise AppError(
+            code=ErrorCode.AUTH_SESSION_INVALID,
+            status_code=401,
+            message="This session has ended",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if not await security.check_password(
         payload.current_password, user.hashed_password
     ):
@@ -569,8 +651,8 @@ async def change_password(
         # guesser's token with it — and the owner's other sessions are left
         # alone: they never typed a wrong password.
         ip = client_ip(request)
-        lock = await crud.record_failure(session, user, ip)
         failures = await auth_sessions.note_password_failure(session, current)
+        lock = await crud.record_failure(session, user, ip)
         if lock is not None:
             details: dict[str, Any] = {
                 "locked_until": lock.until.isoformat(),
@@ -739,7 +821,13 @@ async def _issue_reset_link(session: SessionDep, email: str, ip: str) -> None:
     await session.commit()
 
 
-@router.get(
+class PasswordResetCheck(BaseModel):
+    """A reset token to look at, not to redeem."""
+
+    token: str
+
+
+@router.post(
     "/password-reset/check",
     status_code=204,
     dependencies=[
@@ -750,7 +838,9 @@ async def _issue_reset_link(session: SessionDep, email: str, ip: str) -> None:
         )
     ],
 )
-async def check_password_reset(token: str, session: SessionDep) -> None:
+async def check_password_reset(
+    payload: PasswordResetCheck, session: SessionDep
+) -> None:
     """Whether a reset link can still be redeemed, without redeeming it.
 
     Public, for the reset page to say « ce lien a expiré » before the owner
@@ -759,8 +849,11 @@ async def check_password_reset(token: str, session: SessionDep) -> None:
     locked or written. Rate-limited per address like the reset requests (a
     budget of its own, so reloading the page does not spend theirs): it
     answers whether a token is live, which is what guessing tokens would ask.
+
+    A POST, the token in the body: in a query string, the access log wrote
+    down a link that was still good for an hour.
     """
-    if not await crud.reset_token_usable(session, token):
+    if not await crud.reset_token_usable(session, payload.token):
         raise AppError(
             code=ErrorCode.PASSWORD_RESET_TOKEN_INVALID,
             status_code=400,

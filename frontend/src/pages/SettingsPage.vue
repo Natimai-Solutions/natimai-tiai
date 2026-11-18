@@ -680,6 +680,17 @@ const ownerOptions = ref<{ label: string; value: string }[]>([]);
 let loadedOwnerId: string | null = null;
 const canWrite = computed(() => auth.can('settings', 'write'));
 
+function fillMaintenanceForm(s: ConsoleSettings) {
+  form.cycle = s.maintenance_default_cycle_days;
+  // The stored owner that no longer resolves (deactivated, rights lost) is
+  // named and kept as the value, not shown as an empty field.
+  form.ownerId =
+    s.maintenance_default_owner?.id ?? s.maintenance_default_owner_unavailable?.id ?? null;
+  loadedOwnerId = form.ownerId;
+  form.dueSoon = s.maintenance_due_soon_days;
+  saved.maintenance = formSnapshot(form);
+}
+
 // The usage card's own form. `number | string`: an emptied box hands back ''.
 const savingUsage = ref(false);
 const usageForm = reactive({
@@ -843,11 +854,13 @@ function fillEmailForm(s: ConsoleSettings) {
 
 // --- Unsaved changes (item 12). Each card's form as last filled from the
 // server; a card whose form differs holds changes « Enregistrer » has not
-// sent. The maintenance card keeps its own rules.
-const saved = reactive({ usage: '', fleet: '', schedule: '', email: '' });
+// sent. All five cards: a cycle retyped and left unsaved is lost like any
+// other field.
+const saved = reactive({ maintenance: '', usage: '', fleet: '', schedule: '', email: '' });
 const unsavedCards = computed(() => {
   if (!settings.value || !canWrite.value) return [];
   const cards: string[] = [];
+  if (formSnapshot(form) !== saved.maintenance) cards.push('Maintenance');
   if (formSnapshot(usageForm) !== saved.usage) cards.push('Utilisation');
   if (formSnapshot(fleetForm) !== saved.fleet) cards.push('Seuils du parc');
   if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('Calendrier des e-mails');
@@ -913,13 +926,8 @@ async function load() {
   try {
     settings.value = await getSettings();
     loadError.value = null;
-    form.cycle = settings.value.maintenance_default_cycle_days;
-    // The stored owner that no longer resolves (deactivated, rights lost) is
-    // named and kept as the value, not shown as an empty field.
     const unavailable = settings.value.maintenance_default_owner_unavailable ?? null;
-    form.ownerId = settings.value.maintenance_default_owner?.id ?? unavailable?.id ?? null;
-    loadedOwnerId = form.ownerId;
-    form.dueSoon = settings.value.maintenance_due_soon_days;
+    fillMaintenanceForm(settings.value);
     fillUsageForm(settings.value);
     fillFleetForm(settings.value);
     fillScheduleForm(settings.value);
@@ -953,7 +961,7 @@ async function save() {
       ...(form.ownerId !== loadedOwnerId ? { maintenance_default_owner_id: form.ownerId } : {}),
       maintenance_due_soon_days: Number(form.dueSoon),
     });
-    loadedOwnerId = form.ownerId;
+    fillMaintenanceForm(settings.value);
     $q.notify({ type: 'positive', message: 'Paramètres enregistrés' });
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });

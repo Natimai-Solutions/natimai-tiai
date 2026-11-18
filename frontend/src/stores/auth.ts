@@ -14,6 +14,7 @@ import {
   onSessionEnd,
   setAccessToken,
 } from 'src/services/session';
+import { forgetDrafts, forgetDraftsOfOthers } from 'src/utils/drafts';
 import { permissionKey, type Action, type Resource } from 'src/utils/permissions';
 
 // Permissions cached for the router guard, which runs outside any component
@@ -91,6 +92,10 @@ export const useAuthStore = defineStore('auth', {
         throw e;
       }
       this.profileError = null;
+      // Whoever is identified here — a login, a session restored by its
+      // cookie, which another tab may have logged into as somebody else —
+      // only finds their own drafts: those of the account before are gone.
+      forgetDraftsOfOthers(this.user.id);
       try {
         localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(this.user.permissions));
       } catch {
@@ -146,6 +151,11 @@ export const useAuthStore = defineStore('auth', {
      * stops working at once, the refresh cookie is cleared — then the console
      * forgets it. A failed call (network down, session already over) still
      * logs out locally: the operator asked to leave, and stays out.
+     *
+     * The drafts go too (`useDraft`): they are kept for a session that ends
+     * under a form, not for one its owner closes — and whoever logs out
+     * before leaving a shared poste expects nothing of theirs to stay in the
+     * tab. A session lost to a 401 keeps them, for its owner alone.
      */
     async logout() {
       try {
@@ -153,6 +163,7 @@ export const useAuthStore = defineStore('auth', {
       } catch {
         // Nothing to do: the local half below is what the operator sees.
       }
+      forgetDrafts();
       endSession();
     },
     /** Drop what the console derived from the session (the profile, the

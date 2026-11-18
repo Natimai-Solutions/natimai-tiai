@@ -16,6 +16,8 @@ proxy's URL, ``http://user:password@proxy:3128`` — is shown by its host and
 port alone (``_proxy_host``).
 """
 
+import ipaddress
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -78,19 +80,41 @@ def _fmt(value: Any) -> str | None:
     return str(value)
 
 
+# A host name as a proxy URL may carry it: letters, digits, dots and hyphens.
+_HOST_NAME = re.compile(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?")
+
+_UNREADABLE = "défini (illisible)"
+
+
 def _proxy_host(url: str | None) -> str | None:
     """A proxy URL reduced to ``host:port``: what tells a reader where mail
-    goes out through, without the account and password it may embed. An
-    unreadable URL is said to be set, not printed."""
+    goes out through, without the account and password it may embed.
+
+    Anything that does not read cleanly is said to be set, not printed. A
+    password holding « / », « # » or « ? » ends the authority early for the
+    parser, which then takes the account for the host and the digits that
+    open the password for the port: so an « @ » anywhere but once inside
+    the authority, a host that is neither a name nor an address, a port
+    that is not one — none of it is shown, not even in part.
+    """
     if not url:
         return None
     try:
         parts = urlsplit(url)
         host, port = parts.hostname, parts.port
     except ValueError:
-        return "défini (illisible)"
-    if not host:
-        return "défini (illisible)"
+        return _UNREADABLE
+    if not parts.scheme or not host or parts.netloc.count("@") > 1:
+        return _UNREADABLE
+    if "@" in parts.path + parts.query + parts.fragment:
+        return _UNREADABLE
+    if ":" in host:
+        try:
+            host = f"[{ipaddress.IPv6Address(host)}]"
+        except ValueError:
+            return _UNREADABLE
+    elif not _HOST_NAME.fullmatch(host):
+        return _UNREADABLE
     return f"{host}:{port}" if port else host
 
 
@@ -548,7 +572,8 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     env,
                     "LOGIN_SIEGE_ADDRESSES",
                     "Nombre d'adresses distinctes en échec sur un même compte, en "
-                    "LOGIN_LOCKOUT_MINUTES, à partir duquel le verrouillage écarte "
+                    "LOGIN_LOCKOUT_MINUTES (sous le verrou des essais lents : depuis "
+                    "le début de sa fenêtre), à partir duquel le verrouillage écarte "
                     "toutes les adresses sauf celles qui ont ouvert le compte récemment",
                 ),
                 _item(
@@ -562,13 +587,16 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
                     "Échecs de connexion, même espacés, en LOGIN_SLOW_WINDOW_HOURS "
                     "heures qui verrouillent un compte pour ce nombre d'heures ; ce "
-                    "verrou n'admet que les adresses habituelles du compte",
+                    "verrou ferme le compte aux adresses qui ont échoué pendant "
+                    "cette fenêtre. Non défini : 20, ou quatre fois "
+                    "LOGIN_MAX_FAILED_ATTEMPTS si c'est davantage",
                 ),
                 _item(
                     env,
                     "LOGIN_SLOW_WINDOW_HOURS",
                     "Fenêtre, en heures, de ce second compteur, et durée du verrou "
-                    "qu'il pose ; une réinitialisation du mot de passe le lève",
+                    "qu'il pose ; seul un nouveau mot de passe le lève. Non défini : "
+                    "24, ou le double de LOGIN_LOCKOUT_MINUTES si c'est davantage",
                 ),
                 _item(
                     env,

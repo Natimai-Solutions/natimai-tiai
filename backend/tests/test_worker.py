@@ -188,7 +188,7 @@ async def test_main_marks_alive_after_a_tick(tmp_path, monkeypatch):
 
     alive = tmp_path / "alive"
     monkeypatch.setattr(worker, "ALIVE_FILE", alive)
-    monkeypatch.setattr(worker, "build_jobs", lambda now, policy=None: [])
+    monkeypatch.setattr(worker, "build_jobs", lambda now, policy=None, stop=None: [])
 
     async def no_schedule():
         return None
@@ -478,3 +478,526 @@ def test_a_worker_started_after_the_hour_sends_that_days_mail():
     after_midnight = datetime(2026, 10, 6, 0, 30, tzinfo=UTC)
     jobs = build_jobs(after_midnight, _policy(hour=18, weekday=0))
     assert _job(jobs, "daily_digest").next_run == datetime(2026, 10, 6, 18, tzinfo=UTC)
+
+
+# --- Stopping the worker in the middle of a drain ----------------------------------
+
+
+async def _queue_mails(db_session, monkeypatch, n: int) -> None:
+    from app.core.config import settings
+    from app.features.notification.outbox import queue_email
+
+    monkeypatch.setattr(settings, "MAILGUN_DOMAIN", "mg.test.local")
+    monkeypatch.setattr(settings, "MAILGUN_API_KEY", "key-test")
+    for i in range(n):
+        queue_email(db_session, to=f"r{i}@test.local", subject="s", text="t")
+    await db_session.commit()
+
+
+async def _outbox_statuses(db_session) -> dict[str, str]:
+    from sqlmodel import select
+
+    from app.features.notification.models import EmailOutbox
+
+    db_session.expire_all()
+    rows = await db_session.exec(select(EmailOutbox))
+    return {r.to_address: r.status for r in rows.all()}
+
+
+async def test_a_stop_ends_the_drain_after_the_mail_in_flight(
+    engine, db_session, monkeypatch, tmp_path
+):
+    """`docker stop` during a drain: the mail being sent is finished and
+    recorded, no other is started. The drain used to go on sending for the
+    whole grace, then be cancelled in the middle of a mail — delivered, left
+    pending, and sent again at the next start."""
+    import asyncio
+    import time
+
+    from app.core import worker
+    from app.features.notification import outbox
+    from app.features.notification.models import EmailStatus
+
+    monkeypatch.setattr(worker, "engine", engine)
+    monkeypatch.setattr(worker, "ALIVE_FILE", tmp_path / "alive")
+    monkeypatch.setattr(worker, "STOP_GRACE_SECONDS", 0.5)
+
+    async def role_ok() -> None:
+        return None
+
+    monkeypatch.setattr(worker, "assert_not_superuser", role_ok)
+    await _queue_mails(db_session, monkeypatch, 10)
+
+    built: list[worker.Job] = []
+    real_build = worker.build_jobs
+
+    def only_the_outbox(*args, **kwargs):
+        built[:] = [j for j in real_build(*args, **kwargs) if j.name == "outbox"]
+        return built
+
+    monkeypatch.setattr(worker, "build_jobs", only_the_outbox)
+    stop = asyncio.Event()
+    delivered: list[str] = []
+
+    async def deliver(subject, text, to, *, policy=None):
+        # The server has the mail from here on, whatever becomes of us.
+        delivered.append(to[0])
+        stop.set()  # SIGTERM while the first mail is being sent
+        await asyncio.sleep(0.2)  # … and its answer takes a moment
+        return True
+
+    monkeypatch.setattr(outbox, "send_email", deliver)
+    started = time.monotonic()
+    await asyncio.wait_for(worker.main(stop), timeout=5)
+    elapsed = time.monotonic() - started
+
+    # main() waited for the drain: nothing is left running behind it.
+    [job] = built
+    assert job.background and job.task is not None and job.task.done()
+    statuses = await _outbox_statuses(db_session)
+    sent = sorted(a for a, s in statuses.items() if s == EmailStatus.SENT)
+    # Never delivered *and* still pending.
+    assert sent == sorted(delivered)
+    # Only the mail in flight: the nine others wait for the next start …
+    assert len(delivered) == 1
+    assert sum(s == EmailStatus.PENDING for s in statuses.values()) == 9
+    # … and the stop did not wait out its grace for them.
+    assert elapsed < 0.45
+
+
+# --- The real schedule, as build_jobs hands it to the loop -------------------------
+
+
+async def test_the_outbox_job_is_a_bounded_drain_beside_the_loop(monkeypatch):
+    """What keeps a silent mail server from holding the worker is in how the
+    real job is built — beside the loop, with a budget, told of the stop —
+    not in a Job a test builds for itself."""
+    import asyncio
+
+    from app.core import worker
+
+    calls: list[dict] = []
+
+    async def fake_send_pending(session, **kwargs) -> int:
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr(worker.outbox, "send_pending", fake_send_pending)
+    stop = asyncio.Event()
+    now = datetime(2026, 8, 20, 6, 0, tzinfo=UTC)
+    jobs = {job.name: job for job in worker.build_jobs(now, stop=stop)}
+
+    assert [name for name, job in jobs.items() if job.background] == ["outbox"]
+    await jobs["outbox"].run()
+    assert calls == [{"budget_seconds": worker.OUTBOX_BUDGET_SECONDS, "stop": stop}]
+    # Over before the next drain is due, and with room for the tick itself.
+    assert 0 < worker.OUTBOX_BUDGET_SECONDS < worker.POLL_SECONDS
+
+
+async def test_both_mail_jobs_are_retried_the_same_day_and_told_the_tick():
+    from app.core.worker import POLL_SECONDS, build_jobs, run_due_jobs
+
+    at = datetime(2026, 10, 5, 18, 0, tzinfo=UTC)  # a Monday, at the hour
+    jobs = build_jobs(at - timedelta(hours=1), _policy(hour=18, weekday=0))
+    mail = {"daily_digest", "maintenance_reminders"}
+    assert {j.name for j in jobs if j.retry_same_day} == mail
+    assert {j.name for j in jobs if j.takes_now} == mail
+
+    seen: list[datetime] = []
+
+    async def down(now: datetime) -> int:
+        seen.append(now)
+        raise RuntimeError("db down")
+
+    for name in sorted(mail):
+        job = _job(jobs, name)
+        job.run = down
+        await run_due_jobs([job], at)
+        # Not tomorrow, not next week: at the next tick.
+        assert job.next_run == at + timedelta(seconds=POLL_SECONDS), name
+        assert job.retrying_on == at.date()
+    assert seen == [at, at]
+
+
+# --- A retry in progress and the schedule (review, 2026-11) ------------------------
+
+
+async def test_a_stale_retry_never_swallows_the_occurrence_that_is_due():
+    """A digest failing at 18:00, its hour then moved to 08:00: the 08:00 run
+    of the next day met « gave up retrying » and was rescheduled a day later
+    without running. Same for the reminder's weekday, a whole week lost."""
+    from app.core.worker import apply_schedule, build_jobs, run_due_jobs
+
+    state = {"fail": True}
+    runs: list[datetime] = []
+
+    async def mail(now: datetime) -> int:
+        runs.append(now)
+        if state["fail"]:
+            raise RuntimeError("smtp down")
+        return 1
+
+    start = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)  # a Monday
+    jobs = build_jobs(start, _policy(hour=18, weekday=0))
+    digest, reminder = _job(jobs, "daily_digest"), _job(jobs, "maintenance_reminders")
+    digest.run = reminder.run = mail
+    both = [digest, reminder]
+    at = datetime(2026, 10, 5, 18, 0, 5, tzinfo=UTC)
+    await run_due_jobs(both, at)
+    assert digest.retrying_on == reminder.retrying_on == at.date()
+
+    # 18:10 — the administrator moves the digest to 08:00, the reminder to
+    # Tuesday. Whatever broke is repaired during the night.
+    apply_schedule(both, _policy(hour=8, weekday=1), at + timedelta(minutes=10))
+    assert digest.retrying_on is None and reminder.retrying_on is None
+    assert reminder.next_run == datetime(2026, 10, 6, 8, tzinfo=UTC)
+    state["fail"] = False
+    runs.clear()
+    tuesday = datetime(2026, 10, 6, 8, 0, 5, tzinfo=UTC)
+    await run_due_jobs(both, tuesday)
+    assert runs == [tuesday, tuesday]  # the digest and the reminder
+    assert digest.next_run == datetime(2026, 10, 7, 8, tzinfo=UTC)
+    assert reminder.next_run == datetime(2026, 10, 13, 8, tzinfo=UTC)
+
+
+async def test_giving_up_yesterdays_retry_runs_the_occurrence_already_due():
+    """The give-up itself, whatever left the retry behind: when the job's own
+    occurrence has come due since midnight, it runs — with a digest hour of
+    0 and a failure lasting until midnight, the new day's digest was never
+    attempted."""
+    from app.core.worker import POLL_SECONDS, Job, daily_at, run_due_jobs
+
+    runs: list[datetime] = []
+
+    async def down() -> int:
+        runs.append(datetime.now(UTC))
+        raise RuntimeError("down")
+
+    at = datetime(2026, 10, 1, 0, 0, 5, tzinfo=UTC)
+    job = Job("daily_digest", down, at, daily_at(0), retry_same_day=True)
+    await run_due_jobs([job], at)
+    last = datetime(2026, 10, 1, 23, 59, 50, tzinfo=UTC)
+    job.next_run = last
+    await run_due_jobs([job], last)
+    assert len(runs) == 2
+    # 00:00:20 on the 2nd: the 1st is given up, the 2nd's own digest is due.
+    tick = last + timedelta(seconds=POLL_SECONDS)
+    await run_due_jobs([job], tick)
+    assert len(runs) == 3
+    assert job.retrying_on == tick.date()  # … and retried on its own day
+    assert job.next_run == tick + timedelta(seconds=POLL_SECONDS)
+
+    # A stale retry met at a real occurrence (an hour moved meanwhile).
+    job = Job(
+        "daily_digest",
+        down,
+        datetime(2026, 10, 2, 8, 0, tzinfo=UTC),
+        daily_at(8),
+        retry_same_day=True,
+        retrying_on=datetime(2026, 10, 1, tzinfo=UTC).date(),
+    )
+    await run_due_jobs([job], datetime(2026, 10, 2, 8, 0, 5, tzinfo=UTC))
+    assert len(runs) == 4
+
+
+def test_an_hour_moved_to_one_already_passed_is_due_now_like_a_restart():
+    """10:05, the digest set from 18:00 to 09:00, nothing sent today: the
+    change skipped the day, when a worker restarted at that instant with the
+    same settings sends it at once."""
+    from app.core.worker import apply_schedule, build_jobs
+
+    morning = datetime(2026, 10, 5, 10, 0, tzinfo=UTC)  # a Monday
+    changed = morning + timedelta(minutes=5)
+    jobs = build_jobs(morning, _policy(hour=18, weekday=3))
+    new = _policy(hour=9, weekday=0)
+    apply_schedule(jobs, new, changed)
+    restarted = build_jobs(changed, new)
+    for name in ("daily_digest", "maintenance_reminders"):
+        assert _job(jobs, name).next_run == changed, name
+        assert _job(restarted, name).next_run == changed, name
+
+    # Served today already (in this process): tomorrow, next week.
+    jobs = build_jobs(morning, _policy(hour=18, weekday=3))
+    for name in ("daily_digest", "maintenance_reminders"):
+        _job(jobs, name).last_run = morning
+    apply_schedule(jobs, new, changed)
+    assert _job(jobs, "daily_digest").next_run == datetime(2026, 10, 6, 9, tzinfo=UTC)
+    assert _job(jobs, "maintenance_reminders").next_run == datetime(
+        2026, 10, 12, 9, tzinfo=UTC
+    )
+
+
+# --- The period a mail job records ---------------------------------------------------
+
+
+async def test_the_period_recorded_is_that_of_the_tick(engine, db_session, monkeypatch):
+    """A catch-up decided at 23:59:59.9 and run a few milliseconds later, on
+    the next day by the clock: it recorded the next day, whose own digest was
+    then skipped as already sent."""
+    from app.core import worker
+    from app.features.notification import digest, tasks
+    from app.features.setting import crud
+
+    monkeypatch.setattr(worker, "engine", engine)
+    tick = datetime(2026, 10, 4, 23, 59, 59, 900000, tzinfo=UTC)  # a Sunday
+    monday = datetime(2026, 10, 5, 0, 0, 0, 50000, tzinfo=UTC)
+    jobs = worker.build_jobs(tick, _policy(hour=18, weekday=6))
+    mail = [_job(jobs, "daily_digest"), _job(jobs, "maintenance_reminders")]
+    assert [j.next_run for j in mail] == [tick, tick]  # Sunday's, caught up
+    runs: list[str] = []
+
+    async def fake_digest(session) -> int:
+        runs.append("digest")
+        return 1
+
+    async def fake_reminder(session) -> int:
+        runs.append("reminder")
+        return 1
+
+    monkeypatch.setattr(digest, "send_daily_digest", fake_digest)
+    monkeypatch.setattr(tasks, "send_maintenance_reminders", fake_reminder)
+    monkeypatch.setattr(worker, "utcnow", lambda: monday)
+    await worker.run_due_jobs(mail, tick)
+    assert runs == ["digest", "reminder"]
+    keys = worker.LAST_RUN_KEYS
+    assert await crud.get_value(db_session, keys["daily_digest"]) == "2026-10-04"
+    assert await crud.get_value(db_session, keys["maintenance_reminders"]) == "2026-W40"
+
+    # Monday's own digest, at its hour, is not taken for sent.
+    at = datetime(2026, 10, 5, 18, 0, 5, tzinfo=UTC)
+    await worker.run_due_jobs(mail, at)
+    assert runs == ["digest", "reminder", "digest"]
+
+
+async def test_two_workers_send_one_period_once(engine, db_session, monkeypatch):
+    """Two workers on one database by mistake (`--scale worker=2`, a second
+    stack): both read « not sent for today » and both queued the digest. The
+    second now waits for the first, and sends only if that one failed."""
+    import asyncio
+
+    from app.core import worker
+    from app.features.notification import digest
+    from app.features.setting import crud
+    from app.features.setting.models import AppSetting
+
+    monkeypatch.setattr(worker, "engine", engine)
+    key = worker.LAST_RUN_KEYS["daily_digest"]
+    now = datetime(2026, 10, 5, 18, 0, tzinfo=UTC)
+
+    for first_fails, yesterday in ((False, None), (False, "2026-10-04"), (True, None)):
+        # With no record at all (the first run) and with yesterday's.
+        row = await db_session.get(AppSetting, key)
+        if row is not None:
+            await db_session.delete(row)
+        if yesterday is not None:
+            await crud.set_value(db_session, key, yesterday, actor="t")
+        await db_session.commit()
+        inside: list[int] = []
+        release = asyncio.Event()
+
+        async def building(
+            session, inside=inside, release=release, fails=first_fails
+        ) -> int:
+            inside.append(1)
+            await release.wait()
+            if fails and len(inside) == 1:
+                raise RuntimeError("smtp down")
+            return 1
+
+        monkeypatch.setattr(digest, "send_daily_digest", building)
+        both = [asyncio.create_task(worker.send_daily_digest(now)) for _ in range(2)]
+        await asyncio.sleep(0.3)
+        assert len(inside) == 1, "both workers are building the same digest"
+        release.set()
+        results = await asyncio.gather(*both, return_exceptions=True)
+        if first_fails:
+            # The first one's failure is not taken for a sent digest.
+            assert sorted(map(repr, results)) == ["1", "RuntimeError('smtp down')"]
+            assert len(inside) == 2
+        else:
+            assert sorted(results) == [0, 1]
+            assert len(inside) == 1
+        db_session.expire_all()
+        assert await crud.get_value(db_session, key) == "2026-10-05"
+
+
+# --- The day of the upgrade (migration 0042) -----------------------------------------
+
+
+def _migration_0042():
+    import importlib.util
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "app/alembic/versions/0042_mail_periods_seed.py"
+    )
+    spec = importlib.util.spec_from_file_location("migration_0042", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+async def _seed(engine, now: datetime) -> dict[str, str]:
+    migration = _migration_0042()
+    async with engine.begin() as conn:
+        return await conn.run_sync(migration.seed_mail_periods, now)
+
+
+async def _an_account(db_session) -> None:
+    from app.features.user import crud as user_crud
+
+    await user_crud.create_user(
+        db_session, email="admin@test.local", password="correct-horse-battery"
+    )
+    await db_session.commit()
+
+
+async def test_the_upgrade_day_does_not_send_the_digest_again(
+    engine, db_session, monkeypatch
+):
+    """v1.2.0 sent the 18:00 digest; the server is upgraded at 19:00. The new
+    worker, with no record of it, sent that day's digest a second time — and
+    the reminder, on its day. The migration records what was served."""
+    from app.core import worker
+    from app.core.config import settings
+    from app.features.notification import digest, tasks
+
+    monkeypatch.setattr(worker, "engine", engine)
+    monkeypatch.setattr(settings, "DIGEST_HOUR_UTC", 18)
+    monkeypatch.setattr(settings, "MAINTENANCE_REMINDER_WEEKDAY", 0)
+    await _an_account(db_session)
+    late = datetime(2026, 10, 5, 19, 0, tzinfo=UTC)  # a Monday
+
+    assert await _seed(engine, late) == {
+        "worker.last_run.daily_digest": "2026-10-05",
+        "worker.last_run.maintenance_reminders": "2026-W41",
+    }
+    assert await _seed(engine, late) == {}  # run twice: nothing more
+
+    runs: list[str] = []
+
+    async def fake(session) -> int:
+        runs.append("sent")
+        return 1
+
+    monkeypatch.setattr(digest, "send_daily_digest", fake)
+    monkeypatch.setattr(tasks, "send_maintenance_reminders", fake)
+    jobs = worker.build_jobs(late, _policy(hour=18, weekday=0))
+    mail = [_job(jobs, "daily_digest"), _job(jobs, "maintenance_reminders")]
+    assert [j.next_run for j in mail] == [late, late]  # both caught up at start
+    await worker.run_due_jobs(mail, late)
+    assert runs == []
+    # Tomorrow's digest and next week's reminder go out as usual.
+    await worker.run_due_jobs(mail, datetime(2026, 10, 6, 18, 0, 5, tzinfo=UTC))
+    await worker.run_due_jobs(mail, datetime(2026, 10, 12, 18, 0, 5, tzinfo=UTC))
+    assert runs == ["sent", "sent", "sent"]
+
+
+async def test_the_migration_seeds_when_it_is_run(engine, db_session, monkeypatch):
+    """`alembic upgrade` itself, on the clock: with a schedule of Monday
+    00:00, every instant of the week is past both the digest's hour and the
+    reminder's day."""
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    from app.core import worker
+    from app.core.config import settings
+    from app.features.setting import crud
+
+    monkeypatch.setattr(settings, "DIGEST_HOUR_UTC", 0)
+    monkeypatch.setattr(settings, "MAINTENANCE_REMINDER_WEEKDAY", 0)
+    await _an_account(db_session)
+    migration = _migration_0042()
+
+    def upgrade(conn) -> None:
+        with Operations.context(MigrationContext.configure(conn)):
+            migration.upgrade()
+
+    before = worker.utcnow()
+    async with engine.begin() as conn:
+        await conn.run_sync(upgrade)
+    after = worker.utcnow()
+
+    keys = worker.LAST_RUN_KEYS
+    assert await crud.get_value(db_session, keys["daily_digest"]) in {
+        worker._day(before),
+        worker._day(after),
+    }
+    assert await crud.get_value(db_session, keys["maintenance_reminders"]) in {
+        worker._iso_week(before),
+        worker._iso_week(after),
+    }
+
+
+async def test_the_seed_reads_the_schedule_as_the_worker_does(
+    engine, db_session, monkeypatch
+):
+    from app.core import worker
+    from app.core.config import settings
+    from app.features.setting import crud
+    from app.features.setting.models import AppSetting
+
+    monkeypatch.setattr(settings, "DIGEST_HOUR_UTC", 18)
+    monkeypatch.setattr(settings, "MAINTENANCE_REMINDER_WEEKDAY", 0)
+    keys = worker.LAST_RUN_KEYS
+
+    # A new installation — no account yet: nothing was ever sent.
+    assert await _seed(engine, datetime(2026, 10, 5, 19, 0, tzinfo=UTC)) == {}
+    await _an_account(db_session)
+
+    # Before the hour (environment: 18:00, Monday): today's digest is still
+    # to come, and the worker will send it — nothing recorded.
+    assert await _seed(engine, datetime(2026, 10, 5, 17, 59, tzinfo=UTC)) == {}
+    # Wednesday morning: Monday's reminder is behind, the day's digest not.
+    assert await _seed(engine, datetime(2026, 10, 7, 9, 0, tzinfo=UTC)) == {
+        keys["maintenance_reminders"]: "2026-W41"
+    }
+
+    # The console's schedule wins over the environment's: 08:00, Thursday.
+    await crud.set_value(db_session, crud.KEY_DIGEST_HOUR, 8, actor="t")
+    await crud.set_value(db_session, crud.KEY_REMINDER_WEEKDAY, 3, actor="t")
+    await db_session.delete(
+        await db_session.get_one(AppSetting, keys["maintenance_reminders"])
+    )
+    await db_session.commit()
+    policy = await crud.schedule_policy(db_session)
+    assert (policy.digest_hour_utc, policy.reminder_weekday) == (8, 3)
+    wednesday = datetime(2026, 10, 7, 9, 0, tzinfo=UTC)
+    assert await _seed(engine, wednesday) == {keys["daily_digest"]: "2026-10-07"}
+
+    # A record already there — the worker's own — is never overwritten.
+    await crud.set_value(db_session, keys["daily_digest"], "2026-10-01", actor="worker")
+    await db_session.commit()
+    assert await _seed(engine, datetime(2026, 10, 8, 9, 0, tzinfo=UTC)) == {
+        keys["maintenance_reminders"]: "2026-W41"
+    }
+    db_session.expire_all()
+    assert await crud.get_value(db_session, keys["daily_digest"]) == "2026-10-01"
+
+
+async def test_a_drain_that_outlasts_the_grace_is_cancelled_and_over():
+    """A mail in flight on a server gone silent: past the grace the drain is
+    cancelled, and has ended — its session closed — when the worker says it
+    stopped."""
+    import asyncio
+
+    from app.core.worker import Job, every, finish_background, run_due_jobs
+
+    closed: list[str] = []
+
+    async def stuck() -> int:
+        try:
+            await asyncio.sleep(60)
+        finally:
+            closed.append("session")
+        return 0
+
+    now = datetime(2026, 10, 1, 6, 0, tzinfo=UTC)
+    job = Job("outbox", stuck, now, every(30), background=True)
+    await run_due_jobs([job], now)
+    await asyncio.sleep(0)
+    await asyncio.wait_for(finish_background([job], timeout=0.05), timeout=2)
+    assert job.task is not None and job.task.cancelled()
+    assert closed == ["session"]

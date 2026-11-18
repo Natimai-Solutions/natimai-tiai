@@ -309,18 +309,18 @@ Il n'est jamais committé.
 | `PASSWORD_MIN_LENGTH` | `12` | Longueur minimale imposée à tout mot de passe |
 | `PASSWORD_RESET_EXPIRE_MINUTES` | `60` | Validité d'un lien « mot de passe oublié », en minutes (5 à 10 080) |
 | `PASSWORD_RESET_COOLDOWN_MINUTES` / `PASSWORD_RESET_MAX_LIVE_LINKS` | `5` / `3` | « Mot de passe oublié », compté **par compte et par adresse qui demande** : pas de nouveau courriel dans ce délai (0 à 60 min) après le précédent demandé depuis la même adresse, et au plus ce nombre de liens valides à la fois demandés depuis elle (1 à 10). Un tiers qui épuise son budget laisse donc entier celui du titulaire, qui demande depuis son poste. Une demande n'annule jamais un lien encore valide ; utiliser un lien annule les autres. La réponse (204) arrive après le même délai (une demi-seconde) quelle que soit l'issue : ni son contenu ni sa durée ne disent si le compte existe |
-| `PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS` | `10` | Plafond de liens valides à la fois pour un même compte, **toutes adresses confondues** (1 à 100, au moins `PASSWORD_RESET_MAX_LIVE_LINKS`) : contre l'inondation d'une boîte depuis de nombreuses adresses. Une demande venue d'une adresse habituelle du compte (cf. `LOGIN_KNOWN_ADDRESS_DAYS`) n'y est pas soumise |
+| `PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS` | `10` | Plafond de liens valides à la fois pour un même compte, **toutes adresses confondues** (1 à 100, au moins `PASSWORD_RESET_MAX_LIVE_LINKS`) : contre l'inondation d'une boîte depuis de nombreuses adresses. Une demande venue d'une adresse habituelle du compte (cf. `LOGIN_KNOWN_ADDRESS_DAYS`) n'y est pas soumise ; aucune ne l'est tant que le compte est sous le verrou des essais lents (voir *Verrouillage des comptes*), où ce lien est la sortie du titulaire — seul le budget de chaque adresse compte alors |
 | `CONSOLE_BASE_URL` | `https://<TIAI_SERVER_NAME>` | URL publique de la console, dans les liens des e-mails (réinitialisation, fiche d'un poste). À renseigner seulement si la console est jointe sous une autre URL (autre port, proxy devant Caddy). Si ni elle ni `TIAI_SERVER_NAME` n'est connue, aucun e-mail de réinitialisation n'est envoyé |
 | `ENROLLMENT_SECRET` | `changeme-enrollment-secret` | Secret partagé d'enrôlement ; n'autorise que l'enregistrement d'un poste — 16 caractères minimum hors `local` |
 | `ENROLLMENT_SECRET_PREVIOUS` | *(vide)* | Ancien secret, encore accepté pendant une rotation (cf. « Enrôlement : approbation et rotation du secret ») |
 | `ENROLLMENT_REENROLL_REQUIRES_APPROVAL` | `true` | Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur |
 | `LOGIN_MAX_FAILED_ATTEMPTS` / `LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Verrouillage d'un compte après N échecs de connexion espacés de moins de cette durée, pour cette durée (voir *Verrouillage des comptes*). Une connexion réussie ou une réinitialisation du mot de passe le lève |
-| `LOGIN_SIEGE_ADDRESSES` / `LOGIN_KNOWN_ADDRESS_DAYS` | `10` / `30` | Pendant un verrou, dès que ce nombre d'adresses distinctes (2 à 1 000) ont échoué sur le compte en `LOGIN_LOCKOUT_MINUTES`, seules les adresses qui ont ouvert ce compte depuis ce nombre de jours (1 à 365) restent admises (voir *Verrouillage des comptes*) |
-| `LOGIN_SLOW_MAX_FAILED_ATTEMPTS` / `LOGIN_SLOW_WINDOW_HOURS` | `20` / `24` | Essais lents : ce nombre d'échecs (au-dessus de `LOGIN_MAX_FAILED_ATTEMPTS`, jusqu'à 1 000), même espacés, en ce nombre d'heures (1 à 168, plus long que `LOGIN_LOCKOUT_MINUTES`) depuis le premier verrouille le compte pour ce même nombre d'heures, et ce verrou n'admet que les adresses habituelles (voir *Verrouillage des comptes*) |
-| `RATE_LIMIT_ENABLED` | `true` | Limitation de débit par adresse (connexion, « mot de passe oublié », enrôlement, e-mail de test). À `false`, elle est coupée, et avec elle le plafond de heartbeats par poste et la limite des changements de mot de passe — **pas** le verrouillage des comptes ni les quotas de logiciels. Une issue de secours, pas un réglage : réservée à un déploiement dont tous les opérateurs arrivent par la même adresse (VPN, proxy) |
+| `LOGIN_SIEGE_ADDRESSES` / `LOGIN_KNOWN_ADDRESS_DAYS` | `10` / `30` | Pendant un verrou, dès que ce nombre d'adresses distinctes (2 à 1 000) ont échoué sur le compte en `LOGIN_LOCKOUT_MINUTES` (sous le verrou des essais lents : depuis le début de sa fenêtre), seules les adresses qui ont ouvert ce compte depuis ce nombre de jours (1 à 365) restent admises (voir *Verrouillage des comptes*) |
+| `LOGIN_SLOW_MAX_FAILED_ATTEMPTS` / `LOGIN_SLOW_WINDOW_HOURS` | `20` / `24` | Essais lents : ce nombre d'échecs (au-dessus de `LOGIN_MAX_FAILED_ATTEMPTS`, jusqu'à 1 000), même espacés, en ce nombre d'heures (1 à 168, plus long que `LOGIN_LOCKOUT_MINUTES`) depuis le premier verrouille le compte pour ce même nombre d'heures : ce verrou ferme le compte aux adresses qui ont échoué pendant cette fenêtre, et une connexion réussie ne le lève pas (voir *Verrouillage des comptes*). **Non définies**, elles suivent le verrou rapide qu'elles doivent dépasser : 20 échecs, ou quatre fois `LOGIN_MAX_FAILED_ATTEMPTS` si c'est davantage ; 24 heures, ou le double de `LOGIN_LOCKOUT_MINUTES` si c'est davantage — un `.env` qui ne règle que le verrou rapide démarre donc toujours. Le backend ne **refuse de démarrer** que sur une valeur écrite ici qui contredit l'autre, en nommant les deux |
+| `RATE_LIMIT_ENABLED` | `true` | Limitation de débit par adresse (connexion, « mot de passe oublié », enrôlement, e-mail de test). À `false`, elle est coupée, et avec elle le plafond de heartbeats par poste et la limite des changements de mot de passe — **pas** le verrouillage des comptes, ni les cinq essais du mot de passe actuel par session (comptés en base), ni les quotas de logiciels. Une issue de secours, pas un réglage : réservée à un déploiement dont tous les opérateurs arrivent par la même adresse (VPN, proxy) |
 | `AGENT_HEARTBEAT_MAX_PER_MINUTE` | `12` | Heartbeats acceptés par poste et par minute (2 à 600) ; au-delà, 429. L'agent en envoie un par `heartbeat_interval_seconds` (60 s par défaut), plus un au redémarrage : relever cette limite si l'intervalle est abaissé sous 10 s |
 | `SOFTWARE_NEW_ENTRIES_PER_DAY` | `2000` | Nouveaux logiciels qu'un poste peut ajouter au catalogue par 24 h (100 à 1 000 000) ; les logiciels déjà connus ne comptent pas. Une liste coupée par ce quota est signalée sur la fiche du poste (« Relevé partiel »), et le serveur redemande l'inventaire à l'agent dès que le budget le permet (agents à partir de la v1.2.1 ; un agent plus ancien le complète à son prochain redémarrage ou au prochain changement de son inventaire). En dessous de 2 000 (le plus qu'un inventaire transporte), le premier inventaire d'un poste sur un catalogue vide est donc d'abord partiel |
-| `SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET` | `50000` | Nouveaux logiciels que **tous les postes réunis** peuvent ajouter au catalogue par 24 h (1 000 à 10 000 000). Même règle : les logiciels déjà connus ne comptent pas, et une liste coupée est signalée puis redemandée. Les deux budgets sont comptés dans PostgreSQL : ils valent pour tous les processus de l'API ensemble et un redémarrage ne les remet pas à zéro ; ce qu'un battement en échec avait réservé est rendu |
+| `SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET` | `50000` | Nouveaux logiciels que **tous les postes réunis** peuvent ajouter au catalogue par 24 h (1 000 à 10 000 000). Même règle : les logiciels déjà connus ne comptent pas, et une liste coupée est signalée puis redemandée. Les deux budgets sont comptés dans PostgreSQL : ils valent pour tous les processus de l'API ensemble et un redémarrage ne les remet pas à zéro ; ce qu'un battement en échec avait réservé est rendu. La réservation passe par une connexion à part (cf. `POSTGRES_POOL_SIZE`) : si elle n'aboutit pas en quelques secondes — connexion refusée (`max_connections` atteint) ou sans réponse, verrou des budgets tenu par un processus figé — le battement répond quand même, rien n'est accordé et la liste est coupée comme si le budget était épuisé (« Relevé partiel », puis redemandée). Le journal du backend le dit par une ligne `budgets unreachable` (une au début, puis une par dix minutes au plus tant que cela dure) |
 | `AGENT_TOKEN_ROTATE_DAYS` | `30` | Âge, en jours (0 à 3650), au-delà duquel le token d'un poste est renouvelé à son prochain heartbeat — seulement pour un agent qui sait stocker le nouveau ; un agent plus ancien garde le sien. `0` = jamais. Voir « Rotation des tokens agents » ci-dessous |
 | `BACKEND_CORS_ORIGINS` | *(vide)* | Origines autorisées, séparées par des virgules. Inutile avec la stack Compose (console et API sous la même origine) : seulement pour le serveur de dev Quasar |
 | `TRUSTED_PROXIES` | *(vide)* | Réseaux (CIDR, séparés par des virgules) dont l'en-tête `X-Forwarded-For` est cru, en plus de la boucle locale et de `TRUSTED_PROXY_HOSTS`. Toutes les lignes de l'en-tête sont alors lues bout à bout, dans l'ordre, et l'adresse retenue est l'entrée la plus à droite qui n'est pas elle-même un proxy de confiance ; chaque entrée est lue comme une adresse (port et crochets retirés), et une entrée illisible ramène à l'adresse de la connexion. Pour tout autre pair, l'en-tête est ignoré et l'adresse du client — limitation de débit, journal d'audit — est celle de la connexion. À renseigner seulement si un autre proxy que le Caddy de la stack joint directement le backend, et **n'y lister que les proxys** : une plage large (tout le réseau local) laisse un client qui s'y trouve choisir l'adresse sous laquelle il apparaît, ou ramène tous les clients à l'adresse du proxy. Le backend **refuse de démarrer** sur une entrée plus large qu'un `/24` (IPv4) ou un `/64` (IPv6), en la nommant, sauf `TRUSTED_PROXIES_ALLOW_WIDE=true` |
@@ -330,7 +330,7 @@ Il n'est jamais committé.
 | `POSTGRES_SERVER` / `POSTGRES_PORT` | `db` / `5432` | Forcés par le compose |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `tiai` / — / `tiai` | Compte d'administration (superutilisateur) : initialisation du volume, sauvegardes |
 | `POSTGRES_APP_USER` / `POSTGRES_APP_PASSWORD` | `tiai_app` / — | Rôle applicatif du backend et du worker, sans superutilisateur (cf. § « Rôle applicatif PostgreSQL »). Le compose les passe au backend comme `POSTGRES_USER` / `POSTGRES_PASSWORD` |
-| `POSTGRES_POOL_SIZE` / `POSTGRES_MAX_OVERFLOW` / `POSTGRES_POOL_TIMEOUT` | `20` / `10` / `30` | Pool async partagé backend + worker |
+| `POSTGRES_POOL_SIZE` / `POSTGRES_MAX_OVERFLOW` / `POSTGRES_POOL_TIMEOUT` | `20` / `10` / `30` | Pool async, le même réglage pour le backend et le worker : chaque processus garde jusqu'à `POOL_SIZE` + `MAX_OVERFLOW` connexions (30). Le backend en ouvre en plus **hors pool**, le temps d'une réservation, pour chaque battement en cours qui ajoute un logiciel au catalogue (budgets `SOFTWARE_NEW_ENTRIES_PER_DAY*`) : au pire autant que son pool, soit 2 × (`POOL_SIZE` + `MAX_OVERFLOW`) = 60 connexions par processus d'API. `max_connections` de PostgreSQL (100 par défaut, dont 3 réservées au superutilisateur) doit couvrir ce total — 60 pour l'API + 30 pour le worker = 90 avec les valeurs par défaut — plus les sauvegardes et les sessions d'administration ; avec plusieurs processus d'API, ou un pool agrandi, relever `max_connections` d'autant (ou réduire le pool). Une réservation qui n'obtient pas sa connexion ne fait pas échouer le battement : voir `SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET` |
 | `SIGNATURE_MAX_AGE_DAYS` | `3` | Seuil « signatures à jour », en jours. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage ; un changement est appliqué aussitôt à tout le parc, postes éteints compris |
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif », en jours sans contact. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `LOW_DISK_FREE_PERCENT` | `10` | Seuil « disque presque plein » : pourcentage d'espace libre sur le volume système. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
@@ -402,36 +402,68 @@ d'être choisi.
 **Essais lents.** Des échecs espacés de plus de `LOGIN_LOCKOUT_MINUTES` ne
 s'additionnent pas pour le verrou ci-dessus. Un second compteur les prend :
 `LOGIN_SLOW_MAX_FAILED_ATTEMPTS` échecs (20), même espacés, en
-`LOGIN_SLOW_WINDOW_HOURS` heures (24) depuis le premier verrouillent le compte
-pour `LOGIN_SLOW_WINDOW_HOURS` heures, et ce verrou n'admet d'emblée que les
-**adresses habituelles** du compte — les essais ont été espacés pour qu'aucune
-adresse n'ait échoué récemment. Le titulaire dispose des mêmes sorties que
-ci-dessus : son poste habituel (la connexion lève le verrou), « Mot de passe
-oublié », ou une réinitialisation par un administrateur. Ce verrou figure au
-journal d'audit (`user.locked`, avec `via: slow_attempts`). Une connexion
-réussie ne remet pas ce compteur à zéro (seul un nouveau mot de passe le fait) :
-sinon le titulaire qui se connecte chaque matin rendrait chaque jour un budget
-neuf à qui devine lentement.
+`LOGIN_SLOW_WINDOW_HOURS` heures (24) depuis le premier posent un second
+verrou, pour `LOGIN_SLOW_WINDOW_HOURS` heures. Il suit la règle du premier, sur
+sa propre fenêtre : il ferme le compte aux **adresses qui ont échoué dessus
+depuis le début de cette fenêtre**, jusqu'à sa fin et quel que soit le temps
+qu'elles laissent entre deux essais — pas aux adresses que le compte n'a jamais
+vues. Le bon mot de passe saisi depuis une adresse qui n'a pas échoué ouvre la
+session, habituelle ou non : compte neuf, nouveau poste, mot de passe tout juste
+réinitialisé par un administrateur. Une seule adresse extérieure ne tient donc
+personne dehors. Une adresse qui échoue pendant le verrou rejoint celles qu'il
+écarte ; et dès que `LOGIN_SIEGE_ADDRESSES` adresses distinctes (10) ont échoué
+depuis le début de la fenêtre, il s'étend comme ci-dessus à toutes les adresses
+sauf les **adresses habituelles**.
+
+Une connexion réussie lève le verrou ordinaire, **pas celui-ci**, et ne remet
+pas son compteur à zéro : sinon le titulaire qui se connecte chaque matin
+rendrait chaque jour un budget neuf à qui devine lentement. La fenêtre dure au
+moins autant que le verrou qu'elle a posé ; le premier échec qui suit la fin du
+verrou en ouvre une nouvelle, avec un nouveau budget. Seul un **nouveau mot de
+passe** — lien « Mot de passe oublié », réinitialisation par un administrateur,
+changement par le titulaire — efface le compteur, la fenêtre et le verrou. Ce
+verrou figure au journal d'audit (`user.locked`, avec `via: slow_attempts`), une
+fois par fenêtre, et la page Utilisateurs affiche le compte « Verrouillé »
+jusqu'à sa fin.
 
 Adresses en échec et adresses habituelles sont **en base**
-(`user_login_addresses`, purgée chaque matin) : un redémarrage de l'API ne lève
-pas un verrou et n'oublie pas les postes habituels.
+(`user_login_addresses`, purgée chaque matin de ce qu'aucun verrou ne peut plus
+lire) : un redémarrage de l'API ne lève pas un verrou et n'oublie pas les postes
+habituels.
 
-Deux limites à connaître :
+Trois limites à connaître :
 
 - Le titulaire qui se présente depuis une adresse **jamais vue**, pendant que
   des essais arrivent de `LOGIN_SIEGE_ADDRESSES` adresses ou plus, est refusé
-  comme les autres. Sa sortie : « Mot de passe oublié » depuis ce poste — le
-  lien utilisé rend l'adresse habituelle — ou une réinitialisation par un
-  administrateur suivie d'une connexion rapide. Une session déjà ouverte n'est
-  pas touchée.
+  comme les autres — pour `LOGIN_LOCKOUT_MINUTES` sous le verrou ordinaire,
+  jusqu'à la fin du verrou (`LOGIN_SLOW_WINDOW_HOURS` heures) sous celui des
+  essais lents, que dix adresses suffisent donc à étendre ainsi. Sa sortie :
+  « Mot de passe oublié » depuis ce poste — le lien utilisé rend l'adresse
+  habituelle — ou une réinitialisation par un administrateur suivie d'une
+  connexion rapide (elle efface les adresses habituelles : le poste du
+  titulaire redevient une adresse jamais vue). Sous le verrou des essais lents,
+  le plafond de liens du compte (`PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS`) ne
+  s'applique pas : un tiers qui le tient plein ne ferme pas cette sortie, au
+  prix de davantage de courriels possibles dans la boîte du titulaire (au plus
+  `PASSWORD_RESET_MAX_LIVE_LINKS` par adresse qui demande). Une session déjà
+  ouverte n'est pas touchée.
+- Pendant un verrou, **une adresse qui échoue est écartée comme les autres**,
+  celle du titulaire comprise. Sous le verrou des essais lents, une faute de
+  frappe écarte un poste habituel pour `LOGIN_LOCKOUT_MINUTES` et une adresse
+  non habituelle jusqu'à la fin du verrou ; de même une adresse non habituelle
+  qui avait échoué plus tôt dans la fenêtre sans connexion réussie depuis (une
+  connexion réussie efface l'échec de l'adresse). La réponse reste le 401 d'un
+  mauvais mot de passe. Sortie : « Mot de passe oublié » depuis ce poste, ou un
+  administrateur. En contrepartie, des essais faits depuis une adresse
+  habituelle du compte ne sont ralentis par ce verrou qu'à un essai par
+  `LOGIN_LOCKOUT_MINUTES`.
 - Des opérateurs qui sortent tous par la **même adresse** (NAT, VPN, proxy
   absent de `TRUSTED_PROXIES`) partagent le verrou de l'adresse fautive ; et
   derrière un proxy non déclaré, toutes les requêtes semblent venir de lui.
   Déclarer le proxy (`TRUSTED_PROXIES`, `TRUSTED_PROXY_HOSTS`) avant tout.
 
 La page Utilisateurs affiche « Verrouillé » ; une réinitialisation du mot de
-passe par un administrateur lève le verrou. Le verrouillage et la
+passe par un administrateur lève les deux verrous. Le verrouillage et la
 réinitialisation figurent au journal d'audit, chaque entrée avec l'adresse
 source de la requête.
 
@@ -555,7 +587,7 @@ adresse réelle et modifiable depuis la console.
 | `SMTP_HOST` / `SMTP_PORT` | — / `587` | Serveur SMTP. Hôte vide = aucun e-mail n'est envoyé avec `EMAIL_PROVIDER=smtp` |
 | `SMTP_SECURITY` | `starttls` | `starttls` (connexion en clair puis chiffrée, port 587 — le cas général), `tls` (TLS implicite, port 465) ou `none` (en clair, pour un relais interne sur le port 25 qui authentifie par adresse source) |
 | `SMTP_USER` / `SMTP_PASSWORD` | — | Identifiants, si le serveur en demande. Vides = pas d'authentification |
-| `SMTP_VERIFY_TLS` | `true` | Vérification du certificat du serveur. À `false` seulement pour un relais interne dont le certificat n'est pas vérifiable depuis le conteneur (auto-signé, AC privée non montée) |
+| `SMTP_VERIFY_TLS` | `true` | Vérification du certificat du serveur : la chaîne doit aboutir à une AC connue du conteneur, et le certificat porter le nom du serveur. Une AC interne « faite maison » (`openssl req -x509`, sans extension d'usage de clé) est acceptée comme en v1.2.0 : la lecture stricte de la RFC 5280, que Python applique par défaut depuis la 3.13, n'est pas demandée au serveur SMTP. À `false` seulement pour un relais interne dont le certificat n'est pas vérifiable depuis le conteneur (auto-signé, AC privée non montée) |
 | `SMTP_TIMEOUT_SECONDS` | `10` | |
 | `MAINTENANCE_REMINDER_WEEKDAY` | `0` | Jour du rappel hebdomadaire des maintenances à chaque responsable, à `DIGEST_HOUR_UTC` : `0` = lundi … `6` = dimanche. Un responsable sans rien de dû ne reçoit rien ; un compte sur « aucun e-mail » non plus. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `DIGEST_HOUR_UTC` | `18` | Heure UTC du résumé quotidien. Le parc visé est à UTC-10, où 18:00 UTC = 08:00 sur place. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
@@ -673,6 +705,32 @@ Le service tourne sur une image construite par Compose depuis
 signé d'Alpine. Le premier `docker compose up` la construit : il faut alors
 joindre le registre Docker et `dl-cdn.alpinelinux.org` (derrière un proxy,
 § « Hôte Docker derrière un proxy »). `docker compose pull` ne la concerne pas.
+
+**Hôte qui ne joint pas `dl-cdn.alpinelinux.org`** (miroir de registre seul,
+filtrage sortant) : la construction échoue, et avec elle `docker compose up`
+tout entier — les anciens conteneurs continuent de tourner, rien n'est mis à
+jour. L'image se construit alors ailleurs et se dépose sur le serveur, sous le
+nom que Compose lui donne : `deploy-db-backup` (`<projet>-db-backup` ; le
+projet est le nom du dossier, sauf `COMPOSE_PROJECT_NAME` ou `-p` —
+`docker compose config --images` l'affiche).
+
+```bash
+# Sur une machine qui joint Docker Hub et dl-cdn.alpinelinux.org, de même
+# architecture que le serveur (sinon : --platform linux/amd64), depuis la
+# racine du dépôt à la version visée :
+docker build --pull -t deploy-db-backup deploy/backup
+docker save deploy-db-backup | gzip > tiai-db-backup.tar.gz
+
+# Sur le serveur, après y avoir copié le fichier :
+docker load -i tiai-db-backup.tar.gz     # « Loaded image: deploy-db-backup:latest »
+cd deploy
+docker compose up -d                     # l'image existe : Compose ne la construit pas
+```
+
+À refaire à chaque mise à jour du serveur, à la place de
+`docker compose build --pull db-backup` (étape 5 de § « Mettre à jour le
+serveur »), qui échouerait de la même façon : l'image embarque le `pg_dump` de
+`postgres:16-alpine`, à tenir à la version du service `db`.
 
 Vérifier que ça tourne :
 
@@ -815,6 +873,14 @@ Sur un serveur reconstruit de zéro : déposer d'abord la copie hors site du
 `.dump.age` dans `deploy/backups/`, et le `.env` d'origine (sa
 `BACKUP_ENCRYPT_RECIPIENT` comprise).
 
+> **Renommer le dump déposé avant de démarrer la stack** (clair ou chiffré) :
+> `mv backups/tiai-AAAAMMJJ-HHMMSS.dump.age backups/tiai-a-restaurer.dump.age`.
+> Sous son nom de dump quotidien, une copie qui a gardé sa date et a plus de
+> `BACKUP_KEEP_DAYS` jours est **purgée** par `db-backup` dès son premier
+> dump réussi — celui de la base encore vide, quelques secondes après
+> `docker compose up -d`, avant toute restauration. Un autre nom n'est jamais
+> purgé ; l'effacer à la main une fois la restauration vérifiée.
+
 Au redémarrage, le backend rejoue les migrations Alembic si le dump vient
 d'une version plus ancienne du schéma — restaurer un dump d'hier après une
 montée de version fonctionne donc sans étape supplémentaire. L'inverse (un
@@ -934,7 +1000,10 @@ mais construite, et `docker compose up` ne la reconstruit pas d'elle-même
 quand elle existe déjà. `--pull` la refait sur la `postgres:16-alpine` que
 `docker compose pull` vient d'apporter à `db` (même version de `pg_dump` que
 le serveur, correctifs de sécurité compris), avec le `Dockerfile` de la
-version visée. Il faut joindre le registre Docker et `dl-cdn.alpinelinux.org`.
+version visée. Il faut joindre le registre Docker et `dl-cdn.alpinelinux.org` ;
+sur un hôte qui ne le peut pas, l'image se construit ailleurs et se charge
+(§ « Sauvegardes et restauration », « Hôte qui ne joint pas… ») **avant**
+`docker compose up -d`.
 
 **Les notes de version** (`dev/notes-de-version-v<version>.md`, section « À
 faire avant de mettre à jour ») disent ce qu'une release demande de plus : une
@@ -964,12 +1033,31 @@ curl -L https://github.com/Natimai-Solutions/natimai-tiai/archive/refs/tags/v1.2
 > dans le `.env`. Sans lui, le backend refuse de démarrer.
 
 **Revenir en arrière** : remettre l'ancienne valeur de `TIAI_VERSION` **et**
-les fichiers de déploiement de l'ancienne version (`git checkout v1.2.0`), puis
-relancer `docker compose up -d` et
-`docker compose up -d --build --force-recreate caddy db-backup` — tant que la version
-quittée n'a pas migré la base. Si elle l'a fait, restaurer le dump pris avant
-la montée (§ « Restaurer ») *puis* redémarrer sur l'ancienne version : un
-schéma plus récent que le code n'est pas supporté.
+les fichiers de déploiement de l'ancienne version (`git checkout v1.2.0`),
+puis :
+
+```bash
+# Seulement si la version de retour construit db-backup — son
+# docker-compose.yml porte un `build:` sous `db-backup`, à partir de la
+# v1.2.1 : refaire cette image, et elle seule, avec le Dockerfile de cette
+# version. Sans objet pour un retour à la v1.2.0, qui tire postgres:16-alpine.
+docker compose build db-backup
+docker compose up -d                                    # backend, worker et console de l'ancienne version
+docker compose up -d --force-recreate caddy db-backup   # relisent l'ancien Caddyfile et l'ancien backup.sh
+```
+
+Jamais `up --build` ici : `--build` reconstruit toutes les images des services
+démarrés, dépendances comprises — `caddy` dépend de `backend` et de
+`frontend`, qui seraient reconstruits depuis les sources (plusieurs minutes,
+PyPI, npm et Docker Hub à joindre en plein incident), à la place des images
+publiées de l'ancienne version ; et un échec de construction laisserait
+`caddy` sur le Caddyfile de la version quittée. Si les images de l'ancienne
+version ne sont plus sur l'hôte (`docker image ls`), `docker compose pull`
+d'abord.
+
+Cela vaut tant que la version quittée n'a pas migré la base. Si elle l'a fait,
+restaurer le dump pris avant la montée (§ « Restaurer ») *puis* redémarrer sur
+l'ancienne version : un schéma plus récent que le code n'est pas supporté.
 
 **Construire depuis les sources** plutôt que tirer les images (dépôt modifié,
 serveur sans accès à ghcr.io) : `docker compose up -d --build`. Compose
@@ -1453,11 +1541,40 @@ binaire, `C:\ProgramData\Tiai` et `HKLM\SOFTWARE\Tiai` restent en place.
 ### Enrôlement : approbation et rotation du secret
 
 Le secret d'enrôlement est lisible sur chaque poste (registre ou fichier de la
-GPO). Il permet de **créer** un poste, jamais de **prendre la place** d'un poste
-existant : quand un `machine_uuid` qui détient déjà un token valide redemande
+GPO). Il permet de **créer** un poste, pas de **prendre la place** d'un poste
+établi : quand un `machine_uuid` qui détient déjà un token valide redemande
 à s'enrôler, le serveur ne délivre rien. La demande est notée (date, adresse
 source), le token en place continue de fonctionner, et la fiche du poste
 affiche un bandeau « Ré-enrôlement demandé ».
+
+**Une seule exception : la réponse d'enrôlement perdue.** Un agent dont la
+réponse à l'enrôlement s'est perdue en route n'a pas reçu son token et
+redemande à s'enrôler. Ce second enrôlement est servi **sans approbation** —
+le token précédent est annulé, un nouveau délivré — seulement si toutes ces
+conditions sont réunies :
+
+- le token délivré par l'enrôlement précédent **n'a encore authentifié aucune
+  requête** — heartbeat, résultat de commande, téléchargement de paquet, que
+  la requête ait ensuite été acceptée ou refusée. Le serveur l'enregistre
+  comme un fait à l'enrôlement et l'efface à la première requête authentifiée ;
+  un token renouvelé par rotation (ci-dessous) n'est jamais « non utilisé » ;
+- cet enrôlement date de **moins d'une heure** ;
+- la demande présente **exactement la même empreinte** que lui (MachineGuid,
+  UUID SMBIOS, hachage TPM — une composante en plus ou en moins compte comme
+  une différence) ;
+- le poste n'est pas révoqué.
+
+Dans tout autre cas la demande attend une approbation. La reprise figure au
+journal d'audit (« Enrôlement d'un poste repris (réponse perdue) »).
+Conséquence à connaître : entre l'enrôlement d'un poste et sa première
+requête — quelques secondes en temps normal, une heure au plus — qui détient
+le secret, le `machine_uuid` et l'empreinte du poste peut se faire délivrer
+le token à sa place. Le poste réel, dont le token est alors refusé, redemande
+à s'enrôler : il reprend la main si le token usurpé n'a pas servi, et sinon
+sa demande apparaît en « Ré-enrôlement demandé », ce qui rend la substitution
+visible. Dès qu'un poste a parlé une fois au serveur, le secret ne suffit
+plus. Les postes déjà enrôlés au moment de la mise à jour vers la v1.2.1 sont
+tous considérés comme ayant utilisé leur token.
 
 - **Poste réinstallé** (image refaite, agent réinstallé, token perdu) : le
   bandeau propose **Autoriser le ré-enrôlement**. L'ancien token est annulé et
@@ -1561,7 +1678,8 @@ changement est inscrit au journal d'audit. Le worker relit l'heure du résumé
 rappel de la semaine, quand on déplace leur heure ou qu'il redémarre. Un worker
 démarré après l'heure du résumé (mise à jour, redémarrage de l'hôte) l'envoie
 aussitôt s'il n'est pas déjà parti ce jour-là ; il ne rattrape jamais celui de
-la veille.
+la veille. Il en va de même d'une heure déplacée vers une heure déjà passée :
+le résumé du jour part aussitôt s'il n'est pas déjà parti.
 
 **Utilisation des postes.** Le serveur compte les heures où chaque poste est
 allumé, à partir des battements de l'agent : un écart entre deux battements

@@ -400,3 +400,55 @@ def test_the_slow_lock_and_reset_ceiling_have_bounded_defaults():
 def test_the_generous_limit_must_stay_above_the_tight_one(overrides, named):
     with pytest.raises(ValidationError, match=named):
         make_settings(**overrides)
+
+
+@pytest.mark.parametrize(
+    "quick,slow",
+    [
+        ({}, {"LOGIN_SLOW_MAX_FAILED_ATTEMPTS": 20, "LOGIN_SLOW_WINDOW_HOURS": 24}),
+        ({"LOGIN_MAX_FAILED_ATTEMPTS": 3}, {"LOGIN_SLOW_MAX_FAILED_ATTEMPTS": 20}),
+        ({"LOGIN_MAX_FAILED_ATTEMPTS": 20}, {"LOGIN_SLOW_MAX_FAILED_ATTEMPTS": 80}),
+        ({"LOGIN_MAX_FAILED_ATTEMPTS": 100}, {"LOGIN_SLOW_MAX_FAILED_ATTEMPTS": 400}),
+        ({"LOGIN_LOCKOUT_MINUTES": 720}, {"LOGIN_SLOW_WINDOW_HOURS": 24}),
+        ({"LOGIN_LOCKOUT_MINUTES": 725}, {"LOGIN_SLOW_WINDOW_HOURS": 25}),
+        ({"LOGIN_LOCKOUT_MINUTES": 1440}, {"LOGIN_SLOW_WINDOW_HOURS": 48}),
+    ],
+)
+def test_the_slow_lock_follows_a_quick_one_set_alone(monkeypatch, quick, slow):
+    """Verification of v1.2.1, F2: a ``.env`` valid before the slow lock
+    existed — LOGIN_MAX_FAILED_ATTEMPTS of 20 or more, or a lock of a day —
+    contradicted the new variables' defaults, and the backend refused to
+    start on two variables its operator had never heard of. Left unset,
+    each follows the quick value it must stay beyond: four times the
+    attempts, twice the duration, never below its own default."""
+    for name, value in quick.items():
+        # From the environment, as a deployment sets them.
+        monkeypatch.setenv(name, str(value))
+    env = make_settings()
+    for name, value in slow.items():
+        assert getattr(env, name) == value
+
+
+def test_an_explicit_slow_lock_is_not_adjusted(monkeypatch):
+    """What the operator wrote is taken as written — and refused, both
+    variables named, when the two contradict each other."""
+    monkeypatch.setenv("LOGIN_MAX_FAILED_ATTEMPTS", "10")
+    monkeypatch.setenv("LOGIN_SLOW_MAX_FAILED_ATTEMPTS", "12")
+    assert make_settings().LOGIN_SLOW_MAX_FAILED_ATTEMPTS == 12
+    monkeypatch.setenv("LOGIN_SLOW_MAX_FAILED_ATTEMPTS", "10")
+    with pytest.raises(ValidationError) as refused:
+        make_settings()
+    assert "LOGIN_SLOW_MAX_FAILED_ATTEMPTS" in str(refused.value)
+    assert "LOGIN_MAX_FAILED_ATTEMPTS (10 <= 10)" in str(refused.value)
+    # An explicit slow value against the quick one's default is one too.
+    monkeypatch.delenv("LOGIN_MAX_FAILED_ATTEMPTS")
+    monkeypatch.setenv("LOGIN_SLOW_MAX_FAILED_ATTEMPTS", "5")
+    with pytest.raises(ValidationError, match="LOGIN_MAX_FAILED_ATTEMPTS"):
+        make_settings()
+    monkeypatch.delenv("LOGIN_SLOW_MAX_FAILED_ATTEMPTS")
+    monkeypatch.setenv("LOGIN_LOCKOUT_MINUTES", "1440")
+    monkeypatch.setenv("LOGIN_SLOW_WINDOW_HOURS", "24")
+    with pytest.raises(ValidationError) as refused:
+        make_settings()
+    assert "LOGIN_SLOW_WINDOW_HOURS" in str(refused.value)
+    assert "LOGIN_LOCKOUT_MINUTES" in str(refused.value)

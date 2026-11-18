@@ -9,10 +9,13 @@ its neighbours and rank are exactly the list's, whatever the sort, the
 direction, the ties, the NULLs, the filters and the caller's scope.
 """
 
+import base64
+import json
 import time
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
+import pytest
 from sqlalchemy import event, insert, update
 
 from tests.scope_helpers import SITE_A, SITE_B, machine, two_sites
@@ -64,12 +67,15 @@ async def _fleet(db_session) -> dict[str, object]:
     from app.features.usage.models import MachineUptime
 
     now = datetime.now(UTC)
+    # Case twins, on two sites: a name is unique in its building — and a
+    # building's on its site — whatever its case, and the sorts fold it.
     building = Building(name="Bâtiment A", location="Lycée")
-    db_session.add(building)
+    twin = Building(name="bâtiment a", location="Collège")
+    db_session.add_all([building, twin])
     await db_session.flush()
     rooms = [
         Room(name="Salle 1", building_id=building.id),
-        Room(name="salle 1", building_id=building.id),
+        Room(name="salle 1", building_id=twin.id),
         Room(name="Atelier"),
     ]
     db_session.add_all(rooms)
@@ -355,6 +361,112 @@ async def test_a_cursor_is_checked(client, db_session):
     )
     plain = await _neighbours(client, headers, order[6], "sort_by=ram_total_mb")
     assert other == plain
+
+
+def _forged(sort_by: str, *values) -> str:
+    """A cursor as the server writes them, around values it never wrote."""
+    payload = {"s": sort_by, "d": True, "v": list(values)}
+    raw = json.dumps(payload).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+_STAMP = {"t": "2026-11-17T00:00:00+00:00"}
+# Well-formed cursors of the right sort and the right kinds, whose values no
+# column holds: each used to reach PostgreSQL as a parameter it refuses.
+_UNUSABLE_CURSORS = {
+    "nul in a string": ("hostname", "a\u0000b", _STAMP),
+    "lone surrogate": ("hostname", "\ud800", _STAMP),
+    "nul in a room": ("room", "salle\u0000", _STAMP),
+    "nul in a raw version": ("agent_version", "0.9\u0000", _STAMP),
+    "integer past int4": ("wu_pending_count", 2**31, _STAMP),
+    "integer below int4": ("wu_pending_count", -(2**31) - 1, _STAMP),
+    "integer past any column": ("wu_pending_count", 10**30, _STAMP),
+    "memory past int4": ("ram_total_mb", 2**40, _STAMP),
+    "naive date": ("", {"t": "2026-11-17T00:00:00"}),
+    "naive tie-breaker": ("hostname", "pc-a", {"t": "2026-11-17T00:00:00"}),
+    "naive due date": ("maintenance_due_at", {"t": "2026-11-17T00:00:00"}, _STAMP),
+    "float nan": ("disk_free_percent", {"f": "nan"}, _STAMP),
+    "float infinity": ("disk_free_percent", {"f": "inf"}, _STAMP),
+    "decimal nan": ("disk_free_percent", {"n": "NaN"}, _STAMP),
+    "decimal signalling nan": ("disk_free_percent", {"n": "sNaN"}, _STAMP),
+    "decimal infinity": ("disk_free_percent", {"n": "-Infinity"}, _STAMP),
+    "decimal past numeric": ("disk_free_percent", {"n": "1e999999"}, _STAMP),
+    "integer past numeric": ("disk_free_percent", 10**400, _STAMP),
+    "hours infinite": ("usage_hours", {"f": "-inf"}, _STAMP),
+    "hours past float": ("usage_hours", {"n": "1e400"}, _STAMP),
+    "integer for a flag": ("session_user_present", 1, _STAMP),
+    "flag for a count": ("wu_pending_count", True, _STAMP),
+    "flag for a percentage": ("disk_free_percent", True, _STAMP),
+    "text for a count": ("wu_pending_count", "3", _STAMP),
+}
+
+
+@pytest.mark.parametrize("name", list(_UNUSABLE_CURSORS))
+async def test_a_tampered_cursor_is_ignored_never_a_500(client, db_session, name):
+    """Only the caller's own request was at stake, and it still must answer:
+    the poste's current place, as for another sort's cursor."""
+    sort_by, *values = _UNUSABLE_CURSORS[name]
+    await _fleet(db_session)
+    headers = await _admin(client, db_session)
+    query = f"sort_by={sort_by}" if sort_by else ""
+    order = await _list_ids(client, headers, query)
+    plain = await _neighbours(client, headers, order[6], query)
+    forged = await _neighbours(
+        client, headers, order[6], query, _forged(sort_by, *values)
+    )
+    assert forged == plain
+
+
+async def test_a_usable_cursor_of_every_kind_is_still_used(client, db_session):
+    """The bounds must not turn away what the server itself hands out, nor a
+    place no poste holds any more: the walk goes on from there."""
+    await _fleet(db_session)
+    headers = await _admin(client, db_session)
+    for sort_by, value in (
+        ("hostname", "pc-b"),
+        ("wu_pending_count", 2**31 - 1),
+        ("wu_pending_count", -(2**31)),
+        ("ram_total_mb", 9000),
+        ("disk_free_percent", {"n": "33.5"}),
+        ("disk_free_percent", {"f": "33.5"}),
+        ("disk_free_percent", 34),
+        ("usage_hours", {"f": "0.75"}),
+        ("session_user_present", True),
+        ("maintenance_due_at", _STAMP),
+    ):
+        query = f"sort_by={sort_by}"
+        cursor = _forged(sort_by, value, _STAMP)
+        for mid in (await _list_ids(client, headers, query))[:3]:
+            body = await _neighbours(client, headers, mid, query, cursor)
+            # Used, not replaced by the poste's own place: it comes back as is.
+            assert body["cursor"] == _encode(sort_by, value)
+    # Dates at either end of the calendar are dates still.
+    mid = (await _list_ids(client, headers, ""))[0]
+    for edge in ("0001-01-01T00:00:00+14:00", "9999-12-31T23:59:59-14:00"):
+        await _neighbours(client, headers, mid, "", _forged("", {"t": edge}))
+
+
+def _encode(sort_by: str, value) -> str:
+    raw = json.dumps(
+        {"s": sort_by, "d": True, "v": [value, _STAMP]}, separators=(",", ":")
+    )
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+@pytest.mark.parametrize(
+    "value", [{"n": "abc"}, {"f": "abc"}, {"t": "yesterday"}, {"u": "x"}, [1], 1.5]
+)
+async def test_a_cursor_that_cannot_be_read_is_a_422(client, db_session, value):
+    await _fleet(db_session)
+    headers = await _admin(client, db_session)
+    order = await _list_ids(client, headers, "sort_by=disk_free_percent")
+    resp = await client.get(
+        f"/api/v1/machines/{order[0]}/neighbours?sort_by=disk_free_percent"
+        f"&cursor={_forged('disk_free_percent', value, _STAMP)}",
+        headers=headers,
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["message"] == "Malformed cursor"
 
 
 async def test_one_statement_and_fast_on_three_thousand_postes(

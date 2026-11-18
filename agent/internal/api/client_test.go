@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -281,9 +283,145 @@ func TestStripControlEscapesKeepsWhatIsNotAControlCharacter(t *testing.T) {
 		`{"p":"\u0020\u0100\u00ff"}`:       `{"p":"\u0020\u0100\u00ff"}`,
 		`{"p":"\\"}`:                       `{"p":"\\"}`,
 		`{"p":1}`:                          `{"p":1}`,
+		// Backspace and form feed, which encoding/json writes as two-byte
+		// escapes since Go 1.22, and as \u00XX before: both forms go. After
+		// a literal backslash, "b" and "f" are letters (a Windows path).
+		`{"p":"a\bb\fc\u0008\u000c\u000C"}`: `{"p":"abc"}`,
+		`{"p":"C:\\bin\\foo\\\b"}`:          `{"p":"C:\\bin\\foo\\"}`,
+		`{"p":"\"\/\\\n\r\t"}`:              `{"p":"\"\/\\\n\r\t"}`,
 	} {
 		if got := string(stripControlEscapes([]byte(in))); got != want {
 			t.Errorf("stripControlEscapes(%s) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+// Every C0 control character except tab, line feed and carriage return is
+// gone from what encoding/json produced, whichever escape this version of Go
+// writes it as — the claim of stripControlEscapes, one character at a time.
+func TestStripControlEscapesRemovesEveryC0ButTabLFAndCR(t *testing.T) {
+	for c := rune(0); c < 0x20; c++ {
+		in := "a" + string(c) + "b"
+		data, err := json.Marshal(map[string]string{"k": in})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var back map[string]string
+		if err := json.Unmarshal(stripControlEscapes(data), &back); err != nil {
+			t.Fatalf("U+%04X: invalid JSON after the strip: %v", c, err)
+		}
+		want := "ab"
+		if c == '\t' || c == '\n' || c == '\r' {
+			want = in
+		}
+		if back["k"] != want {
+			t.Errorf("U+%04X: got %q, want %q (sent as %s)", c, back["k"], want, data)
+		}
+	}
+}
+
+// The property the strip must hold on anything the agent may report: what
+// leaves is valid JSON, and decodes to what was marshalled minus the stripped
+// characters — nothing else lost, nothing else changed. Random documents made
+// of the pieces that could confuse a walk over escapes: backslashes, the text
+// of an escape as data, quotes, invalid UTF-8, the characters encoding/json
+// escapes on its own, map keys.
+func TestStripControlEscapesRoundTripsRandomDocuments(t *testing.T) {
+	alphabet := []string{"\\", "u", "0", "0", "0", "1", "f", "F", "b", "\"", "\x00", "\x01", "\x1f",
+		"\b", "\f", "\t", "\n", "\r", "\x7f", "é", " ", "<", "&", "\xff", "\xed\xa0\x80", "😀", "a", "/",
+		"\\u0000", "\\\\", "u0000", "\\b", "\\f", "\x1b", "\u2028"}
+	// What the server receives: the string as encoding/json transmits it
+	// (invalid UTF-8 replaced), minus the stripped characters.
+	want := func(s string) string {
+		raw, err := json.Marshal(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(raw, &s); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Map(func(r rune) rune {
+			if r < 0x20 && r != '\t' && r != '\n' && r != '\r' {
+				return -1
+			}
+			return r
+		}, s)
+	}
+	type doc struct {
+		A string            `json:"a"`
+		M map[string]string `json:"m"`
+		L []string          `json:"l"`
+		N int               `json:"n"`
+	}
+	rng := rand.New(rand.NewPCG(42, 1))
+	gen := func() string {
+		var b strings.Builder
+		for n := rng.IntN(30); n > 0; n-- {
+			if rng.IntN(4) == 0 {
+				b.WriteByte(byte(rng.IntN(256)))
+			} else {
+				b.WriteString(alphabet[rng.IntN(len(alphabet))])
+			}
+		}
+		return b.String()
+	}
+	for i := range 5000 {
+		a, k, v, l := gen(), gen(), gen(), gen()
+		data, err := json.Marshal(doc{A: a, M: map[string]string{k: v}, L: []string{l}, N: i})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := stripControlEscapes(data)
+		if !json.Valid(out) {
+			t.Fatalf("invalid JSON after the strip:\n in  %q\n out %q", data, out)
+		}
+		var back doc
+		if err := json.Unmarshal(out, &back); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		got, ok := back.M[want(k)]
+		if back.A != want(a) || len(back.L) != 1 || back.L[0] != want(l) || !ok || got != want(v) || back.N != i || len(back.M) != 1 {
+			t.Fatalf("document changed by the strip:\n in  %q\n out %q", data, out)
+		}
+	}
+}
+
+// A refusal carries the wait its Retry-After header asks for, in the seconds
+// form the server sends — and nothing when the header is absent, an HTTP
+// date, or not a wait at all. A number no clock could wait is bounded, not
+// wrapped around into a short one.
+func TestAStatusErrorCarriesRetryAfter(t *testing.T) {
+	var header string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if header != "" {
+			w.Header().Set("Retry-After", header)
+		}
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":"rate_limited"}}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "", 5*time.Second, nil)
+	for value, want := range map[string]time.Duration{
+		"300":                           300 * time.Second,
+		" 60 ":                          time.Minute,
+		"":                              0,
+		"0":                             0,
+		"-5":                            0,
+		"1.5":                           0,
+		"soon":                          0,
+		"Wed, 18 Nov 2026 08:00:00 GMT": 0,
+		"86401":                         24 * time.Hour,
+		"9223372036854775807":           24 * time.Hour,
+		"99999999999999999999999":       0,
+	} {
+		header = value
+		_, err := c.Enroll(context.Background(), "secret", models.EnrollRequest{MachineUUID: "u"})
+		var se *StatusError
+		if !errors.As(err, &se) || se.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("Retry-After %q: err = %v", value, err)
+		}
+		if se.RetryAfter != want {
+			t.Errorf("Retry-After %q read as %s, want %s", value, se.RetryAfter, want)
 		}
 	}
 }

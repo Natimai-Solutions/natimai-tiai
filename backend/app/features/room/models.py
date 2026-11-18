@@ -14,7 +14,7 @@ what reveals a GPO aimed at the wrong OU, or a poste moved without its room.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, ForeignKey, Index, UniqueConstraint, func
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
@@ -46,6 +46,19 @@ class Building(SQLModel, table=True):
     notes: str | None = Field(default=None, max_length=2000)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
+
+
+# « Bâtiment B » and « bâtiment b » on one site are one building to whoever
+# reads the list: the routes refuse the second, and this index holds the rule
+# against two requests served at the same time, each finding the name free.
+# Folded by the database's own ``lower()`` — what the routes compare with.
+Index(
+    "ix_buildings_location_name_lower",
+    Building.location,  # type: ignore[arg-type]
+    func.lower(Building.name),
+    unique=True,
+    postgresql_nulls_not_distinct=True,
+)
 
 
 class Room(SQLModel, table=True):
@@ -93,3 +106,14 @@ class Room(SQLModel, table=True):
     notes: str | None = Field(default=None, max_length=2000)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
+
+
+# One name per building whatever its case, and one among the rooms that have
+# no building — the rule of ``uq_rooms_building_name``, case folded.
+Index(
+    "ix_rooms_building_name_lower",
+    Room.building_id,  # type: ignore[arg-type]
+    func.lower(Room.name),
+    unique=True,
+    postgresql_nulls_not_distinct=True,
+)

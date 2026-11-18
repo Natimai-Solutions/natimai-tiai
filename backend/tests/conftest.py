@@ -115,6 +115,21 @@ def _fresh_email_settings():
     email_policy.forget()
 
 
+@pytest_asyncio.fixture(autouse=True)
+def _packages_in_tmp(tmp_path, monkeypatch):
+    """Keep the package store of every test under its own ``tmp_path``.
+
+    Any agent download reaches the store, which creates its directory on
+    first use: left at the default (``/data/packages``), a test that only
+    asks for a missing file writes on the host when run as root, and fails
+    on a machine where ``/data`` cannot be created — CI's runner.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "PACKAGES_DIR", str(tmp_path / "packages"))
+    yield
+
+
 @pytest_asyncio.fixture
 async def db_session(engine):
     """Direct session on the test database (for asserting persisted state)."""

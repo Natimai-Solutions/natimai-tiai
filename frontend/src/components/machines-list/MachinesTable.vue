@@ -11,7 +11,6 @@
     :rows-per-page-options="[25, 50, 100]"
     binary-state-sort
     @request="(evt) => emit('request', evt)"
-    @row-click="onRowClick"
   >
     <template #body-cell-hostname="props">
       <q-td :props="props">
@@ -31,14 +30,14 @@
               {{ timeAgoLabel(props.row.last_seen) }}
             </q-tooltip>
           </q-icon>
-          <!-- The row opens on click; the name is also a link, so the fiche is
-             reachable with Tab and Enter, and opens in a new tab on demand. -->
+          <!-- The name is the way into the fiche, and the only one: a link,
+               reached with Tab and Enter, opened in a new tab on demand. The
+               rest of the row is text to read and to copy (see the script). -->
           <router-link
             v-if="detailRoute"
             :to="detailRoute(props.row, props.pageIndex)"
-            class="row-link machine-name__text"
+            class="machine-name__text machine-name__link"
             :title="props.value || props.row.machine_uuid"
-            @click.stop
           >
             {{ props.value || props.row.machine_uuid }}
           </router-link>
@@ -267,13 +266,19 @@ import {
   usedRatio,
   type MachineListPagination,
 } from 'src/utils/machineListTable';
-import { hasTextSelection } from 'src/utils/textSelection';
 import { hoursLabel } from 'src/utils/usageFilter';
 
 /**
  * The machine list's table: one page of the fleet, a cell per column the
  * reader chose. Sorting and paging are the server's — every interaction comes
  * out as `request`, and the page writes it into the URL.
+ *
+ * A row does not open on click: the name does, as a link. Rows that opened on
+ * click could not let a word be selected by double-click — its first click is
+ * a plain click, the fiche was open before any selection existed to tell the
+ * two apart, and holding every click back for the length of a double-click
+ * would have slowed the plain ones. So the row is text (hostname apart), with
+ * nothing to guess: select it, copy it, Ctrl+A it.
  */
 withDefaults(
   defineProps<{
@@ -303,13 +308,17 @@ const pagination = defineModel<MachineListPagination>('pagination', { required: 
 
 const emit = defineEmits<{
   request: [evt: Parameters<NonNullable<QTableProps['onRequest']>>[0]];
-  /** A row clicked, with its index on the current page. */
-  open: [row: Machine, index: number];
 }>();
-
-/** A row click opens the fiche — unless it ended a text selection (a hostname being copied). */
-function onRowClick(_evt: Event, row: Machine, index: number) {
-  if (hasTextSelection()) return;
-  emit('open', row, index);
-}
 </script>
+
+<style scoped>
+/* The one thing in the row that opens something: it looks like it. Underlined
+   rather than coloured — the primary colour falls short of 4.5:1 on a dark
+   card, and the text colour is right in both modes. */
+.machine-name__link {
+  color: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+</style>

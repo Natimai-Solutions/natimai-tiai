@@ -100,51 +100,75 @@
            depend on it, and a console silently missing half of them would
            read as an account without rights. -->
       <div v-if="auth.profileError && !auth.user" class="q-pa-md q-pb-none">
+        <!-- The sentence is ours whatever failed: handed over as the text to
+             show, not as the fallback of an error that has words of its own. -->
         <LoadErrorBanner
-          :error="auth.profileError"
+          :error="null"
           :loading="profileLoading"
-          fallback="Impossible de charger votre profil : les menus et les actions sont incomplets."
+          :fallback="profileErrorMessage"
           @retry="retryProfile"
         />
       </div>
-      <main id="main-content" ref="mainEl" tabindex="-1" class="main-content">
+      <!-- Where « Aller au contenu » lands. Not a `main` itself: every page is
+           a `q-page`, which renders the landmark — one per page, not two. -->
+      <div id="main-content" ref="mainEl" tabindex="-1" class="main-content">
         <router-view />
-      </main>
+      </div>
     </q-page-container>
   </q-layout>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { canOpen, firstReadablePage } from 'src/router/access';
 import { PROFILE_REFRESH_MS, useAuthStore } from 'src/stores/auth';
 import { listChecks } from 'src/services/checks';
+import { apiErrorMessage } from 'src/services/errors';
 import { getDue } from 'src/services/maintenance';
+import { useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { tasksVersion } from 'src/composables/useTasksBadge';
 
 const drawer = ref(false);
 const auth = useAuthStore();
 const router = useRouter();
 
-// The badge on « Mes tâches »: how many verifications are assigned to me.
-// Read once the profile is known, and again on each navigation — cheap (one
-// count) and enough for a number that changes a few times a day.
+// The badges on « Mes tâches »: how many verifications are assigned to me, and
+// how many postes of mine are overdue for maintenance. Read once the profile
+// is known, and again on each navigation — cheap (two counts) and enough for
+// numbers that change a few times a day.
+//
+// Each count under its own permission, and on its own: the entry is offered
+// to an account that only follows maintenance, which has no right to the list
+// of checks — and one count that fails says nothing about the other.
 const myTasks = ref(0);
 const myOverdue = ref(0);
-async function countMyTasks() {
-  if (!auth.can('check', 'read')) return;
+async function countMyChecks() {
+  // A right withdrawn during the session takes its count with it.
+  if (!auth.can('check', 'read')) {
+    myTasks.value = 0;
+    return;
+  }
   try {
-    const [checks, due] = await Promise.all([
-      listChecks({ open: true, assigned_to: 'me', page_size: 1 }),
-      auth.can('maintenance', 'read') ? getDue('me') : Promise.resolve(null),
-    ]);
-    myTasks.value = checks.total;
-    myOverdue.value = due?.overdue ?? 0;
+    myTasks.value = (await listChecks({ open: true, assigned_to: 'me', page_size: 1 })).total;
   } catch {
     // The badge is a hint; the page says the truth.
   }
+}
+async function countMyOverdue() {
+  if (!auth.can('maintenance', 'read')) {
+    myOverdue.value = 0;
+    return;
+  }
+  try {
+    myOverdue.value = (await getDue('me')).overdue;
+  } catch {
+    // As above.
+  }
+}
+async function countMyTasks() {
+  await Promise.all([countMyChecks(), countMyOverdue()]);
 }
 
 const canReadMachines = computed(() => auth.can('machine', 'read'));
@@ -162,17 +186,32 @@ async function retryProfile() {
     profileLoading.value = false;
   }
 }
-let profileTimer: ReturnType<typeof setInterval> | null = null;
+
+// What the banner says: always that the profile is what is missing — the
+// reader sees an empty menu, and « Erreur interne du serveur » alone does not
+// tell them why — then what the server answered, when it answered.
+const profileErrorMessage = computed(() => {
+  const reason = apiErrorMessage(auth.profileError, '');
+  return (
+    'Impossible de charger votre profil : les menus et les actions sont incomplets' +
+    (reason ? ` — ${reason}.` : '.')
+  );
+});
+
+// The periodic read goes through `useAutoRefresh` for what it does beyond a
+// timer: nothing while the tab is hidden, one catch-up when it is shown again.
+// A bare interval here asked `/auth/me` from every forgotten background tab,
+// and each of those calls renews the access token when it has expired — which
+// slides the session: it then lived to its absolute limit (`SESSION_MAX_DAYS`)
+// instead of closing after `REFRESH_TOKEN_EXPIRE_DAYS` without use. A tab
+// nobody looks at sends nothing at all.
+useAutoRefresh(() => auth.refreshProfile(), { intervalMs: PROFILE_REFRESH_MS });
 
 onMounted(() => {
   // Restore the user profile after a page reload: the router's silent refresh
   // has put an access token back, the profile is still to fetch. A failure is
   // shown by the banner above, not left as an unhandled rejection.
   if (auth.isAuthenticated && !auth.user) void retryProfile();
-  profileTimer = setInterval(() => void auth.refreshProfile(), PROFILE_REFRESH_MS);
-});
-onUnmounted(() => {
-  if (profileTimer !== null) clearInterval(profileTimer);
 });
 
 // Rights withdrawn while a page is open: leave it for the first page still

@@ -262,6 +262,25 @@ describe('PackageDeployDialog', () => {
     w.unmount();
   });
 
+  it('does not send what the server says no poste would install, whatever the console reads', async () => {
+    // By the console's own reading this package is method A — a publisher's
+    // .exe, nothing beside it. The server knows a reason it does not: its
+    // word is enough to keep the installation from being sent.
+    const blocker = 'Une raison que seule la version du serveur connaît';
+    const w = await open({
+      package: pkg({ install_blockers: [blocker] }),
+      machineIds: ['m-1'],
+    });
+    expect(document.querySelector('.q-banner')?.textContent ?? '').toContain(blocker);
+    expect(sendButton(w).props('disable')).toBe(true);
+    w.unmount();
+
+    // The same package without that word is sent.
+    const ok = await open({ package: pkg(), machineIds: ['m-1'] });
+    expect(sendButton(ok).props('disable')).toBe(false);
+    ok.unmount();
+  });
+
   it('tells apart two packages of the same name and version', async () => {
     listPackages.mockResolvedValue([
       pkg({ id: 'p-1', created_at: '2026-11-04T10:00:00Z' }),

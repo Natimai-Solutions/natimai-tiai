@@ -42,6 +42,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Policy is the trust a GPO granted on this poste.
@@ -122,13 +123,6 @@ var (
 	errNotEnabled  = errors.New("déploiement non activé sur ce poste (aucune clé Deploy* posée par GPO)")
 	errNoMsiInMode = errors.New("méthode A : msiexec n'est accepté que pour désinstaller un code produit")
 )
-
-// msiexecRemoval is an msiexec switch that removes a product: /x and
-// /uninstall, in any case, with either of the prefixes msiexec takes, and with
-// whatever is glued to it ("/x{code}"). No other switch of msiexec starts with
-// x, nor with "uninstall". The server (manifest.UNINSTALL_SWITCH) and the
-// signing script ($MsiExecUninstallSwitch) use the same pattern.
-var msiexecRemoval = regexp.MustCompile(`(?i)^[/-](x|uninstall)`)
 
 const cryptoSHA256 = crypto.SHA256
 
@@ -673,19 +667,85 @@ func PublisherApproved(name string, publishers []string) bool {
 	return false
 }
 
-// MsiExecRemoves tells whether a step runs msiexec with a switch that removes
-// a product (/x, /uninstall). Such a step is an uninstall whatever the
-// manifest files it under.
+// MsiExecRemoves tells whether a step runs msiexec with an argument that
+// removes a product: the switches /x and /uninstall, with either prefix
+// msiexec takes and whatever is glued to them ("/x{code}"), and the property
+// REMOVE= — "/i {code} REMOVE=ALL" is the documented other way to uninstall.
+// Such a step is an uninstall whatever the manifest files it under.
+//
+// The rule is shared, word for word, with the server
+// (manifest.msiexec_removes) and the signing script, and the three answer the
+// same vectors (backend/tests/data/msiexec_removal_vectors.json). For each
+// argument:
+//
+//   - it is split on whitespace into pieces: msiexec parses its command line
+//     itself, so one argument holding spaces — passed quoted — may still be
+//     read as several ("/qn /x {code}");
+//   - each piece is rid of one pair of surrounding double quotes ('"/x"');
+//   - a piece removes when it starts with /x, -x, /uninstall, -uninstall or
+//     remove=, in ASCII letters of either case.
+//
+// ASCII and nothing else: a case-insensitive match folds by Unicode rules
+// that differ between Go, the server's Python and the script's .NET ("ı",
+// "İ", "ſ"), and msiexec knows none of those letters.
 func MsiExecRemoves(step Step) bool {
 	if step.Run != MsiExec {
 		return false
 	}
 	for _, a := range step.Args {
-		if msiexecRemoval.MatchString(a) {
+		if argRemoves(a) {
 			return true
 		}
 	}
 	return false
+}
+
+// argRemoves applies the rule of MsiExecRemoves to one argument.
+func argRemoves(arg string) bool {
+	// A piece holds no whitespace, at either end or after its quotes are
+	// off: the trims the rule spells out have nothing left to do here.
+	for _, piece := range strings.FieldsFunc(arg, msiSpace) {
+		if len(piece) >= 2 && piece[0] == '"' && piece[len(piece)-1] == '"' {
+			piece = piece[1 : len(piece)-1]
+		}
+		if hasPrefixASCIIFold(piece, "remove=") {
+			return true
+		}
+		if piece == "" || (piece[0] != '/' && piece[0] != '-') {
+			continue
+		}
+		if hasPrefixASCIIFold(piece[1:], "x") || hasPrefixASCIIFold(piece[1:], "uninstall") {
+			return true
+		}
+	}
+	return false
+}
+
+// msiSpace is the whitespace an argument is split on: what the server's
+// Python splits on, so that the two sides cut the same pieces — Unicode
+// whitespace, and the four separators U+001C to U+001F that Python counts
+// as such and unicode.IsSpace does not.
+func msiSpace(r rune) bool {
+	return unicode.IsSpace(r) || (r >= 0x1c && r <= 0x1f)
+}
+
+// hasPrefixASCIIFold tells whether s starts with prefix — lower-case ASCII —
+// in letters of either case. Byte by byte: no byte of a multi-byte character
+// is an ASCII letter, so no other alphabet's letter can stand for one.
+func hasPrefixASCIIFold(s, prefix string) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		c := s[i]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != prefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // MethodAStep checks a step for method A and returns what to run. The file

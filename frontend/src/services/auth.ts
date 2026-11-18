@@ -142,12 +142,15 @@ export async function requestPasswordReset(email: string): Promise<void> {
  * (C7): `valid` (204), `invalid` (400: expired, used, or garbled), or
  * `unknown` — an older server without the check, or no answer — in which case
  * the form is shown and the confirmation decides.
+ *
+ * The token goes in the body of a POST, never in the URL: a query string ends
+ * up in the server's access log, and this link is still good for an hour.
  */
 export async function checkPasswordResetToken(
   token: string,
 ): Promise<'valid' | 'invalid' | 'unknown'> {
   try {
-    await api.get('/auth/password-reset/check', { params: { token } });
+    await api.post('/auth/password-reset/check', { token });
     return 'valid';
   } catch (e) {
     const status = (e as { response?: { status?: number } } | null)?.response?.status;

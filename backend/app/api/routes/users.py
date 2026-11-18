@@ -78,8 +78,8 @@ class UserOut(BaseModel):
     # an account left on « aucun e-mail » is how a fleet ends up unwatched.
     email_preference: str
     groups: list[GroupRef]
-    # Set while the account is locked after failed logins; resetting its
-    # password lifts the lock.
+    # Set while the account is locked after failed logins — the later of
+    # the quick lock and the slow one; resetting its password lifts both.
     locked_until: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -135,9 +135,18 @@ class PasswordResetOut(BaseModel):
     password: str
 
 
-async def _require_user(session: SessionDep, user_id: uuid.UUID) -> User:
-    """Fetch a user or raise the stable not-found error."""
-    user = await session.get(User, user_id)
+async def _require_user(
+    session: SessionDep, user_id: uuid.UUID, *, for_write: bool = False
+) -> User:
+    """Fetch a user or raise the stable not-found error.
+
+    ``for_write`` locks the row until the transaction ends: an edit and a
+    deletion of one account at the same instant are answered one after the
+    other. Unlocked, the edit read the row, the deletion committed, and the
+    edit's write matched nothing — a 500 where the answer is « not found »,
+    or the edit then the deletion.
+    """
+    user = await session.get(User, user_id, with_for_update=for_write or None)
     if user is None:
         raise AppError(
             code=ErrorCode.USER_NOT_FOUND, status_code=404, message="User not found"
@@ -260,6 +269,13 @@ async def reject_lockout(session: SessionDep) -> None:
         )
 
 
+def _locked_until(user: User) -> datetime | None:
+    """When the account's locks end: the later of the two. The slow one
+    (audit T06) outlives a successful login, which clears the other."""
+    ends = [end for end in (user.locked_until, user.slow_locked_until) if end]
+    return max(ends) if ends else None
+
+
 async def _out(session: SessionDep, users: list[User]) -> list[UserOut]:
     groups = await crud.groups_of_users(session, [u.id for u in users])
     return [
@@ -270,7 +286,7 @@ async def _out(session: SessionDep, users: list[User]) -> list[UserOut]:
             is_active=u.is_active,
             email_preference=u.email_preference,
             groups=[GroupRef.model_validate(g) for g in groups[u.id]],
-            locked_until=u.locked_until,
+            locked_until=_locked_until(u),
             created_at=u.created_at,
             updated_at=u.updated_at,
         )
@@ -364,7 +380,7 @@ async def update_user(
     deactivation is how an operator who has left is shut out, and it must not
     wait for anything to expire.
     """
-    user = await _require_user(session, user_id)
+    user = await _require_user(session, user_id, for_write=True)
     fields = payload.model_dump(exclude_unset=True)
 
     reject_escalation(
@@ -449,7 +465,7 @@ async def delete_user(
     Its sessions go with it — ``ON DELETE CASCADE`` — and with them any access
     still open on it, at the next request.
     """
-    user = await _require_user(session, user_id)
+    user = await _require_user(session, user_id, for_write=True)
     _reject_self(current, user, "delete")
     reject_escalation(
         authority,
@@ -490,7 +506,7 @@ async def reset_password(
     the same reason — the trace says who did it and to whom. Never the password
     itself: only whether it was generated or typed by the administrator.
     """
-    user = await _require_user(session, user_id)
+    user = await _require_user(session, user_id, for_write=True)
     reject_escalation(
         authority,
         await crud.user_authority(session, user.id),

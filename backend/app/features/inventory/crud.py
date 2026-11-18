@@ -127,9 +127,12 @@ def _give_back_now(engine: AsyncEngine, grant: Grant) -> None:
 
 async def _reserve_until_commit(
     session: AsyncSession, machine_key: str, wanted: int
-) -> int:
+) -> int | None:
     """Reserve catalogue entries for this poste, charged only if the
-    session's transaction commits.
+    session's transaction commits. How many were granted; None when the
+    budgets could not be asked at all — nothing granted either, but not
+    because the poste or the fleet spent them. Never raises for the budgets'
+    sake.
 
     The budget is taken at once, committed apart (``budget.reserve``) — two
     heartbeats in flight, in this process or another, must not both be
@@ -139,7 +142,16 @@ async def _reserve_until_commit(
     """
     # The transaction whose end decides: begun now if it was not.
     await session.connection()
-    grant = await budget.reserve(session, machine_key, wanted)
+    try:
+        grant = await budget.reserve(session, machine_key, wanted)
+    except budget.Unavailable:
+        # The budgets could not be asked — their connection refused or not
+        # opened in time, their lock held by a process that froze. Nothing
+        # granted: the list is cut as when the budget is spent, flagged
+        # partial and asked for again later, which the agent already knows.
+        # A heartbeat must not fail, nor wait, for the catalogue's
+        # bookkeeping. Logged where it failed, once for all the postes.
+        return None
     if grant is None:
         return 0
     sync = session.sync_session
@@ -206,6 +218,9 @@ async def _catalogue_ids(
     if not new:
         return ids
     granted = await _reserve_until_commit(session, str(machine_id), len(new))
+    if granted is None:
+        # Not this poste's doing, and already said once (``quota.take``).
+        return ids
     if granted < len(new):
         security_log.warning(
             "software catalogue budget exhausted for machine %s: %d new entries "

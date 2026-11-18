@@ -8,7 +8,7 @@ scheme breaks (two serialisers disagreeing on a space or a key order).
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -118,25 +118,59 @@ def case_duplicates(files: Sequence[PackageFile]) -> list[list[str]]:
     return [sorted(names) for _, names in sorted(groups.items()) if len(names) > 1]
 
 
-# An msiexec switch that removes a product: /x and /uninstall, any case,
-# either prefix msiexec takes, whatever is glued to it ("/x{code}"). No other
-# switch of msiexec starts with x or "uninstall". The agent
-# (deploy.msiexecRemoval) and the signing script ($MsiExecUninstallSwitch)
-# use the same pattern, kept equal by a test.
-UNINSTALL_SWITCH = re.compile(r"^[/-](x|uninstall)", re.IGNORECASE)
+# What makes msiexec remove a product instead of installing one: the switches
+# /x and /uninstall, with either prefix msiexec takes and whatever is glued to
+# them ("/x{code}"), and the property REMOVE= — "/i {code} REMOVE=ALL" is the
+# documented other way to uninstall. Applied to a *piece* of an argument
+# (``_pieces``). ASCII letters of either case spelled out, and no flag: a
+# case-insensitive match folds by Unicode rules that differ between this
+# module, the agent's Go and the signing script's .NET ("ı", "İ", "ſ"), and
+# msiexec knows none of them. The agent (deploy.MsiExecRemoves) and the
+# signing script ($MsiExecRemoval) apply the same rule; a test keeps the
+# script's pattern equal to this one, and the three sides answer the same
+# vectors (backend/tests/data/msiexec_removal_vectors.json).
+MSIEXEC_REMOVAL = re.compile(
+    r"^[/-]([xX]|[uU][nN][iI][nN][sS][tT][aA][lL][lL])|^[rR][eE][mM][oO][vV][eE]="
+)
 
 
-def msiexec_removes(run: str | None, args: Sequence[str]) -> bool:
-    """Whether a step runs msiexec with a switch that removes a product: an
-    uninstallation, whatever step it is filed under. As an installation every
-    poste refuses it (agent deploy.MsiExecRemoves, and deploy.MethodAStep
-    under method A, which would otherwise rebuild it as ``/x {code}``)."""
-    return run == MSIEXEC and any(UNINSTALL_SWITCH.search(a) for a in args)
+def _pieces(arg: str) -> Iterator[str]:
+    """What msiexec may read as separate words in one argument: msiexec
+    parses its command line itself, so an argument holding spaces — the agent
+    passes it quoted — may still be read as several ("/qn /x {code}"). Split
+    on whitespace, each piece rid of one pair of surrounding double quotes
+    ('"/x"'). The rule as agreed also trims each piece, before and after its
+    quotes: a piece cut on whitespace holds none, there is nothing to trim."""
+    for piece in arg.split():
+        if len(piece) >= 2 and piece[0] == piece[-1] == '"':
+            piece = piece[1:-1]
+        yield piece
+
+
+def msiexec_removal(run: str | None, args: Sequence[str] | None) -> str | None:
+    """The first argument that makes this msiexec step a removal, None when
+    there is none — or when the step does not run msiexec: an executable's
+    own /x is its business."""
+    if run != MSIEXEC:
+        return None
+    for arg in args or ():
+        if any(MSIEXEC_REMOVAL.search(piece) for piece in _pieces(arg)):
+            return arg
+    return None
+
+
+def msiexec_removes(run: str | None, args: Sequence[str] | None) -> bool:
+    """Whether a step runs msiexec with an argument that removes a product:
+    an uninstallation, whatever step it is filed under. As an installation
+    every poste refuses it (agent deploy.MsiExecRemoves, and
+    deploy.MethodAStep under method A, which would otherwise rebuild it as
+    ``/x {code}``)."""
+    return msiexec_removal(run, args) is not None
 
 
 INSTALL_REMOVES = (
-    "L'installation lance une désinstallation (msiexec /x ou /uninstall) : "
-    "placez cette commande dans la désinstallation du paquet"
+    "L'installation lance une désinstallation (msiexec /x, /uninstall ou "
+    "REMOVE=) : placez cette commande dans la désinstallation du paquet"
 )
 
 
@@ -145,7 +179,7 @@ def by_product_code(package: Package) -> bool:
     its arguments: what method A runs as ``/x {code}`` without downloading any
     file of the package (agent deploy.MethodAStep)."""
     return package.uninstall_run == MSIEXEC and any(
-        PRODUCT_CODE.fullmatch(a) for a in package.uninstall_args
+        PRODUCT_CODE.fullmatch(a) for a in package.uninstall_args or ()
     )
 
 
@@ -388,16 +422,23 @@ def build(package: Package, files: Sequence[PackageFile]) -> bytes:
             {"name": f.name, "sha256": f.sha256, "size": f.size}
             for f in sorted(files, key=lambda f: f.name)
         ],
-        "install": {"run": package.install_run, "args": list(package.install_args)}
+        # ``or []`` throughout: a row may hold a JSON null where a list is
+        # meant (written before the API refused it), read as an empty one —
+        # which is how the agent reads an empty ``success_codes``: its own
+        # defaults.
+        "install": {
+            "run": package.install_run,
+            "args": list(package.install_args or []),
+        }
         if package.install_run
         else None,
         "uninstall": {
             "run": package.uninstall_run,
-            "args": list(package.uninstall_args),
+            "args": list(package.uninstall_args or []),
         }
         if package.uninstall_run
         else None,
-        "success_codes": list(package.success_codes),
+        "success_codes": list(package.success_codes or []),
     }
     # Indented and key-sorted for the administrator who opens it before
     # signing: it is a document somebody is meant to read.

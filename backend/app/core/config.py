@@ -182,8 +182,12 @@ class Settings(BaseSettings):
     # Slow guessing (audit T06): failures spaced more than
     # LOGIN_LOCKOUT_MINUTES apart never add up to the lock above — four
     # guesses a quarter of an hour, forever. This many failures within
-    # LOGIN_SLOW_WINDOW_HOURS of the first one lock the account for that many
-    # hours, and that lock admits only the account's usual addresses.
+    # LOGIN_SLOW_WINDOW_HOURS of the first one set a second lock for that
+    # many hours, which shuts out the addresses that failed since the first
+    # (and, past LOGIN_SIEGE_ADDRESSES of them, all but the usual ones).
+    # Left unset, each follows the quick value it must stay beyond
+    # (``_account_limits_hold_together``): four times the attempts, twice
+    # the duration, never below the default written here.
     LOGIN_SLOW_MAX_FAILED_ATTEMPTS: int = Field(default=20, ge=2, le=1000)
     LOGIN_SLOW_WINDOW_HOURS: int = Field(default=24, ge=1, le=24 * 7)
     # « Mot de passe oublié » (audit S14, T34): counted per account *and*
@@ -621,7 +625,23 @@ class Settings(BaseSettings):
         """The slow-guessing lock must sit beyond the quick one, and the
         account-wide reset ceiling at or above one address's budget: the other
         way round, the one meant to be generous would be the one that bites
-        (audit T06, T34)."""
+        (audit T06, T34).
+
+        The slow lock's two variables came after the quick one's: a ``.env``
+        that raised LOGIN_MAX_FAILED_ATTEMPTS to 20, or the lock to a day,
+        was valid before them and must still boot. So a slow value the
+        operator did not write follows the quick one — four times the
+        attempts (the ratio of the defaults), twice the duration, and never
+        below its own default. Only what was written is refused.
+        """
+        if "LOGIN_SLOW_MAX_FAILED_ATTEMPTS" not in self.model_fields_set:
+            self.LOGIN_SLOW_MAX_FAILED_ATTEMPTS = max(
+                self.LOGIN_SLOW_MAX_FAILED_ATTEMPTS, 4 * self.LOGIN_MAX_FAILED_ATTEMPTS
+            )
+        if "LOGIN_SLOW_WINDOW_HOURS" not in self.model_fields_set:
+            self.LOGIN_SLOW_WINDOW_HOURS = max(
+                self.LOGIN_SLOW_WINDOW_HOURS, -(-2 * self.LOGIN_LOCKOUT_MINUTES // 60)
+            )
         if self.LOGIN_SLOW_MAX_FAILED_ATTEMPTS <= self.LOGIN_MAX_FAILED_ATTEMPTS:
             raise ValueError(
                 "LOGIN_SLOW_MAX_FAILED_ATTEMPTS must be above "

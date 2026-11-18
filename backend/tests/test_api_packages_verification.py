@@ -938,15 +938,106 @@ async def test_the_package_says_how_large_a_file_may_be(
 
 # --- 9. an installation that uninstalls (§6.4, residual) ----------------------------
 
-# Spellings msiexec reads as a removal, and the agent refuses as an install
-# (deploy_test.go, TestMsiExecRemoves).
+# One argument each: what the server, the agent and the signing script must
+# all refuse in an msiexec installation, and what they must all let through.
+# The one list the three sides answer to.
+MSIEXEC_VECTORS = json.loads(
+    (Path(__file__).parent / "data" / "msiexec_removal_vectors.json").read_text(
+        encoding="utf-8"
+    )
+)
+REMOVING = MSIEXEC_VECTORS["refused"]
+INSTALLING = MSIEXEC_VECTORS["accepted"]
+
+# The removals as an administrator writes them: the switch among others.
 REMOVALS = [
     ["/x", PRODUCT_CODE, "/qn"],
     ["/X" + PRODUCT_CODE],
     ["-x", PRODUCT_CODE],
     ["/qn", "/uninstall", PRODUCT_CODE],
     ["-UNINSTALL", "{dir}\\app.msi"],
+    # The other documented way to uninstall, and one argument read as several.
+    ["/i", PRODUCT_CODE, "REMOVE=ALL", "/qn"],
+    ["/I" + PRODUCT_CODE, "Remove=ALL"],
+    ["/qn /x " + PRODUCT_CODE],
+    [" /x", PRODUCT_CODE],
+    ['"/x"', PRODUCT_CODE],
 ]
+
+
+def _sendable(args: list[str]) -> list[str]:
+    """The vectors the API takes as arguments at all: a tab, a line break or
+    an invisible character is refused before the rule is asked."""
+    from app.api.routes import packages
+
+    return [arg for arg in args if not packages._CONTROL.search(arg)]
+
+
+def test_the_vectors_are_the_agreed_ones():
+    """The list was agreed with the agent's side: not to be thinned out."""
+    assert {
+        "/x",
+        "-x",
+        "/X{11111111-2222-3333-4444-555555555555}",
+        "/uninstall",
+        "/UnInstall",
+        " /x",
+        '"/x"',
+        "/qn /x {11111111-2222-3333-4444-555555555555}",
+        "REMOVE=ALL",
+        "remove=all",
+        '"REMOVE=ALL"',
+        "/i {11111111-2222-3333-4444-555555555555} REMOVE=ALL",
+    } <= set(REMOVING)
+    assert {
+        "/i",
+        "/qn",
+        "/norestart",
+        "/l*v",
+        "/package",
+        "TRANSFORMS=x.mst",
+        "ADDLOCAL=ALL",
+        "INSTALLDIR=C:\\x",
+        "/un\u0131nstall",  # dotless ı
+        "/un\u0130nstall",  # İ
+    } <= set(INSTALLING)
+    # The agent's tests read the same file: the link between the two sides.
+    agent_test = (
+        Path(__file__).resolve().parents[2]
+        / "agent"
+        / "internal"
+        / "deploy"
+        / "deploy_test.go"
+    )
+    if agent_test.exists():
+        assert "msiexec_removal_vectors.json" in agent_test.read_text(encoding="utf-8")
+
+
+def test_an_msiexec_argument_removes_by_the_shared_rule():
+    """Each argument split on whitespace, each piece rid of one pair of
+    double quotes, then ``^[/-](x|uninstall)`` or ``^remove=`` in
+    ASCII letters of either case — and no other folding of case."""
+    from app.features.package import manifest
+
+    for arg in REMOVING:
+        assert manifest.msiexec_removes("msiexec", [arg]), arg
+        # Wherever it sits among the others, and named as the one at fault.
+        assert manifest.msiexec_removal("msiexec", ["/i", "a.msi", arg]) == arg
+        # Not msiexec: an executable's own /x is its business.
+        assert not manifest.msiexec_removes("setup.exe", [arg]), arg
+        assert not manifest.msiexec_removes(None, [arg]), arg
+    for arg in INSTALLING:
+        assert not manifest.msiexec_removes("msiexec", [arg]), arg
+    assert not manifest.msiexec_removes("msiexec", INSTALLING)
+    assert not manifest.msiexec_removes("msiexec", [])
+    # A row holding a JSON null where the arguments are meant.
+    assert not manifest.msiexec_removes("msiexec", None)
+    for args in REMOVALS:
+        assert manifest.msiexec_removes("msiexec", args), args
+
+    # The pattern carries no flag: nothing folds case but its own classes.
+    assert manifest.MSIEXEC_REMOVAL.flags & (re.IGNORECASE | re.ASCII) == 0
+    assert not re.search(r"\(\?[a-zA-Z]", manifest.MSIEXEC_REMOVAL.pattern)
 
 
 async def test_an_installation_by_msiexec_may_not_remove(client, db_session, store):
@@ -957,7 +1048,7 @@ async def test_an_installation_by_msiexec_may_not_remove(client, db_session, sto
     from app.features.package import manifest
 
     admin = await _admin(client, db_session)
-    for args in REMOVALS:
+    for args in [*REMOVALS, *([arg] for arg in _sendable(REMOVING))]:
         created = await client.post(
             "/api/v1/packages",
             headers=admin,
@@ -973,20 +1064,20 @@ async def test_an_installation_by_msiexec_may_not_remove(client, db_session, sto
         assert error["code"] == "package.invalid"
         assert error["message"] == manifest.INSTALL_REMOVES
         assert error["details"]["field"] == "install_args"
+        assert error["details"]["argument"] in args
 
     package = await _pronote(client, admin)
     url = f"/api/v1/packages/{package['id']}"
-    patched = await client.patch(
-        url,
-        headers=admin,
-        json={"install_run": "msiexec", "install_args": ["/x", PRODUCT_CODE]},
-    )
-    assert patched.status_code == 422, patched.text
+    for args in (["/x", PRODUCT_CODE], ["/i", PRODUCT_CODE, "REMOVE=ALL"]):
+        patched = await client.patch(
+            url, headers=admin, json={"install_run": "msiexec", "install_args": args}
+        )
+        assert patched.status_code == 422, (args, patched.text)
     assert (await _get(client, admin, package["id"]))["install_run"] == (
         "Install_PRNclient.exe"
     )
 
-    # The same switches as the uninstallation: what they are for.
+    # The same arguments as the uninstallation: what they are for.
     for args in REMOVALS:
         ok = await client.patch(
             url,
@@ -995,26 +1086,35 @@ async def test_an_installation_by_msiexec_may_not_remove(client, db_session, sto
         )
         assert ok.status_code == 200, (args, ok.text)
     # And an installation by msiexec that installs.
-    ok = await client.patch(
-        url,
-        headers=admin,
-        json={
-            "install_run": "msiexec",
-            "install_args": ["/i", "{dir}\\app.msi", "/qn", "/norestart"],
-        },
-    )
-    assert ok.status_code == 200, ok.text
+    for args in (["/i", "{dir}\\app.msi", "/qn", "/norestart"], _sendable(INSTALLING)):
+        ok = await client.patch(
+            url, headers=admin, json={"install_run": "msiexec", "install_args": args}
+        )
+        assert ok.status_code == 200, (args, ok.text)
     # Not msiexec: an executable's own /x is its business.
     ok = await client.patch(
         url,
         headers=admin,
-        json={"install_run": "Install_PRNclient.exe", "install_args": ["/x", "-s"]},
+        json={
+            "install_run": "Install_PRNclient.exe",
+            "install_args": ["/x", "-s", "REMOVE=ALL"],
+        },
     )
     assert ok.status_code == 200, ok.text
 
 
+@pytest.mark.parametrize(
+    "install_args",
+    [
+        ["/x", PRODUCT_CODE, "/qn"],
+        # What the rule did not know at first: the same answer for a row it
+        # let through then.
+        ["/i", PRODUCT_CODE, "REMOVE=ALL", "/qn"],
+        ["/qn /x " + PRODUCT_CODE],
+    ],
+)
 async def test_a_row_written_before_the_rule_blocks_its_install_only(
-    client, db_session, store
+    client, db_session, store, install_args
 ):
     """A package stored before the rule: its installation is a problem every
     poste refuses — 409 ``package.not_ready`` on install, signed or not —
@@ -1032,7 +1132,7 @@ async def test_a_row_written_before_the_rule_blocks_its_install_only(
         )
     ).one()
     row.install_run = "msiexec"
-    row.install_args = ["/x", PRODUCT_CODE, "/qn"]
+    row.install_args = install_args
     row.uninstall_run = "msiexec"
     row.uninstall_args = ["/x", PRODUCT_CODE, "/qn"]
     db_session.add(row)
@@ -1067,29 +1167,44 @@ async def test_a_row_written_before_the_rule_blocks_its_install_only(
     assert accepted.status_code == 200, accepted.text
 
 
+def _script_removes(source: str, pattern: str, arg: str) -> bool:
+    """One argument through the script's lines, read as the .NET they are:
+    split on whitespace, one pair of quotes off, ``-cmatch``.
+
+    The split names U+001C to U+001F beside ``\\s``: .NET's ``\\s`` leaves
+    them out, the server's ``str.split`` and the agent count them in."""
+    split = re.search(r"-split '([^']+)'\)", source)
+    assert split and split.group(1) == r"[\s\x1C-\x1F]+", split
+    assert "$p[0] -eq [char]34 -and $p[$p.Length - 1] -eq [char]34" in source
+    for piece in re.split(split.group(1), arg):
+        if len(piece) >= 2 and piece[0] == piece[-1] == '"':
+            piece = piece[1:-1]
+        if re.search(pattern, piece):
+            return True
+    return False
+
+
 def test_the_signing_script_refuses_the_same_removals():
     """Sign-TiaiPackage.ps1 refuses to sign an installation that removes,
-    with the server's pattern (and the agent's, deploy.msiexecRemoval). Read
-    as the .NET regular expression it is; the script itself is not run."""
+    with the server's pattern, matched as the server matches it: case
+    apart for ASCII letters only (``-cmatch`` and explicit classes — ``-match``
+    folds case by the rules of the administrator's culture). Read as the .NET
+    regular expression it is, over the shared vectors; the script itself is
+    not run."""
     from app.features.package import manifest
 
     repo = Path(__file__).resolve().parents[2]
     script = repo / "deploy" / "packages" / "Sign-TiaiPackage.ps1"
-    agent_go = repo / "agent" / "internal" / "deploy" / "deploy.go"
-    if not script.exists() or not agent_go.exists():
-        pytest.skip("deploy/ or agent/ not in this checkout")
+    if not script.exists():
+        pytest.skip("deploy/ not in this checkout")
     source = script.read_text(encoding="ascii")
-    found = re.search(r"^\$MsiExecUninstallSwitch = '([^']+)'$", source, re.M)
-    assert found, "$MsiExecUninstallSwitch not found in Sign-TiaiPackage.ps1"
-    assert "-match $MsiExecUninstallSwitch" in source
+    found = re.search(r"^\$MsiExecRemoval = '([^']+)'$", source, re.M)
+    assert found, "$MsiExecRemoval not found in Sign-TiaiPackage.ps1"
+    assert "-cmatch $MsiExecRemoval" in source
+    assert "-match $MsiExecRemoval" not in source
     assert "$doc.install.run -ceq 'msiexec'" in source
-    # PowerShell's -match ignores case, as the server's flag does.
-    assert found.group(1) == manifest.UNINSTALL_SWITCH.pattern
-    assert manifest.UNINSTALL_SWITCH.flags & re.IGNORECASE
-
-    go = re.search(
-        r"msiexecRemoval = regexp\.MustCompile\(`\(\?i\)([^`]+)`\)",
-        agent_go.read_text(encoding="utf-8"),
-    )
-    assert go, "msiexecRemoval not found in deploy.go"
-    assert go.group(1) == manifest.UNINSTALL_SWITCH.pattern
+    assert found.group(1) == manifest.MSIEXEC_REMOVAL.pattern
+    for arg in REMOVING:
+        assert _script_removes(source, found.group(1), arg), arg
+    for arg in INSTALLING:
+        assert not _script_removes(source, found.group(1), arg), arg

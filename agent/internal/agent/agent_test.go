@@ -313,16 +313,18 @@ var (
 
 // An enrollment on hold is retried one minute later, then twice as long each
 // time up to a quarter of an hour — an approval given in the console must
-// bring the poste back within minutes, not half an hour. Once the server
-// answers something else, the next hold starts over from the short step.
-func TestEnrollmentHoldStepsEscalateAndReset(t *testing.T) {
+// bring the poste back within minutes, not half an hour. A success ends the
+// hold, and nothing else does: the next hold starts over from the short step,
+// while a server that goes down in the middle of one leaves it where it was.
+func TestEnrollmentHoldStepsEscalateAndEndOnASuccess(t *testing.T) {
 	p := newRetryPlan(time.Minute, 5*time.Minute)
-	steps := func(err error, n int) []time.Duration {
+	steps := func(err error, n int, wantHeld bool) []time.Duration {
+		t.Helper()
 		var out []time.Duration
 		for range n {
-			step, onHold := p.next(err)
-			if onHold != enrollmentOnHold(err) {
-				t.Fatalf("next(%v) onHold = %v", err, onHold)
+			step, held := p.next(err)
+			if held != wantHeld {
+				t.Fatalf("next(%v) held = %v", err, held)
 			}
 			out = append(out, step)
 		}
@@ -330,26 +332,30 @@ func TestEnrollmentHoldStepsEscalateAndReset(t *testing.T) {
 	}
 	m := time.Minute
 	want := []time.Duration{m, 2 * m, 4 * m, 8 * m, 15 * m, 15 * m}
-	if got := steps(errHeld, 6); !slices.Equal(got, want) {
+	if got := steps(errHeld, 6, true); !slices.Equal(got, want) {
 		t.Errorf("approval hold steps = %v, want %v", got, want)
 	}
 	// Approved: the plain interval, and the hold is forgotten.
-	if got := steps(nil, 1); got[0] != time.Minute {
+	if got := steps(nil, 1, false); got[0] != time.Minute {
 		t.Errorf("after the approval: %v", got)
 	}
-	if got := steps(errRevoked, 3); !slices.Equal(got, want[:3]) {
+	if got := steps(errRevoked, 3, true); !slices.Equal(got, want[:3]) {
 		t.Errorf("revoked steps after a success = %v, want %v", got, want[:3])
 	}
-	// A server that went down ends the hold too: ordinary back-off, then the
-	// next hold starts again at one minute.
-	if got := steps(errors.New("dial tcp: connection refused"), 1); got[0] != 2*time.Minute {
-		t.Errorf("network failure step = %v", got)
+	// A server that goes down ends nothing: the larger of the hold step and
+	// the ordinary back-off (2, 4 then 5 minutes), still on hold, and the
+	// hold goes on from where it was once the server answers again.
+	down := errors.New("dial tcp: connection refused")
+	if got := steps(down, 3, true); !slices.Equal(got, []time.Duration{4 * m, 4 * m, 5 * m}) {
+		t.Errorf("steps while the server is down = %v", got)
 	}
-	if got := steps(errHeld, 1); got[0] != time.Minute {
-		t.Errorf("a new hold starts at %v", got)
+	if got := steps(errHeld, 1, true); got[0] != 8*m {
+		t.Errorf("the hold resumed at %v", got)
 	}
-	// Ordinary failures keep their own back-off, untouched by the holds.
-	if got := steps(errors.New("status 502"), 3); !slices.Equal(got, []time.Duration{4 * m, 5 * m, 5 * m}) {
+	// Ordinary failures keep their own back-off, untouched by a hold that a
+	// success ended.
+	steps(nil, 1, false)
+	if got := steps(errors.New("status 502"), 4, false); !slices.Equal(got, []time.Duration{2 * m, 4 * m, 5 * m, 5 * m}) {
 		t.Errorf("ordinary back-off = %v", got)
 	}
 }
@@ -359,7 +365,7 @@ func TestEnrollmentHoldStepsEscalateAndReset(t *testing.T) {
 // why, and the watchdog is told when the next poll is due.
 func TestScheduleNextLogsEachHoldStep(t *testing.T) {
 	buf := captureLog(t)
-	a := &Agent{}
+	a := &Agent{cfg: &config.Config{}}
 	p := newRetryPlan(time.Minute, 5*time.Minute)
 	now := time.Unix(1_800_000_000, 0)
 	for i, step := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute} {
@@ -406,13 +412,55 @@ func TestWatchdogDoesNotReportADeliberateWait(t *testing.T) {
 	// was due, not before.
 	a.lastPollDone.Store(start.Unix())
 	a.phase("defender state")
-	a.checkStall(start.Add(24*time.Minute), start.Unix())
+	for m := 16; m <= 24; m++ {
+		a.checkStall(start.Add(time.Duration(m)*time.Minute), start.Unix())
+	}
 	if out := buf.String(); out != "" {
 		t.Errorf("reported before the poll was ten minutes late:\n%s", out)
 	}
 	a.checkStall(start.Add(25*time.Minute), start.Unix())
 	if out := buf.String(); !strings.Contains(out, `stuck in "defender state"`) {
 		t.Errorf("a hung poll was not reported:\n%s", out)
+	}
+}
+
+// Hours that a clock set forward, or a machine asleep, put between two looks
+// of the watchdog are not hours a poll spent hanging: nothing is reported for
+// them — at the first look of a service started before the clock was
+// corrected, or at any later one — and a poll that does hang from there is
+// reported ten minutes after the look that noticed, like any other.
+func TestWatchdogDoesNotReportAClockSetForward(t *testing.T) {
+	for name, polled := range map[string]bool{"before the first poll": false, "between two polls": true} {
+		t.Run(name, func(t *testing.T) {
+			buf := captureLog(t)
+			a := &Agent{}
+			start := time.Unix(1_800_000_000, 0)
+			a.phase("enroll")
+			at := start
+			look := func(d time.Duration) string {
+				at = at.Add(d)
+				a.checkStall(at, start.Unix())
+				return buf.String()
+			}
+			if polled {
+				a.lastPollDone.Store(start.Unix())
+				a.phase("idle")
+				a.nextPollAt.Store(start.Add(time.Minute).Unix())
+				look(time.Minute)
+			}
+			// Eight hours appear between two looks a minute apart.
+			if out := look(8*time.Hour + time.Minute); out != "" {
+				t.Fatalf("a clock set forward was reported as a stuck poll:\n%s", out)
+			}
+			for range 9 {
+				if out := look(time.Minute); out != "" {
+					t.Fatalf("reported %s after the jump:\n%s", at.Sub(start)-8*time.Hour, out)
+				}
+			}
+			if out := look(time.Minute); !strings.Contains(out, "no poll has completed for 10m0s") {
+				t.Errorf("a poll hung since the jump was not reported ten minutes later:\n%s", out)
+			}
+		})
 	}
 }
 

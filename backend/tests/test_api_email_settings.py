@@ -900,6 +900,110 @@ async def test_a_server_wanting_a_login_says_so():
     assert "Adresse d'expéditeur" not in result.message
 
 
+async def _send_test_to(handler, **values):
+    import asyncio
+
+    from app.features.notification import probe
+
+    held: list[asyncio.StreamWriter] = []
+
+    async def handle(reader, writer):
+        held.append(writer)
+        await handler(reader, writer)
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        return await probe.send_test(_local_policy(port, **values), "a@lycee.local")
+    finally:
+        for writer in held:
+            writer.close()
+        server.close()
+
+
+async def test_a_server_wanting_starttls_points_at_the_security_mode():
+    """« 530 Must issue a STARTTLS command first » — security « Aucune » on a
+    587 server. The 530 was read as a missing login, and the administrator
+    sent to type a user and a password the server never asked for."""
+
+    async def wants_starttls(reader, writer):
+        writer.write(b"220 relay ESMTP\r\n")
+        await writer.drain()
+        while line := await reader.readline():
+            verb = line[:4].upper()
+            if verb in (b"EHLO", b"HELO"):
+                writer.write(b"250-relay\r\n250 STARTTLS\r\n")
+            elif verb == b"MAIL":
+                writer.write(b"530 5.7.0 Must issue a STARTTLS command first\r\n")
+            elif verb == b"QUIT":
+                writer.write(b"221 bye\r\n")
+                await writer.drain()
+                break
+            else:
+                writer.write(b"250 ok\r\n")
+            await writer.drain()
+
+    result = await _send_test_to(wants_starttls)
+    assert result.ok is False
+    assert "connexion chiffrée" in result.message, result.message
+    assert "sécurité « STARTTLS »" in result.message
+    assert "Must issue a STARTTLS command first" in result.message
+    assert "authentification" not in result.message
+    assert "utilisateur" not in result.message
+
+
+async def test_a_silent_server_in_implicit_tls_is_said_not_to_answer():
+    """Security « TLS implicite » on a server that accepts the connection and
+    says nothing: the handshake runs out of the socket's own delay — 1 s
+    here — and the message gave the 25 s of the whole test, without the
+    sentence the two other modes get."""
+    import asyncio
+
+    async def silent(reader, writer):
+        await asyncio.sleep(30)
+
+    result = await _send_test_to(silent, smtp_security="tls")
+    assert result.ok is False
+    assert "a accepté la connexion mais n'a pas répondu" in result.message
+    assert "dans les 1 s" in result.message, result.message
+    assert "25 s" not in result.message
+    assert "TLS sur 465" in result.message
+
+
+def test_a_timeout_names_the_delay_that_ran_out():
+    """A network step (the connection to a host that drops the packets)
+    runs out of the socket's delay; only the whole test running out of its
+    own gets the overall figure."""
+    import asyncio
+
+    from app.features.notification import probe
+
+    policy = _local_policy(25, smtp_timeout_seconds=7)
+    step = probe.describe_error(TimeoutError("timed out"), policy)
+    assert step == "Le serveur 127.0.0.1:25 n'a pas répondu dans le délai imparti (7 s)"
+
+    overall = TimeoutError()
+    overall.__cause__ = asyncio.CancelledError()  # as asyncio.wait_for raises it
+    assert "(25 s)" in probe.describe_error(overall, policy)
+
+
+async def test_the_whole_test_running_out_says_its_own_delay(monkeypatch):
+    """The real thing: a silent server whose socket delay (5 s) is longer
+    than the delay of the whole test (cut to 1 s here)."""
+    import asyncio
+
+    from app.features.notification import probe
+
+    monkeypatch.setattr(probe, "_OVERALL_TIMEOUT_SECONDS", 1)
+
+    async def silent(reader, writer):
+        await asyncio.sleep(30)
+
+    result = await _send_test_to(silent, smtp_timeout_seconds=5)
+    assert result.ok is False
+    assert result.message.endswith("n'a pas répondu dans le délai imparti (1 s)")
+
+
 def test_a_530_with_an_account_points_at_the_account():
     from app.features.notification import probe
 
@@ -909,3 +1013,265 @@ def test_a_530_with_an_account_points_at_the_account():
     )
     assert "exige une authentification" in message
     assert "vérifiez l'utilisateur" in message
+
+
+# --- TLS verification of the SMTP server, against real sockets --------------------
+#
+# What « vérifier le certificat » checks, held by real handshakes: a relay
+# behind a home-made CA — `openssl req -x509`, no key-usage extension — that
+# v1.2.0 (Python 3.12) accepted must still be accepted, and neither a
+# certificate for another host nor one from an unknown CA may pass.
+
+
+def _private_ca(name: str):
+    """A CA as `openssl req -x509` makes one: basicConstraints and nothing
+    about key usage — what RFC 5280 asks of a CA and what many home-made
+    ones lack."""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    return cert, key
+
+
+def _server_context(folder, ca, host: str):
+    """A TLS server context holding a certificate for ``host`` signed by
+    ``ca`` (SAN only, like a leaf signed with a one-line extfile)."""
+    import datetime
+    import ssl
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    ca_cert, ca_key = ca
+    key = ec.generate_private_key(ec.SECP256R1())
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host)]))
+        .issuer_name(ca_cert.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=30))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName(host)]), False)
+        .sign(ca_key, hashes.SHA256())
+    )
+    pem = folder / f"{host}-{cert.serial_number}.pem"
+    pem.write_bytes(
+        cert.public_bytes(serialization.Encoding.PEM)
+        + key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(pem)
+    return context
+
+
+def _trust(monkeypatch, folder, ca) -> None:
+    """Make ``ca`` the container's trust store — what mounting a private CA
+    and pointing ``SSL_CERT_FILE`` at it does."""
+    from cryptography.hazmat.primitives import serialization
+
+    path = folder / "ca.pem"
+    path.write_bytes(ca[0].public_bytes(serialization.Encoding.PEM))
+    monkeypatch.setenv("SSL_CERT_FILE", str(path))
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+
+
+class _TlsRelay:
+    """A one-thread SMTP server speaking real TLS: implicit (« tls », port
+    465 style) or after STARTTLS. Counts the mails it accepted."""
+
+    def __init__(self, context, *, starttls: bool = False) -> None:
+        import threading
+
+        self.context, self.starttls = context, starttls
+        self.delivered = 0
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(5)
+        self.port = self.sock.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def close(self) -> None:
+        self.sock.close()
+
+    def _serve(self) -> None:
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            try:
+                conn.settimeout(5)
+                self._dialogue(conn)
+            except OSError:
+                pass  # a refused handshake: the client went away
+            finally:
+                conn.close()
+
+    def _dialogue(self, conn) -> None:
+        if not self.starttls:
+            conn = self.context.wrap_socket(conn, server_side=True)
+        conn.sendall(b"220 relay ESMTP\r\n")
+        stream = conn.makefile("rb")
+        while line := stream.readline():
+            verb = line[:4].upper()
+            if verb == b"EHLO":
+                conn.sendall(b"250-relay\r\n250 STARTTLS\r\n")
+            elif verb == b"STAR":
+                conn.sendall(b"220 go ahead\r\n")
+                conn = self.context.wrap_socket(conn, server_side=True)
+                stream = conn.makefile("rb")
+            elif verb == b"DATA":
+                conn.sendall(b"354 go\r\n")
+                while stream.readline() not in (b".\r\n", b""):
+                    pass
+                self.delivered += 1
+                conn.sendall(b"250 queued\r\n")
+            elif verb == b"QUIT":
+                conn.sendall(b"221 bye\r\n")
+                return
+            else:
+                conn.sendall(b"250 ok\r\n")
+
+
+def _relay_policy(relay: _TlsRelay, **values):
+    return _local_policy(
+        relay.port,
+        smtp_host="localhost",
+        smtp_security="starttls" if relay.starttls else "tls",
+        smtp_timeout_seconds=5,
+        **values,
+    )
+
+
+@pytest.mark.parametrize("starttls", [False, True], ids=["tls", "starttls"])
+async def test_a_relay_behind_a_home_made_ca_is_still_verified_and_accepted(
+    starttls, tmp_path, monkeypatch
+):
+    """Python 3.13 made ``ssl.create_default_context`` strict about RFC 5280
+    (``VERIFY_X509_STRICT``): a CA without a key-usage extension, accepted
+    under the Python 3.12 of v1.2.0, was refused after the upgrade — every
+    mail of the site failing on CERTIFICATE_VERIFY_FAILED."""
+    import ssl
+
+    ca = _private_ca("AC du lycee")
+    _trust(monkeypatch, tmp_path, ca)
+    relay = _TlsRelay(_server_context(tmp_path, ca, "localhost"), starttls=starttls)
+    try:
+        # The certificate is one the strict default refuses: the test would
+        # prove nothing with a CA that satisfied it.
+        strict = ssl.create_default_context()
+        if strict.verify_flags & ssl.VERIFY_X509_STRICT and not starttls:
+            with (
+                pytest.raises(ssl.SSLCertVerificationError),
+                socket.create_connection(("127.0.0.1", relay.port)) as raw,
+            ):
+                strict.wrap_socket(raw, server_hostname="localhost")
+        assert await smtp.send_email(
+            "s", "t", ["a@lycee.local"], policy=_relay_policy(relay)
+        )
+    finally:
+        relay.close()
+    assert relay.delivered == 1
+
+
+@pytest.mark.parametrize("starttls", [False, True], ids=["tls", "starttls"])
+@pytest.mark.parametrize("wrong", ["host", "ca"])
+async def test_a_certificate_for_another_host_or_ca_is_refused(
+    wrong, starttls, tmp_path, monkeypatch
+):
+    """Relaxing the strict flag relaxes nothing else: the chain must still
+    end at a trusted CA and the certificate must still name the server."""
+    import ssl
+
+    from app.features.notification import probe
+
+    ca = _private_ca("AC du lycee")
+    _trust(monkeypatch, tmp_path, ca)
+    if wrong == "host":
+        context = _server_context(tmp_path, ca, "autre.lycee.local")
+    else:
+        context = _server_context(tmp_path, _private_ca("AC inconnue"), "localhost")
+    relay = _TlsRelay(context, starttls=starttls)
+    policy = _relay_policy(relay)
+    try:
+        with pytest.raises(ssl.SSLCertVerificationError) as refused:
+            await smtp.send_email("s", "t", ["a@lycee.local"], policy=policy)
+        assert "Certificat du serveur" in probe.describe_error(refused.value, policy)
+        assert relay.delivered == 0
+        # « Vérifier le certificat » off: the administrator's own choice,
+        # and the only way such a server is talked to.
+        unverified = _relay_policy(relay, smtp_verify_tls=False)
+        assert await smtp.send_email("s", "t", ["a@lycee.local"], policy=unverified)
+    finally:
+        relay.close()
+    assert relay.delivered == 1
+
+
+# --- A send abandoned at stop must not hold the process ---------------------------
+
+
+def test_a_send_stuck_on_a_silent_server_does_not_hold_the_exit():
+    """The worker's stop cancels a send that outlasts its grace. Run in the
+    loop's default executor, that send was joined when the loop closed: the
+    process stayed for a whole SMTP timeout more — past the ten seconds
+    `docker stop` gives before it kills."""
+    import subprocess
+    import sys
+    import time
+
+    script = """
+import asyncio, socket
+from app.features.notification import smtp
+from app.features.setting import email_policy as mail
+
+silent = socket.socket()
+silent.bind(("127.0.0.1", 0))
+silent.listen(1)  # accepts the connection, never speaks
+policy = mail.resolve(mail.StoredEmailSettings(values={
+    "provider": "smtp", "smtp_host": "127.0.0.1",
+    "smtp_port": silent.getsockname()[1], "smtp_security": "none",
+    "smtp_timeout_seconds": 30, "from_email": "tiai@lycee.local",
+}))
+
+async def main():
+    send = asyncio.create_task(smtp.send_email("s", "t", ["a@x.fr"], policy=policy))
+    await asyncio.sleep(0.5)
+    assert not send.done()
+    send.cancel()  # what finish_background does once the grace is spent
+    print("cancelled", flush=True)
+
+asyncio.run(main())
+"""
+    started = time.monotonic()
+    run = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
+    )
+    assert run.returncode == 0, run.stderr
+    assert "cancelled" in run.stdout
+    assert time.monotonic() - started < 10, "the process waited for the stuck send"

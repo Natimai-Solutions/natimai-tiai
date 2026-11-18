@@ -6,7 +6,9 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/maintenance')>()),
   recordSessionInParts: vi.fn(),
 }));
+vi.mock('src/composables/useTasksBadge', () => ({ notifyTasksChanged: vi.fn() }));
 
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { recordSessionInParts, type SessionProgress } from 'src/services/maintenance';
 import MaintenanceSessionDialog from './MaintenanceSessionDialog.vue';
 
@@ -60,6 +62,7 @@ describe('MaintenanceSessionDialog (audit T29, U14)', () => {
     vi.mocked(recordSessionInParts)
       .mockReset()
       .mockResolvedValue({} as never);
+    vi.mocked(notifyTasksChanged).mockReset();
   });
   afterEach(() => {
     document.body.innerHTML = '';
@@ -197,6 +200,202 @@ describe('MaintenanceSessionDialog (audit T29, U14)', () => {
     expect(second![0]).toStrictEqual(first![0]);
     expect((second![1] as SessionProgress).sessionId).toBe('s-1');
     expect(closes(wrapper)).toBe(1);
+    wrapper.unmount();
+  });
+
+  function cancelButton() {
+    return [...document.querySelectorAll<HTMLButtonElement>('.q-dialog button')].find((b) =>
+      b.textContent?.includes('Annuler'),
+    )!;
+  }
+
+  it('refreshes the page when a visit cut half-way is abandoned', async () => {
+    vi.mocked(recordSessionInParts).mockImplementationOnce(async (_payload, progress) => {
+      progress!.sessionId = 's-1';
+      progress!.sent = 250;
+      throw new Error('réseau');
+    });
+    const wrapper = await open();
+    await submitForm();
+    expect(wrapper.emitted('recorded')).toBeUndefined();
+
+    cancelButton().click();
+    await flushPromises();
+    // What stays recorded is said before anything is abandoned.
+    expect(document.body.textContent).toContain("Abandonner l'envoi ?");
+    expect(document.body.textContent).toContain('250 poste(s) sur 2 sont enregistrés');
+    expect(closes(wrapper)).toBe(0);
+    pluginButton('Abandonner').click();
+    await flushPromises();
+
+    // The part recorded is on the page behind: its lists are read again.
+    expect(closes(wrapper)).toBe(1);
+    expect(wrapper.emitted('recorded')).toHaveLength(1);
+    expect(notifyTasksChanged).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it('offers no way out while a part is on its way', async () => {
+    let finish!: () => void;
+    vi.mocked(recordSessionInParts).mockImplementationOnce(
+      () => new Promise((resolve) => (finish = () => resolve({} as never))),
+    );
+    const wrapper = await open();
+    await typeNote('PC-A', 'clavier HS');
+    await submitForm();
+
+    // « Annuler » then « Abandonner » closed the dialog and abandoned
+    // nothing: the parts kept leaving behind it.
+    expect(cancelButton().disabled).toBe(true);
+    await pressEscape();
+    expect(document.body.textContent).not.toContain('Abandonner');
+    expect(closes(wrapper)).toBe(0);
+    // Nor a second sending beside the first.
+    await submitForm();
+    expect(recordSessionInParts).toHaveBeenCalledTimes(1);
+
+    finish();
+    await flushPromises();
+    expect(closes(wrapper)).toBe(1);
+    wrapper.unmount();
+  });
+
+  it('keeps a visit whose first part got no answer, and sends it again as the same visit', async () => {
+    vi.mocked(recordSessionInParts)
+      // No answer: the server may have recorded the part, or never seen it.
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValue({} as never);
+    const wrapper = await open();
+    await submitForm();
+
+    expect(closes(wrapper)).toBe(0);
+    const banner = inDialog('[data-test="session-pending"]').textContent.replace(/\s+/g, ' ');
+    expect(banner).toContain('peut-être déjà enregistrée');
+    expect(banner).toContain('sans en créer une seconde');
+    expect(submitButton().textContent).toContain("Reprendre l'envoi");
+    // Frozen: what is sent again is what was sent.
+    expect(inDialog<HTMLInputElement>('input[aria-label="Note pour PC-A"]').disabled).toBe(true);
+    await submitForm();
+
+    const [first, second] = vi.mocked(recordSessionInParts).mock.calls;
+    expect(second![0]).toStrictEqual(first![0]);
+    // The same progress, so the same client id: no second visit.
+    const id = (first![1] as SessionProgress).clientId;
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second![1]).toMatchObject({ clientId: id, sessionId: null, sent: 0 });
+    expect(closes(wrapper)).toBe(1);
+    wrapper.unmount();
+  });
+
+  it('says a visit may be recorded when its unanswered first part is abandoned', async () => {
+    vi.mocked(recordSessionInParts).mockRejectedValueOnce(new Error('Network Error'));
+    const wrapper = await open();
+    await submitForm();
+    cancelButton().click();
+    await flushPromises();
+    expect(document.body.textContent).toContain('la séance est peut-être enregistrée');
+    pluginButton('Abandonner').click();
+    await flushPromises();
+    expect(closes(wrapper)).toBe(1);
+    expect(wrapper.emitted('recorded')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  /** What axios rejects with when the server answers an error. */
+  function refusal(status: number, code: string, details: Record<string, unknown> = {}) {
+    return Object.assign(new Error(code), {
+      response: { status, data: { error: { code, details } } },
+    });
+  }
+
+  it('gives the form back when the server refuses the first part: nothing is recorded', async () => {
+    vi.mocked(recordSessionInParts).mockRejectedValueOnce(
+      refusal(422, 'maintenance.items.not_in_room', { machine_ids: ['b'], hostnames: ['PC-B'] }),
+    );
+    const wrapper = await open();
+    const notify = vi.spyOn(wrapper.vm.$q, 'notify');
+    await submitForm();
+
+    expect(document.querySelector('[data-test="session-pending"]')).toBeNull();
+    expect(submitButton().textContent).toContain('Enregistrer');
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Ces postes ne sont pas dans la salle de la séance : PC-B',
+      }),
+    );
+    // The poste named is unticked by hand, and the visit sent anew.
+    inDialog<HTMLElement>('[aria-label="PC-B : fait"]').click();
+    await flushPromises();
+    await submitForm();
+    const [first, second] = vi.mocked(recordSessionInParts).mock.calls;
+    expect(second![0].items).toEqual([{ machine_id: 'a', note: null }]);
+    expect((second![1] as SessionProgress).clientId).not.toBe(
+      (first![1] as SessionProgress).clientId,
+    );
+    wrapper.unmount();
+  });
+
+  it('lets a resumed visit leave out the postes that left the room since', async () => {
+    vi.mocked(recordSessionInParts)
+      .mockImplementationOnce(async (_payload, progress) => {
+        // PC-A is recorded; the next part is refused for PC-B, moved since.
+        progress!.sessionId = 's-1';
+        progress!.sent = 1;
+        throw refusal(422, 'maintenance.items.not_in_room', {
+          machine_ids: ['b'],
+          hostnames: ['PC-B'],
+        });
+      })
+      .mockResolvedValue({} as never);
+    const wrapper = await open();
+    await typeNote('PC-C', 'éteint');
+    await submitForm();
+
+    const banner = inDialog('[data-test="session-refused"]').textContent.replace(/\s+/g, ' ');
+    expect(banner).toContain('ne sont plus dans la salle');
+    expect(banner).toContain('PC-B');
+    expect(banner).not.toContain('PC-A');
+    const notify = vi.spyOn(wrapper.vm.$q, 'notify');
+    inDialog<HTMLElement>('[data-test="session-drop"]').click();
+    await flushPromises();
+
+    const [first, second] = vi.mocked(recordSessionInParts).mock.calls;
+    // The same visit, without the poste refused; what is recorded stays.
+    expect(second![1]).toMatchObject({
+      clientId: (first![1] as SessionProgress).clientId,
+      sessionId: 's-1',
+      sent: 1,
+      total: 2,
+    });
+    expect(second![0]).toMatchObject({
+      items: [{ machine_id: 'a', note: null }],
+      skipped: [{ machine_id: 'c', note: 'éteint' }],
+    });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Maintenance enregistrée sur 1 poste(s)' }),
+    );
+    expect(closes(wrapper)).toBe(1);
+    wrapper.unmount();
+  });
+
+  it('names a poste that no longer exists, and leaves it out the same way', async () => {
+    vi.mocked(recordSessionInParts)
+      .mockImplementationOnce(async (_payload, progress) => {
+        progress!.sessionId = 's-1';
+        progress!.sent = 1;
+        throw refusal(404, 'machine.not_found', { machine_ids: ['b'] });
+      })
+      .mockResolvedValue({} as never);
+    const wrapper = await open();
+    await submitForm();
+    const banner = inDialog('[data-test="session-refused"]').textContent.replace(/\s+/g, ' ');
+    expect(banner).toContain('n’existent plus');
+    expect(banner).toContain('PC-B');
+    inDialog<HTMLElement>('[data-test="session-drop"]').click();
+    await flushPromises();
+    expect(vi.mocked(recordSessionInParts).mock.calls[1]![0].items).toEqual([
+      { machine_id: 'a', note: null },
+    ]);
     wrapper.unmount();
   });
 

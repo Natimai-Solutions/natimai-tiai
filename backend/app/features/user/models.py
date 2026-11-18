@@ -96,13 +96,18 @@ class User(SQLModel, table=True):
     # The slow counter (audit T06): failures within LOGIN_SLOW_WINDOW_HOURS of
     # ``slow_window_started_at``, however far apart — what the counter above
     # forgets after LOGIN_LOCKOUT_MINUTES. A failure past the window opens a
-    # new one. Reset, with the lock, by a successful login or a new password.
+    # new one, unless the slow lock is running: the window that set a lock
+    # lasts as long as it. A successful login leaves all three alone (the
+    # holder logging in every morning would hand a slow guesser a fresh
+    # budget every day); only a new password clears them.
     slow_failed_login_attempts: int = Field(default=0)
     slow_window_started_at: datetime | None = utc_field(default=None, nullable=True)
-    # Set with ``locked_until`` by the slow counter: that lock admits only the
-    # account's usual addresses (``addresses.shut_out``). Its guesser waited
-    # out every quick lock, so the addresses that failed lately say nothing.
-    lock_admits_known_only: bool = Field(default=False)
+    # Set when the slow counter reaches LOGIN_SLOW_MAX_FAILED_ATTEMPTS, for
+    # LOGIN_SLOW_WINDOW_HOURS: until then the account is shut to the
+    # addresses that failed on it since ``slow_window_started_at``
+    # (``addresses.shut_out``). Apart from ``locked_until``, which a
+    # successful login lifts: this one outlives it.
+    slow_locked_until: datetime | None = utc_field(default=None, nullable=True)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
 

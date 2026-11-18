@@ -156,16 +156,34 @@ foreach ($s in @($doc.install, $doc.uninstall)) {
     }
 }
 
-# An installation that runs msiexec /x removes what it was sent to install:
-# every poste refuses it (agent deploy.MsiExecRemoves), and so does the server
-# (manifest.UNINSTALL_SWITCH, kept equal to this pattern by a backend test).
-# /x and /uninstall, any case (-match ignores it), either prefix, whatever is
-# glued to the switch ("/x{code}").
-$MsiExecUninstallSwitch = '^[/-](x|uninstall)'
+# An installation that has msiexec remove a product takes off what it was sent
+# to install: every poste refuses it (agent deploy.MsiExecRemoves), and so
+# does the server (manifest.msiexec_removal). The same rule on the three
+# sides, the pattern kept equal to the server's by a backend test:
+#   - each argument is split on whitespace: msiexec parses its command line
+#     itself, and may read "/qn /x {code}" passed as one argument as two;
+#   - each piece is rid of one pair of surrounding double quotes;
+#   - it removes when it starts with /x or /uninstall (either prefix, whatever
+#     is glued to it: "/x{code}") or with REMOVE= ("/i {code} REMOVE=ALL" is
+#     the other documented way to uninstall), in ASCII letters of either case.
+# -cmatch and both cases spelled out: -match folds case by the rules of the
+# current culture (under tr-TR, "I" is not the capital of "i"), msiexec does
+# not.
+$MsiExecRemoval = '^[/-]([xX]|[uU][nN][iI][nN][sS][tT][aA][lL][lL])|^[rR][eE][mM][oO][vV][eE]='
 if ($doc.install -and $doc.install.run -ceq 'msiexec') {
     foreach ($a in @($doc.install.args)) {
-        if ($null -ne $a -and "$a" -match $MsiExecUninstallSwitch) {
-            throw "L'installation lance une desinstallation (msiexec /x ou /uninstall) : manifeste refuse, rien n'a ete signe. Placez cette commande dans la desinstallation du paquet."
+        if ($null -eq $a) { continue }
+        # \x1C-\x1F: whitespace for the server and the agent, not for \s.
+        foreach ($piece in ("$a" -split '[\s\x1C-\x1F]+')) {
+            $p = $piece
+            # Compared as characters: String.StartsWith would compare by the
+            # culture's rules.
+            if ($p.Length -ge 2 -and $p[0] -eq [char]34 -and $p[$p.Length - 1] -eq [char]34) {
+                $p = $p.Substring(1, $p.Length - 2)
+            }
+            if ($p -cmatch $MsiExecRemoval) {
+                throw "L'installation lance une desinstallation (msiexec /x, /uninstall ou REMOVE=, argument ""$a"") : manifeste refuse, rien n'a ete signe. Placez cette commande dans la desinstallation du paquet."
+            }
         }
     }
 }

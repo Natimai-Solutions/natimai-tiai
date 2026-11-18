@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -155,20 +156,64 @@ async def record_session(
     performed_at: datetime,
     note: str | None,
     skipped: dict[uuid.UUID, str] | None = None,
-) -> Maintenance:
+    visit_id: uuid.UUID | None = None,
+) -> Maintenance | None:
     """One visit: the session row, one journal entry per poste, and each
-    poste's ``last_maintenance_at`` moved forward. Does not commit."""
-    visit = Maintenance(
-        room_id=room.id if room else None,
-        room_name=room.name if room else None,
-        performed_by=performed_by,
-        performed_at=performed_at,
-        note=note,
-    )
-    session.add(visit)
-    await session.flush()
+    poste's ``last_maintenance_at`` moved forward. Does not commit.
+
+    ``visit_id``: the id the caller chose for the visit. None is returned,
+    and nothing written, when a visit already bears it — the same request
+    sent twice, the first still being served or already answered."""
+    if visit_id is None:
+        visit = Maintenance(
+            room_id=room.id if room else None,
+            room_name=room.name if room else None,
+            performed_by=performed_by,
+            performed_at=performed_at,
+            note=note,
+        )
+        session.add(visit)
+        await session.flush()
+    else:
+        # ON CONFLICT rather than an INSERT that fails: a twin of this request
+        # still in its transaction makes this one wait for it, then write
+        # nothing — no error to recover the session from.
+        inserted = await session.exec(
+            pg_insert(Maintenance)
+            .values(
+                id=visit_id,
+                room_id=room.id if room else None,
+                room_name=room.name if room else None,
+                performed_by=performed_by,
+                performed_at=performed_at,
+                note=note,
+                created_at=utcnow(),
+            )
+            .on_conflict_do_nothing(index_elements=[col(Maintenance.id)])
+            .returning(col(Maintenance.id))
+        )
+        if inserted.first() is None:
+            return None
+        created = await session.get(Maintenance, visit_id)
+        assert created is not None
+        visit = created
     await add_lines(session, visit, machines=machines, notes=notes, skipped=skipped)
     return visit
+
+
+async def lock_session(session: AsyncSession, maintenance_id: uuid.UUID) -> bool:
+    """Take the visit's row for the rest of the transaction, and say whether
+    it is still there. What adds to a visit and what deletes it both start
+    here, so that they are served one after the other: a part written while
+    the visit is being deleted would otherwise be left behind, detached from
+    it (``maintenance_id`` is ``ON DELETE SET NULL``), or meet the missing
+    visit as a foreign-key failure."""
+    locked = await session.exec(
+        select(col(Maintenance.id))
+        .where(col(Maintenance.id) == maintenance_id)
+        .with_for_update()
+    )
+    return locked.first() is not None
 
 
 async def add_lines(

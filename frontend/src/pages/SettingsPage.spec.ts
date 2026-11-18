@@ -7,6 +7,11 @@ import { RouterView, createMemoryHistory, createRouter } from 'vue-router';
 vi.mock('src/services/settings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/settings')>()),
   getSettings: vi.fn(),
+  updateSettings: vi.fn(),
+}));
+vi.mock('src/services/stats', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('src/services/stats')>()),
+  getOverview: vi.fn(() => Promise.reject(new Error('not asked in this spec'))),
 }));
 vi.mock('src/services/maintenance', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/maintenance')>()),
@@ -15,7 +20,9 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
 
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { listAssignableOwners } from 'src/services/maintenance';
-import { getSettings, type ConsoleSettings } from 'src/services/settings';
+import { QInput } from 'quasar';
+import { resetFleetThresholds, useFleetThresholds } from 'src/composables/useFleetThresholds';
+import { getSettings, updateSettings, type ConsoleSettings } from 'src/services/settings';
 import { useAuthStore } from 'src/stores/auth';
 import SettingsPage from './SettingsPage.vue';
 
@@ -171,5 +178,159 @@ describe('SettingsPage', () => {
     await router.push('/');
     expect(router.currentRoute.value.name).toBe('dashboard');
     app.unmount();
+  });
+
+  type Page = Awaited<ReturnType<typeof mountPage>>;
+  const field = (page: Page, label: string) =>
+    page.wrapper.findAllComponents(QInput).find((i) => i.props('label') === label)!;
+  /** « Enregistrer » of the card whose title is `title`. */
+  async function saveCard(page: Page, title: string) {
+    const card = page.wrapper.findAll('.q-card').find((c) => c.text().startsWith(title))!;
+    await card
+      .findAll('button')
+      .find((b) => b.text() === 'Enregistrer')!
+      .trigger('click');
+    await flushPromises();
+  }
+  /** Try to leave; true when the page asked first (and the reader stays). */
+  async function asksBeforeLeaving(page: Page): Promise<string | null> {
+    const leaving = page.router.push('/');
+    await flushPromises();
+    const dialog = document.querySelector<HTMLElement>('.q-dialog-plugin');
+    if (!dialog) {
+      await leaving;
+      return null;
+    }
+    const text = dialog.textContent ?? '';
+    [...dialog.querySelectorAll<HTMLElement>('button')]
+      .find((b) => b.textContent?.includes('Rester sur la page'))!
+      .click();
+    await leaving;
+    return text;
+  }
+  /** What the browser is told on a reload or a closed tab. */
+  function blocksUnload(): boolean {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+
+  // Review finding 3: the maintenance card is a card like the four others.
+  describe('the maintenance card and the unsaved-changes guard', () => {
+    beforeEach(() => {
+      vi.mocked(getSettings).mockResolvedValue(consoleSettings());
+      vi.mocked(updateSettings).mockReset();
+    });
+
+    it('asks before leaving with its cycle changed, and names the card', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      expect(blocksUnload()).toBe(false);
+      field(page, 'Cycle par défaut').vm.$emit('update:modelValue', 123);
+      await flushPromises();
+
+      expect(blocksUnload()).toBe(true);
+      expect(await asksBeforeLeaving(page)).toContain('« Maintenance »');
+      expect(page.router.currentRoute.value.name).toBe('settings');
+      page.app.unmount();
+    });
+
+    it('asks for the « à échéance » window and for the default owner too', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      field(page, 'Fenêtre « à échéance »').vm.$emit('update:modelValue', 20);
+      await flushPromises();
+      expect(await asksBeforeLeaving(page)).toContain('« Maintenance »');
+      field(page, 'Fenêtre « à échéance »').vm.$emit('update:modelValue', 14);
+      (page.wrapper.vm as unknown as { form: { ownerId: string | null } }).form.ownerId = 'u-1';
+      await flushPromises();
+      expect(await asksBeforeLeaving(page)).toContain('« Maintenance »');
+      page.app.unmount();
+    });
+
+    it('is silent once the value is put back as it was', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      field(page, 'Cycle par défaut').vm.$emit('update:modelValue', 123);
+      await flushPromises();
+      field(page, 'Cycle par défaut').vm.$emit('update:modelValue', 90);
+      await flushPromises();
+      expect(blocksUnload()).toBe(false);
+      expect(await asksBeforeLeaving(page)).toBeNull();
+      page.app.unmount();
+    });
+
+    it('is silent once the card is saved', async () => {
+      vi.mocked(updateSettings).mockResolvedValue({
+        ...consoleSettings(),
+        maintenance_default_cycle_days: 123,
+      });
+      const page = await mountPage(['settings:read', 'settings:write']);
+      field(page, 'Cycle par défaut').vm.$emit('update:modelValue', 123);
+      await flushPromises();
+      await saveCard(page, 'Maintenance');
+      expect(updateSettings).toHaveBeenCalledTimes(1);
+      expect(blocksUnload()).toBe(false);
+      expect(await asksBeforeLeaving(page)).toBeNull();
+      page.app.unmount();
+    });
+
+    it('still asks when the save was refused', async () => {
+      vi.mocked(updateSettings).mockRejectedValue({ response: { status: 500, data: {} } });
+      const page = await mountPage(['settings:read', 'settings:write']);
+      field(page, 'Cycle par défaut').vm.$emit('update:modelValue', 123);
+      await flushPromises();
+      await saveCard(page, 'Maintenance');
+      expect(await asksBeforeLeaving(page)).toContain('« Maintenance »');
+      page.app.unmount();
+    });
+
+    it('never asks a read-only account', async () => {
+      const page = await mountPage(['settings:read']);
+      (page.wrapper.vm as unknown as { form: { cycle: number } }).form.cycle = 123;
+      await flushPromises();
+      expect(blocksUnload()).toBe(false);
+      expect(await asksBeforeLeaving(page)).toBeNull();
+      page.app.unmount();
+    });
+  });
+
+  // Surviving mutation: nothing told a card saved from a card still to save.
+  it('is silent after the usage card was saved', async () => {
+    vi.mocked(getSettings).mockResolvedValue(consoleSettings());
+    vi.mocked(updateSettings).mockReset();
+    vi.mocked(updateSettings).mockResolvedValue({ ...consoleSettings(), usage_low_hours: 12 });
+    const page = await mountPage(['settings:read', 'settings:write']);
+    field(page, 'Poste peu utilisé en dessous de').vm.$emit('update:modelValue', 12);
+    await flushPromises();
+    expect(blocksUnload()).toBe(true);
+
+    await saveCard(page, 'Utilisation des postes');
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ usage_low_hours: 12 }));
+    expect(blocksUnload()).toBe(false);
+    expect(await asksBeforeLeaving(page)).toBeNull();
+    page.app.unmount();
+  });
+
+  // Surviving mutation: the disk threshold saved here is the one the list and
+  // the fiche colour their disks by, without waiting for their next read.
+  it('hands the disk threshold to the list and the fiche, at load and on save', async () => {
+    resetFleetThresholds();
+    vi.mocked(getSettings).mockResolvedValue({ ...consoleSettings(), low_disk_free_percent: 15 });
+    vi.mocked(updateSettings).mockReset();
+    vi.mocked(updateSettings).mockResolvedValue({
+      ...consoleSettings(),
+      low_disk_free_percent: 30,
+    });
+    const page = await mountPage(['settings:read', 'settings:write']);
+    const { lowDiskPercent } = useFleetThresholds();
+    expect(lowDiskPercent.value).toBe(15);
+
+    field(page, 'Disque presque plein en dessous de').vm.$emit('update:modelValue', 30);
+    await flushPromises();
+    await saveCard(page, 'Supervision du parc');
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ low_disk_free_percent: 30 }),
+    );
+    expect(lowDiskPercent.value).toBe(30);
+    resetFleetThresholds();
+    page.app.unmount();
   });
 });

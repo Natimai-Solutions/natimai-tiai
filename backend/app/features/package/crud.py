@@ -292,6 +292,10 @@ async def sweep_store(session: AsyncSession) -> int:
     read-only volume, or a database error, must not fail the request that
     triggered the sweep — which has committed by then: the sweep ends the
     session's transaction after each file it deletes, to release its lock.
+    For the same reason ``session`` must hold no file itself (``hold_file``)
+    when this is called: its own hold does not stop its own claim, and the
+    file it was about to name would go. Every caller commits or rolls back
+    first.
 
     A file an upload in progress holds is kept (``hold_file``, audit T09).
     And nothing goes when the database knows no package at all: packages are
@@ -335,9 +339,10 @@ SWEEP_INTERVAL_SECONDS = 3600
 
 async def sweep_periodically(
     session_factory: Callable[[], AsyncSession],
-    interval_seconds: float = SWEEP_INTERVAL_SECONDS,
+    interval_seconds: float | None = None,
 ) -> None:
-    """Sweep the store every ``interval_seconds``, until cancelled.
+    """Sweep the store every ``interval_seconds`` — every
+    ``SWEEP_INTERVAL_SECONDS`` unless told otherwise — until cancelled.
 
     The sweeps the requests trigger — an upload, a verdict, a refusal at
     delivery — miss the files whose last deployment ended without one: it
@@ -346,6 +351,8 @@ async def sweep_periodically(
     deployments are marked first: a pending one past its TTL still holds its
     files until something says it expired. Run in the API process, which has
     the packages volume. Never raises but on cancellation."""
+    if interval_seconds is None:
+        interval_seconds = SWEEP_INTERVAL_SECONDS
     while True:
         await asyncio.sleep(interval_seconds)
         try:

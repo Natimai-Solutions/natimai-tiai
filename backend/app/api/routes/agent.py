@@ -177,6 +177,11 @@ class EnrollResponse(BaseModel):
 # leaves ample room while keeping a vendor string we do not control from growing
 # without limit.
 AV_PRODUCT_NAME_MAX = 120
+# A signature age is a number of days since a date Defender holds: a century
+# covers every clock a poste can have, and anything beyond — or negative — is
+# a broken or forged report. The column is a 32-bit integer the console adds
+# days to on every read (``status.signature_age_expr``).
+SIGNATURE_AGE_MAX_DAYS = 36500
 
 
 class DefenderState(BaseModel):
@@ -196,6 +201,20 @@ class DefenderState(BaseModel):
     @classmethod
     def _bound_text(cls, value: str | None) -> str | None:
         return bound_text(value)
+
+    @field_validator("signature_age_days")
+    @classmethod
+    def _bound_age(cls, value: int | None) -> int | None:
+        """Keep an age that can be one, store anything else as unknown.
+
+        Never 422, like the fields around it: the flags of this block, the
+        threats and the command pickup ride the same heartbeat. Unknown is
+        also the honest reading — and « not up to date », which is what an
+        age nobody can believe should count as.
+        """
+        if value is None or not 0 <= value <= SIGNATURE_AGE_MAX_DAYS:
+            return None
+        return value
 
 
 class AVProduct(BaseModel):
@@ -522,7 +541,9 @@ class CommandResult(BaseModel):
 
 # How long after an enrollment its token may be replaced without approval,
 # provided it was never used: the window in which an agent whose 200 answer
-# was lost retries (it backs off for minutes, not hours).
+# was lost retries (it backs off for minutes, not hours). The one case where
+# the fleet secret replaces a live token, documented as such in DEPLOYMENT.md
+# (« Enrôlement : approbation et rotation du secret »).
 UNUSED_TOKEN_RETRY_WINDOW = timedelta(hours=1)
 
 
@@ -553,16 +574,21 @@ def _unused_enrollment_retry(machine: Machine, fp: Fingerprint) -> bool:
     """Whether this enrollment is the same agent asking again because the
     answer to its previous one never reached it.
 
-    The token that enrollment minted has then never been used: no heartbeat
-    was accepted with it (each one moves ``last_seen`` past
-    ``token_issued_at``), and no rotation offered. Only within
-    ``UNUSED_TOKEN_RETRY_WINDOW`` of it, and only with the very fingerprint
-    it stored — anything else is the reinstall-or-impostor case the
-    approval exists for.
+    The token that enrollment minted has then never authenticated a request
+    of any kind: ``enrollment_token_unused``, set below when the token is
+    minted and cleared by the authentication dependency
+    (``token_rotation.machine_for_token``). A stored fact, not a comparison
+    of ``last_seen`` with ``token_issued_at``: a rotated token first used on
+    a command verdict restarts the second without moving the first, and an
+    established poste then read as never seen. No rotation offered either —
+    an offer exists only because a heartbeat was accepted. Only within
+    ``UNUSED_TOKEN_RETRY_WINDOW`` of the enrollment, and only with the very
+    fingerprint it stored — anything else is the reinstall-or-impostor case
+    the approval exists for.
     """
     if machine.token_hash is None or machine.pending_token_hash is not None:
         return False
-    if machine.last_seen > machine.token_issued_at:
+    if not machine.enrollment_token_unused:
         return False
     if utcnow() - machine.token_issued_at > UNUSED_TOKEN_RETRY_WINDOW:
         return False
@@ -727,6 +753,9 @@ async def enroll(
         machine.needs_verification = True
     machine.token_hash = security.hash_token(token)
     machine.token_issued_at = utcnow()
+    # Until the agent's first authenticated request proves the answer below
+    # reached it (``_unused_enrollment_retry``).
+    machine.enrollment_token_unused = True
     machine.reenroll_requested_at = None
     machine.reenroll_requested_ip = None
     # A rotation the previous agent left half-done must not leave a second

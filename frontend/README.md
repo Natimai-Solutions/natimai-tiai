@@ -79,8 +79,10 @@ avant par `text-strong` ; une couleur posée en CSS par une variable `--ti-*`
   placeholder n'en est pas un).
 - Ce qui mène ailleurs est un lien (`router-link`, `:to`), jamais un `@click`
   sur une carte ou un bloc : atteignable au clavier, ouvrable dans un nouvel
-  onglet. Dans un tableau, la ligne reste cliquable et le nom est le lien
-  (classe `row-link`).
+  onglet. Dans un tableau, le nom est le lien (classe `row-link`). Dans la
+  liste des postes, lui seul ouvre la fiche : le reste de la ligne est du
+  texte que l'on sélectionne et copie, double-clic compris. Les autres
+  tableaux gardent en plus la ligne cliquable à la souris.
 - Chaque page a un `h1` et un titre d'onglet (`meta.title` de la route).
 - Un état ne se dit pas qu'en couleur : le badge antivirus écrit « non à
   jour ».

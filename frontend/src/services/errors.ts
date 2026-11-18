@@ -80,6 +80,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   'maintenance.session.empty':
     'Aucun poste fait : dites pourquoi, par une observation générale ou la note d’un poste non fait',
   'maintenance.session.not_author': 'Seul l’auteur de la séance peut lui ajouter des postes',
+  'maintenance.session.id_taken':
+    'Cet identifiant de séance est déjà celui de la séance d’un autre compte : enregistrez-la de nouveau',
   'request.validation_error': 'Requête invalide',
   'request.rate_limited': 'Trop de tentatives : réessayez dans quelques minutes',
   'http.not_found': 'Ressource introuvable',

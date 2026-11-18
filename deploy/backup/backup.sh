@@ -23,10 +23,6 @@ RECIPIENTS="${BACKUP_ENCRYPT_RECIPIENT:-}"
 # Le montage du compose. Variable pour les tests seulement
 # (backend/tests/test_backup_script.py) : le compose ne la pose pas.
 DIR="${BACKUP_DIR:-/backups}"
-# Témoin d'un pg_dump en échec quand il écrit dans un tube vers age : le code
-# de sortie d'un tube est celui de sa dernière commande, et `pipefail` n'est
-# pas POSIX.
-FAILED="${TMPDIR:-/tmp}/tiai-backup.$$.pg_dump-failed"
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
@@ -80,19 +76,29 @@ fi
 # Écrit le dump dans le fichier $1 : en clair, ou chiffré au fil de l'eau —
 # pg_dump écrit dans un tube, age chiffre, aucun octet en clair ne touche le
 # disque. Réussit seulement si pg_dump ET age ont réussi.
+#
+# Le code de sortie d'un tube est celui de sa dernière commande (age), et
+# `pipefail` n'est pas POSIX : celui de pg_dump revient par le descripteur 3,
+# lu par la substitution de commande. Le dump n'est tenu pour bon que si ce
+# code a été lu ET vaut 0 — rien de lu (sous-shell tué) vaut échec. Pas de
+# fichier témoin : celui d'avant notait l'échec dans /tmp, et là où il ne
+# pouvait pas être écrit (conteneur en lecture seule, disque de Docker plein —
+# l'événement même qui coupe le dump), un dump tronqué passait pour bon.
 dump() {
   if [ -z "$AGE_ARGS" ]; then
     pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$1"
     return
   fi
-  rm -f "$FAILED"
-  status=0
+  age_status=0
   # shellcheck disable=SC2086
-  { pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc || : >"$FAILED"; } \
-    | age $AGE_ARGS -o "$1" || status=1
-  if [ -e "$FAILED" ]; then status=1; fi
-  rm -f "$FAILED"
-  return "$status"
+  pg_status="$(
+    exec 3>&1
+    {
+      pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc 3>&-
+      echo "$?" >&3
+    } | age $AGE_ARGS -o "$1" >/dev/null 3>&-
+  )" || age_status=1
+  [ "$pg_status" = 0 ] && [ "$age_status" = 0 ]
 }
 
 if [ -n "$AGE_ARGS" ]; then

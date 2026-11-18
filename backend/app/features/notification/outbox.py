@@ -12,6 +12,7 @@ rows sent before trying — would lose mail instead, and a rare duplicate alert
 is the better failure.
 """
 
+import asyncio
 import logging
 import time
 from datetime import timedelta
@@ -66,6 +67,7 @@ async def send_pending(
     *,
     batch_size: int = 50,
     budget_seconds: float | None = None,
+    stop: asyncio.Event | None = None,
 ) -> int:
     """Try every due mail once; returns how many went out.
 
@@ -81,6 +83,11 @@ async def send_pending(
     by. A server that accepts the connection and then stays silent costs a
     full timeout per mail; without a budget, fifty of them held the worker for
     many minutes. What is left waits for the next drain, still due.
+
+    ``stop``: set when the worker is asked to stop. The mail being sent is
+    finished and its outcome committed; no other is started. A drain that
+    went on sending during the stop's grace was cancelled in the middle of a
+    mail — delivered, still pending, sent again at the next start.
 
     The policy is resolved once per drain, from the database: a provider, a
     server or a password changed in the console applies from the next tick,
@@ -100,6 +107,9 @@ async def send_pending(
     session.expunge_all()
     sent = 0
     for row_id, to_address, subject, body, attempts in due:
+        if stop is not None and stop.is_set():
+            logger.info("Outbox: stop asked, the rest waits for the next start")
+            break
         if budget_seconds is not None and time.monotonic() - started >= budget_seconds:
             logger.warning(
                 "Outbox: drain stopped after %.0f s, the rest waits for the next tick",

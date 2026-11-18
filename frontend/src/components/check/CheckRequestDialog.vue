@@ -57,6 +57,8 @@ const props = defineProps<{
   subtitle?: string | undefined;
   /** The poste, when there is one: only who can see it is offered. */
   machineId?: string | undefined;
+  /** The postes of a selection, when the request is for several at once. */
+  machineIds?: string[] | undefined;
   /** What to do with the form: the caller knows the poste(s). */
   save: (payload: CheckPayload) => Promise<void>;
 }>();
@@ -68,15 +70,27 @@ const form = reactive({ assigned_to_id: null as string | null, instructions: '' 
 const userOptions = ref<{ label: string; value: string }[]>([]);
 
 // What is being typed survives a session that ends mid-form: the console goes
-// to the login page and the dialog with it; reopened, the text is back. Per
-// poste (or per request edited): a draft never opens on another poste.
-const draft = useDraft(
-  () =>
-    props.check
-      ? `check-edit:${props.check.id}`
-      : `check-request:${props.machineId ?? 'selection'}`,
-  toRefs(form),
-);
+// to the login page and the dialog with it; reopened, the text is back — for
+// the account that typed it (`useDraft`), and for what it was typed about. Per
+// poste, or per request edited: a draft never opens on another poste. For a
+// selection: on the very same postes only, compared id by id rather than by a
+// digest that two selections could share; and nothing is kept for a form that
+// knows neither.
+//
+// Where the draft goes is settled as the dialog opens, and holds until it
+// closes: the list empties its selection as soon as the requests are made,
+// before this dialog closes, and the draft just sent must still be found to
+// be forgotten.
+const draftSlot = ref<{ key: string | null; scope: string }>({ key: null, scope: '' });
+function slotNow(): { key: string | null; scope: string } {
+  if (props.check) return { key: `check-edit:${props.check.id}`, scope: '' };
+  if (props.machineId) return { key: `check-request:${props.machineId}`, scope: '' };
+  if (!props.machineIds?.length) return { key: null, scope: '' };
+  return { key: 'check-request:selection', scope: [...props.machineIds].sort().join(',') };
+}
+const draft = useDraft(() => draftSlot.value.key, toRefs(form), {
+  scope: () => draftSlot.value.scope,
+});
 
 watch(
   () => props.modelValue,
@@ -87,6 +101,7 @@ watch(
       draft.clear();
       return;
     }
+    draftSlot.value = slotNow();
     form.assigned_to_id = props.check?.assigned_to?.id ?? null;
     form.instructions = props.check?.instructions ?? '';
     draft.restore();

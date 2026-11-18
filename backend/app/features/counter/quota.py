@@ -20,15 +20,24 @@ same pool. So the grant is spent whatever becomes of the request; the
 caller gives it back when the request's transaction does not commit
 (``app.features.inventory.crud``). A process that dies in between loses that
 grant for the window — a budget that errs on the safe side.
+
+That second connection must never cost a request more than a truncated
+answer. It may be refused (``max_connections`` reached: a process opens up
+to one per request in flight, beside its pool), it may not open, the lock
+may be held by a process that froze: every such failure is ``Unavailable``
+— nothing granted, within seconds (``CONNECT_TIMEOUT_SECONDS``,
+``LOCK_TIMEOUT_MS``) — which the caller treats as a budget that is spent.
 """
 
 import logging
-from collections.abc import Sequence
+import time
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from weakref import WeakKeyDictionary
 
-from sqlalchemy import ColumnElement, Engine, delete, func, update
+from sqlalchemy import ColumnElement, Engine, delete, func, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
@@ -59,6 +68,29 @@ RETENTION = timedelta(days=2)
 # short statements. Spells "tiai-qta" in ASCII, to read as what it is in
 # ``pg_locks``.
 QUOTA_LOCK = 0x746961692D717461
+
+# How long the side connection may take to open, in seconds: beyond it the
+# grant is given up (``Unavailable``) rather than have the request — a
+# heartbeat, holding its poste's row — wait for a database that does not
+# answer. Two is the least libpq's ``connect_timeout`` honours.
+CONNECT_TIMEOUT_SECONDS = 3
+
+# How long a statement of the side connection may wait for a lock, in
+# milliseconds: the budgets' advisory lock, held for three short statements
+# by whoever is being granted — or for ever by a process that froze while
+# holding it, or whose connection is half open. Far above what a busy fleet
+# makes a grant wait, far below what a heartbeat can afford.
+LOCK_TIMEOUT_MS = 3000
+
+# A failing database fails every grant asked of it: one line when it starts,
+# then one per interval while it lasts — with the count of those it stands
+# for — not a traceback per poste and per heartbeat.
+FAILURE_LOG_INTERVAL_SECONDS = 600.0
+
+
+class Unavailable(Exception):
+    """The budgets could not be asked: nothing was granted, and nothing says
+    they are spent. Already logged."""
 
 
 @dataclass
@@ -126,9 +158,62 @@ def _side(engine: AsyncEngine) -> AsyncEngine:
     per grant, opened and closed with it (see the module's docstring)."""
     side = _side_engines.get(engine.sync_engine)
     if side is None:
-        side = create_async_engine(engine.url, poolclass=NullPool)
+        side = create_async_engine(
+            engine.url,
+            poolclass=NullPool,
+            connect_args={"connect_timeout": CONNECT_TIMEOUT_SECONDS},
+        )
         _side_engines[engine.sync_engine] = side
     return side
+
+
+@asynccontextmanager
+async def _side_transaction(engine: AsyncEngine) -> AsyncIterator[AsyncConnection]:
+    """A transaction on a side connection, committed on the way out, in
+    which no statement waits long for a lock (``LOCK_TIMEOUT_MS``). Said to
+    the transaction rather than in the connection's options: whatever the
+    database URL carries, or stands behind."""
+    async with _side(engine).begin() as conn:
+        await conn.execute(
+            text("SELECT set_config('lock_timeout', :ms, true)").bindparams(
+                ms=str(LOCK_TIMEOUT_MS)
+            )
+        )
+        yield conn
+
+
+class _Failures:
+    """Failures of one kind, logged without flooding: the first one, then
+    one line per ``FAILURE_LOG_INTERVAL_SECONDS`` saying how many it stands
+    for. Kept for the process: an outage is the database's, not a poste's."""
+
+    def __init__(self) -> None:
+        self.logged_at: float | None = None
+        self.unsaid = 0
+
+    def report(self, what: str, exc: BaseException) -> None:
+        now = time.monotonic()
+        if (
+            self.logged_at is not None
+            and now - self.logged_at < FAILURE_LOG_INTERVAL_SECONDS
+        ):
+            self.unsaid += 1
+            return
+        logger.error(
+            "%s: %s (and %d more not logged since the last such line; one "
+            "line per %d s at most)",
+            what,
+            exc,
+            self.unsaid,
+            FAILURE_LOG_INTERVAL_SECONDS,
+            exc_info=exc,
+        )
+        self.logged_at = now
+        self.unsaid = 0
+
+
+_take_failures = _Failures()
+_give_back_failures = _Failures()
 
 
 async def take(
@@ -136,28 +221,42 @@ async def take(
 ) -> Grant | None:
     """Grant up to ``wanted`` units, charged to every (budget, key) of
     ``charges``: the smallest of what is left of each. Committed before it
-    returns; None when nothing could be granted."""
+    returns; None when nothing is left to grant.
+
+    Raises ``Unavailable``, and nothing else of what a database does, when
+    the budgets could not be asked — no connection, a lock not had in time,
+    any error on the way. A commit that failed may have charged the units
+    all the same: lost for the window, which errs on the safe side."""
     if wanted <= 0 or not charges:
         return None
-    async with _side(engine).begin() as conn:
-        await conn.execute(select(func.pg_advisory_xact_lock(QUOTA_LOCK)))
-        left = min([await remaining(conn, quota, key) for quota, key in charges])
-        granted = min(wanted, left)
-        if granted <= 0:
-            return None
-        bucket = (
-            await conn.execute(select(func.date_trunc("minute", func.now())))
-        ).scalar_one()
-        for quota, key in charges:
-            stmt = pg_insert(SharedCounter).values(
-                name=quota.name, key=key, bucket=bucket, used=granted
-            )
-            await conn.execute(
-                stmt.on_conflict_do_update(
-                    index_elements=["name", "key", "bucket"],
-                    set_={"used": col(SharedCounter.used) + stmt.excluded.used},
+    try:
+        async with _side_transaction(engine) as conn:
+            await conn.execute(select(func.pg_advisory_xact_lock(QUOTA_LOCK)))
+            left = min([await remaining(conn, quota, key) for quota, key in charges])
+            granted = min(wanted, left)
+            if granted <= 0:
+                return None
+            bucket = (
+                await conn.execute(select(func.date_trunc("minute", func.now())))
+            ).scalar_one()
+            for quota, key in charges:
+                stmt = pg_insert(SharedCounter).values(
+                    name=quota.name, key=key, bucket=bucket, used=granted
                 )
-            )
+                await conn.execute(
+                    stmt.on_conflict_do_update(
+                        index_elements=["name", "key", "bucket"],
+                        set_={"used": col(SharedCounter.used) + stmt.excluded.used},
+                    )
+                )
+    except (SQLAlchemyError, OSError) as exc:
+        _take_failures.report(
+            "budgets unreachable, nothing granted ("
+            + ", ".join(sorted({quota.name for quota, _ in charges}))
+            + ")",
+            exc,
+        )
+        raise Unavailable from exc
     return Grant(
         charges=tuple((quota.name, key) for quota, key in charges),
         units=granted,
@@ -170,7 +269,7 @@ async def give_back(engine: AsyncEngine, grant: Grant) -> None:
     charged to. Never raises: a give-back that fails leaves the units spent
     for the window, which errs on the safe side."""
     try:
-        async with _side(engine).begin() as conn:
+        async with _side_transaction(engine) as conn:
             for name, key in grant.charges:
                 await conn.execute(
                     update(SharedCounter)
@@ -181,9 +280,9 @@ async def give_back(engine: AsyncEngine, grant: Grant) -> None:
                         used=func.greatest(col(SharedCounter.used) - grant.units, 0)
                     )
                 )
-    except (SQLAlchemyError, OSError):
-        logger.exception(
-            "could not give back %d units to %s", grant.units, grant.charges
+    except (SQLAlchemyError, OSError) as exc:
+        _give_back_failures.report(
+            f"could not give back {grant.units} units to {grant.charges}", exc
         )
 
 
