@@ -2,8 +2,11 @@ import type { Translation } from './types';
 
 /**
  * La page Groupes (lot C2 du plan console bilingue). The permissions' own
- * words are in `permissions`; the built-in groups' names and descriptions are
- * data, stored as the operator left them, and never translated.
+ * words are in `permissions`. The built-in groups' names and descriptions are
+ * data: `builtin` holds the ones an installation gives them (French, word for
+ * word as `backend/app/features/user/permissions.py` seeds them), and the
+ * console translates a built-in group only while it still carries them
+ * (`utils/groupText`).
  */
 const fr = {
   page: {
@@ -78,6 +81,20 @@ const fr = {
     saveFailed: 'Enregistrement impossible',
     deleted: 'Groupe supprimé',
     deleteFailed: 'Suppression impossible',
+  },
+  builtin: {
+    admin: {
+      name: 'Administrateurs',
+      description: 'Tous les droits, y compris ceux des ressources à venir.',
+    },
+    readonly: {
+      name: 'Lecture seule',
+      description: 'Consulte le parc sans rien pouvoir y changer.',
+    },
+    technician: {
+      name: 'Techniciens',
+      description: 'Consulte le parc et exécute les commandes, courantes et à risque.',
+    },
   },
 };
 
@@ -154,6 +171,20 @@ const en: Translation<typeof fr> = {
     saveFailed: 'Could not save',
     deleted: 'Group deleted',
     deleteFailed: 'Could not delete the group',
+  },
+  builtin: {
+    admin: {
+      name: 'Administrators',
+      description: 'Every permission, including those of resources still to come.',
+    },
+    readonly: {
+      name: 'Read only',
+      description: 'Views the fleet without being able to change anything.',
+    },
+    technician: {
+      name: 'Technicians',
+      description: 'Views the fleet and runs commands, routine and risky ones.',
+    },
   },
 };
 

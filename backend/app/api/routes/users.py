@@ -62,6 +62,10 @@ class GroupRef(BaseModel):
 
     id: uuid.UUID
     name: str
+    # A built-in group's stable key (``admin``, ``readonly``, ``technician``):
+    # the console names such a group in its reader's language while its name
+    # is still the one the installation gave it.
+    builtin_key: str | None = None
 
     model_config = {"from_attributes": True}
 

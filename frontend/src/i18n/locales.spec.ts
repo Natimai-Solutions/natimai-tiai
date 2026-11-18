@@ -25,11 +25,13 @@ describe('resolveLocale', () => {
     expect(resolveLocale('en', ['en-US'], ['fr'])).toBe('fr');
   });
 
-  // The guarantee of an update: until English is complete, nothing switches.
-  it('stays French whatever the browser and the account say while English is not offered', () => {
-    expect(ENGLISH_AVAILABLE).toBe(false);
-    expect(availableLocales()).toEqual(['fr']);
-    expect(resolveLocale('en', ['en-US'])).toBe('fr');
-    expect(resolveLocale(null, ['en-GB', 'en'])).toBe('fr');
+  // English is complete (plan, I6): offered, and followed from the browser
+  // for an account that chose nothing.
+  it('offers English now that the console is translated', () => {
+    expect(ENGLISH_AVAILABLE).toBe(true);
+    expect(availableLocales()).toEqual(['fr', 'en']);
+    expect(resolveLocale('en', ['fr-FR'])).toBe('en');
+    expect(resolveLocale(null, ['en-GB', 'en'])).toBe('en');
+    expect(resolveLocale(null, ['fr-FR'])).toBe('fr');
   });
 });

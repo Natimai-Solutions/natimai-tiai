@@ -18,6 +18,8 @@ export type EmailPreference = 'none' | 'immediate' | 'digest_events' | 'digest_d
 export interface GroupRef {
   id: string;
   name: string;
+  /** A built-in group's key (`utils/groupText`); absent from an older server. */
+  builtin_key?: string | null;
 }
 
 /**

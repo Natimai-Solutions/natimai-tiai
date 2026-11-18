@@ -40,9 +40,9 @@
               <q-tooltip v-if="props.row.builtin_key">{{ t('groups.row.builtin') }}</q-tooltip>
             </q-icon>
             <div>
-              <div>{{ props.row.name }}</div>
+              <div>{{ groupName(props.row) }}</div>
               <div v-if="props.row.description" class="text-caption text-muted">
-                {{ props.row.description }}
+                {{ groupDescription(props.row) }}
               </div>
             </div>
           </div>
@@ -267,6 +267,7 @@
 </template>
 
 <script setup lang="ts">
+import { groupDescription, groupName } from 'src/utils/groupText';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useFocusReturn } from 'src/composables/useFocusReturn';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
@@ -545,7 +546,7 @@ function confirmDelete(group: Group) {
   $q.dialog({
     title: t('groups.delete.title'),
     message:
-      `${t('groups.delete.question', { name: `<b>${escapeHtml(group.name)}</b>` })}<br>` +
+      `${t('groups.delete.question', { name: `<b>${escapeHtml(groupName(group))}</b>` })}<br>` +
       t('groups.delete.members', { count: group.member_count }, group.member_count),
     html: true,
     cancel: true,

@@ -56,7 +56,7 @@
               text-color="white"
               class="q-ml-none"
             >
-              {{ group.name }}
+              {{ groupName(group) }}
             </q-chip>
           </template>
           <span v-else class="text-muted">{{ t('users.row.noGroup') }}</span>
@@ -328,6 +328,7 @@
 </template>
 
 <script setup lang="ts">
+import { groupName } from 'src/utils/groupText';
 import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { t } from 'src/i18n';
 import { escapeHtml } from 'src/utils/html';
@@ -421,7 +422,7 @@ function beyondMe(user: ConsoleUser): boolean {
 // form says why they cannot be picked rather than failing on « Enregistrer ».
 const grantableGroupOptions = computed(() =>
   groups.value.map((g) => ({
-    label: g.name,
+    label: groupName(g),
     value: g.id,
     disable: me.value !== null && exceeds(me.value, groupsAuthority([g])),
   })),

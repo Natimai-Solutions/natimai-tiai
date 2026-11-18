@@ -24,7 +24,7 @@
                 text-color="white"
                 class="q-ml-none"
               >
-                {{ group.name }}
+                {{ groupName(group) }}
               </q-chip>
             </template>
             <span v-else class="text-muted">{{ t('account.profile.noGroup') }}</span>
@@ -222,6 +222,7 @@
 </template>
 
 <script setup lang="ts">
+import { groupName } from 'src/utils/groupText';
 import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { computed, onMounted, ref, watch } from 'vue';
 import { availableLocales, t } from 'src/i18n';

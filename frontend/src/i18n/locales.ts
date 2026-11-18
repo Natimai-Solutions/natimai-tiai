@@ -13,12 +13,12 @@ export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = 'fr';
 
 /**
- * False until every text of the console is in the catalogues (plan, jalon I6).
- * Until then an English reader would get a page half in French: the console
- * stays French whatever the browser or the account says, as before the
- * update, and « Mon compte » offers no choice.
+ * Whether English is offered. It was false until every text of the console
+ * was in the catalogues (plan, jalon I6): an English reader would have got a
+ * page half in French. A further language starts the same way — in
+ * `LOCALES`, offered only once complete.
  */
-export const ENGLISH_AVAILABLE = false;
+export const ENGLISH_AVAILABLE = true;
 
 export function availableLocales(): Locale[] {
   return ENGLISH_AVAILABLE ? [...LOCALES] : [DEFAULT_LOCALE];

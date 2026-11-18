@@ -99,7 +99,8 @@ describe('AccountPage in English', () => {
     expect(text).toContain('Opened on');
     expect(text).toContain('Log out');
     expect(text).toContain('Close');
-    expect(text).not.toMatch(/[éèàùç«»]/);
+    // Each language is named in itself in the picker: « Français » is meant.
+    expect(text.replace('Français', '')).not.toMatch(/[éèàùç«»]/);
   });
 
   it('says there is no open session, in English', async () => {

@@ -69,3 +69,17 @@ async def test_a_stored_value_that_is_no_language_reads_as_none(client, db_sessi
 def test_mail_stays_french_unless_told_otherwise():
     assert Settings().DEFAULT_LANGUAGE == "fr"
     assert Settings(DEFAULT_LANGUAGE="en").DEFAULT_LANGUAGE == "en"
+
+
+async def test_a_built_in_group_is_named_with_its_key(client, db_session):
+    """The console names a built-in group in its reader's language while it
+    keeps the name the installation gave it: it needs the group's key."""
+    headers = await _login(client, db_session, "lang-groups@test.local")
+    me = (await client.get("/api/v1/auth/me", headers=headers)).json()
+    assert me["groups"] == [
+        {
+            "id": me["groups"][0]["id"],
+            "name": "Lecture seule",
+            "builtin_key": "readonly",
+        }
+    ]
