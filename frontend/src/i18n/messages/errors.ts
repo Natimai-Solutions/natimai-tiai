@@ -38,6 +38,31 @@ const fr = {
     smtp_port: 'port SMTP',
     mailgun_base_url: 'URL de l’API Mailgun',
   },
+  /**
+   * A refusal of ours in a 422 (`details.errors[].type` = `tiai_<code>`), by
+   * its code: the French is, word for word, the server's `msg` after
+   * « Value error, » (shared cases: backend/tests/data/validation_texts_fr.json).
+   */
+  validation: {
+    name_blank: "le nom ne peut pas être vide ou fait seulement d'espaces",
+    name_too_long: 'le nom ne doit pas dépasser {max} caractères (reçu : {length})',
+    null_refused: '{fields} : valeur requise (null refusé)',
+    password_too_long:
+      'le mot de passe ne doit pas dépasser {max_bytes} octets ({max_bytes} caractères sans accent, moins avec des accents ou des symboles) : au-delà, la fin ne serait pas prise en compte',
+    name_empty: 'le nom ne peut pas être vide',
+    date_in_future: 'la date ne peut pas être dans le futur',
+    control_character: 'caractère de contrôle refusé',
+    too_long: '{max} caractères au plus',
+    too_many_arguments: 'au plus {max} arguments',
+    argument_refused: 'argument trop long ou contenant un caractère de contrôle',
+    arguments_required: "liste d'arguments requise (vide pour aucun argument)",
+    success_codes_count: 'entre {min} et {max} codes de succès',
+    exit_code_out_of_range: 'code de sortie hors limites',
+    name_required: 'nom requis',
+    date_before_request: 'la date ne peut pas précéder la demande',
+    nul_refused: 'Caractère nul refusé',
+    too_nested: 'Corps JSON trop imbriqué',
+  },
 };
 
 const en: Translation<typeof fr> = {
@@ -72,6 +97,26 @@ const en: Translation<typeof fr> = {
     smtp_host: 'SMTP server',
     smtp_port: 'SMTP port',
     mailgun_base_url: 'Mailgun API URL',
+  },
+  validation: {
+    name_blank: 'the name cannot be empty or made only of spaces',
+    name_too_long: 'the name must not exceed {max} characters (received: {length})',
+    null_refused: '{fields}: value required (null refused)',
+    password_too_long:
+      'the password must not exceed {max_bytes} bytes ({max_bytes} unaccented characters, fewer with accents or symbols): beyond that, the end would not count',
+    name_empty: 'the name cannot be empty',
+    date_in_future: 'the date cannot be in the future',
+    control_character: 'control character refused',
+    too_long: '{max} characters at most',
+    too_many_arguments: 'at most {max} arguments',
+    argument_refused: 'argument too long or holding a control character',
+    arguments_required: 'list of arguments required (empty for no argument)',
+    success_codes_count: 'between {min} and {max} success codes',
+    exit_code_out_of_range: 'exit code out of range',
+    name_required: 'name required',
+    date_before_request: 'the date cannot be before the request',
+    nul_refused: 'Null character refused',
+    too_nested: 'JSON body nested too deeply',
   },
 };
 

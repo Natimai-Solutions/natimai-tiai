@@ -474,7 +474,7 @@
                 class="break-anywhere"
                 style="white-space: normal; max-width: 520px"
               >
-                {{ cell.row.error || cell.row.result_output || '' }}
+                {{ commandVerdictText(cell.row) }}
               </q-td>
             </template>
           </q-table>
@@ -501,7 +501,7 @@ import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import PackageDeployDialog from 'src/components/package/PackageDeployDialog.vue';
 import PackageRichText from 'src/components/package/PackageRichText.vue';
 import { t } from 'src/i18n';
-import { commandTypeLabel, type Command } from 'src/services/commands';
+import { commandTypeLabel, commandVerdictText, type Command } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import {
   attachSignature,

@@ -1,5 +1,6 @@
 import { api } from 'boot/axios';
 import { currentLocale, t } from 'src/i18n';
+import { wakeDetailText } from 'src/services/commands';
 
 export type MachineStatus = 'up_to_date' | 'outdated' | 'needs_verification' | 'inactive';
 
@@ -782,10 +783,13 @@ export interface WakeResult {
   ok: boolean;
   /**
    * The server's own sentence, in French: the destination the packet went to,
-   * or why none could be found. Shown as-is — it is the only thing that
-   * explains a poste that did not come back.
+   * or why none could be found — the only thing that explains a poste that
+   * did not come back. Worded in the reader's language from `detail_code`
+   * and `detail_params` (`wakeDetailText`); absent from an older server.
    */
   detail: string;
+  detail_code?: string | null;
+  detail_params?: Record<string, unknown> | null;
 }
 
 export interface WakeResponse {
@@ -831,13 +835,14 @@ export function wakeNotification(res: WakeResponse): {
 } {
   if (res.woken === 0) {
     // One poste failing has a reason worth quoting; thirty have thirty, and the
-    // detail of each is in its own line of the machine's command history. The
-    // detail is the server's own sentence (in French), quoted as it comes.
+    // detail of each is in its own line of the machine's command history.
     const only = res.failed === 1 ? res.results.find((r) => !r.ok) : undefined;
     return {
       type: 'negative',
       message: only
-        ? t('machines.wake.failedOne', { detail: only.detail })
+        ? t('machines.wake.failedOne', {
+            detail: wakeDetailText(only.detail, only.detail_code, only.detail_params),
+          })
         : t('machines.wake.failedAll', { count: res.failed }, res.failed),
     };
   }

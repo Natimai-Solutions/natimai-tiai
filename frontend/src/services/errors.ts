@@ -58,6 +58,29 @@ function fieldLabel(field: string): string {
 interface ValidationItem {
   loc?: (string | number)[];
   msg?: string;
+  type?: string;
+  params?: Record<string, unknown>;
+}
+
+/**
+ * Why a field was refused, in the reader's language: a refusal of ours
+ * (`tiai_<code>`) from the catalogue, filled with its parameters; anything
+ * else — Pydantic's own refusals, a code this console does not know, a
+ * server that sends none — as the server wrote it.
+ */
+function validationReason(item: ValidationItem): string {
+  const written = (item.msg ?? '').replace(/^Value error, /, '');
+  const code = item.type?.startsWith('tiai_') ? item.type.slice(5) : null;
+  if (!code) return written;
+  const key = `errors.validation.${code}`;
+  const params = Object.fromEntries(
+    Object.entries(item.params ?? {}).map(([name, value]) => [
+      name,
+      Array.isArray(value) ? value.map(String).join(t('errors.listSeparator')) : value,
+    ]),
+  );
+  const worded = t(key, params);
+  return worded === key ? written : worded;
 }
 
 /** « champ — raison » for the first field a 422 names, in the console's words. */
@@ -72,8 +95,7 @@ function validationDetail(details: Record<string, unknown> | undefined): string 
   );
   const field = names[names.length - 1];
   const label = field ? fieldLabel(field) : null;
-  // A ValueError raised by the backend reads « Value error, … ».
-  const reason = (first.msg ?? '').replace(/^Value error, /, '');
+  const reason = validationReason(first);
   const more = errors.length > 1 ? t('errors.others', { count: errors.length - 1 }) : '';
   if (label && reason) return t('errors.fieldReason', { field: label, reason }) + more;
   if (label) return t('errors.field', { field: label }) + more;
