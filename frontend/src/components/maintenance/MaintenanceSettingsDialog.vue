@@ -27,6 +27,7 @@
             :label="t('maintenance.settings.every')"
             outlined
             dense
+            reactive-rules
             :rules="[(v) => (Number.isInteger(v) && v >= 1) || t('maintenance.settings.daysRule')]"
           />
           <q-select

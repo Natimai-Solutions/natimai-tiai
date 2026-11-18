@@ -299,6 +299,29 @@ Une deuxième vérification indépendante a relu les corrections du 17 novembre 
 - Français : « À jour due le … » et « … en retard Maintenance : … » retrouvent leur espace dans le texte copié.
 - Anglais : pluriels (« 1 core », « 1 day old »…), libellés cités qui n'existaient pas (« Rarely used », « To take », « Refresh the inventory »), détail du journal pour l'e-mail de test, et phrases propres de l'agent (manifeste, téléchargement, délais, Windows Update), désormais codées, y compris dans le détail d'un autre message.
 
+Défauts mineurs de la même vérification, repris ensuite :
+
+- Un curseur de navigation falsifié portant un nombre décimal d'exposant extrême (`0E-20000`, `1E-16384`…) est désormais ignoré lui aussi, au lieu de finir en erreur 500 sur la flèche « poste suivant ».
+- Un demi-caractère UTF-16 isolé envoyé par un poste sous forme d'octets bruts, et non échappé, est retiré comme sa forme échappée ; l'inscription ou le battement n'échoue plus en 500.
+- Supprimer un bâtiment pendant qu'une salle sans bâtiment du même nom (à la casse près) est créée ne finit plus en erreur 500 : la salle du bâtiment est renommée d'après lui, comme quand le nom était déjà pris (au pire, 409 « nom déjà utilisé »).
+- Une modification qui renvoie le titre d'une ligne du journal sans le changer (ancienne console, script) garde le titre bilingue ; seule une vraie modification du titre le fige dans la langue saisie.
+- Les caractères invisibles (espace sans chasse, gluon…) en tête ou en fin d'un nom de salle ou de bâtiment sont retirés : un nom qui ne diffère d'un autre que par eux est refusé comme déjà utilisé (409).
+- Un poste refusé dès la première partie d'une séance (supprimé, fusionné ou sorti de la salle), y compris à la reprise d'un envoi interrompu, est nommé dans le bandeau orange ; « Retirer ces postes et reprendre l'envoi » le décoche, le marque « Retiré de cette séance » et envoie la séance sans lui.
+- Sur ordinateur aussi, le dialogue de séance tient dans la fenêtre : la liste des postes défile, le titre, l'état de l'envoi et les boutons « Reprendre l'envoi » et « Annuler » restent visibles.
+- Les postes refusés sont nommés jusqu'à cinq, puis « et N autre(s) », dans le bandeau comme dans la notification : sur un téléphone, la liste et les boutons restent à l'écran.
+- Une séance de maintenance qui n'a pas pu être lue dit pourquoi dans la langue affichée, même si la langue change pendant que le dialogue est ouvert.
+- Les badges de « Mes tâches » se mettent à jour dès que les droits du compte changent, sans attendre une navigation ; un droit retiré remet son compte à zéro.
+- Sur tablette, une adresse e-mail longue est coupée dans l'en-tête (adresse entière au survol) et ne masque plus le titre « Tia'i — Console ».
+- Un message d'erreur sous un champ de formulaire (« Requis », « 12 caractères minimum », « Les mots de passe ne correspondent pas »…) suit un changement de langue à chaud, sans attendre que le champ soit modifié.
+- Une confirmation ouverte (« Révoquer le token », « Retirer le paquet »…), l'avertissement de la resynchronisation de l'annuaire et l'avis « Impossible de charger cette page » passent dans la nouvelle langue quand elle change pendant qu'ils sont affichés.
+- Le bandeau d'échec de « Envoyer un e-mail de test » et l'erreur de chargement des colonnes de l'export du parc suivent la langue ; l'export recharge ses colonnes dans la nouvelle langue si le premier chargement avait échoué.
+- Paquet refusé parce que l'installation lance une désinstallation : la console cite l'argument en cause (« … (argument « {dir}\mon appli -x64.msi ») »), par exemple un nom de fichier contenant « -x ».
+- En anglais, un titre d'intervention commençant par un mot composé (« Check-up of the screen ») n'est plus coupé après le type ; seul « Type — », « Type : » ou « Type - » (trait d'union précédé d'une espace) est retiré.
+- En anglais, un groupe intégré garde son nom français quand un autre groupe porte déjà sa traduction (« Administrators » créé à côté d'« Administrateurs ») : les deux restent distincts dans le choix des groupes et les pastilles.
+- Mode sombre : le lien vers le poste dans la colonne « Ressource » du journal d'audit prend la couleur du texte, souligné, au lieu du bleu du navigateur illisible sur fond sombre.
+- Sur écran tactile, le nom souligné qui ouvre une ligne (paquets, salles, postes, mes tâches) se touche sur une hauteur plus confortable, sans que la mise en page bouge.
+- Sur téléphone, un nom de menace, un identifiant winget ou un nom de groupe très long sans espace passe à la ligne au lieu d'élargir la page.
+
 ## Nouvelles variables d'environnement
 
 Toutes facultatives : leur valeur par défaut est celle décrite plus haut.

@@ -18,15 +18,10 @@ function components(dir: string): string[] {
   });
 }
 
-// Edited by another change of the same release, which gives its field the attribute.
-const ELSEWHERE = new Set(['components/maintenance/MaintenanceSettingsDialog.vue']);
-
 describe('validation messages follow the language', () => {
   const files = components(SRC)
     .map((path) => relative(SRC, path))
-    .filter(
-      (file) => !ELSEWHERE.has(file) && readFileSync(join(SRC, file), 'utf-8').includes(':rules='),
-    );
+    .filter((file) => readFileSync(join(SRC, file), 'utf-8').includes(':rules='));
 
   it('has fields to check', () => {
     expect(files.length).toBeGreaterThan(5);

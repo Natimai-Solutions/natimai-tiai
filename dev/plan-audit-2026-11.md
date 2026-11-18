@@ -489,6 +489,8 @@ Verdict : aucun défaut critique ni grave ; quatre défauts moyens introduits, d
 | U27 | Réglages du serveur illisibles sur téléphone (lignes superposées) : la correction du §6 ne tenait pas | Cellules empilées à hauteur libre ; vérifié dans un navigateur, français et anglais |
 | Maintenance (T30) | Une partie de séance envoyée pendant la fusion d'un de ses postes répond 500 (antérieur) | Non repris : rare, sans perte ; listé au §6.4 |
 
+Les défauts mineurs ont été repris ensuite, chacun avec un test qui échoue sans sa correction (détail dans `dev/notes-de-version-v1.2.1.md`, § « Vérification du 18 novembre 2026 ») : curseur décimal et demi-caractère UTF-16 en octets bruts (500), suppression d'un bâtiment en concurrence avec une salle homonyme (500), titre bilingue perdu sur un PATCH inchangé, caractères invisibles en bord de nom ; dialogue de séance (postes refusés nommés et retirables, boutons en vue sur PC, liste des refus bornée sur téléphone), badges de « Mes tâches », adresse longue dans l'en-tête (U29 entre 600 et 1023 px) ; changement de langue à chaud des erreurs de champ, des confirmations, des notifications persistantes et des erreurs gardées ; argument `msiexec` refusé cité ; titres à trait d'union en anglais ; groupes homonymes en anglais ; lien de l'audit en mode sombre ; zones tactiles des noms ; valeurs longues sur téléphone. Restent acceptés : la phrase « Redémarrage requis… » de DISM en français, le séparateur  du CSV anglais et la limite de la maintenance ci-dessus ; les notifications brèves (« Commande envoyée ») ne changent pas de langue pendant leurs quelques secondes d'affichage.
+
 ## 7. Détail des constats
 
 
