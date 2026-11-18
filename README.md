@@ -310,26 +310,6 @@ une issue publique.
   bugs et UI/UX de novembre 2026 et les corrections qui en découlent, par
   ordre de priorité.
 
-## Intégration continue
-
-Les minutes d'Actions sont facturées : la CI ne tourne que lorsqu'elle sert.
-
-- **Pas sur une PR en brouillon.** Ouvrir la PR en brouillon pendant le
-  travail ; la CI (`ci.yml`) et les contrôles de sécurité (`security.yml`)
-  partent quand elle passe « prête », puis à chaque push tant qu'elle l'est.
-- **Seulement les parties modifiées.** Le job « Parties modifiées » lit les
-  fichiers de la PR : backend, console, agent (dont le job Windows, facturé
-  double), e2e et images ne partent que si leur partie change ; une PR de
-  documentation ne lance rien. Toucher `ci.yml` relance tout.
-- **Pas de nouvelle passe à la fusion.** Le statut à exiger est **« Tout est
-  vert »**, avec « Require branches to be up to date » dans la protection de
-  `main` : le commit testé est celui qui est fusionné.
-- **Le lundi**, une passe complète sur `main` : dérive des dépendances, scan
-  Trivy des images, packs Semgrep du registre, badges de couverture. À la
-  demande : Actions → CI (ou Security) → Run workflow.
-- **Dependabot** passe une fois par mois, deux PR ouvertes au plus par
-  écosystème ; les correctifs de sécurité n'attendent pas.
-
 ## Licence
 
 Distribué sous licence **Apache 2.0**. Voir [LICENSE](LICENSE) pour le texte complet.

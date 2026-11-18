@@ -8,8 +8,8 @@
 # Les mises à jour de sécurité (Dependabot alerts) ignorent `schedule` et
 # `open-pull-requests-limit` : elles sont ouvertes dès la publication de l'avis.
 #
-# Rythme mensuel, deux PR ouvertes au plus par écosystème : chaque PR lance la
-# CI, facturée. Les correctifs de sécurité n'attendent pas ce rythme (ci-dessus).
+# Rythme mensuel, deux PR ouvertes au plus par écosystème : moins de PR à
+# relire. Les correctifs de sécurité n'attendent pas ce rythme (ci-dessus).
 version: 2
 
 updates:
@@ -29,8 +29,7 @@ updates:
       #
       # Les majeures ont leur propre groupe : une majeure difficile ne retient
       # pas les patchs/mineures en otage, et toutes les majeures du mois
-      # partent en une PR (CI facturée : une PR de moins, c'est une suite de
-      # moins). Une majeure qui bloque les autres s'ignore le temps de la
+      # partent en une PR. Une majeure qui bloque les autres s'ignore le temps de la
       # traiter (`ignore` ou commentaire `@dependabot ignore`).
       backend-mineures:
         patterns: ["*"]
@@ -89,8 +88,8 @@ updates:
   # python, node, nginx et postgres (image db-backup, construite sur place
   # avec age) : les correctifs de sécurité de ces images arrivent par leurs
   # étiquettes, que rien d'autre ne fait avancer (audit S31). Le job `images`
-  # de la CI construit et scanne les images backend et console quand leur
-  # Dockerfile ou leurs dépendances changent ; l'e2e construit db-backup.
+  # de la CI construit les images backend et console de chaque PR ; l'e2e
+  # construit db-backup.
   - package-ecosystem: docker
     directories: [/backend, /frontend, /deploy/backup]
     schedule:
