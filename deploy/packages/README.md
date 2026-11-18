@@ -124,9 +124,17 @@ qu'à un `.exe` d'éditeur, et `msiexec` accepterait n'importe quel MSI.
 **Désinstallation** (facultative) : un fichier du paquet avec ses arguments,
 ou `msiexec` avec `/x {code-produit} /qn /norestart`. En méthode A, seule la
 forme `msiexec /x {code produit}` est acceptée, et l'agent reconstruit
-lui-même les arguments. À l'inverse, une **installation** qui lance
-`msiexec /x` ou `/uninstall` est refusée par la console, le script de
-signature et l'agent : placez cette commande dans la désinstallation.
+lui-même les arguments. À l'inverse, une **installation** par `msiexec` qui
+désinstalle est refusée par la console, le script de signature et l'agent :
+placez cette commande dans la désinstallation. Est lu comme une
+désinstallation tout argument qui commence par `/x` ou `/uninstall` (ou `-x`,
+`-uninstall`, quelle que soit la casse, y compris collé à sa valeur :
+`/x{code-produit}`) ou par `REMOVE=` — `msiexec /i {code-produit} REMOVE=ALL`
+désinstalle tout autant. La règle lit **chaque mot** d'un argument, guillemets
+ôtés : un argument `/qn /x {code-produit}` saisi d'un seul tenant est refusé de
+même. Revers de cette prudence : un fichier dont le nom contient une espace
+suivie de `-x…` (« `mon appli -x64.msi` ») fait refuser l'installation —
+renommez-le (`mon-appli-x64.msi`).
 
 ### Signer le paquet (méthode B)
 
@@ -154,7 +162,7 @@ jour vers une version qui les connaît.
 | Refus de `.dll`, `.ocx`, `.cpl`, `.sys`, `.manifest`, `.local`, `.config`, autre `.exe`, `.msi`, `.mst`, scripts ; dossier nettoyé ; désinstallation limitée à `msiexec /x {code produit}` | v1.2.0 ou ultérieure |
 | Refus des modules chargés par leur nom : `.bpl`, `.pyd`, `.xll`, `.node`, `.rll`, `.wsc`, `.sct` | v1.2.1 ou ultérieure |
 | Plafond de taille d'un paquet non signé (`DeployMethodAMaxGB`, § 1) | v1.2.1 ou ultérieure |
-| Installation qui lance `msiexec /x` ou `/uninstall` refusée (méthodes A et B) ; place des téléchargements bornée (`DeployCacheMaxGB`, § 1) | v1.2.1 ou ultérieure |
+| Installation par `msiexec` qui désinstalle (`/x`, `/uninstall`, `REMOVE=`, seuls ou au milieu d'un argument) refusée (méthodes A et B) ; place des téléchargements bornée (`DeployCacheMaxGB`, § 1) | v1.2.1 ou ultérieure |
 
 Diffuser l'agent à jour sur le parc avant de s'appuyer sur la méthode A.
 

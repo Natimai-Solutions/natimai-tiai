@@ -477,6 +477,34 @@ describe('PackageDetailPage', () => {
     w.unmount();
   });
 
+  it('does not open the deployment when the save before it fails', async () => {
+    // « Enregistrer puis déployer », and the server refuses the definition:
+    // the dialog would deploy the version saved before, the very thing the
+    // question was asked to avoid.
+    updatePackage.mockRejectedValue(new Error('422'));
+    const w = await mountPage();
+    const vm = w.vm as unknown as VM;
+    const notify = vi.spyOn(vm.$q, 'notify');
+    vm.form.install_args = '/S';
+    await flushPromises();
+    answerDialogs(vm, 'ok');
+    await vm.openDeploy('install');
+    await flushPromises();
+    expect(updatePackage).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'negative' }));
+    expect(vm.deployOpen).toBe(false);
+
+    // Saved at the next try, the deployment opens.
+    updatePackage.mockImplementation((_id: string, fields: object) =>
+      Promise.resolve({ ...pkg, ...fields }),
+    );
+    await vm.openDeploy('install');
+    await flushPromises();
+    expect(updatePackage).toHaveBeenCalledTimes(2);
+    expect(vm.deployOpen).toBe(true);
+    w.unmount();
+  });
+
   it('filters the table to each poste’s latest deployment when a state is chosen', async () => {
     const w = await mountPage();
     const vm = w.vm as unknown as VM;

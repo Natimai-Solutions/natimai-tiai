@@ -509,6 +509,67 @@ async def test_the_periodic_sweep_releases_an_expired_deployments_files(
         assert (store / f["sha256"]).exists()
 
 
+async def test_a_superseded_deployment_releases_the_files(client, db_session, store):
+    """The pending deployment a redeployment replaces was the last one
+    holding the file replaced in the package: the file goes with that
+    request, not at the next hourly sweep."""
+    (
+        admin,
+        package,
+        machine_id,
+        _,
+        old_sha,
+    ) = await _replaced_file_held_by_a_pending_deployment(client, db_session, store)
+    again = await _deploy_many(client, admin, package["id"], [machine_id])
+    assert again["count"] == 1
+    assert not (store / old_sha).exists()
+    current = await client.get(f"/api/v1/packages/{package['id']}", headers=admin)
+    for f in current.json()["files"]:
+        assert (store / f["sha256"]).exists()
+
+
+def _sweepers() -> list[asyncio.Task]:
+    """The tasks running the periodic sweep, in this event loop."""
+    return [
+        t
+        for t in asyncio.all_tasks()
+        if getattr(t.get_coro(), "__name__", "") == "sweep_periodically"
+    ]
+
+
+async def test_the_api_sweeps_the_store_when_it_starts_and_while_it_runs(
+    client, db_session, store, engine, monkeypatch
+):
+    """The lifespan of the API, as uvicorn runs it: one sweep at start-up,
+    then the periodic one — started there, and stopped with the API. Without
+    it a quiet server kept a replaced file until its next restart."""
+    from app.core import db
+    from app.features.package import crud
+    from app.main import app
+
+    admin = await _admin(client, db_session)
+    await _pronote(client, admin)
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(crud, "SWEEP_INTERVAL_SECONDS", 0.05)
+    before = store / ("e0" * 32)
+    before.write_bytes(b"an orphan left while the API was down")
+    assert _sweepers() == []
+
+    async with app.router.lifespan_context(app):
+        assert not before.exists()
+        (sweeper,) = _sweepers()
+        meanwhile = store / ("e1" * 32)
+        meanwhile.write_bytes(b"an orphan made after start-up")
+        for _ in range(200):
+            if not meanwhile.exists():
+                break
+            await asyncio.sleep(0.05)
+        assert not meanwhile.exists()
+        assert not sweeper.done()
+    assert sweeper.cancelled()
+    assert _sweepers() == []
+
+
 async def test_the_periodic_sweep_survives_a_failing_round(store, monkeypatch):
     """A round that fails is logged; the next one runs."""
     from app.features.package import crud
@@ -559,6 +620,63 @@ async def test_the_summary_counts_the_installs_a_retirement_cancels(
         params={"package_id": package["id"]},
     )
     assert summary.json()["pending_installs"] == 0
+
+
+async def test_the_retirement_count_leaves_pending_uninstalls_out(
+    client, db_session, store
+):
+    """A retirement cancels the installations still waiting, and leaves the
+    uninstallations alone: the count the console announces before asking
+    says the same."""
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    patched = await client.patch(
+        f"/api/v1/packages/{package['id']}",
+        headers=admin,
+        json={"uninstall_run": "Install_PRNclient.exe", "uninstall_args": ["-x"]},
+    )
+    assert patched.status_code == 200, patched.text
+    machines = [m for m, _ in [await _enroll(client, f"poste-{i}") for i in range(3)]]
+    await _deploy_many(client, admin, package["id"], machines[:2])
+    for machine_id in machines[1:]:
+        queued = await client.post(
+            "/api/v1/commands",
+            headers=admin,
+            json={
+                "type": "package_uninstall",
+                "machine_ids": [machine_id],
+                "package_id": package["id"],
+            },
+        )
+        assert queued.status_code == 200, queued.text
+        assert queued.json()["count"] == 1
+
+    async def summary():
+        resp = await client.get(
+            "/api/v1/commands/package-summary",
+            headers=admin,
+            params={"package_id": package["id"]},
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    # Four commands wait — two of each kind — on three postes.
+    before = await summary()
+    assert before["by_status"] == {"pending": 3}
+    assert before["pending_installs"] == 2
+    retired = await client.post(
+        f"/api/v1/packages/{package['id']}/retire", headers=admin
+    )
+    assert retired.status_code == 200, retired.text
+    after = await summary()
+    assert after["pending_installs"] == 0
+    rows = await _commands_of(db_session, package["id"])
+    assert sorted((r.type, r.status) for r in rows) == [
+        ("package_install", "failed"),
+        ("package_install", "failed"),
+        ("package_uninstall", "pending"),
+        ("package_uninstall", "pending"),
+    ]
 
 
 # --- 9. what the console reads ---------------------------------------------------------
@@ -722,3 +840,108 @@ async def test_a_blank_or_null_name_is_refused_in_french(client, db_session):
         assert resp.status_code == 422, (name, resp.text)
         (error,) = resp.json()["error"]["details"]["errors"]
         assert error["msg"] == "Value error, nom requis"
+
+
+@pytest.mark.parametrize("field", ["install_args", "uninstall_args", "success_codes"])
+async def test_a_null_list_is_refused_like_a_null_name(client, db_session, field):
+    """``null`` is no list of arguments nor of exit codes. On a package whose
+    manifest does not read the field — no step of that name, or a winget
+    package — it used to be stored as JSON ``null``, and the whole catalogue
+    then answered 500 for everyone."""
+    admin = await _admin(client, db_session)
+    winget = await client.post(
+        "/api/v1/packages",
+        headers=admin,
+        json={"kind": "winget", "name": "Firefox", "winget_id": "Mozilla.Firefox"},
+    )
+    files = await _files_package(client, admin)
+    for package in (winget.json(), files):
+        url = f"/api/v1/packages/{package['id']}"
+        resp = await client.patch(url, headers=admin, json={field: None})
+        assert resp.status_code == 422, (package["kind"], resp.text)
+        (error,) = resp.json()["error"]["details"]["errors"]
+        assert error["loc"][-1] == field
+        assert error["msg"].startswith("Value error, ")
+        assert (await client.get(url, headers=admin)).json()[field] == package[field]
+    created = await client.post(
+        "/api/v1/packages",
+        headers=admin,
+        json={"kind": "files", "name": "Autre", field: None},
+    )
+    assert created.status_code == 422, created.text
+    listed = await client.get("/api/v1/packages", headers=admin)
+    assert [p["name"] for p in listed.json()] == ["Firefox", "Outil"]
+
+
+async def test_a_stored_null_list_does_not_take_the_catalogue_down(
+    client, db_session, store
+):
+    """A row that already holds a JSON ``null`` — written before ``null`` was
+    refused — reads as an empty list: the catalogue lists, the package shows,
+    and the console can save it again."""
+    from sqlalchemy import text
+
+    admin = await _admin(client, db_session)
+    package = await _pronote(client, admin)
+    url = f"/api/v1/packages/{package['id']}"
+    await db_session.exec(
+        text(
+            "UPDATE packages SET install_args = 'null', uninstall_args = 'null', "
+            "success_codes = 'null'"
+        )
+    )
+    await db_session.commit()
+
+    listed = await client.get("/api/v1/packages", headers=admin)
+    assert listed.status_code == 200, listed.text
+    (got,) = listed.json()
+    assert (got["install_args"], got["uninstall_args"], got["success_codes"]) == (
+        [],
+        [],
+        [],
+    )
+    assert (await client.get(url, headers=admin)).status_code == 200
+    # Every route that rebuilds the manifest reads the row as well: a change
+    # that leaves the nulls where they are, then msiexec steps over them.
+    noted = await client.patch(url, headers=admin, json={"notes": "relu"})
+    assert noted.status_code == 200, noted.text
+    stepped = await client.patch(
+        url, headers=admin, json={"install_run": "msiexec", "uninstall_run": "msiexec"}
+    )
+    assert stepped.status_code == 422, stepped.text
+    assert stepped.json()["error"]["code"] == "package.invalid"
+    manifest = await client.get(f"{url}/manifest", headers=admin)
+    assert manifest.status_code == 200, manifest.text
+    saved = await client.patch(
+        url, headers=admin, json={"install_args": ["-s"], "success_codes": [0]}
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["install_args"] == ["-s"]
+
+    # msiexec steps over nulls, which only a hand on the database writes:
+    # the rules that read the arguments read none.
+    await db_session.exec(
+        text(
+            "UPDATE packages SET install_run = 'msiexec', install_args = 'null', "
+            "uninstall_run = 'msiexec', uninstall_args = 'null'"
+        )
+    )
+    await db_session.commit()
+    listed = await client.get("/api/v1/packages", headers=admin)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["install_args"] == []
+    renamed = await client.patch(url, headers=admin, json={"version": "2"})
+    assert renamed.status_code == 422, renamed.text
+    assert "msiexec" in renamed.json()["error"]["message"]
+    machine_id, _ = await _enroll(client, "poste-1")
+    refused = await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={
+            "type": "package_uninstall",
+            "machine_ids": [machine_id],
+            "package_id": package["id"],
+        },
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["error"]["code"] == "package.not_ready"

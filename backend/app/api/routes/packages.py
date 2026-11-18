@@ -164,15 +164,24 @@ class PackageBody(BaseModel):
     def _plain(cls, v: str | None) -> str | None:
         return _no_control(v)
 
+    # Given, the three lists are lists: ``null`` — the type's way of saying
+    # "not supplied" — is refused when supplied. The manifest of a package
+    # that has no such step, or of a winget package, does not read the field:
+    # the JSON ``null`` was stored, and the whole catalogue answered 500 from
+    # then on (``_out``).
     @field_validator("install_args", "uninstall_args")
     @classmethod
-    def _args(cls, v: list[str] | None) -> list[str] | None:
-        return _check_args(v) if v is not None else v
+    def _args(cls, v: list[str] | None) -> list[str]:
+        if v is None:
+            raise ValueError("liste d'arguments requise (vide pour aucun argument)")
+        return _check_args(v)
 
     @field_validator("success_codes")
     @classmethod
-    def _codes(cls, v: list[int] | None) -> list[int] | None:
-        return _check_codes(v) if v is not None else v
+    def _codes(cls, v: list[int] | None) -> list[int]:
+        if v is None:
+            raise ValueError("entre 1 et 32 codes de succès")
+        return _check_codes(v)
 
 
 class PackageCreate(PackageBody):
@@ -264,10 +273,12 @@ async def _out(
         winget_id=package.winget_id,
         winget_version=package.winget_version,
         install_run=package.install_run,
-        install_args=list(package.install_args),
+        # ``or []``: a row written before ``null`` was refused may hold a
+        # JSON null, and one such row must not take the whole list down.
+        install_args=list(package.install_args or []),
         uninstall_run=package.uninstall_run,
-        uninstall_args=list(package.uninstall_args),
-        success_codes=list(package.success_codes),
+        uninstall_args=list(package.uninstall_args or []),
+        success_codes=list(package.success_codes or []),
         detect_name=package.detect_name,
         files=[
             PackageFileOut(
@@ -374,11 +385,16 @@ def _apply(package: Package, fields: dict[str, Any]) -> None:
             raise _invalid(
                 "Installation par msiexec : indiquer les arguments (ex. /i {dir}\\app.msi /qn)"
             )
-        if manifest.msiexec_removes(package.install_run, package.install_args):
+        removal = manifest.msiexec_removal(package.install_run, package.install_args)
+        if removal is not None:
             # Every poste refuses it (agent deploy.MsiExecRemoves), and the
             # console would read « Installation terminée » for a product
-            # taken off.
-            raise _invalid(manifest.INSTALL_REMOVES, field="install_args")
+            # taken off. The argument is named: the rule reads each word of
+            # an argument, and "{dir}\mon appli -x64.msi" holds one that
+            # starts like the switch.
+            raise _invalid(
+                manifest.INSTALL_REMOVES, field="install_args", argument=removal
+            )
 
 
 @router.get("", response_model=list[PackageOut])
