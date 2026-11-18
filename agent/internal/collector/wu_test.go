@@ -3,6 +3,8 @@ package collector
 import (
 	"strings"
 	"testing"
+
+	"tiai/agent/internal/msg"
 )
 
 // --- Search criteria --------------------------------------------------------
@@ -399,6 +401,10 @@ func TestWrapWUErrorKeepsTheOriginal(t *testing.T) {
 	}
 	if !strings.Contains(wrapped.Error(), "désactivé") {
 		t.Errorf("the hint is missing: %v", wrapped)
+	}
+	// The hint is a coded sentence of its own, worded by the console.
+	if code, params := msg.Of(wrapped); code != "wu.known_error" || params["hresult"] != "0x80070422" {
+		t.Errorf("code = %q, params = %v", code, params)
 	}
 }
 
