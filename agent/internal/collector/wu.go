@@ -449,11 +449,6 @@ type rawWUInstall struct {
 	Updates            []rawWUInstallUpdate `json:"updates"`
 }
 
-// wuResultLabel names an OperationResultCode in the console's language.
-func wuResultLabel(code int) string {
-	return msg.WUResults[wuResultKey(code)]
-}
-
 // wuResultKey names an OperationResultCode for the console (msg.WUResults).
 func wuResultKey(code int) string {
 	switch code {
@@ -484,54 +479,32 @@ func wuResultOK(code int) bool {
 // The output is built in both outcomes, success and failure alike: for these
 // operations the per-KB breakdown *is* the useful part, and an error with no
 // list behind it would send an administrator to the machine's own WU log — the
-// thing this feature exists to avoid.
-func summarizeInstall(data []byte) (string, error) {
+// thing this feature exists to avoid. Its sentences are msg's (msg.WUInstall),
+// coded for the console; the updates' titles are Windows', as it gave them.
+func summarizeInstall(data []byte) (msg.Message, error) {
 	var raw rawWUInstall
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return "", fmt.Errorf("parse windows update install result: %w", err)
+		return msg.Message{}, fmt.Errorf("parse windows update install result: %w", err)
 	}
 
-	var lines []string
-	switch {
-	case raw.Selected == 0 && raw.SkippedInteractive == 0:
-		// A success, not a failure: the machine is up to date, which is exactly
-		// what the command was asked to achieve.
-		lines = append(lines, "Aucune mise à jour applicable : le poste est à jour.")
-	case raw.Selected == 0:
-		lines = append(lines, "Aucune mise à jour installable sans intervention sur le poste.")
-	default:
-		lines = append(lines, fmt.Sprintf("%d mise(s) à jour retenue(s), %d installée(s).",
-			raw.Selected, raw.Installed))
-	}
-	if raw.SkippedInteractive > 0 {
-		lines = append(lines, fmt.Sprintf(
-			"%d ignorée(s) : elles réclament une interaction utilisateur, impossible depuis un service.",
-			raw.SkippedInteractive))
-	}
-
+	report := msg.WUInstall{Selected: raw.Selected, Installed: raw.Installed,
+		Skipped: raw.SkippedInteractive, Reboot: raw.RebootRequired}
 	failed := 0
 	for _, u := range raw.Updates {
 		if !wuResultOK(u.ResultCode) {
 			failed++
 		}
-		lines = append(lines, formatInstalledUpdate(u))
+		report.Updates = append(report.Updates, installedUpdate(u))
 	}
 	// Retained but never handed to the installer: their download is what failed.
 	// Counted separately because WUA reports no per-update result for them —
-	// they would otherwise vanish from the summary entirely.
+	// they would otherwise vanish from the summary entirely (the report says
+	// how many: Selected - Installed).
 	if missing := raw.Selected - raw.Installed; missing > 0 {
 		failed += missing
-		lines = append(lines, fmt.Sprintf(
-			"%d mise(s) à jour n'ont pas pu être téléchargée(s), et n'ont donc pas été installée(s).",
-			missing))
 	}
 
-	if raw.RebootRequired {
-		lines = append(lines,
-			"", "Redémarrage requis pour finaliser l'installation (commande « Redémarrer »).")
-	}
-
-	output := strings.Join(lines, "\n")
+	output := report.Message()
 	if failed > 0 {
 		return output, msg.Err("wu.install_incomplete",
 			msg.Params{"failed": failed, "selected": raw.Selected})
@@ -545,11 +518,11 @@ func summarizeInstall(data []byte) (string, error) {
 	return output, nil
 }
 
-// formatInstalledUpdate renders one update's outcome: "KB5063878 — Titre :
-// installée". The HRESULT is shown in hex only when something went wrong —
-// 0x8007000d is searchable, 134217741 is not — and never on a success, where it
+// installedUpdate is one update's outcome: « KB5063878 — Titre », its
+// result, and its HRESULT in hex only when something went wrong —
+// 0x8007000d is searchable, 134217741 is not — never on a success, where it
 // is always zero and only adds noise.
-func formatInstalledUpdate(u rawWUInstallUpdate) string {
+func installedUpdate(u rawWUInstallUpdate) msg.WUInstalled {
 	name := formatKB(u.KBArticleIDs)
 	title := strings.TrimSpace(u.Title)
 	switch {
@@ -558,10 +531,11 @@ func formatInstalledUpdate(u rawWUInstallUpdate) string {
 	case title != "":
 		name = name + " — " + title
 	}
-	if wuResultOK(u.ResultCode) && u.HResult == 0 {
-		return fmt.Sprintf("%s : %s", name, wuResultLabel(u.ResultCode))
+	out := msg.WUInstalled{Name: name, Result: wuResultKey(u.ResultCode)}
+	if !wuResultOK(u.ResultCode) || u.HResult != 0 {
+		out.HResult = fmt.Sprintf("0x%08x", uint32(u.HResult))
 	}
-	return fmt.Sprintf("%s : %s (0x%08x)", name, wuResultLabel(u.ResultCode), uint32(u.HResult))
+	return out
 }
 
 // --- Diagnosing a failure ---------------------------------------------------

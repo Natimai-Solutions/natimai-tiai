@@ -105,8 +105,17 @@ type maintenanceSpec struct {
 	// which covers most of them.
 	enc toolEncoding
 	// verdict turns an exit code plus the collected output into the result the
-	// console shows: a nil error means succeeded.
-	verdict func(code int, output string) (string, error)
+	// console shows: a nil error means succeeded. The output is the tool's,
+	// uncoded (plainVerdict), unless the agent adds a sentence of its own.
+	verdict func(code int, output string) (msg.Message, error)
+}
+
+// plainVerdict is a verdict that leaves the tool's output as it printed it.
+func plainVerdict(verdict func(code int, output string) (string, error)) func(int, string) (msg.Message, error) {
+	return func(code int, output string) (msg.Message, error) {
+		out, err := verdict(code, output)
+		return msg.Plain(out), err
+	}
 }
 
 // maintenanceCatalogue is the closed set of remotely triggerable commands.
@@ -125,19 +134,19 @@ var maintenanceCatalogue = map[string]maintenanceSpec{
 		exe:     "gpupdate.exe",
 		args:    []string{"/target:computer", "/force"},
 		timeout: shortTimeout,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 	"flush_dns": {
 		exe:     "ipconfig.exe",
 		args:    []string{"/flushdns"},
 		timeout: shortTimeout,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 	"time_resync": {
 		exe:     "w32tm.exe",
 		args:    []string{"/resync"},
 		timeout: shortTimeout,
-		verdict: verdictTimeResync,
+		verdict: plainVerdict(verdictTimeResync),
 	},
 	// Forces an immediate certificate autoenrollment pass against the internal
 	// CA — the fix for a machine whose certificate did not renew on its own.
@@ -148,12 +157,12 @@ var maintenanceCatalogue = map[string]maintenanceSpec{
 		args:    []string{"-pulse"},
 		timeout: shortTimeout,
 		enc:     encANSI,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 	"spooler_reset": {
 		native:  true,
 		timeout: shortTimeout,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 	"sfc_scan": {
 		exe:     "sfc.exe",
@@ -161,7 +170,7 @@ var maintenanceCatalogue = map[string]maintenanceSpec{
 		timeout: sfcTimeout,
 		long:    true,
 		enc:     encUTF16LE,
-		verdict: verdictSFC,
+		verdict: plainVerdict(verdictSFC),
 	},
 	"dism_restore_health": {
 		exe:     "dism.exe",
@@ -185,7 +194,7 @@ var maintenanceCatalogue = map[string]maintenanceSpec{
 		args:    []string{"/scan"},
 		timeout: longTimeout,
 		long:    true,
-		verdict: verdictChkdsk,
+		verdict: plainVerdict(verdictChkdsk),
 	},
 
 	// --- Diagnostics (read-only) -------------------------------------------
@@ -194,13 +203,13 @@ var maintenanceCatalogue = map[string]maintenanceSpec{
 		exe:     "gpresult.exe",
 		args:    []string{"/r", "/scope:computer"},
 		timeout: shortTimeout,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 	"net_config": {
 		exe:     "ipconfig.exe",
 		args:    []string{"/all"},
 		timeout: shortTimeout,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 }
 
@@ -417,17 +426,20 @@ const dismSourceMissing = "0x800f081f"
 // owns the reboot command, so here it is only reported.
 const dismRebootRequired = 3010
 
-func verdictDISM(code int, output string) (string, error) {
+// On a 3010 the output is dism's followed by the agent's sentence, coded
+// with dism's text as a parameter (dism.reboot_required) — sent as text
+// alone when that text is beyond what the server keeps (msg.Coded).
+func verdictDISM(code int, output string) (msg.Message, error) {
 	if strings.Contains(strings.ToLower(output), dismSourceMissing) {
-		return output, msg.Err("dism.source_missing", msg.Params{"hresult": dismSourceMissing})
+		return msg.Plain(output), msg.Err("dism.source_missing", msg.Params{"hresult": dismSourceMissing})
 	}
 	switch code {
 	case 0:
-		return output, nil
+		return msg.Plain(output), nil
 	case dismRebootRequired:
-		return output + "\n\nRedémarrage requis pour finaliser l'opération.", nil
+		return msg.New("dism.reboot_required", msg.Params{"output": output}), nil
 	}
-	return output, msg.Err("dism.failed", msg.Params{"code": formatExitCode(code)})
+	return msg.Plain(output), msg.Err("dism.failed", msg.Params{"code": formatExitCode(code)})
 }
 
 // chkdskMeanings holds the exit codes Microsoft actually documents for chkdsk.

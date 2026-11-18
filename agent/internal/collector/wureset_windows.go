@@ -3,11 +3,12 @@ package collector
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
+
+	"tiai/agent/internal/msg"
 )
 
 // RunWUReset stops the Windows Update services, moves the update store and the
@@ -32,67 +33,66 @@ import (
 // and `msiserver` are demand-start on a modern Windows and are routinely found
 // stopped, and one disabled by GPO must stay that way — starting it would be
 // this command quietly overriding an administrator's policy.
-func RunWUReset(ctx context.Context) (string, error) {
+func RunWUReset(ctx context.Context) (msg.Message, error) {
 	ctx, cancel := context.WithTimeout(ctx, wuResetTimeout)
 	defer cancel()
 
 	m, err := mgr.Connect()
 	if err != nil {
-		return "", fmt.Errorf("connexion au gestionnaire de services : %w", err)
+		return msg.Message{}, msg.Wrap("service.manager_failed", nil, err)
 	}
 	defer m.Disconnect()
 
 	var log wuResetLog
 
 	// --- Stop -------------------------------------------------------------
-	stopped := make([]wuResetService, 0, len(wuResetServices))
-	for _, s := range wuResetServices {
-		wasRunning, err := stopWUService(ctx, m, s.name)
+	stopped := make([]string, 0, len(wuResetServices))
+	for _, name := range wuResetServices {
+		wasRunning, err := stopWUService(ctx, m, name)
 		if err != nil {
-			log.fail(fmt.Sprintf("arrêt du service %s (%s)", s.label, s.name), err)
+			log.fail(msg.WUResetStopFailed, name, "", err)
 			continue
 		}
 		if !wasRunning {
-			log.step("%s (%s) : déjà arrêté.", s.label, s.name)
+			log.step(msg.WUResetAlreadyStopped, name, "")
 			continue
 		}
-		log.step("%s (%s) : arrêté.", s.label, s.name)
-		stopped = append(stopped, s)
+		log.step(msg.WUResetStopped, name, "")
+		stopped = append(stopped, name)
 	}
 
 	// --- Move aside -------------------------------------------------------
 	if log.failed() {
-		log.step("Aucun dossier renommé : un service tient encore le magasin de mises à jour.")
+		log.step(msg.WUResetKept, "", "")
 	} else {
 		root := systemRoot()
 		for _, f := range wuResetFolders {
 			dir := filepath.Join(append([]string{root}, f.elems...)...)
 			switch err := moveAside(dir, f.backup); {
 			case err == nil:
-				log.step("%s : renommé en %s.", f.label, f.backup)
+				log.step(msg.WUResetRenamed, f.key, f.backup)
 			case errors.Is(err, errWUResetFolderAbsent):
 				// Nothing to move is not a failure: Windows recreates these on
 				// demand, so an absent one is simply a poste that has not
 				// searched since the last reset.
-				log.step("%s : absent, rien à renommer.", f.label)
+				log.step(msg.WUResetAbsent, f.key, "")
 			default:
-				log.fail(fmt.Sprintf("renommage de %s", dir), err)
+				log.fail(msg.WUResetRenameFailed, f.key, dir, err)
 			}
 		}
 	}
 
 	// --- Start again ------------------------------------------------------
-	for _, s := range stopped {
-		if err := startWUService(ctx, m, s.name); err != nil {
-			log.fail(fmt.Sprintf("redémarrage du service %s (%s)", s.label, s.name), err)
+	for _, name := range stopped {
+		if err := startWUService(ctx, m, name); err != nil {
+			log.fail(msg.WUResetRestartFailed, name, "", err)
 			continue
 		}
-		log.step("%s (%s) : redémarré.", s.label, s.name)
+		log.step(msg.WUResetRestarted, name, "")
 	}
 
 	if !log.failed() {
-		log.step("")
-		log.step("%s", wuResetNextStep)
+		log.step(msg.WUResetNext, "", "")
 	}
 	return log.verdict()
 }
@@ -108,7 +108,7 @@ func stopWUService(ctx context.Context, m *mgr.Mgr, name string) (bool, error) {
 
 	status, err := s.Query()
 	if err != nil {
-		return false, fmt.Errorf("interrogation du service : %w", err)
+		return false, msg.Wrap("service.query_failed", nil, err)
 	}
 	if status.State == svc.Stopped {
 		return false, nil

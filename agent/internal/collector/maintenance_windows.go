@@ -43,9 +43,9 @@ func RunMaintenance(ctx context.Context, cmdType string) (msg.Message, error) {
 	if err != nil {
 		return msg.Plain(output), err
 	}
-	// The tool's own output: no code, whatever the verdict's error carries.
-	output, err = spec.verdict(code, output)
-	return msg.Plain(output), err
+	// The tool's own output carries no code, whatever the verdict's error
+	// carries — unless the verdict adds a sentence of the agent's to it.
+	return spec.verdict(code, output)
 }
 
 // runNativeMaintenance covers the catalogue entries that are not an .exe call.
@@ -177,43 +177,34 @@ const (
 func runSpoolerReset(ctx context.Context) (msg.Message, error) {
 	m, err := mgr.Connect()
 	if err != nil {
-		return msg.Message{}, fmt.Errorf("connexion au gestionnaire de services : %w", err)
+		return msg.Message{}, msg.Wrap("service.manager_failed", nil, err)
 	}
 	defer m.Disconnect()
 
 	s, err := m.OpenService(spoolerService)
 	if err != nil {
-		return msg.Message{}, fmt.Errorf("ouverture du service %s : %w", spoolerService, err)
+		return msg.Message{}, msg.Wrap("service.open_failed", msg.Params{"service": spoolerService}, err)
 	}
 	defer s.Close()
 
-	var lines []string
 	if err := setServiceState(ctx, s, svc.Stop, svc.Stopped); err != nil {
 		return msg.Message{}, msg.Wrap("spooler.stop_failed", nil, err)
 	}
-	lines = append(lines, "Spouleur d'impression arrêté.")
-
 	removed, purgeErr := purgeSpoolQueue()
-	if purgeErr != nil {
-		lines = append(lines, fmt.Sprintf("Purge incomplète de la file : %v", purgeErr))
-	} else {
-		lines = append(lines, fmt.Sprintf("File d'impression purgée (%d fichier(s)).", removed))
-	}
 
 	// Attempted whatever happened above: a machine left with no print spooler at
 	// all is a worse outcome than a queue that is still full.
+	//
+	// The report (msg.SpoolerReport) says what went, line by line: the
+	// spooler stopped, the queue emptied or not, the spooler restarted or not.
 	if err := setServiceState(ctx, s, svc.Cmd(0), svc.Running); err != nil {
-		lines = append(lines, "Le spouleur n'a PAS pu être redémarré.")
-		return msg.Plain(strings.Join(lines, "\n")), msg.Wrap("spooler.start_failed", nil, err)
+		return msg.SpoolerReport(removed, purgeErr, false), msg.Wrap("spooler.start_failed", nil, err)
 	}
-	lines = append(lines, "Spouleur d'impression redémarré.")
-
-	output := strings.Join(lines, "\n")
 	if purgeErr != nil {
-		return msg.Plain(output), msg.Wrap("spooler.purge_failed", nil, purgeErr)
+		return msg.SpoolerReport(removed, purgeErr, true), msg.Wrap("spooler.purge_failed", nil, purgeErr)
 	}
 	// The nominal run, worded by the console (msg); the same three lines.
-	return msg.New("spooler.reset", msg.Params{"removed": removed}), nil
+	return msg.SpoolerReport(removed, nil, true), nil
 }
 
 // setServiceState drives the service to want, then waits for it to get there.
@@ -221,7 +212,7 @@ func runSpoolerReset(ctx context.Context) (msg.Message, error) {
 func setServiceState(ctx context.Context, s *mgr.Service, control svc.Cmd, want svc.State) error {
 	status, err := s.Query()
 	if err != nil {
-		return fmt.Errorf("interrogation du service : %w", err)
+		return msg.Wrap("service.query_failed", nil, err)
 	}
 	if status.State == want {
 		return nil
@@ -246,7 +237,7 @@ func setServiceState(ctx context.Context, s *mgr.Service, control svc.Cmd, want 
 		case <-time.After(servicePollInterval):
 		}
 		if status, err = s.Query(); err != nil {
-			return fmt.Errorf("interrogation du service : %w", err)
+			return msg.Wrap("service.query_failed", nil, err)
 		}
 		if status.State == want {
 			return nil
@@ -265,7 +256,7 @@ func purgeSpoolQueue() (int, error) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return 0, fmt.Errorf("lecture de %s : %w", dir, err)
+		return 0, msg.Wrap("spooler.queue_unreadable", msg.Params{"dir": dir}, err)
 	}
 
 	removed, failed := 0, 0
@@ -289,7 +280,7 @@ func purgeSpoolQueue() (int, error) {
 		removed++
 	}
 	if firstErr != nil {
-		return removed, fmt.Errorf("%d fichier(s) non supprimé(s), première erreur : %w", failed, firstErr)
+		return removed, msg.Wrap("spooler.files_not_removed", msg.Params{"failed": failed}, firstErr)
 	}
 	return removed, nil
 }

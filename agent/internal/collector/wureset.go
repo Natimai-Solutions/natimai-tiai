@@ -2,11 +2,11 @@ package collector
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"tiai/agent/internal/msg"
 )
 
 // Reset of the Windows Update components — the procedure Microsoft documents
@@ -37,7 +37,8 @@ import (
 // than behind a build tag — the tables, the report, the verdict, and the
 // rename itself, which is plain os/filepath and so can be exercised against a
 // real directory on any platform. Only the service manager, which has no
-// counterpart elsewhere, lives in wureset_windows.go.
+// counterpart elsewhere, lives in wureset_windows.go. The report's sentences
+// are msg's (msg.WUResetReport), coded for the console.
 
 // wuResetTimeout bounds the whole operation. Each individual service
 // transition is already capped at serviceStateTimeout; this is the envelope
@@ -50,25 +51,13 @@ const wuResetTimeout = 10 * time.Minute
 // reset left it to be rebuilt and nothing has searched for updates since.
 var errWUResetFolderAbsent = errors.New("dossier absent")
 
-// wuResetService is one service that holds the update store open.
+// wuResetServices are the services that hold the update store open, by
+// their service name; the report names them (msg.WUResetServices).
 //
 // The order is Microsoft's, and it is also the order they are started again
 // in: none of the four depends on another, so the article's order is kept
 // rather than a reversal that would only look cleverer.
-type wuResetService struct {
-	name string
-	// label is what the console shows. The service names are opaque
-	// (`bits`, `cryptsvc`) and the report is read by a human deciding whether
-	// the poste came back whole.
-	label string
-}
-
-var wuResetServices = []wuResetService{
-	{name: "wuauserv", label: "Windows Update"},
-	{name: "cryptsvc", label: "Services de chiffrement"},
-	{name: "bits", label: "Transfert intelligent en arrière-plan (BITS)"},
-	{name: "msiserver", label: "Windows Installer"},
-}
+var wuResetServices = []string{"wuauserv", "cryptsvc", "bits", "msiserver"}
 
 // wuResetFolder is one directory renamed aside, relative to %SystemRoot%.
 //
@@ -76,12 +65,13 @@ var wuResetServices = []wuResetService{
 // it: this file is compiled on every platform, and joining is the Windows
 // implementation's job.
 type wuResetFolder struct {
+	// key names the folder in the report (msg.WUResetFolders).
+	key   string
 	elems []string
 	// backup is a bare name, joined onto the directory's own parent — never a
 	// path. Enforced by a test: this is the one place the command writes
 	// outside a directory Windows owns and rebuilds.
 	backup string
-	label  string
 }
 
 var wuResetFolders = []wuResetFolder{
@@ -90,53 +80,52 @@ var wuResetFolders = []wuResetFolder{
 		// history the Settings app shows. Moving it aside is what actually
 		// fixes a poste; the cost is that history, and a first search that has
 		// to fetch everything again.
+		key:    "software_distribution",
 		elems:  []string{"SoftwareDistribution"},
 		backup: "SoftwareDistribution.old",
-		label:  "Magasin Windows Update (SoftwareDistribution)",
 	},
 	{
 		// The catalogue signature cache. Held open by cryptsvc, which is why
 		// that service is in the list at all.
+		key:    "catroot2",
 		elems:  []string{"System32", "catroot2"},
 		backup: "catroot2.old",
-		label:  "Cache de signatures de catalogues (catroot2)",
 	},
 }
 
-// wuResetNextStep is the last line of a successful report. The command puts a
-// poste back in a state where it *can* update; it does not update it, and the
-// reader should not have to infer that.
-const wuResetNextStep = "Windows reconstruira ces dossiers à la prochaine recherche : " +
-	"lancer « Rechercher les mises à jour » pour vérifier que le poste repart."
-
-// wuResetLog accumulates the report the console shows and the failures that
-// decide the verdict.
+// wuResetLog accumulates the report the console shows, step by step, the
+// failures among them deciding the verdict.
 //
-// Two lists rather than one, because a partial reset is the interesting
-// outcome and the common one: catroot2 held open by a straggler while
-// SoftwareDistribution moved fine is a *useful* run that still has to be
-// reported as failed. The steps say what happened, the failures say what to do
-// about it.
+// A partial reset is the interesting outcome and the common one: catroot2
+// held open by a straggler while SoftwareDistribution moved fine is a
+// *useful* run that still has to be reported as failed. The steps say what
+// happened, the failures what to do about it.
 type wuResetLog struct {
-	lines    []string
-	failures []string
+	steps []msg.WUResetStep
 }
 
-// step records something that went as intended.
-func (l *wuResetLog) step(format string, args ...any) {
-	l.lines = append(l.lines, fmt.Sprintf(format, args...))
+// step records something that went as intended: its kind (msg.WUReset*),
+// the service or folder it is about, and arg — the backup's name for a
+// folder renamed.
+func (l *wuResetLog) step(kind, subject, arg string) {
+	l.steps = append(l.steps, msg.WUResetStep{Kind: kind, Subject: subject, Arg: arg})
 }
 
-// fail records a step that did not, both in the report and in the verdict.
-func (l *wuResetLog) fail(what string, err error) {
-	l.lines = append(l.lines, fmt.Sprintf("ÉCHEC — %s : %v", what, err))
-	l.failures = append(l.failures, what)
+// fail records a step that did not, both in the report and in the verdict;
+// arg is the folder's path for a rename.
+func (l *wuResetLog) fail(kind, subject, arg string, err error) {
+	l.steps = append(l.steps, msg.WUResetStep{Kind: kind, Subject: subject, Arg: arg, Err: msg.FromError(err)})
 }
 
 // failed reports whether anything has gone wrong so far. Read between phases:
 // the folders are not touched while a service that holds them is still up.
 func (l *wuResetLog) failed() bool {
-	return len(l.failures) > 0
+	for _, s := range l.steps {
+		if s.Failed() {
+			return true
+		}
+	}
+	return false
 }
 
 // verdict renders the report and the outcome.
@@ -145,13 +134,12 @@ func (l *wuResetLog) failed() bool {
 // this command the step-by-step *is* the diagnosis, and an error with no list
 // behind it would send an administrator to the poste itself — the thing the
 // command exists to avoid.
-func (l *wuResetLog) verdict() (string, error) {
-	output := strings.Join(l.lines, "\n")
-	if len(l.failures) == 0 {
-		return output, nil
+func (l *wuResetLog) verdict() (msg.Message, error) {
+	report, err := msg.WUResetReport(l.steps)
+	if err != nil {
+		return report, err
 	}
-	return output, fmt.Errorf("réinitialisation incomplète : %s",
-		strings.Join(l.failures, " ; "))
+	return report, nil
 }
 
 // moveAside renames dir to backup within its own parent, discarding a backup
@@ -174,7 +162,7 @@ func moveAside(dir, backup string) error {
 	// own parent — nothing here comes from the network (a test pins that).
 	target := filepath.Join(filepath.Dir(dir), backup)
 	if err := os.RemoveAll(target); err != nil {
-		return fmt.Errorf("suppression du renommage précédent (%s) : %w", target, err)
+		return msg.Wrap("wu_reset.backup_not_removed", msg.Params{"path": target}, err)
 	}
 	return os.Rename(dir, target)
 }

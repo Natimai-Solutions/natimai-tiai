@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -86,21 +87,95 @@ func Err(code string, params Params) *Error {
 // — so that the console words the detail in its reader's language, as it
 // words the sentence around it (verification of 2026-11-18: it showed the
 // French text inside an English sentence).
+//
+// The cause's own detail goes along as "detail_detail" (and its coded
+// detail as "detail_detail_code"…): the console words the cause from its
+// parameters, and a cause without its detail read « transfer interrupted: »
+// with nothing after it.
 func Wrap(code string, params Params, cause error) *Error {
 	p := Params{}
 	maps.Copy(p, params)
 	if _, ok := p["detail"]; !ok && cause != nil {
-		p["detail"] = cause.Error()
-		if inner, innerParams := Of(cause); inner != "" {
-			p["detail_code"] = inner
-			for k, v := range innerParams {
-				if !strings.HasPrefix(k, "detail") {
-					p["detail_"+k] = v
-				}
-			}
-		}
+		Nest(p, "detail", FromError(cause))
 	}
 	return &Error{Message: New(code, p), cause: cause}
+}
+
+// FromError is err as a message: its code and parameters when its whole
+// text is a coded message of the agent's (Of), else its text alone.
+func FromError(err error) Message {
+	if err == nil {
+		return Message{}
+	}
+	code, params := Of(err)
+	return Message{Code: code, Params: params, Text: err.Error()}
+}
+
+// Nest quotes m in p under key — the way a sentence quotes a cause, or a
+// report each failure's error: its text as p[key], and, when m is coded,
+// its code as p[key+"_code"] and each of its parameters as p[key+"_<name>"],
+// for the console to word m in its reader's language too (it reads them
+// back: commandMessage). The French needs only the text.
+func Nest(p Params, key string, m Message) {
+	p[key] = m.Text
+	NestCode(p, key, m)
+}
+
+// NestCode is Nest without the text: for a message whose text is already
+// elsewhere in the result — the output of a failed command (WithOutput).
+//
+// m goes as text alone when its code cannot ride along: no code, parameters
+// beyond the server's bounds, a parameter named "code" (it would take the
+// place of key_code), or a nested name the server would refuse.
+func NestCode(p Params, key string, m Message) {
+	code, params := Coded(m)
+	if code == "" {
+		return
+	}
+	if _, clash := params["code"]; clash {
+		return
+	}
+	for k := range params {
+		if !paramKey.MatchString(key + "_" + k) {
+			return
+		}
+	}
+	p[key+"_code"] = code
+	for k, v := range params {
+		p[key+"_"+k] = v
+	}
+}
+
+// Unnested is p without what Nest put under key but its text: for a report
+// too large with the codes of what it quotes (Fits).
+func Unnested(p Params, key string) Params {
+	out := Params{}
+	for k, v := range p {
+		if !strings.HasPrefix(k, key+"_") {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// WithOutput is the parameters of a failed result's coded error, with the
+// code of its output beside them when that output is a coded message too
+// ("output_code", "output_<name>"): a failed command words its error from
+// its code (models.CommandResult), and its output — a report the agent
+// wrote, such as the steps of a partial reset — from these. When the whole
+// would exceed what the server keeps, the error's own parameters alone: the
+// output then reads as its text, as from an older agent.
+func WithOutput(errParams Params, output Message) Params {
+	if code, _ := Coded(output); code == "" {
+		return errParams
+	}
+	p := Params{}
+	maps.Copy(p, errParams)
+	NestCode(p, "output", output)
+	if !Fits(p) {
+		return errParams
+	}
+	return p
 }
 
 // Of is the code and parameters of err, when err's whole text is a coded
@@ -127,11 +202,13 @@ func Coded(m Message) (string, Params) {
 // The server's bounds on message_params (backend command/texts.py,
 // clean_message), with a margin on the whole for its own serialisation.
 const (
-	maxParams       = 16
-	maxParamRunes   = 1024
-	maxParamsBytes  = 3500
-	maxParamKeySize = 32
+	maxParams      = 16
+	maxParamRunes  = 1024
+	maxParamsBytes = 3500
 )
+
+// paramKey is the server's pattern for a parameter's name.
+var paramKey = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 // Fits reports whether params stay within what the server keeps: a quoted
 // tool error can be long, and a dropped code beats a refused result.
@@ -140,7 +217,7 @@ func Fits(params Params) bool {
 		return false
 	}
 	for k, v := range params {
-		if len(k) == 0 || len(k) > maxParamKeySize {
+		if !paramKey.MatchString(k) {
 			return false
 		}
 		if s, ok := v.(string); ok && utf8.RuneCountInString(s) > maxParamRunes {

@@ -983,10 +983,17 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 // not, err saying why: the text as it always was, and the code the console
 // words it from when the agent wrote the whole of it (msg): the error's on a
 // failure, the output's on a success. A tool's own output carries none.
+//
+// A failure whose output is a report of the agent's (the steps of a partial
+// reset, an install's per-update lines) carries the output's code too,
+// beside the error's (msg.WithOutput: "output_code", "output_<name>").
 func resultOf(output msg.Message, err error) models.CommandResult {
 	if err != nil {
 		res := models.CommandResult{Status: "failed", Output: output.Text, Error: err.Error()}
 		res.MessageCode, res.MessageParams = msg.Of(err)
+		if res.MessageCode != "" {
+			res.MessageParams = msg.WithOutput(res.MessageParams, output)
+		}
 		return res
 	}
 	res := models.CommandResult{Status: "succeeded", Output: output.Text}
@@ -1027,9 +1034,9 @@ func (a *Agent) resolve(cmd models.Command) (run func(context.Context) (msg.Mess
 	case "wu_scan":
 		return a.runWUScan, false, true
 	case "wu_install":
-		return plain(func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, false) }), true, true
+		return func(ctx context.Context) (msg.Message, error) { return a.runWUInstall(ctx, false) }, true, true
 	case "wu_install_full":
-		return plain(func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, true) }), true, true
+		return func(ctx context.Context) (msg.Message, error) { return a.runWUInstall(ctx, true) }, true, true
 	case "inventory_scan":
 		// Not long: a dozen WMI queries and two registry walks are seconds, not
 		// minutes, and a `running` nobody has time to read is noise.
@@ -1039,7 +1046,7 @@ func (a *Agent) resolve(cmd models.Command) (run func(context.Context) (msg.Mess
 		// because the case worth watching is the one where a service refuses to
 		// stop, and "transmise" for four minutes is exactly what the
 		// intermediate `running` exists to replace.
-		return plain(a.runWUReset), true, true
+		return a.runWUReset, true, true
 	case "reboot":
 		return func(ctx context.Context) (msg.Message, error) {
 			return a.runPowerAction(ctx, actionReboot, collector.Reboot)

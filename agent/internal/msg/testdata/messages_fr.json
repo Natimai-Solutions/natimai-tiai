@@ -923,5 +923,265 @@
    "version": "\"1 2\""
   },
   "message": "version winget refusée : \"1 2\""
+ },
+ {
+  "code": "dism.reboot_required",
+  "params": {
+   "output": "Deployment Image Servicing and Management tool\nThe operation completed successfully."
+  },
+  "message": "Deployment Image Servicing and Management tool\nThe operation completed successfully.\n\nRedémarrage requis pour finaliser l'opération."
+ },
+ {
+  "code": "dism.reboot_required",
+  "params": {
+   "output": ""
+  },
+  "message": "\n\nRedémarrage requis pour finaliser l'opération."
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 2,
+   "reboot": true,
+   "selected": 2,
+   "skipped": 0,
+   "updates": "succeeded\t\tKB5063878 — 2025-08 Cumulative Update\nsucceeded_with_errors\t\tKB2267602 — Defender"
+  },
+  "message": "2 mise(s) à jour retenue(s), 2 installée(s).\nKB5063878 — 2025-08 Cumulative Update : installée\nKB2267602 — Defender : installée avec des erreurs\n\nRedémarrage requis pour finaliser l'installation (commande « Redémarrer »)."
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 3,
+   "reboot": false,
+   "selected": 4,
+   "skipped": 1,
+   "updates": "succeeded\t\tKB5063878 — Cumulative\nfailed\t0x80240017\tKB5062660 — Broken\naborted\t0x00000000\tDriver"
+  },
+  "message": "4 mise(s) à jour retenue(s), 3 installée(s).\n1 ignorée(s) : elles réclament une interaction utilisateur, impossible depuis un service.\nKB5063878 — Cumulative : installée\nKB5062660 — Broken : échec (0x80240017)\nDriver : abandonnée (0x00000000)\n1 mise(s) à jour n'ont pas pu être téléchargée(s), et n'ont donc pas été installée(s)."
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 0,
+   "reboot": false,
+   "selected": 0,
+   "skipped": 0,
+   "updates": ""
+  },
+  "message": "Aucune mise à jour applicable : le poste est à jour."
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 0,
+   "reboot": false,
+   "selected": 0,
+   "skipped": 2,
+   "updates": ""
+  },
+  "message": "Aucune mise à jour installable sans intervention sur le poste.\n2 ignorée(s) : elles réclament une interaction utilisateur, impossible depuis un service."
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 1,
+   "reboot": false,
+   "selected": 1,
+   "skipped": 0,
+   "updates": "in_progress\t0x00000001\tKB1 — X"
+  },
+  "message": "1 mise(s) à jour retenue(s), 1 installée(s).\nKB1 — X : encore en cours (0x00000001)"
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 1,
+   "reboot": false,
+   "selected": 1,
+   "skipped": 0,
+   "updates": "not_started\t0x00000002\tKB1 — X"
+  },
+  "message": "1 mise(s) à jour retenue(s), 1 installée(s).\nKB1 — X : non démarrée (0x00000002)"
+ },
+ {
+  "code": "wu_reset.report",
+  "params": {
+   "steps": "stopped\twuauserv\nalready_stopped\tcryptsvc\nstopped\tbits\nalready_stopped\tmsiserver\nrenamed\tsoftware_distribution\tSoftwareDistribution.old\nabsent\tcatroot2\nrestarted\twuauserv\nrestarted\tbits\nnext\t"
+  },
+  "message": "Windows Update (wuauserv) : arrêté.\nServices de chiffrement (cryptsvc) : déjà arrêté.\nTransfert intelligent en arrière-plan (BITS) (bits) : arrêté.\nWindows Installer (msiserver) : déjà arrêté.\nMagasin Windows Update (SoftwareDistribution) : renommé en SoftwareDistribution.old.\nCache de signatures de catalogues (catroot2) : absent, rien à renommer.\nWindows Update (wuauserv) : redémarré.\nTransfert intelligent en arrière-plan (BITS) (bits) : redémarré.\n\nWindows reconstruira ces dossiers à la prochaine recherche : lancer « Rechercher les mises à jour » pour vérifier que le poste repart."
+ },
+ {
+  "code": "wu_reset.report",
+  "params": {
+   "e1": "suppression du renommage précédent (C:\\Windows\\System32\\catroot2.old) : Access is denied.",
+   "e1_code": "wu_reset.backup_not_removed",
+   "e1_detail": "Access is denied.",
+   "e1_path": "C:\\Windows\\System32\\catroot2.old",
+   "e2": "The service did not respond.",
+   "steps": "stopped\twuauserv\nrenamed\tsoftware_distribution\tSoftwareDistribution.old\nrename_failed\tcatroot2\tC:\\Windows\\System32\\catroot2\nrestart_failed\twuauserv"
+  },
+  "message": "Windows Update (wuauserv) : arrêté.\nMagasin Windows Update (SoftwareDistribution) : renommé en SoftwareDistribution.old.\nÉCHEC — renommage de C:\\Windows\\System32\\catroot2 : suppression du renommage précédent (C:\\Windows\\System32\\catroot2.old) : Access is denied.\nÉCHEC — redémarrage du service Windows Update (wuauserv) : The service did not respond."
+ },
+ {
+  "code": "wu_reset.incomplete",
+  "params": {
+   "failed": "rename_failed\tcatroot2\tC:\\Windows\\System32\\catroot2\nrestart_failed\twuauserv"
+  },
+  "message": "réinitialisation incomplète : renommage de C:\\Windows\\System32\\catroot2 ; redémarrage du service Windows Update (wuauserv)"
+ },
+ {
+  "code": "wu_reset.incomplete",
+  "params": {
+   "failed": "stop_failed\tcryptsvc"
+  },
+  "message": "réinitialisation incomplète : arrêt du service Services de chiffrement (cryptsvc)"
+ },
+ {
+  "code": "wu_reset.backup_not_removed",
+  "params": {
+   "detail": "Access is denied.",
+   "path": "C:\\Windows\\SoftwareDistribution.old"
+  },
+  "message": "suppression du renommage précédent (C:\\Windows\\SoftwareDistribution.old) : Access is denied."
+ },
+ {
+  "code": "service.manager_failed",
+  "params": {
+   "detail": "Access is denied."
+  },
+  "message": "connexion au gestionnaire de services : Access is denied."
+ },
+ {
+  "code": "service.open_failed",
+  "params": {
+   "detail": "The specified service does not exist as an installed service.",
+   "service": "Spooler"
+  },
+  "message": "ouverture du service Spooler : The specified service does not exist as an installed service."
+ },
+ {
+  "code": "service.query_failed",
+  "params": {
+   "detail": "Access is denied."
+  },
+  "message": "interrogation du service : Access is denied."
+ },
+ {
+  "code": "spooler.report",
+  "params": {
+   "removed": 4,
+   "restarted": false
+  },
+  "message": "Spouleur d'impression arrêté.\nFile d'impression purgée (4 fichier(s)).\nLe spouleur n'a PAS pu être redémarré."
+ },
+ {
+  "code": "spooler.report",
+  "params": {
+   "purge": "2 fichier(s) non supprimé(s), première erreur : The process cannot access the file.",
+   "purge_code": "spooler.files_not_removed",
+   "purge_detail": "The process cannot access the file.",
+   "purge_failed": 2,
+   "restarted": true
+  },
+  "message": "Spouleur d'impression arrêté.\nPurge incomplète de la file : 2 fichier(s) non supprimé(s), première erreur : The process cannot access the file.\nSpouleur d'impression redémarré."
+ },
+ {
+  "code": "spooler.report",
+  "params": {
+   "purge": "lecture de C:\\Windows\\System32\\spool\\PRINTERS : Access is denied.",
+   "purge_code": "spooler.queue_unreadable",
+   "purge_detail": "Access is denied.",
+   "purge_dir": "C:\\Windows\\System32\\spool\\PRINTERS",
+   "restarted": false
+  },
+  "message": "Spouleur d'impression arrêté.\nPurge incomplète de la file : lecture de C:\\Windows\\System32\\spool\\PRINTERS : Access is denied.\nLe spouleur n'a PAS pu être redémarré."
+ },
+ {
+  "code": "spooler.report",
+  "params": {
+   "purge": "boom",
+   "restarted": true
+  },
+  "message": "Spouleur d'impression arrêté.\nPurge incomplète de la file : boom\nSpouleur d'impression redémarré."
+ },
+ {
+  "code": "spooler.queue_unreadable",
+  "params": {
+   "detail": "Access is denied.",
+   "dir": "C:\\Windows\\System32\\spool\\PRINTERS"
+  },
+  "message": "lecture de C:\\Windows\\System32\\spool\\PRINTERS : Access is denied."
+ },
+ {
+  "code": "spooler.files_not_removed",
+  "params": {
+   "detail": "The process cannot access the file.",
+   "failed": 2
+  },
+  "message": "2 fichier(s) non supprimé(s), première erreur : The process cannot access the file."
+ },
+ {
+  "code": "spooler.purge_failed",
+  "params": {
+   "detail": "1 fichier(s) non supprimé(s), première erreur : Access is denied.",
+   "detail_code": "spooler.files_not_removed",
+   "detail_detail": "Access is denied.",
+   "detail_failed": 1
+  },
+  "message": "purge de la file d'impression : 1 fichier(s) non supprimé(s), première erreur : Access is denied."
+ },
+ {
+  "code": "deploy.both_refused",
+  "params": {
+   "a": "méthode A : seul un exécutable (.exe) signé par un éditeur approuvé peut être lancé — signez le paquet (méthode B)",
+   "a_code": "deploy.method_a.exe_only",
+   "b": "certificat de signature non approuvé sur ce poste (empreinte 0A1B2C absente de DeploySigners)",
+   "b_code": "deploy.signature.untrusted",
+   "b_thumbprint": "0A1B2C"
+  },
+  "message": "méthode B : certificat de signature non approuvé sur ce poste (empreinte 0A1B2C absente de DeploySigners) ; méthode A : seul un exécutable (.exe) signé par un éditeur approuvé peut être lancé — signez le paquet (méthode B)"
+ },
+ {
+  "code": "deploy.both_refused",
+  "params": {
+   "a": "éditeur \"Contoso Ltd\" non approuvé sur ce poste (DeployPublishers)",
+   "a_code": "deploy.publisher_not_approved",
+   "a_publisher": "\"Contoso Ltd\"",
+   "b": "signature invalide : le manifeste a changé depuis sa signature",
+   "b_code": "deploy.signature.invalid"
+  },
+  "message": "méthode B : signature invalide : le manifeste a changé depuis sa signature ; méthode A : éditeur \"Contoso Ltd\" non approuvé sur ce poste (DeployPublishers)"
+ },
+ {
+  "code": "deploy.both_refused",
+  "params": {
+   "a": "signature de setup.exe refusée par Windows : fichier non signé (pas de signature Authenticode)",
+   "a_code": "deploy.authenticode_refused",
+   "a_detail": "fichier non signé (pas de signature Authenticode)",
+   "a_detail_code": "deploy.not_signed",
+   "a_file": "setup.exe",
+   "b": "signature invalide : le manifeste a changé depuis sa signature",
+   "b_code": "deploy.signature.invalid"
+  },
+  "message": "méthode B : signature invalide : le manifeste a changé depuis sa signature ; méthode A : signature de setup.exe refusée par Windows : fichier non signé (pas de signature Authenticode)"
+ },
+ {
+  "code": "deploy.both_refused",
+  "params": {
+   "a": "unexpected",
+   "b": "x509: unknown authority"
+  },
+  "message": "méthode B : x509: unknown authority ; méthode A : unexpected"
+ },
+ {
+  "code": "deploy.download_failed",
+  "params": {
+   "detail": "transfert interrompu : unexpected EOF",
+   "detail_code": "deploy.download.interrupted",
+   "detail_detail": "unexpected EOF",
+   "file": "setup.exe"
+  },
+  "message": "téléchargement de setup.exe : transfert interrompu : unexpected EOF"
  }
 ]
