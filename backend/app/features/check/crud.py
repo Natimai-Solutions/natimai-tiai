@@ -200,6 +200,13 @@ async def list_checks(
     return list(rows.all()), total or 0
 
 
+# The note the server writes on a request closed by a merge, and its code: the
+# console words the code in the reader's language (plan console bilingue), the
+# French staying in ``closing_note`` for an older console.
+CLOSED_BY_MERGE = "check.closed.merged"
+CLOSED_BY_MERGE_NOTE = "Fermée par la fusion du poste dans un autre."
+
+
 async def move_to(
     session: AsyncSession, *, source_id: uuid.UUID, target_id: uuid.UUID
 ) -> None:
@@ -212,7 +219,8 @@ async def move_to(
         if source_open is not None:
             source_open.closed_at = utcnow()
             source_open.closed_by = "system"
-            source_open.closing_note = "Fermée par la fusion du poste dans un autre."
+            source_open.closing_note = CLOSED_BY_MERGE_NOTE
+            source_open.closing_note_code = CLOSED_BY_MERGE
             source_open.updated_at = utcnow()
             session.add(source_open)
             await session.flush()

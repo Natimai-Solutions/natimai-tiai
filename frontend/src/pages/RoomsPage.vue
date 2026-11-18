@@ -1,7 +1,7 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <h1 class="text-h5 q-my-none col-auto">Salles</h1>
+      <h1 class="text-h5 q-my-none col-auto">{{ t('rooms.list.title') }}</h1>
       <q-space />
       <!-- Each only where the account's scope lets it create: one confined
            to rooms creates neither, one confined to buildings no building. -->
@@ -10,14 +10,14 @@
         flat
         color="primary"
         icon="apartment"
-        label="Nouveau bâtiment"
+        :label="t('rooms.list.newBuilding')"
         @click="openBuildingForm(null)"
       />
       <q-btn
         v-if="canWrite && creation.rooms"
         color="primary"
         icon="meeting_room"
-        label="Nouvelle salle"
+        :label="t('rooms.list.newRoom')"
         @click="openRoomForm(null)"
       />
     </div>
@@ -26,31 +26,23 @@
          how a setting switched on the server reaches the whole parc at once. -->
     <q-banner v-if="config && !config.manual" class="surface-blue q-mb-md" rounded>
       <template #avatar><q-icon name="account_tree" color="primary" /></template>
-      Les postes sont rangés {{ sourceLabel }} (<code>ROOM_SOURCE={{ config.source }}</code
-      >) : les salles se créent toutes seules et le rattachement manuel est désactivé. Nom, bâtiment
-      et notes des salles restent modifiables.
+      {{ t('rooms.list.directoryBefore', { source: sourceLabel }) }} (<code
+        >ROOM_SOURCE={{ config.source }}</code
+      >){{ t('rooms.list.directoryAfter') }}
       <template v-if="canWrite" #action>
-        <q-btn
-          flat
-          dense
-          label="Resynchroniser depuis l'annuaire"
-          :loading="syncing"
-          @click="sync"
-        />
+        <q-btn flat dense :label="t('rooms.list.resync')" :loading="syncing" @click="sync" />
       </template>
     </q-banner>
 
     <q-tabs v-model="tab" dense align="left" class="text-muted q-mb-sm" active-color="primary">
-      <q-tab name="rooms" icon="meeting_room" label="Salles" />
-      <q-tab name="buildings" icon="apartment" label="Bâtiments" />
+      <q-tab name="rooms" icon="meeting_room" :label="t('rooms.list.tabRooms')" />
+      <q-tab name="buildings" icon="apartment" :label="t('rooms.list.tabBuildings')" />
     </q-tabs>
 
     <q-tab-panels v-model="tab" animated>
       <q-tab-panel name="rooms" class="q-px-none">
         <div class="text-body2 text-muted q-mb-sm" style="max-width: 760px">
-          Une salle regroupe des postes qui se trouvent au même endroit — une classe, un bureau, un
-          local technique — tels que la console les a rangés. Elle hérite de l'emplacement de son
-          bâtiment ; un poste dont l'agent déclare un autre emplacement est signalé, jamais refusé.
+          {{ t('rooms.list.roomsIntro') }}
         </div>
         <q-table
           :rows="rooms"
@@ -83,13 +75,13 @@
                     name="account_tree"
                     size="16px"
                     class="q-ml-xs text-muted"
-                    :aria-label="`Créée depuis l'annuaire : ${props.row.ad_key}`"
+                    :aria-label="t('rooms.list.fromDirectory', { key: props.row.ad_key })"
                   />
                   <div class="text-caption text-muted" style="overflow-wrap: anywhere">
                     {{
                       [props.row.building?.name, props.row.effective_location]
                         .filter(Boolean)
-                        .join(' · ') || 'Sans bâtiment ni emplacement'
+                        .join(' · ') || t('rooms.list.noBuildingNorLocation')
                     }}
                   </div>
                   <div
@@ -100,25 +92,27 @@
                     {{ props.row.notes }}
                   </div>
                   <div class="q-mt-xs">
-                    {{ props.row.machine_count }} poste(s)
+                    {{
+                      t(
+                        'rooms.list.machines',
+                        { count: props.row.machine_count },
+                        props.row.machine_count,
+                      )
+                    }}
                     <q-badge v-if="props.row.mismatch_count" color="orange" class="q-ml-xs">
-                      {{ props.row.mismatch_count }} divergent(s)
+                      {{ t('rooms.list.mismatched', { count: props.row.mismatch_count }) }}
                     </q-badge>
                   </div>
                   <div class="q-mt-xs">
                     <q-badge v-if="props.row.maintenance_overdue" color="negative" class="q-mr-xs">
-                      {{ props.row.maintenance_overdue }} en retard
+                      {{ t('rooms.list.overdue', { count: props.row.maintenance_overdue }) }}
                     </q-badge>
                     <q-badge v-if="props.row.maintenance_due_soon" color="orange" class="q-mr-xs">
-                      {{ props.row.maintenance_due_soon }} à échéance
+                      {{ t('rooms.list.dueSoon', { count: props.row.maintenance_due_soon }) }}
                     </q-badge>
                     <span class="text-caption text-muted">
-                      Maintenance :
-                      {{
-                        props.row.effective_cycle_days > 0
-                          ? `${props.row.effective_cycle_days} j`
-                          : 'exclue'
-                      }}
+                      {{ t('rooms.list.maintenance') }}
+                      {{ cycleText(props.row) }}
                       {{
                         props.row.effective_owner_name ? `· ${props.row.effective_owner_name}` : ''
                       }}
@@ -130,7 +124,7 @@
                     flat
                     no-caps
                     icon="edit"
-                    label="Modifier"
+                    :label="t('rooms.actions.edit')"
                     @click="openRoomForm(props.row)"
                   />
                   <q-btn
@@ -138,7 +132,7 @@
                     no-caps
                     color="negative"
                     icon="delete"
-                    label="Supprimer"
+                    :label="t('rooms.actions.delete')"
                     @click="confirmDeleteRoom(props.row)"
                   />
                 </q-card-actions>
@@ -160,7 +154,9 @@
                   size="16px"
                   class="q-ml-xs text-muted"
                 >
-                  <q-tooltip>Créée depuis l'annuaire : {{ props.row.ad_key }}</q-tooltip>
+                  <q-tooltip>{{
+                    t('rooms.list.fromDirectory', { key: props.row.ad_key })
+                  }}</q-tooltip>
                 </q-icon>
               </div>
               <div
@@ -181,10 +177,10 @@
           <template #body-cell-maintenance="props">
             <q-td :props="props">
               <q-badge v-if="props.row.maintenance_overdue" color="negative" class="q-mr-xs">
-                {{ props.row.maintenance_overdue }} en retard
+                {{ t('rooms.list.overdue', { count: props.row.maintenance_overdue }) }}
               </q-badge>
               <q-badge v-if="props.row.maintenance_due_soon" color="orange">
-                {{ props.row.maintenance_due_soon }} à échéance
+                {{ t('rooms.list.dueSoon', { count: props.row.maintenance_due_soon }) }}
               </q-badge>
               <span
                 v-if="!props.row.maintenance_overdue && !props.row.maintenance_due_soon"
@@ -192,11 +188,7 @@
                 >—</span
               >
               <div class="text-caption text-muted">
-                {{
-                  props.row.effective_cycle_days > 0
-                    ? `${props.row.effective_cycle_days} j`
-                    : 'exclue'
-                }}
+                {{ cycleText(props.row) }}
                 {{ props.row.effective_owner_name ? `· ${props.row.effective_owner_name}` : '' }}
               </div>
             </q-td>
@@ -205,7 +197,7 @@
             <q-td :props="props">
               <q-badge v-if="props.value" color="orange" :label="props.value">
                 <q-tooltip>
-                  {{ props.value }} poste(s) dont l'agent déclare un autre emplacement que la salle
+                  {{ t('rooms.list.mismatchTooltip', { count: props.value }, props.value) }}
                 </q-tooltip>
               </q-badge>
               <span v-else class="text-muted">—</span>
@@ -219,13 +211,13 @@
                 dense
                 round
                 icon="more_vert"
-                :aria-label="`Actions pour ${props.row.name}`"
+                :aria-label="t('rooms.list.actionsFor', { name: props.row.name })"
               >
                 <q-menu>
                   <q-list style="min-width: 200px">
                     <q-item v-close-popup clickable @click="openRoomForm(props.row)">
                       <q-item-section avatar><q-icon name="edit" /></q-item-section>
-                      <q-item-section>Modifier</q-item-section>
+                      <q-item-section>{{ t('rooms.actions.edit') }}</q-item-section>
                     </q-item>
                     <q-separator />
                     <q-item
@@ -235,7 +227,7 @@
                       @click="confirmDeleteRoom(props.row)"
                     >
                       <q-item-section avatar><q-icon name="delete" /></q-item-section>
-                      <q-item-section>Supprimer</q-item-section>
+                      <q-item-section>{{ t('rooms.actions.delete') }}</q-item-section>
                     </q-item>
                   </q-list>
                 </q-menu>
@@ -247,8 +239,7 @@
 
       <q-tab-panel name="buildings" class="q-px-none">
         <div class="text-body2 text-muted q-mb-sm" style="max-width: 760px">
-          Un bâtiment porte l'emplacement — dans les mots que les agents remontent — et regroupe des
-          salles. Il n'a ni cycle ni responsable propres.
+          {{ t('rooms.list.buildingsIntro') }}
         </div>
         <q-table
           :rows="buildings"
@@ -270,10 +261,15 @@
                     {{ props.row.name }}
                   </div>
                   <div class="text-caption text-muted" style="overflow-wrap: anywhere">
-                    {{ props.row.location ?? 'Sans emplacement' }}
+                    {{ props.row.location ?? t('rooms.list.noLocation') }}
                   </div>
                   <div class="q-mt-xs">
-                    {{ props.row.room_count }} salle(s) · {{ props.row.machine_count }} poste(s)
+                    {{
+                      t('rooms.list.roomsAndMachines', {
+                        rooms: props.row.room_count,
+                        machines: props.row.machine_count,
+                      })
+                    }}
                   </div>
                 </q-card-section>
                 <q-card-actions v-if="canWrite" align="right">
@@ -281,7 +277,7 @@
                     flat
                     no-caps
                     icon="edit"
-                    label="Modifier"
+                    :label="t('rooms.actions.edit')"
                     @click="openBuildingForm(props.row)"
                   />
                   <q-btn
@@ -289,7 +285,7 @@
                     no-caps
                     color="negative"
                     icon="delete"
-                    label="Supprimer"
+                    :label="t('rooms.actions.delete')"
                     @click="confirmDeleteBuilding(props.row)"
                   />
                 </q-card-actions>
@@ -307,13 +303,13 @@
                 dense
                 round
                 icon="more_vert"
-                :aria-label="`Actions pour ${props.row.name}`"
+                :aria-label="t('rooms.list.actionsFor', { name: props.row.name })"
               >
                 <q-menu>
                   <q-list style="min-width: 200px">
                     <q-item v-close-popup clickable @click="openBuildingForm(props.row)">
                       <q-item-section avatar><q-icon name="edit" /></q-item-section>
-                      <q-item-section>Modifier</q-item-section>
+                      <q-item-section>{{ t('rooms.actions.edit') }}</q-item-section>
                     </q-item>
                     <q-separator />
                     <q-item
@@ -323,7 +319,7 @@
                       @click="confirmDeleteBuilding(props.row)"
                     >
                       <q-item-section avatar><q-icon name="delete" /></q-item-section>
-                      <q-item-section>Supprimer</q-item-section>
+                      <q-item-section>{{ t('rooms.actions.delete') }}</q-item-section>
                     </q-item>
                   </q-list>
                 </q-menu>
@@ -364,7 +360,7 @@ import {
   getRoomCreation,
   listBuildings,
   listRooms,
-  ROOM_SOURCE_LABELS,
+  roomSourceLabel,
   syncDirectory,
   syncNotification,
   syncPreviewMessage,
@@ -376,6 +372,7 @@ import {
 } from 'src/services/rooms';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
+import { t } from 'src/i18n';
 
 const $q = useQuasar();
 // A phone: cards rather than tables (audit U23).
@@ -406,9 +403,14 @@ async function loadCreation() {
 
 const config = ref<RoomConfig | null>(null);
 const syncing = ref(false);
-const sourceLabel = computed(() =>
-  config.value ? (ROOM_SOURCE_LABELS[config.value.source] ?? config.value.source) : '',
-);
+const sourceLabel = computed(() => (config.value ? roomSourceLabel(config.value.source) : ''));
+
+/** « 90 j », or « exclue » for a room out of the maintenance. */
+function cycleText(room: Room): string {
+  return room.effective_cycle_days > 0
+    ? t('rooms.list.cycleDays', { days: room.effective_cycle_days })
+    : t('rooms.list.excluded');
+}
 
 async function loadConfig() {
   try {
@@ -429,15 +431,15 @@ async function sync() {
   try {
     preview = await syncDirectory(true);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Resynchronisation impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.resyncFailed')) });
     syncing.value = false;
     return;
   }
   $q.dialog({
-    title: "Resynchroniser depuis l'annuaire",
+    title: t('rooms.list.resync'),
     message: syncPreviewMessage(preview),
-    cancel: { flat: true, label: 'Annuler' },
-    ok: { label: 'Resynchroniser', color: 'primary' },
+    cancel: { flat: true, label: t('rooms.actions.cancel') },
+    ok: { label: t('rooms.list.resyncConfirm'), color: 'primary' },
     persistent: true,
   })
     .onOk(() => void runSync())
@@ -452,7 +454,7 @@ async function runSync() {
     $q.notify(syncNotification(res));
     await reload();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Resynchronisation impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.resyncFailed')) });
   } finally {
     syncing.value = false;
   }
@@ -463,35 +465,65 @@ const editingRoom = ref<Room | null>(null);
 const buildingFormOpen = ref(false);
 const editingBuilding = ref<Building | null>(null);
 
-const roomColumns: QTableColumn<Room>[] = [
-  { name: 'name', label: 'Salle', field: 'name', align: 'left' },
-  { name: 'building', label: 'Bâtiment', field: (r) => r.building?.name ?? '', align: 'left' },
+const roomColumns = computed<QTableColumn<Room>[]>(() => [
+  { name: 'name', label: t('rooms.list.columns.room'), field: 'name', align: 'left' },
+  {
+    name: 'building',
+    label: t('rooms.list.columns.building'),
+    field: (r) => r.building?.name ?? '',
+    align: 'left',
+  },
   {
     name: 'effective_location',
-    label: 'Emplacement',
+    label: t('rooms.list.columns.location'),
     field: 'effective_location',
     align: 'left',
   },
-  { name: 'machine_count', label: 'Postes', field: 'machine_count', align: 'center' },
-  { name: 'mismatch_count', label: 'Divergents', field: 'mismatch_count', align: 'center' },
-  { name: 'maintenance', label: 'Maintenance', field: 'maintenance_overdue', align: 'left' },
+  {
+    name: 'machine_count',
+    label: t('rooms.list.columns.machines'),
+    field: 'machine_count',
+    align: 'center',
+  },
+  {
+    name: 'mismatch_count',
+    label: t('rooms.list.columns.mismatched'),
+    field: 'mismatch_count',
+    align: 'center',
+  },
+  {
+    name: 'maintenance',
+    label: t('rooms.list.columns.maintenance'),
+    field: 'maintenance_overdue',
+    align: 'left',
+  },
   { name: 'actions', label: '', field: 'id', align: 'right' },
-];
+]);
 
-const buildingColumns: QTableColumn<Building>[] = [
-  { name: 'name', label: 'Bâtiment', field: 'name', align: 'left' },
-  { name: 'location', label: 'Emplacement', field: 'location', align: 'left' },
-  { name: 'room_count', label: 'Salles', field: 'room_count', align: 'center' },
-  { name: 'machine_count', label: 'Postes', field: 'machine_count', align: 'center' },
+const buildingColumns = computed<QTableColumn<Building>[]>(() => [
+  { name: 'name', label: t('rooms.list.columns.building'), field: 'name', align: 'left' },
+  { name: 'location', label: t('rooms.list.columns.location'), field: 'location', align: 'left' },
+  {
+    name: 'room_count',
+    label: t('rooms.list.columns.rooms'),
+    field: 'room_count',
+    align: 'center',
+  },
+  {
+    name: 'machine_count',
+    label: t('rooms.list.columns.machines'),
+    field: 'machine_count',
+    align: 'center',
+  },
   { name: 'actions', label: '', field: 'id', align: 'right' },
-];
+]);
 
 async function reload() {
   loading.value = true;
   try {
     [rooms.value, buildings.value] = await Promise.all([listRooms(), listBuildings()]);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.loadFailed')) });
   } finally {
     loading.value = false;
   }
@@ -517,21 +549,22 @@ function openBuildingForm(building: Building | null) {
 
 function confirmDeleteRoom(room: Room) {
   $q.dialog({
-    title: 'Supprimer la salle',
+    title: t('rooms.list.deleteRoomTitle'),
     message:
-      `Supprimer <b>${escapeHtml(room.name)}</b> ?<br>` +
-      `Ses ${room.machine_count} poste(s) restent dans le parc, sans salle.`,
+      t('rooms.list.deleteAsk', { name: `<b>${escapeHtml(room.name)}</b>` }) +
+      '<br>' +
+      t('rooms.list.deleteRoomBody', { count: room.machine_count }, room.machine_count),
     html: true,
     cancel: true,
-    ok: { label: 'Supprimer', color: 'negative' },
+    ok: { label: t('rooms.actions.delete'), color: 'negative' },
   }).onOk(() => {
     void (async () => {
       try {
         await deleteRoom(room.id);
-        $q.notify({ type: 'positive', message: 'Salle supprimée' });
+        $q.notify({ type: 'positive', message: t('rooms.list.roomDeleted') });
         await reload();
       } catch (e) {
-        $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Suppression impossible') });
+        $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.deleteFailed')) });
       }
     })();
   });
@@ -539,21 +572,22 @@ function confirmDeleteRoom(room: Room) {
 
 function confirmDeleteBuilding(building: Building) {
   $q.dialog({
-    title: 'Supprimer le bâtiment',
+    title: t('rooms.list.deleteBuildingTitle'),
     message:
-      `Supprimer <b>${escapeHtml(building.name)}</b> ?<br>` +
-      `Ses ${building.room_count} salle(s) restent, sans bâtiment, et gardent son emplacement.`,
+      t('rooms.list.deleteAsk', { name: `<b>${escapeHtml(building.name)}</b>` }) +
+      '<br>' +
+      t('rooms.list.deleteBuildingBody', { count: building.room_count }, building.room_count),
     html: true,
     cancel: true,
-    ok: { label: 'Supprimer', color: 'negative' },
+    ok: { label: t('rooms.actions.delete'), color: 'negative' },
   }).onOk(() => {
     void (async () => {
       try {
         await deleteBuilding(building.id);
-        $q.notify({ type: 'positive', message: 'Bâtiment supprimé' });
+        $q.notify({ type: 'positive', message: t('rooms.list.buildingDeleted') });
         await reload();
       } catch (e) {
-        $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Suppression impossible') });
+        $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.deleteFailed')) });
       }
     })();
   });

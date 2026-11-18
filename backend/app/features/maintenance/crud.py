@@ -216,6 +216,21 @@ async def lock_session(session: AsyncSession, maintenance_id: uuid.UUID) -> bool
     return locked.first() is not None
 
 
+# The code of the title of a line « left out of a visit », which the console
+# words in the reader's language (plan console bilingue). The French stays in
+# ``title`` beside it: an older console shows it, and so do the lines written
+# before the code.
+SKIPPED_TITLE_CODE = "maintenance.skipped"
+
+
+def skipped_title(room_name: str | None) -> tuple[str, dict[str, Any]]:
+    """The title of a line left out of a visit — « Maintenance non faite —
+    A101 » — and the parameters the console words it from."""
+    if room_name:
+        return f"Maintenance non faite — {room_name}", {"room": room_name}
+    return "Maintenance non faite", {}
+
+
 async def add_lines(
     session: AsyncSession,
     visit: Maintenance,
@@ -246,13 +261,15 @@ async def add_lines(
     # A poste left out of the visit keeps why, in its own journal — not as a
     # maintenance, which would move its cycle (audit U20). Linked to the
     # session all the same: the session shows who was skipped, and why.
-    where = f" — {title}" if title else ""
+    skipped_text, skipped_params = skipped_title(title)
     for machine_id, reason in (skipped or {}).items():
         session.add(
             Intervention(
                 machine_id=machine_id,
                 kind=InterventionKind.OTHER.value,
-                title=f"Maintenance non faite{where}",
+                title=skipped_text,
+                title_code=SKIPPED_TITLE_CODE,
+                title_params=skipped_params,
                 note=reason,
                 performed_by=visit.performed_by,
                 performed_at=visit.performed_at,

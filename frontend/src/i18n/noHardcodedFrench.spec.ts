@@ -71,24 +71,6 @@ const PENDING = new Set<string>([
   'utils/permissions.ts',
   'utils/userAgent.ts',
 
-  // --- Lot D : salles, maintenance, vérifications, tâches
-  'components/check/CheckCloseDialog.vue',
-  'components/check/CheckRequestDialog.vue',
-  'components/machine/MachineHistoryCard.vue',
-  'components/machine/MachineMaintenanceCard.vue',
-  'components/maintenance/MaintenanceSessionDialog.vue',
-  'components/maintenance/MaintenanceSessionViewDialog.vue',
-  'components/maintenance/MaintenanceSettingsDialog.vue',
-  'components/room/BuildingFormDialog.vue',
-  'components/room/RoomFormDialog.vue',
-  'pages/RoomDetailPage.vue',
-  'pages/RoomsPage.vue',
-  'pages/TasksPage.vue',
-  'services/checks.ts',
-  'services/interventions.ts',
-  'services/maintenance.ts',
-  'services/rooms.ts',
-
   // --- Lot E1 : coquille, connexion, tableau de bord, logiciels, mise en forme
   'components/CardLoadError.vue',
   'components/LoadErrorBanner.vue',

@@ -4,7 +4,7 @@
   <q-dialog :model-value="modelValue" @update:model-value="(v) => emit('update:modelValue', v)">
     <q-card style="width: 480px; max-width: 95vw">
       <q-card-section class="text-h6">
-        {{ check ? 'Modifier la demande' : 'Demander une vérification' }}
+        {{ check ? t('checks.request.edit') : t('checks.request.ask') }}
       </q-card-section>
       <q-card-section v-if="subtitle" class="q-pt-none text-body2 text-muted">
         {{ subtitle }}
@@ -16,27 +16,32 @@
             :options="userOptions"
             emit-value
             map-options
-            label="Affecter à"
+            :label="t('checks.request.assignTo')"
             outlined
             dense
             clearable
-            hint="Personne : la demande reste à prendre par qui veut"
+            :hint="t('checks.request.assignHint')"
           />
           <q-input
             v-model="form.instructions"
-            label="Consignes"
+            :label="t('checks.request.instructions')"
             outlined
             dense
             autogrow
             type="textarea"
             maxlength="5000"
             autofocus
-            hint="Ce qu'il faut regarder, et pourquoi"
+            :hint="t('checks.request.instructionsHint')"
           />
         </q-card-section>
         <q-card-actions align="right" class="q-px-md q-pb-md">
-          <q-btn v-close-popup flat label="Annuler" />
-          <q-btn type="submit" color="primary" label="Enregistrer" :loading="saving" />
+          <q-btn v-close-popup flat :label="t('checks.actions.cancel')" />
+          <q-btn
+            type="submit"
+            color="primary"
+            :label="t('checks.actions.save')"
+            :loading="saving"
+          />
         </q-card-actions>
       </q-form>
     </q-card>
@@ -44,10 +49,11 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, toRefs, watch } from 'vue';
+import { computed, reactive, ref, toRefs, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { listAssignableUsers, type Check, type CheckPayload } from 'src/services/checks';
 import { apiErrorMessage } from 'src/services/errors';
+import { t } from 'src/i18n';
 import { useDraft } from 'src/composables/useDraft';
 
 const props = defineProps<{
@@ -67,7 +73,22 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>();
 const $q = useQuasar();
 const saving = ref(false);
 const form = reactive({ assigned_to_id: null as string | null, instructions: '' });
-const userOptions = ref<{ label: string; value: string }[]>([]);
+// Who can be given the task, as the server lists them.
+const assignable = ref<{ label: string; value: string }[]>([]);
+// The current assignee, deactivated since (or out of reach), is not among
+// the choices: named, not shown as a raw id — and kept if left alone. Worded
+// at render time, in the language shown.
+const userOptions = computed(() => {
+  const current = props.check?.assigned_to;
+  if (!current || assignable.value.some((o) => o.value === current.id)) return assignable.value;
+  const label =
+    current.active === false
+      ? t('checks.request.deactivated', { name: current.name })
+      : current.reachable === false
+        ? t('checks.request.unreachable', { name: current.name })
+        : current.name;
+  return [{ label, value: current.id }, ...assignable.value];
+});
 
 // What is being typed survives a session that ends mid-form: the console goes
 // to the login page and the dialog with it; reopened, the text is back — for
@@ -111,26 +132,11 @@ watch(
 
 async function loadUsers() {
   try {
-    const options = (await listAssignableUsers(props.check?.machine_id ?? props.machineId)).map(
+    assignable.value = (await listAssignableUsers(props.check?.machine_id ?? props.machineId)).map(
       (u) => ({ label: u.name, value: u.id }),
     );
-    // The current assignee, deactivated since (or out of reach), is not among
-    // the choices: named, not shown as a raw id — and kept if left alone.
-    const current = props.check?.assigned_to;
-    if (current && !options.some((o) => o.value === current.id)) {
-      options.unshift({
-        label:
-          current.active === false
-            ? `${current.name} (désactivé)`
-            : current.reachable === false
-              ? `${current.name} (ne voit plus ce poste)`
-              : current.name,
-        value: current.id,
-      });
-    }
-    userOptions.value = options;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Comptes indisponibles') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('checks.request.usersFailed')) });
   }
 }
 
@@ -143,7 +149,7 @@ async function submit() {
     });
     emit('update:modelValue', false);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('checks.request.saveFailed')) });
   } finally {
     saving.value = false;
   }

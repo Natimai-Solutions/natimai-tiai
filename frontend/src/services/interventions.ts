@@ -1,4 +1,5 @@
 import { api } from 'boot/axios';
+import { currentLocale, t, type Locale } from 'src/i18n';
 
 /**
  * The journal of a poste: every human intervention on it, whatever the cause.
@@ -14,6 +15,14 @@ export interface Intervention {
   machine_id: string;
   kind: InterventionKind | (string & {});
   title: string | null;
+  /**
+   * Set when the server wrote the title itself (« Maintenance non faite —
+   * A101 »): the console words it from the code and its parameters, `title`
+   * keeping the server's French. Absent from an older server, null on a
+   * title typed by someone (an edit clears it).
+   */
+  title_code?: string | null;
+  title_params?: Record<string, unknown> | null;
   note: string | null;
   /** The acting account's e-mail, kept as text: the entry outlives the account. */
   performed_by: string;
@@ -42,41 +51,82 @@ export interface InterventionPayload {
   performed_at?: string | null;
 }
 
+/** The kinds, in the order the form offers them; each label is `interventions.kinds.<kind>`. */
 export const INTERVENTION_KINDS: readonly {
   value: InterventionKind;
-  label: string;
   icon: string;
   color: string;
 }[] = [
-  { value: 'incident', label: 'Panne / incident', icon: 'report_problem', color: 'negative' },
-  { value: 'software_install', label: 'Installation logicielle', icon: 'apps', color: 'primary' },
-  { value: 'upgrade', label: 'Mise à niveau', icon: 'upgrade', color: 'primary' },
-  { value: 'maintenance', label: 'Maintenance', icon: 'build', color: 'positive' },
-  { value: 'verification', label: 'Vérification', icon: 'fact_check', color: 'orange' },
-  { value: 'other', label: 'Autre', icon: 'notes', color: 'grey-7' },
+  { value: 'incident', icon: 'report_problem', color: 'negative' },
+  { value: 'software_install', icon: 'apps', color: 'primary' },
+  { value: 'upgrade', icon: 'upgrade', color: 'primary' },
+  { value: 'maintenance', icon: 'build', color: 'positive' },
+  { value: 'verification', icon: 'fact_check', color: 'orange' },
+  { value: 'other', icon: 'notes', color: 'grey-7' },
 ];
 
-export function interventionKindLabel(kind: string): string {
-  return INTERVENTION_KINDS.find((k) => k.value === kind)?.label ?? kind;
+function isKind(kind: string): kind is InterventionKind {
+  return INTERVENTION_KINDS.some((k) => k.value === kind);
+}
+
+/** A kind's label — in `locale` when given, else in the language shown; an unknown kind as is. */
+export function interventionKindLabel(kind: string, locale?: Locale): string {
+  if (!isKind(kind)) return kind;
+  const key = `interventions.kinds.${kind}`;
+  return locale ? t(key, {}, { locale }) : t(key);
+}
+
+/** The titles the server writes itself, by their code (`title_code`). */
+const TITLE_CODES: Record<string, (params: Record<string, unknown>) => string> = {
+  'maintenance.skipped': (params) =>
+    typeof params.room === 'string' && params.room
+      ? t('interventions.titles.maintenanceSkippedIn', { room: params.room })
+      : t('interventions.titles.maintenanceSkipped'),
+};
+
+/**
+ * A line's title in the reader's language when the server wrote it under a
+ * code this console knows; otherwise as stored — typed by someone, or
+ * written before the codes (plan console bilingue: old rows keep their
+ * French).
+ */
+export function interventionTitle(
+  item: Pick<Intervention, 'title' | 'title_code' | 'title_params'>,
+): string | null {
+  const word = item.title_code ? TITLE_CODES[item.title_code] : undefined;
+  return word ? word(item.title_params ?? {}) : item.title;
+}
+
+/**
+ * The title without a leading `label` followed by a dash, or null when it
+ * does not start with it. Only the whole word followed by a dash: «
+ * Maintenance non faite » stays.
+ */
+function withoutKind(title: string, label: string): string | null {
+  if (!title.toLocaleLowerCase('fr-FR').startsWith(label.toLocaleLowerCase('fr-FR'))) return null;
+  const rest = title.slice(label.length);
+  if (rest.trim() && !/^\s*[—–:-]/.test(rest)) return null;
+  return rest.replace(/^\s*[—–:-]\s*/, '').trim();
 }
 
 /**
  * « Maintenance — A101 »: the kind, then the title — without repeating the
  * kind when the title starts with it, as the lines written before the server
  * stopped doing so do (« Maintenance — Maintenance — A101 », « Vérification —
- * Vérification »).
+ * Vérification »). Those lines are in French whatever the reader's language:
+ * the French label is looked for too.
  */
-export function interventionHeading(item: Pick<Intervention, 'kind' | 'title'>): string {
+export function interventionHeading(
+  item: Pick<Intervention, 'kind' | 'title'> &
+    Partial<Pick<Intervention, 'title_code' | 'title_params'>>,
+): string {
   const label = interventionKindLabel(item.kind);
-  let title = (item.title ?? '').trim();
-  if (title.toLocaleLowerCase('fr-FR').startsWith(label.toLocaleLowerCase('fr-FR'))) {
-    // Only the whole word followed by a dash: « Maintenance non faite » stays.
-    const rest = title.slice(label.length);
-    if (!rest.trim() || /^\s*[—–:-]/.test(rest)) {
-      title = rest.replace(/^\s*[—–:-]\s*/, '').trim();
-    }
-  }
-  return title ? `${label} — ${title}` : label;
+  let title = (interventionTitle({ title_code: null, title_params: null, ...item }) ?? '').trim();
+  const stripped =
+    withoutKind(title, label) ??
+    (currentLocale() === 'fr' ? null : withoutKind(title, interventionKindLabel(item.kind, 'fr')));
+  if (stripped !== null) title = stripped;
+  return title ? t('interventions.heading', { label, title }) : label;
 }
 
 export function interventionKindIcon(kind: string): string {

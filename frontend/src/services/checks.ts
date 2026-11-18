@@ -1,4 +1,5 @@
 import { api } from 'boot/axios';
+import { t } from 'src/i18n';
 
 /**
  * Verification requests: "go and look at this poste", assigned or not, closed
@@ -27,7 +28,9 @@ export function effectiveAssignee(a: UserRef | null | undefined): UserRef | null
 /** Why a check named after someone is « à prendre »; empty when it is not. */
 export function formerAssigneeNote(a: UserRef | null | undefined): string {
   if (!a || a.reachable !== false) return '';
-  return a.active === false ? `${a.name}, désactivé` : `${a.name} ne voit plus ce poste`;
+  return a.active === false
+    ? t('checks.former.deactivated', { name: a.name })
+    : t('checks.former.unreachable', { name: a.name });
 }
 
 export interface CheckMachineRef {
@@ -50,6 +53,12 @@ export interface Check {
   closed_at: string | null;
   closed_by: string | null;
   closing_note: string | null;
+  /**
+   * Set when the server wrote the closing note itself (a merge): the console
+   * words it, `closing_note` keeping the server's French. Absent from an
+   * older server, null on a note typed by someone.
+   */
+  closing_note_code?: string | null;
   /** Filled on the task lists, where no fiche is open. */
   machine: CheckMachineRef | null;
 }
@@ -154,10 +163,27 @@ export function bulkCheckNotification(res: { created: number; skipped: number })
   type: 'positive' | 'warning';
   message: string;
 } {
-  const created = `${res.created} vérification(s) demandée(s)`;
+  const created = t('checks.bulk.created', { count: res.created }, res.created);
   if (!res.skipped) return { type: 'positive', message: created };
   return {
     type: res.created ? 'warning' : 'warning',
-    message: `${created} — ${res.skipped} poste(s) en avaient déjà une ouverte`,
+    message: t('checks.bulk.skipped', { created, count: res.skipped }, res.skipped),
   };
+}
+
+/** The codes of the closing notes the server writes itself, and their text. */
+const CLOSING_NOTES: Record<string, string> = {
+  'check.closed.merged': 'checks.closingNotes.merged',
+};
+
+/**
+ * A check's closing note in the reader's language when the server wrote it
+ * (`closing_note_code`); what was typed — or written by an older server, or
+ * under a code this console does not know — as it is.
+ */
+export function closingNoteText(
+  check: Pick<Check, 'closing_note' | 'closing_note_code'>,
+): string | null {
+  const key = check.closing_note_code ? CLOSING_NOTES[check.closing_note_code] : undefined;
+  return key ? t(key) : check.closing_note;
 }

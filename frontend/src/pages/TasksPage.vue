@@ -1,7 +1,7 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <h1 class="text-h5 q-my-none col-auto">Mes tâches</h1>
+      <h1 class="text-h5 q-my-none col-auto">{{ t('tasks.title') }}</h1>
       <q-space />
       <!-- Wrapped in its own column: the gutter pads every direct child of the
            row, and on a toggle that padding showed as a white band inside the
@@ -20,16 +20,15 @@
     </div>
 
     <div class="text-body2 text-muted q-mb-md" style="max-width: 760px">
-      Les vérifications demandées sur des postes et les maintenances à faire : les vôtres, celles
-      que personne n'a encore prises, ou toutes.
+      {{ t('tasks.intro') }}
     </div>
     <!-- Each section for who may read it: an account that only holds the
          maintenance (no check:read) is sent here by its reminders too. -->
     <div v-if="canReadChecks" class="row items-center q-mb-sm">
-      <div class="text-h6">Vérifications</div>
+      <div class="text-h6">{{ t('tasks.checks.title') }}</div>
       <q-space />
       <div v-if="!loading" class="text-caption text-muted" data-test="checks-total">
-        {{ checksTotal }} vérification(s)
+        {{ t('tasks.checks.total', { count: checksTotal }, checksTotal) }}
       </div>
     </div>
 
@@ -43,7 +42,7 @@
       hide-pagination
       flat
       bordered
-      no-data-label="Rien à faire."
+      :no-data-label="t('tasks.checks.nothing')"
       :grid="$q.screen.lt.sm"
     >
       <!-- On a phone, a card per check with « Clore » in sight, rather than
@@ -56,7 +55,7 @@
                 :to="{ name: 'machine-detail', params: { id: props.row.machine_id } }"
                 class="row-link text-weight-medium"
               >
-                {{ props.row.machine?.hostname ?? 'Poste' }}
+                {{ props.row.machine?.hostname ?? t('tasks.checks.machine') }}
               </router-link>
               <div class="text-caption text-muted">{{ placeLabel(props.row.machine) }}</div>
               <div class="q-mt-xs" style="white-space: pre-line">
@@ -67,8 +66,10 @@
                   effectiveAssignee(props.row.assigned_to)
                     ? props.row.assigned_to!.name
                     : formerAssigneeNote(props.row.assigned_to)
-                      ? `à prendre (${formerAssigneeNote(props.row.assigned_to)})`
-                      : 'à prendre'
+                      ? t('tasks.checks.toTakeWhy', {
+                          why: formerAssigneeNote(props.row.assigned_to),
+                        })
+                      : t('tasks.checks.toTake')
                 }}
                 ·
                 {{ timeAgoLabel(props.row.created_at) }}
@@ -80,17 +81,23 @@
                 flat
                 dense
                 no-caps
-                label="Me l'affecter"
+                :label="t('tasks.checks.takeOver')"
                 @click="takeOver(props.row)"
               />
-              <q-btn flat dense no-caps label="Modifier" @click="openEdit(props.row)" />
+              <q-btn
+                flat
+                dense
+                no-caps
+                :label="t('tasks.checks.edit')"
+                @click="openEdit(props.row)"
+              />
               <q-btn
                 unelevated
                 dense
                 no-caps
                 color="primary"
                 icon="task_alt"
-                label="Clore"
+                :label="t('tasks.checks.close')"
                 @click="openClose(props.row)"
               />
             </q-card-actions>
@@ -104,7 +111,7 @@
               :to="{ name: 'machine-detail', params: { id: props.row.machine_id } }"
               class="row-link"
             >
-              {{ props.row.machine?.hostname ?? 'Poste' }}
+              {{ props.row.machine?.hostname ?? t('tasks.checks.machine') }}
             </router-link>
           </div>
           <div class="text-caption text-muted" style="white-space: normal; max-width: 280px">
@@ -123,7 +130,7 @@
             {{ props.row.assigned_to.name }}
           </span>
           <template v-else>
-            <q-badge color="grey-6">à prendre</q-badge>
+            <q-badge color="grey-6">{{ t('tasks.checks.toTake') }}</q-badge>
             <div v-if="formerAssigneeNote(props.row.assigned_to)" class="text-caption text-muted">
               {{ formerAssigneeNote(props.row.assigned_to) }}
             </div>
@@ -133,7 +140,9 @@
       <template #body-cell-created_at="props">
         <q-td :props="props">
           {{ timeAgoLabel(props.value) }}
-          <div class="text-caption text-muted">par {{ props.row.requested_by }}</div>
+          <div class="text-caption text-muted">
+            {{ t('tasks.checks.by', { name: props.row.requested_by }) }}
+          </div>
         </q-td>
       </template>
       <template #body-cell-actions="props">
@@ -143,12 +152,12 @@
               flat
               dense
               color="primary"
-              label="Clore"
+              :label="t('tasks.checks.close')"
               icon="task_alt"
               class="q-mr-xs"
               @click="openClose(props.row)"
             />
-            <q-btn flat dense round icon="more_vert" aria-label="Autres actions">
+            <q-btn flat dense round icon="more_vert" :aria-label="t('tasks.checks.moreActions')">
               <q-menu>
                 <q-list style="min-width: 200px">
                   <q-item
@@ -158,11 +167,11 @@
                     @click="takeOver(props.row)"
                   >
                     <q-item-section avatar><q-icon name="person" /></q-item-section>
-                    <q-item-section>Me l'affecter</q-item-section>
+                    <q-item-section>{{ t('tasks.checks.takeOver') }}</q-item-section>
                   </q-item>
                   <q-item v-close-popup clickable @click="openEdit(props.row)">
                     <q-item-section avatar><q-icon name="edit" /></q-item-section>
-                    <q-item-section>Réaffecter / modifier</q-item-section>
+                    <q-item-section>{{ t('tasks.checks.reassign') }}</q-item-section>
                   </q-item>
                 </q-list>
               </q-menu>
@@ -175,10 +184,10 @@
     <!-- Maintenance: rooms with something due, then the loose postes. -->
     <div v-if="auth.can('maintenance', 'read')" :class="canReadChecks ? 'q-mt-xl' : ''">
       <div class="row items-center q-mb-sm">
-        <div class="text-h6">Maintenances à faire</div>
+        <div class="text-h6">{{ t('tasks.maintenance.title') }}</div>
         <q-space />
         <div v-if="due" class="text-caption text-muted">
-          {{ due.overdue }} en retard · {{ due.due_soon }} à échéance
+          {{ t('tasks.maintenance.counts', { overdue: due.overdue, dueSoon: due.due_soon }) }}
         </div>
       </div>
       <q-list v-if="due && (dueRooms.length || dueMachines.length)" bordered separator>
@@ -196,25 +205,36 @@
                 >{{ r.name }}
               </q-item-label>
               <q-item-label caption>
-                {{ r.total }} poste(s) · cycle {{ r.cycle_days }} jours ·
-                {{ r.owner ? r.owner.name : 'sans responsable' }}
+                {{
+                  t(
+                    'tasks.maintenance.summary',
+                    {
+                      count: r.total,
+                      days: r.cycle_days,
+                      owner: r.owner ? r.owner.name : t('tasks.maintenance.noOwner'),
+                    },
+                    r.total,
+                  )
+                }}
                 {{ r.next_due_at ? ` · ${dueLabel(r.next_due_at)}` : '' }}
               </q-item-label>
               <!-- Postes whose own owner or cycle overrides the room's: their
                    group says what they resolve to, not the room's. -->
               <q-item-label v-if="r.level === 'machine'" caption class="text-italic">
-                postes à réglage propre
+                {{ t('tasks.maintenance.ownSettings') }}
               </q-item-label>
             </q-item-section>
             <q-item-section side>
               <div>
-                <q-badge v-if="r.overdue" color="negative" class="q-mr-xs"
-                  >{{ r.overdue }} en retard</q-badge
-                >
-                <q-badge v-if="r.due_soon" color="orange" class="q-mr-xs"
-                  >{{ r.due_soon }} à échéance</q-badge
-                >
-                <q-badge v-if="!r.overdue && !r.due_soon" color="positive">à jour</q-badge>
+                <q-badge v-if="r.overdue" color="negative" class="q-mr-xs">{{
+                  t('tasks.maintenance.overdue', { count: r.overdue })
+                }}</q-badge>
+                <q-badge v-if="r.due_soon" color="orange" class="q-mr-xs">{{
+                  t('tasks.maintenance.dueSoon', { count: r.due_soon })
+                }}</q-badge>
+                <q-badge v-if="!r.overdue && !r.due_soon" color="positive">{{
+                  t('tasks.maintenance.upToDate')
+                }}</q-badge>
               </div>
             </q-item-section>
           </template>
@@ -231,7 +251,7 @@
                     dense
                     no-caps
                     icon="person"
-                    label="Me l'affecter"
+                    :label="t('tasks.maintenance.takeOver')"
                     class="q-mr-sm"
                     @click="takeRoom(r)"
                   />
@@ -241,7 +261,7 @@
                     dense
                     no-caps
                     icon="forward"
-                    label="Transmettre…"
+                    :label="t('tasks.maintenance.handOver')"
                     class="q-mr-sm"
                     @click="openHandOver(r)"
                   />
@@ -250,7 +270,7 @@
                   flat
                   dense
                   icon="meeting_room"
-                  label="Voir la salle"
+                  :label="t('tasks.maintenance.viewRoom')"
                   class="q-mr-sm"
                   :to="{ name: 'room-detail', params: { id: r.id } }"
                 />
@@ -259,7 +279,7 @@
                   dense
                   color="primary"
                   icon="build"
-                  label="Effectuer la maintenance"
+                  :label="t('tasks.maintenance.doMaintenance')"
                   @click="openSession(r)"
                 />
               </div>
@@ -287,16 +307,18 @@
         >
           <q-item-section>
             <q-item-label>{{ m.hostname ?? m.id }}</q-item-label>
-            <q-item-label caption
-              >sans salle · {{ m.owner ? m.owner.name : 'sans responsable' }}</q-item-label
-            >
+            <q-item-label caption>{{
+              t('tasks.maintenance.noRoom', {
+                owner: m.owner ? m.owner.name : t('tasks.maintenance.noOwner'),
+              })
+            }}</q-item-label>
           </q-item-section>
           <q-item-section side>
             <q-badge :color="maintenanceStateColor(m.state)" :label="stateWithDate(m)" />
           </q-item-section>
         </q-item>
       </q-list>
-      <div v-else-if="due" class="text-muted">Rien à faire.</div>
+      <div v-else-if="due" class="text-muted">{{ t('tasks.maintenance.nothing') }}</div>
     </div>
 
     <MaintenanceSettingsDialog
@@ -305,7 +327,7 @@
       :room-id="handOverRoom?.id ?? null"
       :cycle-days="handOverSettings?.maintenance_cycle_days ?? null"
       :owner-id="handOverSettings?.maintenance_owner?.id ?? null"
-      inherit-hint="Vide : le responsable par défaut du parc"
+      :inherit-hint="t('tasks.maintenance.inheritHint')"
       :save="saveHandOver"
     />
     <MaintenanceSessionDialog
@@ -361,41 +383,55 @@ import {
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { timeAgoLabel } from 'src/utils/format';
+import { t } from 'src/i18n';
 
 const $q = useQuasar();
 const auth = useAuthStore();
 
 const scope = ref<'me' | 'none' | 'all'>('me');
-const scopeOptions = [
-  { label: 'Les miennes', value: 'me' },
-  { label: 'À prendre', value: 'none' },
-  { label: 'Toutes', value: 'all' },
-];
+const scopeOptions = computed(() =>
+  (['me', 'none', 'all'] as const).map((value) => ({ label: t(`tasks.scopes.${value}`), value })),
+);
 const rows = ref<Check[]>([]);
 const checksTotal = ref(0);
 const loading = ref(false);
 const canWrite = computed(() => auth.can('check', 'write'));
 const canReadChecks = computed(() => auth.can('check', 'read'));
 
-const columns: QTableColumn<Check>[] = [
-  { name: 'machine', label: 'Poste', field: (r) => r.machine?.hostname ?? '', align: 'left' },
-  { name: 'instructions', label: 'Consignes', field: 'instructions', align: 'left' },
+const columns = computed<QTableColumn<Check>[]>(() => [
+  {
+    name: 'machine',
+    label: t('tasks.checks.columns.machine'),
+    field: (r) => r.machine?.hostname ?? '',
+    align: 'left',
+  },
+  {
+    name: 'instructions',
+    label: t('tasks.checks.columns.instructions'),
+    field: 'instructions',
+    align: 'left',
+  },
   {
     name: 'assigned_to',
-    label: 'Affectée à',
+    label: t('tasks.checks.columns.assignedTo'),
     field: (r) => effectiveAssignee(r.assigned_to)?.name ?? '',
     align: 'left',
   },
-  { name: 'created_at', label: 'Demandée', field: 'created_at', align: 'left' },
+  {
+    name: 'created_at',
+    label: t('tasks.checks.columns.requested'),
+    field: 'created_at',
+    align: 'left',
+  },
   { name: 'actions', label: '', field: 'id', align: 'right' },
-];
+]);
 
 function placeLabel(m: CheckMachineRef | null): string {
   if (!m) return '';
   const parts = [m.building_name, m.room_name].filter(Boolean);
   const place = parts.join(' › ');
   if (place && m.location) return `${place} · ${m.location}`;
-  return place || m.location || 'sans salle';
+  return place || m.location || t('tasks.checks.noRoom');
 }
 
 // --- Maintenance
@@ -441,16 +477,23 @@ async function takeRoom(r: DueRoom) {
       }
       $q.notify({
         type: 'positive',
-        message: `${r.machines.length} poste(s) de ${r.name} affecté(s) à vous`,
+        message: t(
+          'tasks.maintenance.machinesTaken',
+          { count: r.machines.length, room: r.name },
+          r.machines.length,
+        ),
       });
     } else {
       await updateRoomMaintenance(r.id, { maintenance_owner_id: me });
-      $q.notify({ type: 'positive', message: `Salle ${r.name} affectée à vous` });
+      $q.notify({ type: 'positive', message: t('tasks.maintenance.roomTaken', { room: r.name }) });
     }
     notifyTasksChanged();
     await reload();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
+    $q.notify({
+      type: 'negative',
+      message: apiErrorMessage(e, t('tasks.maintenance.takeFailed')),
+    });
   }
 }
 
@@ -463,13 +506,13 @@ async function openHandOver(r: DueRoom) {
     handOverRoom.value = r;
     handOverOpen.value = true;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Salle indisponible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('tasks.maintenance.roomFailed')) });
   }
 }
 async function saveHandOver(payload: MaintenanceSettingsPayload) {
   if (!handOverRoom.value) return;
   await updateRoomMaintenance(handOverRoom.value.id, payload);
-  $q.notify({ type: 'positive', message: 'Salle transmise' });
+  $q.notify({ type: 'positive', message: t('tasks.maintenance.handedOver') });
   notifyTasksChanged();
   await reload();
 }
@@ -484,7 +527,7 @@ async function loadDue() {
   try {
     due.value = await getDue(scope.value === 'all' ? undefined : scope.value);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Maintenances indisponibles') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('tasks.maintenance.loadFailed')) });
   }
 }
 
@@ -504,7 +547,7 @@ async function reload() {
     rows.value = res.items;
     checksTotal.value = res.total;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('tasks.checks.loadFailed')) });
   } finally {
     loading.value = false;
   }
@@ -528,7 +571,7 @@ function openEdit(check: Check) {
 async function saveEdit(payload: CheckPayload) {
   if (!editing.value) return;
   await updateCheck(editing.value.id, payload);
-  $q.notify({ type: 'positive', message: 'Demande mise à jour' });
+  $q.notify({ type: 'positive', message: t('tasks.checks.updated') });
   notifyTasksChanged();
   await reload();
 }
@@ -536,11 +579,11 @@ async function takeOver(check: Check) {
   if (!auth.user) return;
   try {
     await updateCheck(check.id, { assigned_to_id: auth.user.id });
-    $q.notify({ type: 'positive', message: 'Vérification affectée à vous' });
+    $q.notify({ type: 'positive', message: t('tasks.checks.taken') });
     notifyTasksChanged();
     await reload();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('tasks.checks.takeFailed')) });
   }
 }
 

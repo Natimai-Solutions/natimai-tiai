@@ -122,6 +122,9 @@ class CheckOut(BaseModel):
     closed_at: datetime | None
     closed_by: str | None
     closing_note: str | None
+    # Set when the server wrote the note itself (a merge): the console words
+    # it in the reader's language, ``closing_note`` keeping the French.
+    closing_note_code: str | None = None
     # Filled on the task lists, where the reader has no fiche open.
     machine: MachineRef | None = None
 
@@ -306,6 +309,7 @@ async def _out(
             closed_at=r.closed_at,
             closed_by=r.closed_by,
             closing_note=r.closing_note,
+            closing_note_code=r.closing_note_code,
             machine=machines.get(r.machine_id),
         )
         for r in rows

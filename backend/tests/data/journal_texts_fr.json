@@ -1,0 +1,22 @@
+[
+ {
+  "kind": "intervention_title",
+  "code": "maintenance.skipped",
+  "params": {
+   "room": "A101"
+  },
+  "text": "Maintenance non faite — A101"
+ },
+ {
+  "kind": "intervention_title",
+  "code": "maintenance.skipped",
+  "params": {},
+  "text": "Maintenance non faite"
+ },
+ {
+  "kind": "closing_note",
+  "code": "check.closed.merged",
+  "params": {},
+  "text": "Fermée par la fusion du poste dans un autre."
+ }
+]
