@@ -633,7 +633,7 @@ async def send_test_email(
     _reject_secret_redirect(stored, unsaved)
     policy = mail.resolve(stored.merged(unsaved))
     to = payload.to or current.email
-    result = await probe.send_test(policy, to)
+    result = await probe.send_test(policy, to, language=current.language)
     audit.record(
         session,
         actor=current.email,

@@ -3,9 +3,9 @@
     <q-card style="width: 900px; max-width: 95vw">
       <q-card-section class="row items-center q-pb-none">
         <div>
-          <div class="text-h6">Exporter le parc</div>
+          <div class="text-h6">{{ t('exports.machines.title') }}</div>
           <div class="text-caption text-muted">
-            {{ countLabel }} — les filtres de la liste s'appliquent, pas la pagination.
+            {{ t('exports.machines.caption', { count: countLabel }) }}
           </div>
         </div>
         <q-space />
@@ -27,14 +27,14 @@
         <!-- Left: what can be exported, by section. A click adds; the chosen
              ones stay listed but greyed, so the section still reads as a whole. -->
         <div class="col-12 col-sm-6">
-          <div class="text-subtitle2 q-mb-xs">Colonnes disponibles</div>
+          <div class="text-subtitle2 q-mb-xs">{{ t('exports.machines.available') }}</div>
           <q-input
             v-model="filter"
-            aria-label="Rechercher une colonne"
+            :aria-label="t('exports.machines.search')"
             dense
             outlined
             clearable
-            placeholder="Rechercher une colonne…"
+            :placeholder="t('exports.machines.searchPlaceholder')"
             class="q-mb-sm"
           >
             <template #prepend><q-icon name="search" /></template>
@@ -57,7 +57,9 @@
                 </q-item>
               </template>
               <q-item v-if="!availableSections.length">
-                <q-item-section class="text-muted">Aucune colonne ne correspond.</q-item-section>
+                <q-item-section class="text-muted">{{
+                  t('exports.machines.noMatch')
+                }}</q-item-section>
               </q-item>
             </q-list>
           </q-scroll-area>
@@ -66,15 +68,24 @@
         <!-- Right: what will be exported, in the order it will appear. -->
         <div class="col-12 col-sm-6">
           <div class="row items-center q-mb-xs">
-            <div class="text-subtitle2">Colonnes exportées ({{ selected.length }})</div>
+            <div class="text-subtitle2">
+              {{ t('exports.machines.exported', { count: selected.length }) }}
+            </div>
             <q-space />
-            <q-btn flat dense no-caps size="sm" label="Par défaut" @click="resetToDefaults" />
             <q-btn
               flat
               dense
               no-caps
               size="sm"
-              label="Tout retirer"
+              :label="t('exports.machines.defaults')"
+              @click="resetToDefaults"
+            />
+            <q-btn
+              flat
+              dense
+              no-caps
+              size="sm"
+              :label="t('exports.machines.removeAll')"
               :disable="!selected.length"
               @click="selected = []"
             />
@@ -86,7 +97,7 @@
                 <q-item-section side>
                   <div class="row no-wrap">
                     <q-btn
-                      aria-label="Monter la colonne"
+                      :aria-label="t('exports.machines.moveUp')"
                       flat
                       dense
                       round
@@ -96,7 +107,7 @@
                       @click="move(index, -1)"
                     />
                     <q-btn
-                      aria-label="Descendre la colonne"
+                      :aria-label="t('exports.machines.moveDown')"
                       flat
                       dense
                       round
@@ -106,7 +117,7 @@
                       @click="move(index, 1)"
                     />
                     <q-btn
-                      aria-label="Retirer la colonne"
+                      :aria-label="t('exports.machines.remove')"
                       flat
                       dense
                       round
@@ -119,7 +130,7 @@
               </q-item>
               <q-item v-if="!selected.length">
                 <q-item-section class="text-muted">
-                  Aucune colonne : choisissez-en à gauche, ou revenez aux colonnes par défaut.
+                  {{ t('exports.machines.noneChosen') }}
                 </q-item-section>
               </q-item>
             </q-list>
@@ -128,7 +139,7 @@
       </q-card-section>
 
       <q-card-actions align="right">
-        <q-btn v-close-popup flat no-caps label="Annuler" />
+        <q-btn v-close-popup flat no-caps :label="t('exports.machines.cancel')" />
         <q-btn
           color="primary"
           no-caps
@@ -144,8 +155,8 @@
 </template>
 
 <script setup lang="ts">
-import { intlTag } from 'src/i18n';
-import { computed, ref } from 'vue';
+import { currentLocale, intlTag, t, type Locale } from 'src/i18n';
+import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import {
   exportMachines,
@@ -163,6 +174,10 @@ import { downloadBlob } from 'src/utils/format';
  * moves columns across and reorders them. The choice is remembered in the
  * browser, since the columns a meeting wants are the same from one week to
  * the next.
+ *
+ * The catalogue's labels are the server's, in the language the console
+ * shows (`lang`): the headers the file will carry. A change of language
+ * reloads them; the choice, made of keys, stays.
  */
 const props = defineProps<{
   /** The list's current filters — what bounds the export. */
@@ -192,12 +207,15 @@ const exporting = ref(false);
 
 const byKey = computed(() => new Map(catalogue.value.map((c) => [c.key, c])));
 
+// The language the catalogue was read in: another one reloads it.
+const loadedIn = ref<Locale | null>(null);
+
 const countLabel = computed(() =>
-  props.count === 1 ? '1 poste' : `${props.count.toLocaleString(intlTag())} postes`,
+  t('exports.machines.count', { count: props.count.toLocaleString(intlTag()) }, props.count),
 );
 
 const exportLabel = computed(() =>
-  format.value === 'xlsx' ? 'Exporter en Excel' : 'Exporter en CSV',
+  format.value === 'xlsx' ? t('exports.machines.exportXlsx') : t('exports.machines.exportCsv'),
 );
 
 /** The catalogue in sections, narrowed by the search box. */
@@ -271,17 +289,38 @@ function remember() {
   }
 }
 
-async function onOpen() {
-  filter.value = '';
-  if (catalogue.value.length) return;
+async function loadCatalogue() {
+  const locale = currentLocale();
   try {
-    catalogue.value = await listExportColumns();
-    resetToDefaults();
-    restore();
+    const columns = await listExportColumns();
+    // Answered after another change of language: that load's answer wins.
+    if (locale !== currentLocale()) return;
+    const first = !catalogue.value.length;
+    catalogue.value = columns;
+    loadedIn.value = locale;
+    loadError.value = '';
+    if (first) {
+      resetToDefaults();
+      restore();
+    }
   } catch (e) {
-    loadError.value = apiErrorMessage(e, 'Impossible de charger la liste des colonnes');
+    loadError.value = apiErrorMessage(e, t('exports.machines.loadError'));
   }
 }
+
+async function onOpen() {
+  filter.value = '';
+  if (catalogue.value.length && loadedIn.value === currentLocale()) return;
+  await loadCatalogue();
+}
+
+// The language changed while the dialog is open: the labels follow.
+watch(
+  () => currentLocale(),
+  () => {
+    if (open.value && catalogue.value.length) void loadCatalogue();
+  },
+);
 
 async function doExport() {
   exporting.value = true;
@@ -293,11 +332,11 @@ async function doExport() {
       columns: selected.value,
       ...(tz ? { tz } : {}),
     });
-    downloadBlob(blob, `parc.${format.value}`);
+    downloadBlob(blob, t('exports.machines.fileName', { ext: format.value }));
     remember();
     open.value = false;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'export") });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('exports.machines.exportError')) });
   } finally {
     exporting.value = false;
   }

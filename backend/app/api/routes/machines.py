@@ -81,7 +81,7 @@ from app.features.setting.crud import FleetPolicy, MaintenancePolicy, UsagePolic
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 from app.features.usage.models import SECONDS_PER_HOUR
-from app.features.user.models import User
+from app.features.user.models import Language, User
 from app.features.user.permissions import Action, Resource
 from app.features.user.scope import Scope, machine_clause, machine_visible, restrict
 from app.features.windows_update.models import WindowsUpdate
@@ -1788,20 +1788,29 @@ class ExportColumnOut(BaseModel):
     default: bool
 
 
+# The language of an export's words — its headers, sheet, values — as the
+# console asks for it. French when absent: a script or an older console gets
+# the file it always got.
+ExportLanguage = Annotated[Language, Query(description="fr or en; fr when absent")]
+
+
 @router.get("/export-columns", response_model=list[ExportColumnOut])
-async def list_export_columns() -> list[ExportColumnOut]:
+async def list_export_columns(
+    lang: ExportLanguage = Language.FR,
+) -> list[ExportColumnOut]:
     """The export's column catalogue, in the order the picker shows it.
 
     Served rather than duplicated in the console: the catalogue is what the
     export reads, and a picker offering a column the server does not know
-    would produce a 422 at the moment the reader clicks « Exporter ».
+    would produce a 422 at the moment the reader clicks « Exporter ». The
+    labels are in ``lang``, the headers the file will carry.
     """
     return [
         ExportColumnOut(
             key=c.key,
-            label=c.label,
+            label=machine_export.column_label(c, lang),
             group=c.group,
-            group_label=machine_export.GROUP_LABELS[c.group],
+            group_label=machine_export.group_label(c.group, lang),
             kind=c.kind,
             default=c.default,
         )
@@ -1810,7 +1819,7 @@ async def list_export_columns() -> list[ExportColumnOut]:
 
 
 async def _export_rows(
-    session: SessionDep, filters: MachineFilters
+    session: SessionDep, filters: MachineFilters, language: Language
 ) -> tuple[list[machine_export.ExportRow], UsageWindow]:
     """The filtered fleet, every row, hostname order.
 
@@ -1850,6 +1859,7 @@ async def _export_rows(
             usage_hours=usage_crud.usage_hours(seconds, m.first_seen, usage.start),
             signature_max_age_days=policies.fleet.signature_max_age_days,
             taken_at=now,
+            language=language,
         )
         for m, room, building, check, seconds in all_rows
     ], usage
@@ -1867,20 +1877,23 @@ async def export_machines_csv(
     filters: FiltersDep,
     columns: str | None = None,
     tz: str | None = None,
+    lang: ExportLanguage = Language.FR,
 ) -> Response:
     """The filtered fleet as CSV — every facet of the list, no pages.
 
     ``columns`` is a comma-separated list of catalogue keys (default set when
-    absent); ``tz`` the IANA zone timestamps are written in (UTC when absent).
+    absent); ``tz`` the IANA zone timestamps are written in (UTC when absent);
+    ``lang`` the language of the file's words (French when absent).
     """
     chosen = machine_export.resolve_columns(columns)
     zone = machine_export.resolve_timezone(tz)
-    machines, usage = await _export_rows(session, filters)
+    machines, usage = await _export_rows(session, filters, lang)
+    texts = machine_export.EXPORT_TEXTS[lang]
     return csv_response(
-        "parc.csv",
-        machine_export.headers(chosen, usage_days=usage.days),
+        f"{texts.file_stem}.csv",
+        machine_export.headers(chosen, usage_days=usage.days, language=lang),
         [
-            [machine_export.csv_value(c, c.read(m), zone) for c in chosen]
+            [machine_export.csv_value(c, c.read(m), zone, lang) for c in chosen]
             for m in machines
         ],
     )
@@ -1892,24 +1905,26 @@ async def export_machines_xlsx(
     filters: FiltersDep,
     columns: str | None = None,
     tz: str | None = None,
+    lang: ExportLanguage = Language.FR,
 ) -> Response:
     """The filtered fleet as an Excel workbook, with real dates and numbers.
 
-    Same facets, same column catalogue and the same ``tz`` as the CSV; the
-    difference is what lands in the cells — values Excel can sort, filter and
-    sum without a conversion step.
+    Same facets, same column catalogue, the same ``tz`` and ``lang`` as the
+    CSV; the difference is what lands in the cells — values Excel can sort,
+    filter and sum without a conversion step.
     """
     chosen = machine_export.resolve_columns(columns)
     zone = machine_export.resolve_timezone(tz)
-    machines, usage = await _export_rows(session, filters)
+    machines, usage = await _export_rows(session, filters, lang)
+    texts = machine_export.EXPORT_TEXTS[lang]
     return await xlsx_response(
-        "parc.xlsx",
-        machine_export.headers(chosen, usage_days=usage.days),
+        f"{texts.file_stem}.xlsx",
+        machine_export.headers(chosen, usage_days=usage.days, language=lang),
         [
-            [machine_export.xlsx_value(c, c.read(m), zone) for c in chosen]
+            [machine_export.xlsx_value(c, c.read(m), zone, lang) for c in chosen]
             for m in machines
         ],
-        sheet_title="Parc",
+        sheet_title=texts.sheet_title,
     )
 
 

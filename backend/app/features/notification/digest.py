@@ -13,6 +13,7 @@ definitions, same thresholds, one source of truth for "périmé" and "inactif".
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -32,6 +33,8 @@ from app.features.machine.status import (
     windows_update_clause,
 )
 from app.features.machine.status import WindowsUpdateFilter as WUFilter
+from app.features.notification.digest_texts import TEXTS, DigestTexts
+from app.features.notification.language import mail_language, texts_for
 from app.features.notification.outbox import queue_email
 from app.features.notification.recipients import users_for
 from app.features.notification.tasks import (
@@ -43,7 +46,7 @@ from app.features.setting import crud as setting_crud
 from app.features.setting.email_policy import email_policy
 from app.features.threat.models import Threat
 from app.features.user import crud as user_crud
-from app.features.user.models import EmailPreference, User
+from app.features.user.models import EmailPreference, Language, User
 from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import Scope, machine_clause, machine_ids_clause, restrict
 from app.features.windows_update.models import WindowsUpdate
@@ -59,10 +62,31 @@ HIGH_SEVERITIES = ("critical", "important")
 
 @dataclass
 class MachineLine:
-    """One poste as a digest mentions it: a name and why it is listed."""
+    """One poste as a digest mentions it: a name and why it is listed.
+
+    ``detail`` is worded when the mail is, in its reader's language: one
+    digest is built per scope and read by people who may not share one.
+    """
 
     hostname: str
-    detail: str
+    detail: str | Callable[[DigestTexts], str]
+
+    def worded(self, texts: DigestTexts) -> str:
+        return self.detail if isinstance(self.detail, str) else self.detail(texts)
+
+
+def _threats_detail(n: int) -> Callable[[DigestTexts], str]:
+    return lambda t: t.threats_detail(n)
+
+
+def _updates_detail(n: int) -> Callable[[DigestTexts], str]:
+    return lambda t: t.updates_detail(n)
+
+
+def _antivirus_detail(age: int | None) -> Callable[[DigestTexts], str]:
+    if age is None:
+        return lambda t: t.protection_inactive
+    return lambda t: t.signature_age_detail(age)
 
 
 @dataclass
@@ -169,9 +193,7 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
     threat_rows = await session.exec(active_threats)
     threat_machines = threat_rows.all()
     threat_lines = [
-        MachineLine(
-            hostname=_name(hostname, machine_uuid), detail=f"{n} menace(s) active(s)"
-        )
+        MachineLine(hostname=_name(hostname, machine_uuid), detail=_threats_detail(n))
         for hostname, machine_uuid, n in threat_machines[:cap]
     ]
 
@@ -187,10 +209,7 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
     update_rows = await session.exec(high_updates)
     update_machines = update_rows.all()
     update_lines = [
-        MachineLine(
-            hostname=_name(hostname, machine_uuid),
-            detail=f"{n} MAJ critique(s)/importante(s)",
-        )
+        MachineLine(hostname=_name(hostname, machine_uuid), detail=_updates_detail(n))
         for hostname, machine_uuid, n in update_machines[:cap]
     ]
 
@@ -204,12 +223,7 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
     )
     outdated_lines = [
         MachineLine(
-            hostname=_name(hostname, machine_uuid),
-            detail=(
-                f"signatures vieilles de {age} j"
-                if age is not None
-                else "protection inactive ou jamais relevée"
-            ),
+            hostname=_name(hostname, machine_uuid), detail=_antivirus_detail(age)
         )
         for hostname, machine_uuid, age in outdated_rows.all()
     ]
@@ -250,121 +264,113 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
     )
 
 
-def _bullet_block(title: str, lines: list[MachineLine], total: int) -> list[str]:
+def _bullet_block(
+    t: DigestTexts, title: str, lines: list[MachineLine], total: int
+) -> list[str]:
     """A titled block of named postes, with the overflow stated rather than cut."""
     if not lines:
         return []
-    out = [f"{title}", *(f"  • {line.hostname} — {line.detail}" for line in lines)]
+    out = [f"{title}", *(f"  • {line.hostname} — {line.worded(t)}" for line in lines)]
     hidden = total - len(lines)
     if hidden > 0:
-        out.append(f"  … et {hidden} autre(s) poste(s)")
+        out.append(t.more_machines(hidden))
     out.append("")
     return out
 
 
-_FOOTER = (
-    "Vous recevez ce message parce que votre compte est réglé sur un résumé "
-    "quotidien. Changez-le dans la console, page « Mon compte »."
-)
-
-
-def _ending(personal: list[str]) -> list[str]:
+def _ending(t: DigestTexts, personal: list[str]) -> list[str]:
     """What every digest ends with: the recipient's own tasks, the console's
     address, then — last — why they receive it."""
     out = list(personal)
     if settings.console_base_url:
-        out.append(f"Ouvrir la console : {settings.console_base_url}")
+        out.append(t.open_console(settings.console_base_url))
         out.append("")
-    out.append(_FOOTER)
+    out.append(t.footer)
     return out
 
 
-def render_digest(digest: Digest, personal: list[str] | None = None) -> tuple[str, str]:
+def render_digest(
+    digest: Digest,
+    personal: list[str] | None = None,
+    language: Language | None = None,
+) -> tuple[str, str]:
     """The digest as (subject, plain-text body), ``personal`` — the
     recipient's « VOS TÂCHES » block (``tasks.personal_block``) — after the
-    parc and before the footer.
+    parc and before the footer. In ``language``, else ``DEFAULT_LANGUAGE``.
 
     The subject carries the headline so the mail can be triaged without being
     opened — a list of "Tia'i — résumé quotidien" in an inbox says nothing about
     which morning had a threat on it.
     """
+    t = texts_for(TEXTS, language)
     date = mail_date(digest.generated_at)
     if digest.with_active_threats:
-        headline = f"{digest.with_active_threats} poste(s) avec menace active"
+        headline = t.headline_threats(digest.with_active_threats)
     elif digest.with_high_severity_updates:
-        headline = f"{digest.with_high_severity_updates} poste(s) à mettre à jour"
+        headline = t.headline_updates(digest.with_high_severity_updates)
     elif digest.needs_verification:
-        headline = (
-            f"{digest.needs_verification} poste(s) dont l'identité est à confirmer"
-        )
+        headline = t.headline_verify(digest.needs_verification)
     else:
-        headline = "rien à signaler"
-    subject = f"{settings.PROJECT_NAME} — parc du {date} : {headline}"
+        headline = t.headline_quiet
+    subject = t.subject(settings.PROJECT_NAME, date, headline)
 
     body: list[str] = [
-        f"État du parc au {date}.",
+        t.state_at(date),
         "",
-        f"{digest.total} poste(s) enregistré(s), {digest.online} en ligne à l'instant du relevé.",
+        t.totals(digest.total, digest.online),
         "",
     ]
 
     if digest.has_events:
-        body.append("À TRAITER")
+        body.append(t.to_handle)
         if digest.with_active_threats:
-            body.append(
-                f"  {digest.with_active_threats} poste(s) avec au moins une menace active"
-            )
+            body.append(t.threats_line(digest.with_active_threats))
         if digest.new_threats_24h:
             body.append(
-                f"  {digest.new_threats_24h} détection(s) enregistrée(s) dans les dernières "
-                f"{settings.THREAT_ALERT_MAX_AGE_HOURS} h"
+                t.new_threats_line(
+                    digest.new_threats_24h, settings.THREAT_ALERT_MAX_AGE_HOURS
+                )
             )
         if digest.with_high_severity_updates:
-            body.append(
-                f"  {digest.with_high_severity_updates} poste(s) avec une mise à jour "
-                "critique ou importante en attente"
-            )
+            body.append(t.updates_line(digest.with_high_severity_updates))
         if digest.needs_verification:
-            body.append(
-                f"  {digest.needs_verification} poste(s) dont l'identité est à "
-                "confirmer (empreinte matérielle divergente ou doublon)"
-            )
+            body.append(t.verify_line(digest.needs_verification))
         body.append("")
     else:
-        body += ["Aucune menace active, aucun correctif urgent en attente.", ""]
+        body += [t.nothing_urgent, ""]
 
     body += [
-        "ÉTAT COURANT",
-        f"  Antivirus périmé ou inactif : {digest.outdated_antivirus} poste(s)",
-        f"  Mises à jour Windows en attente : {digest.wu_pending} poste(s)",
-        f"  Redémarrage requis : {digest.reboot_required} poste(s)",
-        f"  Sans contact depuis plus de {digest.inactive_after_days} j : "
-        f"{digest.inactive} poste(s)",
+        t.current_state,
+        t.outdated_antivirus(digest.outdated_antivirus),
+        t.wu_pending(digest.wu_pending),
+        t.reboot_required(digest.reboot_required),
+        t.inactive(digest.inactive_after_days, digest.inactive),
         "",
     ]
 
     body += _bullet_block(
-        "MENACES ACTIVES", digest.threat_lines, digest.with_active_threats
+        t, t.title_threats, digest.threat_lines, digest.with_active_threats
     )
     body += _bullet_block(
-        "MISES À JOUR CRITIQUES OU IMPORTANTES",
-        digest.update_lines,
-        digest.with_high_severity_updates,
+        t, t.title_updates, digest.update_lines, digest.with_high_severity_updates
     )
     body += _bullet_block(
-        "ANTIVIRUS À REPRENDRE", digest.outdated_lines, digest.outdated_antivirus
+        t, t.title_antivirus, digest.outdated_lines, digest.outdated_antivirus
     )
 
-    body += _ending(personal or [])
+    body += _ending(t, personal or [])
     return subject, "\n".join(body)
 
 
-def render_tasks_digest(personal: list[str], now: datetime) -> tuple[str, str]:
+def render_tasks_digest(
+    personal: list[str], now: datetime, language: Language | None = None
+) -> tuple[str, str]:
     """The digest of an account that reads no poste (no ``machine:read``):
     nothing of the parc, only its own tasks."""
+    t = texts_for(TEXTS, language)
     date = mail_date(now)
-    subject = f"{settings.PROJECT_NAME} — vos tâches au {date}"
-    return subject, "\n".join([f"Vos tâches au {date}.", "", *_ending(personal)])
+    subject = t.tasks_subject(settings.PROJECT_NAME, date)
+    return subject, "\n".join([t.tasks_intro(date), "", *_ending(t, personal)])
 
 
 @dataclass
@@ -456,10 +462,12 @@ async def send_daily_digest(session: AsyncSession) -> int:
     for plan in planned:
         # The same parc for everyone who reads it, then what is *theirs*: the
         # verifications they were handed, the maintenances they own that are due.
+        # In their language: the parc is read once per scope, worded per reader.
+        language = mail_language(plan.user.language)
         if plan.digest is not None:
-            subject, body = render_digest(plan.digest, plan.personal)
+            subject, body = render_digest(plan.digest, plan.personal, language)
         else:
-            subject, body = render_tasks_digest(plan.personal, utcnow())
+            subject, body = render_tasks_digest(plan.personal, utcnow(), language)
         if queue_email(session, to=plan.user.email, subject=subject, text=body):
             queued += 1
     await session.commit()

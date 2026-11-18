@@ -1,0 +1,488 @@
+{
+ "digest_events": {
+  "fr": {
+   "subject": "Tia'i — parc du 18/11/2026 (UTC) : 3 poste(s) avec menace active",
+   "body": [
+    "État du parc au 18/11/2026 (UTC).",
+    "",
+    "42 poste(s) enregistré(s), 17 en ligne à l'instant du relevé.",
+    "",
+    "À TRAITER",
+    "  3 poste(s) avec au moins une menace active",
+    "  4 détection(s) enregistrée(s) dans les dernières 24 h",
+    "  2 poste(s) avec une mise à jour critique ou importante en attente",
+    "  1 poste(s) dont l'identité est à confirmer (empreinte matérielle divergente ou doublon)",
+    "",
+    "ÉTAT COURANT",
+    "  Antivirus périmé ou inactif : 5 poste(s)",
+    "  Mises à jour Windows en attente : 6 poste(s)",
+    "  Redémarrage requis : 2 poste(s)",
+    "  Sans contact depuis plus de 30 j : 7 poste(s)",
+    "",
+    "MENACES ACTIVES",
+    "  • PC-A — 2 menace(s) active(s)",
+    "  • PC-B — 1 menace(s) active(s)",
+    "  … et 1 autre(s) poste(s)",
+    "",
+    "MISES À JOUR CRITIQUES OU IMPORTANTES",
+    "  • PC-C — 3 MAJ critique(s)/importante(s)",
+    "  … et 1 autre(s) poste(s)",
+    "",
+    "ANTIVIRUS À REPRENDRE",
+    "  • PC-D — signatures vieilles de 12 j",
+    "  • PC-E — protection inactive ou jamais relevée",
+    "  … et 3 autre(s) poste(s)",
+    "",
+    "VOS TÂCHES",
+    "  (bloc)",
+    "",
+    "Ouvrir la console : https://tiai.test",
+    "",
+    "Vous recevez ce message parce que votre compte est réglé sur un résumé quotidien. Changez-le dans la console, page « Mon compte »."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — fleet on 18/11/2026 (UTC): 3 computers with an active threat",
+   "body": [
+    "State of the fleet on 18/11/2026 (UTC).",
+    "",
+    "42 computers registered, 17 online at the time of the report.",
+    "",
+    "NEEDS ATTENTION",
+    "  3 computers with at least one active threat",
+    "  4 detections recorded in the last 24 h",
+    "  2 computers with a critical or important update waiting",
+    "  1 computer with an identity to confirm (hardware fingerprint mismatch or duplicate)",
+    "",
+    "CURRENT STATE",
+    "  Antivirus outdated or off: 5 computers",
+    "  Windows updates waiting: 6 computers",
+    "  Restart required: 2 computers",
+    "  No contact for more than 30 days: 7 computers",
+    "",
+    "ACTIVE THREATS",
+    "  • PC-A — 2 active threats",
+    "  • PC-B — 1 active threat",
+    "  … and 1 more computer",
+    "",
+    "CRITICAL OR IMPORTANT UPDATES",
+    "  • PC-C — 3 critical or important updates",
+    "  … and 1 more computer",
+    "",
+    "ANTIVIRUS TO FIX",
+    "  • PC-D — signatures 12 days old",
+    "  • PC-E — protection off or never reported",
+    "  … and 3 more computers",
+    "",
+    "VOS TÂCHES",
+    "  (bloc)",
+    "",
+    "Open the console: https://tiai.test",
+    "",
+    "You receive this message because your account is set to a daily digest. Change it in the console, under My account."
+   ]
+  }
+ },
+ "digest_quiet": {
+  "fr": {
+   "subject": "Tia'i — parc du 18/11/2026 (UTC) : rien à signaler",
+   "body": [
+    "État du parc au 18/11/2026 (UTC).",
+    "",
+    "1 poste(s) enregistré(s), 0 en ligne à l'instant du relevé.",
+    "",
+    "Aucune menace active, aucun correctif urgent en attente.",
+    "",
+    "ÉTAT COURANT",
+    "  Antivirus périmé ou inactif : 0 poste(s)",
+    "  Mises à jour Windows en attente : 0 poste(s)",
+    "  Redémarrage requis : 0 poste(s)",
+    "  Sans contact depuis plus de 30 j : 0 poste(s)",
+    "",
+    "Ouvrir la console : https://tiai.test",
+    "",
+    "Vous recevez ce message parce que votre compte est réglé sur un résumé quotidien. Changez-le dans la console, page « Mon compte »."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — fleet on 18/11/2026 (UTC): nothing to report",
+   "body": [
+    "State of the fleet on 18/11/2026 (UTC).",
+    "",
+    "1 computer registered, 0 online at the time of the report.",
+    "",
+    "No active threat, no urgent update waiting.",
+    "",
+    "CURRENT STATE",
+    "  Antivirus outdated or off: 0 computers",
+    "  Windows updates waiting: 0 computers",
+    "  Restart required: 0 computers",
+    "  No contact for more than 30 days: 0 computers",
+    "",
+    "Open the console: https://tiai.test",
+    "",
+    "You receive this message because your account is set to a daily digest. Change it in the console, under My account."
+   ]
+  }
+ },
+ "digest_updates": {
+  "fr": {
+   "subject": "Tia'i — parc du 18/11/2026 (UTC) : 1 poste(s) à mettre à jour",
+   "body": [
+    "État du parc au 18/11/2026 (UTC).",
+    "",
+    "1 poste(s) enregistré(s), 0 en ligne à l'instant du relevé.",
+    "",
+    "À TRAITER",
+    "  1 poste(s) avec une mise à jour critique ou importante en attente",
+    "",
+    "ÉTAT COURANT",
+    "  Antivirus périmé ou inactif : 0 poste(s)",
+    "  Mises à jour Windows en attente : 0 poste(s)",
+    "  Redémarrage requis : 0 poste(s)",
+    "  Sans contact depuis plus de 30 j : 0 poste(s)",
+    "",
+    "Ouvrir la console : https://tiai.test",
+    "",
+    "Vous recevez ce message parce que votre compte est réglé sur un résumé quotidien. Changez-le dans la console, page « Mon compte »."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — fleet on 18/11/2026 (UTC): 1 computer to update",
+   "body": [
+    "State of the fleet on 18/11/2026 (UTC).",
+    "",
+    "1 computer registered, 0 online at the time of the report.",
+    "",
+    "NEEDS ATTENTION",
+    "  1 computer with a critical or important update waiting",
+    "",
+    "CURRENT STATE",
+    "  Antivirus outdated or off: 0 computers",
+    "  Windows updates waiting: 0 computers",
+    "  Restart required: 0 computers",
+    "  No contact for more than 30 days: 0 computers",
+    "",
+    "Open the console: https://tiai.test",
+    "",
+    "You receive this message because your account is set to a daily digest. Change it in the console, under My account."
+   ]
+  }
+ },
+ "digest_verify": {
+  "fr": {
+   "subject": "Tia'i — parc du 18/11/2026 (UTC) : 2 poste(s) dont l'identité est à confirmer",
+   "body": [
+    "État du parc au 18/11/2026 (UTC).",
+    "",
+    "1 poste(s) enregistré(s), 0 en ligne à l'instant du relevé.",
+    "",
+    "À TRAITER",
+    "  2 poste(s) dont l'identité est à confirmer (empreinte matérielle divergente ou doublon)",
+    "",
+    "ÉTAT COURANT",
+    "  Antivirus périmé ou inactif : 0 poste(s)",
+    "  Mises à jour Windows en attente : 0 poste(s)",
+    "  Redémarrage requis : 0 poste(s)",
+    "  Sans contact depuis plus de 30 j : 0 poste(s)",
+    "",
+    "Ouvrir la console : https://tiai.test",
+    "",
+    "Vous recevez ce message parce que votre compte est réglé sur un résumé quotidien. Changez-le dans la console, page « Mon compte »."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — fleet on 18/11/2026 (UTC): 2 computers with an identity to confirm",
+   "body": [
+    "State of the fleet on 18/11/2026 (UTC).",
+    "",
+    "1 computer registered, 0 online at the time of the report.",
+    "",
+    "NEEDS ATTENTION",
+    "  2 computers with an identity to confirm (hardware fingerprint mismatch or duplicate)",
+    "",
+    "CURRENT STATE",
+    "  Antivirus outdated or off: 0 computers",
+    "  Windows updates waiting: 0 computers",
+    "  Restart required: 0 computers",
+    "  No contact for more than 30 days: 0 computers",
+    "",
+    "Open the console: https://tiai.test",
+    "",
+    "You receive this message because your account is set to a daily digest. Change it in the console, under My account."
+   ]
+  }
+ },
+ "tasks_digest": {
+  "fr": {
+   "subject": "Tia'i — vos tâches au 18/11/2026 (UTC)",
+   "body": [
+    "Vos tâches au 18/11/2026 (UTC).",
+    "",
+    "VOS TÂCHES",
+    "  (bloc)",
+    "",
+    "Ouvrir la console : https://tiai.test",
+    "",
+    "Vous recevez ce message parce que votre compte est réglé sur un résumé quotidien. Changez-le dans la console, page « Mon compte »."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — your tasks on 18/11/2026 (UTC)",
+   "body": [
+    "Your tasks on 18/11/2026 (UTC).",
+    "",
+    "VOS TÂCHES",
+    "  (bloc)",
+    "",
+    "Open the console: https://tiai.test",
+    "",
+    "You receive this message because your account is set to a daily digest. Change it in the console, under My account."
+   ]
+  }
+ },
+ "alert_many": {
+  "fr": {
+   "subject": "Tia'i — 3 menaces détectées sur PC-042",
+   "body": [
+    "Microsoft Defender a signalé 3 détection(s) sur le poste PC-042.",
+    "",
+    "  • Trojan:Win32/Test — sévérité Severe — statut Active — détectée le 18/11/2026 à 06:00 UTC",
+    "  • menace non nommée",
+    "  … et 1 autre(s) détection(s)",
+    "",
+    "Poste : PC-042",
+    "UUID : uuid-1",
+    "Domaine : LYCEE",
+    "Adresse IP : 10.0.0.4",
+    "Session ouverte : eleve",
+    "",
+    "Ouvrir la fiche du poste : https://tiai.test/machines/00000000-0000-0000-0000-000000000001",
+    "",
+    "Vous recevez ce message parce que votre compte est réglé sur les alertes immédiates. Changez-le dans la console, page « Mon compte »."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — 3 threats detected on PC-042",
+   "body": [
+    "Microsoft Defender reported 3 detections on the computer PC-042.",
+    "",
+    "  • Trojan:Win32/Test — severity Severe — status Active — detected on 18/11/2026 at 06:00 UTC",
+    "  • unnamed threat",
+    "  … and 1 more detection",
+    "",
+    "Computer: PC-042",
+    "UUID: uuid-1",
+    "Domain: LYCEE",
+    "IP address: 10.0.0.4",
+    "Logged-on user: eleve",
+    "",
+    "Open the computer's page: https://tiai.test/machines/00000000-0000-0000-0000-000000000001",
+    "",
+    "You receive this message because your account is set to immediate alerts. Change it in the console, under My account."
+   ]
+  }
+ },
+ "alert_one": {
+  "fr": {
+   "subject": "Tia'i — menace détectée sur uuid-2",
+   "body": [
+    "Microsoft Defender a signalé 1 détection(s) sur le poste uuid-2.",
+    "",
+    "  • Trojan:Win32/Test — sévérité Severe — statut Active — détectée le 18/11/2026 à 06:00 UTC",
+    "",
+    "Poste : uuid-2",
+    "UUID : uuid-2",
+    "Domaine : —",
+    "Adresse IP : —",
+    "Session ouverte : —",
+    "",
+    "Ouvrir la fiche du poste : https://tiai.test/machines/00000000-0000-0000-0000-000000000002",
+    "",
+    "Vous recevez ce message parce que votre compte est réglé sur les alertes immédiates. Changez-le dans la console, page « Mon compte »."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — threat detected on uuid-2",
+   "body": [
+    "Microsoft Defender reported 1 detection on the computer uuid-2.",
+    "",
+    "  • Trojan:Win32/Test — severity Severe — status Active — detected on 18/11/2026 at 06:00 UTC",
+    "",
+    "Computer: uuid-2",
+    "UUID: uuid-2",
+    "Domain: —",
+    "IP address: —",
+    "Logged-on user: —",
+    "",
+    "Open the computer's page: https://tiai.test/machines/00000000-0000-0000-0000-000000000002",
+    "",
+    "You receive this message because your account is set to immediate alerts. Change it in the console, under My account."
+   ]
+  }
+ },
+ "password_reset": {
+  "fr": {
+   "subject": "Tia'i — réinitialisation du mot de passe",
+   "body": [
+    "Vous avez demandé la réinitialisation de votre mot de passe Tia'i.",
+    "",
+    "Ouvrez ce lien pour choisir un nouveau mot de passe :",
+    "https://tiai.test/reset-password?token=tok123",
+    "",
+    "Ce lien expire dans 60 minutes et ne peut servir qu'une fois.",
+    "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe reste inchangé."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — password reset",
+   "body": [
+    "You asked to reset your Tia'i password.",
+    "",
+    "Open this link to choose a new password:",
+    "https://tiai.test/reset-password?token=tok123",
+    "",
+    "This link expires in 60 minutes and can be used only once.",
+    "If you did not make this request, ignore this message: your password stays as it is."
+   ]
+  }
+ },
+ "check_one": {
+  "fr": {
+   "subject": "Tia'i — vérification demandée : PC-B12-03",
+   "body": [
+    "admin@test.local vous demande de vérifier le poste PC-B12-03.",
+    "",
+    "Consignes :",
+    "Écran",
+    "Clavier",
+    "",
+    "Vos tâches : https://tiai.test/#/tasks",
+    "",
+    "Vous recevez ce message parce qu'une vérification vous a été affectée. Réglez vos e-mails dans la console, page « Mon compte »."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — check requested: PC-B12-03",
+   "body": [
+    "admin@test.local asks you to check the computer PC-B12-03.",
+    "",
+    "Instructions:",
+    "Écran",
+    "Clavier",
+    "",
+    "Your tasks: https://tiai.test/#/tasks",
+    "",
+    "You receive this message because a check was assigned to you. Choose your e-mails in the console, under My account."
+   ]
+  }
+ },
+ "check_many": {
+  "fr": {
+   "subject": "Tia'i — vérification demandée sur 3 postes",
+   "body": [
+    "Jean vous demande de vérifier 3 postes.",
+    "",
+    "  • PC-1",
+    "  • PC-2",
+    "  … et 1 autre(s)",
+    "",
+    "Vos tâches : https://tiai.test/#/tasks",
+    "",
+    "Vous recevez ce message parce qu'une vérification vous a été affectée. Réglez vos e-mails dans la console, page « Mon compte »."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — check requested on 3 computers",
+   "body": [
+    "Jean asks you to check 3 computers.",
+    "",
+    "  • PC-1",
+    "  • PC-2",
+    "  … and 1 more",
+    "",
+    "Your tasks: https://tiai.test/#/tasks",
+    "",
+    "You receive this message because a check was assigned to you. Choose your e-mails in the console, under My account."
+   ]
+  }
+ },
+ "test_mail_smtp": {
+  "fr": {
+   "subject": "Tia'i — e-mail de test",
+   "body": [
+    "Ceci est un e-mail de test envoyé depuis la console Tia'i, page Paramètres, par le serveur SMTP smtp.lycee.local:587.",
+    "",
+    "S'il vous parvient, les alertes et les résumés partiront par le même chemin."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — test e-mail",
+   "body": [
+    "This is a test e-mail sent from the Tia'i console, Settings page, through the SMTP server smtp.lycee.local:587.",
+    "",
+    "If it reaches you, alerts and digests will go out the same way."
+   ]
+  }
+ },
+ "test_mail_mailgun": {
+  "fr": {
+   "subject": "Tia'i — e-mail de test",
+   "body": [
+    "Ceci est un e-mail de test envoyé depuis la console Tia'i, page Paramètres, par Mailgun (domaine mg.lycee.local).",
+    "",
+    "S'il vous parvient, les alertes et les résumés partiront par le même chemin."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — test e-mail",
+   "body": [
+    "This is a test e-mail sent from the Tia'i console, Settings page, through Mailgun (domain mg.lycee.local).",
+    "",
+    "If it reaches you, alerts and digests will go out the same way."
+   ]
+  }
+ },
+ "reminder": {
+  "fr": {
+   "subject": "Tia'i — vos maintenances au {date}",
+   "body": [
+    "Rappel hebdomadaire de ce qui vous attend.",
+    "",
+    "VOS TÂCHES",
+    "  Vérifications qui vous sont affectées : 3",
+    "    • PC-OLD — Écran",
+    "      Clavier",
+    "    • PC-LOOSE2",
+    "    … et 1 autre(s)",
+    "  Maintenances dont vous êtes responsable : 4 poste(s) en retard, 0 à échéance",
+    "    • Bât A › B12 — 2 en retard, 0 à échéance",
+    "    • PC-LOOSE (sans salle) — en retard",
+    "    … et 1 autre(s)",
+    "  Voir : https://tiai.test/#/tasks",
+    "",
+    "Vous recevez ce message parce que vous êtes responsable de la maintenance de salles ou de postes. Réglez vos e-mails dans la console, page « Mon compte »."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — your maintenance on {date}",
+   "body": [
+    "Weekly reminder of what is waiting for you.",
+    "",
+    "YOUR TASKS",
+    "  Checks assigned to you: 3",
+    "    • PC-OLD — Écran",
+    "      Clavier",
+    "    • PC-LOOSE2",
+    "    … and 1 more",
+    "  Maintenance you own: 4 computers overdue, 0 due soon",
+    "    • Bât A › B12 — 2 overdue, 0 due soon",
+    "    • PC-LOOSE (no room) — overdue",
+    "    … and 1 more",
+    "  View: https://tiai.test/#/tasks",
+    "",
+    "You receive this message because you own the maintenance of rooms or computers. Choose your e-mails in the console, under My account."
+   ]
+  }
+ }
+}

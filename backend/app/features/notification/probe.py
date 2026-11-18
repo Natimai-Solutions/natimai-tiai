@@ -16,8 +16,9 @@ from dataclasses import dataclass
 
 import httpx
 
-from app.core.config import settings
 from app.features.notification.email import send_email
+from app.features.notification.language import mail_language
+from app.features.notification.probe_texts import probe_mail
 from app.features.setting.email_policy import EmailPolicy
 
 # Each network step of the test is capped at this many seconds, whatever the
@@ -208,8 +209,14 @@ def _scrub(message: str, policy: EmailPolicy) -> str:
     return message[:_MAX_MESSAGE]
 
 
-async def send_test(policy: EmailPolicy, to: str) -> ProbeResult:
-    """Send the test mail to ``to`` with ``policy``, now; never raises."""
+async def send_test(
+    policy: EmailPolicy, to: str, *, language: str | None = None
+) -> ProbeResult:
+    """Send the test mail to ``to`` with ``policy``, now; never raises.
+
+    ``language`` is the stored choice of the administrator asking
+    (``User.language``): the mail is written in it, else in
+    ``DEFAULT_LANGUAGE``."""
     if not policy.enabled:
         missing = ", ".join(policy.missing())
         return ProbeResult(
@@ -221,19 +228,11 @@ async def send_test(policy: EmailPolicy, to: str) -> ProbeResult:
         if bounded.provider == "smtp"
         else f"Mailgun (domaine {bounded.mailgun_domain})"
     )
-    text = (
-        f"Ceci est un e-mail de test envoyé depuis la console {settings.PROJECT_NAME}, "
-        f"page Paramètres, par {via}.\n\n"
-        "S'il vous parvient, les alertes et les résumés partiront par le même chemin."
-    )
+    # The mail itself, in the language of whoever asked for it.
+    subject, text = probe_mail(bounded, mail_language(language))
     try:
         sent = await asyncio.wait_for(
-            send_email(
-                f"{settings.PROJECT_NAME} — e-mail de test",
-                text,
-                [to],
-                policy=bounded,
-            ),
+            send_email(subject, text, [to], policy=bounded),
             timeout=_OVERALL_TIMEOUT_SECONDS,
         )
     except Exception as exc:
