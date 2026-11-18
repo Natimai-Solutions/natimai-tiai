@@ -1,9 +1,9 @@
 # Lecture de l'annuaire par le serveur — plan de travail
 
-> **Statut : à cadrer** (rédigé le 2026-11-16, non codé). Répond aux constats
-> S19 et S20 de l'audit 2026-11, acceptés en limite au §6.4 de
-> `plan-audit-2026-11.md` (« Emplacement et annuaire déclaratifs »). Les
-> questions du §9 sont à trancher avant le premier jalon.
+> **Statut : cadré, non codé** (rédigé le 2026-11-16, décisions du 2026-11-18
+> au §9). Répond aux constats S19 et S20 de l'audit 2026-11, acceptés en limite
+> au §6.4 de `plan-audit-2026-11.md` (« Emplacement et annuaire déclaratifs »).
+> Il reste une question ouverte au §9.2.
 >
 > Objectif : que l'emplacement d'un poste, son OU et l'attribut *Emplacement*
 > de son objet ordinateur ne soient plus **crus sur parole** quand ils décident
@@ -46,9 +46,11 @@ lequel le relais Wake-on-LAN existe. Les deux déploiements doivent être
 couverts :
 
 - **Serveur avec une route vers un contrôleur de domaine** (même réseau, VPN
-  site à site) : lecture LDAP directe, §3.1.
-- **Serveur sans route** (hébergé ailleurs, plusieurs domaines) : lecture
-  déléguée à des postes désignés, §3.2.
+  site à site) : lecture LDAP directe, §3.1. **Un seul domaine** dans ce cas.
+- **Serveur sans route** (hébergé dans le cloud, plusieurs établissements
+  gérés) : lecture déléguée à des postes désignés, §3.2. **Plusieurs
+  domaines** peuvent cohabiter sur le même serveur, et la plupart des sites
+  n'ont **pas d'adresse de sortie fixe**.
 
 ## 3. Deux modes de lecture, un seul modèle
 
@@ -60,9 +62,12 @@ couverts :
 - **Connexion** : LDAPS (636) ou StartTLS, certificat vérifié (AC de
   l'établissement fournie par fichier). Le LDAP en clair est refusé au
   démarrage, sauf option explicite comme `AllowInsecureHTTP` côté agent.
+- **Un seul domaine** : une connexion, une base. Plusieurs domaines relèvent
+  du mode `relay`.
 - **Compte** : un compte de service AD en **lecture seule**, sans aucun droit
   au-delà de la lecture des objets ordinateurs, des OU et de la configuration
-  des sites. Bind simple sur TLS ; Kerberos plus tard si demandé. Mot de passe
+  des sites. **Bind simple sur LDAPS** (décision du 2026-11-18) ; Kerberos
+  n'est pas prévu pour l'instant. Mot de passe
   dans le `.env`, jamais affiché par la page Paramètres (même règle que les
   secrets SMTP).
 - **Ce qui est lu**, par recherche paginée, sur toute la base des ordinateurs
@@ -80,22 +85,45 @@ couverts :
 ### 3.2 Mode `relay` — des postes désignés lisent pour les autres
 
 Pour un serveur sans route vers un DC. Même idée que le relais Wake-on-LAN,
-avec une confiance **explicite** au lieu d'une confiance par emplacement :
+avec une confiance **explicite** au lieu d'une confiance par emplacement.
 
-- un administrateur **désigne** dans la console un ou plusieurs postes
-  « lecteurs d'annuaire » (typiquement un serveur membre du site, jamais un
-  poste élève). La désignation est auditée et révocable ;
-- le serveur leur confie une commande `directory_read`, avec la liste des noms
-  de postes à lire. L'agent interroge l'annuaire en ADSI (déjà utilisé pour
-  l'attribut `location`, §3 du plan salles) avec son compte machine, et
-  renvoie les mêmes attributs que le §3.1 ;
-- **gain de sécurité** : un poste quelconque, forgé ou compromis, ne décide
-  plus de rien pour les autres. Seuls les postes désignés par un
-  administrateur le peuvent, et le journal dit lesquels ont parlé ;
-- **limite** : un lecteur désigné compromis ment pour tout son domaine. On le
-  borne en exigeant qu'un lecteur ne réponde que pour son propre domaine
-  (`dNSHostName` du suffixe attendu), et en comparant deux lecteurs quand il y
-  en a deux.
+**Désignation**
+- Un administrateur **désigne** dans la console un ou plusieurs postes
+  « lecteurs d'annuaire » : un serveur membre ou un poste d'administration
+  toujours allumé, jamais un poste élève. Droit `settings:write`, action
+  journalisée, révocable.
+- La désignation porte sur le poste enrôlé (son identifiant), pas sur son
+  nom. Elle **tombe d'elle-même** si le poste est ré-enrôlé, si son token est
+  révoqué ou s'il passe en « Identité à confirmer ».
+
+**Lecture**
+- L'agent du lecteur interroge l'annuaire en ADSI (déjà utilisé pour
+  l'attribut `location`, §3 du plan salles) avec le **compte machine** du
+  poste : ni compte de service, ni mot de passe à stocker.
+- Le serveur lui confie une commande `directory_read` avec la liste des noms
+  des postes enrôlés qui déclarent son domaine. Le lecteur renvoie les mêmes
+  attributs que le §3.1, plus l'identité de son domaine (nom DNS et SID) et
+  la table sous-réseaux → sites.
+- Seuls les lecteurs ont besoin du nouvel agent.
+
+**Plusieurs domaines sur un même serveur**
+- Un lecteur ne lit et ne répond **que pour son propre domaine**. Chaque
+  domaine a donc besoin d'au moins un lecteur ; un domaine sans lecteur reste
+  dans le comportement actuel, et la page Paramètres le dit.
+- Un domaine est identifié par son **SID**, pas par son nom DNS : deux
+  établissements peuvent avoir le même nom de domaine (`ecole.local`).
+- Si deux domaines de même nom ont chacun un poste du même nom, le poste
+  enrôlé ne peut pas être rattaché à l'un plutôt qu'à l'autre : il reste
+  `unknown` et est signalé, jusqu'à ce qu'un administrateur tranche.
+
+**Garde-fous contre un lecteur qui ment**
+- **Limite** : un lecteur désigné compromis ment pour tout son domaine.
+- Quand un domaine a deux lecteurs, leurs réponses sont comparées. En cas de
+  désaccord, rien ne change et une alerte est levée.
+- Une lecture qui déplacerait plus de `DIRECTORY_CONFIRM_MOVES` postes d'un
+  coup attend la confirmation d'un administrateur, avec l'aperçu déjà utilisé
+  pour la resynchronisation des salles.
+- Chaque changement de salle issu d'une lecture nomme le lecteur au journal.
 
 ### 3.3 Le modèle commun
 
@@ -105,7 +133,8 @@ l'annuaire :
 | Colonne | Rôle |
 |---|---|
 | `object_guid` | Clé stable (un poste renommé garde son GUID) |
-| `domain`, `sam_account_name`, `dns_host_name` | Pour rapprocher l'objet du poste |
+| `domain_sid`, `domain` | Le domaine lu : son SID l'identifie, son nom DNS l'affiche |
+| `sam_account_name`, `dns_host_name` | Pour rapprocher l'objet du poste |
 | `distinguished_name`, `ou`, `location` | Ce que l'annuaire dit |
 | `disabled` | Compte ordinateur désactivé dans AD |
 | `source` | `ldap` ou `relay:<machine_id>` |
@@ -122,6 +151,15 @@ Sur `machines`, deux colonnes :
 - Un poste déjà rapproché qui change de nom garde son GUID et le serveur
   relit l'objet.
 
+**Limite du rapprochement, dans les deux modes.** Lire l'annuaire prouve ce
+que l'annuaire dit d'un nom, pas que le poste *est* ce nom : le nom vient de
+l'agent. Un poste forgé peut donc encore prendre le nom d'un poste réel pas
+encore enrôlé, et être rangé à sa place. Les protections de l'enrôlement
+(empreinte, ré-enrôlement soumis à approbation) couvrent les postes déjà
+enrôlés. Fermer complètement ce trou demande une preuve d'identité du compte
+machine (Kerberos) ; elle n'est pas dans ce plan, et sa faisabilité côté
+agent n'a pas été vérifiée.
+
 ## 4. Ce que la lecture change
 
 ### 4.1 Salles (S20)
@@ -131,28 +169,49 @@ Avec `DIRECTORY_VERIFY=ldap` ou `relay` et `ROOM_SOURCE=ad_*` :
   d'après le bloc `directory` du heartbeat. Le bloc envoyé par l'agent reste
   stocké et affiché, comme indice ;
 - un écart entre les deux passe le poste en `mismatch` : badge sur la fiche,
-  filtre dans la liste, ligne au journal d'audit. Ce n'est pas un refus : un
-  poste déplacé dans AD et pas encore redémarré a un DN local en retard ;
+  filtre dans la liste, ligne au journal d'audit. L'écart est **signalé, pas
+  bloquant** (décision du 2026-11-18) : un poste déplacé dans AD et pas encore
+  redémarré a un DN local en retard ;
 - un poste sans enregistrement (`unknown`) reste où il est et ne crée pas de
   salle. Les salles ne se créent plus qu'à partir de l'annuaire lu ;
 - le vote à la majorité de T36 devient inutile dans ce mode : le DN de l'OU
-  lue est la clé de la salle.
+  lue est la clé de la salle ;
+- avec plusieurs domaines, **la clé d'une salle inclut le domaine** (son SID).
+  Aujourd'hui `rooms.ad_key` est unique sur tout le serveur : en mode
+  `ad_location`, deux établissements qui ont chacun une « Salle 101 »
+  partageraient la même salle. Les clés existantes sont réécrites à la
+  première lecture vérifiée de leur domaine.
 
 ### 4.2 Relais Wake-on-LAN (S19)
 
-- **Site d'un poste** : le site AD de l'objet est déduit du sous-réseau de son
-  adresse. Pour ne pas croire l'adresse déclarée, le serveur la compare à
-  l'**adresse source** de la connexion (`client_ip`) quand le poste est sur
-  le même réseau que le serveur. Sinon, il la compare à une liste
-  d'**adresses de sortie par site** (`WOL_SITE_EGRESS`, facultative), qui
-  rattache l'IP publique d'un établissement à son site.
-- **Relais** : un poste ne relaie que pour les cibles du même site
-  **vérifié**, et seulement s'il est lui-même `verified`. L'emplacement
-  déclaré par l'agent ne suffit plus ; il reste l'emplacement affiché et
-  filtrable.
-- **Sans vérification possible** (mode désactivé ou annuaire injoignable) : le
-  comportement actuel est conservé et la page Paramètres dit que les relais
-  reposent sur l'emplacement déclaré.
+La question est : ce poste est-il réellement sur le site de la cible ? Son
+emplacement et son adresse sont déclarés ; le serveur les confronte à ce
+qu'il **observe lui-même**, l'adresse source de la connexion (`client_ip`).
+
+- **Mode `ldap`** (serveur sur le réseau des postes ou relié par VPN) :
+  l'adresse source est l'adresse du poste. Elle doit être égale à l'adresse
+  déclarée ; son sous-réseau donne le site AD (table sous-réseaux → sites).
+- **Mode `relay`** (serveur dans le cloud) : le serveur ne voit que l'adresse
+  de sortie Internet du site, et la plupart des sites n'en ont pas de fixe
+  (décision du 2026-11-18 : pas de liste d'adresses à tenir à jour). Le
+  serveur l'**apprend du lecteur d'annuaire** : un poste dont l'adresse
+  source est celle d'un lecteur de son domaine, vue dans les
+  `DIRECTORY_SITE_WINDOW_MINUTES` dernières minutes, est « sur site ». Une
+  adresse qui change est suivie sans intervention.
+- **Relais** : les postes `verified` et sur le site vérifié de la cible
+  passent en premier. Voir la question ouverte du §9.2 pour les autres.
+- L'emplacement déclaré par l'agent reste l'emplacement affiché et filtrable.
+- **Sans vérification possible** (mode désactivé, annuaire injoignable, aucun
+  lecteur en ligne) : le comportement actuel est conservé et la page
+  Paramètres dit que les relais reposent sur l'emplacement déclaré.
+
+Limites de l'adresse apprise :
+- un site qui sort par plusieurs accès Internet ne reconnaît que les postes
+  qui sortent par le même accès qu'un lecteur ;
+- une adresse de sortie partagée entre plusieurs abonnés (CGNAT) fait
+  reconnaître « sur site » un poste d'un autre abonné du même opérateur ;
+- le serveur doit garder la dernière adresse source de chaque poste, qu'il
+  ne stocke pas aujourd'hui.
 
 ### 4.3 Comptes désactivés et postes supprimés de l'annuaire
 
@@ -165,14 +224,15 @@ révocation reste une décision humaine, proposée en un clic depuis le filtre.
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `DIRECTORY_VERIFY` | `off` | `off`, `ldap` ou `relay` |
-| `LDAP_URL` | — | `ldaps://dc1.lycee.local` ; plusieurs URL séparées par des virgules, essayées dans l'ordre |
+| `LDAP_URL` | — | `ldaps://dc1.lycee.local` ; plusieurs URL du **même domaine** séparées par des virgules, essayées dans l'ordre |
 | `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD` | — | Compte de service en lecture seule |
 | `LDAP_BASE_DN` | — | Racine des objets ordinateurs, par exemple `OU=Postes,DC=lycee,DC=local` |
 | `LDAP_CA_FILE` | — | AC qui a signé le certificat du DC |
 | `LDAP_ALLOW_PLAINTEXT` | `false` | Refusé sans cette option : `ldap://` sans StartTLS |
 | `DIRECTORY_SYNC_MINUTES` | `60` | Intervalle des lectures complètes |
 | `DIRECTORY_STALE_HOURS` | `72` | Au-delà, un enregistrement non relu est `stale` et ne vérifie plus rien |
-| `WOL_SITE_EGRESS` | — | `Site=203.0.113.4,198.51.100.0/28;…` (§4.2) |
+| `DIRECTORY_CONFIRM_MOVES` | `20` | Mode `relay` : au-delà de ce nombre de postes déplacés par une lecture, confirmation d'un administrateur (§3.2) |
+| `DIRECTORY_SITE_WINDOW_MINUTES` | `30` | Mode `relay` : durée pendant laquelle l'adresse source d'un lecteur désigne son site (§4.2) |
 
 Ces valeurs sont contrôlées au démarrage, avec les mêmes bornes que le reste
 du `.env`. La page Paramètres les affiche, sans le mot de passe.
@@ -189,7 +249,8 @@ du `.env`. La page Paramètres les affiche, sans le mot de passe.
 - **Liste des postes** : filtre « Annuaire : vérifié / écart / inconnu /
   périmé ».
 - **Mode `relay`** : action « Désigner comme lecteur d'annuaire » sur la fiche
-  (droit `settings:write`), liste des lecteurs dans Paramètres.
+  (droit `settings:write`). Paramètres liste les domaines connus, leurs
+  lecteurs, la dernière lecture de chacun et les domaines sans lecteur.
 
 ## 7. Sécurité
 
@@ -210,23 +271,39 @@ du `.env`. La page Paramètres les affiche, sans le mot de passe.
 | Jalon | Contenu | Estimation |
 |---|---|---|
 | **L1 — Modèle et lecture LDAP** | Table, colonnes et migration ; client `ldap3` ; lecture complète et incrémentale dans le worker ; rapprochement ; « Tester la connexion ». Tests contre un annuaire de test (`slapd` avec un schéma réduit imitant AD sur le banc) et tests unitaires du rapprochement. | 3 j |
-| **L2 — Salles vérifiées** | Placement d'après l'enregistrement, statut `mismatch`, fiche et filtre, aperçu de resynchronisation qui montre les écarts. | 2 j |
-| **L3 — Relais vérifiés** | Sous-réseaux et sites, `client_ip` et `WOL_SITE_EGRESS`, éligibilité des relais. | 2 j |
-| **L4 — Mode `relay`** | Désignation, commande `directory_read`, lecture ADSI côté agent (Windows : à valider sur un domaine réel, comme le bind ADSI de J3), comparaison de deux lecteurs. | 3 j + validation sur site |
-| **L5 — Documentation et recette** | `DEPLOYMENT.md` (compte de service, AC, dépannage), notes de version, recette sur le banc et sur un domaine réel. | 1 j |
+| **L2 — Salles vérifiées** | Placement d'après l'enregistrement, statut `mismatch`, fiche et filtre, aperçu de resynchronisation qui montre les écarts, clé de salle par domaine. | 2 j |
+| **L3 — Mode `relay`** | Désignation et sa révocation automatique, commande `directory_read`, lecture ADSI côté agent, domaines identifiés par SID, comparaison de deux lecteurs, confirmation des déplacements en masse. | 4 j + validation sur un domaine réel (comme le bind ADSI de J3) |
+| **L4 — Relais vérifiés** | Adresse source gardée par poste, sous-réseaux et sites (mode `ldap`), adresse apprise du lecteur (mode `relay`), ordre des relais. | 2 j |
+| **L5 — Documentation et recette** | `DEPLOYMENT.md` (compte de service, AC, choix des lecteurs, dépannage), notes de version, recette sur le banc et sur un domaine réel. | 1 j |
 
-L1 à L3 suffisent pour un serveur qui voit un DC ; L4 n'est utile que pour un
-serveur hébergé ailleurs.
+Les deux déploiements sont à couvrir. L1 et L2 suffisent à ranger les salles
+d'un serveur qui voit un DC ; L3 apporte la même chose à un serveur hébergé
+ailleurs, et L4 dépend de L3 pour ce cas.
 
-## 9. Questions à trancher
+## 9. Décisions et question ouverte
 
-1. **Le serveur de production voit-il un contrôleur de domaine** (même réseau
-   ou VPN) ? Si oui, L4 peut attendre.
-2. **Un ou plusieurs domaines** sur le parc ? Le §3.1 suppose une base par
-   domaine ; plusieurs domaines demandent une liste de connexions.
-3. **Qui crée le compte de service**, et l'établissement accepte-t-il un bind
-   simple sur LDAPS, ou exige-t-il Kerberos ?
-4. **Adresses de sortie par site** : sont-elles fixes et connues, pour
-   `WOL_SITE_EGRESS` ?
-5. **Écart annuaire / agent** : signaler seulement (proposé), ou bloquer le
-   placement du poste tant que l'écart dure ?
+### 9.1 Décisions du 2026-11-18
+
+1. **Les deux déploiements sont pris en charge** : serveur qui voit un DC
+   (mode `ldap`) et serveur sans route (mode `relay`).
+2. **Domaines** : un seul en mode `ldap` ; plusieurs possibles en mode
+   `relay` (serveur dans le cloud qui gère plusieurs établissements).
+3. **Compte de service** (mode `ldap`) : bind simple sur LDAPS. Pas de
+   Kerberos pour l'instant.
+4. **Adresses de sortie** : la plupart des sites n'en ont pas de fixe. La
+   liste `WOL_SITE_EGRESS` envisagée est abandonnée au profit de l'adresse
+   apprise du lecteur (§4.2).
+5. **Écart annuaire / agent** : signalé, pas bloquant.
+
+### 9.2 Question ouverte
+
+**Relais non vérifiés : écartés, ou seulement passés après les autres ?**
+L'adresse apprise est un signal qui peut manquer (lecteur éteint, adresse
+qui vient de changer, site à plusieurs accès).
+- *Écartés* : plus aucun réveil relayé sur un site tant que personne n'y est
+  vérifié.
+- *Passés après* (proposé, avec un réglage pour choisir l'autre) : un relais
+  vérifié est toujours préféré ; à défaut, le réveil part comme aujourd'hui
+  et le résultat dit qu'il a été relayé par un poste non vérifié. Le risque
+  qui reste est celui de S19 : un poste forgé apprend l'adresse MAC de la
+  cible et ne la réveille pas.
