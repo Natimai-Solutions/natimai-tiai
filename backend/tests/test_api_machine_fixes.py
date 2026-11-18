@@ -466,6 +466,8 @@ async def test_a_merge_closes_the_open_commands_it_absorbs(client, db_session):
         row = await _command(db_session, command_id)
         assert str(row.machine_id) == kept["machine_id"]
         assert (row.status, row.error) == ("failed", MERGED_ERROR)
+        # The code beside the French text: what the English console reads.
+        assert (row.result_code, row.result_params) == ("command.merged", {})
         assert row.finished_at is not None
     closed = await _command(db_session, done["created"][0])
     assert (str(closed.machine_id), closed.status) == (kept["machine_id"], "succeeded")

@@ -855,6 +855,43 @@ async def test_an_admin_reset_and_a_wrong_current_password_do_not_deadlock(
     assert done.status_code == 200, done.text
 
 
+async def test_a_wrong_current_password_and_a_successful_login_do_not_deadlock(
+    client, db_session, monkeypatch
+):
+    """A wrong current password holds the account's row (lock_account) while
+    it checks the password, then writes its address's row (record_failure).
+    A right password from the same address meanwhile has written that
+    address's row and inserts its session, whose foreign key needs KEY SHARE
+    on the account's row. lock_account takes FOR NO KEY UPDATE so the login
+    does not wait for it: a plain FOR UPDATE made the two deadlock
+    (verification 2026-11-18)."""
+    from app.core import security
+
+    _, headers, _ = await _operator_session(client, db_session)
+    # Long enough for the login to note its success on the address's row
+    # and reach its session's insert.
+    checking = _linger(monkeypatch, security, "check_password", before=True, seconds=1)
+
+    async def login():
+        await checking.wait()
+        return await client.post(
+            "/api/v1/auth/login",
+            data={"username": "op@test.local", "password": STRONG},
+            headers={"X-Forwarded-For": "10.0.0.10"},
+        )
+
+    wrong, logged = await asyncio.gather(
+        client.post(
+            "/api/v1/auth/password",
+            headers={**headers, "X-Forwarded-For": "10.0.0.10"},
+            json={"current_password": "guess-guess", "new_password": "x" * 20},
+        ),
+        login(),
+    )
+    assert wrong.status_code == 400, wrong.text
+    assert logged.status_code == 200, logged.text
+
+
 async def test_an_admin_reset_and_a_refresh_do_not_deadlock(
     client, db_session, monkeypatch
 ):

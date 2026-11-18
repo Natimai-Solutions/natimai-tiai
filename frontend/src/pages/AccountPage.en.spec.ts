@@ -51,7 +51,7 @@ const sessions = [
   },
 ] as unknown as AuthSession[];
 
-async function mountPage() {
+async function mountPage(groups: unknown[] = []) {
   const pinia = createPinia();
   setActivePinia(pinia);
   useAuthStore().user = {
@@ -59,7 +59,7 @@ async function mountPage() {
     email: 'a@b.c',
     full_name: 'Ann Smith',
     permissions: [],
-    groups: [],
+    groups,
     email_preference: 'none',
     language: null,
     preferences: {},
@@ -108,6 +108,18 @@ describe('AccountPage in English', () => {
     setLocale('en');
     const w = await mountPage();
     expect(w.text()).toContain('No open session.');
+  });
+
+  it('names a built-in group in English, one renamed as typed', async () => {
+    vi.mocked(listSessions).mockResolvedValue([]);
+    setLocale('en');
+    // The names the installation gave: what /auth/me sends, with the keys.
+    const w = await mountPage([
+      { id: 'g-ro', name: 'Lecture seule', builtin_key: 'readonly' },
+      { id: 'g-tech', name: 'Équipe info', builtin_key: 'technician' },
+    ]);
+    const chips = w.findAll('.q-chip').map((c) => c.text());
+    expect(chips).toEqual(['Read only', 'Équipe info']);
   });
 
   it('switches language while open — the reader may have just chosen it here', async () => {

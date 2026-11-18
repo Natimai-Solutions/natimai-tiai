@@ -123,6 +123,10 @@ async def test_redeploying_a_changed_package_replaces_the_pending_deployments(
     superseded = [r for r in rows if r.error == "Remplacée par un nouveau déploiement"]
     assert len(superseded) == 2
     assert all(r.status == "failed" and r.finished_at for r in superseded)
+    # The code beside the French text: what the English console reads.
+    assert [(r.result_code, r.result_params) for r in superseded] == [
+        ("package.superseded", {})
+    ] * 2
     assert next(r for r in rows if str(r.id) == delivered["id"]).status == "delivered"
 
     # The same version once more: already pending, nothing replaced.

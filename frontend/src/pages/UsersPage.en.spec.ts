@@ -62,8 +62,27 @@ const users: ConsoleUser[] = [
   },
 ];
 
+const readonly: Group = {
+  ...admins,
+  id: 'g-ro',
+  name: 'Lecture seule',
+  builtin_key: 'readonly',
+  is_admin: false,
+};
+
+// An account in a built-in group still bearing the name the installation
+// gave it: what /users sends, with the group's key.
+const reader: ConsoleUser = {
+  ...users[0]!,
+  id: 'u-3',
+  email: 'reader@example.org',
+  locked_until: null,
+  groups: [{ id: 'g-ro', name: 'Lecture seule', builtin_key: 'readonly' }] as never,
+};
+
 interface PageApi {
   openCreate: () => void;
+  openEdit: (user: ConsoleUser) => void;
   openReset: (user: ConsoleUser) => void;
 }
 
@@ -138,6 +157,31 @@ describe('UsersPage in English', () => {
     expect(text).toContain('Type a password');
     expect(text).toContain('The open sessions of this account will be closed.');
     expect(text).not.toMatch(/[éèàùç«»]/);
+    wrapper.unmount();
+  });
+
+  it('names a built-in group in English, in the list and in the form', async () => {
+    vi.mocked(listUsers).mockResolvedValue({
+      items: [reader],
+      total: 1,
+      page: 1,
+      page_size: 25,
+    });
+    vi.mocked(listGroups).mockResolvedValue([admins, readonly]);
+    setLocale('en');
+    const { wrapper, vm } = mountPage();
+    await flushPromises();
+    const row = wrapper.findAll('tbody tr').find((r) => r.text().includes('reader@example.org'));
+    expect(row?.findAll('.q-chip').map((c) => c.text())).toEqual(['Read only']);
+
+    // The group picker: its options, here the one the account holds.
+    vm.openEdit(reader);
+    await flushPromises();
+    const dialog = document.body.querySelector('.q-dialog');
+    const picked = [...(dialog?.querySelectorAll('.q-chip') ?? [])].map((c) =>
+      c.textContent?.trim(),
+    );
+    expect(picked).toEqual(['Read only']);
     wrapper.unmount();
   });
 
