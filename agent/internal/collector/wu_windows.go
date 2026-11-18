@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/msg"
 	"tiai/agent/internal/winpath"
 )
 
@@ -96,10 +97,10 @@ func runPowerShellJSON(ctx context.Context, script string) ([]byte, error) {
 		// Ours (wuSearchTimeout / the configured install budget) versus the
 		// service being stopped — two very different things to report.
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, errors.New("délai d'exécution dépassé pour l'opération Windows Update")
+			return nil, msg.Err("wu.timeout", nil)
 		}
 		if errors.Is(ctx.Err(), context.Canceled) {
-			return nil, errors.New("opération Windows Update interrompue (arrêt de l'agent)")
+			return nil, msg.Err("wu.interrupted", nil)
 		}
 		detail := strings.TrimSpace(stderr.String())
 		if detail == "" {

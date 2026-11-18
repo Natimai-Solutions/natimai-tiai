@@ -36,9 +36,11 @@
           <q-badge :color="maintenanceStateColor(info.resolved.state)">
             {{ maintenanceStateLabel(info.resolved.state) }}
           </q-badge>
-          <span v-if="info.resolved.due_at" class="q-ml-sm">
-            {{ t('maintenance.card.dueOn', { date: dueDate(info.resolved.due_at) }) }}
-          </span>
+          <!-- The leading space keeps « À jour due le … » two words in the
+               text (copy, textContent), as the literal text did before. -->
+          <span v-if="info.resolved.due_at" class="q-ml-sm">{{
+            ' ' + t('maintenance.card.dueOn', { date: dueDate(info.resolved.due_at) })
+          }}</span>
         </div>
       </div>
       <div class="row items-center">

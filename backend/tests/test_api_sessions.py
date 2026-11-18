@@ -794,6 +794,37 @@ async def test_an_admin_reset_and_a_failing_login_do_not_deadlock(
     assert refused.status_code == 401
 
 
+async def test_an_admin_reset_and_a_successful_login_do_not_deadlock(
+    client, db_session, monkeypatch
+):
+    """The reset holds the account's row, then forgets its addresses; a right
+    password from one of them has written its address's row and inserts its
+    session, whose foreign key needs KEY SHARE on the account's row. A
+    plain FOR UPDATE there made the two deadlock (verification 2026-11-18)."""
+    from app.features.user import addresses
+
+    admin = await _admin_headers(client, db_session)
+    user_id, _, _ = await _operator_session(client, db_session)
+    noted = _linger(monkeypatch, addresses, "note_success", before=False, seconds=1.0)
+
+    async def reset():
+        await noted.wait()
+        return await client.post(
+            f"/api/v1/users/{user_id}/reset-password", headers=admin, json={}
+        )
+
+    logged, done = await asyncio.gather(
+        client.post(
+            "/api/v1/auth/login",
+            data={"username": "op@test.local", "password": STRONG},
+            headers={"X-Forwarded-For": "10.0.0.10"},
+        ),
+        reset(),
+    )
+    assert logged.status_code == 200, logged.text
+    assert done.status_code == 200, done.text
+
+
 async def test_an_admin_reset_and_a_wrong_current_password_do_not_deadlock(
     client, db_session, monkeypatch
 ):

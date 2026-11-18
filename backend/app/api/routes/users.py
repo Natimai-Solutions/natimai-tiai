@@ -149,8 +149,16 @@ async def _require_user(
     other. Unlocked, the edit read the row, the deletion committed, and the
     edit's write matched nothing — a 500 where the answer is « not found »,
     or the edit then the deletion.
+
+    FOR NO KEY UPDATE, as ``crud.lock_account``: it still orders two writes
+    of the account, and lets a login of that account insert its session —
+    whose foreign key takes KEY SHARE on this row. A plain FOR UPDATE made
+    an administrator's reset and a successful login of the same account
+    deadlock (verification of 2026-11-18).
     """
-    user = await session.get(User, user_id, with_for_update=for_write or None)
+    user = await session.get(
+        User, user_id, with_for_update={"key_share": True} if for_write else None
+    )
     if user is None:
         raise AppError(
             code=ErrorCode.USER_NOT_FOUND, status_code=404, message="User not found"

@@ -52,6 +52,8 @@ describe('MachineMaintenanceCard', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('due le 02/12/2026');
+    // Two words in the text, as before the bilingual console: copied, read.
+    expect(wrapper.text()).toMatch(/[^\s] due le 02\/12\/2026/);
     expect(wrapper.text()).not.toMatch(/\d{2}:\d{2}:\d{2}/);
   });
 

@@ -49,7 +49,19 @@
         @request="onRequest"
       >
         <template #body-cell-at="props">
-          <q-td :props="props" class="text-no-wrap">{{ formatDateTime(props.value) }}</q-td>
+          <!-- The date opens the entry: the first column, always in view — the
+               eye button at the end of a wide row is off-screen on most
+               screens, and the row itself is text to select. -->
+          <q-td :props="props" class="text-no-wrap">
+            <button
+              type="button"
+              class="row-link audit-open"
+              :title="t('audit.page.viewDetails')"
+              @click="openEntry(props.row)"
+            >
+              {{ formatDateTime(props.value) }}
+            </button>
+          </q-td>
         </template>
 
         <template #body-cell-action="props">
@@ -314,6 +326,17 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.audit-open {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.audit-open:focus-visible {
+  outline: 2px solid var(--q-primary);
+  outline-offset: 2px;
+}
 .audit-id {
   font-family: monospace;
   font-size: 12px;

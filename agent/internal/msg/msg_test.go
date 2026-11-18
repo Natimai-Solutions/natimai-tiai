@@ -202,6 +202,40 @@ func TestEveryCodeHasACaseAndFitsTheServer(t *testing.T) {
 // A code written in the agent's source and missing from the catalogue would
 // send the code itself as text: every literal one is checked here, and the
 // three Defender families built from a prefix (collector.defenderAction).
+// The reverse: a code of the catalogue that nothing sends is a sentence the
+// agent still writes uncoded somewhere (wu.timeout and wu.interrupted were,
+// verification of 2026-11-18). A code built from a prefix (defender actions'
+// ".timeout" and ".interrupted") counts when its prefix is in the source.
+func TestEveryCodeOfTheCatalogueIsSent(t *testing.T) {
+	var source strings.Builder
+	err := filepath.WalkDir("..", func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
+			strings.Contains(path, string(filepath.Separator)+"msg"+string(filepath.Separator)) {
+			return err
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		source.Write(src)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := source.String()
+	for code := range french {
+		if strings.Contains(text, `"`+code+`"`) {
+			continue
+		}
+		base := strings.TrimSuffix(strings.TrimSuffix(code, ".timeout"), ".interrupted")
+		if base != code && strings.Contains(text, `"`+base+`"`) {
+			continue
+		}
+		t.Errorf("code %q is in the catalogue but nothing in the agent sends it", code)
+	}
+}
+
 func TestEveryCodeInTheSourceIsInTheCatalogue(t *testing.T) {
 	call := regexp.MustCompile(`msg\.(?:New|Err|Wrap)\("([^"]+)"`)
 	found := 0

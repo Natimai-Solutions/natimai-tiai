@@ -110,8 +110,10 @@
                     <q-badge v-if="props.row.maintenance_due_soon" color="orange" class="q-mr-xs">
                       {{ t('rooms.list.dueSoon', { count: props.row.maintenance_due_soon }) }}
                     </q-badge>
+                    <!-- Leading space: the badges and « Maintenance : » stay
+                         separate words, as the literal text kept them. -->
                     <span class="text-caption text-muted">
-                      {{ t('rooms.list.maintenance') }}
+                      {{ ' ' + t('rooms.list.maintenance') }}
                       {{ cycleText(props.row) }}
                       {{
                         props.row.effective_owner_name ? `· ${props.row.effective_owner_name}` : ''

@@ -285,6 +285,9 @@ describe('RoomsPage — on a phone (audit U23)', () => {
     expect(text).toContain('24 poste(s)');
     expect(text).toContain('2 divergent(s)');
     expect(text).toContain('3 en retard');
+    // The badges and the maintenance line stay separate words.
+    expect(text).not.toMatch(/(retard|échéance)Maintenance/);
+    expect(text).toContain(' Maintenance : ');
     expect(text).toContain('90 j');
     expect(card.find('a').attributes('href')).toBe('/rooms/r-1');
 

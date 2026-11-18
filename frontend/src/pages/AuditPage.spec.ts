@@ -69,4 +69,14 @@ describe('AuditPage', () => {
     await row.find('button[aria-label="Voir le détail"]').trigger('click');
     expect(w.findComponent(AuditDetailsDialog).props('modelValue')).toBe(true);
   });
+
+  // The eye button sits at the end of a wide row, off-screen on most screens
+  // (verification of 2026-11-18): the date, first column, opens the entry too.
+  it('opens the details from the date, always in view', async () => {
+    const w = await mountPage();
+    const date = w.find('tbody tr button.audit-open');
+    expect(date.attributes('title')).toBe('Voir le détail');
+    await date.trigger('click');
+    expect(w.findComponent(AuditDetailsDialog).props('modelValue')).toBe(true);
+  });
 });
