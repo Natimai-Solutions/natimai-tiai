@@ -473,6 +473,78 @@ func TestMsiExecRemoves(t *testing.T) {
 	}
 }
 
+// The rule the server, the signing script and the agent share, one argument
+// at a time: an argument is read as msiexec may read it — in pieces, quotes
+// off — and a piece removes by /x, /uninstall or REMOVE=, in ASCII letters of
+// either case and no other: msiexec knows nothing of the letters a Unicode
+// case folding would add ("ı", "İ", "ſ"), and the three sides fold them
+// differently.
+func TestMsiExecRemovesOneArgumentAtATime(t *testing.T) {
+	const guid = "{11111111-2222-3333-4444-555555555555}"
+	refused := []string{
+		"/x", "-x", "/X" + guid, "/uninstall", "/UnInstall", " /x", `"/x"`, "/qn /x " + guid,
+		"REMOVE=ALL", "remove=all", `"REMOVE=ALL"`, "/i " + guid + " REMOVE=ALL",
+		// The same, by every route into a piece.
+		"-UNINSTALL", "/x ", "\t/x", "/qn\t-x", "/qn\n/x", ` "/x" `, `" /x "`, `/qn "/uninstall" ` + guid,
+		"ReMoVe=App", "/qn  Remove=ALL", "/i\u00a0/x", "/i\u2003REMOVE=ALL", "/i\x1f/x", "/i\x1c-x",
+	}
+	accepted := []string{
+		"/i", "/qn", "/norestart", "/l*v", "/package", "TRANSFORMS=x.mst", "ADDLOCAL=ALL", `INSTALLDIR=C:\x`,
+		"/un\u0131nstall", "/un\u0130nstall",
+		// A letter a Unicode folding takes for s, a full-width x, and what
+		// merely holds the words.
+		"/unin\u017ftall", "/\uff58", "", " ", `"`, `""`, "/", "-", "REMOVE", "XREMOVE=ALL", "NOREMOVE=1",
+		"{dir}/x.msi", `C:\x\uninstall.msi`, "a-x", "ADDLOCAL=REMOVE=ALL", guid,
+		// Not whitespace, for the server either: nothing is cut there.
+		"/i\x01/x", "/i\x1b/x", "/i\u200b/x", "/i\ufeffREMOVE=ALL",
+	}
+	for _, a := range refused {
+		if !MsiExecRemoves(Step{Run: MsiExec, Args: []string{"/i", "{dir}/app.msi", a, "/qn"}}) {
+			t.Errorf("argument %q not seen as a removal", a)
+		}
+	}
+	for _, a := range accepted {
+		if MsiExecRemoves(Step{Run: MsiExec, Args: []string{"/i", "{dir}/app.msi", a, "/qn"}}) {
+			t.Errorf("argument %q seen as a removal", a)
+		}
+	}
+}
+
+// The vectors the three sides answer alike are one file, kept with the
+// server's tests: read from there rather than restated, so that a rule
+// changed on one side is a test failure on the others.
+func TestMsiExecRemovesAnswersTheSharedVectors(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "backend", "tests", "data", "msiexec_removal_vectors.json")
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		// The agent module checked out on its own: nothing to compare with.
+		t.Skipf("%s not present (agent built outside the repository)", path)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors struct {
+		Refused  []string `json:"refused"`
+		Accepted []string `json:"accepted"`
+	}
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	if len(vectors.Refused) == 0 || len(vectors.Accepted) == 0 {
+		t.Fatalf("%s holds no vectors", path)
+	}
+	for _, a := range vectors.Refused {
+		if !MsiExecRemoves(Step{Run: MsiExec, Args: []string{a}}) {
+			t.Errorf("argument %q not seen as a removal", a)
+		}
+	}
+	for _, a := range vectors.Accepted {
+		if MsiExecRemoves(Step{Run: MsiExec, Args: []string{a}}) {
+			t.Errorf("argument %q seen as a removal", a)
+		}
+	}
+}
+
 // An installation is never run as msiexec /x: under method A the agent would
 // otherwise rebuild any msiexec step holding a product code into one, and a
 // signed manifest that files a removal under "install" is refused too — the
@@ -494,7 +566,10 @@ func TestAnInstallationNeverRunsAnMsiExecRemoval(t *testing.T) {
 			}
 		})
 	}
-	for _, args := range [][]string{{"/x", guid, "/qn"}, {"/X" + guid}, {"/qn", "-uninstall", guid}} {
+	for _, args := range [][]string{
+		{"/x", guid, "/qn"}, {"/X" + guid}, {"/qn", "-uninstall", guid},
+		{"/i", guid, "REMOVE=ALL", "/qn"}, {"/qn /x " + guid}, {`"/x"`, guid}, {" /x", guid},
+	} {
 		t.Run("method B "+strings.Join(args, " "), func(t *testing.T) {
 			env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, files: files}
 			raw := manifestFor(t, signedID, env.files, &Step{Run: MsiExec, Args: args})
@@ -502,7 +577,7 @@ func TestAnInstallationNeverRunsAnMsiExecRemoval(t *testing.T) {
 			pkg := &models.PackageDelivery{ID: signedID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw),
 				Signature: sig, SignatureAlgorithm: "rsa-pkcs1-sha256", Certificate: cert}
 			_, err := Execute(context.Background(), env, Policy{Signers: []string{thumb(der)}}, "package_install", pkg)
-			if err == nil || !strings.Contains(err.Error(), "lance une désinstallation") {
+			if err == nil || !strings.Contains(err.Error(), "lance une désinstallation (msiexec /x, /uninstall ou REMOVE=)") {
 				t.Errorf("verdict = %v", err)
 			}
 			if len(env.ran) != 0 || len(env.fetched) != 0 {
@@ -510,6 +585,21 @@ func TestAnInstallationNeverRunsAnMsiExecRemoval(t *testing.T) {
 			}
 		})
 	}
+	// A signed installation that removes nothing runs as it is written.
+	t.Run("method B install", func(t *testing.T) {
+		env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, files: files}
+		args := []string{"/i", "{dir}/app.msi", "/qn", "/norestart", "ADDLOCAL=ALL", "TRANSFORMS=x.mst", "/l*v", "{dir}/x.log"}
+		raw := manifestFor(t, signedID, env.files, &Step{Run: MsiExec, Args: args})
+		sig, cert, der := signRSA(t, raw)
+		pkg := &models.PackageDelivery{ID: signedID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw),
+			Signature: sig, SignatureAlgorithm: "rsa-pkcs1-sha256", Certificate: cert}
+		if _, err := Execute(context.Background(), env, Policy{Signers: []string{thumb(der)}}, "package_install", pkg); err != nil {
+			t.Fatal(err)
+		}
+		if len(env.ran) != 1 || !strings.HasPrefix(env.ran[0], "msiexec.exe /i ") || !strings.Contains(env.ran[0], " /qn /norestart ADDLOCAL=ALL TRANSFORMS=x.mst /l*v ") {
+			t.Errorf("ran = %v", env.ran)
+		}
+	})
 	// The same step as the uninstallation is what method A is for.
 	env := &fakeEnv{SystemEnv: SystemEnv{DataDir: t.TempDir()}, files: files}
 	m := Manifest{Format: "tiai-package-1", PackageID: pronoteID, Name: "App",
@@ -517,7 +607,8 @@ func TestAnInstallationNeverRunsAnMsiExecRemoval(t *testing.T) {
 		Uninstall: &Step{Run: MsiExec, Args: []string{"/x", guid, "/qn"}}}
 	raw, _ := json.Marshal(m)
 	pkg := &models.PackageDelivery{ID: pronoteID, Kind: "files", Manifest: base64.StdEncoding.EncodeToString(raw)}
-	if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"X"}}, "package_uninstall", pkg); err != nil || len(env.ran) != 1 {
+	if _, err := Execute(context.Background(), env, Policy{Publishers: []string{"X"}}, "package_uninstall", pkg); err != nil ||
+		!slices.Equal(env.ran, []string{"msiexec.exe /x " + guid + " /qn /norestart"}) {
 		t.Errorf("uninstall by product code: %v, ran = %v", err, env.ran)
 	}
 }

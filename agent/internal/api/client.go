@@ -32,6 +32,9 @@ import (
 type StatusError struct {
 	StatusCode int
 	Body       string
+	// RetryAfter is the wait the answer's Retry-After header asks for; zero
+	// when there is none, or none in seconds (see retryAfter).
+	RetryAfter time.Duration
 }
 
 // Error renders the body on one line: an error ends up in the agent's log, and
@@ -190,8 +193,8 @@ func (c *Client) do(ctx context.Context, method, path string, headers map[string
 		// Bounded: the body goes into the error, and the error into the log
 		// on every failed tick (audit S23).
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
-		return fmt.Errorf("%s %s: %w", method, path,
-			&StatusError{StatusCode: resp.StatusCode, Body: string(b)})
+		return fmt.Errorf("%s %s: %w", method, path, &StatusError{
+			StatusCode: resp.StatusCode, Body: string(b), RetryAfter: retryAfter(resp.Header)})
 	}
 	if out != nil {
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
@@ -199,6 +202,26 @@ func (c *Client) do(ctx context.Context, method, path string, headers map[string
 		}
 	}
 	return nil
+}
+
+// maxRetryAfter bounds what a Retry-After header is read as. Far above any
+// wait the agent agrees to — each caller applies its own bound — and what
+// keeps the conversion to a duration from overflowing.
+const maxRetryAfter = 24 * time.Hour
+
+// retryAfter reads a Retry-After header in its seconds form, the one the
+// server sends with a 429 (the length of the limiter's window). The HTTP-date
+// form is not read: it would be compared with this poste's clock, and nothing
+// the agent talks to sends it. Zero when the header is absent or unusable.
+func retryAfter(h http.Header) time.Duration {
+	s, err := strconv.ParseInt(strings.TrimSpace(h.Get("Retry-After")), 10, 64)
+	if err != nil || s <= 0 {
+		return 0
+	}
+	if s > int64(maxRetryAfter/time.Second) {
+		return maxRetryAfter
+	}
+	return time.Duration(s) * time.Second
 }
 
 // stripControlEscapes removes from a JSON document every C0 control character
@@ -214,9 +237,11 @@ func (c *Client) do(ctx context.Context, method, path string, headers map[string
 // those characters.
 //
 // encoding/json writes every control character inside a string as an escape
-// (\u0000 … \u001f, or \n \r \t for those three), and a backslash anywhere in
-// its output starts an escape: a literal backslash is "\\". So the document
-// is walked escape by escape, and the \u00XX escapes of C0 characters dropped.
+// — \u0000 … \u001f, or a two-byte escape for those that have one: \n \r \t,
+// and \b \f since Go 1.22 — and a backslash anywhere in its output starts an
+// escape: a literal backslash is "\\". So the document is walked escape by
+// escape, and the escapes of the stripped characters dropped: \b, \f, and the
+// \u00XX of a C0 character.
 func stripControlEscapes(data []byte) []byte {
 	if bytes.IndexByte(data, '\\') < 0 {
 		return data
@@ -225,6 +250,10 @@ func stripControlEscapes(data []byte) []byte {
 	for i := 0; i < len(data); i++ {
 		if data[i] != '\\' || i+1 >= len(data) {
 			out = append(out, data[i])
+			continue
+		}
+		if data[i+1] == 'b' || data[i+1] == 'f' {
+			i++
 			continue
 		}
 		if data[i+1] == 'u' && i+5 < len(data) && isStrippedControl(data[i+2:i+6]) {

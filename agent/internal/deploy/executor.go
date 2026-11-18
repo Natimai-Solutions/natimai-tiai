@@ -165,13 +165,14 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 		}
 		step = &checked
 	}
-	// An installation that runs msiexec /x removes what it was sent to
-	// install, and the console would read « Installation … terminée ».
-	// Method A refused any installation by msiexec above (MethodAStep); a
-	// signed manifest gets here, and the server and the signing script refuse
-	// to produce one — what reaches a poste anyway is refused here too.
+	// An installation that runs msiexec /x, or REMOVE=, removes what it was
+	// sent to install, and the console would read « Installation …
+	// terminée ». Method A refused any installation by msiexec above
+	// (MethodAStep); a signed manifest gets here, and the server and the
+	// signing script refuse to produce one — what reaches a poste anyway is
+	// refused here too.
 	if action == "install" && MsiExecRemoves(*step) {
-		return Result{}, errors.New("l'installation de ce paquet lance une désinstallation (msiexec /x ou /uninstall) : refusée — placez cette commande dans la désinstallation du paquet")
+		return Result{}, errors.New("l'installation de ce paquet lance une désinstallation (msiexec /x, /uninstall ou REMOVE=) : refusée — placez cette commande dans la désinstallation du paquet")
 	}
 
 	files := manifest.Files

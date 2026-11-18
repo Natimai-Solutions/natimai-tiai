@@ -728,12 +728,53 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
   attend ; dès qu'un admin « autorise le ré-enrôlement », le poste revient seul.
   Même attente pour un enrôlement **en attente d'approbation** : une tentative
   d'enrôlement par palier, le premier après une minute, puis le double à chaque
-  fois jusqu'à un plafond de 15 minutes (avec jitter), et retour au premier
-  palier dès que la réponse change. Une approbation donnée depuis la console est
-  ainsi prise en compte dans les minutes qui suivent, et un poste que personne
-  n'approuve coûte au serveur une tentative par quart d'heure. Le journal
+  fois jusqu'à un plafond de 15 minutes — 1, 2, 4, 8 puis 15 minutes, chacun
+  avec jitter (entre la moitié du palier et le palier). Une approbation donnée
+  depuis la console est ainsi prise en compte dans les minutes qui suivent. En
+  régime établi, un poste que personne n'approuve retente donc toutes les
+  7,5 à 15 minutes — 11 minutes en moyenne, soit **environ cinq tentatives par
+  heure et par poste**, chacune une ligne du journal de sécurité du serveur
+  (l'entrée d'audit, elle, reste dédoublonnée sur 24 h). Le journal de l'agent
   porte une ligne par palier ; cette attente voulue n'est pas signalée comme un
   polling bloqué.
+
+  **Seul un succès termine l'attente.** Une réponse qui n'est ni un succès ni
+  l'un des deux refus ci-dessus — un 429, un 5xx, une panne réseau — ne ramène
+  pas au premier palier : l'agent attend le plus long du palier d'attente et du
+  back-off ordinaire, puis reprend l'attente où elle en était. (Si un 429 la
+  ramenait à une minute, une salle de postes en attente derrière une même
+  adresse saturerait indéfiniment le limiteur d'enrôlement : chaque refus du
+  limiteur en préparerait un autre.) Si l'enrôlement aboutit et que c'est le
+  heartbeat suivant qui échoue, l'attente est terminée : c'est un échec
+  ordinaire.
+
+  **Limiteur d'enrôlement (429).** Le serveur admet 30 enrôlements par
+  5 minutes et par adresse source, tentatives « en attente » comprises, et
+  répond au-delà `429` avec `Retry-After: 300`. Sur un LAN où chaque poste a
+  son adresse, il ne se voit pas ; il compte quand un site entier arrive par
+  une seule adresse (NAT d'un site distant, concentrateur VPN, proxy —
+  `ProxyURL`). L'agent :
+  - **respecte `Retry-After`** (forme en secondes) sur tout 429 : jamais de
+    nouvelle tentative avant ce délai, lui-même borné à 15 minutes ;
+  - pendant une attente, compte un 429 comme un refus de plus : le palier
+    double, comme après un refus d'approbation ;
+  - au plafond de 15 minutes, lit un 429 comme « cette adresse demande plus que
+    ce que le limiteur accorde » et passe à un palier de **30 minutes**
+    (15 à 30 avec jitter, la valeur d'avant la v1.2.1), qu'il garde jusqu'à
+    son enrôlement. Environ 70 postes en attente à cinq tentatives par heure
+    suffisent à dépasser les 360 enrôlements par heure du limiteur ; chaque
+    429 ralentit un poste, et ils cessent quand le débit de l'adresse tient.
+
+  Simulé contre le limiteur du serveur ([`hold_test.go`](internal/agent/hold_test.go),
+  postes démarrés ensemble, mesures après la première heure) : à 40 postes
+  derrière une adresse, aucun palier relevé, 0,1 % de tentatives refusées au
+  plus, et un poste approuvé enrôlé en moins de 15 minutes ; à 100 postes,
+  presque tous au palier de 30 minutes, 4 à 5 % de tentatives refusées, et un
+  poste approuvé enrôlé en moins de 30 minutes neuf fois sur dix, une heure
+  au pire. Au-delà de 130 postes environ derrière une même adresse, le
+  limiteur recommence à refuser une part sensible des tentatives (14 % à 130,
+  37 % à 200) et un poste approuvé peut attendre plus d'une heure : c'est la
+  limite du serveur, par adresse, qu'il faudrait alors élargir.
 - **Rotation du token.** Un token copié hors du poste (image disque, sauvegarde
   de `%ProgramData%`) ne doit pas fonctionner pour toujours : le serveur le
   renouvelle tous les `AGENT_TOKEN_ROTATE_DAYS` jours (30 par défaut). L'agent
@@ -769,7 +810,9 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
   quelques secondes après l'échec martèlerait un serveur tombé), ni ±20 %
   (dépasserait le plafond documenté). Le premier heartbeat après démarrage n'est
   pas retardé : c'est le signal de présence du poste, et un démarrage est déjà
-  sa propre dispersion.
+  sa propre dispersion. Seule exception au plafond : un `429` qui porte
+  `Retry-After` (secondes) n'est jamais retenté avant ce délai, borné à
+  15 minutes — voir « Limiteur d'enrôlement », § Identité & sécurité.
 - File locale durable pour les **résultats de commandes** : un scan terminé alors
   que le serveur était down est rejoué au prochain contact — y compris le
   résultat d'un `reboot`, si le poste tombe avant que le POST n'aboutisse.

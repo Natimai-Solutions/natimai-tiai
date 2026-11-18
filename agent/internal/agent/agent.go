@@ -132,17 +132,29 @@ type Agent struct {
 	lastPollDone atomic.Int64 // unix seconds; 0 until the first poll completes
 	// When the loop's deliberate wait ends (unix seconds): the next poll is not
 	// late before then, however long ago the last one finished — an
-	// enrollment hold waits up to a quarter of an hour on purpose.
+	// enrollment hold waits up to half an hour on purpose.
 	nextPollAt  atomic.Int64
 	pollPhase   atomic.Value // string
 	stallLogged atomic.Bool
 	firstOK     atomic.Bool
+	// The watchdog's own, read and written by checkStall alone: when it last
+	// looked, and the moment before which nothing counts as late — set when
+	// two looks are further apart than its ticker allows (see stallCheckGap).
+	lastStallCheck int64 // unix seconds; 0 before the first look
+	stallFloor     int64 // unix seconds
 }
 
 // pollStallAfter is how long the watchdog tolerates without a completed poll
 // before saying so. Well above one heavy heartbeat plus the back-off cap: a
 // server that is merely slow or down produces "tick failed" lines of its own.
 const pollStallAfter = 10 * time.Minute
+
+// stallCheckGap is how far apart two looks of the watchdog may be before the
+// time between them is taken for time that did not pass here — the clock set
+// forward (a poste whose clock is corrected after the service started), or
+// the process not running (the machine resumed from sleep) — and not for time
+// a poll spent hanging. The watchdog looks every minute.
+const stallCheckGap = 3 * time.Minute
 
 // New creates an agent from config.
 func New(cfg *config.Config, cfgPath string) *Agent {
@@ -255,8 +267,8 @@ type retryPlan struct {
 	base, max time.Duration
 	// wait is the regular back-off step.
 	wait time.Duration
-	// hold is the enrollment-hold step, zero while the server holds nothing:
-	// the first hold step is then enrollmentHoldFirst again.
+	// hold is the enrollment-hold step, zero while the server holds nothing.
+	// Only a success brings it back to zero (next, enrolled).
 	hold time.Duration
 }
 
@@ -265,39 +277,75 @@ func newRetryPlan(base, max time.Duration) *retryPlan {
 }
 
 // next returns the step to wait after a tick that returned err (nil for a
-// success), and whether that step is an enrollment hold.
-func (p *retryPlan) next(err error) (step time.Duration, onHold bool) {
+// success), and whether the enrollment is on hold.
+//
+// A hold lasts until a success. An answer that is neither — the enrollment
+// limiter's 429, a network failure, a 5xx — says nothing about the approval
+// the poste waits for, and must not bring the next attempt forward: the step
+// is then the larger of the hold step and the regular back-off. It used to
+// end the hold, so that the hold refusal after it was retried within the
+// minute; in a room of held postes behind one address (a NAT, a proxy), each
+// 429 of the limiter did that, and the limiter never emptied.
+func (p *retryPlan) next(err error) (step time.Duration, held bool) {
 	if err == nil {
 		p.wait, p.hold = p.base, 0
 		return p.base, false
 	}
 	if enrollmentOnHold(err) {
-		p.hold = nextHoldStep(p.hold)
+		// Up to the ceiling; a step a 429 took above it stays there.
+		if p.hold < enrollmentHoldMax {
+			p.hold = nextHoldStep(p.hold)
+		}
 		return p.hold, true
 	}
-	// The hold has ended — the server answers something else now — and the
-	// next one starts again from its first, short step.
-	p.hold = 0
 	p.wait = nextBackoff(p.wait, p.max)
-	return p.wait, false
+	if p.hold == 0 {
+		return p.wait, false
+	}
+	if rateLimited(err) {
+		// One more refused attempt, so one more doubling — and past the
+		// ceiling, the one answer that does: see enrollmentHoldCongested.
+		if p.hold < enrollmentHoldMax {
+			p.hold = nextHoldStep(p.hold)
+		} else {
+			p.hold = enrollmentHoldCongested
+		}
+	}
+	return max(p.hold, p.wait), true
 }
+
+// enrolled tells the plan the poste holds a token: nothing is on hold, and
+// whatever failed after the enrollment went through — the heartbeat that
+// follows it — is an ordinary failure, retried as one.
+func (p *retryPlan) enrolled() { p.hold = 0 }
 
 // scheduleNext decides how long the loop sleeps after a tick that returned
 // err, logs the failure or the hold, and tells the watchdog when the next poll
 // is due — a wait chosen on purpose is not a poll that hangs.
 func (a *Agent) scheduleNext(p *retryPlan, err error, now time.Time) time.Duration {
-	step, onHold := p.next(err)
+	if a.cfg.AuthToken != "" {
+		p.enrolled()
+	}
+	step, held := p.next(err)
 	sleep := step
-	switch {
-	case err == nil:
-	case onHold:
+	if err != nil {
 		sleep = jitterBackoff(step)
+		// Never sooner than a 429 asks: the enrollment limiter names the
+		// length of its window, and an attempt inside it is refused again.
+		if after := retryAfter(err); sleep < after {
+			sleep = after
+		}
+	}
+	switch reason := enrollmentHoldReason(err); {
+	case err == nil:
+	case reason != "":
 		// One line per hold step: the step grows to enrollmentHoldMax, so a
 		// poste left waiting for a day writes about a hundred of them.
-		log.Printf("agent: %s, next enrollment attempt in %s",
-			enrollmentHoldReason(err), sleep.Round(time.Second))
+		log.Printf("agent: %s, next enrollment attempt in %s", reason, sleep.Round(time.Second))
+	case held:
+		log.Printf("agent: tick failed while the enrollment is on hold, retrying in %s: %v",
+			sleep.Round(time.Second), err)
 	default:
-		sleep = jitterBackoff(step)
 		log.Printf("agent: tick failed, retrying in %s: %v", sleep.Round(time.Second), err)
 	}
 	a.nextPollAt.Store(now.Add(sleep).Unix())
@@ -331,14 +379,38 @@ func (a *Agent) tick(ctx context.Context) error {
 //
 // An approval is what an administrator does while looking at the console,
 // which promises the poste back within minutes: the first steps are short for
-// that. A poste nobody approves settles at one enrollment attempt per quarter
-// of an hour — retrying every five minutes, as an ordinary failure would,
-// changed nothing but the server's audit log (audit B33). Each step is one
-// tick, so one enrollment attempt.
+// that. A poste nobody approves settles at the last step — with the jitter,
+// an enrollment attempt every 7.5 to 15 minutes, about five an hour.
+// Retrying every five minutes, as an ordinary failure would, changed nothing
+// but the server's audit log (audit B33). Each step is one tick, so one
+// enrollment attempt.
 const (
 	enrollmentHoldFirst = time.Minute
 	enrollmentHoldMax   = 15 * time.Minute
 )
+
+// enrollmentHoldCongested is the hold step of a poste the enrollment limiter
+// answered 429 while already at enrollmentHoldMax, until it enrolls.
+//
+// The server admits 30 enrollments per five minutes per source address, 360
+// an hour, and a held attempt counts as one. At five attempts an hour per
+// poste, some seventy held postes behind one address (a remote site's NAT, a
+// proxy) ask for more than that, for as long as they are held: part of them
+// is refused whatever they do, and so is the poste just approved, or the new
+// one, that shares their address. A 429 at the ceiling is that situation
+// telling its name, and the poste that receives it halves its own rate — the
+// half hour a hold lasted before the short steps existed. Each such 429
+// lowers the address's rate until that poste enrolls, so they stop once it
+// fits: a hundred held postes are down to a few refusals in a hundred
+// attempts after their first hour. Past some hundred and thirty, half an hour
+// is not enough either and the limiter fills again, as it did before the
+// short steps; the cure for that is not on the poste.
+const enrollmentHoldCongested = 30 * time.Minute
+
+// retryAfterMax bounds the wait a 429's Retry-After can impose: an answer —
+// the server's, or anything standing in for it — must not be able to put a
+// poste to sleep for longer than a hold does.
+const retryAfterMax = enrollmentHoldMax
 
 // nextHoldStep is the hold step after cur (zero: the hold just started).
 func nextHoldStep(cur time.Duration) time.Duration {
@@ -368,6 +440,22 @@ func enrollmentHoldReason(err error) string {
 		return "this machine is revoked, waiting for an administrator to allow re-enrollment"
 	}
 	return ""
+}
+
+// rateLimited reports whether err wraps an HTTP 429 from the server.
+func rateLimited(err error) bool {
+	var se *api.StatusError
+	return errors.As(err, &se) && se.StatusCode == http.StatusTooManyRequests
+}
+
+// retryAfter is the wait a 429 asks for in its Retry-After header, at most
+// retryAfterMax; zero for any other answer, or without the header.
+func retryAfter(err error) time.Duration {
+	var se *api.StatusError
+	if !errors.As(err, &se) || se.StatusCode != http.StatusTooManyRequests {
+		return 0
+	}
+	return min(se.RetryAfter, retryAfterMax)
 }
 
 // isUnauthorized reports whether err wraps an HTTP 401 from the server.
@@ -652,13 +740,30 @@ func (a *Agent) watchdog(ctx context.Context) {
 // checkStall logs, once, a poll that has not completed for pollStallAfter.
 // The clock runs from the last completed poll, or from the end of the wait
 // the loop chose after it — a poll is only late once it was due.
+//
+// Nor is it late by the hours a clock set forward, or a machine asleep, put
+// between two looks: the wall clock then says « no poll for eight hours » of
+// a loop that was simply not running, or whose timer has not fired yet. The
+// count starts again from the look that noticed, and a poll that really hangs
+// is reported pollStallAfter later.
 func (a *Agent) checkStall(now time.Time, started int64) {
+	last := a.lastStallCheck
+	if last == 0 {
+		last = started
+	}
+	a.lastStallCheck = now.Unix()
+	if now.Unix()-last > int64(stallCheckGap/time.Second) {
+		a.stallFloor = now.Unix()
+	}
 	ref := a.lastPollDone.Load()
 	if ref == 0 {
 		ref = started
 	}
 	if due := a.nextPollAt.Load(); due > ref {
 		ref = due
+	}
+	if a.stallFloor > ref {
+		ref = a.stallFloor
 	}
 	since := now.Sub(time.Unix(ref, 0))
 	if since < pollStallAfter || a.stallLogged.Load() {
@@ -1121,9 +1226,13 @@ func jitterBackoff(step time.Duration) time.Duration {
 		return step
 	}
 	half := step / 2
-	// rand.N(n) is in [0, n): +1 makes the step itself reachable.
-	return step - half + rand.N(half+1)
+	// A draw in [0, n): +1 makes the step itself reachable.
+	return step - half + jitterDraw(half+1)
 }
+
+// jitterDraw draws uniformly in [0, n). A variable for the tests alone, which
+// replace it to fix the draws or to seed them.
+var jitterDraw = rand.N[time.Duration]
 
 // packageBudget bounds a deployment: downloads included, which on a slow site
 // is most of it. The worker is sequential; nothing may hold it forever.
@@ -1142,9 +1251,7 @@ func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.Pack
 	a.wuOp.Lock()
 	defer a.wuOp.Unlock()
 
-	policy := deployPolicy(config.DeployKeys())
-	env := &deploy.SystemEnv{Fetcher: a.client, DataDir: config.DefaultConfigDir()}
-	res, err := deploy.Execute(ctx, env, policy, cmdType, pkg)
+	res, err := a.executePackage(ctx, cmdType, pkg)
 	if err != nil {
 		return "", err
 	}
@@ -1155,6 +1262,17 @@ func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.Pack
 	}
 	return res.Output, nil
 }
+
+// executePackage hands the deployment to internal/deploy, under the trust and
+// the caps the registry holds at this moment.
+func (a *Agent) executePackage(ctx context.Context, cmdType string, pkg *models.PackageDelivery) (deploy.Result, error) {
+	env := &deploy.SystemEnv{Fetcher: a.client, DataDir: config.DefaultConfigDir()}
+	return deploy.Execute(ctx, env, deployPolicy(deployKeys()), cmdType, pkg)
+}
+
+// deployKeys reads the Deploy* registry values. A variable for the tests
+// alone: there is no registry to set them in off Windows.
+var deployKeys = config.DeployKeys
 
 // deployPolicy is the trust a GPO granted, as internal/deploy reads it.
 func deployPolicy(trust config.DeployTrust) deploy.Policy {
@@ -1176,5 +1294,5 @@ func deployPolicy(trust config.DeployTrust) deploy.Policy {
 // none would keep them for a week whatever their size.
 func sweepPackageCache() {
 	env := &deploy.SystemEnv{DataDir: config.DefaultConfigDir()}
-	deploy.SweepPackages(env.PackagesDir(), "", 0, deployPolicy(config.DeployKeys()).CacheMaxBytes(), time.Now())
+	deploy.SweepPackages(env.PackagesDir(), "", 0, deployPolicy(deployKeys()).CacheMaxBytes(), time.Now())
 }
