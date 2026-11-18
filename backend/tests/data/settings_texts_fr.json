@@ -1,0 +1,4035 @@
+{
+ "environment": [
+  {
+   "name": "defaults",
+   "settings": {},
+   "groups": [
+    {
+     "code": "fleet",
+     "label": "Postes et seuils",
+     "items": [
+      {
+       "key": "SIGNATURE_MAX_AGE_DAYS",
+       "value": "3",
+       "description": "Âge maximal des signatures antivirus, en jours, avant qu'un poste soit « base antivirus périmée » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "INACTIVE_AFTER_DAYS",
+       "value": "30",
+       "description": "Jours sans contact de l'agent avant qu'un poste soit « inactif » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "OFFLINE_AFTER_SECONDS",
+       "value": "180",
+       "description": "Secondes sans battement avant qu'un poste soit compté éteint (3 × l'intervalle de l'agent par défaut)",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOW_DISK_FREE_PERCENT",
+       "value": "10",
+       "description": "Seuil « disque presque plein » : pourcentage libre sur le volume système en dessous duquel un poste est signalé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "HARDWARE_AGING_YEARS",
+       "value": "5",
+       "description": "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_EXPECTED_VERSION",
+       "value": null,
+       "description": "Version d'agent de référence pour « agent obsolète » ; vide = la plus haute version remontée par le parc — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_DEFAULT_TTL_MINUTES",
+       "value": "60",
+       "description": "Durée de vie, en minutes, d'une commande encore en attente avant qu'elle soit périmée — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_UNANSWERED_HOURS",
+       "value": "24",
+       "description": "Heures laissées à un poste pour répondre d'une commande qu'il a reçue avant qu'elle soit close en échec « sans réponse du poste » (une réponse plus tardive l'emporte encore)",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_RETENTION_DAYS",
+       "value": "365",
+       "description": "Jours de conservation de l'historique des commandes terminées (0 = indéfiniment)",
+       "raw": 365,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_TOKEN_ROTATE_DAYS",
+       "value": "30",
+       "description": "Âge, en jours, au-delà duquel le token d'un poste est renouvelé (0 = jamais)",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_HEARTBEAT_MAX_PER_MINUTE",
+       "value": "12",
+       "description": "Battements qu'un même poste peut envoyer par minute ; au-delà, le serveur répond 429 (l'agent en envoie un par intervalle, plus un au redémarrage)",
+       "raw": 12,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SOFTWARE_NEW_ENTRIES_PER_DAY",
+       "value": "2000",
+       "description": "Nouvelles entrées du catalogue logiciel qu'un même poste peut créer par 24 heures ; au-delà, son inventaire est signalé partiel et redemandé quand le budget le permet",
+       "raw": 2000,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET",
+       "value": "50000",
+       "description": "Nouvelles entrées du catalogue logiciel que tous les postes réunis peuvent créer par 24 heures ; un poste reçoit le plus petit de ce qui reste de son budget et de celui-ci",
+       "raw": 50000,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AUDIT_RETENTION_DAYS",
+       "value": "730",
+       "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
+       "raw": 730,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "maintenance",
+     "label": "Maintenance",
+     "items": [
+      {
+       "key": "MAINTENANCE_DEFAULT_CYCLE_DAYS",
+       "value": "90",
+       "description": "Cycle par défaut, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 90,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAINTENANCE_DUE_SOON_DAYS",
+       "value": "14",
+       "description": "Fenêtre « à échéance », en jours — même règle",
+       "raw": 14,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAINTENANCE_REMINDER_WEEKDAY",
+       "value": "0 (lundi)",
+       "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 0,
+       "format": "weekday",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "usage",
+     "label": "Utilisation des postes",
+     "items": [
+      {
+       "key": "USAGE_WINDOW_DAYS",
+       "value": "7",
+       "description": "Fenêtre d'observation, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 7,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_LOW_HOURS",
+       "value": "10",
+       "description": "Heures allumées en dessous desquelles un poste est « peu utilisé » — même règle",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_HIGH_HOURS",
+       "value": "30",
+       "description": "Heures allumées au-dessus desquelles un poste est « toujours allumé » — même règle",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_RETENTION_DAYS",
+       "value": "400",
+       "description": "Durée de conservation, en jours, des compteurs horaires d'utilisation",
+       "raw": 400,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "rooms",
+     "label": "Salles",
+     "items": [
+      {
+       "key": "ROOM_SOURCE",
+       "value": "manual (à la main, depuis la console)",
+       "description": "Comment les postes sont rangés en salles : manual, ad_ou ou ad_location. Dans un mode annuaire, le rattachement manuel est verrouillé",
+       "raw": "manual",
+       "format": "room_source",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "email",
+     "label": "E-mails",
+     "items": [
+      {
+       "key": "EMAIL_PROVIDER",
+       "value": "mailgun (incomplet dans l'environnement : aucun e-mail ne part sans réglage dans la console)",
+       "description": "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "mailgun",
+       "format": "mail_state",
+       "params": {
+        "configured": false
+       }
+      },
+      {
+       "key": "EMAIL_FROM_EMAIL",
+       "value": null,
+       "description": "Adresse d'expéditeur (ou MAILGUN_FROM_EMAIL pour un .env plus ancien) — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_FROM_NAME",
+       "value": "Tia'i",
+       "description": "Nom d'expéditeur affiché — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "Tia'i",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_DOMAIN",
+       "value": null,
+       "description": "Domaine d'envoi Mailgun ; vide = Mailgun non configuré — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_API_BASE_URL",
+       "value": "https://api.mailgun.net/v3",
+       "description": "Point d'entrée de l'API Mailgun (EU ou US) — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "https://api.mailgun.net/v3",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_TIMEOUT_SECONDS",
+       "value": "10",
+       "description": "Délai d'attente de l'API Mailgun, en secondes",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_PROXY_URL",
+       "value": null,
+       "description": "Proxy HTTP par lequel passent les appels à Mailgun, et eux seuls ; vide = connexion directe. Seuls l'hôte et le port sont affichés, jamais un identifiant ni un mot de passe",
+       "raw": null,
+       "format": "proxy",
+       "params": {
+        "unreadable": false
+       }
+      },
+      {
+       "key": "DIGEST_HOUR_UTC",
+       "value": "18",
+       "description": "Heure UTC d'envoi du résumé quotidien et du rappel de maintenance — valeur initiale : le réglage enregistré prend le dessus",
+       "raw": 18,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "THREAT_ALERT_MAX_AGE_HOURS",
+       "value": "24",
+       "description": "Une détection plus ancienne que ce nombre d'heures ne déclenche pas d'alerte immédiate (historique d'un poste qui s'enrôle)",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "NOTIFICATION_MAX_ITEMS",
+       "value": "10",
+       "description": "Nombre de postes ou de détections détaillés dans un e-mail avant « et N autres »",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "DEFAULT_LANGUAGE",
+       "value": "fr",
+       "description": "Langue des e-mails d'un compte qui n'a pas choisi la sienne (fr ou en)",
+       "raw": "fr",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_MAX_ATTEMPTS",
+       "value": "20",
+       "description": "Tentatives d'envoi d'un e-mail (de 1 min à 1 h d'écart) avant qu'il soit abandonné et gardé avec sa dernière erreur",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_OUTBOX_RETENTION_DAYS",
+       "value": "30",
+       "description": "Jours de conservation des e-mails envoyés ou abandonnés dans la file de sortie",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "wol",
+     "label": "Réveil des postes (Wake-on-LAN)",
+     "items": [
+      {
+       "key": "WOL_RELAY_ENABLED",
+       "value": "non",
+       "description": "oui = le serveur confie le réveil à un poste allumé du même emplacement (serveur hébergé hors site) ; non = il émet lui-même",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "WOL_BROADCAST_ADDRESSES",
+       "value": null,
+       "description": "Adresses de diffusion explicites ; renseignées, elles remplacent l'adresse déduite du poste",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "WOL_SUBNET_PREFIXLEN",
+       "value": "24",
+       "description": "Masque de repli pour déduire l'adresse de diffusion d'un poste dont l'agent n'a pas remonté le sien",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_ALLOWED_NETWORKS",
+       "value": null,
+       "description": "Réseaux (CIDR) sur lesquels le serveur peut émettre lui-même un réveil ; vide = les plages privées 10.0.0.0/8, 172.16.0.0/12 et 192.168.0.0/16. Une adresse de poste hors de ces réseaux n'est pas une destination",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "WOL_PORT",
+       "value": "9",
+       "description": "Port UDP du paquet magique",
+       "raw": 9,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_PACKET_COUNT",
+       "value": "3",
+       "description": "Nombre de copies du paquet émises",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_TTL_MINUTES",
+       "value": "10",
+       "description": "Délai, en minutes, laissé à un poste relais pour prendre un réveil",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_SUBNET_GRACE_SECONDS",
+       "value": "90",
+       "description": "Avance laissée à un relais du même sous-réseau que la cible ; 0 = aucune",
+       "raw": 90,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_MIN_AGE_MINUTES",
+       "value": "60",
+       "description": "Ancienneté minimale, en minutes, d'un poste dans le parc avant qu'il puisse relayer un réveil",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_MIN_AGENT_VERSION",
+       "value": "1.0.0",
+       "description": "Version d'agent minimale d'un poste relais ; un agent plus ancien, ou sans version lisible, ne reçoit aucun réveil à relayer",
+       "raw": "1.0.0",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_CLAIM_TIMEOUT_SECONDS",
+       "value": "180",
+       "description": "Secondes sans réponse après lesquelles un réveil pris par un relais est remis en file pour un autre",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "console",
+     "label": "Console et sécurité",
+     "items": [
+      {
+       "key": "ENVIRONMENT",
+       "value": "local",
+       "description": "local, staging ou production ; hors local, les secrets de démonstration sont refusés et les erreurs internes masquées",
+       "raw": "local",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TIAI_SERVER_NAME",
+       "value": null,
+       "description": "Nom sous lequel le serveur est joint (site de Caddy, nom du certificat) ; la console en déduit son URL publique",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "CONSOLE_BASE_URL",
+       "value": null,
+       "description": "URL publique de la console, dans les liens des e-mails ; déduite de TIAI_SERVER_NAME quand elle n'est pas renseignée. Vide = aucun e-mail de réinitialisation",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ACCESS_TOKEN_EXPIRE_MINUTES",
+       "value": "15",
+       "description": "Durée de vie, en minutes, du jeton d'accès console (renouvelé seul par la session)",
+       "raw": 15,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "REFRESH_TOKEN_EXPIRE_DAYS",
+       "value": "7",
+       "description": "Jours sans usage avant qu'une session console se ferme (glissant)",
+       "raw": 7,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SESSION_MAX_DAYS",
+       "value": "30",
+       "description": "Durée maximale d'une session console depuis la connexion, en jours",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_MIN_LENGTH",
+       "value": "12",
+       "description": "Longueur minimale imposée à tout mot de passe",
+       "raw": 12,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_EXPIRE_MINUTES",
+       "value": "60",
+       "description": "Validité, en minutes, d'un lien de réinitialisation",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_COOLDOWN_MINUTES",
+       "value": "5",
+       "description": "Minutes pendant lesquelles une même adresse ne fait pas envoyer de nouvel e-mail « mot de passe oublié » pour un compte après le précédent qu'elle a demandé",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_MAX_LIVE_LINKS",
+       "value": "3",
+       "description": "Nombre de liens de réinitialisation valides à la fois pour un même compte et une même adresse qui les demande ; une demande n'annule jamais un lien encore valide",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS",
+       "value": "10",
+       "description": "Plafond de liens valides à la fois pour un même compte, toutes adresses confondues ; une demande venue d'une adresse habituelle du compte n'y est pas soumise",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_MAX_FAILED_ATTEMPTS",
+       "value": "5",
+       "description": "Échecs de connexion rapprochés (chacun à moins de LOGIN_LOCKOUT_MINUTES du précédent) avant qu'un compte soit verrouillé pour les adresses qui ont échoué",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_LOCKOUT_MINUTES",
+       "value": "15",
+       "description": "Durée, en minutes, du verrouillage, et délai au-delà duquel un échec ancien ne compte plus ; une réinitialisation du mot de passe le lève",
+       "raw": 15,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SIEGE_ADDRESSES",
+       "value": "10",
+       "description": "Nombre d'adresses distinctes en échec sur un même compte, en LOGIN_LOCKOUT_MINUTES (sous le verrou des essais lents : depuis le début de sa fenêtre), à partir duquel le verrouillage écarte toutes les adresses sauf celles qui ont ouvert le compte récemment",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_KNOWN_ADDRESS_DAYS",
+       "value": "30",
+       "description": "Jours pendant lesquels une adresse qui a ouvert un compte reste connue de lui, et n'est pas écartée par ce verrouillage étendu",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
+       "value": "20",
+       "description": "Échecs de connexion, même espacés, en LOGIN_SLOW_WINDOW_HOURS heures qui verrouillent un compte pour ce nombre d'heures ; ce verrou ferme le compte aux adresses qui ont échoué pendant cette fenêtre. Non défini : 20, ou quatre fois LOGIN_MAX_FAILED_ATTEMPTS si c'est davantage",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SLOW_WINDOW_HOURS",
+       "value": "24",
+       "description": "Fenêtre, en heures, de ce second compteur, et durée du verrou qu'il pose ; seul un nouveau mot de passe le lève. Non défini : 24, ou le double de LOGIN_LOCKOUT_MINUTES si c'est davantage",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
+       "value": "oui",
+       "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "RATE_LIMIT_ENABLED",
+       "value": "oui",
+       "description": "Limitation du débit par adresse (connexion, mot de passe oublié, enrôlement), par session (changement de mot de passe) et par poste (battements) ; non = tout cela est levé, à réserver à des opérateurs qui arrivent tous d'une même adresse. Ni le verrouillage des comptes ni le budget du catalogue logiciel n'en dépendent",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXIES",
+       "value": null,
+       "description": "Réseaux (CIDR) des proxys dont l'en-tête X-Forwarded-For est cru pour connaître l'adresse du client, en plus de la boucle locale",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXIES_ALLOW_WIDE",
+       "value": "non",
+       "description": "oui = TRUSTED_PROXIES peut lister un réseau plus large qu'un /24 (IPv4) ou un /64 (IPv6) ; non = le serveur refuse de démarrer, car tout client de ce réseau pourrait choisir son adresse",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXY_HOSTS",
+       "value": "caddy",
+       "description": "Noms d'hôte de ces proxys, résolus dans le réseau du serveur (le service caddy par défaut)",
+       "raw": [
+        "caddy"
+       ],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "EXPOSE_OPENAPI",
+       "value": "non",
+       "description": "oui = le schéma OpenAPI et ses pages (/docs, /redoc) sont servis hors développement local",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_POOL_SIZE",
+       "value": "20",
+       "description": "Connexions à la base gardées ouvertes par processus (API, worker)",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_MAX_OVERFLOW",
+       "value": "10",
+       "description": "Connexions supplémentaires ouvertes au-delà, le temps d'un pic",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_POOL_TIMEOUT",
+       "value": "30",
+       "description": "Secondes d'attente d'une connexion libre avant qu'une requête échoue",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "packages",
+     "label": "Paquets logiciels",
+     "items": [
+      {
+       "key": "PACKAGES_DIR",
+       "value": "/data/packages",
+       "description": "Dossier du serveur où sont rangés les fichiers des paquets (un fichier par empreinte SHA-256)",
+       "raw": "/data/packages",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PACKAGE_MAX_BYTES",
+       "value": "2147483648 (2 Gio)",
+       "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+       "raw": 2147483648,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "PACKAGE_METHOD_A_MAX_GB",
+       "value": "8",
+       "description": "Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents",
+       "raw": 8,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mailgun",
+   "settings": {
+    "EMAIL_PROVIDER": "mailgun",
+    "MAILGUN_DOMAIN": "mg.lycee.pf",
+    "MAILGUN_API_KEY": "key-0123456789",
+    "MAILGUN_PROXY_URL": "http://jdupont:s3cr3t@10.0.0.1:3128",
+    "EMAIL_FROM_EMAIL": "tiai@lycee.pf",
+    "EMAIL_FROM_NAME": "Parc du lycée",
+    "ROOM_SOURCE": "ad_ou",
+    "MAINTENANCE_REMINDER_WEEKDAY": 4,
+    "PACKAGE_MAX_BYTES": 1610612736,
+    "WOL_RELAY_ENABLED": true,
+    "WOL_BROADCAST_ADDRESSES": "10.0.0.255, 10.0.1.255",
+    "TIAI_SERVER_NAME": "tiai.lycee.pf",
+    "AGENT_EXPECTED_VERSION": "1.2.0",
+    "DEFAULT_LANGUAGE": "en"
+   },
+   "groups": [
+    {
+     "code": "fleet",
+     "label": "Postes et seuils",
+     "items": [
+      {
+       "key": "SIGNATURE_MAX_AGE_DAYS",
+       "value": "3",
+       "description": "Âge maximal des signatures antivirus, en jours, avant qu'un poste soit « base antivirus périmée » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "INACTIVE_AFTER_DAYS",
+       "value": "30",
+       "description": "Jours sans contact de l'agent avant qu'un poste soit « inactif » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "OFFLINE_AFTER_SECONDS",
+       "value": "180",
+       "description": "Secondes sans battement avant qu'un poste soit compté éteint (3 × l'intervalle de l'agent par défaut)",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOW_DISK_FREE_PERCENT",
+       "value": "10",
+       "description": "Seuil « disque presque plein » : pourcentage libre sur le volume système en dessous duquel un poste est signalé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "HARDWARE_AGING_YEARS",
+       "value": "5",
+       "description": "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_EXPECTED_VERSION",
+       "value": "1.2.0",
+       "description": "Version d'agent de référence pour « agent obsolète » ; vide = la plus haute version remontée par le parc — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": "1.2.0",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_DEFAULT_TTL_MINUTES",
+       "value": "60",
+       "description": "Durée de vie, en minutes, d'une commande encore en attente avant qu'elle soit périmée — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_UNANSWERED_HOURS",
+       "value": "24",
+       "description": "Heures laissées à un poste pour répondre d'une commande qu'il a reçue avant qu'elle soit close en échec « sans réponse du poste » (une réponse plus tardive l'emporte encore)",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_RETENTION_DAYS",
+       "value": "365",
+       "description": "Jours de conservation de l'historique des commandes terminées (0 = indéfiniment)",
+       "raw": 365,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_TOKEN_ROTATE_DAYS",
+       "value": "30",
+       "description": "Âge, en jours, au-delà duquel le token d'un poste est renouvelé (0 = jamais)",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_HEARTBEAT_MAX_PER_MINUTE",
+       "value": "12",
+       "description": "Battements qu'un même poste peut envoyer par minute ; au-delà, le serveur répond 429 (l'agent en envoie un par intervalle, plus un au redémarrage)",
+       "raw": 12,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SOFTWARE_NEW_ENTRIES_PER_DAY",
+       "value": "2000",
+       "description": "Nouvelles entrées du catalogue logiciel qu'un même poste peut créer par 24 heures ; au-delà, son inventaire est signalé partiel et redemandé quand le budget le permet",
+       "raw": 2000,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET",
+       "value": "50000",
+       "description": "Nouvelles entrées du catalogue logiciel que tous les postes réunis peuvent créer par 24 heures ; un poste reçoit le plus petit de ce qui reste de son budget et de celui-ci",
+       "raw": 50000,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AUDIT_RETENTION_DAYS",
+       "value": "730",
+       "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
+       "raw": 730,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "maintenance",
+     "label": "Maintenance",
+     "items": [
+      {
+       "key": "MAINTENANCE_DEFAULT_CYCLE_DAYS",
+       "value": "90",
+       "description": "Cycle par défaut, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 90,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAINTENANCE_DUE_SOON_DAYS",
+       "value": "14",
+       "description": "Fenêtre « à échéance », en jours — même règle",
+       "raw": 14,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAINTENANCE_REMINDER_WEEKDAY",
+       "value": "4 (vendredi)",
+       "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 4,
+       "format": "weekday",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "usage",
+     "label": "Utilisation des postes",
+     "items": [
+      {
+       "key": "USAGE_WINDOW_DAYS",
+       "value": "7",
+       "description": "Fenêtre d'observation, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 7,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_LOW_HOURS",
+       "value": "10",
+       "description": "Heures allumées en dessous desquelles un poste est « peu utilisé » — même règle",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_HIGH_HOURS",
+       "value": "30",
+       "description": "Heures allumées au-dessus desquelles un poste est « toujours allumé » — même règle",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_RETENTION_DAYS",
+       "value": "400",
+       "description": "Durée de conservation, en jours, des compteurs horaires d'utilisation",
+       "raw": 400,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "rooms",
+     "label": "Salles",
+     "items": [
+      {
+       "key": "ROOM_SOURCE",
+       "value": "ad_ou (par l'unité d'organisation de l'annuaire)",
+       "description": "Comment les postes sont rangés en salles : manual, ad_ou ou ad_location. Dans un mode annuaire, le rattachement manuel est verrouillé",
+       "raw": "ad_ou",
+       "format": "room_source",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "email",
+     "label": "E-mails",
+     "items": [
+      {
+       "key": "EMAIL_PROVIDER",
+       "value": "mailgun (configuré dans l'environnement)",
+       "description": "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "mailgun",
+       "format": "mail_state",
+       "params": {
+        "configured": true
+       }
+      },
+      {
+       "key": "EMAIL_FROM_EMAIL",
+       "value": "tiai@lycee.pf",
+       "description": "Adresse d'expéditeur (ou MAILGUN_FROM_EMAIL pour un .env plus ancien) — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "tiai@lycee.pf",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_FROM_NAME",
+       "value": "Parc du lycée",
+       "description": "Nom d'expéditeur affiché — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "Parc du lycée",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_DOMAIN",
+       "value": "mg.lycee.pf",
+       "description": "Domaine d'envoi Mailgun ; vide = Mailgun non configuré — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "mg.lycee.pf",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_API_BASE_URL",
+       "value": "https://api.mailgun.net/v3",
+       "description": "Point d'entrée de l'API Mailgun (EU ou US) — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "https://api.mailgun.net/v3",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_TIMEOUT_SECONDS",
+       "value": "10",
+       "description": "Délai d'attente de l'API Mailgun, en secondes",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_PROXY_URL",
+       "value": "10.0.0.1:3128",
+       "description": "Proxy HTTP par lequel passent les appels à Mailgun, et eux seuls ; vide = connexion directe. Seuls l'hôte et le port sont affichés, jamais un identifiant ni un mot de passe",
+       "raw": "10.0.0.1:3128",
+       "format": "proxy",
+       "params": {
+        "unreadable": false
+       }
+      },
+      {
+       "key": "DIGEST_HOUR_UTC",
+       "value": "18",
+       "description": "Heure UTC d'envoi du résumé quotidien et du rappel de maintenance — valeur initiale : le réglage enregistré prend le dessus",
+       "raw": 18,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "THREAT_ALERT_MAX_AGE_HOURS",
+       "value": "24",
+       "description": "Une détection plus ancienne que ce nombre d'heures ne déclenche pas d'alerte immédiate (historique d'un poste qui s'enrôle)",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "NOTIFICATION_MAX_ITEMS",
+       "value": "10",
+       "description": "Nombre de postes ou de détections détaillés dans un e-mail avant « et N autres »",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "DEFAULT_LANGUAGE",
+       "value": "en",
+       "description": "Langue des e-mails d'un compte qui n'a pas choisi la sienne (fr ou en)",
+       "raw": "en",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_MAX_ATTEMPTS",
+       "value": "20",
+       "description": "Tentatives d'envoi d'un e-mail (de 1 min à 1 h d'écart) avant qu'il soit abandonné et gardé avec sa dernière erreur",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_OUTBOX_RETENTION_DAYS",
+       "value": "30",
+       "description": "Jours de conservation des e-mails envoyés ou abandonnés dans la file de sortie",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "wol",
+     "label": "Réveil des postes (Wake-on-LAN)",
+     "items": [
+      {
+       "key": "WOL_RELAY_ENABLED",
+       "value": "oui",
+       "description": "oui = le serveur confie le réveil à un poste allumé du même emplacement (serveur hébergé hors site) ; non = il émet lui-même",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "WOL_BROADCAST_ADDRESSES",
+       "value": "10.0.0.255, 10.0.1.255",
+       "description": "Adresses de diffusion explicites ; renseignées, elles remplacent l'adresse déduite du poste",
+       "raw": [
+        "10.0.0.255",
+        "10.0.1.255"
+       ],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "WOL_SUBNET_PREFIXLEN",
+       "value": "24",
+       "description": "Masque de repli pour déduire l'adresse de diffusion d'un poste dont l'agent n'a pas remonté le sien",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_ALLOWED_NETWORKS",
+       "value": null,
+       "description": "Réseaux (CIDR) sur lesquels le serveur peut émettre lui-même un réveil ; vide = les plages privées 10.0.0.0/8, 172.16.0.0/12 et 192.168.0.0/16. Une adresse de poste hors de ces réseaux n'est pas une destination",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "WOL_PORT",
+       "value": "9",
+       "description": "Port UDP du paquet magique",
+       "raw": 9,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_PACKET_COUNT",
+       "value": "3",
+       "description": "Nombre de copies du paquet émises",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_TTL_MINUTES",
+       "value": "10",
+       "description": "Délai, en minutes, laissé à un poste relais pour prendre un réveil",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_SUBNET_GRACE_SECONDS",
+       "value": "90",
+       "description": "Avance laissée à un relais du même sous-réseau que la cible ; 0 = aucune",
+       "raw": 90,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_MIN_AGE_MINUTES",
+       "value": "60",
+       "description": "Ancienneté minimale, en minutes, d'un poste dans le parc avant qu'il puisse relayer un réveil",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_MIN_AGENT_VERSION",
+       "value": "1.0.0",
+       "description": "Version d'agent minimale d'un poste relais ; un agent plus ancien, ou sans version lisible, ne reçoit aucun réveil à relayer",
+       "raw": "1.0.0",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_CLAIM_TIMEOUT_SECONDS",
+       "value": "180",
+       "description": "Secondes sans réponse après lesquelles un réveil pris par un relais est remis en file pour un autre",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "console",
+     "label": "Console et sécurité",
+     "items": [
+      {
+       "key": "ENVIRONMENT",
+       "value": "local",
+       "description": "local, staging ou production ; hors local, les secrets de démonstration sont refusés et les erreurs internes masquées",
+       "raw": "local",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TIAI_SERVER_NAME",
+       "value": "tiai.lycee.pf",
+       "description": "Nom sous lequel le serveur est joint (site de Caddy, nom du certificat) ; la console en déduit son URL publique",
+       "raw": "tiai.lycee.pf",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "CONSOLE_BASE_URL",
+       "value": "https://tiai.lycee.pf",
+       "description": "URL publique de la console, dans les liens des e-mails ; déduite de TIAI_SERVER_NAME quand elle n'est pas renseignée. Vide = aucun e-mail de réinitialisation",
+       "raw": "https://tiai.lycee.pf",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ACCESS_TOKEN_EXPIRE_MINUTES",
+       "value": "15",
+       "description": "Durée de vie, en minutes, du jeton d'accès console (renouvelé seul par la session)",
+       "raw": 15,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "REFRESH_TOKEN_EXPIRE_DAYS",
+       "value": "7",
+       "description": "Jours sans usage avant qu'une session console se ferme (glissant)",
+       "raw": 7,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SESSION_MAX_DAYS",
+       "value": "30",
+       "description": "Durée maximale d'une session console depuis la connexion, en jours",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_MIN_LENGTH",
+       "value": "12",
+       "description": "Longueur minimale imposée à tout mot de passe",
+       "raw": 12,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_EXPIRE_MINUTES",
+       "value": "60",
+       "description": "Validité, en minutes, d'un lien de réinitialisation",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_COOLDOWN_MINUTES",
+       "value": "5",
+       "description": "Minutes pendant lesquelles une même adresse ne fait pas envoyer de nouvel e-mail « mot de passe oublié » pour un compte après le précédent qu'elle a demandé",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_MAX_LIVE_LINKS",
+       "value": "3",
+       "description": "Nombre de liens de réinitialisation valides à la fois pour un même compte et une même adresse qui les demande ; une demande n'annule jamais un lien encore valide",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS",
+       "value": "10",
+       "description": "Plafond de liens valides à la fois pour un même compte, toutes adresses confondues ; une demande venue d'une adresse habituelle du compte n'y est pas soumise",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_MAX_FAILED_ATTEMPTS",
+       "value": "5",
+       "description": "Échecs de connexion rapprochés (chacun à moins de LOGIN_LOCKOUT_MINUTES du précédent) avant qu'un compte soit verrouillé pour les adresses qui ont échoué",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_LOCKOUT_MINUTES",
+       "value": "15",
+       "description": "Durée, en minutes, du verrouillage, et délai au-delà duquel un échec ancien ne compte plus ; une réinitialisation du mot de passe le lève",
+       "raw": 15,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SIEGE_ADDRESSES",
+       "value": "10",
+       "description": "Nombre d'adresses distinctes en échec sur un même compte, en LOGIN_LOCKOUT_MINUTES (sous le verrou des essais lents : depuis le début de sa fenêtre), à partir duquel le verrouillage écarte toutes les adresses sauf celles qui ont ouvert le compte récemment",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_KNOWN_ADDRESS_DAYS",
+       "value": "30",
+       "description": "Jours pendant lesquels une adresse qui a ouvert un compte reste connue de lui, et n'est pas écartée par ce verrouillage étendu",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
+       "value": "20",
+       "description": "Échecs de connexion, même espacés, en LOGIN_SLOW_WINDOW_HOURS heures qui verrouillent un compte pour ce nombre d'heures ; ce verrou ferme le compte aux adresses qui ont échoué pendant cette fenêtre. Non défini : 20, ou quatre fois LOGIN_MAX_FAILED_ATTEMPTS si c'est davantage",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SLOW_WINDOW_HOURS",
+       "value": "24",
+       "description": "Fenêtre, en heures, de ce second compteur, et durée du verrou qu'il pose ; seul un nouveau mot de passe le lève. Non défini : 24, ou le double de LOGIN_LOCKOUT_MINUTES si c'est davantage",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
+       "value": "oui",
+       "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "RATE_LIMIT_ENABLED",
+       "value": "oui",
+       "description": "Limitation du débit par adresse (connexion, mot de passe oublié, enrôlement), par session (changement de mot de passe) et par poste (battements) ; non = tout cela est levé, à réserver à des opérateurs qui arrivent tous d'une même adresse. Ni le verrouillage des comptes ni le budget du catalogue logiciel n'en dépendent",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXIES",
+       "value": null,
+       "description": "Réseaux (CIDR) des proxys dont l'en-tête X-Forwarded-For est cru pour connaître l'adresse du client, en plus de la boucle locale",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXIES_ALLOW_WIDE",
+       "value": "non",
+       "description": "oui = TRUSTED_PROXIES peut lister un réseau plus large qu'un /24 (IPv4) ou un /64 (IPv6) ; non = le serveur refuse de démarrer, car tout client de ce réseau pourrait choisir son adresse",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXY_HOSTS",
+       "value": "caddy",
+       "description": "Noms d'hôte de ces proxys, résolus dans le réseau du serveur (le service caddy par défaut)",
+       "raw": [
+        "caddy"
+       ],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "EXPOSE_OPENAPI",
+       "value": "non",
+       "description": "oui = le schéma OpenAPI et ses pages (/docs, /redoc) sont servis hors développement local",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_POOL_SIZE",
+       "value": "20",
+       "description": "Connexions à la base gardées ouvertes par processus (API, worker)",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_MAX_OVERFLOW",
+       "value": "10",
+       "description": "Connexions supplémentaires ouvertes au-delà, le temps d'un pic",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_POOL_TIMEOUT",
+       "value": "30",
+       "description": "Secondes d'attente d'une connexion libre avant qu'une requête échoue",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "packages",
+     "label": "Paquets logiciels",
+     "items": [
+      {
+       "key": "PACKAGES_DIR",
+       "value": "/data/packages",
+       "description": "Dossier du serveur où sont rangés les fichiers des paquets (un fichier par empreinte SHA-256)",
+       "raw": "/data/packages",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PACKAGE_MAX_BYTES",
+       "value": "1610612736 (1,5 Gio)",
+       "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+       "raw": 1610612736,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "PACKAGE_METHOD_A_MAX_GB",
+       "value": "8",
+       "description": "Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents",
+       "raw": 8,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mailgun_proxy_unreadable",
+   "settings": {
+    "EMAIL_PROVIDER": "mailgun",
+    "MAILGUN_PROXY_URL": "http://jdupont:123/abc@proxy:3128",
+    "ROOM_SOURCE": "ad_location",
+    "MAINTENANCE_REMINDER_WEEKDAY": 6,
+    "PACKAGE_MAX_BYTES": 1572864,
+    "CONSOLE_BASE_URL": "https://console.lycee.pf:8443/"
+   },
+   "groups": [
+    {
+     "code": "fleet",
+     "label": "Postes et seuils",
+     "items": [
+      {
+       "key": "SIGNATURE_MAX_AGE_DAYS",
+       "value": "3",
+       "description": "Âge maximal des signatures antivirus, en jours, avant qu'un poste soit « base antivirus périmée » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "INACTIVE_AFTER_DAYS",
+       "value": "30",
+       "description": "Jours sans contact de l'agent avant qu'un poste soit « inactif » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "OFFLINE_AFTER_SECONDS",
+       "value": "180",
+       "description": "Secondes sans battement avant qu'un poste soit compté éteint (3 × l'intervalle de l'agent par défaut)",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOW_DISK_FREE_PERCENT",
+       "value": "10",
+       "description": "Seuil « disque presque plein » : pourcentage libre sur le volume système en dessous duquel un poste est signalé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "HARDWARE_AGING_YEARS",
+       "value": "5",
+       "description": "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_EXPECTED_VERSION",
+       "value": null,
+       "description": "Version d'agent de référence pour « agent obsolète » ; vide = la plus haute version remontée par le parc — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_DEFAULT_TTL_MINUTES",
+       "value": "60",
+       "description": "Durée de vie, en minutes, d'une commande encore en attente avant qu'elle soit périmée — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_UNANSWERED_HOURS",
+       "value": "24",
+       "description": "Heures laissées à un poste pour répondre d'une commande qu'il a reçue avant qu'elle soit close en échec « sans réponse du poste » (une réponse plus tardive l'emporte encore)",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_RETENTION_DAYS",
+       "value": "365",
+       "description": "Jours de conservation de l'historique des commandes terminées (0 = indéfiniment)",
+       "raw": 365,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_TOKEN_ROTATE_DAYS",
+       "value": "30",
+       "description": "Âge, en jours, au-delà duquel le token d'un poste est renouvelé (0 = jamais)",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_HEARTBEAT_MAX_PER_MINUTE",
+       "value": "12",
+       "description": "Battements qu'un même poste peut envoyer par minute ; au-delà, le serveur répond 429 (l'agent en envoie un par intervalle, plus un au redémarrage)",
+       "raw": 12,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SOFTWARE_NEW_ENTRIES_PER_DAY",
+       "value": "2000",
+       "description": "Nouvelles entrées du catalogue logiciel qu'un même poste peut créer par 24 heures ; au-delà, son inventaire est signalé partiel et redemandé quand le budget le permet",
+       "raw": 2000,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET",
+       "value": "50000",
+       "description": "Nouvelles entrées du catalogue logiciel que tous les postes réunis peuvent créer par 24 heures ; un poste reçoit le plus petit de ce qui reste de son budget et de celui-ci",
+       "raw": 50000,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AUDIT_RETENTION_DAYS",
+       "value": "730",
+       "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
+       "raw": 730,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "maintenance",
+     "label": "Maintenance",
+     "items": [
+      {
+       "key": "MAINTENANCE_DEFAULT_CYCLE_DAYS",
+       "value": "90",
+       "description": "Cycle par défaut, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 90,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAINTENANCE_DUE_SOON_DAYS",
+       "value": "14",
+       "description": "Fenêtre « à échéance », en jours — même règle",
+       "raw": 14,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAINTENANCE_REMINDER_WEEKDAY",
+       "value": "6 (dimanche)",
+       "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 6,
+       "format": "weekday",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "usage",
+     "label": "Utilisation des postes",
+     "items": [
+      {
+       "key": "USAGE_WINDOW_DAYS",
+       "value": "7",
+       "description": "Fenêtre d'observation, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 7,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_LOW_HOURS",
+       "value": "10",
+       "description": "Heures allumées en dessous desquelles un poste est « peu utilisé » — même règle",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_HIGH_HOURS",
+       "value": "30",
+       "description": "Heures allumées au-dessus desquelles un poste est « toujours allumé » — même règle",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_RETENTION_DAYS",
+       "value": "400",
+       "description": "Durée de conservation, en jours, des compteurs horaires d'utilisation",
+       "raw": 400,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "rooms",
+     "label": "Salles",
+     "items": [
+      {
+       "key": "ROOM_SOURCE",
+       "value": "ad_location (par l'attribut Emplacement de l'annuaire)",
+       "description": "Comment les postes sont rangés en salles : manual, ad_ou ou ad_location. Dans un mode annuaire, le rattachement manuel est verrouillé",
+       "raw": "ad_location",
+       "format": "room_source",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "email",
+     "label": "E-mails",
+     "items": [
+      {
+       "key": "EMAIL_PROVIDER",
+       "value": "mailgun (incomplet dans l'environnement : aucun e-mail ne part sans réglage dans la console)",
+       "description": "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "mailgun",
+       "format": "mail_state",
+       "params": {
+        "configured": false
+       }
+      },
+      {
+       "key": "EMAIL_FROM_EMAIL",
+       "value": null,
+       "description": "Adresse d'expéditeur (ou MAILGUN_FROM_EMAIL pour un .env plus ancien) — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_FROM_NAME",
+       "value": "Tia'i",
+       "description": "Nom d'expéditeur affiché — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "Tia'i",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_DOMAIN",
+       "value": null,
+       "description": "Domaine d'envoi Mailgun ; vide = Mailgun non configuré — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_API_BASE_URL",
+       "value": "https://api.mailgun.net/v3",
+       "description": "Point d'entrée de l'API Mailgun (EU ou US) — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "https://api.mailgun.net/v3",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_TIMEOUT_SECONDS",
+       "value": "10",
+       "description": "Délai d'attente de l'API Mailgun, en secondes",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAILGUN_PROXY_URL",
+       "value": "défini (illisible)",
+       "description": "Proxy HTTP par lequel passent les appels à Mailgun, et eux seuls ; vide = connexion directe. Seuls l'hôte et le port sont affichés, jamais un identifiant ni un mot de passe",
+       "raw": null,
+       "format": "proxy",
+       "params": {
+        "unreadable": true
+       }
+      },
+      {
+       "key": "DIGEST_HOUR_UTC",
+       "value": "18",
+       "description": "Heure UTC d'envoi du résumé quotidien et du rappel de maintenance — valeur initiale : le réglage enregistré prend le dessus",
+       "raw": 18,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "THREAT_ALERT_MAX_AGE_HOURS",
+       "value": "24",
+       "description": "Une détection plus ancienne que ce nombre d'heures ne déclenche pas d'alerte immédiate (historique d'un poste qui s'enrôle)",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "NOTIFICATION_MAX_ITEMS",
+       "value": "10",
+       "description": "Nombre de postes ou de détections détaillés dans un e-mail avant « et N autres »",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "DEFAULT_LANGUAGE",
+       "value": "fr",
+       "description": "Langue des e-mails d'un compte qui n'a pas choisi la sienne (fr ou en)",
+       "raw": "fr",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_MAX_ATTEMPTS",
+       "value": "20",
+       "description": "Tentatives d'envoi d'un e-mail (de 1 min à 1 h d'écart) avant qu'il soit abandonné et gardé avec sa dernière erreur",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_OUTBOX_RETENTION_DAYS",
+       "value": "30",
+       "description": "Jours de conservation des e-mails envoyés ou abandonnés dans la file de sortie",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "wol",
+     "label": "Réveil des postes (Wake-on-LAN)",
+     "items": [
+      {
+       "key": "WOL_RELAY_ENABLED",
+       "value": "non",
+       "description": "oui = le serveur confie le réveil à un poste allumé du même emplacement (serveur hébergé hors site) ; non = il émet lui-même",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "WOL_BROADCAST_ADDRESSES",
+       "value": null,
+       "description": "Adresses de diffusion explicites ; renseignées, elles remplacent l'adresse déduite du poste",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "WOL_SUBNET_PREFIXLEN",
+       "value": "24",
+       "description": "Masque de repli pour déduire l'adresse de diffusion d'un poste dont l'agent n'a pas remonté le sien",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_ALLOWED_NETWORKS",
+       "value": null,
+       "description": "Réseaux (CIDR) sur lesquels le serveur peut émettre lui-même un réveil ; vide = les plages privées 10.0.0.0/8, 172.16.0.0/12 et 192.168.0.0/16. Une adresse de poste hors de ces réseaux n'est pas une destination",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "WOL_PORT",
+       "value": "9",
+       "description": "Port UDP du paquet magique",
+       "raw": 9,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_PACKET_COUNT",
+       "value": "3",
+       "description": "Nombre de copies du paquet émises",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_TTL_MINUTES",
+       "value": "10",
+       "description": "Délai, en minutes, laissé à un poste relais pour prendre un réveil",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_SUBNET_GRACE_SECONDS",
+       "value": "90",
+       "description": "Avance laissée à un relais du même sous-réseau que la cible ; 0 = aucune",
+       "raw": 90,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_MIN_AGE_MINUTES",
+       "value": "60",
+       "description": "Ancienneté minimale, en minutes, d'un poste dans le parc avant qu'il puisse relayer un réveil",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_MIN_AGENT_VERSION",
+       "value": "1.0.0",
+       "description": "Version d'agent minimale d'un poste relais ; un agent plus ancien, ou sans version lisible, ne reçoit aucun réveil à relayer",
+       "raw": "1.0.0",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_CLAIM_TIMEOUT_SECONDS",
+       "value": "180",
+       "description": "Secondes sans réponse après lesquelles un réveil pris par un relais est remis en file pour un autre",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "console",
+     "label": "Console et sécurité",
+     "items": [
+      {
+       "key": "ENVIRONMENT",
+       "value": "local",
+       "description": "local, staging ou production ; hors local, les secrets de démonstration sont refusés et les erreurs internes masquées",
+       "raw": "local",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TIAI_SERVER_NAME",
+       "value": null,
+       "description": "Nom sous lequel le serveur est joint (site de Caddy, nom du certificat) ; la console en déduit son URL publique",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "CONSOLE_BASE_URL",
+       "value": "https://console.lycee.pf:8443",
+       "description": "URL publique de la console, dans les liens des e-mails ; déduite de TIAI_SERVER_NAME quand elle n'est pas renseignée. Vide = aucun e-mail de réinitialisation",
+       "raw": "https://console.lycee.pf:8443",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ACCESS_TOKEN_EXPIRE_MINUTES",
+       "value": "15",
+       "description": "Durée de vie, en minutes, du jeton d'accès console (renouvelé seul par la session)",
+       "raw": 15,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "REFRESH_TOKEN_EXPIRE_DAYS",
+       "value": "7",
+       "description": "Jours sans usage avant qu'une session console se ferme (glissant)",
+       "raw": 7,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SESSION_MAX_DAYS",
+       "value": "30",
+       "description": "Durée maximale d'une session console depuis la connexion, en jours",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_MIN_LENGTH",
+       "value": "12",
+       "description": "Longueur minimale imposée à tout mot de passe",
+       "raw": 12,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_EXPIRE_MINUTES",
+       "value": "60",
+       "description": "Validité, en minutes, d'un lien de réinitialisation",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_COOLDOWN_MINUTES",
+       "value": "5",
+       "description": "Minutes pendant lesquelles une même adresse ne fait pas envoyer de nouvel e-mail « mot de passe oublié » pour un compte après le précédent qu'elle a demandé",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_MAX_LIVE_LINKS",
+       "value": "3",
+       "description": "Nombre de liens de réinitialisation valides à la fois pour un même compte et une même adresse qui les demande ; une demande n'annule jamais un lien encore valide",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS",
+       "value": "10",
+       "description": "Plafond de liens valides à la fois pour un même compte, toutes adresses confondues ; une demande venue d'une adresse habituelle du compte n'y est pas soumise",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_MAX_FAILED_ATTEMPTS",
+       "value": "5",
+       "description": "Échecs de connexion rapprochés (chacun à moins de LOGIN_LOCKOUT_MINUTES du précédent) avant qu'un compte soit verrouillé pour les adresses qui ont échoué",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_LOCKOUT_MINUTES",
+       "value": "15",
+       "description": "Durée, en minutes, du verrouillage, et délai au-delà duquel un échec ancien ne compte plus ; une réinitialisation du mot de passe le lève",
+       "raw": 15,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SIEGE_ADDRESSES",
+       "value": "10",
+       "description": "Nombre d'adresses distinctes en échec sur un même compte, en LOGIN_LOCKOUT_MINUTES (sous le verrou des essais lents : depuis le début de sa fenêtre), à partir duquel le verrouillage écarte toutes les adresses sauf celles qui ont ouvert le compte récemment",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_KNOWN_ADDRESS_DAYS",
+       "value": "30",
+       "description": "Jours pendant lesquels une adresse qui a ouvert un compte reste connue de lui, et n'est pas écartée par ce verrouillage étendu",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
+       "value": "20",
+       "description": "Échecs de connexion, même espacés, en LOGIN_SLOW_WINDOW_HOURS heures qui verrouillent un compte pour ce nombre d'heures ; ce verrou ferme le compte aux adresses qui ont échoué pendant cette fenêtre. Non défini : 20, ou quatre fois LOGIN_MAX_FAILED_ATTEMPTS si c'est davantage",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SLOW_WINDOW_HOURS",
+       "value": "24",
+       "description": "Fenêtre, en heures, de ce second compteur, et durée du verrou qu'il pose ; seul un nouveau mot de passe le lève. Non défini : 24, ou le double de LOGIN_LOCKOUT_MINUTES si c'est davantage",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
+       "value": "oui",
+       "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "RATE_LIMIT_ENABLED",
+       "value": "oui",
+       "description": "Limitation du débit par adresse (connexion, mot de passe oublié, enrôlement), par session (changement de mot de passe) et par poste (battements) ; non = tout cela est levé, à réserver à des opérateurs qui arrivent tous d'une même adresse. Ni le verrouillage des comptes ni le budget du catalogue logiciel n'en dépendent",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXIES",
+       "value": null,
+       "description": "Réseaux (CIDR) des proxys dont l'en-tête X-Forwarded-For est cru pour connaître l'adresse du client, en plus de la boucle locale",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXIES_ALLOW_WIDE",
+       "value": "non",
+       "description": "oui = TRUSTED_PROXIES peut lister un réseau plus large qu'un /24 (IPv4) ou un /64 (IPv6) ; non = le serveur refuse de démarrer, car tout client de ce réseau pourrait choisir son adresse",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXY_HOSTS",
+       "value": "caddy",
+       "description": "Noms d'hôte de ces proxys, résolus dans le réseau du serveur (le service caddy par défaut)",
+       "raw": [
+        "caddy"
+       ],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "EXPOSE_OPENAPI",
+       "value": "non",
+       "description": "oui = le schéma OpenAPI et ses pages (/docs, /redoc) sont servis hors développement local",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_POOL_SIZE",
+       "value": "20",
+       "description": "Connexions à la base gardées ouvertes par processus (API, worker)",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_MAX_OVERFLOW",
+       "value": "10",
+       "description": "Connexions supplémentaires ouvertes au-delà, le temps d'un pic",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_POOL_TIMEOUT",
+       "value": "30",
+       "description": "Secondes d'attente d'une connexion libre avant qu'une requête échoue",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "packages",
+     "label": "Paquets logiciels",
+     "items": [
+      {
+       "key": "PACKAGES_DIR",
+       "value": "/data/packages",
+       "description": "Dossier du serveur où sont rangés les fichiers des paquets (un fichier par empreinte SHA-256)",
+       "raw": "/data/packages",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PACKAGE_MAX_BYTES",
+       "value": "1572864 (1,5 Mio)",
+       "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+       "raw": 1572864,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "PACKAGE_METHOD_A_MAX_GB",
+       "value": "8",
+       "description": "Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents",
+       "raw": 8,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smtp",
+   "settings": {
+    "EMAIL_PROVIDER": "smtp",
+    "SMTP_HOST": "smtp.office365.com",
+    "SMTP_SECURITY": "tls",
+    "SMTP_PORT": 465,
+    "SMTP_VERIFY_TLS": false,
+    "SMTP_USER": "never-shown@lycee.pf",
+    "SMTP_PASSWORD": "never-shown",
+    "EMAIL_FROM_EMAIL": "tiai@lycee.pf",
+    "TRUSTED_PROXIES": "172.18.0.0/24,10.9.0.0/24",
+    "WOL_ALLOWED_NETWORKS": "10.4.0.0/16,10.5.0.0/16",
+    "EXPOSE_OPENAPI": true,
+    "RATE_LIMIT_ENABLED": false,
+    "MAINTENANCE_REMINDER_WEEKDAY": 2,
+    "PACKAGE_MAX_BYTES": 8589934592
+   },
+   "groups": [
+    {
+     "code": "fleet",
+     "label": "Postes et seuils",
+     "items": [
+      {
+       "key": "SIGNATURE_MAX_AGE_DAYS",
+       "value": "3",
+       "description": "Âge maximal des signatures antivirus, en jours, avant qu'un poste soit « base antivirus périmée » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "INACTIVE_AFTER_DAYS",
+       "value": "30",
+       "description": "Jours sans contact de l'agent avant qu'un poste soit « inactif » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "OFFLINE_AFTER_SECONDS",
+       "value": "180",
+       "description": "Secondes sans battement avant qu'un poste soit compté éteint (3 × l'intervalle de l'agent par défaut)",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOW_DISK_FREE_PERCENT",
+       "value": "10",
+       "description": "Seuil « disque presque plein » : pourcentage libre sur le volume système en dessous duquel un poste est signalé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "HARDWARE_AGING_YEARS",
+       "value": "5",
+       "description": "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_EXPECTED_VERSION",
+       "value": null,
+       "description": "Version d'agent de référence pour « agent obsolète » ; vide = la plus haute version remontée par le parc — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_DEFAULT_TTL_MINUTES",
+       "value": "60",
+       "description": "Durée de vie, en minutes, d'une commande encore en attente avant qu'elle soit périmée — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_UNANSWERED_HOURS",
+       "value": "24",
+       "description": "Heures laissées à un poste pour répondre d'une commande qu'il a reçue avant qu'elle soit close en échec « sans réponse du poste » (une réponse plus tardive l'emporte encore)",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_RETENTION_DAYS",
+       "value": "365",
+       "description": "Jours de conservation de l'historique des commandes terminées (0 = indéfiniment)",
+       "raw": 365,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_TOKEN_ROTATE_DAYS",
+       "value": "30",
+       "description": "Âge, en jours, au-delà duquel le token d'un poste est renouvelé (0 = jamais)",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_HEARTBEAT_MAX_PER_MINUTE",
+       "value": "12",
+       "description": "Battements qu'un même poste peut envoyer par minute ; au-delà, le serveur répond 429 (l'agent en envoie un par intervalle, plus un au redémarrage)",
+       "raw": 12,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SOFTWARE_NEW_ENTRIES_PER_DAY",
+       "value": "2000",
+       "description": "Nouvelles entrées du catalogue logiciel qu'un même poste peut créer par 24 heures ; au-delà, son inventaire est signalé partiel et redemandé quand le budget le permet",
+       "raw": 2000,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET",
+       "value": "50000",
+       "description": "Nouvelles entrées du catalogue logiciel que tous les postes réunis peuvent créer par 24 heures ; un poste reçoit le plus petit de ce qui reste de son budget et de celui-ci",
+       "raw": 50000,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AUDIT_RETENTION_DAYS",
+       "value": "730",
+       "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
+       "raw": 730,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "maintenance",
+     "label": "Maintenance",
+     "items": [
+      {
+       "key": "MAINTENANCE_DEFAULT_CYCLE_DAYS",
+       "value": "90",
+       "description": "Cycle par défaut, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 90,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAINTENANCE_DUE_SOON_DAYS",
+       "value": "14",
+       "description": "Fenêtre « à échéance », en jours — même règle",
+       "raw": 14,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAINTENANCE_REMINDER_WEEKDAY",
+       "value": "2 (mercredi)",
+       "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 2,
+       "format": "weekday",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "usage",
+     "label": "Utilisation des postes",
+     "items": [
+      {
+       "key": "USAGE_WINDOW_DAYS",
+       "value": "7",
+       "description": "Fenêtre d'observation, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 7,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_LOW_HOURS",
+       "value": "10",
+       "description": "Heures allumées en dessous desquelles un poste est « peu utilisé » — même règle",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_HIGH_HOURS",
+       "value": "30",
+       "description": "Heures allumées au-dessus desquelles un poste est « toujours allumé » — même règle",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_RETENTION_DAYS",
+       "value": "400",
+       "description": "Durée de conservation, en jours, des compteurs horaires d'utilisation",
+       "raw": 400,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "rooms",
+     "label": "Salles",
+     "items": [
+      {
+       "key": "ROOM_SOURCE",
+       "value": "manual (à la main, depuis la console)",
+       "description": "Comment les postes sont rangés en salles : manual, ad_ou ou ad_location. Dans un mode annuaire, le rattachement manuel est verrouillé",
+       "raw": "manual",
+       "format": "room_source",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "email",
+     "label": "E-mails",
+     "items": [
+      {
+       "key": "EMAIL_PROVIDER",
+       "value": "smtp (configuré dans l'environnement)",
+       "description": "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "smtp",
+       "format": "mail_state",
+       "params": {
+        "configured": true
+       }
+      },
+      {
+       "key": "EMAIL_FROM_EMAIL",
+       "value": "tiai@lycee.pf",
+       "description": "Adresse d'expéditeur (ou MAILGUN_FROM_EMAIL pour un .env plus ancien) — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "tiai@lycee.pf",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_FROM_NAME",
+       "value": "Tia'i",
+       "description": "Nom d'expéditeur affiché — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "Tia'i",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SMTP_HOST",
+       "value": "smtp.office365.com",
+       "description": "Serveur SMTP ; vide = SMTP non configuré — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "smtp.office365.com",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SMTP_PORT",
+       "value": "465",
+       "description": "Port du serveur SMTP — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": 465,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SMTP_SECURITY",
+       "value": "tls",
+       "description": "starttls (587), tls (465) ou none (relais interne sur 25) — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "tls",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SMTP_VERIFY_TLS",
+       "value": "non",
+       "description": "Vérification du certificat du serveur ; non = relais à certificat privé — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "SMTP_TIMEOUT_SECONDS",
+       "value": "10",
+       "description": "Délai d'attente du serveur SMTP, en secondes — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "DIGEST_HOUR_UTC",
+       "value": "18",
+       "description": "Heure UTC d'envoi du résumé quotidien et du rappel de maintenance — valeur initiale : le réglage enregistré prend le dessus",
+       "raw": 18,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "THREAT_ALERT_MAX_AGE_HOURS",
+       "value": "24",
+       "description": "Une détection plus ancienne que ce nombre d'heures ne déclenche pas d'alerte immédiate (historique d'un poste qui s'enrôle)",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "NOTIFICATION_MAX_ITEMS",
+       "value": "10",
+       "description": "Nombre de postes ou de détections détaillés dans un e-mail avant « et N autres »",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "DEFAULT_LANGUAGE",
+       "value": "fr",
+       "description": "Langue des e-mails d'un compte qui n'a pas choisi la sienne (fr ou en)",
+       "raw": "fr",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_MAX_ATTEMPTS",
+       "value": "20",
+       "description": "Tentatives d'envoi d'un e-mail (de 1 min à 1 h d'écart) avant qu'il soit abandonné et gardé avec sa dernière erreur",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_OUTBOX_RETENTION_DAYS",
+       "value": "30",
+       "description": "Jours de conservation des e-mails envoyés ou abandonnés dans la file de sortie",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "wol",
+     "label": "Réveil des postes (Wake-on-LAN)",
+     "items": [
+      {
+       "key": "WOL_RELAY_ENABLED",
+       "value": "non",
+       "description": "oui = le serveur confie le réveil à un poste allumé du même emplacement (serveur hébergé hors site) ; non = il émet lui-même",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "WOL_BROADCAST_ADDRESSES",
+       "value": null,
+       "description": "Adresses de diffusion explicites ; renseignées, elles remplacent l'adresse déduite du poste",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "WOL_SUBNET_PREFIXLEN",
+       "value": "24",
+       "description": "Masque de repli pour déduire l'adresse de diffusion d'un poste dont l'agent n'a pas remonté le sien",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_ALLOWED_NETWORKS",
+       "value": "10.4.0.0/16, 10.5.0.0/16",
+       "description": "Réseaux (CIDR) sur lesquels le serveur peut émettre lui-même un réveil ; vide = les plages privées 10.0.0.0/8, 172.16.0.0/12 et 192.168.0.0/16. Une adresse de poste hors de ces réseaux n'est pas une destination",
+       "raw": [
+        "10.4.0.0/16",
+        "10.5.0.0/16"
+       ],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "WOL_PORT",
+       "value": "9",
+       "description": "Port UDP du paquet magique",
+       "raw": 9,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_PACKET_COUNT",
+       "value": "3",
+       "description": "Nombre de copies du paquet émises",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_TTL_MINUTES",
+       "value": "10",
+       "description": "Délai, en minutes, laissé à un poste relais pour prendre un réveil",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_SUBNET_GRACE_SECONDS",
+       "value": "90",
+       "description": "Avance laissée à un relais du même sous-réseau que la cible ; 0 = aucune",
+       "raw": 90,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_MIN_AGE_MINUTES",
+       "value": "60",
+       "description": "Ancienneté minimale, en minutes, d'un poste dans le parc avant qu'il puisse relayer un réveil",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_MIN_AGENT_VERSION",
+       "value": "1.0.0",
+       "description": "Version d'agent minimale d'un poste relais ; un agent plus ancien, ou sans version lisible, ne reçoit aucun réveil à relayer",
+       "raw": "1.0.0",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_CLAIM_TIMEOUT_SECONDS",
+       "value": "180",
+       "description": "Secondes sans réponse après lesquelles un réveil pris par un relais est remis en file pour un autre",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "console",
+     "label": "Console et sécurité",
+     "items": [
+      {
+       "key": "ENVIRONMENT",
+       "value": "local",
+       "description": "local, staging ou production ; hors local, les secrets de démonstration sont refusés et les erreurs internes masquées",
+       "raw": "local",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TIAI_SERVER_NAME",
+       "value": null,
+       "description": "Nom sous lequel le serveur est joint (site de Caddy, nom du certificat) ; la console en déduit son URL publique",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "CONSOLE_BASE_URL",
+       "value": null,
+       "description": "URL publique de la console, dans les liens des e-mails ; déduite de TIAI_SERVER_NAME quand elle n'est pas renseignée. Vide = aucun e-mail de réinitialisation",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ACCESS_TOKEN_EXPIRE_MINUTES",
+       "value": "15",
+       "description": "Durée de vie, en minutes, du jeton d'accès console (renouvelé seul par la session)",
+       "raw": 15,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "REFRESH_TOKEN_EXPIRE_DAYS",
+       "value": "7",
+       "description": "Jours sans usage avant qu'une session console se ferme (glissant)",
+       "raw": 7,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SESSION_MAX_DAYS",
+       "value": "30",
+       "description": "Durée maximale d'une session console depuis la connexion, en jours",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_MIN_LENGTH",
+       "value": "12",
+       "description": "Longueur minimale imposée à tout mot de passe",
+       "raw": 12,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_EXPIRE_MINUTES",
+       "value": "60",
+       "description": "Validité, en minutes, d'un lien de réinitialisation",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_COOLDOWN_MINUTES",
+       "value": "5",
+       "description": "Minutes pendant lesquelles une même adresse ne fait pas envoyer de nouvel e-mail « mot de passe oublié » pour un compte après le précédent qu'elle a demandé",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_MAX_LIVE_LINKS",
+       "value": "3",
+       "description": "Nombre de liens de réinitialisation valides à la fois pour un même compte et une même adresse qui les demande ; une demande n'annule jamais un lien encore valide",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS",
+       "value": "10",
+       "description": "Plafond de liens valides à la fois pour un même compte, toutes adresses confondues ; une demande venue d'une adresse habituelle du compte n'y est pas soumise",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_MAX_FAILED_ATTEMPTS",
+       "value": "5",
+       "description": "Échecs de connexion rapprochés (chacun à moins de LOGIN_LOCKOUT_MINUTES du précédent) avant qu'un compte soit verrouillé pour les adresses qui ont échoué",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_LOCKOUT_MINUTES",
+       "value": "15",
+       "description": "Durée, en minutes, du verrouillage, et délai au-delà duquel un échec ancien ne compte plus ; une réinitialisation du mot de passe le lève",
+       "raw": 15,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SIEGE_ADDRESSES",
+       "value": "10",
+       "description": "Nombre d'adresses distinctes en échec sur un même compte, en LOGIN_LOCKOUT_MINUTES (sous le verrou des essais lents : depuis le début de sa fenêtre), à partir duquel le verrouillage écarte toutes les adresses sauf celles qui ont ouvert le compte récemment",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_KNOWN_ADDRESS_DAYS",
+       "value": "30",
+       "description": "Jours pendant lesquels une adresse qui a ouvert un compte reste connue de lui, et n'est pas écartée par ce verrouillage étendu",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
+       "value": "20",
+       "description": "Échecs de connexion, même espacés, en LOGIN_SLOW_WINDOW_HOURS heures qui verrouillent un compte pour ce nombre d'heures ; ce verrou ferme le compte aux adresses qui ont échoué pendant cette fenêtre. Non défini : 20, ou quatre fois LOGIN_MAX_FAILED_ATTEMPTS si c'est davantage",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SLOW_WINDOW_HOURS",
+       "value": "24",
+       "description": "Fenêtre, en heures, de ce second compteur, et durée du verrou qu'il pose ; seul un nouveau mot de passe le lève. Non défini : 24, ou le double de LOGIN_LOCKOUT_MINUTES si c'est davantage",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
+       "value": "oui",
+       "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "RATE_LIMIT_ENABLED",
+       "value": "non",
+       "description": "Limitation du débit par adresse (connexion, mot de passe oublié, enrôlement), par session (changement de mot de passe) et par poste (battements) ; non = tout cela est levé, à réserver à des opérateurs qui arrivent tous d'une même adresse. Ni le verrouillage des comptes ni le budget du catalogue logiciel n'en dépendent",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXIES",
+       "value": "172.18.0.0/24, 10.9.0.0/24",
+       "description": "Réseaux (CIDR) des proxys dont l'en-tête X-Forwarded-For est cru pour connaître l'adresse du client, en plus de la boucle locale",
+       "raw": [
+        "172.18.0.0/24",
+        "10.9.0.0/24"
+       ],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXIES_ALLOW_WIDE",
+       "value": "non",
+       "description": "oui = TRUSTED_PROXIES peut lister un réseau plus large qu'un /24 (IPv4) ou un /64 (IPv6) ; non = le serveur refuse de démarrer, car tout client de ce réseau pourrait choisir son adresse",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXY_HOSTS",
+       "value": "caddy",
+       "description": "Noms d'hôte de ces proxys, résolus dans le réseau du serveur (le service caddy par défaut)",
+       "raw": [
+        "caddy"
+       ],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "EXPOSE_OPENAPI",
+       "value": "oui",
+       "description": "oui = le schéma OpenAPI et ses pages (/docs, /redoc) sont servis hors développement local",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_POOL_SIZE",
+       "value": "20",
+       "description": "Connexions à la base gardées ouvertes par processus (API, worker)",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_MAX_OVERFLOW",
+       "value": "10",
+       "description": "Connexions supplémentaires ouvertes au-delà, le temps d'un pic",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_POOL_TIMEOUT",
+       "value": "30",
+       "description": "Secondes d'attente d'une connexion libre avant qu'une requête échoue",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "packages",
+     "label": "Paquets logiciels",
+     "items": [
+      {
+       "key": "PACKAGES_DIR",
+       "value": "/data/packages",
+       "description": "Dossier du serveur où sont rangés les fichiers des paquets (un fichier par empreinte SHA-256)",
+       "raw": "/data/packages",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PACKAGE_MAX_BYTES",
+       "value": "8589934592 (8 Gio)",
+       "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+       "raw": 8589934592,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "PACKAGE_METHOD_A_MAX_GB",
+       "value": "8",
+       "description": "Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents",
+       "raw": 8,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smtp_incomplete",
+   "settings": {
+    "EMAIL_PROVIDER": "smtp",
+    "MAINTENANCE_REMINDER_WEEKDAY": 1,
+    "PACKAGE_MAX_BYTES": 1288490189
+   },
+   "groups": [
+    {
+     "code": "fleet",
+     "label": "Postes et seuils",
+     "items": [
+      {
+       "key": "SIGNATURE_MAX_AGE_DAYS",
+       "value": "3",
+       "description": "Âge maximal des signatures antivirus, en jours, avant qu'un poste soit « base antivirus périmée » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "INACTIVE_AFTER_DAYS",
+       "value": "30",
+       "description": "Jours sans contact de l'agent avant qu'un poste soit « inactif » — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "OFFLINE_AFTER_SECONDS",
+       "value": "180",
+       "description": "Secondes sans battement avant qu'un poste soit compté éteint (3 × l'intervalle de l'agent par défaut)",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOW_DISK_FREE_PERCENT",
+       "value": "10",
+       "description": "Seuil « disque presque plein » : pourcentage libre sur le volume système en dessous duquel un poste est signalé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "HARDWARE_AGING_YEARS",
+       "value": "5",
+       "description": "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_EXPECTED_VERSION",
+       "value": null,
+       "description": "Version d'agent de référence pour « agent obsolète » ; vide = la plus haute version remontée par le parc — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_DEFAULT_TTL_MINUTES",
+       "value": "60",
+       "description": "Durée de vie, en minutes, d'une commande encore en attente avant qu'elle soit périmée — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_UNANSWERED_HOURS",
+       "value": "24",
+       "description": "Heures laissées à un poste pour répondre d'une commande qu'il a reçue avant qu'elle soit close en échec « sans réponse du poste » (une réponse plus tardive l'emporte encore)",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "COMMAND_RETENTION_DAYS",
+       "value": "365",
+       "description": "Jours de conservation de l'historique des commandes terminées (0 = indéfiniment)",
+       "raw": 365,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_TOKEN_ROTATE_DAYS",
+       "value": "30",
+       "description": "Âge, en jours, au-delà duquel le token d'un poste est renouvelé (0 = jamais)",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AGENT_HEARTBEAT_MAX_PER_MINUTE",
+       "value": "12",
+       "description": "Battements qu'un même poste peut envoyer par minute ; au-delà, le serveur répond 429 (l'agent en envoie un par intervalle, plus un au redémarrage)",
+       "raw": 12,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SOFTWARE_NEW_ENTRIES_PER_DAY",
+       "value": "2000",
+       "description": "Nouvelles entrées du catalogue logiciel qu'un même poste peut créer par 24 heures ; au-delà, son inventaire est signalé partiel et redemandé quand le budget le permet",
+       "raw": 2000,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET",
+       "value": "50000",
+       "description": "Nouvelles entrées du catalogue logiciel que tous les postes réunis peuvent créer par 24 heures ; un poste reçoit le plus petit de ce qui reste de son budget et de celui-ci",
+       "raw": 50000,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "AUDIT_RETENTION_DAYS",
+       "value": "730",
+       "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
+       "raw": 730,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "maintenance",
+     "label": "Maintenance",
+     "items": [
+      {
+       "key": "MAINTENANCE_DEFAULT_CYCLE_DAYS",
+       "value": "90",
+       "description": "Cycle par défaut, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 90,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAINTENANCE_DUE_SOON_DAYS",
+       "value": "14",
+       "description": "Fenêtre « à échéance », en jours — même règle",
+       "raw": 14,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "MAINTENANCE_REMINDER_WEEKDAY",
+       "value": "1 (mardi)",
+       "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 1,
+       "format": "weekday",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "usage",
+     "label": "Utilisation des postes",
+     "items": [
+      {
+       "key": "USAGE_WINDOW_DAYS",
+       "value": "7",
+       "description": "Fenêtre d'observation, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "raw": 7,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_LOW_HOURS",
+       "value": "10",
+       "description": "Heures allumées en dessous desquelles un poste est « peu utilisé » — même règle",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_HIGH_HOURS",
+       "value": "30",
+       "description": "Heures allumées au-dessus desquelles un poste est « toujours allumé » — même règle",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "USAGE_RETENTION_DAYS",
+       "value": "400",
+       "description": "Durée de conservation, en jours, des compteurs horaires d'utilisation",
+       "raw": 400,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "rooms",
+     "label": "Salles",
+     "items": [
+      {
+       "key": "ROOM_SOURCE",
+       "value": "manual (à la main, depuis la console)",
+       "description": "Comment les postes sont rangés en salles : manual, ad_ou ou ad_location. Dans un mode annuaire, le rattachement manuel est verrouillé",
+       "raw": "manual",
+       "format": "room_source",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "email",
+     "label": "E-mails",
+     "items": [
+      {
+       "key": "EMAIL_PROVIDER",
+       "value": "smtp (incomplet dans l'environnement : aucun e-mail ne part sans réglage dans la console)",
+       "description": "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "smtp",
+       "format": "mail_state",
+       "params": {
+        "configured": false
+       }
+      },
+      {
+       "key": "EMAIL_FROM_EMAIL",
+       "value": null,
+       "description": "Adresse d'expéditeur (ou MAILGUN_FROM_EMAIL pour un .env plus ancien) — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_FROM_NAME",
+       "value": "Tia'i",
+       "description": "Nom d'expéditeur affiché — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "Tia'i",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SMTP_HOST",
+       "value": null,
+       "description": "Serveur SMTP ; vide = SMTP non configuré — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SMTP_PORT",
+       "value": "587",
+       "description": "Port du serveur SMTP — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": 587,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SMTP_SECURITY",
+       "value": "starttls",
+       "description": "starttls (587), tls (465) ou none (relais interne sur 25) — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": "starttls",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SMTP_VERIFY_TLS",
+       "value": "oui",
+       "description": "Vérification du certificat du serveur ; non = relais à certificat privé — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "SMTP_TIMEOUT_SECONDS",
+       "value": "10",
+       "description": "Délai d'attente du serveur SMTP, en secondes — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "DIGEST_HOUR_UTC",
+       "value": "18",
+       "description": "Heure UTC d'envoi du résumé quotidien et du rappel de maintenance — valeur initiale : le réglage enregistré prend le dessus",
+       "raw": 18,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "THREAT_ALERT_MAX_AGE_HOURS",
+       "value": "24",
+       "description": "Une détection plus ancienne que ce nombre d'heures ne déclenche pas d'alerte immédiate (historique d'un poste qui s'enrôle)",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "NOTIFICATION_MAX_ITEMS",
+       "value": "10",
+       "description": "Nombre de postes ou de détections détaillés dans un e-mail avant « et N autres »",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "DEFAULT_LANGUAGE",
+       "value": "fr",
+       "description": "Langue des e-mails d'un compte qui n'a pas choisi la sienne (fr ou en)",
+       "raw": "fr",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_MAX_ATTEMPTS",
+       "value": "20",
+       "description": "Tentatives d'envoi d'un e-mail (de 1 min à 1 h d'écart) avant qu'il soit abandonné et gardé avec sa dernière erreur",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "EMAIL_OUTBOX_RETENTION_DAYS",
+       "value": "30",
+       "description": "Jours de conservation des e-mails envoyés ou abandonnés dans la file de sortie",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "wol",
+     "label": "Réveil des postes (Wake-on-LAN)",
+     "items": [
+      {
+       "key": "WOL_RELAY_ENABLED",
+       "value": "non",
+       "description": "oui = le serveur confie le réveil à un poste allumé du même emplacement (serveur hébergé hors site) ; non = il émet lui-même",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "WOL_BROADCAST_ADDRESSES",
+       "value": null,
+       "description": "Adresses de diffusion explicites ; renseignées, elles remplacent l'adresse déduite du poste",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "WOL_SUBNET_PREFIXLEN",
+       "value": "24",
+       "description": "Masque de repli pour déduire l'adresse de diffusion d'un poste dont l'agent n'a pas remonté le sien",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_ALLOWED_NETWORKS",
+       "value": null,
+       "description": "Réseaux (CIDR) sur lesquels le serveur peut émettre lui-même un réveil ; vide = les plages privées 10.0.0.0/8, 172.16.0.0/12 et 192.168.0.0/16. Une adresse de poste hors de ces réseaux n'est pas une destination",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "WOL_PORT",
+       "value": "9",
+       "description": "Port UDP du paquet magique",
+       "raw": 9,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_PACKET_COUNT",
+       "value": "3",
+       "description": "Nombre de copies du paquet émises",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_TTL_MINUTES",
+       "value": "10",
+       "description": "Délai, en minutes, laissé à un poste relais pour prendre un réveil",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_SUBNET_GRACE_SECONDS",
+       "value": "90",
+       "description": "Avance laissée à un relais du même sous-réseau que la cible ; 0 = aucune",
+       "raw": 90,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_MIN_AGE_MINUTES",
+       "value": "60",
+       "description": "Ancienneté minimale, en minutes, d'un poste dans le parc avant qu'il puisse relayer un réveil",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_MIN_AGENT_VERSION",
+       "value": "1.0.0",
+       "description": "Version d'agent minimale d'un poste relais ; un agent plus ancien, ou sans version lisible, ne reçoit aucun réveil à relayer",
+       "raw": "1.0.0",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "WOL_RELAY_CLAIM_TIMEOUT_SECONDS",
+       "value": "180",
+       "description": "Secondes sans réponse après lesquelles un réveil pris par un relais est remis en file pour un autre",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "console",
+     "label": "Console et sécurité",
+     "items": [
+      {
+       "key": "ENVIRONMENT",
+       "value": "local",
+       "description": "local, staging ou production ; hors local, les secrets de démonstration sont refusés et les erreurs internes masquées",
+       "raw": "local",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TIAI_SERVER_NAME",
+       "value": null,
+       "description": "Nom sous lequel le serveur est joint (site de Caddy, nom du certificat) ; la console en déduit son URL publique",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "CONSOLE_BASE_URL",
+       "value": null,
+       "description": "URL publique de la console, dans les liens des e-mails ; déduite de TIAI_SERVER_NAME quand elle n'est pas renseignée. Vide = aucun e-mail de réinitialisation",
+       "raw": null,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ACCESS_TOKEN_EXPIRE_MINUTES",
+       "value": "15",
+       "description": "Durée de vie, en minutes, du jeton d'accès console (renouvelé seul par la session)",
+       "raw": 15,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "REFRESH_TOKEN_EXPIRE_DAYS",
+       "value": "7",
+       "description": "Jours sans usage avant qu'une session console se ferme (glissant)",
+       "raw": 7,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "SESSION_MAX_DAYS",
+       "value": "30",
+       "description": "Durée maximale d'une session console depuis la connexion, en jours",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_MIN_LENGTH",
+       "value": "12",
+       "description": "Longueur minimale imposée à tout mot de passe",
+       "raw": 12,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_EXPIRE_MINUTES",
+       "value": "60",
+       "description": "Validité, en minutes, d'un lien de réinitialisation",
+       "raw": 60,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_COOLDOWN_MINUTES",
+       "value": "5",
+       "description": "Minutes pendant lesquelles une même adresse ne fait pas envoyer de nouvel e-mail « mot de passe oublié » pour un compte après le précédent qu'elle a demandé",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_MAX_LIVE_LINKS",
+       "value": "3",
+       "description": "Nombre de liens de réinitialisation valides à la fois pour un même compte et une même adresse qui les demande ; une demande n'annule jamais un lien encore valide",
+       "raw": 3,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PASSWORD_RESET_ACCOUNT_MAX_LIVE_LINKS",
+       "value": "10",
+       "description": "Plafond de liens valides à la fois pour un même compte, toutes adresses confondues ; une demande venue d'une adresse habituelle du compte n'y est pas soumise",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_MAX_FAILED_ATTEMPTS",
+       "value": "5",
+       "description": "Échecs de connexion rapprochés (chacun à moins de LOGIN_LOCKOUT_MINUTES du précédent) avant qu'un compte soit verrouillé pour les adresses qui ont échoué",
+       "raw": 5,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_LOCKOUT_MINUTES",
+       "value": "15",
+       "description": "Durée, en minutes, du verrouillage, et délai au-delà duquel un échec ancien ne compte plus ; une réinitialisation du mot de passe le lève",
+       "raw": 15,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SIEGE_ADDRESSES",
+       "value": "10",
+       "description": "Nombre d'adresses distinctes en échec sur un même compte, en LOGIN_LOCKOUT_MINUTES (sous le verrou des essais lents : depuis le début de sa fenêtre), à partir duquel le verrouillage écarte toutes les adresses sauf celles qui ont ouvert le compte récemment",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_KNOWN_ADDRESS_DAYS",
+       "value": "30",
+       "description": "Jours pendant lesquels une adresse qui a ouvert un compte reste connue de lui, et n'est pas écartée par ce verrouillage étendu",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SLOW_MAX_FAILED_ATTEMPTS",
+       "value": "20",
+       "description": "Échecs de connexion, même espacés, en LOGIN_SLOW_WINDOW_HOURS heures qui verrouillent un compte pour ce nombre d'heures ; ce verrou ferme le compte aux adresses qui ont échoué pendant cette fenêtre. Non défini : 20, ou quatre fois LOGIN_MAX_FAILED_ATTEMPTS si c'est davantage",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "LOGIN_SLOW_WINDOW_HOURS",
+       "value": "24",
+       "description": "Fenêtre, en heures, de ce second compteur, et durée du verrou qu'il pose ; seul un nouveau mot de passe le lève. Non défini : 24, ou le double de LOGIN_LOCKOUT_MINUTES si c'est davantage",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
+       "value": "oui",
+       "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "RATE_LIMIT_ENABLED",
+       "value": "oui",
+       "description": "Limitation du débit par adresse (connexion, mot de passe oublié, enrôlement), par session (changement de mot de passe) et par poste (battements) ; non = tout cela est levé, à réserver à des opérateurs qui arrivent tous d'une même adresse. Ni le verrouillage des comptes ni le budget du catalogue logiciel n'en dépendent",
+       "raw": true,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXIES",
+       "value": null,
+       "description": "Réseaux (CIDR) des proxys dont l'en-tête X-Forwarded-For est cru pour connaître l'adresse du client, en plus de la boucle locale",
+       "raw": [],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXIES_ALLOW_WIDE",
+       "value": "non",
+       "description": "oui = TRUSTED_PROXIES peut lister un réseau plus large qu'un /24 (IPv4) ou un /64 (IPv6) ; non = le serveur refuse de démarrer, car tout client de ce réseau pourrait choisir son adresse",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "TRUSTED_PROXY_HOSTS",
+       "value": "caddy",
+       "description": "Noms d'hôte de ces proxys, résolus dans le réseau du serveur (le service caddy par défaut)",
+       "raw": [
+        "caddy"
+       ],
+       "format": "list",
+       "params": {}
+      },
+      {
+       "key": "EXPOSE_OPENAPI",
+       "value": "non",
+       "description": "oui = le schéma OpenAPI et ses pages (/docs, /redoc) sont servis hors développement local",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_POOL_SIZE",
+       "value": "20",
+       "description": "Connexions à la base gardées ouvertes par processus (API, worker)",
+       "raw": 20,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_MAX_OVERFLOW",
+       "value": "10",
+       "description": "Connexions supplémentaires ouvertes au-delà, le temps d'un pic",
+       "raw": 10,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "POSTGRES_POOL_TIMEOUT",
+       "value": "30",
+       "description": "Secondes d'attente d'une connexion libre avant qu'une requête échoue",
+       "raw": 30,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "packages",
+     "label": "Paquets logiciels",
+     "items": [
+      {
+       "key": "PACKAGES_DIR",
+       "value": "/data/packages",
+       "description": "Dossier du serveur où sont rangés les fichiers des paquets (un fichier par empreinte SHA-256)",
+       "raw": "/data/packages",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "PACKAGE_MAX_BYTES",
+       "value": "1288490189 (1,2 Gio)",
+       "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+       "raw": 1288490189,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "PACKAGE_METHOD_A_MAX_GB",
+       "value": "8",
+       "description": "Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents",
+       "raw": 8,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "environment_items": [
+  {
+   "settings": {
+    "MAINTENANCE_REMINDER_WEEKDAY": 0
+   },
+   "key": "MAINTENANCE_REMINDER_WEEKDAY",
+   "value": "0 (lundi)",
+   "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+   "raw": 0,
+   "format": "weekday",
+   "params": {}
+  },
+  {
+   "settings": {
+    "MAINTENANCE_REMINDER_WEEKDAY": 1
+   },
+   "key": "MAINTENANCE_REMINDER_WEEKDAY",
+   "value": "1 (mardi)",
+   "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+   "raw": 1,
+   "format": "weekday",
+   "params": {}
+  },
+  {
+   "settings": {
+    "MAINTENANCE_REMINDER_WEEKDAY": 2
+   },
+   "key": "MAINTENANCE_REMINDER_WEEKDAY",
+   "value": "2 (mercredi)",
+   "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+   "raw": 2,
+   "format": "weekday",
+   "params": {}
+  },
+  {
+   "settings": {
+    "MAINTENANCE_REMINDER_WEEKDAY": 3
+   },
+   "key": "MAINTENANCE_REMINDER_WEEKDAY",
+   "value": "3 (jeudi)",
+   "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+   "raw": 3,
+   "format": "weekday",
+   "params": {}
+  },
+  {
+   "settings": {
+    "MAINTENANCE_REMINDER_WEEKDAY": 4
+   },
+   "key": "MAINTENANCE_REMINDER_WEEKDAY",
+   "value": "4 (vendredi)",
+   "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+   "raw": 4,
+   "format": "weekday",
+   "params": {}
+  },
+  {
+   "settings": {
+    "MAINTENANCE_REMINDER_WEEKDAY": 5
+   },
+   "key": "MAINTENANCE_REMINDER_WEEKDAY",
+   "value": "5 (samedi)",
+   "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+   "raw": 5,
+   "format": "weekday",
+   "params": {}
+  },
+  {
+   "settings": {
+    "MAINTENANCE_REMINDER_WEEKDAY": 6
+   },
+   "key": "MAINTENANCE_REMINDER_WEEKDAY",
+   "value": "6 (dimanche)",
+   "description": "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … 6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+   "raw": 6,
+   "format": "weekday",
+   "params": {}
+  },
+  {
+   "settings": {
+    "ROOM_SOURCE": "manual"
+   },
+   "key": "ROOM_SOURCE",
+   "value": "manual (à la main, depuis la console)",
+   "description": "Comment les postes sont rangés en salles : manual, ad_ou ou ad_location. Dans un mode annuaire, le rattachement manuel est verrouillé",
+   "raw": "manual",
+   "format": "room_source",
+   "params": {}
+  },
+  {
+   "settings": {
+    "ROOM_SOURCE": "ad_ou"
+   },
+   "key": "ROOM_SOURCE",
+   "value": "ad_ou (par l'unité d'organisation de l'annuaire)",
+   "description": "Comment les postes sont rangés en salles : manual, ad_ou ou ad_location. Dans un mode annuaire, le rattachement manuel est verrouillé",
+   "raw": "ad_ou",
+   "format": "room_source",
+   "params": {}
+  },
+  {
+   "settings": {
+    "ROOM_SOURCE": "ad_location"
+   },
+   "key": "ROOM_SOURCE",
+   "value": "ad_location (par l'attribut Emplacement de l'annuaire)",
+   "description": "Comment les postes sont rangés en salles : manual, ad_ou ou ad_location. Dans un mode annuaire, le rattachement manuel est verrouillé",
+   "raw": "ad_location",
+   "format": "room_source",
+   "params": {}
+  },
+  {
+   "settings": {
+    "PACKAGE_MAX_BYTES": 1048576
+   },
+   "key": "PACKAGE_MAX_BYTES",
+   "value": "1048576 (1 Mio)",
+   "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+   "raw": 1048576,
+   "format": "bytes",
+   "params": {}
+  },
+  {
+   "settings": {
+    "PACKAGE_MAX_BYTES": 1048577
+   },
+   "key": "PACKAGE_MAX_BYTES",
+   "value": "1048577 (1,0 Mio)",
+   "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+   "raw": 1048577,
+   "format": "bytes",
+   "params": {}
+  },
+  {
+   "settings": {
+    "PACKAGE_MAX_BYTES": 5505024
+   },
+   "key": "PACKAGE_MAX_BYTES",
+   "value": "5505024 (5,2 Mio)",
+   "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+   "raw": 5505024,
+   "format": "bytes",
+   "params": {}
+  },
+  {
+   "settings": {
+    "PACKAGE_MAX_BYTES": 1073217536
+   },
+   "key": "PACKAGE_MAX_BYTES",
+   "value": "1073217536 (1023,5 Mio)",
+   "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+   "raw": 1073217536,
+   "format": "bytes",
+   "params": {}
+  },
+  {
+   "settings": {
+    "PACKAGE_MAX_BYTES": 1073741823
+   },
+   "key": "PACKAGE_MAX_BYTES",
+   "value": "1073741823 (1024,0 Mio)",
+   "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+   "raw": 1073741823,
+   "format": "bytes",
+   "params": {}
+  },
+  {
+   "settings": {
+    "PACKAGE_MAX_BYTES": 1127428915
+   },
+   "key": "PACKAGE_MAX_BYTES",
+   "value": "1127428915 (1,0 Gio)",
+   "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+   "raw": 1127428915,
+   "format": "bytes",
+   "params": {}
+  },
+  {
+   "settings": {
+    "PACKAGE_MAX_BYTES": 3489660928
+   },
+   "key": "PACKAGE_MAX_BYTES",
+   "value": "3489660928 (3,2 Gio)",
+   "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+   "raw": 3489660928,
+   "format": "bytes",
+   "params": {}
+  },
+  {
+   "settings": {
+    "PACKAGE_MAX_BYTES": 4026531840
+   },
+   "key": "PACKAGE_MAX_BYTES",
+   "value": "4026531840 (3,8 Gio)",
+   "description": "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
+   "raw": 4026531840,
+   "format": "bytes",
+   "params": {}
+  },
+  {
+   "settings": {
+    "EMAIL_PROVIDER": "mailgun",
+    "MAILGUN_PROXY_URL": "http://proxy.lycee.pf:3128"
+   },
+   "key": "MAILGUN_PROXY_URL",
+   "value": "proxy.lycee.pf:3128",
+   "description": "Proxy HTTP par lequel passent les appels à Mailgun, et eux seuls ; vide = connexion directe. Seuls l'hôte et le port sont affichés, jamais un identifiant ni un mot de passe",
+   "raw": "proxy.lycee.pf:3128",
+   "format": "proxy",
+   "params": {
+    "unreadable": false
+   }
+  },
+  {
+   "settings": {
+    "EMAIL_PROVIDER": "mailgun",
+    "MAILGUN_PROXY_URL": "https://user@proxy.example"
+   },
+   "key": "MAILGUN_PROXY_URL",
+   "value": "proxy.example",
+   "description": "Proxy HTTP par lequel passent les appels à Mailgun, et eux seuls ; vide = connexion directe. Seuls l'hôte et le port sont affichés, jamais un identifiant ni un mot de passe",
+   "raw": "proxy.example",
+   "format": "proxy",
+   "params": {
+    "unreadable": false
+   }
+  },
+  {
+   "settings": {
+    "EMAIL_PROVIDER": "mailgun",
+    "MAILGUN_PROXY_URL": "http://[fd00::1]:3128"
+   },
+   "key": "MAILGUN_PROXY_URL",
+   "value": "[fd00::1]:3128",
+   "description": "Proxy HTTP par lequel passent les appels à Mailgun, et eux seuls ; vide = connexion directe. Seuls l'hôte et le port sont affichés, jamais un identifiant ni un mot de passe",
+   "raw": "[fd00::1]:3128",
+   "format": "proxy",
+   "params": {
+    "unreadable": false
+   }
+  },
+  {
+   "settings": {
+    "EMAIL_PROVIDER": "mailgun",
+    "MAILGUN_PROXY_URL": "http://[::1"
+   },
+   "key": "MAILGUN_PROXY_URL",
+   "value": "défini (illisible)",
+   "description": "Proxy HTTP par lequel passent les appels à Mailgun, et eux seuls ; vide = connexion directe. Seuls l'hôte et le port sont affichés, jamais un identifiant ni un mot de passe",
+   "raw": null,
+   "format": "proxy",
+   "params": {
+    "unreadable": true
+   }
+  },
+  {
+   "settings": {
+    "EMAIL_PROVIDER": "mailgun",
+    "MAILGUN_PROXY_URL": "http://pro xy:3128"
+   },
+   "key": "MAILGUN_PROXY_URL",
+   "value": "défini (illisible)",
+   "description": "Proxy HTTP par lequel passent les appels à Mailgun, et eux seuls ; vide = connexion directe. Seuls l'hôte et le port sont affichés, jamais un identifiant ni un mot de passe",
+   "raw": null,
+   "format": "proxy",
+   "params": {
+    "unreadable": true
+   }
+  },
+  {
+   "settings": {
+    "EMAIL_PROVIDER": "mailgun",
+    "MAILGUN_DOMAIN": "mg.x.fr",
+    "MAILGUN_API_KEY": "k"
+   },
+   "key": "EMAIL_PROVIDER",
+   "value": "mailgun (configuré dans l'environnement)",
+   "description": "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+   "raw": "mailgun",
+   "format": "mail_state",
+   "params": {
+    "configured": true
+   }
+  },
+  {
+   "settings": {
+    "EMAIL_PROVIDER": "smtp",
+    "SMTP_HOST": "smtp.x.fr",
+    "EMAIL_FROM_EMAIL": "a@x.fr"
+   },
+   "key": "EMAIL_PROVIDER",
+   "value": "smtp (configuré dans l'environnement)",
+   "description": "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+   "raw": "smtp",
+   "format": "mail_state",
+   "params": {
+    "configured": true
+   }
+  },
+  {
+   "settings": {
+    "EMAIL_PROVIDER": "smtp"
+   },
+   "key": "EMAIL_PROVIDER",
+   "value": "smtp (incomplet dans l'environnement : aucun e-mail ne part sans réglage dans la console)",
+   "description": "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP — valeur initiale : la carte « Envoi des e-mails » prend le dessus",
+   "raw": "smtp",
+   "format": "mail_state",
+   "params": {
+    "configured": false
+   }
+  },
+  {
+   "settings": {
+    "WOL_RELAY_ENABLED": false
+   },
+   "key": "WOL_RELAY_ENABLED",
+   "value": "non",
+   "description": "oui = le serveur confie le réveil à un poste allumé du même emplacement (serveur hébergé hors site) ; non = il émet lui-même",
+   "raw": false,
+   "format": "bool",
+   "params": {}
+  },
+  {
+   "settings": {
+    "WOL_RELAY_ENABLED": true
+   },
+   "key": "WOL_RELAY_ENABLED",
+   "value": "oui",
+   "description": "oui = le serveur confie le réveil à un poste allumé du même emplacement (serveur hébergé hors site) ; non = il émet lui-même",
+   "raw": true,
+   "format": "bool",
+   "params": {}
+  }
+ ],
+ "email_test": [
+  {
+   "ok": true,
+   "code": "sent",
+   "params": {
+    "to": "admin@lycee.pf",
+    "provider": "smtp",
+    "host": "smtp.x.fr",
+    "port": 587
+   },
+   "message": "E-mail de test envoyé à admin@lycee.pf par le serveur SMTP smtp.x.fr:587."
+  },
+  {
+   "ok": true,
+   "code": "sent",
+   "params": {
+    "to": "admin@lycee.pf",
+    "provider": "mailgun",
+    "domain": "mg.x.fr"
+   },
+   "message": "E-mail de test envoyé à admin@lycee.pf par Mailgun (domaine mg.x.fr)."
+  },
+  {
+   "ok": false,
+   "code": "incomplete",
+   "params": {
+    "missing": [
+     "smtp_host",
+     "from_email"
+    ]
+   },
+   "message": "Configuration incomplète : il manque le serveur SMTP, l'adresse d'expéditeur."
+  },
+  {
+   "ok": false,
+   "code": "incomplete",
+   "params": {
+    "missing": [
+     "mailgun_domain",
+     "mailgun_api_key"
+    ]
+   },
+   "message": "Configuration incomplète : il manque le domaine Mailgun, la clé API Mailgun."
+  },
+  {
+   "ok": false,
+   "code": "incomplete",
+   "params": {
+    "missing": [
+     "from_email"
+    ]
+   },
+   "message": "Configuration incomplète : il manque l'adresse d'expéditeur."
+  },
+  {
+   "ok": false,
+   "code": "smtp_starttls_required",
+   "params": {
+    "where": "smtp.x.fr:587",
+    "response": "530 5.7.0 Must issue a STARTTLS command first"
+   },
+   "message": "Le serveur smtp.x.fr:587 exige une connexion chiffrée avant tout envoi — choisissez la sécurité « STARTTLS » (réponse : 530 5.7.0 Must issue a STARTTLS command first)"
+  },
+  {
+   "ok": false,
+   "code": "smtp_auth_required",
+   "params": {
+    "where": "smtp.x.fr:587",
+    "response": "530 5.7.0 Authentication required",
+    "has_user": false
+   },
+   "message": "Le serveur smtp.x.fr:587 exige une authentification — renseignez l'utilisateur et le mot de passe SMTP (réponse : 530 5.7.0 Authentication required)"
+  },
+  {
+   "ok": false,
+   "code": "smtp_auth_required",
+   "params": {
+    "where": "smtp.x.fr:587",
+    "response": "530 Authentication required",
+    "has_user": true
+   },
+   "message": "Le serveur smtp.x.fr:587 exige une authentification — le compte configuré n'a pas suffi : vérifiez l'utilisateur (réponse : 530 Authentication required)"
+  },
+  {
+   "ok": false,
+   "code": "smtp_silent",
+   "params": {
+    "where": "smtp.x.fr:587",
+    "seconds": 10
+   },
+   "message": "Le serveur smtp.x.fr:587 a accepté la connexion mais n'a pas répondu dans les 10 s. Est-ce bien un serveur SMTP, et le mode de sécurité correspond-il au port (TLS sur 465) ?"
+  },
+  {
+   "ok": false,
+   "code": "smtp_auth_failed",
+   "params": {
+    "response": "535 5.7.8 bad credentials ••••"
+   },
+   "message": "Identifiants refusés par le serveur SMTP — vérifiez l'utilisateur et le mot de passe (réponse : 535 5.7.8 bad credentials ••••)"
+  },
+  {
+   "ok": false,
+   "code": "smtp_sender_refused",
+   "params": {
+    "from_email": "t@x.fr",
+    "response": "553 not owner"
+   },
+   "message": "Adresse d'expéditeur t@x.fr refusée par le serveur — avec un compte authentifié, elle doit en général être celle du compte (réponse : 553 not owner)"
+  },
+  {
+   "ok": false,
+   "code": "smtp_recipients_refused",
+   "params": {
+    "recipients": [
+     {
+      "address": "a@x.fr",
+      "code": 550,
+      "text": "no such user"
+     },
+     {
+      "address": "b@x.fr",
+      "code": 551,
+      "text": "gone"
+     }
+    ]
+   },
+   "message": "Destinataire refusé par le serveur SMTP (a@x.fr : 550 no such user; b@x.fr : 551 gone)"
+  },
+  {
+   "ok": false,
+   "code": "smtp_not_supported",
+   "params": {
+    "error": "STARTTLS extension not supported"
+   },
+   "message": "Le serveur SMTP ne propose pas ce que la configuration lui demande (STARTTLS ou authentification) : STARTTLS extension not supported. Essayez une autre sécurité."
+  },
+  {
+   "ok": false,
+   "code": "smtp_disconnected",
+   "params": {
+    "where": "smtp.x.fr:587"
+   },
+   "message": "Le serveur smtp.x.fr:587 a fermé la connexion. Le mode de sécurité correspond-il au port (STARTTLS sur 587, TLS sur 465) ?"
+  },
+  {
+   "ok": false,
+   "code": "smtp_error_response",
+   "params": {
+    "response": "554 rejected"
+   },
+   "message": "Le serveur SMTP a répondu par une erreur : 554 rejected"
+  },
+  {
+   "ok": false,
+   "code": "smtp_error_response",
+   "params": {
+    "response": "554 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "message": "Le serveur SMTP a répondu par une erreur : 554 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+   "ok": false,
+   "code": "smtp_error",
+   "params": {
+    "error": "odd"
+   },
+   "message": "Erreur SMTP : odd"
+  },
+  {
+   "ok": false,
+   "code": "tls_certificate_refused",
+   "params": {
+    "where": "smtp.x.fr:587",
+    "reason": "self-signed certificate"
+   },
+   "message": "Certificat du serveur smtp.x.fr:587 refusé (self-signed certificate). Pour un relais interne à certificat privé, désactivez la vérification."
+  },
+  {
+   "ok": false,
+   "code": "tls_failed",
+   "params": {
+    "where": "smtp.x.fr:587",
+    "reason": "wrong version number"
+   },
+   "message": "Échec de la négociation TLS avec smtp.x.fr:587 (wrong version number). Le mode de sécurité correspond-il au port (STARTTLS sur 587, TLS sur 465) ?"
+  },
+  {
+   "ok": false,
+   "code": "smtp_host_unknown",
+   "params": {
+    "host": "smtp.x.fr"
+   },
+   "message": "Serveur SMTP introuvable : smtp.x.fr ne se résout pas"
+  },
+  {
+   "ok": false,
+   "code": "mailgun_key_refused",
+   "params": {},
+   "message": "Clé API Mailgun refusée (401)"
+  },
+  {
+   "ok": false,
+   "code": "mailgun_domain_unknown",
+   "params": {
+    "domain": "mg.x.fr",
+    "status": 404
+   },
+   "message": "Mailgun ne connaît pas le domaine mg.x.fr (404) — vérifiez le domaine et la région de l'API (EU ou US)"
+  },
+  {
+   "ok": false,
+   "code": "mailgun_status",
+   "params": {
+    "status": 500,
+    "body": "Internal failure"
+   },
+   "message": "Mailgun a répondu 500 : Internal failure"
+  },
+  {
+   "ok": false,
+   "code": "mailgun_status",
+   "params": {
+    "status": 502,
+    "body": ""
+   },
+   "message": "Mailgun a répondu 502"
+  },
+  {
+   "ok": false,
+   "code": "mailgun_timeout",
+   "params": {},
+   "message": "Mailgun n'a pas répondu dans le délai imparti"
+  },
+  {
+   "ok": false,
+   "code": "mailgun_unreachable",
+   "params": {
+    "error": "refused"
+   },
+   "message": "Impossible de joindre Mailgun : refused"
+  },
+  {
+   "ok": false,
+   "code": "smtp_handshake_silent",
+   "params": {
+    "where": "smtp.x.fr:587",
+    "seconds": 10
+   },
+   "message": "Le serveur smtp.x.fr:587 a accepté la connexion mais n'a pas répondu dans les 10 s. Est-ce bien un serveur SMTP, et le mode de sécurité correspond-il au port (STARTTLS sur 587, TLS sur 465) ?"
+  },
+  {
+   "ok": false,
+   "code": "timeout",
+   "params": {
+    "where": "smtp.x.fr:587",
+    "seconds": 10
+   },
+   "message": "Le serveur smtp.x.fr:587 n'a pas répondu dans le délai imparti (10 s)"
+  },
+  {
+   "ok": false,
+   "code": "timeout",
+   "params": {
+    "where": "smtp.x.fr:587",
+    "seconds": 25
+   },
+   "message": "Le serveur smtp.x.fr:587 n'a pas répondu dans le délai imparti (25 s)"
+  },
+  {
+   "ok": false,
+   "code": "timeout",
+   "params": {
+    "where": "Mailgun",
+    "seconds": 25
+   },
+   "message": "Le serveur Mailgun n'a pas répondu dans le délai imparti (25 s)"
+  },
+  {
+   "ok": false,
+   "code": "connection_refused",
+   "params": {
+    "where": "smtp.x.fr:587"
+   },
+   "message": "Connexion refusée par smtp.x.fr:587 — le port est-il le bon ?"
+  },
+  {
+   "ok": false,
+   "code": "unreachable",
+   "params": {
+    "where": "smtp.x.fr:587",
+    "error": "Network is unreachable"
+   },
+   "message": "Impossible de joindre smtp.x.fr:587 : Network is unreachable"
+  },
+  {
+   "ok": false,
+   "code": "unreachable",
+   "params": {
+    "where": "Mailgun",
+    "error": "no route"
+   },
+   "message": "Impossible de joindre Mailgun : no route"
+  },
+  {
+   "ok": false,
+   "code": "unexpected",
+   "params": {
+    "error": "ValueError: •••• leaked"
+   },
+   "message": "Erreur inattendue : ValueError: •••• leaked"
+  }
+ ],
+ "email_missing": [
+  {
+   "code": "smtp_host",
+   "label": "le serveur SMTP"
+  },
+  {
+   "code": "from_email",
+   "label": "l'adresse d'expéditeur"
+  },
+  {
+   "code": "mailgun_domain",
+   "label": "le domaine Mailgun"
+  },
+  {
+   "code": "mailgun_api_key",
+   "label": "la clé API Mailgun"
+  },
+  {
+   "code": "smtp_password_retype",
+   "label": "le mot de passe SMTP (celui du .env ne sert que pour le serveur du .env : à ressaisir ici)"
+  }
+ ]
+}

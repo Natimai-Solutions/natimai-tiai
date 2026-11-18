@@ -144,6 +144,20 @@ def stored_from(values: Mapping[str, Any]) -> StoredEmailSettings:
     return StoredEmailSettings(plain, secrets, frozenset(unreadable))
 
 
+# What a provider may lack, in the page's French (``EmailPolicy.missing``);
+# the console words the codes itself (plan ``dev/plan-console-bilingue.md``).
+MISSING_LABELS = {
+    "smtp_host": "le serveur SMTP",
+    "from_email": "l'adresse d'expéditeur",
+    "mailgun_domain": "le domaine Mailgun",
+    "mailgun_api_key": "la clé API Mailgun",
+    # Not a field the provider lacks but one the page asks for again: an SMTP
+    # account whose ``.env`` password is held back (``settings_routes``).
+    "smtp_password_retype": "le mot de passe SMTP (celui du .env ne sert que "
+    "pour le serveur du .env : à ressaisir ici)",
+}
+
+
 @dataclass(frozen=True)
 class EmailPolicy:
     """Everything a send needs, resolved: the console's value where it wrote
@@ -185,19 +199,23 @@ class EmailPolicy:
             return self.smtp_configured
         return self.mailgun_configured
 
-    def missing(self) -> list[str]:
-        """What the chosen provider still lacks, in the page's words."""
+    def missing_codes(self) -> list[str]:
+        """What the chosen provider still lacks, by the name of its field."""
         if self.provider == "smtp":
             wanted = [
-                (self.smtp_host, "le serveur SMTP"),
-                (self.from_email, "l'adresse d'expéditeur"),
+                (self.smtp_host, "smtp_host"),
+                (self.from_email, "from_email"),
             ]
         else:
             wanted = [
-                (self.mailgun_domain, "le domaine Mailgun"),
-                (self.mailgun_api_key, "la clé API Mailgun"),
+                (self.mailgun_domain, "mailgun_domain"),
+                (self.mailgun_api_key, "mailgun_api_key"),
             ]
-        return [label for value, label in wanted if not value]
+        return [code for value, code in wanted if not value]
+
+    def missing(self) -> list[str]:
+        """What the chosen provider still lacks, in the page's words."""
+        return [MISSING_LABELS[code] for code in self.missing_codes()]
 
     def bounded(self, seconds: int) -> "EmailPolicy":
         """The same policy with both providers' timeouts capped at ``seconds``."""

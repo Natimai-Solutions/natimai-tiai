@@ -14,10 +14,12 @@
  * value replaces the stored one, and only an explicit « effacer » removes it.
  */
 
+import { t } from 'src/i18n';
 import type {
   EmailProvider,
   EmailSettings,
   EmailSettingsPayload,
+  EmailTestResult,
   SmtpSecurity,
 } from 'src/services/settings';
 
@@ -122,22 +124,17 @@ function intOutside(value: number | string, low: number, high: number): boolean 
 /** What stops the form from being saved or tried, in the page's words; null when nothing. */
 export function emailFormError(form: EmailForm): string | null {
   const from = text(form.fromEmail);
-  if (from !== null && !EMAIL.test(from))
-    return "L'adresse d'expéditeur n'est pas une adresse e-mail.";
+  if (from !== null && !EMAIL.test(from)) return t('settings.email.errors.fromEmail');
   if (form.provider === 'smtp') {
     const host = text(form.smtpHost);
-    if (host !== null && !HOST.test(host))
-      return 'Le serveur SMTP est un nom ou une adresse, sans « smtp:// » ni chemin.';
-    if (intOutside(form.smtpPort, 1, 65535)) return 'Le port est un entier entre 1 et 65535.';
-    if (intOutside(form.smtpTimeout, 1, 120))
-      return 'Le délai est un entier entre 1 et 120 secondes.';
+    if (host !== null && !HOST.test(host)) return t('settings.email.errors.smtpHost');
+    if (intOutside(form.smtpPort, 1, 65535)) return t('settings.email.errors.port');
+    if (intOutside(form.smtpTimeout, 1, 120)) return t('settings.email.errors.timeout');
   } else {
     const domain = text(form.mailgunDomain);
-    if (domain !== null && !HOST.test(domain))
-      return 'Le domaine Mailgun est un nom de domaine, sans chemin.';
+    if (domain !== null && !HOST.test(domain)) return t('settings.email.errors.mailgunDomain');
     const base = text(form.mailgunBaseUrl);
-    if (base !== null && !API_URL.test(base))
-      return "L'adresse de l'API Mailgun commence par https://.";
+    if (base !== null && !API_URL.test(base)) return t('settings.email.errors.mailgunBaseUrl');
   }
   return null;
 }
@@ -145,7 +142,7 @@ export function emailFormError(form: EmailForm): string | null {
 /** An optional recipient for the test mail: empty (the caller's own address) or an address. */
 export function testRecipientError(to: string): string | null {
   const value = to.trim();
-  return value === '' || EMAIL.test(value) ? null : "Ce n'est pas une adresse e-mail.";
+  return value === '' || EMAIL.test(value) ? null : t('settings.email.errors.recipient');
 }
 
 export interface SecretState {
@@ -153,35 +150,153 @@ export interface SecretState {
   color: 'positive' | 'warning' | 'grey';
 }
 
+/** The four cases of a secret the page cannot show. */
+export type SecretKind = 'unreadable' | 'stored' | 'env' | 'unset';
+
 /**
- * What the page says about a secret it cannot show: stored in the console,
- * stored but unreadable since a change of SECRET_KEY, or taken from the
- * environment — the three cases an administrator must tell apart.
+ * Which case a secret is in: stored in the console, stored but unreadable
+ * since a change of SECRET_KEY, or taken from the environment — the three
+ * cases an administrator must tell apart —, or none.
  */
-export function secretState(stored: boolean, unreadable: boolean, envSet: boolean): SecretState {
-  if (unreadable) return { label: 'à ressaisir', color: 'warning' };
-  if (stored) return { label: 'enregistré', color: 'positive' };
-  if (envSet) return { label: 'valeur du serveur', color: 'grey' };
-  return { label: 'non défini', color: 'grey' };
+export function secretKind(stored: boolean, unreadable: boolean, envSet: boolean): SecretKind {
+  if (unreadable) return 'unreadable';
+  if (stored) return 'stored';
+  if (envSet) return 'env';
+  return 'unset';
 }
 
-const SECURITY_LABELS: Record<SmtpSecurity, string> = {
-  starttls: 'STARTTLS (port 587)',
-  tls: 'TLS implicite (port 465)',
-  none: 'Aucune (relais interne, port 25)',
+const SECRET_COLORS: Record<SecretKind, SecretState['color']> = {
+  unreadable: 'warning',
+  stored: 'positive',
+  env: 'grey',
+  unset: 'grey',
 };
 
-export const SECURITY_OPTIONS = (Object.keys(SECURITY_LABELS) as SmtpSecurity[]).map((value) => ({
+/** What the page says about a secret it cannot show: its badge. */
+export function secretState(stored: boolean, unreadable: boolean, envSet: boolean): SecretState {
+  const kind = secretKind(stored, unreadable, envSet);
+  return { label: t(`settings.email.secret.${kind}`), color: SECRET_COLORS[kind] };
+}
+
+/** The line under a secret box: what saving will do with it. */
+export function secretHint(kind: SecretKind, clearing: boolean): string {
+  if (clearing) return t('settings.email.secretHint.clearing');
+  if (kind === 'unreadable') return t('settings.email.secretHint.unreadable');
+  if (kind === 'stored') return t('settings.email.secretHint.stored');
+  return t('settings.email.secretHint.other');
+}
+
+const SECURITY_MODES: SmtpSecurity[] = ['starttls', 'tls', 'none'];
+
+/** A security mode as the select shows it, in the reader's language. */
+export function securityLabel(security: SmtpSecurity): string {
+  return SECURITY_MODES.includes(security)
+    ? t(`settings.email.securityOptions.${security}`)
+    : security;
+}
+
+/** The select's options; each label is read when shown, in the reader's language. */
+export const SECURITY_OPTIONS = SECURITY_MODES.map((value) => ({
   value,
-  label: SECURITY_LABELS[value],
+  get label(): string {
+    return securityLabel(value);
+  },
 }));
+
+/** A provider inside a sentence: « valeur du serveur : serveur SMTP ». */
+export function providerLabel(provider: EmailProvider): string {
+  return t(`settings.email.providerInline.${provider === 'smtp' ? 'smtp' : 'mailgun'}`);
+}
+
+/** `key` translated with `named`, or null when the catalogue has no such key. */
+function translated(key: string, named: Record<string, unknown> = {}): string | null {
+  const text = t(key, named);
+  return text === key ? null : text;
+}
+
+/**
+ * What the chosen provider lacks, in the reader's language: from the codes of
+ * the server (`missing_codes`), each one falling back to the server's own
+ * French when the console does not know it — or when the server is older and
+ * sends no codes.
+ */
+export function missingTexts(s: Pick<EmailSettings, 'missing' | 'missing_codes'>): string[] {
+  const codes = s.missing_codes;
+  if (!codes || codes.length !== s.missing.length) return s.missing;
+  return codes.map((code, i) => translated(`settings.email.missing.${code}`) ?? s.missing[i]!);
+}
 
 /** The one-line state of the card: does mail leave, and if not, why. */
 export function emailStatus(s: EmailSettings): { ok: boolean; text: string } {
   if (s.configured) {
-    const via = s.effective_provider === 'smtp' ? 'un serveur SMTP' : 'Mailgun';
-    return { ok: true, text: `Les e-mails partent par ${via}.` };
+    const key = s.effective_provider === 'smtp' ? 'viaSmtp' : 'viaMailgun';
+    return { ok: true, text: t(`settings.email.status.${key}`) };
   }
-  const missing = s.missing.length ? ` : il manque ${s.missing.join(', ')}` : '';
-  return { ok: false, text: `Aucun e-mail ne part${missing}.` };
+  const missing = missingTexts(s);
+  if (!missing.length) return { ok: false, text: t('settings.email.status.none') };
+  return {
+    ok: false,
+    text: t('settings.email.status.missing', {
+      missing: missing.join(t('settings.email.listSeparator')),
+    }),
+  };
+}
+
+// The server cuts its sentence to this many characters (``probe._MAX_MESSAGE``).
+const MAX_RESULT = 400;
+
+/** A parameter as the server's f-string writes it (`None` for nothing). */
+function str(value: unknown): string {
+  if (value === null || value === undefined) return 'None';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
+/** The sentence of a test send's outcome, from its code; null for an unknown code. */
+function resultSentence(code: string, params: Record<string, unknown>): string | null {
+  const key = `settings.test.results.${code}`;
+  const named = Object.fromEntries(Object.entries(params).map(([k, v]) => [k, str(v)]));
+  switch (code) {
+    case 'sent':
+      return translated(`${key}_${params.provider === 'smtp' ? 'smtp' : 'mailgun'}`, named);
+    case 'incomplete': {
+      const codes = Array.isArray(params.missing) ? params.missing.map(String) : [];
+      const texts = codes.map((c) => translated(`settings.email.missing.${c}`));
+      if (texts.some((x) => x === null)) return null;
+      return translated(key, { missing: texts.join(t('settings.email.listSeparator')) });
+    }
+    case 'smtp_auth_required':
+      return translated(params.has_user === true ? `${key}_user` : key, named);
+    case 'smtp_recipients_refused': {
+      const refused = Array.isArray(params.recipients) ? params.recipients : [];
+      const details = refused
+        .map((r: Record<string, unknown>) =>
+          t('settings.test.refusedRecipient', {
+            address: str(r.address),
+            code: str(r.code),
+            text: str(r.text),
+          }),
+        )
+        .join(t('settings.test.refusedRecipientSeparator'));
+      return translated(key, { details });
+    }
+    case 'mailgun_status':
+      return translated(params.body ? `${key}_body` : key, named);
+    default:
+      return translated(key, named);
+  }
+}
+
+/**
+ * What the page says under « Envoyer un e-mail de test », in the reader's
+ * language: the server's outcome worded from its code and parameters — the
+ * server's own words (an SMTP reply, a system error) kept as they came. A code
+ * the console does not know, or a server older than the codes, shows the
+ * server's French sentence.
+ */
+export function testResultText(result: EmailTestResult): string {
+  if (!result.code || !result.params) return result.message;
+  const sentence = resultSentence(result.code, result.params);
+  return sentence === null ? result.message : sentence.slice(0, MAX_RESULT);
 }

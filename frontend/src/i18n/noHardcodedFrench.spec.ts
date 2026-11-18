@@ -52,12 +52,6 @@ const PENDING = new Set<string>([
   'utils/machineQuery.ts',
   'utils/usageFilter.ts',
 
-  // --- Lot C1 : Paramètres
-  'pages/SettingsPage.vue',
-  'utils/emailSettings.ts',
-  'utils/numberField.ts',
-  'utils/settingsSchedule.ts',
-
   // --- Lot C2 : comptes, groupes, audit
   'components/audit/AuditDetailsDialog.vue',
   'components/audit/AuditFiltersBar.vue',
