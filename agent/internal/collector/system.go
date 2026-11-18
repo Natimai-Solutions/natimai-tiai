@@ -1,6 +1,10 @@
 package collector
 
-import "time"
+import (
+	"time"
+
+	"tiai/agent/internal/msg"
+)
 
 // Powering the machine down — restarting it, or stopping it outright. The two
 // commands in the catalogue whose effect outlives the agent process that ran
@@ -38,3 +42,15 @@ const (
 	// something is wrong with the machine and not with the delay.
 	powerActionTimeout = 1 * time.Minute
 )
+
+// poweredOutput is the result of a power action Windows accepted: the
+// sentence, then whatever shutdown.exe printed — nothing, normally, and then
+// the sentence alone is worded by the console (msg). Whatever the tool said
+// stays as it said it, so a message with it carries no code.
+func poweredOutput(action string, seconds int, output string) msg.Message {
+	scheduled := msg.New("power.scheduled", msg.Params{"action": action, "seconds": seconds})
+	if output == "" {
+		return scheduled
+	}
+	return msg.Plain(scheduled.Text + output)
+}

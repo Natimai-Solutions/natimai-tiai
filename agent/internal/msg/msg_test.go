@@ -1,0 +1,329 @@
+package msg
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+)
+
+var update = flag.Bool("update", false, "rewrite testdata/messages_fr.json from the catalogue")
+
+const fixture = "testdata/messages_fr.json"
+
+// cases fills every code of the catalogue, some several ways: the shared set
+// the console's French is checked against (frontend/src/services/commandResults.spec.ts).
+func cases() []Message {
+	return []Message{
+		New("agent.backlog_full", Params{"max": 64}),
+		New("agent.stopped", nil),
+		New("agent.unsupported_type", Params{"type": Quote("format_c"), "version": "1.3.0"}),
+		New("agent.power_pending", Params{"action": "reboot"}),
+		New("agent.power_pending", Params{"action": "shutdown"}),
+		New("power.too_soon", Params{"action": "reboot", "ago": "3 min", "min": "10 min"}),
+		New("power.too_soon", Params{"action": "shutdown", "ago": "45 s", "min": "10 min"}),
+		New("power.too_soon_boot", Params{"ago": "2 min", "min": "10 min"}),
+		New("power.scheduled", Params{"action": "reboot", "seconds": 60}),
+		New("power.scheduled", Params{"action": "shutdown", "seconds": 60}),
+		New("power.schedule_failed", Params{"action": "reboot", "code": "1190"}),
+		New("power.schedule_failed", Params{"action": "shutdown", "code": "0x80070005"}),
+		New("wu.scan", Params{"count": 0}),
+		New("wu.scan", Params{"count": 7}),
+		New("wu.timeout", nil),
+		New("wu.interrupted", nil),
+		New("wu.known_error", Params{"hresult": "0x80070422", "detail": "powershell: exit status 1 (Exception from HRESULT: 0x80070422)"}),
+		New("wu.known_error", Params{"hresult": "0x8024402c", "detail": "x"}),
+		New("wu.known_error", Params{"hresult": "0x80072ee2", "detail": "x"}),
+		New("wu.known_error", Params{"hresult": "0x8024002e", "detail": "x"}),
+		New("wu.known_error", Params{"hresult": "0x80248014", "detail": "x"}),
+		New("wu.known_error", Params{"hresult": "0x80244022", "detail": "x"}),
+		New("wu.known_error", Params{"hresult": "0x80240016", "detail": "x"}),
+		New("wu.known_error", Params{"hresult": "0x80240438", "detail": "x"}),
+		New("wu.install_incomplete", Params{"failed": 2, "selected": 5}),
+		New("wu.install_result", Params{"result": "succeeded", "code": 2}),
+		New("wu.install_result", Params{"result": "succeeded_with_errors", "code": 3}),
+		New("wu.install_result", Params{"result": "failed", "code": 4}),
+		New("wu.install_result", Params{"result": "aborted", "code": 5}),
+		New("wu.install_result", Params{"result": "in_progress", "code": 1}),
+		New("wu.install_result", Params{"result": "not_started", "code": 0}),
+		New("inventory.scan", Params{"disks": 1, "volumes": 2, "nics": 1, "software": 143}),
+		New("inventory.scan_without_software", Params{"disks": 2, "volumes": 3, "nics": 2}),
+		New("inventory.unavailable", nil),
+		New("defender.quick_scan.timeout", Params{"budget": "1 h"}),
+		New("defender.full_scan.timeout", Params{"budget": "8 h"}),
+		New("defender.signatures.timeout", Params{"budget": "1 h 30 min"}),
+		New("defender.quick_scan.interrupted", nil),
+		New("defender.full_scan.interrupted", nil),
+		New("defender.signatures.interrupted", nil),
+		New("maintenance.timeout", Params{"exe": "sfc.exe"}),
+		New("maintenance.interrupted", Params{"exe": "dism.exe"}),
+		New("maintenance.launch_failed", Params{"exe": "gpupdate.exe", "detail": "exec: file does not exist"}),
+		New("maintenance.exit_code", Params{"code": "1"}),
+		New("sfc.failed", Params{"code": "1"}),
+		New("sfc.failed_summary", Params{"code": "0x800f081f", "summary": "La protection des ressources Windows a trouvé des fichiers corrompus."}),
+		New("dism.source_missing", Params{"hresult": "0x800f081f"}),
+		New("dism.failed", Params{"code": "87"}),
+		New("chkdsk.failed", Params{"code": "0xc0000005"}),
+		New("chkdsk.offline_repair", Params{"meaning": "errors_found", "code": 1}),
+		New("chkdsk.offline_repair", Params{"meaning": "partly_checked", "code": 2}),
+		New("chkdsk.offline_repair", Params{"meaning": "not_checked", "code": 3}),
+		New("time.service_stopped", Params{"hresult": "0x80070426"}),
+		New("time.failed", Params{"code": "0x800705b4"}),
+		New("spooler.reset", Params{"removed": 3}),
+		New("spooler.stop_failed", Params{"detail": "Access is denied."}),
+		New("spooler.start_failed", Params{"detail": "The service did not respond."}),
+		New("spooler.purge_failed", Params{"detail": "lecture de C:\\Windows\\System32\\spool\\PRINTERS : Access is denied."}),
+		New("wol.relay.sent", Params{"mac": "AA:BB:CC:DD:EE:FF", "copies": 3, "targets": "192.168.1.255:9, 10.4.255.255:9"}),
+		New("wol.relay.no_subnet", nil),
+		New("wol.relay.nic_failed", Params{"detail": "The system cannot find the file specified."}),
+		New("wol.relay.send_failed", Params{"detail": "network is unreachable"}),
+		New("wol.relay.bad_mac", Params{"mac": Quote("00:00:00:00:00:00")}),
+		New("deploy.unsupported", nil),
+		New("deploy.not_enabled", nil),
+		New("deploy.no_package", nil),
+		New("deploy.package_id_refused", Params{"id": Quote("../etc")}),
+		New("deploy.bad_manifest", nil),
+		New("deploy.no_step", Params{"action": "install"}),
+		New("deploy.no_step", Params{"action": "uninstall"}),
+		New("deploy.no_trust_method", nil),
+		New("deploy.unsigned_no_publisher", nil),
+		New("deploy.install_removes", nil),
+		New("deploy.method_a.msiexec", nil),
+		New("deploy.method_a.exe_only", nil),
+		New("deploy.method_a.too_large", Params{"gib": 8}),
+		New("deploy.method_a.loadable", Params{"file": Quote("version.dll")}),
+		New("deploy.signature.unsigned", nil),
+		New("deploy.signature.bad_certificate", nil),
+		New("deploy.signature.untrusted", Params{"thumbprint": "0A1B2C"}),
+		New("deploy.signature.unreadable_certificate", Params{"detail": "x509: malformed certificate"}),
+		New("deploy.signature.bad_signature", nil),
+		New("deploy.signature.algorithm_mismatch", nil),
+		New("deploy.signature.invalid", nil),
+		New("deploy.signature.unsupported_key", nil),
+		New("deploy.not_signed", nil),
+		New("deploy.authenticode_refused", Params{"file": "setup.exe", "detail": "fichier non signé (pas de signature Authenticode)"}),
+		New("deploy.publisher_not_approved", Params{"publisher": Quote("Contoso Ltd")}),
+		New("deploy.download_failed", Params{"file": "setup.exe", "detail": "serveur occupé (429)"}),
+		New("deploy.launch_failed", Params{"file": "setup.exe", "detail": "The system cannot find the file specified."}),
+		New("deploy.exit_code", Params{"file": "setup.exe", "code": 1603}),
+		New("deploy.exit_code", Params{"file": "setup.exe", "code": 1603, "trust": "signer", "by": "CN=Lycée Test"}),
+		New("deploy.exit_code", Params{"file": "setup.exe", "code": 2, "trust": "publisher", "by": "Igor Pavlov"}),
+		New("deploy.exit_code", Params{"file": "setup.exe", "code": 2, "trust": "publisher", "by": "Igor Pavlov", "revocation_offline": true}),
+		New("deploy.done", Params{"action": "install", "name": "7-Zip 23.01", "package_id": "p", "method": "A", "reboot": false, "trust": "publisher", "by": "Igor Pavlov"}),
+		New("deploy.done", Params{"action": "install", "name": "7-Zip 23.01", "package_id": "p", "method": "A", "reboot": true, "trust": "publisher", "by": "Igor Pavlov", "revocation_offline": true}),
+		New("deploy.done", Params{"action": "uninstall", "name": "", "package_id": "0b9c6a4e-6c1d-4a51-9a51-2f1e8f0c3d11", "method": "A", "reboot": false}),
+		New("deploy.done", Params{"action": "install", "name": "Outil", "package_id": "p", "method": "B", "reboot": false, "trust": "signer", "by": "CN=DSI"}),
+		New("deploy.winget_done", Params{"action": "install", "id": "Mozilla.Firefox", "already": false}),
+		New("deploy.winget_done", Params{"action": "uninstall", "id": "Mozilla.Firefox", "already": true}),
+		New("deploy.winget_no_match", nil),
+		New("deploy.winget_failed", Params{"code": "0x8A150001"}),
+		New("deploy.winget_not_enabled", nil),
+		New("deploy.winget_missing", nil),
+		New("deploy.winget_refused", Params{"id": Quote("-x")}),
+		New("deploy.winget_not_allowed", Params{"id": Quote("Mozilla.Firefox")}),
+		New("deploy.winget_version_refused", Params{"version": Quote("1 2")}),
+	}
+}
+
+type fixtureCase struct {
+	Code    string `json:"code"`
+	Params  Params `json:"params"`
+	Message string `json:"message"`
+}
+
+func fixtureCases() []fixtureCase {
+	out := []fixtureCase{}
+	for _, m := range cases() {
+		out = append(out, fixtureCase{Code: m.Code, Params: m.Params, Message: m.Text})
+	}
+	return out
+}
+
+// The console words these codes; its French must be the agent's, case by
+// case. Regenerate after a deliberate change: go test ./internal/msg -update.
+func TestTheSharedCasesAreTheCatalogues(t *testing.T) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", " ")
+	if err := enc.Encode(fixtureCases()); err != nil {
+		t.Fatal(err)
+	}
+	if *update {
+		if err := os.WriteFile(fixture, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(stored, buf.Bytes()) {
+		t.Errorf("%s is not what the catalogue writes: run go test ./internal/msg -update, "+
+			"then match frontend/src/i18n/messages/commands.ts", fixture)
+	}
+}
+
+func TestEveryCodeHasACaseAndFitsTheServer(t *testing.T) {
+	pattern := regexp.MustCompile(`^[a-z0-9_.]{1,64}$`)
+	covered := map[string]bool{}
+	for _, m := range cases() {
+		if m.Code == "" {
+			t.Errorf("a case has no code: %q", m.Text)
+		}
+		if !Fits(m.Params) {
+			t.Errorf("%s: params beyond what the server keeps", m.Code)
+		}
+		covered[m.Code] = true
+	}
+	for code := range french {
+		if !pattern.MatchString(code) {
+			t.Errorf("%q is not a code the server accepts", code)
+		}
+		if !covered[code] {
+			t.Errorf("%s has no case in the shared set", code)
+		}
+		// No code is a prefix of another: the console's catalogue nests them.
+		for other := range french {
+			if strings.HasPrefix(other, code+".") {
+				t.Errorf("%s is a prefix of %s", code, other)
+			}
+		}
+	}
+}
+
+// A code written in the agent's source and missing from the catalogue would
+// send the code itself as text: every literal one is checked here, and the
+// three Defender families built from a prefix (collector.defenderAction).
+func TestEveryCodeInTheSourceIsInTheCatalogue(t *testing.T) {
+	call := regexp.MustCompile(`msg\.(?:New|Err|Wrap)\("([^"]+)"`)
+	found := 0
+	err := filepath.WalkDir("..", func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, m := range call.FindAllStringSubmatch(string(src), -1) {
+			found++
+			if _, ok := french[m[1]]; !ok {
+				t.Errorf("%s: code %q is not in the catalogue", path, m[1])
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found < 50 {
+		t.Errorf("only %d coded messages found in the source", found)
+	}
+	for _, action := range []string{"defender.quick_scan", "defender.full_scan", "defender.signatures"} {
+		for _, suffix := range []string{".timeout", ".interrupted"} {
+			if _, ok := french[action+suffix]; !ok {
+				t.Errorf("%s%s is not in the catalogue", action, suffix)
+			}
+		}
+	}
+}
+
+// The sentences the agent wrote before its messages had codes, word for
+// word: an older server shows the text, and must show what it showed.
+func TestTheTextsAreTheOnesTheAgentAlwaysWrote(t *testing.T) {
+	for _, c := range []struct {
+		got, want string
+	}{
+		{New("agent.backlog_full", Params{"max": 64}).Text,
+			"file d'attente de l'agent pleine (64 commandes) : commande non exécutée, à relancer"},
+		{New("agent.unsupported_type", Params{"type": Quote("x"), "version": "1.2.0"}).Text,
+			`type de commande "x" non pris en charge par l'agent 1.2.0 : mettez l'agent à jour`},
+		{New("power.too_soon", Params{"action": "shutdown", "ago": "3 min", "min": "10 min"}).Text,
+			"opération refusée : un arrêt a déjà été programmé sur ce poste il y a 3 min (délai minimum 10 min)"},
+		{New("power.scheduled", Params{"action": "reboot", "seconds": 60}).Text,
+			"Redémarrage programmé dans 60 secondes.\n"},
+		{New("chkdsk.offline_repair", Params{"meaning": "errors_found", "code": 1}).Text,
+			"chkdsk : des erreurs ont été trouvées (code 1) — une réparation hors ligne (chkdsk /spotfix, appliquée au redémarrage) est nécessaire"},
+		{New("deploy.done", Params{"action": "install", "name": "App 1.0", "package_id": "p", "method": "A",
+			"reboot": true, "trust": "publisher", "by": "Ed", "revocation_offline": true}).Text,
+			"Installation de App 1.0 terminée (méthode A, éditeur approuvé : Ed (révocation non vérifiable hors ligne))\nRedémarrage requis pour terminer."},
+		{New("deploy.done", Params{"action": "uninstall", "name": "", "package_id": "id", "method": "A"}).Text,
+			"Désinstallation de paquet id terminée (méthode A)"},
+		{New("wu.known_error", Params{"hresult": "0x80240438", "detail": "boom"}).Text,
+			"aucune source de mises à jour n'est configurée sur ce poste (boom)"},
+	} {
+		if c.got != c.want {
+			t.Errorf("got  %q\nwant %q", c.got, c.want)
+		}
+	}
+}
+
+func TestOfReadsOnlyAWholeCodedMessage(t *testing.T) {
+	base := errors.New("cause")
+	coded := Wrap("wol.relay.send_failed", nil, base)
+	if coded.Error() != "émission du paquet magique impossible : cause" {
+		t.Errorf("text = %q", coded.Error())
+	}
+	if !errors.Is(coded, base) {
+		t.Error("the cause must stay reachable")
+	}
+	if code, params := Of(coded); code != "wol.relay.send_failed" || params["detail"] != "cause" {
+		t.Errorf("Of = %q %v", code, params)
+	}
+	// Inside a longer sentence, the code would word only part of it.
+	if code, _ := Of(fmt.Errorf("méthode B : %w", coded)); code != "" {
+		t.Errorf("a coded error inside another sentence kept its code %q", code)
+	}
+	if code, _ := Of(errors.New("plain")); code != "" {
+		t.Error("an uncoded error has no code")
+	}
+	if code, _ := Of(nil); code != "" {
+		t.Error("no error, no code")
+	}
+	// Too long for the server: the text goes alone.
+	long := Wrap("wol.relay.send_failed", nil, errors.New(strings.Repeat("x", 2000)))
+	if code, params := Of(long); code != "" || params != nil {
+		t.Errorf("an oversized message kept its code %q", code)
+	}
+	if !strings.HasSuffix(long.Error(), strings.Repeat("x", 2000)) {
+		t.Error("the text stays whole")
+	}
+}
+
+func TestAnUnknownCodeDegradesToText(t *testing.T) {
+	m := New("no.such.code", Params{"a": 1})
+	if m.Code != "" || m.Text != "no.such.code" {
+		t.Errorf("New(unknown) = %+v", m)
+	}
+}
+
+func TestFitsMirrorsTheServerBounds(t *testing.T) {
+	many := Params{}
+	for i := range 17 {
+		many[fmt.Sprintf("k%d", i)] = i
+	}
+	for _, p := range []Params{
+		many,
+		{"long": strings.Repeat("é", 1025)},
+		{strings.Repeat("k", 33): 1},
+		{"a": strings.Repeat("x", 1000), "b": strings.Repeat("x", 1000), "c": strings.Repeat("x", 1000), "d": strings.Repeat("x", 1000)},
+	} {
+		if Fits(p) {
+			t.Errorf("Fits(%d keys) = true", len(p))
+		}
+	}
+	if !Fits(Params{"text": strings.Repeat("é", 1024), "n": 1, "b": true}) {
+		t.Error("a message within bounds must fit")
+	}
+	if !slices.Contains([]bool{Fits(nil)}, true) {
+		t.Error("no params fit")
+	}
+}

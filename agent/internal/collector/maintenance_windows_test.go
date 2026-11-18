@@ -31,7 +31,8 @@ func TestRunMaintenanceOutputIsReadable(t *testing.T) {
 			// The error is not the subject: gpo_report and cert_pulse need
 			// elevation and fail for an unprivileged test run. Their *output*
 			// is still the tool's own localized text, which is what is checked.
-			out, err := RunMaintenance(ctx, c.cmd)
+			res, err := RunMaintenance(ctx, c.cmd)
+			out := res.Text
 			if strings.TrimSpace(out) == "" {
 				t.Fatalf("no output (err = %v)", err)
 			}

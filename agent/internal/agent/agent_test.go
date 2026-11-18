@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -592,7 +593,7 @@ func TestAVerdictWithANulIsDelivered(t *testing.T) {
 	}
 	want := models.CommandResult{Status: "failed", Output: "SFC\tok\r\n", Error: "boom[31m"}
 	for _, id := range []string{c1, c2} {
-		if got[id] != want {
+		if !reflect.DeepEqual(got[id], want) {
 			t.Errorf("%s: server got %+v, want %+v", id, got[id], want)
 		}
 	}

@@ -38,6 +38,7 @@ from app.features.audit import crud as audit
 from app.features.base import contains, utcnow
 from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
+from app.features.command import texts as command_texts
 from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.inventory.models import (
     Disk,
@@ -1944,6 +1945,10 @@ class WakeOut(BaseModel):
     hostname: str | None
     ok: bool
     detail: str
+    # What the console words ``detail`` from (``command.texts``, plan console
+    # bilingue): its code and parameters. ``detail`` stays, in French.
+    detail_code: str | None = None
+    detail_params: dict[str, Any] = {}
 
 
 class WakeResponse(BaseModel):
@@ -2020,12 +2025,15 @@ async def wake_machines(
             # Reported rather than 404'd: one stale id in a selection of thirty
             # must not cost the other twenty-nine their wake. Nothing is
             # recorded — there is no machine left to record it against.
+            unknown = command_texts.wake_unknown_machine()
             results.append(
                 WakeOut(
                     machine_id=machine_id,
                     hostname=None,
                     ok=False,
-                    detail="Poste introuvable : il a été supprimé ou fusionné.",
+                    detail=unknown.text,
+                    detail_code=unknown.code,
+                    detail_params=unknown.params,
                 )
             )
             continue
@@ -2042,6 +2050,8 @@ async def wake_machines(
                     hostname=machine.hostname,
                     ok=outcome.ok,
                     detail=outcome.detail,
+                    detail_code=outcome.code,
+                    detail_params=outcome.params,
                 )
             )
             continue
@@ -2072,6 +2082,8 @@ async def wake_machines(
                 finished_at=now,
                 result_output=outcome.detail if outcome.ok else None,
                 error=None if outcome.ok else outcome.detail,
+                result_code=outcome.code,
+                result_params=outcome.params,
             )
         )
         results.append(
@@ -2080,6 +2092,8 @@ async def wake_machines(
                 hostname=machine.hostname,
                 ok=outcome.ok,
                 detail=outcome.detail,
+                detail_code=outcome.code,
+                detail_params=outcome.params,
             )
         )
 

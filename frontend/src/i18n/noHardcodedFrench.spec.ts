@@ -12,12 +12,7 @@ import { scanSource } from './scan';
  * listed must stay clean. English is offered (`ENGLISH_AVAILABLE`) once the
  * list is empty.
  */
-const PENDING = new Set<string>([
-  // --- Lot F : commandes
-  'components/machine/CommandOutputDialog.vue',
-  'components/machine/MachineCommandsCard.vue',
-  'services/commands.ts',
-]);
+const PENDING = new Set<string>([]);
 
 const SRC = new URL('..', import.meta.url).pathname;
 

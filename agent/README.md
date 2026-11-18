@@ -32,6 +32,7 @@ internal/
   acl/       DACL SYSTEM + Administrateurs sur HKLM\SOFTWARE\Tiai et %ProgramData%\Tiai (mêmes SDDL que MSI/GPO)
   winpath/   chemins absolus des binaires système (System32, powershell.exe) — jamais le PATH
   agent/     boucle de polling + exécution des commandes
+  msg/       messages propres de l'agent : code + paramètres pour la console, texte français à côté
   models/    types de la couche transport
 ```
 
@@ -830,6 +831,36 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
   anciens partent jusqu'à repasser sous le plafond, le paquet à télécharger
   compté pour sa taille annoncée et jamais retiré (audit S24). Chaque retrait
   est une ligne `deploy: removed package folder …` de `agent.log`.
+
+## Messages des résultats : code et texte
+
+Ce que l'agent écrit lui-même dans le résultat d'une commande — un refus, un
+délai dépassé, « 3 mise(s) à jour en attente. », la ligne de fin d'un
+déploiement — part sous deux formes (console bilingue, plan
+`dev/plan-console-bilingue.md`, I5) :
+
+- le **texte français** dans `output` ou `error`, comme toujours : c'est ce
+  qu'un serveur plus ancien enregistre et affiche ;
+- un **code** et ses **paramètres**, champs facultatifs `message_code` et
+  `message_params` du résultat, que la console met en mots dans la langue de
+  son lecteur. Le code décrit l'`error` d'un résultat en échec, l'`output`
+  d'un résultat réussi — le texte entier, jamais une partie.
+
+Les phrases sont écrites dans `internal/msg/catalogue.go` et nulle part
+ailleurs ; le catalogue de la console
+(`frontend/src/i18n/messages/commands.ts`) doit dire la même chose mot pour
+mot, ce que vérifient de part et d'autre les cas partagés
+`internal/msg/testdata/messages_fr.json` (à régénérer après un changement de
+formulation : `go test ./internal/msg -update`).
+
+Restent sans code, en texte seul : la **sortie des outils Windows** (`ipconfig`,
+`gpresult`, `sfc`…, dans la langue du poste, citée telle quelle — y compris
+dans un paramètre `detail` ou `summary`), le compte rendu détaillé d'une
+installation Windows Update et d'une réinitialisation Windows Update, et les
+phrases composées de deux refus (méthode B puis méthode A). Un message dont
+les paramètres dépassent ce que le serveur garde (16 clés, 1 024 caractères
+par texte) part aussi sans code. La note « […] sortie tronquée à N Kio par
+l'agent » n'est pas un code : la console la reconnaît en fin de texte.
 
 ## Build & essai
 

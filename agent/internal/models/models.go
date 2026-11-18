@@ -422,8 +422,16 @@ type HeartbeatResponse struct {
 }
 
 // CommandResult is posted back after executing a command.
+//
+// MessageCode and MessageParams name the agent's own message, for the console
+// to word in its reader's language (internal/msg): the Error of a failed
+// result, the Output of a succeeded one. Empty when that text is a tool's
+// output, or too composite to be worded from a code. The text is sent all
+// the same — an older server ignores the two fields and shows it, as before.
 type CommandResult struct {
-	Status string `json:"status"` // succeeded / failed
-	Output string `json:"output,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Status        string         `json:"status"` // succeeded / failed
+	Output        string         `json:"output,omitempty"`
+	Error         string         `json:"error,omitempty"`
+	MessageCode   string         `json:"message_code,omitempty"`
+	MessageParams map[string]any `json:"message_params,omitempty"`
 }

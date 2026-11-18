@@ -2,11 +2,12 @@ package collector
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	"tiai/agent/internal/msg"
 )
 
 var procGetTickCount64 = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount64")
@@ -26,8 +27,8 @@ func Uptime() (time.Duration, error) {
 
 // Reboot schedules a restart of the machine after powerActionDelay, with a
 // message for whoever is logged on.
-func Reboot(ctx context.Context) (string, error) {
-	return schedulePowerAction(ctx, "/r", rebootMessage, "Redémarrage")
+func Reboot(ctx context.Context) (msg.Message, error) {
+	return schedulePowerAction(ctx, "/r", rebootMessage, "reboot")
 }
 
 // Shutdown schedules a full stop of the machine, same delay and same warning.
@@ -42,8 +43,8 @@ func Reboot(ctx context.Context) (string, error) {
 // Wake-on-LAN is unreliable, which would make the console offer a wake that
 // works on some machines and not others. The plain stop is the one whose
 // counterpart is a magic packet that actually arrives.
-func Shutdown(ctx context.Context) (string, error) {
-	return schedulePowerAction(ctx, "/s", shutdownMessage, "Arrêt")
+func Shutdown(ctx context.Context) (msg.Message, error) {
+	return schedulePowerAction(ctx, "/s", shutdownMessage, "shutdown")
 }
 
 // schedulePowerAction runs shutdown.exe for one of the two power commands and
@@ -61,20 +62,20 @@ func Shutdown(ctx context.Context) (string, error) {
 // carries the privilege handling (SeShutdownPrivilege), the user notification
 // and the message display, and reimplementing all three to save one process
 // launch on a command triggered by hand would be a poor trade.
-func schedulePowerAction(ctx context.Context, flag, message, label string) (string, error) {
-	seconds := strconv.Itoa(int(powerActionDelay.Seconds()))
+func schedulePowerAction(ctx context.Context, flag, message, action string) (msg.Message, error) {
+	seconds := int(powerActionDelay.Seconds())
 	ctx, cancel := context.WithTimeout(ctx, powerActionTimeout)
 	defer cancel()
 
 	raw, code, err := runSystem32(ctx, "shutdown.exe",
-		flag, "/t", seconds, "/c", message)
+		flag, "/t", strconv.Itoa(seconds), "/c", message)
 	output := truncateOutput(normalizeConsoleOutput(decodeToolOutput(raw, encOEM)), maxOutputBytes)
 	if err != nil {
-		return output, err
+		return msg.Plain(output), err
 	}
 	if code != 0 {
-		return output, fmt.Errorf("%s : l'opération n'a pas pu être programmée (code %s)",
-			label, formatExitCode(code))
+		return msg.Plain(output), msg.Err("power.schedule_failed",
+			msg.Params{"action": action, "code": formatExitCode(code)})
 	}
-	return fmt.Sprintf("%s programmé dans %s secondes.\n%s", label, seconds, output), nil
+	return poweredOutput(action, seconds, output), nil
 }

@@ -1,6 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Column, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
@@ -181,6 +182,17 @@ class Command(SQLModel, table=True):
     agent_verdict_at: datetime | None = utc_field(default=None, nullable=True)
     result_output: str | None = None
     error: str | None = None
+    # What the console words the verdict from, in its reader's language (plan
+    # ``dev/plan-console-bilingue.md``, I3 and I5): a code and its parameters
+    # — the server's own (``command.texts``) or the agent's
+    # (``message_code``). It words the ``error`` of a failed command, the
+    # ``result_output`` of a succeeded one; the French text stays beside it.
+    # NULL on a row stored before, on a verdict from an older agent, and on
+    # the output of a Windows tool, which reads as written.
+    result_code: str | None = Field(default=None, max_length=64)
+    result_params: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
     # Set on a ``wake_on_lan`` alone: the poste whose agent emitted — or is
     # about to emit — the magic packet on behalf of ``machine_id``, which is
     # off. NULL while no poste has claimed it, and always NULL on every other
