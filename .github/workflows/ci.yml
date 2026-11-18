@@ -347,3 +347,22 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 7
+
+  # Le seul statut à exiger dans le ruleset de main : vert quand chaque job
+  # ci-dessus a réussi. Toujours exécuté (if: always()), pour qu'un job en
+  # échec ou annulé le fasse échouer au lieu de le laisser en attente.
+  ci-green:
+    name: CI verte
+    needs: [backend, agent, agent-windows, frontend, images, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Résultat des jobs
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for r in $RESULTS; do
+            [ "$r" = success ] || exit 1
+          done
