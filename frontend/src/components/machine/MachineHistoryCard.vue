@@ -186,6 +186,7 @@ import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime } from 'src/utils/format';
 import { t } from 'src/i18n';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = withDefaults(
   defineProps<{
@@ -280,10 +281,10 @@ async function submit() {
       const { title, ...rest } = payload;
       const keepCode = !!editing.value.title_code && form.title.trim() === shownTitle.trim();
       await updateIntervention(editing.value.id, keepCode ? rest : { ...rest, title });
-      $q.notify({ type: 'positive', message: t('interventions.history.updated') });
+      notify($q, () => ({ type: 'positive', message: t('interventions.history.updated') }));
     } else {
       await createIntervention(props.machineId, payload);
-      $q.notify({ type: 'positive', message: t('interventions.history.created') });
+      notify($q, () => ({ type: 'positive', message: t('interventions.history.created') }));
     }
     formOpen.value = false;
     // A maintenance line moves the poste's due date, and with it « Mes
@@ -291,10 +292,10 @@ async function submit() {
     notifyTasksChanged();
     emit('changed');
   } catch (e) {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('interventions.history.saveFailed')),
-    });
+    }));
   } finally {
     saving.value = false;
   }
@@ -313,14 +314,14 @@ function confirmDelete(item: Intervention) {
     void (async () => {
       try {
         await deleteIntervention(item.id);
-        $q.notify({ type: 'positive', message: t('interventions.history.deleted') });
+        notify($q, () => ({ type: 'positive', message: t('interventions.history.deleted') }));
         notifyTasksChanged();
         emit('changed');
       } catch (e) {
-        $q.notify({
+        notify($q, () => ({
           type: 'negative',
           message: apiErrorMessage(e, t('interventions.history.deleteFailed')),
-        });
+        }));
       }
     })();
   });

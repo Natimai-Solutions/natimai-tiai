@@ -97,6 +97,7 @@ import {
   isKnownAuditAction,
 } from 'src/utils/auditLabels';
 import { formatDateTime } from 'src/utils/format';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{ entry: AuditEntry | null }>();
 const emit = defineEmits<{
@@ -150,9 +151,9 @@ const rawJson = computed(() => JSON.stringify(props.entry ?? {}, null, 2));
 async function copy() {
   try {
     await navigator.clipboard.writeText(rawJson.value);
-    $q.notify({ type: 'positive', message: t('audit.details.copied') });
+    notify($q, () => ({ type: 'positive', message: t('audit.details.copied') }));
   } catch {
-    $q.notify({ type: 'negative', message: t('audit.details.copyFailed') });
+    notify($q, () => ({ type: 'negative', message: t('audit.details.copyFailed') }));
   }
 }
 </script>

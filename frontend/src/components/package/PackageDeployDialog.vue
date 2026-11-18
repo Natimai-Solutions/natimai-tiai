@@ -127,6 +127,7 @@ import {
   type Package,
 } from 'src/services/packages';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -255,10 +256,10 @@ watch(
       try {
         packages.value = await listPackages();
       } catch (e) {
-        $q.notify({
+        notify($q, () => ({
           type: 'negative',
           message: apiErrorMessage(e, t('packagePages.deploy.loadFailed')),
-        });
+        }));
       } finally {
         loadingPackages.value = false;
       }
@@ -336,14 +337,14 @@ async function send() {
     if (!(await confirmed(mine))) return;
     sending.value = true;
     const res = await deployPackage(chosen.value.id, action.value, target);
-    $q.notify(bulkSendNotification(res));
+    notify($q, () => bulkSendNotification(res));
     emit('update:modelValue', false);
     emit('sent');
   } catch (e) {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('packagePages.deploy.sendFailed')),
-    });
+    }));
   } finally {
     // Only for the showing this send was started in: a later one has its
     // own state, reset when it opened.

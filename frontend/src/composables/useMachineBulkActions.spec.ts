@@ -79,10 +79,12 @@ describe('useMachineBulkActions', () => {
         machine_ids: ['m-1', 'm-2'],
       });
       expect(q.dialog).not.toHaveBeenCalled();
-      expect(q.notify).toHaveBeenCalledWith({
-        type: 'positive',
-        message: '2 commande(s) envoyée(s)',
-      });
+      expect(q.notify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: '2 commande(s) envoyée(s)',
+        }),
+      );
     });
 
     it('asks first for a costly one, with the count — and sends nothing until « OK »', async () => {
@@ -216,7 +218,9 @@ describe('useMachineBulkActions', () => {
       await placeSelection('r-1');
 
       expect(placeMachines).toHaveBeenCalledWith('r-1', ['m-1', 'm-2']);
-      expect(q.notify).toHaveBeenCalledWith({ type: 'positive', message: '2 poste(s) affecté(s)' });
+      expect(q.notify).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'positive', message: '2 poste(s) affecté(s)' }),
+      );
       expect(placeOpen.value).toBe(false);
       expect(selected.value).toEqual([]);
       expect(reload).toHaveBeenCalledOnce();
@@ -284,10 +288,12 @@ describe('useMachineBulkActions — re-enrolment (C2) and revoked postes (C3)', 
     await vi.waitFor(() => expect(selected.value).toEqual([]));
 
     expect(approveReenroll).toHaveBeenCalledWith(['m-1', 'm-2']);
-    expect(q.notify).toHaveBeenCalledWith({
-      type: 'positive',
-      message: 'Ré-enrôlement autorisé pour 1 poste(s) — 1 sans demande en attente, ignoré(s)',
-    });
+    expect(q.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'positive',
+        message: 'Ré-enrôlement autorisé pour 1 poste(s) — 1 sans demande en attente, ignoré(s)',
+      }),
+    );
     expect(reload).toHaveBeenCalled();
   });
 
@@ -296,9 +302,11 @@ describe('useMachineBulkActions — re-enrolment (C2) and revoked postes (C3)', 
     const { runBulk } = setup();
     runBulk(action((a) => !a.confirm && !a.serverSide && a.bulk));
     await vi.waitFor(() => expect(q.notify).toHaveBeenCalled());
-    expect(q.notify).toHaveBeenCalledWith({
-      type: 'warning',
-      message: '1 commande(s) envoyée(s) — 1 au token révoqué, ignoré(s)',
-    });
+    expect(q.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'warning',
+        message: '1 commande(s) envoyée(s) — 1 au token révoqué, ignoré(s)',
+      }),
+    );
   });
 });

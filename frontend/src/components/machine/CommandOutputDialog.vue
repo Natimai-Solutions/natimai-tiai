@@ -29,6 +29,7 @@ import { useQuasar } from 'quasar';
 import { t } from 'src/i18n';
 import { commandResultText, commandTypeLabel, type Command } from 'src/services/commands';
 import { formatDateTime } from 'src/utils/format';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{ command: Command | null; kind: 'output' | 'error' }>();
 
@@ -45,9 +46,9 @@ const text = computed(() => (props.command ? commandResultText(props.command, pr
 async function copy() {
   try {
     await navigator.clipboard.writeText(text.value);
-    $q.notify({ type: 'positive', message: t('commands.output.copied') });
+    notify($q, () => ({ type: 'positive', message: t('commands.output.copied') }));
   } catch {
-    $q.notify({ type: 'negative', message: t('commands.output.copyFailed') });
+    notify($q, () => ({ type: 'negative', message: t('commands.output.copyFailed') }));
   }
 }
 </script>

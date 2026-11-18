@@ -82,7 +82,9 @@ describe('MaintenanceSessionDialog in English', () => {
       .dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
     await flushPromises();
 
-    expect(notify).toHaveBeenCalledWith({ type: 'negative', message: 'Could not save' });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'negative', message: 'Could not save' }),
+    );
     expect(bodyText()).toContain('Sending stopped without an answer from the server');
     expect(bodyText()).toContain('Resume sending');
     wrapper.unmount();
@@ -99,10 +101,12 @@ describe('MaintenanceSessionDialog in English', () => {
       .dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
     await flushPromises();
 
-    expect(notify).toHaveBeenCalledWith({
-      type: 'positive',
-      message: 'Maintenance recorded on 2 computers',
-    });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'positive',
+        message: 'Maintenance recorded on 2 computers',
+      }),
+    );
     wrapper.unmount();
   });
 

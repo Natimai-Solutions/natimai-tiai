@@ -2,7 +2,7 @@ import { Notify } from 'quasar';
 import type { Router } from 'vue-router';
 import { t } from 'src/i18n';
 import layout from 'src/i18n/messages/layout';
-import { liveNotify } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 /**
  * A console tab opened before a deployment still runs the old build: the
@@ -201,24 +201,21 @@ export function browserStaleChunkEnv(): StaleChunkEnv {
     },
     // It stays until dismissed: its words follow a change of language.
     notify: (retry, offline) =>
-      liveNotify(
-        (options) => Notify.create(options),
-        () => ({
-          type: 'negative',
-          message: chunkLoadFailedMessage(),
-          ...(offline ? { caption: chunkLoadOfflineCaption() } : {}),
-          // Stays until dismissed: the reader may be looking elsewhere when the
-          // click on a menu entry does nothing.
-          timeout: 0,
-          // One message at a time is this module's own business (it takes the
-          // previous one down): no « 2 », « 3 » badge counting the clicks.
-          group: false,
-          actions: [
-            { label: t('layout.staleChunk.reload'), color: 'white', handler: retry },
-            { label: t('layout.staleChunk.close'), color: 'white' },
-          ],
-        }),
-      ),
+      notify({ notify: (options) => Notify.create(options) }, () => ({
+        type: 'negative',
+        message: chunkLoadFailedMessage(),
+        ...(offline ? { caption: chunkLoadOfflineCaption() } : {}),
+        // Stays until dismissed: the reader may be looking elsewhere when the
+        // click on a menu entry does nothing.
+        timeout: 0,
+        // One message at a time is this module's own business (it takes the
+        // previous one down): no « 2 », « 3 » badge counting the clicks.
+        group: false,
+        actions: [
+          { label: t('layout.staleChunk.reload'), color: 'white', handler: retry },
+          { label: t('layout.staleChunk.close'), color: 'white' },
+        ],
+      })),
     logError: (error) => console.error(error),
   };
 }

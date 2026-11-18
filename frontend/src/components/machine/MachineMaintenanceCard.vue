@@ -114,6 +114,7 @@ import {
 } from 'src/services/maintenance';
 import { formatDateTime } from 'src/utils/format';
 import { t } from 'src/i18n';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{ machineId: string; hostname: string; canWrite: boolean }>();
 const emit = defineEmits<{ (e: 'changed'): void }>();
@@ -148,7 +149,7 @@ async function saveSettings(payload: MaintenanceSettingsPayload) {
   // Another owner or cycle moves the poste in or out of somebody's « Mes
   // tâches »: the menu badge reads again (audit U19).
   notifyTasksChanged();
-  $q.notify({ type: 'positive', message: t('maintenance.card.saved') });
+  notify($q, () => ({ type: 'positive', message: t('maintenance.card.saved') }));
   emit('changed');
 }
 

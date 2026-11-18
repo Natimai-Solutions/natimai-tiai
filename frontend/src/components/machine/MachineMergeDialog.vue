@@ -134,6 +134,7 @@ import { apiErrorMessage } from 'src/services/errors';
 import { formatDateTime, timeAgoLabel } from 'src/utils/format';
 import { escapeHtml } from 'src/utils/html';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{
   /** The record being kept — the merge target. */
@@ -194,7 +195,10 @@ async function runSearch() {
     results.value = data.items.filter((m) => m.id !== props.machineId);
   } catch (e) {
     results.value = [];
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machine.merge.searchFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('machine.merge.searchFailed')),
+    }));
   } finally {
     searching.value = false;
   }
@@ -225,11 +229,14 @@ function doMerge(source: Machine) {
 async function runMerge(sourceId: string) {
   try {
     await mergeMachines(props.machineId, sourceId);
-    $q.notify({ type: 'positive', message: t('machine.merge.merged') });
+    notify($q, () => ({ type: 'positive', message: t('machine.merge.merged') }));
     open.value = false;
     emit('merged');
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('machine.merge.failed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('machine.merge.failed')),
+    }));
   }
 }
 </script>

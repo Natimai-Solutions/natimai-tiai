@@ -55,6 +55,7 @@ import { listAssignableUsers, type Check, type CheckPayload } from 'src/services
 import { apiErrorMessage } from 'src/services/errors';
 import { t } from 'src/i18n';
 import { useDraft } from 'src/composables/useDraft';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -136,7 +137,10 @@ async function loadUsers() {
       (u) => ({ label: u.name, value: u.id }),
     );
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('checks.request.usersFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('checks.request.usersFailed')),
+    }));
   }
 }
 
@@ -149,7 +153,10 @@ async function submit() {
     });
     emit('update:modelValue', false);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('checks.request.saveFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('checks.request.saveFailed')),
+    }));
   } finally {
     saving.value = false;
   }

@@ -539,6 +539,7 @@ import {
 import { useAuthStore } from 'src/stores/auth';
 import { downloadBlob, formatDateTime } from 'src/utils/format';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{ id: string }>();
 const $q = useQuasar();
@@ -834,8 +835,9 @@ const rules = {
   },
 };
 
-function notifyError(e: unknown, fallback: string) {
-  $q.notify({ type: 'negative', message: apiErrorMessage(e, fallback) });
+/** The fallback is a function: worded again with the notification. */
+function notifyError(e: unknown, fallback: () => string) {
+  notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, fallback()) }));
 }
 
 /** Saves the definition; whether it was saved. */
@@ -870,16 +872,16 @@ async function save(): Promise<boolean> {
     const wasSigned = pkg.value.signed;
     const updated = await updatePackage(pkg.value.id, fields);
     fill(updated);
-    $q.notify({
+    notify($q, () => ({
       type: wasSigned && !updated.signed ? 'warning' : 'positive',
       message:
         wasSigned && !updated.signed
           ? t('packagePages.detail.savedResign')
           : t('packagePages.detail.saved'),
-    });
+    }));
     return true;
   } catch (e) {
-    notifyError(e, t('packagePages.detail.saveFailed'));
+    notifyError(e, () => t('packagePages.detail.saveFailed'));
     return false;
   } finally {
     saving.value = false;
@@ -900,15 +902,16 @@ async function upload() {
   // Against the server's own bound, as the package reports it.
   const tooBig = tooLargeFiles(pkg.value, files);
   if (tooBig.length) {
-    $q.notify({
+    const maxBytes = pkg.value.file_max_bytes;
+    notify($q, () => ({
       type: 'negative',
       message: t('packagePages.detail.upload.tooLarge', {
         files: tooBig.map((f) => f.name).join(t('packages.listSeparator')),
       }),
       caption: t('packagePages.detail.upload.tooLargeCaption', {
-        size: formatSize(pkg.value.file_max_bytes),
+        size: formatSize(maxBytes),
       }),
-    });
+    }));
     return;
   }
   const total = files.reduce((n, f) => n + f.size, 0) || 1;
@@ -940,14 +943,16 @@ async function upload() {
       if (exe) form.install_run = exe.name;
     }
     toUpload.value = null;
-    $q.notify({
+    const unsaved = dirty.value;
+    notify($q, () => ({
       type: 'positive',
       message: t('packagePages.detail.upload.done', files.length),
-      ...(dirty.value ? { caption: t('packagePages.detail.upload.rememberSave') } : {}),
-    });
+      ...(unsaved ? { caption: t('packagePages.detail.upload.rememberSave') } : {}),
+    }));
   } catch (e) {
     const notSent = files.slice(kept.length).map((f) => f.name);
-    const caption =
+    // Built with the notification, in the language it is shown in.
+    const caption = () =>
       files.length > 1
         ? [
             kept.length
@@ -967,25 +972,29 @@ async function upload() {
             .join(' ')
         : undefined;
     if (isCancel(e)) {
-      $q.notify({
+      notify($q, () => ({
         type: 'info',
         message: sent
           ? t('packagePages.detail.upload.interrupted')
           : t('packagePages.detail.upload.cancelled'),
-        ...(caption ? { caption } : {}),
-      });
+        ...withCaption(caption()),
+      }));
     } else {
-      $q.notify({
+      notify($q, () => ({
         type: 'negative',
         message: apiErrorMessage(e, t('packagePages.detail.upload.failed')),
-        ...(caption ? { caption } : {}),
+        ...withCaption(caption()),
         ...(files.length > 1 ? { timeout: 10000 } : {}),
-      });
+      }));
     }
   } finally {
     uploading.value = false;
     uploadAbort = null;
   }
+}
+
+function withCaption(caption: string | undefined): { caption?: string } {
+  return caption ? { caption } : {};
 }
 
 function cancelUpload() {
@@ -1007,7 +1016,7 @@ function removeFile(name: string) {
       try {
         refresh(await deletePackageFile(id, name));
       } catch (e) {
-        notifyError(e, t('packagePages.detail.removeFile.failed'));
+        notifyError(e, () => t('packagePages.detail.removeFile.failed'));
       }
     })();
   });
@@ -1019,7 +1028,7 @@ async function getManifest() {
     const blob = await downloadManifest(pkg.value.id);
     downloadBlob(blob, manifestFileName(pkg.value));
   } catch (e) {
-    notifyError(e, t('packagePages.detail.downloadFailed'));
+    notifyError(e, () => t('packagePages.detail.downloadFailed'));
   }
 }
 
@@ -1028,10 +1037,9 @@ async function sendSignature(file: File | null) {
   try {
     const document: unknown = JSON.parse(await file.text());
     refresh(await attachSignature(pkg.value.id, document));
-    $q.notify({ type: 'positive', message: t('packagePages.detail.signature.attached') });
+    notify($q, () => ({ type: 'positive', message: t('packagePages.detail.signature.attached') }));
   } catch (e) {
-    notifyError(
-      e,
+    notifyError(e, () =>
       e instanceof SyntaxError
         ? t('packagePages.detail.signature.notSignature')
         : t('packagePages.detail.signature.refused'),
@@ -1046,7 +1054,7 @@ async function unsign() {
   try {
     refresh(await removeSignature(pkg.value.id));
   } catch (e) {
-    notifyError(e, t('packagePages.detail.operationFailed'));
+    notifyError(e, () => t('packagePages.detail.operationFailed'));
   }
 }
 
@@ -1088,13 +1096,13 @@ async function toggleRetired() {
     if (!ok) return;
     try {
       refresh(await restorePackage(p.id));
-      $q.notify({
+      notify($q, () => ({
         type: 'positive',
         message: t('packagePages.detail.restoreConfirm.done'),
         caption: t('packagePages.detail.restoreConfirm.doneCaption'),
-      });
+      }));
     } catch (e) {
-      notifyError(e, t('packagePages.detail.operationFailed'));
+      notifyError(e, () => t('packagePages.detail.operationFailed'));
     }
     void loadCommands();
     return;
@@ -1120,7 +1128,7 @@ async function toggleRetired() {
   if (!ok) return;
   try {
     refresh(await retirePackage(p.id));
-    $q.notify({
+    notify($q, () => ({
       type: 'positive',
       message: t('packagePages.detail.retireConfirm.done'),
       ...(pending
@@ -1132,9 +1140,9 @@ async function toggleRetired() {
             ),
           }
         : {}),
-    });
+    }));
   } catch (e) {
-    notifyError(e, t('packagePages.detail.operationFailed'));
+    notifyError(e, () => t('packagePages.detail.operationFailed'));
   }
   void loadCommands();
 }

@@ -166,7 +166,9 @@ describe('TasksPage in English', () => {
     await take.trigger('click');
     await flushPromises();
 
-    expect(notify).toHaveBeenCalledWith({ type: 'positive', message: 'Room B12 assigned to you' });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'positive', message: 'Room B12 assigned to you' }),
+    );
     expect(updateRoomMaintenance).toHaveBeenCalledWith('r-1', { maintenance_owner_id: 'me' });
     wrapper.unmount();
   });

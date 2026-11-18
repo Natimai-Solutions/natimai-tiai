@@ -725,6 +725,7 @@ import {
   weekdayName,
 } from 'src/utils/settingsSchedule';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -1036,7 +1037,11 @@ async function load() {
     // Before the settings: nothing to show, the banner says why. After them
     // (the owner list): the cards are shown, the toast names what is missing.
     if (!settings.value) loadError.value = e;
-    else $q.notify({ type: 'negative', message: apiErrorMessage(e, t('settings.loadFailed')) });
+    else
+      notify($q, () => ({
+        type: 'negative',
+        message: apiErrorMessage(e, t('settings.loadFailed')),
+      }));
   }
 }
 
@@ -1050,9 +1055,9 @@ async function save() {
       maintenance_due_soon_days: Number(form.dueSoon),
     });
     fillMaintenanceForm(settings.value);
-    $q.notify({ type: 'positive', message: t('settings.saved') });
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     saving.value = false;
   }
@@ -1068,9 +1073,9 @@ async function saveUsage() {
       usage_high_hours: Number(usageForm.highHours),
     });
     fillUsageForm(settings.value);
-    $q.notify({ type: 'positive', message: t('settings.saved') });
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     savingUsage.value = false;
   }
@@ -1091,9 +1096,9 @@ async function saveFleet() {
       command_default_ttl_minutes: Number(fleetForm.commandDefaultTtlMinutes),
     });
     fillFleetForm(settings.value);
-    $q.notify({ type: 'positive', message: t('settings.saved') });
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     savingFleet.value = false;
   }
@@ -1107,9 +1112,9 @@ async function saveSchedule() {
       maintenance_reminder_weekday: scheduleForm.reminderWeekday,
     });
     fillScheduleForm(settings.value);
-    $q.notify({ type: 'positive', message: t('settings.saved') });
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     savingSchedule.value = false;
   }
@@ -1121,9 +1126,9 @@ async function saveEmail() {
   try {
     settings.value = await updateSettings({ email: emailPayload(emailForm, settings.value.email) });
     fillEmailForm(settings.value);
-    $q.notify({ type: 'positive', message: t('settings.email.saved') });
+    notify($q, () => ({ type: 'positive', message: t('settings.email.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     savingEmail.value = false;
   }

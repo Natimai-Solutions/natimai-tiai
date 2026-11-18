@@ -167,6 +167,7 @@ import {
 } from 'src/services/machines';
 import { apiErrorMessage } from 'src/services/errors';
 import { downloadBlob } from 'src/utils/format';
+import { notify } from 'src/utils/notify';
 
 /**
  * The fleet export's column picker — the way Odoo's export dialog works: a
@@ -338,7 +339,10 @@ async function doExport() {
     remember();
     open.value = false;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('exports.machines.exportError')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('exports.machines.exportError')),
+    }));
   } finally {
     exporting.value = false;
   }

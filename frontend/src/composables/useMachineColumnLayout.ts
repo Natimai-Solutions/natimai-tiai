@@ -10,6 +10,7 @@ import {
   type MachineColumnKey,
 } from 'src/utils/machineColumns';
 import { visibleMachineColumns } from 'src/utils/machineListTable';
+import { notify } from 'src/utils/notify';
 
 /**
  * Which columns the machine list shows, and in what order — kept on the
@@ -48,10 +49,10 @@ export function useMachineColumnLayout(usageWindowDays: Ref<number>) {
       });
       columnOrder.value = next;
     } catch (e) {
-      $q.notify({
+      notify($q, () => ({
         type: 'negative',
         message: apiErrorMessage(e, t('machines.columnsDialog.saveFailed')),
-      });
+      }));
       throw e;
     }
   }

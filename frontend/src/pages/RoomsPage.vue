@@ -375,7 +375,8 @@ import {
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { t } from 'src/i18n';
-import { liveDialog, liveNotify } from 'src/utils/liveDialog';
+import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
 // A phone: cards rather than tables (audit U23).
@@ -434,7 +435,10 @@ async function sync() {
   try {
     preview = await syncDirectory(true);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.resyncFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('rooms.list.resyncFailed')),
+    }));
     syncing.value = false;
     return;
   }
@@ -454,17 +458,14 @@ async function sync() {
 async function runSync() {
   try {
     const res = await syncDirectory();
-    // The warning stays until read: its words follow a change of language.
-    const notice = syncNotification(res);
-    if (notice.timeout === 0)
-      liveNotify(
-        (options) => $q.notify(options),
-        () => syncNotification(res),
-      );
-    else $q.notify(notice);
+    // The warning stays until read.
+    notify($q, () => syncNotification(res));
     await reload();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.resyncFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('rooms.list.resyncFailed')),
+    }));
   } finally {
     syncing.value = false;
   }
@@ -533,7 +534,10 @@ async function reload() {
   try {
     [rooms.value, buildings.value] = await Promise.all([listRooms(), listBuildings()]);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.loadFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('rooms.list.loadFailed')),
+    }));
   } finally {
     loading.value = false;
   }
@@ -571,10 +575,13 @@ function confirmDeleteRoom(room: Room) {
     void (async () => {
       try {
         await deleteRoom(room.id);
-        $q.notify({ type: 'positive', message: t('rooms.list.roomDeleted') });
+        notify($q, () => ({ type: 'positive', message: t('rooms.list.roomDeleted') }));
         await reload();
       } catch (e) {
-        $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.deleteFailed')) });
+        notify($q, () => ({
+          type: 'negative',
+          message: apiErrorMessage(e, t('rooms.list.deleteFailed')),
+        }));
       }
     })();
   });
@@ -594,10 +601,13 @@ function confirmDeleteBuilding(building: Building) {
     void (async () => {
       try {
         await deleteBuilding(building.id);
-        $q.notify({ type: 'positive', message: t('rooms.list.buildingDeleted') });
+        notify($q, () => ({ type: 'positive', message: t('rooms.list.buildingDeleted') }));
         await reload();
       } catch (e) {
-        $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.deleteFailed')) });
+        notify($q, () => ({
+          type: 'negative',
+          message: apiErrorMessage(e, t('rooms.list.deleteFailed')),
+        }));
       }
     })();
   });

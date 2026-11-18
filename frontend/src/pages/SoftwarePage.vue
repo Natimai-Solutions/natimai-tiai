@@ -108,6 +108,7 @@ import {
 import { apiErrorMessage } from 'src/services/errors';
 import { downloadBlob } from 'src/utils/format';
 import { queryValue } from 'src/utils/machineQuery';
+import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
 const route = useRoute();
@@ -297,7 +298,10 @@ async function doExport(format: SoftwareExportFormat) {
     const blob = await exportSoftware(format, search.value ? { search: search.value } : {});
     downloadBlob(blob, `${t('software.exportFileName')}.${format}`);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('software.exportFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('software.exportFailed')),
+    }));
   } finally {
     exporting.value = false;
   }

@@ -47,6 +47,7 @@ import LocationSelect from './LocationSelect.vue';
 import { createBuilding, updateBuilding, type Building } from 'src/services/rooms';
 import { apiErrorMessage } from 'src/services/errors';
 import { t } from 'src/i18n';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -84,14 +85,18 @@ async function submit() {
     const saved = props.building
       ? await updateBuilding(props.building.id, payload)
       : await createBuilding(payload);
-    $q.notify({
+    const updated = !!props.building;
+    notify($q, () => ({
       type: 'positive',
-      message: props.building ? t('rooms.form.buildingUpdated') : t('rooms.form.buildingCreated'),
-    });
+      message: updated ? t('rooms.form.buildingUpdated') : t('rooms.form.buildingCreated'),
+    }));
     emit('update:modelValue', false);
     emit('saved', saved);
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.form.saveFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('rooms.form.saveFailed')),
+    }));
   } finally {
     saving.value = false;
   }

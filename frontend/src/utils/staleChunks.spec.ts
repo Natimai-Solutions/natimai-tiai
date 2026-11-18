@@ -444,7 +444,7 @@ describe('browserStaleChunkEnv', () => {
     plugin.create = create;
     const retry = vi.fn();
 
-    expect(browserStaleChunkEnv().notify(retry)).toBe(close);
+    const dismiss = browserStaleChunkEnv().notify(retry);
 
     const options = create.mock.calls[0]![0] as {
       message: string;
@@ -462,6 +462,9 @@ describe('browserStaleChunkEnv', () => {
     const reload = options.actions.find((a) => a.label === 'Recharger')!;
     reload.handler!();
     expect(retry).toHaveBeenCalledTimes(1);
+    // What it returns takes it down.
+    dismiss();
+    expect(close).toHaveBeenCalledTimes(1);
     if (installed) plugin.create = installed;
     else delete plugin.create;
   });

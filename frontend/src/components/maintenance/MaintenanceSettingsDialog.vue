@@ -62,6 +62,7 @@ import { useQuasar } from 'quasar';
 import { listAssignableOwners, type MaintenanceSettingsPayload } from 'src/services/maintenance';
 import { apiErrorMessage } from 'src/services/errors';
 import { t } from 'src/i18n';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -131,10 +132,10 @@ async function loadUsers() {
     const list = await listAssignableOwners({ machineId: props.machineId, roomId: props.roomId });
     owners.value = list.map((u) => ({ label: u.name, value: u.id }));
   } catch (e) {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('maintenance.settings.usersFailed')),
-    });
+    }));
   }
 }
 
@@ -148,10 +149,10 @@ async function submit() {
     });
     emit('update:modelValue', false);
   } catch (e) {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('maintenance.settings.saveFailed')),
-    });
+    }));
   } finally {
     saving.value = false;
   }

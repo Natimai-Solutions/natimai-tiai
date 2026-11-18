@@ -230,6 +230,7 @@ import {
 import { apiErrorMessage, someNames } from 'src/services/errors';
 import { t } from 'src/i18n';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 export interface SessionMachine {
   id: string;
@@ -427,12 +428,12 @@ async function submit() {
     // A room of any size is one visit: sent in parts under the server's cap.
     await recordSessionInParts(job.payload, job.progress);
     const done = job.payload.items.length;
-    $q.notify({
+    notify($q, () => ({
       type: 'positive',
       message: done
         ? t('maintenance.session.recorded', { count: done }, done)
         : t('maintenance.session.recordedNothingDone'),
-    });
+    }));
     close();
     notifyTasksChanged();
     emit('recorded');
@@ -444,10 +445,10 @@ async function submit() {
     // user's again, to correct — and the postes it names offered for removal.
     pending.value = job.progress.sessionId || !isRefusal(e) ? job : null;
     refused.value = refusedMachines(e);
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
       message: apiErrorMessage(e, t('maintenance.session.saveFailed')),
-    });
+    }));
   } finally {
     saving.value = false;
   }

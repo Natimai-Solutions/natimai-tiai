@@ -9,6 +9,7 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
 vi.mock('src/composables/useTasksBadge', () => ({ notifyTasksChanged: vi.fn() }));
 
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
+import { setLocale } from 'src/i18n';
 import { recordSessionInParts, type SessionProgress } from 'src/services/maintenance';
 import MaintenanceSessionDialog from './MaintenanceSessionDialog.vue';
 
@@ -335,6 +336,36 @@ describe('MaintenanceSessionDialog (audit T29, U14)', () => {
     wrapper.unmount();
   });
 
+  it('shows a refusal above the dialog, clear of its buttons, in the language shown', async () => {
+    vi.mocked(recordSessionInParts).mockRejectedValueOnce(
+      refusal(422, 'maintenance.items.not_in_room', { machine_ids: ['b'], hostnames: ['PC-B'] }),
+    );
+    const wrapper = await open();
+    const notify = vi.spyOn(wrapper.vm.$q, 'notify');
+    try {
+      await submitForm();
+      expect(notify).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: 'negative',
+          message: 'Ces postes ne sont pas dans la salle de la séance : PC-B',
+          position: 'top',
+        }),
+      );
+      // The language changes while it is on screen: worded again from the error.
+      setLocale('en');
+      expect(notify).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: 'negative',
+          message: 'These computers are not in the session’s room: PC-B',
+          position: 'top',
+        }),
+      );
+    } finally {
+      setLocale('fr');
+      wrapper.unmount();
+    }
+  });
+
   it('lets a resumed visit leave out the postes that left the room since', async () => {
     vi.mocked(recordSessionInParts)
       .mockImplementationOnce(async (_payload, progress) => {
@@ -348,6 +379,10 @@ describe('MaintenanceSessionDialog (audit T29, U14)', () => {
       })
       .mockResolvedValue({} as never);
     const wrapper = await open();
+    // Its parent closes it when asked, as a v-model does.
+    await wrapper.setProps({
+      'onUpdate:modelValue': (v: boolean) => void wrapper.setProps({ modelValue: v }),
+    });
     await typeNote('PC-C', 'éteint');
     await submitForm();
 
@@ -371,8 +406,12 @@ describe('MaintenanceSessionDialog (audit T29, U14)', () => {
       items: [{ machine_id: 'a', note: null }],
       skipped: [{ machine_id: 'c', note: 'éteint' }],
     });
+    // The dialog closes with it: where notifications always showed.
     expect(notify).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'Maintenance enregistrée sur 1 poste(s)' }),
+      expect.objectContaining({
+        message: 'Maintenance enregistrée sur 1 poste(s)',
+        position: 'bottom',
+      }),
     );
     expect(closes(wrapper)).toBe(1);
     wrapper.unmount();

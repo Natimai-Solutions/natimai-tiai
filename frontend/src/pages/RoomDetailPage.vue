@@ -463,6 +463,7 @@ import {
   timeAgoLabel,
 } from 'src/utils/format';
 import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{ id: string }>();
 
@@ -582,7 +583,10 @@ async function loadMoreSessions() {
     sessions.value = [...sessions.value, ...list.items.filter((s) => !known.has(s.id))];
     sessionsTotal.value = list.total;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.detail.sessionsFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('rooms.detail.sessionsFailed')),
+    }));
   }
 }
 
@@ -602,7 +606,7 @@ async function saveMaintenance(payload: MaintenanceSettingsPayload) {
   // Another owner or cycle moves the room in or out of somebody's « Mes
   // tâches »: the menu badge reads again (audit U19).
   notifyTasksChanged();
-  $q.notify({ type: 'positive', message: t('rooms.detail.settingsSaved') });
+  notify($q, () => ({ type: 'positive', message: t('rooms.detail.settingsSaved') }));
   await load();
 }
 
@@ -635,7 +639,10 @@ async function load() {
     machines.value = all;
     void loadMaintenance();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.detail.loadFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('rooms.detail.loadFailed')),
+    }));
   } finally {
     loading.value = false;
   }
@@ -676,15 +683,18 @@ async function remove(m: Machine) {
     // Out of the room, the poste leaves its maintenance owner's « Mes tâches »:
     // the menu badge reads again (audit U19).
     notifyTasksChanged();
-    $q.notify({
+    notify($q, () => ({
       type: 'positive',
       message: m.hostname
         ? t('rooms.detail.removed', { name: m.hostname })
         : t('rooms.detail.machineRemoved'),
-    });
+    }));
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.detail.removeFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('rooms.detail.removeFailed')),
+    }));
   }
 }
 
@@ -742,11 +752,14 @@ async function addPicked() {
     // The postes moved here now follow this room's maintenance owner and
     // cycle: « Mes tâches » counts them differently (audit U19).
     notifyTasksChanged();
-    $q.notify(placementNotification(res));
+    notify($q, () => placementNotification(res));
     addOpen.value = false;
     await load();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.detail.placeFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('rooms.detail.placeFailed')),
+    }));
   } finally {
     adding.value = false;
   }

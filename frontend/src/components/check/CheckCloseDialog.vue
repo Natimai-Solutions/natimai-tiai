@@ -58,6 +58,7 @@ import { useQuasar } from 'quasar';
 import { closeCheck } from 'src/services/checks';
 import { apiErrorMessage } from 'src/services/errors';
 import { t } from 'src/i18n';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -129,12 +130,15 @@ async function submit() {
       note: note.value.trim() || null,
       ...(at ? { closed_at: at } : {}),
     });
-    $q.notify({ type: 'positive', message: t('checks.close.closed') });
+    notify($q, () => ({ type: 'positive', message: t('checks.close.closed') }));
     emit('update:modelValue', false);
     notifyTasksChanged();
     emit('closed');
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('checks.close.closeFailed')) });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('checks.close.closeFailed')),
+    }));
   } finally {
     saving.value = false;
   }
