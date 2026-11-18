@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.core.errors import AppError, ErrorCode
+from app.core.validation import refusal
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.intervention import crud
@@ -192,16 +193,19 @@ async def update_intervention(
         # The date is not sent, so the request model did not check it: a
         # line dated in the future (an old check closing, a legacy entry)
         # turned into a maintenance would push the cycle out (audit B06).
+        # The coded refusal the request model would give (« Value error, »
+        # once, its code for the console), not the validator's own text: a
+        # PydanticCustomError already reads « Value error, … ».
         try:
             crud.not_in_the_future(row.performed_at)
-        except ValueError as exc:
+        except ValueError:
             raise RequestValidationError(
                 [
-                    {
-                        "loc": ("body", "performed_at"),
-                        "msg": f"Value error, {exc}",
-                        "type": "value_error",
-                    }
+                    refusal(
+                        ["body", "performed_at"],
+                        "date_in_future",
+                        "la date ne peut pas être dans le futur",
+                    )
                 ]
             ) from None
     if "kind" in fields:

@@ -94,14 +94,16 @@ export function useMachineBulkActions(options: {
     });
   }
 
-  // One send at a time: the menu entry clicked twice before it closes, or the
-  // confirmation accepted twice in the same instant, queued the command twice
-  // on every poste of the selection.
-  let sending = false;
+  // One send of a given command at a time: the menu entry clicked twice
+  // before it closes, or the confirmation accepted twice in the same
+  // instant, queued the command twice on every poste of the selection.
+  // Another command still goes: refusing it silently lost what the operator
+  // had just confirmed (verification of 2026-11-18).
+  const sending = new Set<string>();
 
   async function sendBulk(action: CommandAction, ids: string[]) {
-    if (sending) return;
-    sending = true;
+    if (sending.has(action.type)) return;
+    sending.add(action.type);
     try {
       // The wake is emitted by the server, not queued for agents that — by
       // definition of the action — are not running. Everything around it is
@@ -121,7 +123,7 @@ export function useMachineBulkActions(options: {
         });
       }
     } finally {
-      sending = false;
+      sending.delete(action.type);
     }
   }
 

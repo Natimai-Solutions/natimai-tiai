@@ -1149,10 +1149,13 @@ onMounted(load);
 /* Phone: the long keys no longer squeeze the description into a sliver —
    each line stacks, key and value above, description below (audit U27). */
 @media (max-width: 599px) {
-  .env-table tr,
-  .env-table td {
+  /* Stacked on a phone (audit U27). « height: auto »: Quasar's dense table
+     fixes a cell at 28 px, and the stacked blocks then overlapped. */
+  .env-table tbody tr,
+  .env-table tbody td {
     display: block;
     width: 100%;
+    height: auto;
   }
   .env-key {
     white-space: normal;

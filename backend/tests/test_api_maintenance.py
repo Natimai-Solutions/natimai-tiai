@@ -495,6 +495,11 @@ async def test_a_future_line_never_becomes_a_maintenance(client, db_session):
     body = refused.json()["error"]
     assert body["code"] == "request.validation_error"
     assert body["details"]["errors"][0]["loc"] == ["body", "performed_at"]
+    # The message as before, once « Value error, », and its code for the console.
+    assert body["details"]["errors"][0]["msg"] == (
+        "Value error, la date ne peut pas être dans le futur"
+    )
+    assert body["details"]["errors"][0]["type"] == "tiai_date_in_future"
     detail = await _detail(client, admin, a)
     assert detail["last_maintenance_at"] is None
     assert detail["maintenance_state"] == "overdue"

@@ -101,26 +101,33 @@ describe('useMachineBulkActions', () => {
     });
 
     // Review: the confirmation accepted twice in the same instant, or the
-    // menu entry clicked twice before the first answer, sends once.
+    // menu entry clicked twice before the first answer, sends once — and
+    // another command asked meanwhile is sent, not lost (verification of
+    // 2026-11-18).
     it('sends once when asked twice before the server has answered', async () => {
-      let release: (v: unknown) => void = () => undefined;
+      const pending: ((v: unknown) => void)[] = [];
+      const release = (v: unknown) => pending.splice(0).forEach((resolve) => resolve(v));
       vi.mocked(createCommands).mockImplementation(
-        () => new Promise((resolve) => (release = resolve)) as never,
+        () => new Promise((resolve) => pending.push(resolve)) as never,
       );
       const { selected, runBulk } = setup();
       const costly = action((a) => a.confirm && !a.serverSide && a.bulk);
       runBulk(costly);
       q.state.onOk!();
       q.state.onOk!();
-      runBulk(action((a) => !a.confirm && !a.serverSide && a.bulk));
       expect(createCommands).toHaveBeenCalledTimes(1);
+      const other = action((a) => !a.confirm && !a.serverSide && a.bulk);
+      runBulk(other);
+      expect(createCommands).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(createCommands).mock.calls[1]![0]).toMatchObject({ type: other.type });
 
       release({ count: 2, skipped: 0 });
       await vi.waitFor(() => expect(selected.value).toEqual([]));
       // Free again for the next selection.
       selected.value = [{ id: 'm-3' } as Machine];
-      runBulk(action((a) => !a.confirm && !a.serverSide && a.bulk));
-      expect(createCommands).toHaveBeenCalledTimes(2);
+      runBulk(costly);
+      q.state.onOk!();
+      expect(createCommands).toHaveBeenCalledTimes(3);
     });
 
     it('wakes through the server rather than queueing a command', async () => {
