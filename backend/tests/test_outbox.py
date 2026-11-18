@@ -287,3 +287,38 @@ async def test_a_drain_stops_starting_mails_past_its_budget(
     pending = [r for r in rows if r.status == EmailStatus.PENDING]
     assert len(pending) == 6 - sent
     assert all(r.attempts == 0 for r in pending)
+
+
+async def test_a_drain_starts_no_mail_once_the_stop_is_asked(
+    db_session, mailgun_configured, monkeypatch
+):
+    """The worker is asked to stop while the second mail is being sent: that
+    one is finished and recorded, the others are left as they were — due,
+    never tried — for the next start."""
+    import asyncio
+
+    from app.features.notification import outbox
+    from app.features.notification.models import EmailStatus
+
+    await _queue(db_session, 5)
+    stop = asyncio.Event()
+    delivered: list[str] = []
+
+    async def deliver(subject, text, to, *, policy=None):
+        delivered.append(to[0])
+        if len(delivered) == 2:
+            stop.set()
+        return True
+
+    monkeypatch.setattr(outbox, "send_email", deliver)
+    assert await outbox.send_pending(db_session, stop=stop) == 2
+
+    rows = await _rows(db_session)
+    assert [r.to_address for r in rows if r.status == EmailStatus.SENT] == delivered
+    pending = [r for r in rows if r.status == EmailStatus.PENDING]
+    assert len(pending) == 3
+    assert all(r.attempts == 0 and r.last_error is None for r in pending)
+
+    # A stop asked before the drain began: nothing is started at all.
+    assert await outbox.send_pending(db_session, stop=stop) == 0
+    assert len(delivered) == 2

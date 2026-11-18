@@ -65,6 +65,16 @@ jobs:
       - name: Sync dependencies
         run: uv sync --frozen
 
+      # tests/test_backup_script.py lance deploy/backup/backup.sh pour de vrai :
+      # chiffrement avec age, et sous le shell du conteneur (busybox ash).
+      # Sans ces deux outils, ces tests étaient sautés en silence ; ici (CI
+      # posé), leur absence les fait échouer.
+      - name: Outils des tests de sauvegarde (age, busybox)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends age busybox-static
+          age --version && busybox | head -n 1
+
       - name: Ruff format
         run: uv run ruff format --check
 

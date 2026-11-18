@@ -1,7 +1,7 @@
 """Minimal SMTP client — the other channel this console can send mail through.
 
-The standard library's ``smtplib`` is blocking, so each send runs in a worker
-thread (``asyncio.to_thread``): the outbox drain sends one mail at a time and
+The standard library's ``smtplib`` is blocking, so each send runs in a thread
+of its own (``_in_thread``): the outbox drain sends one mail at a time and
 the worker loop has nothing else to do meanwhile, so a thread per send costs
 nothing worth a dependency.
 
@@ -14,6 +14,7 @@ send, not at the next restart.
 import asyncio
 import smtplib
 import ssl
+import threading
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 
@@ -36,7 +37,20 @@ def _build_message(
 
 
 def _tls_context(verify: bool) -> ssl.SSLContext:
+    """The client side of the TLS session: the chain must end at a CA the
+    container trusts and the certificate must name the server — unless the
+    administrator turned the verification off."""
     ctx = ssl.create_default_context()
+    # Python 3.13 added VERIFY_X509_STRICT to the default context: RFC 5280
+    # to the letter, which refuses a CA without a key-usage extension or a
+    # certificate without an authority key identifier — what `openssl req
+    # -x509` and many home-made CAs produce. The relays this console talks to
+    # are often behind such a CA, and v1.2.0 (Python 3.12) accepted them: a
+    # patch release that moved the interpreter must not stop a site's mail.
+    # So the verification stays what it was — chain and host name. The flag
+    # can come back with a release whose notes tell those sites to reissue
+    # their CA first, or behind a setting of its own.
+    ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
     if not verify:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -73,6 +87,42 @@ def _send_sync(policy: EmailPolicy, msg: EmailMessage) -> None:
             raise smtplib.SMTPRecipientsRefused(refused)
 
 
+async def _in_thread(policy: EmailPolicy, msg: EmailMessage) -> None:
+    """Run ``_send_sync`` in a thread and wait for it.
+
+    A daemon thread, not ``asyncio.to_thread``: the loop's default executor
+    is joined when the loop closes, so a send the worker had cancelled at the
+    end of its stop grace — a server gone silent — still held the process
+    for the rest of its SMTP timeout, past the ten seconds ``docker stop``
+    gives. A daemon thread is abandoned with the process; the mail's row is
+    still pending, and the next start sends it.
+    """
+    loop = asyncio.get_running_loop()
+    done: asyncio.Future[None] = loop.create_future()
+
+    def settle(error: BaseException | None) -> None:
+        if done.cancelled():
+            return  # nobody waits for this send any more
+        if error is None:
+            done.set_result(None)
+        else:
+            done.set_exception(error)
+
+    def run() -> None:
+        error: BaseException | None = None
+        try:
+            _send_sync(policy, msg)
+        except BaseException as exc:
+            error = exc
+        try:
+            loop.call_soon_threadsafe(settle, error)
+        except RuntimeError:
+            pass  # the loop is closed: the process is going down
+
+    threading.Thread(target=run, name="smtp-send", daemon=True).start()
+    await done
+
+
 async def send_email(
     subject: str, text: str, to: list[str], *, policy: EmailPolicy
 ) -> bool:
@@ -85,5 +135,5 @@ async def send_email(
     if not policy.smtp_configured or not to:
         return False
     msg = _build_message(policy, subject, text, to)
-    await asyncio.to_thread(_send_sync, policy, msg)
+    await _in_thread(policy, msg)
     return True

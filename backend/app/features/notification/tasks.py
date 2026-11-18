@@ -265,9 +265,26 @@ async def send_maintenance_reminders(session: AsyncSession) -> int:
     # The reminder goes out at the digest's hour: an owner whose digest of
     # this morning already carries « VOS TÂCHES » would read the same block
     # twice. They have it there; the reminder is for the others.
-    in_digest = {
-        plan.user.id for plan in await plan_daily_digest(session) if plan.personal
-    }
+    #
+    # Asked under a savepoint, and answered « nobody » when it fails: the
+    # digest's plan reads the whole parc (every section of every scope), and
+    # a failure there must not cost the owners their week's reminder — nor
+    # the caller its transaction, which carries the worker's record of the
+    # week. The price is an owner told twice, should the digest then go out.
+    in_digest: set[uuid.UUID] = set()
+    try:
+        async with session.begin_nested():
+            in_digest = {
+                plan.user.id
+                for plan in await plan_daily_digest(session)
+                if plan.personal
+            }
+    except Exception:
+        logger.warning(
+            "Maintenance reminders: today's digest could not be planned, "
+            "every owner is reminded",
+            exc_info=True,
+        )
     # Once for the run: the parc, and who reaches what.
     fleet = await fleet_maintenance(session, now)
     queued = 0

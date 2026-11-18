@@ -21,8 +21,9 @@ The two mail jobs — the daily digest, the weekly reminder — keep in the
 database (``app_settings``, ``worker.last_run.*``) the day or the week they
 last went out, written in the transaction that queues the mails: neither is
 ever sent twice for one period, whatever restarts and schedule changes happen
-in between. One that fails is tried again at the next tick, the same day,
-instead of waiting for tomorrow.
+in between — nor by a second worker started by mistake: the period is
+claimed in one statement, under the row's lock. One that fails is tried again
+at the next tick, the same day, instead of waiting for tomorrow.
 
 The outbox is drained beside the loop, not in it, and for a bounded time per
 drain: a mail server that accepts connections and never answers delays mail,
@@ -32,6 +33,7 @@ Run with: python -m app.core.worker
 """
 
 import asyncio
+import functools
 import logging
 import signal
 import tempfile
@@ -41,6 +43,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -55,6 +58,7 @@ from app.features.command.models import Command, CommandStatus
 from app.features.notification import digest, outbox
 from app.features.setting import crud as setting_crud
 from app.features.setting.crud import SchedulePolicy
+from app.features.setting.models import AppSetting
 from app.features.usage import crud as usage_crud
 from app.features.user import addresses as login_addresses
 
@@ -84,10 +88,15 @@ STOP_GRACE_SECONDS = 8
 OUTBOX_BUDGET_SECONDS = 25
 
 
-async def process_outbox() -> int:
-    """Send the due mails; the worker is the outbox's only drainer."""
+async def process_outbox(stop: asyncio.Event | None = None) -> int:
+    """Send the due mails; the worker is the outbox's only drainer.
+
+    ``stop`` is the worker's stop event: once set, the drain ends with the
+    mail it is sending (``finish_background`` waits for that one)."""
     async with AsyncSession(engine) as session:
-        return await outbox.send_pending(session, budget_seconds=OUTBOX_BUDGET_SECONDS)
+        return await outbox.send_pending(
+            session, budget_seconds=OUTBOX_BUDGET_SECONDS, stop=stop
+        )
 
 
 async def expire_stale_commands() -> int:
@@ -141,6 +150,26 @@ def _iso_week(now: datetime) -> str:
     return f"{year}-W{week:02d}"
 
 
+async def _claim_period(session: AsyncSession, key: str, period: str) -> bool:
+    """Record ``period`` under ``key`` unless it is already there; whether
+    this transaction is the one that recorded it.
+
+    One statement, not a read then a write: two workers started by mistake
+    (``--scale worker=2``, a second stack on the same database) both read
+    « not sent yet » and both sent. The second now waits on the row the first
+    holds until that one commits — and then finds the period there — or
+    rolls back, and then takes its turn.
+    """
+    values = {"value": period, "updated_at": utcnow(), "updated_by": "worker"}
+    insert = pg_insert(AppSetting).values(key=key, **values)
+    claim = insert.on_conflict_do_update(
+        index_elements=[col(AppSetting.key)],
+        set_=values,
+        where=col(AppSetting.value).is_distinct_from(insert.excluded.value),
+    ).returning(col(AppSetting.key))
+    return (await session.exec(claim)).first() is not None
+
+
 async def _once_per_period(
     job_name: str,
     period: str,
@@ -151,10 +180,9 @@ async def _once_per_period(
     together, or not at all — a failed run is not taken for a sent one."""
     key = LAST_RUN_KEYS[job_name]
     async with AsyncSession(engine) as session:
-        if await setting_crud.get_value(session, key) == period:
+        if not await _claim_period(session, key, period):
             logger.info("Job %s already ran for %s, skipped", job_name, period)
             return 0
-        await setting_crud.set_value(session, key, period, actor="worker")
         queued = await send(session)
         # The senders commit what they queue; one that had nothing to send
         # returns before its commit, and the period is recorded all the same.
@@ -162,15 +190,19 @@ async def _once_per_period(
         return queued
 
 
-async def send_daily_digest() -> int:
+async def send_daily_digest(now: datetime | None = None) -> int:
     """Queue the daily fleet digest for the accounts that asked for one.
 
     Runs once a day at the digest hour (page Paramètres, else
     ``DIGEST_HOUR_UTC``). Which accounts hear from it, and on
     which days, is decided per account — see ``features/notification/digest``.
+
+    ``now`` is the tick that decided the run, and the day recorded is its
+    day: read off the clock a second time, a run decided a breath before
+    midnight recorded the next day, whose own digest was then skipped.
     """
     return await _once_per_period(
-        "daily_digest", _day(utcnow()), digest.send_daily_digest
+        "daily_digest", _day(now or utcnow()), digest.send_daily_digest
     )
 
 
@@ -247,7 +279,7 @@ class Job:
     """A periodic task and when it next runs."""
 
     name: str
-    run: Callable[[], Awaitable[int]]
+    run: Callable[..., Awaitable[int]]
     next_run: datetime
     # Given the instant a run happened, returns the next due instant.
     schedule: Callable[[datetime], datetime]
@@ -261,6 +293,9 @@ class Job:
     # A mail job (digest, reminder): one that fails is tried again at every
     # tick of the same UTC day, rather than at its next occurrence.
     retry_same_day: bool = False
+    # ``run`` is called with the tick's instant — the mail jobs, which record
+    # the period of the tick that decided the run.
+    takes_now: bool = False
     # Set while such a job is being retried: the day its failed run was due.
     retrying_on: date | None = None
     # Run beside the loop rather than in it (the outbox drain): the next tick
@@ -310,13 +345,14 @@ def weekly_at(weekday: int, hour: int) -> Callable[[datetime], datetime]:
     return _next
 
 
-async def send_maintenance_reminders() -> int:
-    """Queue the weekly reminder for the owners with a maintenance due."""
+async def send_maintenance_reminders(now: datetime | None = None) -> int:
+    """Queue the weekly reminder for the owners with a maintenance due —
+    once per ISO week, that of ``now``, the tick that decided the run."""
     from app.features.notification import tasks
 
     return await _once_per_period(
         "maintenance_reminders",
-        _iso_week(utcnow()),
+        _iso_week(now or utcnow()),
         tasks.send_maintenance_reminders,
     )
 
@@ -330,7 +366,8 @@ def _reminder_params(policy: SchedulePolicy) -> tuple[int, ...]:
 
 
 def first_run(schedule: Callable[[datetime], datetime], now: datetime) -> datetime:
-    """When a mail job is first due in a worker started at ``now``.
+    """When a mail job is first due in a worker started at ``now`` — or
+    whose schedule was changed at ``now`` (``apply_schedule``).
 
     Now, when today's occurrence has already passed — a worker restarted at
     18:05 (deployment, crash, host reboot) still sends the 18:00 digest; the
@@ -352,11 +389,16 @@ def _same_period(job_name: str, a: datetime, b: datetime) -> bool:
     return a.date() == b.date()
 
 
-def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]:
+def build_jobs(
+    now: datetime,
+    policy: SchedulePolicy | None = None,
+    stop: asyncio.Event | None = None,
+) -> list[Job]:
     """The worker's whole schedule, in one place.
 
     ``policy`` is the console's schedule (page Paramètres) as read at
     start-up; the environment's values when the database could not be read.
+    ``stop`` is the worker's stop event, handed to the outbox drain.
     """
     if policy is None:
         policy = SchedulePolicy(
@@ -368,7 +410,13 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
     housekeeping = daily_at(8)
     return [
         # Due immediately: a restart must resume mail delivery within one tick.
-        Job("outbox", process_outbox, now, every(POLL_SECONDS), background=True),
+        Job(
+            "outbox",
+            functools.partial(process_outbox, stop),
+            now,
+            every(POLL_SECONDS),
+            background=True,
+        ),
         Job("expire_stale_commands", expire_stale_commands, now, every(300)),
         Job("close_unanswered_commands", close_unanswered_commands, now, every(300)),
         Job(
@@ -378,6 +426,7 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
             digest_hour,
             params=_digest_params(policy),
             retry_same_day=True,
+            takes_now=True,
         ),
         Job(
             "maintenance_reminders",
@@ -386,6 +435,7 @@ def build_jobs(now: datetime, policy: SchedulePolicy | None = None) -> list[Job]
             reminder,
             params=_reminder_params(policy),
             retry_same_day=True,
+            takes_now=True,
         ),
         Job("purge_outbox", purge_outbox, housekeeping(now), housekeeping),
         Job("purge_software", purge_software, housekeeping(now), housekeeping),
@@ -421,11 +471,20 @@ def apply_schedule(jobs: list[Job], policy: SchedulePolicy, now: datetime) -> No
     without restarting the worker. A job whose settings did not move is left
     alone — its next run stays where it was.
 
+    A change is a restart at that instant, as far as the aim goes
+    (``first_run``): an hour moved to one already passed today is due now when
+    the day was not served, exactly as if the worker had been restarted with
+    the new hour — the two used to disagree, the change skipping the day.
+
     One guard: moving the hour must not send a period's mail twice. The digest
     sent at 18:00 and an hour then moved to 20:00 aims for 20:00 *tomorrow*,
     not tonight; likewise a reminder already sent this week waits for the
-    next. Known only for runs in this process — the restart semantics the
-    schedule already has.
+    next. Known here only for runs in this process; the period kept in the
+    database (``_once_per_period``) covers the others — a run it skips costs
+    one query.
+
+    A retry in progress belongs to the schedule that is replaced: it is
+    dropped, and the new aim decides alone.
     """
     wanted = {
         "daily_digest": (
@@ -443,7 +502,7 @@ def apply_schedule(jobs: list[Job], policy: SchedulePolicy, now: datetime) -> No
         params, schedule = wanted[job.name]
         if job.params == params:
             continue
-        next_run = schedule(now)
+        next_run = first_run(schedule, now)
         if job.last_run is not None and _same_period(job.name, job.last_run, next_run):
             next_run = schedule(next_run)
         logger.info(
@@ -452,6 +511,7 @@ def apply_schedule(jobs: list[Job], policy: SchedulePolicy, now: datetime) -> No
             next_run.isoformat(),
         )
         job.params, job.schedule, job.next_run = params, schedule, next_run
+        job.retrying_on = None
 
 
 async def load_schedule() -> SchedulePolicy | None:
@@ -468,7 +528,7 @@ async def load_schedule() -> SchedulePolicy | None:
 async def _run_logged(job: Job, now: datetime) -> bool:
     """Run one job; whether it went through. Never raises."""
     try:
-        result = await job.run()
+        result = await (job.run(now) if job.takes_now else job.run())
     except Exception:
         logger.exception("Job %s failed", job.name)
         return False
@@ -495,8 +555,15 @@ async def run_due_jobs(jobs: list[Job], now: datetime) -> None:
             # the job waits for its next occurrence.
             logger.warning("Job %s: gave up retrying %s", job.name, job.retrying_on)
             job.retrying_on = None
-            job.next_run = job.schedule(now)
-            continue
+            # Unless that occurrence has itself come due since midnight — a
+            # digest hour of 0, a failure that lasted the night: it is
+            # today's own and runs now. Giving up used to skip it, a whole
+            # day (or week) of mail lost to yesterday's failure.
+            midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            due = job.schedule(midnight - timedelta(microseconds=1))
+            if due > now:
+                job.next_run = due
+                continue
         # Rescheduled before running, so a job that raises still moves on
         # rather than being retried on every tick against the same failure —
         # except a mail job, retried the same day: a passing outage at the
@@ -516,13 +583,20 @@ async def _run_background(job: Job, now: datetime) -> None:
 async def finish_background(jobs: list[Job], timeout: float) -> None:
     """Give the background jobs still running ``timeout`` seconds to end,
     then cancel them — at stop, so that a drain finishes the mail it is
-    sending rather than leave it to be sent again."""
+    sending rather than leave it to be sent again. The drain starts no other
+    mail once the stop is asked (``outbox.send_pending``): the wait is for
+    the mail in flight alone, and only one that outlasts ``timeout`` — a
+    server gone silent — is abandoned, still pending."""
     pending = [j.task for j in jobs if j.task is not None and not j.task.done()]
     if not pending:
         return
     _, still = await asyncio.wait(pending, timeout=timeout)
     for task in still:
         task.cancel()
+    if still:
+        # Let the cancellation land — the drain's session is closed here,
+        # not left to the loop's teardown.
+        await asyncio.gather(*still, return_exceptions=True)
 
 
 def mark_alive() -> None:
@@ -536,13 +610,16 @@ def mark_alive() -> None:
 
 async def main(stop: asyncio.Event) -> None:
     await assert_not_superuser()
-    jobs = build_jobs(utcnow(), await load_schedule())
+    jobs = build_jobs(utcnow(), await load_schedule(), stop=stop)
     logger.info("Worker started: %d jobs, tick %ds", len(jobs), POLL_SECONDS)
     while not stop.is_set():
         policy = await load_schedule()
+        # One reading of the clock for the tick: what the schedule is aimed
+        # from is what the jobs are run at.
+        now = utcnow()
         if policy is not None:
-            apply_schedule(jobs, policy, utcnow())
-        await run_due_jobs(jobs, utcnow())
+            apply_schedule(jobs, policy, now)
+        await run_due_jobs(jobs, now)
         mark_alive()
         try:
             await asyncio.wait_for(stop.wait(), timeout=POLL_SECONDS)

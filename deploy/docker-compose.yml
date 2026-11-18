@@ -61,6 +61,8 @@ services:
   # celle de `db`, même tag — un pg_dump de la même version que le serveur —
   # plus `age`, pour le chiffrement optionnel des dumps. Pas d'`image:` : rien
   # à tirer d'un registre, `docker compose pull` la saute et `up` la construit.
+  # Hôte qui ne joint pas le miroir d'Alpine : la construire ailleurs et la
+  # charger (`docker load`) sous le nom <projet>-db-backup, cf. DEPLOYMENT.md.
   db-backup:
     build:
       context: ./backup
