@@ -13,6 +13,7 @@
             dense
             autofocus
             maxlength="100"
+            reactive-rules
             :rules="[required]"
           />
           <LocationSelect

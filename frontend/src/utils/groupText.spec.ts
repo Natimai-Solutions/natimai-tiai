@@ -41,4 +41,25 @@ describe('built-in groups in the reader’s language', () => {
     expect(groupName({ name: 'Techniciens', builtin_key: null })).toBe('Techniciens');
     expect(groupName({ name: 'Techniciens', builtin_key: 'unknown' })).toBe('Techniciens');
   });
+
+  it('keeps a built-in group’s stored name when another group of the list bears its translation', () => {
+    const builtins = [
+      { name: 'Administrateurs', builtin_key: 'admin' },
+      { name: 'Lecture seule', builtin_key: 'readonly' },
+    ].filter((g) => g.builtin_key in catalogue.fr.builtin);
+    const list = [
+      ...builtins,
+      ...builtins.map((g) => ({ name: catalogue.en.builtin[g.builtin_key as 'admin'].name })),
+    ];
+    setLocale('en');
+    const names = list.map((g) => groupName(g, list));
+    expect(new Set(names).size).toBe(list.length);
+    expect(names.slice(0, builtins.length)).toEqual(builtins.map((g) => g.name));
+    // Alone, or beside groups of other names: translated as before.
+    expect(groupName(builtins[0]!, builtins)).toBe(
+      catalogue.en.builtin[builtins[0]!.builtin_key as 'admin'].name,
+    );
+    setLocale('fr');
+    expect(list.map((g) => groupName(g, list))).toEqual(list.map((g) => g.name));
+  });
 });

@@ -343,4 +343,14 @@ const emit = defineEmits<{
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* On a touch screen, a taller target than the 20 px of the text: the padding
+   takes the tap and the negative margin gives the room back, so nothing moves.
+   Not a stretched ::after as for .row-link: the name is cut (overflow: hidden)
+   and would clip it. */
+@media (pointer: coarse) {
+  .machine-name__link {
+    padding-block: 12px;
+    margin-block: -12px;
+  }
+}
 </style>

@@ -229,6 +229,7 @@ import {
 } from 'src/services/maintenance';
 import { apiErrorMessage, someNames } from 'src/services/errors';
 import { t } from 'src/i18n';
+import { liveDialog } from 'src/utils/liveDialog';
 
 export interface SessionMachine {
   id: string;
@@ -348,7 +349,7 @@ function cancel() {
     // Part of the visit is recorded already — or may be: closing keeps that
     // part, and the page must show it.
     const { sessionId, sent, total } = pending.value.progress;
-    $q.dialog({
+    liveDialog($q, () => ({
       title: t('maintenance.session.abandonSendingTitle'),
       message: sessionId
         ? t('maintenance.session.abandonSendingPartly', { sent, total })
@@ -356,7 +357,7 @@ function cancel() {
       cancel: { flat: true, noCaps: true, label: t('maintenance.session.resume') },
       ok: { flat: true, noCaps: true, label: t('maintenance.session.abandon'), color: 'negative' },
       persistent: true,
-    }).onOk(() => {
+    })).onOk(() => {
       close();
       notifyTasksChanged();
       emit('recorded');
@@ -367,13 +368,13 @@ function cancel() {
     close();
     return;
   }
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('maintenance.session.abandonInputTitle'),
     message: t('maintenance.session.abandonInputBody'),
     cancel: { flat: true, noCaps: true, label: t('maintenance.session.continueInput') },
     ok: { flat: true, noCaps: true, label: t('maintenance.session.abandon'), color: 'negative' },
     persistent: true,
-  }).onOk(close);
+  })).onOk(close);
 }
 
 function toggleAll(on: boolean) {

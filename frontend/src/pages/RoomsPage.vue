@@ -375,6 +375,7 @@ import {
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { t } from 'src/i18n';
+import { liveDialog, liveNotify } from 'src/utils/liveDialog';
 
 const $q = useQuasar();
 // A phone: cards rather than tables (audit U23).
@@ -437,13 +438,13 @@ async function sync() {
     syncing.value = false;
     return;
   }
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('rooms.list.resync'),
     message: syncPreviewMessage(preview),
     cancel: { flat: true, label: t('rooms.actions.cancel') },
     ok: { label: t('rooms.list.resyncConfirm'), color: 'primary' },
     persistent: true,
-  })
+  }))
     .onOk(() => void runSync())
     .onCancel(() => {
       syncing.value = false;
@@ -453,7 +454,14 @@ async function sync() {
 async function runSync() {
   try {
     const res = await syncDirectory();
-    $q.notify(syncNotification(res));
+    // The warning stays until read: its words follow a change of language.
+    const notice = syncNotification(res);
+    if (notice.timeout === 0)
+      liveNotify(
+        (options) => $q.notify(options),
+        () => syncNotification(res),
+      );
+    else $q.notify(notice);
     await reload();
   } catch (e) {
     $q.notify({ type: 'negative', message: apiErrorMessage(e, t('rooms.list.resyncFailed')) });
@@ -550,7 +558,7 @@ function openBuildingForm(building: Building | null) {
 }
 
 function confirmDeleteRoom(room: Room) {
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('rooms.list.deleteRoomTitle'),
     message:
       t('rooms.list.deleteAsk', { name: `<b>${escapeHtml(room.name)}</b>` }) +
@@ -559,7 +567,7 @@ function confirmDeleteRoom(room: Room) {
     html: true,
     cancel: true,
     ok: { label: t('rooms.actions.delete'), color: 'negative' },
-  }).onOk(() => {
+  })).onOk(() => {
     void (async () => {
       try {
         await deleteRoom(room.id);
@@ -573,7 +581,7 @@ function confirmDeleteRoom(room: Room) {
 }
 
 function confirmDeleteBuilding(building: Building) {
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('rooms.list.deleteBuildingTitle'),
     message:
       t('rooms.list.deleteAsk', { name: `<b>${escapeHtml(building.name)}</b>` }) +
@@ -582,7 +590,7 @@ function confirmDeleteBuilding(building: Building) {
     html: true,
     cancel: true,
     ok: { label: t('rooms.actions.delete'), color: 'negative' },
-  }).onOk(() => {
+  })).onOk(() => {
     void (async () => {
       try {
         await deleteBuilding(building.id);

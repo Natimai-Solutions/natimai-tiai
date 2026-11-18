@@ -103,7 +103,11 @@ export function invalidText(cause: Cause): string | null {
     if (reason === null) return null;
     return translated('packages.invalid.run_file_refused', { ...params, refusal: reason });
   }
-  return translated(`packages.invalid.${cause.code}`, params);
+  const sentence = translated(`packages.invalid.${cause.code}`, params);
+  // The removal may hide in a file name: the argument says where.
+  if (sentence !== null && cause.code === 'install_removes' && typeof params.argument === 'string')
+    return t('packages.invalid.withArgument', { sentence, argument: params.argument });
+  return sentence;
 }
 
 /** A refused upload name, whole: « « name » refusé : reason ». */

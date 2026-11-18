@@ -631,6 +631,7 @@ import {
   onlineLabel,
   timeAgoLabel,
 } from 'src/utils/format';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const props = defineProps<{ id: string }>();
 const $q = useQuasar();
@@ -1022,7 +1023,7 @@ function runOne(action: CommandAction) {
     void send(action);
     return;
   }
-  $q.dialog(commandConfirm(action, 1, machine.value?.session_user_present ? 1 : 0))
+  liveDialog($q, () => commandConfirm(action, 1, machine.value?.session_user_present ? 1 : 0))
     .onOk(() => {
       void send(action);
     })
@@ -1090,13 +1091,13 @@ async function sendWake() {
 }
 
 function confirmRevoke() {
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('machine.actions.revokeTitle'),
     message: t('machine.actions.revokeMessage'),
     cancel: { flat: true, noCaps: true, label: t('machine.actions.cancel') },
     ok: { unelevated: true, noCaps: true, label: t('machine.actions.revokeOk'), color: 'negative' },
     persistent: true,
-  }).onOk(() => {
+  })).onOk(() => {
     void doRevoke();
   });
 }
@@ -1112,13 +1113,13 @@ async function doRevoke() {
 }
 
 function confirmAllowReenroll() {
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('machine.actions.allowTitle'),
     message: t('machine.actions.allowMessage'),
     cancel: { flat: true, noCaps: true, label: t('machine.actions.cancel') },
     ok: { unelevated: true, noCaps: true, label: t('machine.actions.allowOk') },
     persistent: true,
-  }).onOk(() => {
+  })).onOk(() => {
     void doAllowReenroll();
   });
 }
@@ -1138,13 +1139,13 @@ async function doAllowReenroll() {
 const confirmingIdentity = ref(false);
 
 function askConfirmIdentity() {
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('machine.actions.identityTitle'),
     message: t('machine.actions.identityMessage'),
     cancel: { flat: true, noCaps: true, label: t('machine.actions.cancel') },
     ok: { unelevated: true, noCaps: true, label: t('machine.actions.identityOk') },
     persistent: true,
-  }).onOk(() => {
+  })).onOk(() => {
     void doConfirmIdentity();
   });
 }

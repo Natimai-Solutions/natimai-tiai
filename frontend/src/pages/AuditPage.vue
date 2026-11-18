@@ -341,6 +341,13 @@ onMounted(() => {
   font-family: monospace;
   font-size: 12px;
 }
+/* The text colour, underlined, as .row-link: the browser's blue is 1.79:1 on
+   a dark card. */
+a.audit-id {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .audit-summary {
   white-space: normal;
   min-width: 220px;

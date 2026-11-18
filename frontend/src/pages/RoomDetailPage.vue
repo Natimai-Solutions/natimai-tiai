@@ -462,6 +462,7 @@ import {
   onlineIcon,
   timeAgoLabel,
 } from 'src/utils/format';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const props = defineProps<{ id: string }>();
 
@@ -658,7 +659,7 @@ async function loadRefs() {
 
 /** Taking a poste out of the room changes its owner and cycle: asked first. */
 function confirmRemove(m: Machine) {
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('rooms.detail.removeTitle'),
     message: t('rooms.detail.removeAsk', {
       name: m.hostname ?? t('rooms.detail.thisMachine'),
@@ -666,7 +667,7 @@ function confirmRemove(m: Machine) {
     }),
     cancel: true,
     ok: { label: t('rooms.detail.remove'), color: 'negative' },
-  }).onOk(() => void remove(m));
+  })).onOk(() => void remove(m));
 }
 
 async function remove(m: Machine) {

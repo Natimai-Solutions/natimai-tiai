@@ -22,9 +22,9 @@
                 dense
                 color="primary"
                 text-color="white"
-                class="q-ml-none"
+                class="q-ml-none account-group-chip"
               >
-                {{ groupName(group) }}
+                {{ groupName(group, auth.user.groups) }}
               </q-chip>
             </template>
             <span v-else class="text-muted">{{ t('account.profile.noGroup') }}</span>
@@ -108,6 +108,7 @@
             outlined
             dense
             autocomplete="current-password"
+            reactive-rules
             :rules="[required]"
           />
           <q-input
@@ -118,6 +119,7 @@
             dense
             autocomplete="new-password"
             :hint="t('account.password.minLength', { count: passwordMin })"
+            reactive-rules
             :rules="[required, longEnough]"
           />
           <q-input
@@ -127,6 +129,7 @@
             outlined
             dense
             autocomplete="new-password"
+            reactive-rules
             :rules="[required, matches]"
           />
           <q-banner dense class="surface-blue">
@@ -247,6 +250,7 @@ import {
   timeAgoLabel,
 } from 'src/utils/format';
 import { describeUserAgent } from 'src/utils/userAgent';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const { passwordMin } = usePasswordPolicy();
 
@@ -384,13 +388,13 @@ function onCloseSession(session: AuthSession) {
     void closeOne(session);
     return;
   }
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('account.sessions.logoutTitle'),
     message: t('account.sessions.logoutMessage'),
     cancel: { label: t('account.sessions.cancel'), flat: true },
     ok: { label: t('account.sessions.logout'), color: 'negative', flat: true },
     persistent: true,
-  }).onOk(() => void closeOne(session));
+  })).onOk(() => void closeOne(session));
 }
 
 async function closeOne(session: AuthSession) {
@@ -417,3 +421,16 @@ async function closeOne(session: AuthSession) {
   }
 }
 </script>
+
+<style scoped>
+/* A group name with no space in it (64 characters are allowed) wraps inside its
+   chip rather than widening the page on a phone. */
+.account-group-chip {
+  height: auto;
+  min-height: 1.5em;
+}
+.account-group-chip :deep(.q-chip__content) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+</style>

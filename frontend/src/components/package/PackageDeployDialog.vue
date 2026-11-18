@@ -126,6 +126,7 @@ import {
   type DeployTarget,
   type Package,
 } from 'src/services/packages';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -289,7 +290,7 @@ async function confirmed(mine: number): Promise<boolean> {
   // Closed while the postes were being counted: nothing is asked, nothing
   // is sent.
   if (mine !== showing) return false;
-  const where =
+  const where = () =>
     count === null
       ? wide
         ? t('packagePages.deploy.confirm.whereAll')
@@ -301,20 +302,22 @@ async function confirmed(mine: number): Promise<boolean> {
           { count },
           count,
         );
-  const verb = verbLabel();
   return new Promise((resolve) => {
-    $q.dialog({
-      title: t('packagePages.deploy.confirm.title', { verb, name: chosen.value?.name ?? '' }),
-      message: t('packagePages.deploy.confirm.message', { verb, where }),
+    liveDialog($q, () => ({
+      title: t('packagePages.deploy.confirm.title', {
+        verb: verbLabel(),
+        name: chosen.value?.name ?? '',
+      }),
+      message: t('packagePages.deploy.confirm.message', { verb: verbLabel(), where: where() }),
       cancel: { flat: true, noCaps: true, label: t('packagePages.deploy.cancel') },
       ok: {
         unelevated: true,
         noCaps: true,
-        label: verb,
+        label: verbLabel(),
         color: action.value === 'uninstall' ? 'negative' : 'primary',
       },
       persistent: true,
-    })
+    }))
       .onOk(() => resolve(true))
       .onCancel(() => resolve(false));
   });

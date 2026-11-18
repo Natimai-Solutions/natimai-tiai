@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
 vi.mock('src/services/auth', async (importOriginal) => ({
@@ -9,6 +9,7 @@ vi.mock('src/services/auth', async (importOriginal) => ({
 }));
 
 import { listSessions } from 'src/services/auth';
+import { setLocale } from 'src/i18n';
 import { useAuthStore } from 'src/stores/auth';
 import AccountPage from './AccountPage.vue';
 
@@ -50,5 +51,25 @@ describe('AccountPage — open sessions (item 2)', () => {
       .trigger('click');
     await flushPromises();
     expect(w.text()).toContain('Aucune session ouverte');
+  });
+});
+
+describe('AccountPage — a field error follows a live switch of language (gap2-3-1)', () => {
+  afterEach(() => setLocale('fr'));
+
+  it('words again, in English, the error already under a field', async () => {
+    vi.mocked(listSessions).mockResolvedValue([]);
+    const w = await mountPage();
+    const passwords = w.findAll('input[type="password"]');
+    await passwords[1]!.setValue('a-long-enough-password');
+    await passwords[2]!.setValue('another-password');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(w.text()).toContain('Les mots de passe ne correspondent pas');
+
+    setLocale('en');
+    await flushPromises();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(w.text()).toContain('The passwords do not match');
+    expect(w.text()).not.toContain('Les mots de passe ne correspondent pas');
   });
 });

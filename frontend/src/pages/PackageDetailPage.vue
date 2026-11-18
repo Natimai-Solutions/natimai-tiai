@@ -73,6 +73,7 @@
                 outlined
                 dense
                 :maxlength="LIMITS.name"
+                reactive-rules
                 :rules="[rules.name]"
                 :readonly="!canWrite"
               />
@@ -91,6 +92,7 @@
                   outlined
                   dense
                   :maxlength="LIMITS.winget_id"
+                  reactive-rules
                   :rules="[rules.wingetId]"
                   :readonly="!canWrite"
                 />
@@ -118,6 +120,7 @@
                   :label="t('packagePages.detail.definition.installArgs')"
                   outlined
                   dense
+                  reactive-rules
                   :rules="[(v: string) => rules.msiexecArgs(form.install_run, v)]"
                   :readonly="!canWrite"
                   :hint="t('packagePages.detail.definition.installArgsHint')"
@@ -136,6 +139,7 @@
                   :label="t('packagePages.detail.definition.uninstallArgs')"
                   outlined
                   dense
+                  reactive-rules
                   :rules="[(v: string) => rules.msiexecArgs(form.uninstall_run, v)]"
                   :readonly="!canWrite"
                   :hint="t('packagePages.detail.definition.uninstallArgsHint')"
@@ -145,6 +149,7 @@
                   :label="t('packagePages.detail.definition.successCodes')"
                   outlined
                   dense
+                  reactive-rules
                   :rules="[rules.successCodes]"
                   :readonly="!canWrite"
                   :hint="t('packagePages.detail.definition.successCodesHint')"
@@ -533,6 +538,7 @@ import {
 } from 'src/services/packages';
 import { useAuthStore } from 'src/stores/auth';
 import { downloadBlob, formatDateTime } from 'src/utils/format';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const props = defineProps<{ id: string }>();
 const $q = useQuasar();
@@ -699,27 +705,31 @@ onBeforeRouteLeave(() => {
   if (!dirty.value && !uploading.value) return true;
   // Leaving cancels an upload under way: said before, not after (the toast
   // « Dépôt annulé » came once the files were lost).
-  const what = [
-    uploading.value ? t('packagePages.detail.leave.uploading') : '',
-    dirty.value ? t('packagePages.detail.leave.dirty') : '',
-  ].filter(Boolean);
+  // As things stand when it asks: the words follow the language, not the upload.
+  const wasUploading = uploading.value;
+  const wasDirty = dirty.value;
+  const what = () =>
+    [
+      wasUploading ? t('packagePages.detail.leave.uploading') : '',
+      wasDirty ? t('packagePages.detail.leave.dirty') : '',
+    ].filter(Boolean);
   return new Promise<boolean>((resolve) => {
-    $q.dialog({
-      title: uploading.value
+    liveDialog($q, () => ({
+      title: wasUploading
         ? t('packagePages.detail.leave.titleUploading')
         : t('packagePages.detail.leave.titleDirty'),
-      message: t('packagePages.detail.leave.question', { what: what.join(' ') }),
+      message: t('packagePages.detail.leave.question', { what: what().join(' ') }),
       cancel: { flat: true, noCaps: true, label: t('packagePages.detail.leave.stay') },
       ok: {
         flat: true,
         noCaps: true,
-        label: uploading.value
+        label: wasUploading
           ? t('packagePages.detail.leave.okUploading')
           : t('packagePages.detail.leave.okDirty'),
         color: 'negative',
       },
       persistent: true,
-    })
+    }))
       .onOk(() => {
         cancelUpload();
         resolve(true);
@@ -987,12 +997,12 @@ onBeforeUnmount(cancelUpload);
 function removeFile(name: string) {
   if (!pkg.value) return;
   const id = pkg.value.id;
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('packagePages.detail.removeFile.title'),
     message: t('packagePages.detail.removeFile.message', { name }),
     cancel: true,
     ok: { label: t('packagePages.detail.removeFile.ok'), color: 'negative' },
-  }).onOk(() => {
+  })).onOk(() => {
     void (async () => {
       try {
         refresh(await deletePackageFile(id, name));
@@ -1040,15 +1050,19 @@ async function unsign() {
   }
 }
 
-function confirm(title: string, message: string, ok: string, color: string): Promise<boolean> {
+/** A confirmation; `texts` words it, again on a change of language. */
+function confirm(
+  texts: () => { title: string; message: string; ok: string },
+  color: string,
+): Promise<boolean> {
   return new Promise((resolve) => {
-    $q.dialog({
-      title,
-      message,
+    liveDialog($q, () => ({
+      title: texts().title,
+      message: texts().message,
       cancel: { flat: true, noCaps: true, label: t('packagePages.detail.cancel') },
-      ok: { unelevated: true, noCaps: true, label: ok, color },
+      ok: { unelevated: true, noCaps: true, label: texts().ok, color },
       persistent: true,
-    })
+    }))
       .onOk(() => resolve(true))
       .onCancel(() => resolve(false));
   });
@@ -1064,9 +1078,11 @@ async function toggleRetired() {
   const p = pkg.value;
   if (p.retired_at) {
     const ok = await confirm(
-      t('packagePages.detail.restoreConfirm.title'),
-      t('packagePages.detail.restoreConfirm.message', { name: p.name }),
-      t('packagePages.detail.restoreConfirm.ok'),
+      () => ({
+        title: t('packagePages.detail.restoreConfirm.title'),
+        message: t('packagePages.detail.restoreConfirm.message', { name: p.name }),
+        ok: t('packagePages.detail.restoreConfirm.ok'),
+      }),
       'primary',
     );
     if (!ok) return;
@@ -1087,16 +1103,18 @@ async function toggleRetired() {
   const tally = await getPackageSummary(p.id).catch(() => summary.value);
   if (tally) summary.value = tally;
   const pending = tally?.pending_installs ?? null;
-  const cancelled =
+  const cancelled = () =>
     pending === null
       ? t('packagePages.detail.retireConfirm.pendingUnknown')
       : pending > 0
         ? t('packagePages.detail.retireConfirm.pending', { count: pending }, pending)
         : t('packagePages.detail.retireConfirm.noPending');
   const ok = await confirm(
-    t('packagePages.detail.retireConfirm.title'),
-    t('packagePages.detail.retireConfirm.message', { cancelled }),
-    t('packagePages.detail.retireConfirm.ok'),
+    () => ({
+      title: t('packagePages.detail.retireConfirm.title'),
+      message: t('packagePages.detail.retireConfirm.message', { cancelled: cancelled() }),
+      ok: t('packagePages.detail.retireConfirm.ok'),
+    }),
     'negative',
   );
   if (!ok) return;
@@ -1129,9 +1147,11 @@ async function toggleRetired() {
 async function openDeploy(action: 'install' | 'uninstall') {
   if (dirty.value && canWrite.value) {
     const ok = await confirm(
-      t('packagePages.detail.unsavedDeploy.title'),
-      t('packagePages.detail.unsavedDeploy.message'),
-      t('packagePages.detail.unsavedDeploy.ok'),
+      () => ({
+        title: t('packagePages.detail.unsavedDeploy.title'),
+        message: t('packagePages.detail.unsavedDeploy.message'),
+        ok: t('packagePages.detail.unsavedDeploy.ok'),
+      }),
       'primary',
     );
     if (!ok) return;

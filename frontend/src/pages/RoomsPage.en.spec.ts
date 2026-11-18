@@ -149,7 +149,16 @@ describe('RoomsPage in English', () => {
     setLocale('en');
     const wrapper = await mountPage();
     const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => {
-      const chain = { onOk: () => chain, onCancel: () => chain };
+      const chain = {
+        onDismiss() {
+          return this;
+        },
+        update() {
+          return this;
+        },
+        onOk: () => chain,
+        onCancel: () => chain,
+      };
       return chain;
     }) as never);
 

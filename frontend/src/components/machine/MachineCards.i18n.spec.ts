@@ -426,7 +426,15 @@ describe('the computer cards — English', () => {
     expectNoFrench(text);
 
     // The confirmation names both records, in English, the values still escaped.
-    const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({ onOk: () => undefined } as never);
+    const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
+      onOk: () => undefined,
+    } as never);
     const mergeHere = [...document.querySelectorAll('button')].find((b) =>
       b.textContent?.includes('Merge here'),
     )!;

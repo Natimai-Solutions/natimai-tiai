@@ -44,6 +44,17 @@ function worded(c: Case): string | null {
   }
 }
 
+/**
+ * The one text the console adds to the server's sentence: the argument an
+ * installation was refused for (« … du paquet (argument « /x ») »).
+ */
+function argumentSuffix(c: Case): string {
+  const argument = c.cause?.params?.argument;
+  return c.kind === 'invalid' && c.cause?.code === 'install_removes' && typeof argument === 'string'
+    ? ` (argument « ${argument} »)`
+    : '';
+}
+
 afterEach(() => setLocale('fr'));
 
 describe('package diagnostics, from their codes', () => {
@@ -57,7 +68,7 @@ describe('package diagnostics, from their codes', () => {
   it.each(CASES.map((c) => [c.message.slice(0, 60), c] as const))(
     'writes in French what the server writes: %s',
     (_label, c) => {
-      expect(worded(c)).toBe(c.message);
+      expect(worded(c)).toBe(c.message + argumentSuffix(c));
     },
   );
 
@@ -122,5 +133,20 @@ describe('a server older or newer than the console', () => {
         ],
       }),
     ).toEqual(['No file uploaded']);
+  });
+
+  it('names the argument an installation is refused for, in both languages', () => {
+    const cause = { code: 'install_removes', params: { argument: '{dir}\\mon appli -x64.msi' } };
+    expect(invalidText(cause)).toBe(
+      "L'installation lance une désinstallation (msiexec /x, /uninstall ou REMOVE=) : placez cette commande dans la désinstallation du paquet (argument « {dir}\\mon appli -x64.msi »)",
+    );
+    setLocale('en');
+    expect(invalidText(cause)).toBe(
+      'The installation runs an uninstallation (msiexec /x, /uninstall or REMOVE=): put this command in the package’s uninstallation (argument “{dir}\\mon appli -x64.msi”)',
+    );
+    // An older server names no argument: the sentence alone.
+    expect(invalidText({ code: 'install_removes' })).toBe(
+      'The installation runs an uninstallation (msiexec /x, /uninstall or REMOVE=): put this command in the package’s uninstallation',
+    );
   });
 });

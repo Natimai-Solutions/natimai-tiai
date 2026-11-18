@@ -47,6 +47,7 @@
                 autofocus
                 autocomplete="new-password"
                 :hint="t('auth.reset.minLength', { min: passwordMin })"
+                reactive-rules
                 :rules="[required, longEnough]"
               />
               <q-input
@@ -56,6 +57,7 @@
                 outlined
                 dense
                 autocomplete="new-password"
+                reactive-rules
                 :rules="[required, matches]"
               />
             </q-card-section>

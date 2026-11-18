@@ -183,6 +183,12 @@ describe('RoomDetailPage in English', () => {
     const notify = vi.spyOn(wrapper.vm.$q, 'notify').mockImplementation(() => () => undefined);
     let ok: (() => void) | null = null;
     const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk(fn: () => void) {
         ok = fn;
         return this;

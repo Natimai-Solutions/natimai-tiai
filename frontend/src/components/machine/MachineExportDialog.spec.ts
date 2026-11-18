@@ -174,4 +174,28 @@ describe('MachineExportDialog', () => {
     expect(dialogText()).toContain('Could not load the list of columns');
     wrapper.unmount();
   });
+
+  it('rewords a failed load after a live switch, then loads the catalogue in the new language', async () => {
+    vi.mocked(listExportColumns).mockRejectedValueOnce(new Error('network'));
+    const wrapper = await mountDialog();
+    expect(dialogText()).toContain('Impossible de charger la liste des colonnes');
+
+    shown = 'en';
+    setLocale('en');
+    await flushPromises();
+    expect(dialogText()).not.toContain('Impossible de charger');
+    expect(dialogText()).toContain('Processor');
+    expect(listExportColumns).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  it('rewords a failed load in the new language, the retry failing too', async () => {
+    vi.mocked(listExportColumns).mockRejectedValue(new Error('network'));
+    const wrapper = await mountDialog();
+    expect(dialogText()).toContain('Impossible de charger la liste des colonnes');
+    setLocale('en');
+    await nextTick();
+    expect(dialogText()).toContain('Could not load the list of columns');
+    wrapper.unmount();
+  });
 });

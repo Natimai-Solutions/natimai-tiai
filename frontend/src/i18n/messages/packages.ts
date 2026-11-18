@@ -54,6 +54,11 @@ const fr = {
     install_removes:
       "L'installation lance une désinstallation (msiexec /x, /uninstall ou REMOVE=) : placez cette commande dans la désinstallation du paquet",
     winget_has_no_files: "Ce paquet est un paquet winget : il n'a pas de fichiers",
+    /**
+     * `install_removes` with the argument the rule read the removal in
+     * (`params.argument`): a file named « mon appli -x64.msi » is one.
+     */
+    withArgument: '{sentence} (argument « {argument} »)',
   },
   /** A refused file name (`package.file.name_invalid`, `run_file_refused`). */
   fileName: {
@@ -154,6 +159,7 @@ const en: Translation<typeof fr> = {
     install_removes:
       'The installation runs an uninstallation (msiexec /x, /uninstall or REMOVE=): put this command in the package’s uninstallation',
     winget_has_no_files: 'This package is a winget package: it has no files',
+    withArgument: '{sentence} (argument “{argument}”)',
   },
   fileName: {
     refused: '“{name}” refused: {reason}',

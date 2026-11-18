@@ -607,15 +607,15 @@
             </div>
           </div>
           <q-banner
-            v-if="testResult"
+            v-if="testBanner"
             dense
             rounded
-            :class="testResult.ok ? 'surface-green' : 'surface-red'"
+            :class="testBanner.ok ? 'surface-green' : 'surface-red'"
           >
             <template #avatar>
-              <q-icon :name="testResult.ok ? 'check_circle' : 'error_outline'" />
+              <q-icon :name="testBanner.ok ? 'check_circle' : 'error_outline'" />
             </template>
-            {{ testResultText(testResult) }}
+            {{ testBanner.text }}
           </q-banner>
         </q-card-section>
         <q-card-actions align="right" class="q-px-md q-pb-md">
@@ -724,6 +724,7 @@ import {
   reminderSummary,
   weekdayName,
 } from 'src/utils/settingsSchedule';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -897,6 +898,15 @@ const testTo = ref('');
 const testToError = computed(() => testRecipientError(testTo.value ?? ''));
 const testing = ref(false);
 const testResult = ref<EmailTestResult | null>(null);
+// A test the server refused: the error itself, worded at render so a change
+// of language rewords it.
+const testFailure = ref<{ error: unknown } | null>(null);
+const testBanner = computed(() => {
+  if (testResult.value) return { ok: testResult.value.ok, text: testResultText(testResult.value) };
+  if (testFailure.value)
+    return { ok: false, text: apiErrorMessage(testFailure.value.error, t('settings.test.failed')) };
+  return null;
+});
 
 function fillEmailForm(s: ConsoleSettings) {
   Object.assign(emailForm, emailFormFrom(s.email));
@@ -923,12 +933,13 @@ const unsavedCards = computed(() => {
 onBeforeRouteLeave(() => {
   const cards = unsavedCards.value;
   if (!cards.length) return true;
-  const names = cards.map((card) => t(`settings.unsaved.cards.${card}`));
   return new Promise<boolean>((resolve) => {
-    $q.dialog({
+    liveDialog($q, () => ({
       title: t('settings.unsaved.title'),
       message: t('settings.unsaved.message', {
-        cards: names.join(t('settings.unsaved.cardSeparator')),
+        cards: cards
+          .map((card) => t(`settings.unsaved.cards.${card}`))
+          .join(t('settings.unsaved.cardSeparator')),
       }),
       cancel: { flat: true, noCaps: true, label: t('settings.unsaved.stay') },
       ok: {
@@ -938,7 +949,7 @@ onBeforeRouteLeave(() => {
         color: 'negative',
       },
       persistent: true,
-    })
+    }))
       .onOk(() => resolve(true))
       .onCancel(() => resolve(false));
   });
@@ -1122,6 +1133,7 @@ async function sendTest() {
   if (!settings.value || emailError.value || testToError.value) return;
   testing.value = true;
   testResult.value = null;
+  testFailure.value = null;
   try {
     const to = (testTo.value ?? '').trim();
     testResult.value = await sendTestEmail({
@@ -1129,7 +1141,7 @@ async function sendTest() {
       email: emailPayload(emailForm, settings.value.email),
     });
   } catch (e) {
-    testResult.value = { ok: false, message: apiErrorMessage(e, t('settings.test.failed')) };
+    testFailure.value = { error: e };
   } finally {
     testing.value = false;
   }

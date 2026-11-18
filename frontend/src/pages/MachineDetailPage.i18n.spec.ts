@@ -207,7 +207,15 @@ describe('MachineDetailPage — English', () => {
   it('asks its confirmations in English', async () => {
     setLocale('en');
     const w = await mountPage();
-    const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({ onOk: () => undefined } as never);
+    const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
+      onOk: () => undefined,
+    } as never);
     const button = w.findAll('button').find((b) => b.text().includes('Revoke the token'))!;
     await button.trigger('click');
     expect(dialog).toHaveBeenCalledWith(
@@ -218,6 +226,29 @@ describe('MachineDetailPage — English', () => {
         ok: expect.objectContaining({ label: 'Revoke' }),
       }),
     );
+  });
+
+  it('rewords an open confirmation when the language changes (gap2-3-2)', async () => {
+    const w = await mountPage();
+    const button = w.findAll('button').find((b) => b.text().includes('Révoquer le token'))!;
+    await button.trigger('click');
+    await flushPromises();
+    const dialogText = () => document.body.querySelector('.q-dialog')?.textContent ?? '';
+    expect(dialogText()).toContain('Le poste sera coupé du serveur');
+    expect(dialogText()).toContain('Annuler');
+
+    setLocale('en');
+    await nextTick();
+    expect(dialogText()).toContain('Revoke the token');
+    expect(dialogText()).toContain('The computer will be cut off from the server');
+    expect(dialogText()).toContain('Cancel');
+    expect(dialogText()).not.toContain('Révoquer');
+    expect(dialogText()).not.toContain('Annuler');
+    [...document.body.querySelectorAll<HTMLButtonElement>('.q-dialog button')]
+      .find((b) => b.textContent?.includes('Cancel'))!
+      .click();
+    await flushPromises();
+    w.unmount();
   });
 
   it('switches language live', async () => {
