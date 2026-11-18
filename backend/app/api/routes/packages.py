@@ -52,12 +52,19 @@ _MAX_ARGS = 64
 _MAX_ARG_LEN = 1024
 
 
-def _invalid(message: str, **details: Any) -> AppError:
+def _cause(code: str, **params: Any) -> dict[str, Any]:
+    """What the console words an error's detail from, in its reader's language
+    (plan ``dev/plan-console-bilingue.md``): ``details.cause``, beside the
+    French ``message`` an older console and other clients still read."""
+    return {"code": code, "params": params}
+
+
+def _invalid(message: str, cause: dict[str, Any], **details: Any) -> AppError:
     return AppError(
         code=ErrorCode.PACKAGE_INVALID,
         status_code=422,
         message=message,
-        details=details,
+        details={**details, "cause": cause},
     )
 
 
@@ -198,6 +205,9 @@ class PackageFileOut(BaseModel):
 
 class ProblemOut(BaseModel):
     code: str
+    # What fills the sentence the code names, for the console to word in its
+    # reader's language; ``message`` is that sentence in French.
+    params: dict[str, Any]
     message: str
     # Whether it stands in the way of an uninstallation too: the console and
     # the command route read the same flag (``manifest.Problem``).
@@ -244,6 +254,10 @@ class PackageOut(BaseModel):
     # B nor method A would carry it, method A's size cap included. Empty when
     # some poste could install it; a retirement is said by ``retired_at``.
     install_blockers: list[str]
+    # The same, as codes and parameters for the console to word (plan
+    # ``dev/plan-console-bilingue.md``); ``install_blockers`` stays for an
+    # older console and other clients.
+    install_blocker_problems: list[ProblemOut]
     # Postes (within the caller's scope) whose inventory shows the program;
     # null when ``detect_name`` is empty.
     installed_count: int | None
@@ -251,6 +265,15 @@ class PackageOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     retired_at: datetime | None
+
+
+def _problem_out(p: manifest.Problem) -> ProblemOut:
+    return ProblemOut(
+        code=p.code,
+        params=p.params,
+        message=p.message,
+        blocks_uninstall=p.blocks_uninstall,
+    )
 
 
 async def _out(
@@ -263,6 +286,7 @@ async def _out(
     problems = (
         manifest.problems(package, files) if package.kind == PackageKind.FILES else []
     )
+    blockers = manifest.step_blockers(package, files, "install")
     run_file = next((f for f in files if f.name == package.install_run), None)
     return PackageOut(
         id=package.id,
@@ -298,15 +322,9 @@ async def _out(
         method_a_too_large=manifest.method_a_too_large(files),
         method_a_max_bytes=manifest.method_a_max_bytes(),
         file_max_bytes=settings.PACKAGE_MAX_BYTES,
-        problems=[
-            ProblemOut(
-                code=p.code, message=p.message, blocks_uninstall=p.blocks_uninstall
-            )
-            for p in problems
-        ],
-        install_blockers=[
-            p.message for p in manifest.step_blockers(package, files, "install")
-        ],
+        problems=[_problem_out(p) for p in problems],
+        install_blockers=[p.message for p in blockers],
+        install_blocker_problems=[_problem_out(p) for p in blockers],
         installed_count=await crud.installed_count(
             session, package, machine_ids_clause(scope, col(MachineSoftware.machine_id))
         ),
@@ -349,18 +367,26 @@ def _apply(package: Package, fields: dict[str, Any]) -> None:
 
     if package.kind == PackageKind.WINGET:
         if not package.winget_id or not WINGET_ID.fullmatch(package.winget_id):
-            raise _invalid("Identifiant winget invalide (ex. Mozilla.Firefox)")
+            raise _invalid(
+                "Identifiant winget invalide (ex. Mozilla.Firefox)",
+                _cause("winget_id_invalid"),
+            )
         if package.winget_version and not WINGET_VERSION.fullmatch(
             package.winget_version
         ):
-            raise _invalid("Version winget invalide")
+            raise _invalid("Version winget invalide", _cause("winget_version_invalid"))
         if package.install_run or package.uninstall_run:
-            raise _invalid("Un paquet winget ne lance pas de fichier")
+            raise _invalid(
+                "Un paquet winget ne lance pas de fichier", _cause("winget_runs_file")
+            )
         if not package.detect_name:
             package.detect_name = package.name
     else:
         if package.winget_id or package.winget_version:
-            raise _invalid("Un paquet de fichiers n'a pas d'identifiant winget")
+            raise _invalid(
+                "Un paquet de fichiers n'a pas d'identifiant winget",
+                _cause("files_with_winget_id"),
+            )
         for key in ("install_run", "uninstall_run"):
             value = getattr(package, key)
             if value is None:
@@ -369,21 +395,28 @@ def _apply(package: Package, fields: dict[str, Any]) -> None:
                 # An MSI is not an executable: msiexec runs it, with the
                 # package's .msi among the arguments ("/i {dir}\\app.msi").
                 continue
-            reason = manifest.file_name_problem(value)
-            if reason is not None:
+            refusal = manifest.file_name_refusal(value)
+            if refusal is not None:
                 raise _invalid(
-                    f"Fichier à lancer « {value} » refusé : {reason}",
+                    f"Fichier à lancer « {value} » refusé : {refusal.message}",
+                    _cause(
+                        "run_file_refused",
+                        file=value,
+                        refusal=_cause(refusal.code, **refusal.params),
+                    ),
                     field=key,
                     name=value,
-                    reason=reason,
+                    reason=refusal.message,
                 )
         if package.uninstall_run == manifest.MSIEXEC and not package.uninstall_args:
             raise _invalid(
-                "Désinstallation par msiexec : indiquer les arguments (ex. /x {code produit} /qn)"
+                "Désinstallation par msiexec : indiquer les arguments (ex. /x {code produit} /qn)",
+                _cause("msiexec_uninstall_args_required"),
             )
         if package.install_run == manifest.MSIEXEC and not package.install_args:
             raise _invalid(
-                "Installation par msiexec : indiquer les arguments (ex. /i {dir}\\app.msi /qn)"
+                "Installation par msiexec : indiquer les arguments (ex. /i {dir}\\app.msi /qn)",
+                _cause("msiexec_install_args_required"),
             )
         removal = manifest.msiexec_removal(package.install_run, package.install_args)
         if removal is not None:
@@ -393,7 +426,10 @@ def _apply(package: Package, fields: dict[str, Any]) -> None:
             # an argument, and "{dir}\mon appli -x64.msi" holds one that
             # starts like the switch.
             raise _invalid(
-                manifest.INSTALL_REMOVES, field="install_args", argument=removal
+                manifest.INSTALL_REMOVES,
+                _cause("install_removes", argument=removal),
+                field="install_args",
+                argument=removal,
             )
 
 
@@ -480,7 +516,10 @@ async def update_package(
 
 def _require_files_kind(package: Package) -> None:
     if package.kind != PackageKind.FILES:
-        raise _invalid("Ce paquet est un paquet winget : il n'a pas de fichiers")
+        raise _invalid(
+            "Ce paquet est un paquet winget : il n'a pas de fichiers",
+            _cause("winget_has_no_files"),
+        )
 
 
 @router.post("/{package_id}/files", response_model=PackageOut, dependencies=[_WRITE])
@@ -542,15 +581,20 @@ async def _store_uploads(
         name = (upload.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         # The name and the clause it fails, said to the administrator: « nom
         # refusé » alone left « nul.txt » and « _config.ini » unexplained.
-        reason = manifest.file_name_problem(name)
-        if reason is None and not manifest.valid_file_name(name):
-            reason = "nom refusé par les postes"  # the two rules disagree: never
-        if reason is not None:
+        refusal = manifest.file_name_refusal(name)
+        if refusal is None and not manifest.valid_file_name(name):
+            # The two rules disagree: never.
+            refusal = manifest.NameRefusal("refused", "nom refusé par les postes")
+        if refusal is not None:
             raise AppError(
                 code=ErrorCode.PACKAGE_FILE_NAME_INVALID,
                 status_code=422,
-                message=f"« {name} » refusé : {reason}",
-                details={"name": name, "reason": reason},
+                message=f"« {name} » refusé : {refusal.message}",
+                details={
+                    "name": name,
+                    "reason": refusal.message,
+                    "cause": _cause(refusal.code, **refusal.params),
+                },
             )
         other = spelled.setdefault(name.lower(), name)
         if other != name:
@@ -562,7 +606,12 @@ async def _store_uploads(
                 code=ErrorCode.PACKAGE_FILE_NAME_INVALID,
                 status_code=422,
                 message=f"« {name} » refusé : {reason}",
-                details={"name": name, "same_as": other, "reason": reason},
+                details={
+                    "name": name,
+                    "same_as": other,
+                    "reason": reason,
+                    "cause": _cause("same_name_but_case", other=other),
+                },
             )
         try:
             stored = await storage.save(
@@ -701,7 +750,10 @@ async def attach_signature(
             code=ErrorCode.PACKAGE_NOT_READY,
             status_code=409,
             message="Le paquet n'est pas complet",
-            details={"problems": [p.message for p in problems]},
+            details={
+                "problems": [p.message for p in problems],
+                "causes": [_cause(p.code, **p.params) for p in problems],
+            },
         )
     try:
         verified = signature.verify(
@@ -709,7 +761,10 @@ async def attach_signature(
         )
     except signature.SignatureError as exc:
         raise AppError(
-            code=ErrorCode.PACKAGE_SIGNATURE_INVALID, status_code=422, message=str(exc)
+            code=ErrorCode.PACKAGE_SIGNATURE_INVALID,
+            status_code=422,
+            message=str(exc),
+            details={"cause": _cause(exc.code, **exc.params)},
         ) from None
     package.signature = verified.signature
     package.signature_algorithm = verified.algorithm

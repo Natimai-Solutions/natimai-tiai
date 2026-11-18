@@ -176,7 +176,7 @@
             {{ pkg.problems.length ? 'Pas encore déployable' : 'Aucun poste ne l’installera' }}
           </div>
           <ul class="q-my-xs q-pl-md">
-            <li v-for="m in pkg.install_blockers" :key="m">{{ m }}</li>
+            <li v-for="m in installBlockerTexts(pkg)" :key="m">{{ m }}</li>
           </ul>
         </q-banner>
 
@@ -432,6 +432,7 @@
 </template>
 
 <script setup lang="ts">
+import { installBlockerTexts } from 'src/utils/packageText';
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import { isCancel } from 'axios';

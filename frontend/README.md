@@ -20,6 +20,9 @@ npm run build        # génère dist/spa, servi par nginx (cf. Dockerfile)
 
 ```
 src/
+  boot/i18n.ts              vue-i18n, langue du compte ou du navigateur, pack Quasar
+  i18n/                     traductions : `t()` importable, langues offertes (locales.ts),
+                            catalogues par domaine dans messages/ (français et anglais)
   boot/axios.ts             instance axios (baseURL = API_BASE_URL, défaut /api/v1) ; sur 401,
                             un seul POST /auth/refresh partagé puis la requête rejouée
   services/session.ts       jeton d'accès en mémoire, logique du 401 et rafraîchissement
@@ -58,8 +61,29 @@ l'URL, et c'est la relecture de l'URL qui recharge la liste.
 
 L'interface est en français jusque dans les libellés internes de Quasar
 (pagination des tableaux, sélecteurs de date) : `framework.lang: 'fr'` dans
-`quasar.config.ts`. Une page ne surcharge un de ces libellés que lorsqu'elle
-veut autre chose que le pack.
+`quasar.config.ts`, puis le pack de la langue courante (`boot/i18n.ts`). Une
+page ne surcharge un de ces libellés que lorsqu'elle veut autre chose que le
+pack.
+
+## Langues
+
+La console devient bilingue, français et anglais (`dev/plan-console-bilingue.md`).
+
+- Un texte d'interface vit dans un catalogue, `src/i18n/messages/<domaine>.ts`,
+  avec son français et son anglais côte à côte ; l'anglais est typé d'après le
+  français (`Translation`), une clé sans traduction ne compile pas.
+- Il s'écrit `t('domaine.cle')`, avec `t` importé de `src/i18n` — dans le
+  script comme dans le gabarit, jamais `$t` : les tests montent les
+  composants sans le plugin.
+- Les dates et nombres se mettent en forme avec `intlTag()` (`fr-FR` ou
+  `en-GB`), jamais un `'fr-FR'` écrit en dur.
+- Les messages des codes d'erreur de l'API sont dans
+  `src/i18n/messages/errorCodes.ts` ; le test backend `test_errors_unit.py`
+  vérifie que chaque code y figure en français et en anglais.
+- Tant que toute la console n'est pas dans les catalogues,
+  `ENGLISH_AVAILABLE` (`src/i18n/locales.ts`) reste faux : la console reste en
+  français quel que soit le navigateur, et « Mon compte » ne propose aucun
+  choix.
 
 ## Thème clair et sombre
 

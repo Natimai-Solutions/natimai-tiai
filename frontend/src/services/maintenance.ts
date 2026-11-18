@@ -1,6 +1,7 @@
 import type { AxiosError } from 'axios';
 import { api } from 'boot/axios';
 import type { ApiErrorBody } from './errors';
+import { intlTag } from 'src/i18n';
 
 /**
  * Maintenance: a cycle and an owner resolved over three levels (the poste,
@@ -159,7 +160,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** A deadline as a date alone, in the browser's time zone. */
 export function dueDate(value: string): string {
-  return new Date(value).toLocaleDateString('fr-FR');
+  return new Date(value).toLocaleDateString(intlTag());
 }
 
 /**

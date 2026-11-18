@@ -1,0 +1,136 @@
+# Console bilingue français / anglais — plan de travail
+
+> **Statut : cadré le 2026-11-18, en cours (I1 fait, I2 commencé).** Phase 6 de `plan-projet-tiai.md`.
+>
+> Objectif : une console en français ou en anglais, au choix de chaque
+> compte, et un backend qui ne rédige plus de phrases pour la console. Le
+> backend renvoie des **codes, des paramètres et des valeurs brutes** ; la
+> console compose les phrases dans la langue de l'utilisateur.
+>
+> **Contrainte de départ : une installation existante se met à jour sans
+> rien changer à ce qu'elle voit.** Le français reste la langue par défaut et
+> la langue de repli, l'anglais n'est proposé qu'une fois la console
+> entièrement traduite, et toute modification de l'API ou de l'agent est
+> additive.
+
+---
+
+## 1. Décisions
+
+1. **Langues** : français et anglais.
+2. **Choix** : par compte, enregistré côté serveur ; tant que le compte n'a
+   rien choisi, la console suit la langue du navigateur. Les pages sans
+   compte (connexion, mot de passe oublié) suivent le navigateur.
+3. **Backend agnostique** pour tout ce qu'affiche la console : codes,
+   paramètres et valeurs brutes. Les dates, nombres et tailles sont mis en
+   forme par la console.
+4. **Trois exceptions assumées**, où le serveur écrit lui-même :
+   - les **e-mails**, qui partent sans navigateur : dans la langue du
+     destinataire, sinon dans `DEFAULT_LANGUAGE` ;
+   - les **exports CSV et Excel**, téléchargés directement : dans la langue
+     que la console demande ;
+   - le **`message`** du contrat d'erreurs, gardé comme texte de repli pour
+     les journaux, les scripts qui appellent l'API et une console plus
+     ancienne. La console ne l'affiche plus.
+5. **Ce qui ne se traduit pas** : la sortie des outils Windows (dans la
+   langue du poste) et ce que les utilisateurs saisissent (noms, notes,
+   consignes).
+
+## 2. Compatibilité des installations existantes
+
+| Point | Garantie |
+|---|---|
+| Langue affichée | Tant que l'anglais n'est pas complet, la console reste en français, quel que soit le navigateur (`ENGLISH_AVAILABLE`, §4.1). Ensuite, un compte qui n'a rien choisi suit son navigateur : un navigateur en français garde la console en français. |
+| Comptes existants | Colonne `users.language` nulle : « suivre le navigateur ». Aucune donnée à reprendre. |
+| E-mails | `DEFAULT_LANGUAGE=fr` par défaut : rien ne change pour qui ne le règle pas. |
+| API | Additive : les champs texte existants restent (`problems`, `install_blockers`, `message`…), les codes s'ajoutent à côté. |
+| Données enregistrées | Les verdicts et textes déjà en base gardent leur texte français et s'affichent tels quels ; seuls les nouveaux portent un code. |
+| Agents en place | Un ancien agent n'envoie pas de code : son texte s'affiche tel quel, comme aujourd'hui. |
+
+## 3. Ce que le backend envoie aujourd'hui en français
+
+Relevé du 2026-11-18 : environ 420 lignes dans 38 fichiers.
+
+| Famille | Exemples | Traitement | Jalon |
+|---|---|---|---|
+| Erreurs de l'API | 117 codes, déjà traduits par la console | Catalogue fr/en ; les trois codes dont la console affiche le texte (`package.invalid`, `package.signature.invalid`, `package.file.name_invalid`) reçoivent des paramètres | I1, I2 |
+| Diagnostics calculés | Problèmes et blocages d'un paquet, règle `msiexec`, relais de réveil | `{code, params}` à côté du texte | I2 |
+| Libellés et valeurs mises en forme | Page Paramètres → serveur, descriptions des droits | Valeurs brutes et codes | I2 |
+| Verdicts enregistrés | Commande perdue, paquet retiré, sortie tronquée | Colonnes `result_code`, `result_params` ; les anciennes lignes gardent leur texte | I3 |
+| E-mails | Réinitialisation, résumé, alertes, e-mail de test | Gabarits par langue | I4 |
+| Exports | En-têtes, états | Paramètre `lang` | I4 |
+| Messages de l'agent | Réinitialisation Windows Update, maintenance | Champ facultatif `message_code` + `message_params` | I5 |
+
+## 4. Console
+
+### 4.1 Socle
+
+- **Bibliothèque** : `vue-i18n` 11, en mode composition, compilation des
+  messages sans `eval` (compatible avec la CSP de Caddy, `script-src 'self'`).
+- **Catalogues par domaine** (`src/i18n/messages/<domaine>.ts`), chacun avec
+  son français et son anglais côte à côte. L'anglais est typé d'après le
+  français : une clé sans traduction ne compile pas.
+- **`t()` importable** depuis `src/i18n`, utilisable dans les scripts, les
+  utilitaires et les tests sans monter de plugin.
+- **Langue courante** : préférence du compte, sinon premier choix du
+  navigateur parmi les langues disponibles, sinon français.
+  `ENGLISH_AVAILABLE` (faux tant que l'extraction n'est pas finie) réduit les
+  langues disponibles au français.
+- **Pack de langue Quasar** chargé selon la langue (pagination, sélecteurs).
+- **Mise en forme** : `Intl` avec la langue courante (`fr-FR`, `en-GB` : le
+  jour avant le mois, comme en français).
+- **Choix de la langue** dans « Mon compte », visible dès que l'anglais est
+  disponible.
+
+### 4.2 Extraction
+
+Environ 1 300 lignes de texte dans une centaine de fichiers. Par page ou par
+composant, chaque texte passe dans le catalogue de son domaine avec sa
+traduction. Les tests existants vérifient le français ; un test par page la
+monte aussi en anglais et vérifie qu'aucun texte français connu n'y reste.
+
+## 5. Backend
+
+- `users.language` (`fr`, `en` ou nul), lu et écrit par `/auth/me`.
+- `DEFAULT_LANGUAGE` (`fr`) : langue des e-mails d'un compte sans choix et
+  des e-mails sans compte.
+- Codes : même règle que les codes d'erreur (`domaine.sujet.cas`), stables,
+  avec des paramètres nommés ; un test vérifie que chaque code émis a sa
+  traduction dans les deux langues de la console.
+
+### 5.1 Réalisé (I1 et I2, paquets)
+
+- **Langue du compte** : `GET/PATCH /auth/me` lisent et écrivent `language`
+  (`fr`, `en` ou `null`) ; une valeur stockée qui n'est pas une langue se lit
+  `null`.
+- **Diagnostics de paquets** : chaque problème (`problems`,
+  `install_blocker_problems`) porte `params` à côté de son `code` ; les refus
+  `package.invalid`, `package.file.name_invalid` et
+  `package.signature.invalid` portent `details.cause` (`code`, `params`), et
+  `package.not_ready` porte `details.causes`. Les textes français
+  (`message`, `problems`, `install_blockers`, `details.reason`) restent.
+- **Le français de la console est celui du serveur, mot pour mot** : le jeu
+  de cas partagé `backend/tests/data/package_texts_fr.json` est vérifié des
+  deux côtés (`test_package_texts.py`, `utils/packageText.spec.ts`).
+- **Serveur plus ancien ou plus récent que la console** : un problème sans
+  `params`, ou un code que la console ne connaît pas, s'affiche avec la
+  phrase du serveur.
+- **Noms et descriptions des groupes intégrés** : ce sont des données, que
+  l'administrateur peut modifier ; ils restent tels qu'enregistrés.
+
+## 6. Agent
+
+Champ facultatif `message_code` et `message_params` dans le résultat d'une
+commande. Le texte reste envoyé : un serveur plus ancien l'affiche, un
+serveur à jour traduit le code. Rien ne change pour un agent non mis à jour.
+
+## 7. Jalons
+
+| Jalon | Contenu | Statut |
+|---|---|---|
+| **I1 — Socle** | `vue-i18n`, catalogues, langue du compte (`users.language`, migration `0045`), langue du navigateur, pack Quasar, mise en forme, catalogue des erreurs en deux langues, test de complétude | fait (2026-11-18) |
+| **I2 — Backend agnostique** | Diagnostics de paquets (fait le 2026-11-18), page Paramètres → serveur : codes et valeurs brutes | en cours |
+| **I3 — Verdicts enregistrés** | Colonnes de code sur les commandes, migration | à faire |
+| **I4 — E-mails et exports** | Gabarits par langue, `DEFAULT_LANGUAGE`, paramètre `lang` des exports | à faire |
+| **I5 — Agent** | Codes des messages propres de l'agent | à faire |
+| **I6 — Extraction** | Toute la console dans les catalogues, traduction anglaise, `ENGLISH_AVAILABLE` passé à vrai | à faire |

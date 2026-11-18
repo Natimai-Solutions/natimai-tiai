@@ -1,4 +1,5 @@
 import type { EmailPreference } from 'src/services/auth';
+import { intlTag } from 'src/i18n';
 
 /**
  * A number the French way — decimal comma, narrow space between thousands —
@@ -6,7 +7,7 @@ import type { EmailPreference } from 'src/services/auth';
  * beside « 7,5 h » read as two different notations.
  */
 export function frNumber(value: number, digits = 0): string {
-  return value.toLocaleString('fr-FR', {
+  return value.toLocaleString(intlTag(), {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
@@ -22,7 +23,7 @@ export function dash(value: string | number | null | undefined): string {
 /** Format an ISO timestamp for display, or a dash when absent. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—';
-  return new Date(value).toLocaleString('fr-FR');
+  return new Date(value).toLocaleString(intlTag());
 }
 
 /**
@@ -307,7 +308,7 @@ export function wuTypeLabel(type: string | null | undefined): string {
  */
 export function wuSizeLabel(sizeMb: number | null | undefined): string {
   if (sizeMb === null || sizeMb === undefined) return '—';
-  return `≤ ${sizeMb.toLocaleString('fr-FR')} Mio`;
+  return `≤ ${sizeMb.toLocaleString(intlTag())} Mio`;
 }
 
 /**

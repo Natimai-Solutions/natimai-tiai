@@ -31,7 +31,7 @@
       </q-btn>
     </div>
     <div v-if="lastRefreshedAt" class="text-caption text-muted col-auto">
-      Actualisé à {{ lastRefreshedAt.toLocaleTimeString('fr-FR') }}
+      Actualisé à {{ lastRefreshedAt.toLocaleTimeString(intlTag()) }}
     </div>
     <div class="col-auto">
       <q-btn
@@ -50,6 +50,7 @@
 </template>
 
 <script setup lang="ts">
+import { intlTag } from 'src/i18n';
 import { AUTO_REFRESH_INTERVAL_MS } from 'src/composables/useAutoRefresh';
 
 defineProps<{

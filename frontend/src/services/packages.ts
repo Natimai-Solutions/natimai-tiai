@@ -1,6 +1,7 @@
 import { api } from 'boot/axios';
 import type { Command, CommandList, CreateCommandsResponse } from './commands';
 import { frNumber } from 'src/utils/format';
+import { intlTag } from 'src/i18n';
 
 /**
  * Software packages the console deploys (dev/plan-deploiement-logiciel.md).
@@ -24,6 +25,12 @@ export interface PackageFile {
 
 export interface PackageProblem {
   code: string;
+  /**
+   * What fills the sentence the code names, worded by the console in its
+   * reader's language (`utils/packageText`). Absent from an older server.
+   */
+  params?: Record<string, unknown>;
+  /** The same sentence, in French, as the server writes it. */
   message: string;
   /**
    * Whether it stands in the way of an uninstallation too. Decided by the
@@ -77,6 +84,8 @@ export interface Package {
    * retirement is said by `retired_at`, not here.
    */
   install_blockers: string[];
+  /** The same, as codes to word in the reader's language; absent from an older server. */
+  install_blocker_problems?: PackageProblem[];
   /** Postes whose inventory shows the program; null without `detect_name`. */
   installed_count: number | null;
   created_by: string | null;
@@ -263,7 +272,7 @@ export function packageChoiceLabel(p: Package, among: Package[]): string {
     p.kind === 'winget'
       ? `winget ${p.winget_id ?? ''}`.trim()
       : `fichiers, ${p.install_run ?? 'sans fichier à lancer'}`;
-  const created = new Date(p.created_at).toLocaleString('fr-FR', {
+  const created = new Date(p.created_at).toLocaleString(intlTag(), {
     dateStyle: 'short',
     timeStyle: 'short',
   });

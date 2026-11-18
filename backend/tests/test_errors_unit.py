@@ -85,9 +85,12 @@ async def test_unexpected_handler_prod_masks_details(monkeypatch):
 
 
 def test_every_code_has_a_message_in_the_console():
-    """The catalog is mirrored by the console (``services/errors.ts``): a code
-    added here without its French message reaches the operator as the
-    backend's English text. Skipped where the frontend is not checked out."""
+    """The catalog is mirrored by the console (``i18n/messages/errorCodes.ts``,
+    one table per language): a code added here without its message reaches
+    the operator as the backend's fallback text. Each code must be there
+    twice, in French and in English — the English table's type also makes a
+    missing line fail the console's typecheck. Skipped where the frontend is
+    not checked out."""
     import pathlib
 
     import pytest
@@ -96,13 +99,14 @@ def test_every_code_has_a_message_in_the_console():
         pathlib.Path(__file__).resolve().parents[2]
         / "frontend"
         / "src"
-        / "services"
-        / "errors.ts"
+        / "i18n"
+        / "messages"
+        / "errorCodes.ts"
     )
     if not table.exists():
         pytest.skip("frontend sources not available")
     source = table.read_text(encoding="utf-8")
-    missing = [c.value for c in errors.ErrorCode if f"'{c.value}'" not in source]
+    missing = [c.value for c in errors.ErrorCode if source.count(f"'{c.value}'") < 2]
     assert missing == []
 
 

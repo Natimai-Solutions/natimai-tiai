@@ -1142,10 +1142,12 @@ async def test_a_row_written_before_the_rule_blocks_its_install_only(
     (problem,) = got["problems"]
     assert problem == {
         "code": "install_removes",
+        "params": {},
         "message": manifest.INSTALL_REMOVES,
         "blocks_uninstall": False,
     }
     assert got["install_blockers"] == [manifest.INSTALL_REMOVES]
+    assert got["install_blocker_problems"] == [problem]
 
     refused = await client.post(
         "/api/v1/commands",

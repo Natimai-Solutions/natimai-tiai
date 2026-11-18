@@ -10,6 +10,17 @@ from sqlmodel import Field, SQLModel
 from app.features.base import utc_field, utcnow
 
 
+class Language(enum.StrEnum):
+    """A language the console and the mail it sends can speak.
+
+    A plain string column holds it, like ``email_preference``: a third
+    language is a member here and a catalogue in the console, not a migration.
+    """
+
+    FR = "fr"
+    EN = "en"
+
+
 class EmailPreference(enum.StrEnum):
     """What this account wants to receive by e-mail.
 
@@ -71,6 +82,11 @@ class User(SQLModel, table=True):
     # database type. A PostgreSQL ENUM would need a migration to add a fifth
     # cadence.
     email_preference: str = Field(default=EmailPreference.DIGEST_DAILY)
+    # The language the account chose (``Language``), or None: « follow my
+    # browser » in the console, DEFAULT_LANGUAGE for the mail sent to it. A
+    # column rather than a key of ``preferences``: the server reads it, to
+    # write that mail, where it never reads the console's own document.
+    language: str | None = Field(default=None, max_length=8)
     # The console's per-account preferences, as one JSON document: which
     # columns the machine list shows and in what order, and whatever the next
     # page wants remembered. Owned by the console (the keys are its

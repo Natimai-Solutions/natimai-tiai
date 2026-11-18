@@ -979,6 +979,13 @@ async def test_an_uninstall_no_poste_would_run_is_refused(client, db_session, st
     error = refused.json()["error"]
     assert error["code"] == "package.not_ready"
     assert "aucun poste ne l'exécutera" in error["details"]["problems"][0]
+    # The same, as the console words it in its reader's language.
+    assert error["details"]["causes"] == [
+        {
+            "code": "untrusted",
+            "params": {"file": "msiexec", "reason": "msiexec_uninstall"},
+        }
+    ]
 
     # A data file of the package, not an executable.
     await client.patch(

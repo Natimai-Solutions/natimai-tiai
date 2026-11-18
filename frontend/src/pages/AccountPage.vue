@@ -33,6 +33,33 @@
       </q-card-section>
     </q-card>
 
+    <!-- Offered once the console speaks more than French (`ENGLISH_AVAILABLE`):
+         until then there is nothing to choose, and an updated installation
+         shows the page it showed before. -->
+    <q-card
+      v-if="languageOptions.length > 2"
+      flat
+      bordered
+      class="q-mb-md"
+      style="max-width: 520px"
+      data-test="language-card"
+    >
+      <q-card-section class="text-subtitle1">
+        {{ t('common.language.label') }}
+        <div class="text-caption text-muted">{{ t('common.language.hint') }}</div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section class="q-pt-sm">
+        <q-option-group
+          :model-value="language"
+          :options="languageOptions"
+          type="radio"
+          :disable="savingLanguage"
+          @update:model-value="saveLanguage"
+        />
+      </q-card-section>
+    </q-card>
+
     <q-card flat bordered class="q-mb-md" style="max-width: 520px">
       <q-card-section class="text-subtitle1">
         Notifications par e-mail
@@ -185,7 +212,8 @@
 
 <script setup lang="ts">
 import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { availableLocales, t } from 'src/i18n';
 import CardLoadError from 'src/components/CardLoadError.vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
@@ -194,6 +222,7 @@ import {
   closeSession,
   listSessions,
   updateMe,
+  type AccountLanguage,
   type AuthSession,
   type EmailPreference,
 } from 'src/services/auth';
@@ -207,6 +236,29 @@ const { passwordMin } = usePasswordPolicy();
 const $q = useQuasar();
 const auth = useAuthStore();
 const router = useRouter();
+
+// --- Language: the account's choice, or the browser's (`BROWSER`).
+const BROWSER = 'browser';
+const language = computed(() => auth.user?.language ?? BROWSER);
+const languageOptions = computed(() => [
+  { value: BROWSER, label: t('common.language.browser') },
+  ...availableLocales().map((locale) => ({ value: locale, label: t(`common.language.${locale}`) })),
+]);
+const savingLanguage = ref(false);
+
+/** Saved on selection, like the e-mail preference; the console switches at once. */
+async function saveLanguage(choice: string) {
+  if (choice === language.value) return;
+  savingLanguage.value = true;
+  try {
+    await auth.saveLanguage(choice === BROWSER ? null : (choice as AccountLanguage));
+    $q.notify({ type: 'positive', message: t('common.language.saved') });
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiErrorMessage(e) });
+  } finally {
+    savingLanguage.value = false;
+  }
+}
 
 const currentPassword = ref('');
 const newPassword = ref('');

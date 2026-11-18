@@ -1,3 +1,4 @@
+import { intlTag } from 'src/i18n';
 /**
  * The machine list's « Utilisation » filter, as pure functions.
  *
@@ -57,7 +58,7 @@ export function usagePresetOf(bounds: UsageBounds, t: UsageThresholds | null): U
 
 /** Hours as the console writes them: « 12,4 h », « 0 h ». */
 export function hoursLabel(hours: number): string {
-  return `${hours.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
+  return `${hours.toLocaleString(intlTag(), { maximumFractionDigits: 1 })} h`;
 }
 
 /** The chip under the search bar, in words: what the list is narrowed to. */

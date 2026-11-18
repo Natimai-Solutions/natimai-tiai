@@ -5,6 +5,7 @@ import {
   login as loginRequest,
   logout as logoutRequest,
   updateMe,
+  type AccountLanguage,
   type User,
 } from 'src/services/auth';
 import {
@@ -145,6 +146,13 @@ export const useAuthStore = defineStore('auth', {
      */
     async savePreferences(patch: Record<string, unknown>) {
       this.user = await updateMe({ preferences: patch });
+    },
+    /**
+     * Store the account's language, or `null` to follow the browser. The
+     * console switches as soon as the profile comes back (`boot/i18n`).
+     */
+    async saveLanguage(language: AccountLanguage | null) {
+      this.user = await updateMe({ language });
     },
     /**
      * Log out for real: the server revokes the session — the access token

@@ -61,7 +61,7 @@
             {{ action === 'install' ? 'Pas encore déployable' : 'Désinstallation impossible' }}
           </div>
           <ul class="q-my-xs q-pl-md">
-            <li v-for="p in blocking" :key="p.code">{{ p.message }}</li>
+            <li v-for="p in blocking" :key="p.code">{{ problemText(p) }}</li>
           </ul>
         </q-banner>
         <q-banner v-else-if="installBlockers.length" dense class="surface-orange">
@@ -92,6 +92,7 @@
 </template>
 
 <script setup lang="ts">
+import { installBlockerTexts, problemText } from 'src/utils/packageText';
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { bulkSendNotification } from 'src/services/commands';
@@ -163,7 +164,7 @@ const blocking = computed(() => (chosen.value ? blockingProblems(chosen.value, a
 // exécutable d'éditeur » whatever the cause.
 const installBlockers = computed(() =>
   chosen.value && action.value === 'install' && !blocking.value.length
-    ? (chosen.value.install_blockers ?? [])
+    ? installBlockerTexts(chosen.value)
     : [],
 );
 const ready = computed(() => {

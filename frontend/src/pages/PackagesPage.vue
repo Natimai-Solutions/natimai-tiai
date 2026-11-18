@@ -61,7 +61,7 @@
                reasons, the first one said (an unsigned .exe, a .dll beside
                an editor's setup.exe…). -->
           <span v-else-if="props.row.install_blockers.length" class="text-warn break-anywhere">
-            {{ props.row.install_blockers[0] }}
+            {{ installBlockerTexts(props.row)[0] }}
           </span>
           <span v-else class="text-ok">Prêt</span>
         </q-td>
@@ -130,6 +130,7 @@
 </template>
 
 <script setup lang="ts">
+import { installBlockerTexts } from 'src/utils/packageText';
 import { onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';

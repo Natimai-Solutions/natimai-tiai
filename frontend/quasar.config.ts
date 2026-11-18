@@ -4,7 +4,7 @@ import { defineConfig } from '#q-app';
 
 export default defineConfig(() => {
   return {
-    boot: ['pinia', 'axios'],
+    boot: ['pinia', 'i18n', 'axios'],
     css: ['app.scss'],
     extras: ['material-icons'],
 

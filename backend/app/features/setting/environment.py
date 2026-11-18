@@ -249,6 +249,11 @@ def _email_group(env: Settings) -> EnvGroup:
         ),
         _item(
             env,
+            "DEFAULT_LANGUAGE",
+            "Langue des e-mails d'un compte qui n'a pas choisi la sienne (fr ou en)",
+        ),
+        _item(
+            env,
             "EMAIL_MAX_ATTEMPTS",
             "Tentatives d'envoi d'un e-mail (de 1 min à 1 h d'écart) avant qu'il "
             "soit abandonné et gardé avec sa dernière erreur",

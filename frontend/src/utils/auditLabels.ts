@@ -6,6 +6,7 @@
  */
 
 import { commandTypeLabel } from 'src/services/commands';
+import { intlTag } from 'src/i18n';
 
 /** Action slug → label. Mirrors the `audit.record(action=…)` calls of the backend. */
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
@@ -185,7 +186,7 @@ export function auditDetailValue(value: unknown, key?: string): string {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'boolean') return value ? 'Oui' : 'Non';
   if (typeof value === 'string') return value;
-  if (typeof value === 'number') return value.toLocaleString('fr-FR');
+  if (typeof value === 'number') return value.toLocaleString(intlTag());
   if (Array.isArray(value)) {
     if (!value.length) return '—';
     return value.every((v) => typeof v !== 'object' || v === null)

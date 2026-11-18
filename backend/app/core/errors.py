@@ -3,7 +3,8 @@
 Every error response carries the envelope ``{"error": {code, message, details}}``.
 The ``code`` is a stable, namespaced, machine-readable string — it, never the
 message text, is what the console maps to a localized message. Keep this catalog
-in sync with the frontend table (``frontend/src/services/errors.ts``).
+in sync with the frontend tables (``frontend/src/i18n/messages/errorCodes.ts``,
+one per language of the console).
 """
 
 from __future__ import annotations

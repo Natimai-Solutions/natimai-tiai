@@ -1,3 +1,4 @@
+import { intlTag } from 'src/i18n';
 /**
  * The page Paramètres' mail schedule and agent version field, as pure functions.
  *
@@ -40,7 +41,7 @@ function utcInstant(hour: number, weekday: number | null, ref: Date): Date {
 }
 
 function localParts(instant: Date, timeZone: string): { weekday: string; time: string } {
-  const fmt = new Intl.DateTimeFormat('fr-FR', {
+  const fmt = new Intl.DateTimeFormat(intlTag(), {
     timeZone,
     weekday: 'long',
     hour: '2-digit',

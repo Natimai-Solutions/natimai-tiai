@@ -508,6 +508,7 @@
 </template>
 
 <script setup lang="ts">
+import { intlTag } from 'src/i18n';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -955,7 +956,7 @@ const notFound = computed(() => {
 });
 
 const lastRefreshLabel = computed(() =>
-  lastRefreshedAt.value ? lastRefreshedAt.value.toLocaleTimeString('fr-FR') : '',
+  lastRefreshedAt.value ? lastRefreshedAt.value.toLocaleTimeString(intlTag()) : '',
 );
 
 const autoRefreshHint = `Actualiser — automatique toutes les ${Math.round(

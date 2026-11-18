@@ -93,6 +93,7 @@
 </template>
 
 <script setup lang="ts">
+import { intlTag } from 'src/i18n';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
@@ -200,7 +201,7 @@ watch(
 
 /** A first-seen instant, as the day it was in the reader's time zone. */
 function localDate(value: string | null): string {
-  return value ? new Date(value).toLocaleDateString('fr-FR') : '—';
+  return value ? new Date(value).toLocaleDateString(intlTag()) : '—';
 }
 
 // Three different empty tables, three different sentences (audit U09).

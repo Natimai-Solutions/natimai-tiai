@@ -253,7 +253,11 @@ async def _deployable_package(
             code=ErrorCode.PACKAGE_NOT_READY,
             status_code=409,
             message="This package cannot be deployed yet",
-            details={"problems": [p.message for p in problems]},
+            details={
+                "problems": [p.message for p in problems],
+                # What the console words them from (plan console bilingue).
+                "causes": [{"code": p.code, "params": p.params} for p in problems],
+            },
         )
     return package
 

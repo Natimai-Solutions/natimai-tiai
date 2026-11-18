@@ -144,6 +144,7 @@
 </template>
 
 <script setup lang="ts">
+import { intlTag } from 'src/i18n';
 import { computed, ref } from 'vue';
 import { useQuasar } from 'quasar';
 import {
@@ -192,7 +193,7 @@ const exporting = ref(false);
 const byKey = computed(() => new Map(catalogue.value.map((c) => [c.key, c])));
 
 const countLabel = computed(() =>
-  props.count === 1 ? '1 poste' : `${props.count.toLocaleString('fr-FR')} postes`,
+  props.count === 1 ? '1 poste' : `${props.count.toLocaleString(intlTag())} postes`,
 );
 
 const exportLabel = computed(() =>

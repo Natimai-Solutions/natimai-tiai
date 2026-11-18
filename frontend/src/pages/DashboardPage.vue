@@ -164,6 +164,7 @@
 </template>
 
 <script setup lang="ts">
+import { intlTag } from 'src/i18n';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, type RouteLocationRaw } from 'vue-router';
@@ -220,7 +221,7 @@ function usageCountingCaption(s: StatsOverview): string | undefined {
   const since = new Date(s.usage_since);
   const full = since.getTime() + s.usage_window_days * 24 * 3600 * 1000;
   if (Date.now() >= full) return undefined;
-  return `comptage depuis le ${since.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}`;
+  return `comptage depuis le ${since.toLocaleDateString(intlTag(), { day: '2-digit', month: '2-digit' })}`;
 }
 
 /**
@@ -492,7 +493,7 @@ async function reload() {
 }
 
 const lastRefreshLabel = computed(() =>
-  lastRefreshedAt.value ? lastRefreshedAt.value.toLocaleTimeString('fr-FR') : '',
+  lastRefreshedAt.value ? lastRefreshedAt.value.toLocaleTimeString(intlTag()) : '',
 );
 
 const autoRefreshHint = `Actualiser — automatique toutes les ${Math.round(
