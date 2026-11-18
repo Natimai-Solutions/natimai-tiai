@@ -399,8 +399,8 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
   - la CI ajoute des builds croisés `linux/amd64`, `linux/arm64`, `darwin/amd64` et `darwin/arm64`, ainsi que govulncheck sur ces cibles.
 - **DoD** : un poste Linux et un Mac pilotes enrôlés, visibles dans la console avec leur inventaire et leur session, et des commandes non applicables refusées proprement.
 
-### Phase 6 — Console bilingue français / anglais · 🟡 en cours
-Cadrée le 2026-11-18 : cf. `plan-console-bilingue.md`.
+### Phase 6 — Console bilingue français / anglais · 🟢 livrée (2026-11-18)
+Cf. `plan-console-bilingue.md`.
 - **Langues** : français et anglais.
 - **Choix** : par compte, enregistré côté serveur (`users.language`) ; tant que le compte n'a rien choisi, la console suit la langue du navigateur.
 - **Backend agnostique** : il renvoie des codes, des paramètres et des valeurs brutes ; la console compose les phrases. Exceptions : les e-mails (langue du destinataire, sinon `DEFAULT_LANGUAGE`) et les exports (langue demandée par la console).

@@ -8,7 +8,9 @@ Enfin, elle reprend les limites que l'audit avait acceptées (§6.6 de `dev/plan
 
 Une vérification indépendante de l'ensemble (17 novembre 2026) a ensuite cherché à prendre ces corrections en défaut : sept relecteurs, par reproduction sur le banc, et en retirant les corrections une à une pour voir si un test échouait. Elle a trouvé onze défauts moyens, dont sept introduits par les corrections elles-mêmes, et une quarantaine de défauts mineurs ; tous sont corrigés ici. Voir § « Vérification du 17 novembre ».
 
-Elle contient treize migrations de base (`0032` à `0044`).
+Elle rend enfin la console bilingue, français et anglais, au choix de chaque compte (`dev/plan-console-bilingue.md`). Voir § « Console bilingue ».
+
+Elle contient seize migrations de base (`0032` à `0047`).
 
 ---
 
@@ -36,7 +38,8 @@ Elle contient treize migrations de base (`0032` à `0044`).
 13. **`max_connections` de PostgreSQL.** Un processus d'API peut ouvrir jusqu'à deux fois son pool en connexions (60 avec les valeurs par défaut), plus 30 pour le worker : la valeur par défaut de PostgreSQL (100) suffit pour une API et un worker, pas au-delà (`DEPLOYMENT.md`, ligne `POSTGRES_POOL_SIZE`).
 14. **Script de signature.** `Sign-TiaiPackage.ps1` est à remplacer par celui de cette version : il applique la nouvelle règle sur `msiexec` (voir plus bas).
 15. **Postes enrôlés dans l'heure qui précède la mise à jour.** Un poste dont la réponse d'enrôlement s'est perdue juste avant la mise à jour demandera une approbation au lieu d'être servi de nouveau.
-16. **Sauvegardes manuelles.** La purge de `backup.sh` ne retire plus que les dumps quotidiens (`tiai-AAAAMMJJ-HHMMSS.dump`). Les dumps manuels déjà présents dans `deploy/backups/` sous un autre nom sont désormais gardés indéfiniment : les supprimer à la main quand ils ne servent plus.
+16. **Langue de la console.** Un compte qui n'a pas choisi de langue suit celle de son navigateur : un navigateur réglé en anglais affiche désormais la console en anglais. Pour garder le français, choisir **Français** dans **Mon compte → Langue**. Les e-mails d'un compte sans choix partent dans `DEFAULT_LANGUAGE` (`fr` par défaut, donc comme avant).
+17. **Sauvegardes manuelles.** La purge de `backup.sh` ne retire plus que les dumps quotidiens (`tiai-AAAAMMJJ-HHMMSS.dump`). Les dumps manuels déjà présents dans `deploy/backups/` sous un autre nom sont désormais gardés indéfiniment : les supprimer à la main quand ils ne servent plus.
 
 ### Agent : mettre à jour le parc
 
@@ -44,12 +47,14 @@ Les correctifs de l'agent n'agissent qu'après la mise à jour par GPO.
 
 - **Script GPO.** `Install-TiaiAgent.ps1` n'est pas un fichier de la release : le recopier à la main sur le partage. Il accepte désormais `-AllowInsecureHttp` (`true` ou `false`), et le MSI la propriété `ALLOWINSECUREHTTP` (`1` ou `0`).
 - **Ordre à respecter.** Copier le nouveau script **avant** d'ajouter `-AllowInsecureHttp` aux arguments de la GPO. L'ancien script refuse ce paramètre inconnu sans rien journaliser, et plus aucun poste n'est installé ni mis à jour.
+- **Messages de l'agent.** Un agent de cette version envoie un code avec ses propres messages (refus, délais dépassés, réveil relayé, déploiements) : la console les affiche dans la langue du lecteur. Un agent plus ancien continue d'envoyer son texte français, affiché tel quel.
 - **Onglets ouverts.** Les onglets de la console ouverts avant cette mise à jour doivent être rechargés à la main, une fois. Le rechargement automatique n'existe qu'à partir de cette version.
 
 ---
 
 ## Changements de comportement à annoncer aux utilisateurs
 
+- **Langue.** La console existe en français et en anglais. Chaque compte choisit dans **Mon compte → Langue** : français, anglais, ou celle du navigateur (le choix par défaut). Le changement s'applique tout de suite, sans recharger la page, et suit le compte d'un poste à l'autre. Les e-mails partent dans la langue du compte, l'e-mail de test dans celle de l'administrateur qui l'envoie, et les exports Excel et CSV dans la langue de la console.
 - **Verrouillage de compte.**
   - Un échec de connexion de plus de 15 minutes (`LOGIN_LOCKOUT_MINUTES`) ne compte plus : quelques fautes de frappe étalées dans la semaine ne verrouillent plus.
   - Dès que 10 adresses distinctes (`LOGIN_SIEGE_ADDRESSES`) ont échoué sur un compte pendant un verrou, seules ses adresses habituelles restent admises : celles qui l'ont ouvert dans les 30 derniers jours (`LOGIN_KNOWN_ADDRESS_DAYS`), ou sur lesquelles une session est restée en usage.
@@ -270,6 +275,18 @@ Ces corrections n'agissent qu'après la diffusion du nouvel agent.
 
 ---
 
+## Console bilingue (Phase 6)
+
+Plan : `dev/plan-console-bilingue.md`. Le backend ne rédige plus de phrases pour la console : il envoie des codes, des paramètres et des valeurs brutes, à côté de son texte français d'avant, et la console écrit la phrase dans la langue du lecteur.
+
+- **Toute la console** est traduite : menus, pages, fiches, dialogues, confirmations, notifications, titres d'onglet, pack Quasar (pagination, sélecteurs de date), dates et nombres (`fr-FR` ou `en-GB`). Le français est inchangé, mot pour mot : les tests existants n'ont pas été modifiés.
+- **Textes écrits par le serveur** : diagnostics et refus des paquets, refus de validation des formulaires, variables de la page **Paramètres → serveur**, résultat de l'e-mail de test, verdicts enregistrés des commandes (commande perdue, poste fusionné, paquet retiré, réveil), ligne « Maintenance non faite » et note de clôture par fusion. Les lignes enregistrées avant la mise à jour gardent leur texte français.
+- **Groupes intégrés** : nommés dans la langue du lecteur tant qu'ils gardent le nom et la description donnés à l'installation ; renommés, ils s'affichent tels que saisis.
+- **E-mails** : réinitialisation, résumé quotidien, alertes de menace, vérification affectée, rappel des maintenances, e-mail de test, dans la langue du destinataire ; le français est inchangé.
+- **Exports** Excel et CSV des postes et des logiciels : en-têtes, valeurs, nom de la feuille et du fichier dans la langue de la console (`lang=en`). Sans ce paramètre, le fichier est identique à celui d'avant. Le CSV anglais garde le séparateur `;` et la virgule décimale.
+- **Ne se traduit pas** : la sortie des outils Windows (dans la langue du poste), ce que les utilisateurs saisissent (noms, notes, consignes), et quelques textes de l'agent sans code (rapport détaillé d'installation des mises à jour Windows, étapes de la réinitialisation de Windows Update, échecs partiels du spouleur), affichés tels qu'envoyés.
+- **API** : uniquement des ajouts. `users.language` (`/auth/me`), `params` et `install_blocker_problems` sur les paquets, `details.cause` / `details.causes` sur les refus de paquet, `type` `tiai_<code>` et `params` dans les refus 422 (le `msg` est inchangé), `code`/`raw`/`format`/`params` sur l'environnement du serveur, `code`/`params` sur l'e-mail de test, `result_code`/`result_params` sur les commandes, `detail_code`/`detail_params` sur le réveil, `title_code`/`title_params` sur les interventions, `closing_note_code` sur les vérifications, `builtin_key` sur les groupes d'un compte, paramètre `lang` des exports. L'agent ajoute `message_code`/`message_params` à ses résultats.
+
 ## Nouvelles variables d'environnement
 
 Toutes facultatives : leur valeur par défaut est celle décrite plus haut.
@@ -289,6 +306,7 @@ Toutes facultatives : leur valeur par défaut est celle décrite plus haut.
 | `LOGIN_SLOW_WINDOW_HOURS` | `24` | Fenêtre longue des échecs, et durée du verrou qu'elle déclenche. Non définie : 24, ou le double de `LOGIN_LOCKOUT_MINUTES` si c'est davantage |
 | `TRUSTED_PROXIES_ALLOW_WIDE` | `false` | Accepte dans `TRUSTED_PROXIES` une plage plus large qu'un /24 ou un /64 |
 | `BACKUP_ENCRYPT_RECIPIENT` | vide | Clés publiques `age` pour chiffrer les sauvegardes ; vide = dumps en clair |
+| `DEFAULT_LANGUAGE` | `fr` | Langue des e-mails d'un compte qui n'a pas choisi la sienne (`fr` ou `en`) |
 
 Clés de registre de l'agent : `DeployMethodAMaxGB` et `DeployCacheMaxGB` (`REG_DWORD`), voir plus haut.
 
@@ -316,5 +334,8 @@ Clés de registre de l'agent : `DeployMethodAMaxGB` et `DeployCacheMaxGB` (`REG_
 | `0042` | Période du résumé et du rappel déjà servie le jour de la mise à jour (`app_settings`, `worker.last_run.*`) ; rien sur une installation neuve |
 | `0043` | Noms de salle et de bâtiment uniques à la casse près (doublons renommés « (2) »…) |
 | `0044` | Fin du verrou des essais lents (`users.slow_locked_until`) ; `users.lock_admits_known_only` supprimée |
+| `0045` | Langue du compte (`users.language`), nulle pour les comptes existants : « celle du navigateur » |
+| `0046` | Code des verdicts de commande (`commands.result_code`, `result_params`), nul pour les commandes existantes |
+| `0047` | Code des textes écrits par le serveur dans le journal des interventions (`interventions.title_code`, `title_params`) et à la clôture d'une vérification (`machine_checks.closing_note_code`) |
 
 Le backend applique les migrations à son démarrage.

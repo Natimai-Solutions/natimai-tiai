@@ -1,6 +1,6 @@
 # Console bilingue français / anglais — plan de travail
 
-> **Statut : cadré le 2026-11-18, en cours (I1 fait, I2 commencé).** Phase 6 de `plan-projet-tiai.md`.
+> **Statut : livré le 2026-11-18** (I1 à I6, §7 et §8). Phase 6 de `plan-projet-tiai.md`.
 >
 > Objectif : une console en français ou en anglais, au choix de chaque
 > compte, et un backend qui ne rédige plus de phrases pour la console. Le
@@ -128,9 +128,42 @@ serveur à jour traduit le code. Rien ne change pour un agent non mis à jour.
 
 | Jalon | Contenu | Statut |
 |---|---|---|
-| **I1 — Socle** | `vue-i18n`, catalogues, langue du compte (`users.language`, migration `0045`), langue du navigateur, pack Quasar, mise en forme, catalogue des erreurs en deux langues, test de complétude | fait (2026-11-18) |
-| **I2 — Backend agnostique** | Diagnostics de paquets (fait le 2026-11-18), page Paramètres → serveur : codes et valeurs brutes | en cours |
-| **I3 — Verdicts enregistrés** | Colonnes de code sur les commandes, migration | à faire |
-| **I4 — E-mails et exports** | Gabarits par langue, `DEFAULT_LANGUAGE`, paramètre `lang` des exports | à faire |
-| **I5 — Agent** | Codes des messages propres de l'agent | à faire |
-| **I6 — Extraction** | Toute la console dans les catalogues, traduction anglaise, `ENGLISH_AVAILABLE` passé à vrai | à faire |
+| **I1 — Socle** | `vue-i18n`, catalogues, langue du compte (`users.language`, migration `0045`), langue du navigateur, pack Quasar, mise en forme, catalogue des erreurs en deux langues, test de complétude | fait |
+| **I2 — Backend agnostique** | Diagnostics de paquets, page Paramètres → serveur, e-mail de test, refus de validation (422) : codes et valeurs brutes | fait |
+| **I3 — Verdicts enregistrés** | `commands.result_code`, `result_params` (migration `0046`) ; journal des interventions et clôture des vérifications (migration `0047`) ; détail du réveil | fait |
+| **I4 — E-mails et exports** | Gabarits par langue, langue du destinataire, `DEFAULT_LANGUAGE`, paramètre `lang` des exports | fait |
+| **I5 — Agent** | `message_code` + `message_params` dans les résultats ; environ 90 codes (`agent/internal/msg`) | fait |
+| **I6 — Extraction** | Toute la console dans les catalogues, traduction anglaise, `ENGLISH_AVAILABLE` passé à vrai | fait |
+
+## 8. Réalisation (2026-11-18)
+
+- **Découpage** : neuf lots traduits en parallèle, chacun propriétaire de ses
+  fichiers et de son catalogue (`src/i18n/messages/<domaine>.ts`), fusionnés
+  ensuite. Le garde-fou `src/i18n/noHardcodedFrench.spec.ts` (heuristique
+  `scan.ts`) refuse tout texte d'interface français hors des catalogues ; sa
+  liste `PENDING` est vide.
+- **Le français de la console est celui d'avant, mot pour mot** : aucun test
+  existant n'a été modifié. Là où le serveur écrivait la phrase, un jeu de cas
+  partagé, écrit et vérifié par le backend, est relu par la console :
+  `backend/tests/data/package_texts_fr.json`, `validation_texts_fr.json`,
+  `settings_texts_fr.json`, `command_texts_fr.json`, `journal_texts_fr.json`,
+  `mail_texts.json` ; côté agent, `agent/internal/msg/testdata/messages_fr.json`.
+- **Changement de langue en direct** : aucun texte n'est traduit au chargement
+  d'un module ; colonnes, listes d'options et titres d'onglet sont recalculés.
+  Testé page par page, et de bout en bout (`frontend/e2e/language.spec.ts`).
+- **Vérifié dans un navigateur**, derrière la CSP de Caddy : les seize pages,
+  onglets compris, en anglais sur un banc peuplé, sans texte français restant
+  ni erreur.
+- **Choix faits en cours de route** :
+  - les **groupes intégrés** sont nommés dans la langue du lecteur tant qu'ils
+    gardent le nom et la description de l'installation (`builtin_key` sur les
+    références de groupe, `utils/groupText.ts`) ;
+  - le **CSV anglais** garde le séparateur `;` et la virgule décimale : le
+    séparateur qu'Excel attend suit les réglages régionaux du poste, pas la
+    langue de la console ; le format par défaut, XLSX, n'est pas concerné ;
+  - les **refus propres à Pydantic** (champ manquant, longueur…) gardent leur
+    message anglais, comme avant ;
+  - restent en texte, sans code : la sortie des outils Windows, le rapport
+    détaillé d'installation des mises à jour Windows, les étapes de la
+    réinitialisation de Windows Update, les échecs partiels du spouleur et le
+    refus combiné « méthode B … ; méthode A … » de l'agent.

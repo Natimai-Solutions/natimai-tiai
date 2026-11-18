@@ -67,7 +67,9 @@ pack.
 
 ## Langues
 
-La console devient bilingue, français et anglais (`dev/plan-console-bilingue.md`).
+La console est en français et en anglais (`dev/plan-console-bilingue.md`). Un
+compte choisit sa langue dans « Mon compte » ; sans choix, la console suit le
+navigateur.
 
 - Un texte d'interface vit dans un catalogue, `src/i18n/messages/<domaine>.ts`,
   avec son français et son anglais côte à côte ; l'anglais est typé d'après le
@@ -75,15 +77,23 @@ La console devient bilingue, français et anglais (`dev/plan-console-bilingue.md
 - Il s'écrit `t('domaine.cle')`, avec `t` importé de `src/i18n` — dans le
   script comme dans le gabarit, jamais `$t` : les tests montent les
   composants sans le plugin.
+- Jamais de `t()` au chargement d'un module ni dans une constante : la langue
+  change sans recharger la page. Colonnes et listes d'options sont des
+  `computed`, les utilitaires des fonctions.
 - Les dates et nombres se mettent en forme avec `intlTag()` (`fr-FR` ou
   `en-GB`), jamais un `'fr-FR'` écrit en dur.
+- Le serveur envoie des codes et des paramètres à côté de son texte français
+  (problèmes de paquet, refus de validation, verdicts de commande, variables
+  du serveur…) : la console écrit la phrase ; un code inconnu garde le texte
+  du serveur. Les jeux de cas partagés `backend/tests/data/*_fr.json`
+  vérifient que le français de la console est celui du serveur.
 - Les messages des codes d'erreur de l'API sont dans
   `src/i18n/messages/errorCodes.ts` ; le test backend `test_errors_unit.py`
   vérifie que chaque code y figure en français et en anglais.
-- Tant que toute la console n'est pas dans les catalogues,
-  `ENGLISH_AVAILABLE` (`src/i18n/locales.ts`) reste faux : la console reste en
-  français quel que soit le navigateur, et « Mon compte » ne propose aucun
-  choix.
+- `src/i18n/noHardcodedFrench.spec.ts` refuse un texte d'interface français
+  hors des catalogues (une ligne qui doit le garder porte `i18n-ignore`).
+- Une nouvelle langue s'ajoute à `LOCALES` (`src/i18n/locales.ts`) et à chaque
+  catalogue, et n'est proposée qu'une fois complète.
 
 ## Thème clair et sombre
 
