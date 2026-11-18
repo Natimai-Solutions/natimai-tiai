@@ -32,7 +32,8 @@ test('un poste enrôlé apparaît dans la liste et reçoit une commande depuis s
   await page.goto(`/machines?search=${hostname}`);
   const row = page.getByRole('row', { name: new RegExp(hostname) });
   await expect(row).toBeVisible();
-  await row.click();
+  // The name is the way into the fiche; the rest of the row is text to copy.
+  await row.getByRole('link', { name: hostname }).click();
 
   await expect(page.getByText(hostname).first()).toBeVisible();
   await page.getByRole('button', { name: 'Action' }).click();

@@ -402,7 +402,7 @@
           </q-badge>
         </q-tab>
         <q-tab v-if="canReadCommands" name="commands" icon="history" label="Commandes" />
-        <q-tab name="history" icon="handyman" label="Historique">
+        <q-tab v-if="canSeeHistory" name="history" icon="handyman" label="Historique">
           <q-badge v-if="interventionTotal" color="grey-7" floating>{{
             interventionTotal
           }}</q-badge>
@@ -454,7 +454,10 @@
           <MachineSoftwareCard :machine="machine" :loading="loading" />
         </q-tab-panel>
 
-        <q-tab-panel name="history" class="q-px-none">
+        <!-- Each card under its own right, and the tab only when one of them
+             shows: an account that reads neither was told « Aucune
+             intervention enregistrée » about a journal nobody had asked for. -->
+        <q-tab-panel v-if="canSeeHistory" name="history" class="q-px-none">
           <MachineMaintenanceCard
             v-if="auth.can('maintenance', 'read')"
             :machine-id="props.id"
@@ -463,13 +466,17 @@
             @changed="onMaintenanceChanged"
           />
           <MachineHistoryCard
+            v-if="canReadInterventions || canWriteInterventions"
             :machine-id="props.id"
             :items="interventions"
             :total="interventionTotal"
             :loading="interventionsLoading"
-            :can-write="auth.can('intervention', 'write')"
+            :failed="interventionsFailed"
+            :can-read="canReadInterventions"
+            :can-write="canWriteInterventions"
             @changed="loadInterventions(1)"
             @more="loadInterventions(interventionPage + 1)"
+            @retry="loadInterventions(1)"
           />
         </q-tab-panel>
 
@@ -600,6 +607,15 @@ const activeThreats = ref(0);
 // (audit B02). What the account may not read is not asked for.
 const canReadThreats = computed(() => auth.can('threat', 'read'));
 const canReadCommands = computed(() => auth.can('command', 'read'));
+// « Historique » holds the journal of interventions and the maintenance card,
+// each behind its own right; the tab is offered when either can show. The
+// write alone (a group made through the API) still adds a line.
+const canReadInterventions = computed(() => auth.can('intervention', 'read'));
+const canWriteInterventions = computed(() => auth.can('intervention', 'write'));
+const canSeeHistory = computed(
+  () =>
+    canReadInterventions.value || canWriteInterventions.value || auth.can('maintenance', 'read'),
+);
 
 /**
  * The open tab, kept in the URL so a link to « the Windows Update tab of this
@@ -614,6 +630,7 @@ const tab = computed<MachineTab>({
     // the tab is not rendered, and selecting it would leave an empty panel
     // under no selected tab (audit T14).
     if (raw === 'commands' && !canReadCommands.value) return DEFAULT_MACHINE_TAB;
+    if (raw === 'history' && !canSeeHistory.value) return DEFAULT_MACHINE_TAB;
     return raw as MachineTab;
   },
   set: (value) => {
@@ -734,25 +751,28 @@ const interventions = ref<Intervention[]>([]);
 const interventionTotal = ref(0);
 const interventionPage = ref(1);
 const interventionsLoading = ref(false);
+// The last read of the journal failed: the card says so, and does not claim
+// « aucune intervention » off a journal nobody could read.
+const interventionsFailed = ref(false);
 const INTERVENTION_PAGE_SIZE = 25;
 
 async function loadInterventions(page: number) {
-  if (!auth.can('intervention', 'read')) return;
+  if (!canReadInterventions.value) return;
   interventionsLoading.value = true;
+  const id = props.id;
   try {
-    const id = props.id;
     const res = await listInterventions(id, { page, page_size: INTERVENTION_PAGE_SIZE });
     if (id !== props.id) return;
     interventions.value = page === 1 ? res.items : [...interventions.value, ...res.items];
     interventionTotal.value = res.total;
     interventionPage.value = page;
-  } catch (e) {
-    // A poste that does not exist (or an id that is not one): the page says
-    // « Poste introuvable » once; a second, technical message is noise.
-    const status = (e as { response?: { status?: number } } | null)?.response?.status;
-    if (status !== 404 && status !== 422) {
-      $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Historique indisponible') });
-    }
+    interventionsFailed.value = false;
+  } catch {
+    // Said by the card, with « Réessayer », for as long as it is true — a
+    // toast was gone in five seconds and left the empty-journal sentence.
+    // (A poste that does not exist shows no card: the page says « Poste
+    // introuvable » once.)
+    if (id === props.id) interventionsFailed.value = true;
   } finally {
     interventionsLoading.value = false;
   }
@@ -762,10 +782,11 @@ async function loadInterventions(page: number) {
 // when the server is not in a directory mode.
 const manualMode = ref(true);
 const canPlace = computed(() => auth.can('room', 'write') && manualMode.value);
-// Asked only of an account that may place postes: without room:write the
-// answer changes nothing, and without room:read the server refuses it.
+// Asked only of an account that may place postes and read the rooms: without
+// room:write the answer changes nothing, and without room:read the server
+// refuses it — a group may hold the write alone, and got a 403 on every fiche.
 watch(
-  () => auth.can('room', 'write'),
+  () => auth.can('room', 'write') && auth.can('room', 'read'),
   (allowed) => {
     if (!allowed) return;
     void getRoomConfig()
@@ -969,7 +990,15 @@ function sendErrorMessage(e: unknown, fallback: string): string {
   return apiErrorMessage(e, fallback);
 }
 
+// `sending` is already up while the confirmation is shown, so it cannot tell
+// `send` that a send is running: a second « OK » of the same dialog — two
+// clicks in the same instant, which the dialog hands over both — queued the
+// command twice. This one is up from the first call to the server's answer.
+let sendInFlight = false;
+
 async function send(action: CommandAction) {
+  if (sendInFlight) return;
+  sendInFlight = true;
   sending.value = true;
   try {
     // The wake is not a command: the poste is off, so there is nothing to queue
@@ -994,6 +1023,7 @@ async function send(action: CommandAction) {
     }
   } finally {
     sending.value = false;
+    sendInFlight = false;
   }
   await load();
 }
@@ -1137,6 +1167,7 @@ watch(
     machine.value = null;
     interventions.value = [];
     interventionTotal.value = 0;
+    interventionsFailed.value = false;
     void loadInterventions(1);
     threats.value = [];
     activeThreats.value = 0;
@@ -1160,12 +1191,9 @@ watch(canManage, (allowed) => {
 
 // Same reasoning as the duplicate lookup: on a hard reload the profile is
 // not there yet when the first load runs, and the journal would stay empty.
-watch(
-  () => auth.can('intervention', 'read'),
-  (allowed) => {
-    if (allowed && !interventions.value.length) void loadInterventions(1);
-  },
-);
+watch(canReadInterventions, (allowed) => {
+  if (allowed && !interventions.value.length) void loadInterventions(1);
+});
 
 onMounted(() => {
   void load();

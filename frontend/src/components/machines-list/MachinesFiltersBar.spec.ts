@@ -214,4 +214,44 @@ describe('MachinesFiltersBar — every filter the URL carries has a chip (item 8
     await flushPromises();
     expect(emitted(w).at(-1)!.search).toBe('PC-01');
   });
+
+  // Review, « partial filter values »: `?hw_model=OptiPlex` typed by hand.
+  describe('a value matched exactly that the parc does not hold', () => {
+    function mountWith(listEmpty: boolean, model = 'OptiPlex') {
+      const options = initialFleetOptions();
+      options.model.push({ label: 'OptiPlex 7010 (20)', value: 'OptiPlex 7010' });
+      return mount(MachinesFiltersBar, {
+        props: {
+          modelValue: { ...emptyMachineFilters(), model },
+          options,
+          usageThresholds: { low: 10, high: 50 },
+          usageWindowDays: 7,
+          listEmpty,
+        },
+      });
+    }
+
+    it('says why the list is empty, next to the chip', () => {
+      const wrapper = mountWith(true);
+      expect(wrapper.findAllComponents(QChip).map((c) => c.text())).toEqual(['OptiPlexcancel']);
+      const hint = wrapper.find('[data-test="unmatched-filters"]');
+      expect(hint.text()).toContain('Modèle « OptiPlex »');
+      expect(hint.text()).toContain('valeur exacte — aucune correspondance dans le parc');
+    });
+
+    it('keeps saying it with the panel open, where the chips are folded away', async () => {
+      const wrapper = mountWith(true);
+      await filtersButton(wrapper).trigger('click');
+      expect(wrapper.find('[data-test="unmatched-filters"]').text()).toContain(
+        'Modèle « OptiPlex »',
+      );
+    });
+
+    it('says nothing for a value of the parc, nor over a list that has rows', () => {
+      expect(
+        mountWith(true, 'OptiPlex 7010').find('[data-test="unmatched-filters"]').exists(),
+      ).toBe(false);
+      expect(mountWith(false).find('[data-test="unmatched-filters"]').exists()).toBe(false);
+    });
+  });
 });

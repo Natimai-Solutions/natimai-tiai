@@ -15,6 +15,8 @@ const machineCalls: Record<string, Deferred[]> = {};
 const calls: string[] = [];
 // GETs answered with a 500 instead, for the specs of a side list failing.
 const failing = new Map<string, number>();
+// GETs left unanswered: a side list still on its way.
+const pending = new Set<string>();
 
 vi.mock('boot/axios', () => {
   const page = { data: { items: [], total: 0 } };
@@ -22,6 +24,7 @@ vi.mock('boot/axios', () => {
     api: {
       get: vi.fn((url: string) => {
         calls.push(url);
+        if (pending.has(url)) return new Promise(() => undefined);
         const status = failing.get(url);
         if (status) {
           return Promise.reject(
@@ -41,6 +44,8 @@ vi.mock('boot/axios', () => {
           return Promise.resolve(page);
         }
         if (url === '/rooms/config') return Promise.resolve({ data: { manual: true } });
+        if (url === '/stats/overview')
+          return Promise.resolve({ data: { low_disk_free_percent: 25 } });
         if (url.endsWith('/duplicates')) return Promise.resolve({ data: [] });
         return Promise.reject(new Error(`unexpected GET ${url}`));
       }),
@@ -64,10 +69,14 @@ import { getRoomConfig } from 'src/services/rooms';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
 import MachineCommandsCard from 'src/components/machine/MachineCommandsCard.vue';
+import MachineHistoryCard from 'src/components/machine/MachineHistoryCard.vue';
+import MachineMaintenanceCard from 'src/components/machine/MachineMaintenanceCard.vue';
 import MachineMergeDialog from 'src/components/machine/MachineMergeDialog.vue';
 import MachineStatusCard from 'src/components/machine/MachineStatusCard.vue';
+import MachineStorageCard from 'src/components/machine/MachineStorageCard.vue';
 import MachineThreatsCard from 'src/components/machine/MachineThreatsCard.vue';
 import { QItem } from 'quasar';
+import { resetFleetThresholds } from 'src/composables/useFleetThresholds';
 import { tasksVersion } from 'src/composables/useTasksBadge';
 import type { CheckPayload } from 'src/services/checks';
 import { useAuthStore } from 'src/stores/auth';
@@ -128,6 +137,7 @@ describe('MachineDetailPage', () => {
     for (const k of Object.keys(machineCalls)) delete machineCalls[k];
     calls.length = 0;
     failing.clear();
+    pending.clear();
   });
 
   // Audit T14: machine:read alone opens the fiche, and nothing it may not
@@ -392,6 +402,100 @@ describe('MachineDetailPage', () => {
     });
   });
 
+  // Surviving mutation: the threshold of the parc reaches the head of the
+  // fiche (the « disque presque plein » alert) and the storage card.
+  it('hands the disk threshold of the parc to the status and storage cards', async () => {
+    resetFleetThresholds();
+    const w = await mountPage('B', ['machine:read'], '?tab=hardware');
+    answer('B');
+    await flushPromises();
+
+    expect(calls).toContain('/stats/overview');
+    expect(w.findComponent(MachineStatusCard).props('lowDiskPercent')).toBe(25);
+    expect(w.findComponent(MachineStorageCard).props('lowDiskPercent')).toBe(25);
+  });
+
+  // Review finding 4: « Historique » says nothing about what it did not read.
+  describe('the « Historique » tab', () => {
+    const journalCalls = () => calls.filter((u) => u === '/machines/B/interventions').length;
+
+    it('is not offered to an account that reads neither the journal nor the maintenance', async () => {
+      const w = await mountPage('B', ['machine:read'], '?tab=history');
+      answer('B');
+      await flushPromises();
+
+      expect(w.find('[name="history"]').exists()).toBe(false);
+      expect(w.findComponent(MachineHistoryCard).exists()).toBe(false);
+      // A link to the tab falls back, as for the commands.
+      expect(w.findComponent(QTabPanels).props('modelValue')).toBe('identity');
+      expect(journalCalls()).toBe(0);
+    });
+
+    it('shows the maintenance alone to an account that only follows maintenance', async () => {
+      const w = await mountPage('B', ['machine:read', 'maintenance:read'], '?tab=history');
+      answer('B');
+      await flushPromises();
+
+      expect(w.findComponent(QTabPanels).props('modelValue')).toBe('history');
+      expect(w.findComponent(MachineMaintenanceCard).exists()).toBe(true);
+      expect(w.findComponent(MachineHistoryCard).exists()).toBe(false);
+      expect(journalCalls()).toBe(0);
+    });
+
+    it('shows the journal alone to an account that only reads interventions', async () => {
+      const w = await mountPage('B', ['machine:read', 'intervention:read'], '?tab=history');
+      answer('B');
+      await flushPromises();
+
+      expect(w.findComponent(MachineMaintenanceCard).exists()).toBe(false);
+      const card = w.findComponent(MachineHistoryCard);
+      expect(card.props('canRead')).toBe(true);
+      expect(card.props('failed')).toBe(false);
+    });
+
+    it('lets an account that may only write add a line, and tells the card it reads nothing', async () => {
+      const w = await mountPage('B', ['machine:read', 'intervention:write'], '?tab=history');
+      answer('B');
+      await flushPromises();
+
+      const card = w.findComponent(MachineHistoryCard);
+      expect(card.props('canRead')).toBe(false);
+      expect(card.props('canWrite')).toBe(true);
+      expect(journalCalls()).toBe(0);
+    });
+
+    it('tells the card its read failed, and reads again on « Réessayer »', async () => {
+      failing.set('/machines/B/interventions', 500);
+      const w = await mountPage('B', ['machine:read', 'intervention:read'], '?tab=history');
+      answer('B');
+      await flushPromises();
+
+      const card = w.findComponent(MachineHistoryCard);
+      expect(card.props('failed')).toBe(true);
+      expect(journalCalls()).toBe(1);
+
+      failing.clear();
+      card.vm.$emit('retry');
+      await flushPromises();
+      expect(journalCalls()).toBe(2);
+      expect(w.findComponent(MachineHistoryCard).props('failed')).toBe(false);
+    });
+
+    it('does not carry the failure of one poste to the next', async () => {
+      failing.set('/machines/B/interventions', 500);
+      const w = await mountPage('B', ['machine:read', 'intervention:read'], '?tab=history');
+      answer('B');
+      await flushPromises();
+      // The next poste is shown while its own journal is still being read.
+      pending.add('/machines/C/interventions');
+      await w.setProps({ id: 'C' });
+      await flushPromises();
+      answer('C');
+      await flushPromises();
+      expect(w.findComponent(MachineHistoryCard).props('failed')).toBe(false);
+    });
+  });
+
   // Item 2 / 11: an id nobody knows — or that is not even an id.
   it.each([404, 422])(
     'says « Poste introuvable » for a %i, with no retry and no action',
@@ -442,6 +546,43 @@ describe('MachineDetailPage', () => {
     await flushPromises();
 
     expect(vi.mocked(api.post).mock.calls.filter(([url]) => url === '/commands')).toHaveLength(1);
+  });
+
+  // Review: two « OK » of the confirmation in the same instant — the dialog
+  // hands both over — must send once; `send()` holds its own guard.
+  it('sends a confirmed command once when the confirmation is accepted twice', async () => {
+    let release: (v: unknown) => void = () => undefined;
+    vi.mocked(api.post).mockReset();
+    vi.mocked(api.post).mockImplementation(() => new Promise((resolve) => (release = resolve)));
+    const w = await mountPage('B', ['machine:read', 'command:execute']);
+    answer('B');
+    await flushPromises();
+    const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({
+      onOk: (fn: () => void) => {
+        fn();
+        fn();
+        return { onCancel: () => undefined };
+      },
+    } as never);
+
+    w.findAllComponents(QItem)
+      .find((i) => i.text().includes('Scan complet'))!
+      .vm.$emit('click');
+    await flushPromises();
+    expect(dialog).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.post).mock.calls.filter(([url]) => url === '/commands')).toHaveLength(1);
+
+    // And the menu is free again once the server has answered.
+    release({ data: { created: ['c'], count: 1 } });
+    await flushPromises();
+    answer('B', 1);
+    await flushPromises();
+    w.findAllComponents(QItem)
+      .find((i) => i.text().includes('Vider le cache DNS'))!
+      .vm.$emit('click');
+    await flushPromises();
+    expect(vi.mocked(api.post).mock.calls.filter(([url]) => url === '/commands')).toHaveLength(2);
+    dialog.mockRestore();
   });
 
   // C3: a revoked poste takes no command; the menu says why.
@@ -509,11 +650,15 @@ describe('MachineDetailPage', () => {
   });
 
   // Item 4: the room settings are asked only of an account that may place postes.
-  it('asks for the room settings only with room:write', async () => {
+  // And review finding 5: the server refuses them without room:read, which a
+  // group may lack while holding the write.
+  it('asks for the room settings only with room:read and room:write', async () => {
     vi.mocked(getRoomConfig).mockClear();
     await mountPage('B', ['machine:read']);
-    expect(getRoomConfig).not.toHaveBeenCalled();
+    await mountPage('B', ['machine:read', 'room:read']);
     await mountPage('B', ['machine:read', 'room:write']);
+    expect(getRoomConfig).not.toHaveBeenCalled();
+    await mountPage('B', ['machine:read', 'room:read', 'room:write']);
     expect(getRoomConfig).toHaveBeenCalledTimes(1);
   });
 });

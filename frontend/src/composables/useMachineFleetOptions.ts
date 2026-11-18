@@ -125,8 +125,11 @@ export function useMachineFleetOptions(
    */
   async function loadRooms() {
     // Not asked of an account the server would refuse (item 4): its toasts
-    // and silent errors were the only thing these calls produced.
-    if (canPlaceRooms()) {
+    // and silent errors were the only thing these calls produced. The
+    // placement mode takes both rights: room:write for its only use, placing
+    // postes, and room:read because the server answers 403 without it — a
+    // group may hold the write alone.
+    if (canPlaceRooms() && canReadRooms()) {
       try {
         manualMode.value = (await getRoomConfig()).manual;
       } catch {

@@ -70,8 +70,9 @@
   --q-machines-sticky-bg: var(--q-dark);
 }
 
-// A name in a table that opens its fiche. The row stays clickable for the
-// mouse; the link is what Tab reaches and what opens in a new tab.
+// A name in a table that opens its fiche: what Tab reaches and what opens in
+// a new tab. In the machine list it is the only way in — the rest of the row
+// is text to select and copy; the other tables keep the row clickable too.
 .row-link {
   color: inherit;
   text-decoration: none;

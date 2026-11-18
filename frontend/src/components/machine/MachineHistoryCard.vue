@@ -14,13 +14,27 @@
     </q-card-section>
     <q-separator />
 
-    <q-card-section v-if="!items.length && !loading" class="text-muted">
+    <!-- « Aucune intervention » is a statement about the journal: made only
+         once it was read. Not read — the request failed, or the account has
+         no right to it — the card says that instead. -->
+    <q-card-section v-if="failed" class="q-pa-sm">
+      <CardLoadError
+        what="l'historique des interventions"
+        :loading="loading"
+        @retry="emit('retry')"
+      />
+    </q-card-section>
+    <q-card-section v-if="!canRead" class="text-muted">
+      Votre compte ne permet pas de consulter l'historique de ce poste : vous pouvez seulement y
+      ajouter une intervention.
+    </q-card-section>
+    <q-card-section v-else-if="!items.length && !loading && !failed" class="text-muted">
       Aucune intervention enregistrée sur ce poste.
     </q-card-section>
 
     <!-- A timeline rather than a table: a journal is read top to bottom,
          and a note is a paragraph, not a cell. -->
-    <q-list v-else separator>
+    <q-list v-else-if="items.length" separator>
       <q-item v-for="item in items" :key="item.id" class="q-py-md">
         <q-item-section avatar top>
           <q-avatar :color="interventionKindColor(item.kind)" text-color="white" size="36px">
@@ -134,6 +148,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
 import { useQuasar } from 'quasar';
+import CardLoadError from 'src/components/CardLoadError.vue';
 import MaintenanceSessionViewDialog from 'src/components/maintenance/MaintenanceSessionViewDialog.vue';
 import {
   createIntervention,
@@ -151,14 +166,22 @@ import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime } from 'src/utils/format';
 
-const props = defineProps<{
-  machineId: string;
-  items: Intervention[];
-  total: number;
-  loading: boolean;
-  canWrite: boolean;
-}>();
-const emit = defineEmits<{ (e: 'changed'): void; (e: 'more'): void }>();
+const props = withDefaults(
+  defineProps<{
+    machineId: string;
+    items: Intervention[];
+    total: number;
+    loading: boolean;
+    canWrite: boolean;
+    /** The account may read the journal (intervention:read). False for the
+     * rare group holding the write alone: it adds lines and sees none. */
+    canRead?: boolean;
+    /** The last read of the journal failed: `items` is not the journal. */
+    failed?: boolean;
+  }>(),
+  { canRead: true, failed: false },
+);
+const emit = defineEmits<{ (e: 'changed'): void; (e: 'more'): void; (e: 'retry'): void }>();
 
 const $q = useQuasar();
 const auth = useAuthStore();

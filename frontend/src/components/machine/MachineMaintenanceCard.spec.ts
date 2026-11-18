@@ -7,6 +7,8 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
   updateMachineMaintenance: vi.fn(),
 }));
 
+import { QBtn } from 'quasar';
+import CardLoadError from 'src/components/CardLoadError.vue';
 import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
 import { notifyTasksChanged, tasksVersion } from 'src/composables/useTasksBadge';
 import {
@@ -115,6 +117,55 @@ describe('MachineMaintenanceCard — after a change to the journal (item 10)', (
     expect(wrapper.findComponent(MaintenanceSettingsDialog).props('ownerLabel')).toBe(
       'Marie (désactivé)',
     );
+    wrapper.unmount();
+  });
+});
+
+// Review finding 4: a read that failed left the card blank, with no retry —
+// and « Régler » open on empty fields that saving would have written.
+describe('MachineMaintenanceCard — a read that fails', () => {
+  beforeEach(() => {
+    vi.mocked(getMachineMaintenance).mockReset();
+  });
+
+  it('says so with « Réessayer », and shows the maintenance once it answers', async () => {
+    vi.mocked(getMachineMaintenance).mockRejectedValueOnce({ response: { status: 500 } });
+    const wrapper = mountCard();
+    await flushPromises();
+    const error = wrapper.findComponent(CardLoadError);
+    expect(error.text()).toContain('Impossible de charger la maintenance de ce poste.');
+    expect(wrapper.text()).not.toContain('Régler');
+
+    vi.mocked(getMachineMaintenance).mockResolvedValue(info);
+    await error.findComponent(QBtn).trigger('click');
+    await flushPromises();
+    expect(wrapper.findComponent(CardLoadError).exists()).toBe(false);
+    expect(wrapper.text()).toContain('due le 02/12/2026');
+    expect(wrapper.text()).toContain('Régler');
+    wrapper.unmount();
+  });
+
+  it('keeps what it showed when a later read fails, and says it could not read', async () => {
+    vi.mocked(getMachineMaintenance).mockResolvedValueOnce(info);
+    const wrapper = mountCard();
+    await flushPromises();
+    vi.mocked(getMachineMaintenance).mockRejectedValue({ response: { status: 500 } });
+    notifyTasksChanged();
+    await flushPromises();
+    expect(wrapper.findComponent(CardLoadError).exists()).toBe(true);
+    expect(wrapper.text()).toContain('due le 02/12/2026');
+    wrapper.unmount();
+  });
+
+  it('forgets the maintenance of the poste left when the next one cannot be read', async () => {
+    vi.mocked(getMachineMaintenance).mockResolvedValueOnce(info);
+    const wrapper = mountCard();
+    await flushPromises();
+    vi.mocked(getMachineMaintenance).mockRejectedValue({ response: { status: 500 } });
+    await wrapper.setProps({ machineId: 'm2' });
+    await flushPromises();
+    expect(wrapper.findComponent(CardLoadError).exists()).toBe(true);
+    expect(wrapper.text()).not.toContain('due le 02/12/2026');
     wrapper.unmount();
   });
 });

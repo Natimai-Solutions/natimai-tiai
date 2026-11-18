@@ -99,6 +99,21 @@
       @click="clearAll"
     />
   </div>
+
+  <!-- A value typed into the URL for a facet matched exactly, which the parc
+       does not hold: said beside the chip — and with the panel open, where
+       the chips are folded away — rather than left as a bare empty list. -->
+  <div
+    v-if="unmatched.length"
+    class="text-caption text-muted q-mb-sm"
+    role="status"
+    data-test="unmatched-filters"
+  >
+    <div v-for="u in unmatched" :key="u.key">
+      <q-icon name="info" size="16px" class="q-mr-xs" />
+      {{ u.facet }} « {{ u.value }} » : valeur exacte — aucune correspondance dans le parc.
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -109,6 +124,7 @@ import {
   clearMachineFilter,
   emptyMachineFilters,
   machineFilterChips,
+  unmatchedExactFilters,
   type MachineFilterKey,
   type MachineFilters,
   type MachineFleetOptions,
@@ -129,8 +145,10 @@ const props = withDefaults(
     usageWindowDays: number;
     /** See MachinesFilterPanel: the room filters need room:read. */
     canReadRooms?: boolean;
+    /** The list answered no poste: the moment to say an exact value matches none. */
+    listEmpty?: boolean;
   }>(),
-  { canReadRooms: true },
+  { canReadRooms: true, listEmpty: false },
 );
 
 const emit = defineEmits<{ 'update:modelValue': [value: MachineFilters] }>();
@@ -171,6 +189,11 @@ const chips = computed(() =>
 );
 const shownChips = computed(() =>
   filtersOpen.value ? chips.value.filter((c) => c.key === 'software') : chips.value,
+);
+// Only over an empty list: the dropdowns are read once with the page, and a
+// value the parc gained since must not be called absent above its own rows.
+const unmatched = computed(() =>
+  props.listEmpty ? unmatchedExactFilters(props.modelValue, props.options) : [],
 );
 
 function set(patch: Partial<MachineFilters>) {

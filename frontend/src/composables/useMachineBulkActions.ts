@@ -93,23 +93,34 @@ export function useMachineBulkActions(options: {
     });
   }
 
+  // One send at a time: the menu entry clicked twice before it closes, or the
+  // confirmation accepted twice in the same instant, queued the command twice
+  // on every poste of the selection.
+  let sending = false;
+
   async function sendBulk(action: CommandAction, ids: string[]) {
-    // The wake is emitted by the server, not queued for agents that — by
-    // definition of the action — are not running. Everything around it is the
-    // same: same menu, same selection, same notification slot.
-    if (action.serverSide) {
-      await wakeBulk(ids);
-      return;
-    }
+    if (sending) return;
+    sending = true;
     try {
-      const res = await createCommands({ type: action.type, machine_ids: ids });
-      $q.notify(bulkSendNotification(res));
-      selected.value = [];
-    } catch (e) {
-      $q.notify({
-        type: 'negative',
-        message: apiErrorMessage(e, "Échec de l'envoi des commandes"),
-      });
+      // The wake is emitted by the server, not queued for agents that — by
+      // definition of the action — are not running. Everything around it is
+      // the same: same menu, same selection, same notification slot.
+      if (action.serverSide) {
+        await wakeBulk(ids);
+        return;
+      }
+      try {
+        const res = await createCommands({ type: action.type, machine_ids: ids });
+        $q.notify(bulkSendNotification(res));
+        selected.value = [];
+      } catch (e) {
+        $q.notify({
+          type: 'negative',
+          message: apiErrorMessage(e, "Échec de l'envoi des commandes"),
+        });
+      }
+    } finally {
+      sending = false;
     }
   }
 

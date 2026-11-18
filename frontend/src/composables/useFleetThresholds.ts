@@ -26,7 +26,7 @@ export function rememberFleetThresholds(
   }
 }
 
-/** Forget what was read — for the specs, and after a logout. */
+/** Forget what was read — for the specs: a threshold must not travel from one to the next. */
 export function resetFleetThresholds(): void {
   lowDiskPercent.value = undefined;
   fetchedAt = 0;

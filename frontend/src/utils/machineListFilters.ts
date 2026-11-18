@@ -593,6 +593,46 @@ export function machineFilterChips(
   return chips;
 }
 
+/** A filter set to a value the parc does not hold: see `unmatchedExactFilters`. */
+export interface UnmatchedFilter {
+  key: MachineFilterKey;
+  /** The facet in the console's words: « Modèle ». */
+  facet: string;
+  value: string;
+}
+
+/**
+ * The facets the server matches exactly — the whole value, case included —
+ * whose current value is not one of the parc's. Their dropdowns only offer the
+ * parc's own values, so such a value was typed into the URL (`?hw_model=
+ * OptiPlex`, where the parc holds « OptiPlex 7010 »): it matches nothing, and
+ * a bare empty list would not say that the match is exact.
+ *
+ * Only once the dropdown has been filled: before that — or when its listing
+ * failed — nobody knows what the parc holds, and nothing is claimed.
+ */
+export function unmatchedExactFilters(
+  f: MachineFilters,
+  options: MachineFleetOptions,
+): UnmatchedFilter[] {
+  const facets: [MachineFilterKey, string, string | null, FilterOption[]][] = [
+    ['location', 'Emplacement', f.location, options.location],
+    ['antivirus', 'Antivirus', f.antivirus, options.antivirus],
+    ['os', 'Système', f.os, options.os],
+    ['agent', "Version de l'agent", f.agent, options.agent],
+    ['manufacturer', 'Constructeur', f.manufacturer, options.manufacturer],
+    ['model', 'Modèle', f.model, options.model],
+    ['processor', 'Processeur', f.processor, options.processor],
+  ];
+  return facets.flatMap(([key, facet, value, known]) => {
+    // The « Tous » entry alone: the listing has not answered.
+    if (!value || known.length <= 1) return [];
+    // « Agent obsolète » is the console's own entry, not a version.
+    if (key === 'agent' && value === AGENT_OUTDATED) return [];
+    return known.some((o) => o.value === value) ? [] : [{ key, facet, value }];
+  });
+}
+
 /** The usage filter off, window included: a widened window is part of it. */
 export function clearUsageFilter(f: MachineFilters): MachineFilters {
   return { ...f, usageBelow: null, usageAbove: null, usageDays: null };

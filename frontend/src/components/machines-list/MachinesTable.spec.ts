@@ -89,13 +89,52 @@ describe('MachinesTable', () => {
     expect(wrapper.find('thead').text()).toContain('Allumé (7 j)');
   });
 
-  it('opens a poste with its index on the page', async () => {
-    const second = row({ id: 'b', hostname: 'PC-02' });
-    const wrapper = mountTable([row({ id: 'a' }), second]);
+  // Review finding 6: the fiche opens by the name, a link — and by nothing
+  // else. A row that opened on click also opened on the first click of the
+  // double-click that selects a word in it, before any selection existed to
+  // tell the two apart; waiting for the second click would have delayed every
+  // plain one.
+  it('opens the fiche by the name, a link carrying the index on the page', () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/machines/:id', name: 'machine-detail', component: { render: () => null } },
+      ],
+    });
+    const wrapper = mount(MachinesTable, {
+      props: {
+        rows: [row({ id: 'a' }), row({ id: 'b', hostname: 'PC-02' })],
+        columns: visibleMachineColumns([...MACHINE_COLUMN_KEYS], 7),
+        loading: false,
+        agentLatest: '0.3.0',
+        usageWindowDays: 7,
+        selected: [],
+        pagination: { ...initialMachinePagination(), rowsNumber: 2 },
+        detailRoute: (m: Machine, i: number) => ({
+          name: 'machine-detail',
+          params: { id: m.id },
+          query: { i: String(i) },
+        }),
+      },
+      global: { plugins: [router] },
+    });
+    const links = wrapper.findAll('tbody tr a.machine-name__text');
+    expect(links.map((a) => a.attributes('href'))).toEqual(['/machines/a?i=0', '/machines/b?i=1']);
+    expect(links[1]!.text()).toBe('PC-02');
+  });
 
-    await wrapper.findAll('tbody tr')[1]!.trigger('click');
+  it('leaves the rest of the row to the reader: a click on it opens nothing', async () => {
+    const wrapper = mountTable([row({ id: 'a' }), row({ id: 'b', hostname: 'PC-02' })]);
+    const line = wrapper.findAll('tbody tr')[1]!;
 
-    expect(wrapper.emitted('open')).toEqual([[second, 1]]);
+    // The two clicks of a double-click on a word, then the double-click.
+    await line.find('td:last-child').trigger('click');
+    await line.find('td:last-child').trigger('click');
+    await line.find('td:last-child').trigger('dblclick');
+
+    expect(wrapper.emitted('open')).toBeUndefined();
+    // Nor does the row announce itself as a button.
+    expect(line.classes()).not.toContain('cursor-pointer');
   });
 
   it('hands every sort to the page as a server request', () => {
@@ -229,21 +268,6 @@ describe('MachinesTable', () => {
 });
 
 describe('MachinesTable — selection, enrolment, thresholds', () => {
-  // Item 3: copying a hostname must not open the fiche.
-  it('opens nothing on a click that ends a text selection', async () => {
-    const wrapper = mountTable([row()]);
-    const selection = vi
-      .spyOn(window, 'getSelection')
-      .mockReturnValue({ isCollapsed: false, toString: () => 'PC-01' } as unknown as Selection);
-    await wrapper.find('tbody tr').trigger('click');
-    expect(wrapper.emitted('open')).toBeUndefined();
-
-    selection.mockReturnValue({ isCollapsed: true, toString: () => '' } as unknown as Selection);
-    await wrapper.find('tbody tr').trigger('click');
-    expect(wrapper.emitted('open')).toHaveLength(1);
-    selection.mockRestore();
-  });
-
   // Item 4: no checkboxes without a bulk action to use them for.
   it('offers no selection column when told rows are not selectable', () => {
     const wrapper = mount(MachinesTable, {

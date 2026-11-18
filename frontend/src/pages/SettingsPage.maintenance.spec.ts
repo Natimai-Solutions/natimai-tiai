@@ -123,7 +123,19 @@ describe('SettingsPage — the default owner deactivated since (item 3)', () => 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listAssignableOwners).mockResolvedValue([{ id: 'u-1', name: 'Alice' }]);
-    vi.mocked(updateSettings).mockImplementation(() => Promise.resolve(settings()));
+    // The server answers with what it stored — the card is filled from it
+    // again, like the four others: the owner sent, or the one it had.
+    vi.mocked(updateSettings).mockImplementation((payload) => {
+      if (!('maintenance_default_owner_id' in payload)) {
+        return Promise.resolve(
+          settings({ maintenance_default_owner_unavailable: { id: 'u-gone', name: 'Marie' } }),
+        );
+      }
+      const id = payload.maintenance_default_owner_id;
+      return Promise.resolve(
+        settings({ maintenance_default_owner: id ? { id, name: 'Alice' } : null }),
+      );
+    });
   });
 
   it('names it instead of an empty field, and does not erase it on save', async () => {

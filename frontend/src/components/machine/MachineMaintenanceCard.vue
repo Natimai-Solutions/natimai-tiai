@@ -3,8 +3,10 @@
     <q-card-section class="row items-center text-subtitle1">
       Maintenance
       <q-space />
+      <!-- Only over settings that were read: opened on a card that could not
+           load, the dialog would show empty fields and save them. -->
       <q-btn
-        v-if="canWrite"
+        v-if="canWrite && info"
         flat
         dense
         icon="tune"
@@ -22,6 +24,11 @@
       />
     </q-card-section>
     <q-separator />
+    <!-- The read failed: said here, with a retry — a card left blank reads as
+         a poste without maintenance. -->
+    <q-card-section v-if="failed" class="q-pa-sm">
+      <CardLoadError what="la maintenance de ce poste" :loading="loading" @retry="load" />
+    </q-card-section>
     <q-card-section v-if="info" class="q-gutter-xs">
       <div class="row items-center">
         <div class="col-4 text-muted">État</div>
@@ -87,10 +94,10 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
+import CardLoadError from 'src/components/CardLoadError.vue';
 import MaintenanceSessionDialog from 'src/components/maintenance/MaintenanceSessionDialog.vue';
 import MaintenanceSettingsDialog from 'src/components/maintenance/MaintenanceSettingsDialog.vue';
 import { notifyTasksChanged, tasksVersion } from 'src/composables/useTasksBadge';
-import { apiErrorMessage } from 'src/services/errors';
 import {
   cycleLabel,
   dueDate,
@@ -112,12 +119,24 @@ const $q = useQuasar();
 const info = ref<MachineMaintenance | null>(null);
 const settingsOpen = ref(false);
 const sessionOpen = ref(false);
+// The last read failed: the card says so, over whatever an earlier read of
+// the same poste had shown.
+const failed = ref(false);
+const loading = ref(false);
 
 async function load() {
+  const id = props.machineId;
+  loading.value = true;
   try {
-    info.value = await getMachineMaintenance(props.machineId);
-  } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Maintenance indisponible') });
+    const read = await getMachineMaintenance(id);
+    // The reader walked to another poste meanwhile: its own read decides.
+    if (id !== props.machineId) return;
+    info.value = read;
+    failed.value = false;
+  } catch {
+    if (id === props.machineId) failed.value = true;
+  } finally {
+    if (id === props.machineId) loading.value = false;
   }
 }
 
@@ -137,7 +156,13 @@ async function onRecorded() {
 
 watch(
   () => props.machineId,
-  () => void load(),
+  () => {
+    // Another poste: what was read belongs to the one left, and must not
+    // stand under the new name while — or if — its own read fails.
+    info.value = null;
+    failed.value = false;
+    void load();
+  },
 );
 // A line of the journal added, edited or deleted — a maintenance typed by
 // hand, one turned into « Autre », a visit removed — moves the due date and

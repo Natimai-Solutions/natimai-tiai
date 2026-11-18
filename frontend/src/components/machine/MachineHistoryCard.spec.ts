@@ -23,6 +23,7 @@ import {
   deleteIntervention,
   type Intervention,
 } from 'src/services/interventions';
+import CardLoadError from 'src/components/CardLoadError.vue';
 import MachineHistoryCard from './MachineHistoryCard.vue';
 
 function mountCard(items: Intervention[] = [], permissions: string[] = []) {
@@ -165,6 +166,53 @@ describe('MachineHistoryCard — a line of a maintenance visit (item 1, C8)', ()
   it('offers no link to whoever cannot read the maintenance', () => {
     const wrapper = mountCard([line], []);
     expect(wrapper.text()).not.toContain('Voir la séance');
+    wrapper.unmount();
+  });
+});
+
+// Review finding 4: the card must not say « aucune intervention » about a
+// journal it has not read.
+describe('MachineHistoryCard — a journal that was not read', () => {
+  function mountWith(props: Record<string, unknown>) {
+    setActivePinia(createPinia());
+    useAuthStore().user = { id: 'me', email: 'a@b.c', permissions: [] } as never;
+    return mount(MachineHistoryCard, {
+      props: { machineId: 'm1', items: [], total: 0, loading: false, canWrite: true, ...props },
+      attachTo: document.body,
+    });
+  }
+
+  it('says the journal is empty once it was read, and empty', () => {
+    const wrapper = mountWith({});
+    expect(wrapper.text()).toContain('Aucune intervention enregistrée sur ce poste.');
+    expect(wrapper.findComponent(CardLoadError).exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('says the read failed, with « Réessayer », and claims no empty journal', async () => {
+    const wrapper = mountWith({ failed: true });
+    expect(wrapper.text()).not.toContain('Aucune intervention');
+    const error = wrapper.findComponent(CardLoadError);
+    expect(error.text()).toContain("Impossible de charger l'historique des interventions.");
+    await error.findComponent(QBtn).trigger('click');
+    expect(wrapper.emitted('retry')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('keeps the lines already shown under the error of a later read', () => {
+    const wrapper = mountWith({ failed: true, items: [visit], total: 30 });
+    expect(wrapper.findComponent(CardLoadError).exists()).toBe(true);
+    expect(wrapper.text()).toContain('Dépoussiérage');
+    wrapper.unmount();
+  });
+
+  // intervention:write without the read (a group made through the API): the
+  // account may add a line, and is told why it sees none.
+  it('says the account may not read the journal, rather than that it is empty', () => {
+    const wrapper = mountWith({ canRead: false });
+    expect(wrapper.text()).not.toContain('Aucune intervention');
+    expect(wrapper.text()).toContain("Votre compte ne permet pas de consulter l'historique");
+    expect(wrapper.text()).toContain('Ajouter une intervention');
     wrapper.unmount();
   });
 });

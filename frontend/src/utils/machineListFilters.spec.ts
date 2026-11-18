@@ -13,6 +13,7 @@ import {
   machineFiltersToParams,
   machineFiltersToQuery,
   ramGbValue,
+  unmatchedExactFilters,
   type MachineFilters,
 } from './machineListFilters';
 import { machineListParamsFromQuery } from './machineQuery';
@@ -336,5 +337,67 @@ describe('item 8 and C2: what the URL can carry', () => {
       { key: 'enrollment', label: 'Token révoqué' },
     ]);
     expect(machineFiltersFromQuery({ enrollment: 'nope' }).enrollment).toBeNull();
+  });
+});
+
+// Review, « partial filter values »: a facet matched exactly, set by hand to a
+// value the parc does not hold, answers an empty list — and must say why.
+describe('unmatchedExactFilters', () => {
+  function loaded() {
+    const options = initialFleetOptions();
+    options.model.push({ label: 'OptiPlex 7010 (20)', value: 'OptiPlex 7010' });
+    options.antivirus.push({
+      label: 'Kaspersky Endpoint Security (8)',
+      value: 'Kaspersky Endpoint Security',
+    });
+    options.os.push({ label: 'Windows 11 Pro 23H2 (30)', value: 'Windows 11 Pro 23H2' });
+    options.location.push({ label: 'Papeete (40)', value: 'Papeete' });
+    options.agent.push(
+      { label: 'Agent obsolète (3)', value: AGENT_OUTDATED },
+      { label: 'Agent 1.2.1 (40)', value: '1.2.1' },
+    );
+    options.manufacturer.push({ label: 'Dell Inc. (30)', value: 'Dell Inc.' });
+    options.processor.push({ label: 'i5-3470 (12)', value: 'i5-3470' });
+    return options;
+  }
+
+  it('names the facets whose value is not one the parc holds', () => {
+    const f = {
+      ...emptyMachineFilters(),
+      model: 'OptiPlex',
+      antivirus: 'Kaspersky',
+      os: 'Windows 11',
+      manufacturer: 'Dell',
+      processor: 'i5',
+      location: 'Pape',
+      agent: '1.2',
+    };
+    expect(unmatchedExactFilters(f, loaded())).toEqual([
+      { key: 'location', facet: 'Emplacement', value: 'Pape' },
+      { key: 'antivirus', facet: 'Antivirus', value: 'Kaspersky' },
+      { key: 'os', facet: 'Système', value: 'Windows 11' },
+      { key: 'agent', facet: "Version de l'agent", value: '1.2' },
+      { key: 'manufacturer', facet: 'Constructeur', value: 'Dell' },
+      { key: 'model', facet: 'Modèle', value: 'OptiPlex' },
+      { key: 'processor', facet: 'Processeur', value: 'i5' },
+    ]);
+  });
+
+  it('says nothing of a value the dropdown offers', () => {
+    const f = {
+      ...emptyMachineFilters(),
+      model: 'OptiPlex 7010',
+      antivirus: 'Kaspersky Endpoint Security',
+      os: 'Windows 11 Pro 23H2',
+      location: 'Papeete',
+      agent: AGENT_OUTDATED,
+    };
+    expect(unmatchedExactFilters(f, loaded())).toEqual([]);
+    expect(unmatchedExactFilters({ ...f, agent: '1.2.1' }, loaded())).toEqual([]);
+  });
+
+  it('says nothing while a dropdown has not been filled — nobody knows yet', () => {
+    const f = { ...emptyMachineFilters(), model: 'OptiPlex', os: 'Windows 11' };
+    expect(unmatchedExactFilters(f, initialFleetOptions())).toEqual([]);
   });
 });

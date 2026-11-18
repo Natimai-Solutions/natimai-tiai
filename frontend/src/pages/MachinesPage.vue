@@ -24,6 +24,7 @@
         :can-read-rooms="canReadRooms"
         :usage-thresholds="usageThresholds"
         :usage-window-days="usageWindowDays"
+        :list-empty="listEmpty"
         @update:model-value="onFilters"
       />
     </div>
@@ -55,12 +56,12 @@
       :selectable="selectable"
       :low-disk-percent="lowDiskPercent"
       @request="onRequest"
-      @open="goDetail"
     />
 
     <CheckRequestDialog
       v-model="askOpen"
       :check="null"
+      :machine-ids="selected.map((m) => m.id)"
       :subtitle="`${selected.length} poste(s) sélectionné(s)`"
       :save="askSelection"
     />
@@ -276,9 +277,10 @@ watch(
   },
 );
 
-/** Open a poste, carrying the whole list query plus the row's absolute rank in
- * it (`i`). The detail page uses the query to come back to this exact search,
- * and the rank to walk to the previous/next result of it. */
+/** Where a poste's name links to: its fiche, carrying the whole list query
+ * plus the row's absolute rank in it (`i`). The detail page uses the query to
+ * come back to this exact search, and the rank to walk to the previous/next
+ * result of it. */
 function detailRoute(row: Machine, rowIndex: number): RouteLocationRaw {
   const p = pagination.value;
   const i = (p.page - 1) * p.rowsPerPage + rowIndex;
@@ -287,10 +289,6 @@ function detailRoute(row: Machine, rowIndex: number): RouteLocationRaw {
     params: { id: row.id },
     query: { ...buildQuery(), i: String(i) },
   };
-}
-
-function goDetail(row: Machine, rowIndex: number) {
-  void router.push(detailRoute(row, rowIndex));
 }
 
 /** The current filters as API params, for the list and the export alike. */
@@ -377,6 +375,18 @@ async function reload() {
 watch(lastRefreshedAt, () => {
   if (lastError.value === null) stale.value = false;
 });
+
+// The server answered this query with no poste — not « still loading », not
+// « could not load »: when the filters bar may say that a value matched
+// exactly is not one of the parc's.
+const listEmpty = computed(
+  () =>
+    !loading.value &&
+    !stale.value &&
+    lastRefreshedAt.value !== null &&
+    lastError.value === null &&
+    pagination.value.rowsNumber === 0,
+);
 
 const { askOpen, placeOpen, askSelection, placeSelection, runBulk, reenrollSelection } =
   useMachineBulkActions({
