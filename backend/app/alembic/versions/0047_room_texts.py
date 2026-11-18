@@ -15,7 +15,7 @@ All nullable, and null on every existing row: the lines and notes written
 before keep their French and are shown as they are.
 
 Revision ID: 0047_room_texts
-Revises: 0045_user_language
+Revises: 0046_command_result_codes
 Create Date: 2026-11-18
 
 """
@@ -27,7 +27,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
 revision: str = "0047_room_texts"
-down_revision: str | None = "0045_user_language"
+down_revision: str | None = "0046_command_result_codes"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
