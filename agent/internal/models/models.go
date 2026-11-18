@@ -425,9 +425,11 @@ type HeartbeatResponse struct {
 //
 // MessageCode and MessageParams name the agent's own message, for the console
 // to word in its reader's language (internal/msg): the Error of a failed
-// result, the Output of a succeeded one. Empty when that text is a tool's
-// output, or too composite to be worded from a code. The text is sent all
-// the same — an older server ignores the two fields and shows it, as before.
+// result, the Output of a succeeded one — and the Output of a failed one
+// too when the agent wrote it, as "output_code"/"output_<name>" beside the
+// error's parameters (msg.WithOutput). Empty when that text is a tool's
+// output, or beyond what the server keeps. The text is sent all the same —
+// an older server ignores the two fields and shows it, as before.
 type CommandResult struct {
 	Status        string         `json:"status"` // succeeded / failed
 	Output        string         `json:"output,omitempty"`

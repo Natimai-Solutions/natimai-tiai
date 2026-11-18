@@ -306,13 +306,10 @@ func noted(m msg.Message, trust msg.Params) msg.Message {
 
 // bothMethodsRefused reports a signed package that method B refused and
 // method A refused after it: method B first — the administrator signed the
-// package, its refusal is the cause — then method A.
+// package, its refusal is the cause — then method A. One sentence, coded
+// "deploy.both_refused", each refusal quoted with its own code (msg).
 func bothMethodsRefused(methodB, methodA error) error {
-	a := methodA.Error()
-	if !strings.HasPrefix(a, "méthode A") {
-		a = "méthode A : " + a
-	}
-	return fmt.Errorf("méthode B : %v ; %s", methodB, a)
+	return msg.BothMethodsRefused(methodB, methodA)
 }
 
 // joinNonEmpty joins the parts that are not empty.

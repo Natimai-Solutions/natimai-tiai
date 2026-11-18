@@ -152,8 +152,74 @@ func cases() []Message {
 		New("deploy.winget_refused", Params{"id": Quote("-x")}),
 		New("deploy.winget_not_allowed", Params{"id": Quote("Mozilla.Firefox")}),
 		New("deploy.winget_version_refused", Params{"version": Quote("1 2")}),
+		// The composite texts (reports.go), and what they quote.
+		New("dism.reboot_required", Params{"output": "Deployment Image Servicing and Management tool\nThe operation completed successfully."}),
+		New("dism.reboot_required", Params{"output": ""}),
+		WUInstall{Selected: 2, Installed: 2, Reboot: true, Updates: []WUInstalled{
+			{Name: "KB5063878 — 2025-08 Cumulative Update", Result: "succeeded"},
+			{Name: "KB2267602 — Defender", Result: "succeeded_with_errors"},
+		}}.Message(),
+		WUInstall{Selected: 4, Installed: 3, Skipped: 1, Updates: []WUInstalled{
+			{Name: "KB5063878 — Cumulative", Result: "succeeded"},
+			{Name: "KB5062660 — Broken", Result: "failed", HResult: "0x80240017"},
+			{Name: "Driver", Result: "aborted", HResult: "0x00000000"},
+		}}.Message(),
+		WUInstall{}.Message(),
+		WUInstall{Skipped: 2}.Message(),
+		WUInstall{Selected: 1, Installed: 1, Updates: []WUInstalled{{Name: "KB1 — X", Result: "in_progress", HResult: "0x00000001"}}}.Message(),
+		WUInstall{Selected: 1, Installed: 1, Updates: []WUInstalled{{Name: "KB1 — X", Result: "not_started", HResult: "0x00000002"}}}.Message(),
+		wuResetWhole,
+		wuResetPartial,
+		wuResetPartialError.Message,
+		wuResetStopError.Message,
+		New("wu_reset.backup_not_removed", Params{"path": `C:\Windows\SoftwareDistribution.old`, "detail": "Access is denied."}),
+		New("service.manager_failed", Params{"detail": "Access is denied."}),
+		New("service.open_failed", Params{"service": "Spooler", "detail": "The specified service does not exist as an installed service."}),
+		New("service.query_failed", Params{"detail": "Access is denied."}),
+		SpoolerReport(4, nil, false),
+		SpoolerReport(0, Wrap("spooler.files_not_removed", Params{"failed": 2}, errors.New("The process cannot access the file.")), true),
+		SpoolerReport(0, Wrap("spooler.queue_unreadable", Params{"dir": `C:\Windows\System32\spool\PRINTERS`}, errors.New("Access is denied.")), false),
+		SpoolerReport(0, errors.New("boom"), true),
+		New("spooler.queue_unreadable", Params{"dir": `C:\Windows\System32\spool\PRINTERS`, "detail": "Access is denied."}),
+		New("spooler.files_not_removed", Params{"failed": 2, "detail": "The process cannot access the file."}),
+		Wrap("spooler.purge_failed", nil, Wrap("spooler.files_not_removed", Params{"failed": 1}, errors.New("Access is denied."))).Message,
+		BothMethodsRefused(Err("deploy.signature.untrusted", Params{"thumbprint": "0A1B2C"}), Err("deploy.method_a.exe_only", nil)).Message,
+		BothMethodsRefused(Err("deploy.signature.invalid", nil), Err("deploy.publisher_not_approved", Params{"publisher": Quote("Contoso Ltd")})).Message,
+		BothMethodsRefused(Err("deploy.signature.invalid", nil),
+			Wrap("deploy.authenticode_refused", Params{"file": "setup.exe"}, Err("deploy.not_signed", nil))).Message,
+		BothMethodsRefused(errors.New("x509: unknown authority"), errors.New("unexpected")).Message,
+		// A coded cause whose own detail is quoted: it goes along too.
+		Wrap("deploy.download_failed", Params{"file": "setup.exe"},
+			Wrap("deploy.download.interrupted", nil, errors.New("unexpected EOF"))).Message,
 	}
 }
+
+// The steps of a whole reset, of a partial one, and the latter's verdict.
+var (
+	wuResetWhole, _ = WUResetReport([]WUResetStep{
+		{Kind: WUResetStopped, Subject: "wuauserv"},
+		{Kind: WUResetAlreadyStopped, Subject: "cryptsvc"},
+		{Kind: WUResetStopped, Subject: "bits"},
+		{Kind: WUResetAlreadyStopped, Subject: "msiserver"},
+		{Kind: WUResetRenamed, Subject: "software_distribution", Arg: "SoftwareDistribution.old"},
+		{Kind: WUResetAbsent, Subject: "catroot2"},
+		{Kind: WUResetRestarted, Subject: "wuauserv"},
+		{Kind: WUResetRestarted, Subject: "bits"},
+		{Kind: WUResetNext},
+	})
+	wuResetPartial, wuResetPartialError = WUResetReport([]WUResetStep{
+		{Kind: WUResetStopped, Subject: "wuauserv"},
+		{Kind: WUResetRenamed, Subject: "software_distribution", Arg: "SoftwareDistribution.old"},
+		{Kind: WUResetRenameFailed, Subject: "catroot2", Arg: `C:\Windows\System32\catroot2`,
+			Err: FromError(Wrap("wu_reset.backup_not_removed", Params{"path": `C:\Windows\System32\catroot2.old`}, errors.New("Access is denied.")))},
+		{Kind: WUResetRestartFailed, Subject: "wuauserv", Err: Plain("The service did not respond.")},
+	})
+	_, wuResetStopError = WUResetReport([]WUResetStep{
+		{Kind: WUResetStopFailed, Subject: "cryptsvc", Err: FromError(Err("spooler.state_timeout", Params{"timeout": "30s"}))},
+		{Kind: WUResetAlreadyStopped, Subject: "msiserver"},
+		{Kind: WUResetKept},
+	})
+)
 
 type fixtureCase struct {
 	Code    string `json:"code"`
@@ -231,9 +297,11 @@ func TestEveryCodeHasACaseAndFitsTheServer(t *testing.T) {
 // ".timeout" and ".interrupted") counts when its prefix is in the source.
 func TestEveryCodeOfTheCatalogueIsSent(t *testing.T) {
 	var source strings.Builder
+	// The reports' builders (reports.go) send codes of their own; the
+	// catalogue itself names them all, and does not count.
 	err := filepath.WalkDir("..", func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
-			strings.Contains(path, string(filepath.Separator)+"msg"+string(filepath.Separator)) {
+			path == filepath.Join("..", "msg", "catalogue.go") {
 			return err
 		}
 		src, err := os.ReadFile(path)
@@ -261,6 +329,8 @@ func TestEveryCodeOfTheCatalogueIsSent(t *testing.T) {
 
 func TestEveryCodeInTheSourceIsInTheCatalogue(t *testing.T) {
 	call := regexp.MustCompile(`msg\.(?:New|Err|Wrap)\("([^"]+)"`)
+	// Inside this package (reports.go), without the qualifier.
+	inside := regexp.MustCompile(`(?:^|[^.\w])(?:New|Err|Wrap|checked)\("([^"]+)"`)
 	found := 0
 	err := filepath.WalkDir("..", func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
@@ -270,7 +340,11 @@ func TestEveryCodeInTheSourceIsInTheCatalogue(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		for _, m := range call.FindAllStringSubmatch(string(src), -1) {
+		find := call
+		if filepath.Dir(path) == filepath.Join("..", "msg") {
+			find = inside
+		}
+		for _, m := range find.FindAllStringSubmatch(string(src), -1) {
 			found++
 			if _, ok := french[m[1]]; !ok {
 				t.Errorf("%s: code %q is not in the catalogue", path, m[1])

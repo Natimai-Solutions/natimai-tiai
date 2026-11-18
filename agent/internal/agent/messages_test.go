@@ -44,6 +44,28 @@ func TestResultOfCarriesTheCodeOfTheWholeText(t *testing.T) {
 	}
 }
 
+// A failure whose output is the agent's own report — a spooler reset that
+// emptied the queue but could not restart it — carries the report's code
+// beside the error's, for the console to word both.
+func TestAFailedResultCarriesTheCodeOfItsReport(t *testing.T) {
+	report := msg.SpoolerReport(4, nil, false)
+	res := resultOf(report, msg.Wrap("spooler.start_failed", nil, errors.New("Access is denied.")))
+	if res.Output != "Spouleur d'impression arrêté.\nFile d'impression purgée (4 fichier(s)).\n"+
+		"Le spouleur n'a PAS pu être redémarré." || res.Error != "démarrage du spouleur : Access is denied." {
+		t.Errorf("texts = %q / %q", res.Output, res.Error)
+	}
+	p := res.MessageParams
+	if res.MessageCode != "spooler.start_failed" || p["detail"] != "Access is denied." ||
+		p["output_code"] != "spooler.report" || p["output_removed"] != 4 || p["output_restarted"] != false {
+		t.Errorf("code = %q %v", res.MessageCode, p)
+	}
+	// A tool's output stays text: no output_code.
+	tool := resultOf(msg.Plain("dism"), msg.Err("dism.failed", msg.Params{"code": "87"}))
+	if _, ok := tool.MessageParams["output_code"]; ok {
+		t.Errorf("a tool's output has no code: %v", tool.MessageParams)
+	}
+}
+
 // What travels: the two fields when there is a code, nothing new otherwise —
 // the body an older server has always read.
 func TestTheResultOnTheWire(t *testing.T) {

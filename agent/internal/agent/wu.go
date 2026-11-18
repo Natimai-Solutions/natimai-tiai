@@ -102,7 +102,7 @@ func (a *Agent) runWUScan(ctx context.Context) (msg.Message, error) {
 // registry, which the reset does not touch either. The next cycle — or a
 // wu_scan, which is what the command's own output tells the administrator to
 // run — re-reads all of it.
-func (a *Agent) runWUReset(ctx context.Context) (string, error) {
+func (a *Agent) runWUReset(ctx context.Context) (msg.Message, error) {
 	a.wuOp.Lock()
 	defer a.wuOp.Unlock()
 
@@ -117,7 +117,7 @@ func (a *Agent) runWUReset(ctx context.Context) (string, error) {
 // now installed would be worse than showing none. The refreshed reading — and
 // with it "restart required", which only becomes true here — reaches the console
 // on the next heartbeat, a minute later.
-func (a *Agent) runWUInstall(ctx context.Context, includeDrivers bool) (string, error) {
+func (a *Agent) runWUInstall(ctx context.Context, includeDrivers bool) (msg.Message, error) {
 	a.wuOp.Lock()
 	defer a.wuOp.Unlock()
 

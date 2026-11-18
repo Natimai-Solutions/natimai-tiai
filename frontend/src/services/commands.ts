@@ -702,6 +702,148 @@ function wordFrom(table: object, prefix: string, key: unknown): string {
 }
 
 /**
+ * A message the agent quotes in another under `key` (its `msg.Nest`): the
+ * text as `key`, its code as `key_code` and its parameters as `key_<name>`.
+ * Worded in the language shown when this console knows the code, else null.
+ */
+function nestedMessage(p: Params, key: string): string | null {
+  const code = p[`${key}_code`];
+  if (typeof code !== 'string') return null;
+  const prefix = `${key}_`;
+  const inner = Object.fromEntries(
+    Object.entries(p)
+      .filter(([k]) => k.startsWith(prefix) && k !== `${key}_code`)
+      .map(([k, v]) => [k.slice(prefix.length), v]),
+  );
+  return commandMessage(code, inner);
+}
+
+/** A quoted message, worded when it can be, else its text as the agent wrote it. */
+function nested(p: Params, key: string): string {
+  return nestedMessage(p, key) ?? text(p[key]);
+}
+
+/**
+ * A list parameter (the agent's `msg.listParam`): one item per line, its
+ * fields separated by tabs, the last field keeping any tab of its own.
+ */
+function listItems(value: unknown, fields: number): string[][] {
+  const joined = text(value);
+  if (!joined) return [];
+  return joined.split('\n').map((line) => {
+    const parts = line.split('\t');
+    const item = [...parts.slice(0, fields - 1), parts.slice(fields - 1).join('\t')];
+    while (item.length < fields) item.push('');
+    return item;
+  });
+}
+
+/** The lines of a Windows Update install's report (wu.install_report). */
+function wuInstallReport(p: Params): string {
+  const selected = count(p.selected);
+  const installed = count(p.installed);
+  const skipped = count(p.skipped);
+  const lines: string[] = [];
+  if (selected === 0 && skipped === 0) lines.push(word('commands.words.wuInstall.upToDate'));
+  else if (selected === 0) lines.push(word('commands.words.wuInstall.nothingInstallable'));
+  else lines.push(word('commands.words.wuInstall.selected', { selected, installed }, selected));
+  if (skipped > 0) {
+    lines.push(word('commands.words.wuInstall.skipped', { count: skipped }, skipped));
+  }
+  for (const [result = '', hresult = '', name = ''] of listItems(p.updates, 3)) {
+    const label = wordFrom(catalogue.fr.words.wuResult, 'commands.words.wuResult', result);
+    lines.push(
+      hresult
+        ? word('commands.words.wuInstall.updateHresult', { name, result: label, hresult })
+        : word('commands.words.wuInstall.update', { name, result: label }),
+    );
+  }
+  const missing = selected - installed;
+  if (missing > 0) {
+    lines.push(word('commands.words.wuInstall.notDownloaded', { count: missing }, missing));
+  }
+  if (p.reboot === true) lines.push('', word('commands.words.wuInstall.reboot'));
+  return lines.join('\n');
+}
+
+const WU_RESET_FAILURES = new Set(['stop_failed', 'rename_failed', 'restart_failed']);
+
+function wuResetService(name: string): string {
+  const label =
+    wordFrom(catalogue.fr.words.wuReset.services, 'commands.words.wuReset.services', name) || name;
+  return word('commands.words.wuReset.service', { label, name });
+}
+
+function wuResetFolder(key: string): string {
+  return wordFrom(catalogue.fr.words.wuReset.folders, 'commands.words.wuReset.folders', key) || key;
+}
+
+/** What a failed step of a reset was doing. */
+function wuResetWhat(kind: string, subject: string, arg: string): string {
+  if (kind === 'rename_failed') return word('commands.words.wuReset.rename_failed', { path: arg });
+  return word(`commands.words.wuReset.${kind === 'stop_failed' ? 'stop' : 'restart'}_failed`, {
+    service: wuResetService(subject),
+  });
+}
+
+/** The steps of a Windows Update reset (wu_reset.report); `e<n>` quotes the nth failure's error. */
+function wuResetReport(p: Params): string {
+  const lines: string[] = [];
+  let failures = 0;
+  for (const [kind = '', subject = '', arg = ''] of listItems(p.steps, 3)) {
+    if (WU_RESET_FAILURES.has(kind)) {
+      failures += 1;
+      lines.push(
+        word('commands.words.wuReset.failed', {
+          what: wuResetWhat(kind, subject, arg),
+          detail: nested(p, `e${failures}`),
+        }),
+      );
+      continue;
+    }
+    switch (kind) {
+      case 'already_stopped':
+      case 'stopped':
+      case 'restarted':
+        lines.push(word(`commands.words.wuReset.${kind}`, { service: wuResetService(subject) }));
+        break;
+      case 'kept':
+        lines.push(word('commands.words.wuReset.kept'));
+        break;
+      case 'renamed':
+        lines.push(
+          word('commands.words.wuReset.renamed', { folder: wuResetFolder(subject), backup: arg }),
+        );
+        break;
+      case 'absent':
+        lines.push(word('commands.words.wuReset.absent', { folder: wuResetFolder(subject) }));
+        break;
+      case 'next':
+        lines.push('', word('commands.words.wuReset.next'));
+        break;
+    }
+  }
+  return lines.join('\n');
+}
+
+/** The lines of a spooler reset that went partly (spooler.report). */
+function spoolerReport(p: Params): string {
+  const lines = [word('commands.words.spoolerReport.stopped')];
+  if (p.purge !== undefined) {
+    lines.push(
+      word('commands.words.spoolerReport.purgeIncomplete', { detail: nested(p, 'purge') }),
+    );
+  } else {
+    const removed = count(p.removed);
+    lines.push(word('commands.words.spoolerReport.purged', { removed }, removed));
+  }
+  lines.push(
+    word(`commands.words.spoolerReport.${p.restarted === true ? 'restarted' : 'notRestarted'}`),
+  );
+  return lines.join('\n');
+}
+
+/**
  * The parameters a code's sentence is filled with — its own, and the pieces
  * built from them — and the number its plural follows, if any.
  */
@@ -790,6 +932,32 @@ function filled(code: string, p: Params): { named: Params; plural?: number } {
     case 'deploy.winget_done':
       named.already = p.already === true ? word('commands.words.wingetAlready') : '';
       return { named };
+    case 'wu.install_report':
+      named.report = wuInstallReport(p);
+      return { named };
+    case 'wu_reset.report':
+      named.report = wuResetReport(p);
+      return { named };
+    case 'wu_reset.incomplete':
+      named.failed = listItems(p.failed, 3)
+        .map(([kind = '', subject = '', arg = '']) => wuResetWhat(kind, subject, arg))
+        .join(word('commands.words.wuReset.separator'));
+      return { named };
+    case 'spooler.report':
+      named.report = spoolerReport(p);
+      return { named };
+    case 'spooler.files_not_removed':
+      return { named, plural: count(p.failed) };
+    case 'deploy.both_refused': {
+      // As the agent writes it: method A's refusal gets its prefix unless
+      // its French already starts with it (the method_a.* refusals).
+      named.b = nested(p, 'b');
+      const refusal = nested(p, 'a');
+      named.a = text(p.a).startsWith(catalogue.fr.words.method.replace('{method}', 'A'))
+        ? refusal
+        : word('commands.words.methodA', { refusal });
+      return { named };
+    }
   }
   return { named };
 }
@@ -809,15 +977,8 @@ export function commandMessage(
   const { named, plural } = filled(code, p);
   // A detail that is itself one of the agent's coded messages (detail_code,
   // its parameters as detail_<name>): worded too, not quoted in French.
-  if (typeof p.detail_code === 'string') {
-    const inner = Object.fromEntries(
-      Object.entries(p)
-        .filter(([k]) => k.startsWith('detail_') && k !== 'detail_code')
-        .map(([k, v]) => [k.slice('detail_'.length), v]),
-    );
-    const detail = commandMessage(p.detail_code, inner);
-    if (detail !== null) named.detail = detail;
-  }
+  const detail = nestedMessage(p, 'detail');
+  if (detail !== null) named.detail = detail;
   const sentence = word(`commands.results.${code}`, named, plural);
   const relay = typeof p.relay === 'string' ? p.relay : '';
   return relay ? word('commands.relayed', { relay, text: sentence }) : sentence;
@@ -856,7 +1017,9 @@ type Verdict = Pick<
  * failed command, the output of a succeeded one — and this console knows
  * it; else the stored text as the server or the agent wrote it (a tool's
  * output, a row stored before codes, an older agent), its truncation note
- * worded.
+ * worded. The output of a failed command, when the agent wrote it (the
+ * steps of a partial reset, an install's report), is worded from the code
+ * it carries beside the error's (`output_code`, `output_<name>`).
  */
 export function commandResultText(cmd: Verdict, kind: 'output' | 'error'): string {
   const stored = (kind === 'error' ? cmd.error : cmd.result_output) ?? '';
@@ -865,6 +1028,9 @@ export function commandResultText(cmd: Verdict, kind: 'output' | 'error'): strin
   if (kind === worded) {
     const sentence = commandMessage(cmd.result_code, cmd.result_params);
     if (sentence !== null) return sentence;
+  } else if (kind === 'output' && cmd.result_code && cmd.result_params) {
+    const report = nestedMessage(cmd.result_params, 'output');
+    if (report !== null) return report;
   }
   return withTruncationWorded(stored);
 }

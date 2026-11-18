@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/msg"
 )
 
 // errWUUnsupported is returned by the stubs below: the WUA COM API is a Windows
@@ -25,12 +26,12 @@ func ReadWUState(ctx context.Context) (*models.WUState, error) {
 }
 
 // RunWUInstall refuses on any platform that has no Windows Update.
-func RunWUInstall(ctx context.Context, includeDrivers bool, timeout time.Duration) (string, error) {
-	return "", errWUUnsupported
+func RunWUInstall(ctx context.Context, includeDrivers bool, timeout time.Duration) (msg.Message, error) {
+	return msg.Message{}, errWUUnsupported
 }
 
 // RunWUReset refuses off Windows: it drives the Windows service manager and
 // renames directories under %SystemRoot%, neither of which has a counterpart.
-func RunWUReset(ctx context.Context) (string, error) {
-	return "", errWUUnsupported
+func RunWUReset(ctx context.Context) (msg.Message, error) {
+	return msg.Message{}, errWUUnsupported
 }

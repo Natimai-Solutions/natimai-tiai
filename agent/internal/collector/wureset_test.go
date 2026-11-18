@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"tiai/agent/internal/msg"
 )
 
 // --- The tables -------------------------------------------------------------
@@ -16,15 +18,13 @@ import (
 // here as well as there.
 func TestWUResetServicesMatchTheDocumentedProcedure(t *testing.T) {
 	want := []string{"wuauserv", "cryptsvc", "bits", "msiserver"}
-	got := make([]string, 0, len(wuResetServices))
-	for _, s := range wuResetServices {
-		got = append(got, s.name)
-		if strings.TrimSpace(s.label) == "" {
-			t.Errorf("%s: no label — the report is read by a human", s.name)
+	for _, name := range wuResetServices {
+		if strings.TrimSpace(msg.WUResetServices[name]) == "" {
+			t.Errorf("%s: no label — the report is read by a human", name)
 		}
 	}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("services = %v, want %v", got, want)
+	if strings.Join(wuResetServices, ",") != strings.Join(want, ",") {
+		t.Errorf("services = %v, want %v", wuResetServices, want)
 	}
 }
 
@@ -38,17 +38,17 @@ func TestWUResetFoldersStayUnderSystemRoot(t *testing.T) {
 	}
 	for _, f := range wuResetFolders {
 		if len(f.elems) == 0 {
-			t.Errorf("%s: no path", f.label)
+			t.Errorf("%s: no path", f.key)
 		}
 		for _, e := range f.elems {
 			if strings.ContainsAny(e, `\/`) || e == ".." {
-				t.Errorf("%s: path element %q must be a bare name", f.label, e)
+				t.Errorf("%s: path element %q must be a bare name", f.key, e)
 			}
 		}
 		if strings.ContainsAny(f.backup, `\/`) || f.backup == ".." {
-			t.Errorf("%s: backup name %q must be a bare name", f.label, f.backup)
+			t.Errorf("%s: backup name %q must be a bare name", f.key, f.backup)
 		}
-		if strings.TrimSpace(f.label) == "" {
+		if strings.TrimSpace(msg.WUResetFolders[f.key]) == "" {
 			t.Errorf("%v: no label", f.elems)
 		}
 	}
@@ -67,10 +67,16 @@ func TestWUResetTimeoutCoversEveryServiceTransition(t *testing.T) {
 
 // --- The report -------------------------------------------------------------
 
+// A whole reset: the report reads, byte for byte, what the agent wrote
+// before it had a code, and carries the code the console words it from.
 func TestWUResetLogSucceedsWhenNothingFailed(t *testing.T) {
 	var log wuResetLog
-	log.step("Windows Update (%s) : arrêté.", "wuauserv")
-	log.step("Magasin : renommé.")
+	log.step(msg.WUResetStopped, "wuauserv", "")
+	log.step(msg.WUResetAlreadyStopped, "cryptsvc", "")
+	log.step(msg.WUResetRenamed, "software_distribution", "SoftwareDistribution.old")
+	log.step(msg.WUResetAbsent, "catroot2", "")
+	log.step(msg.WUResetRestarted, "wuauserv", "")
+	log.step(msg.WUResetNext, "", "")
 
 	if log.failed() {
 		t.Error("a log with no failure must not report one")
@@ -79,8 +85,18 @@ func TestWUResetLogSucceedsWhenNothingFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verdict = %v, want success", err)
 	}
-	if !strings.Contains(out, "wuauserv") || !strings.Contains(out, "renommé") {
-		t.Errorf("steps lost from the report:\n%s", out)
+	want := "Windows Update (wuauserv) : arrêté.\n" +
+		"Services de chiffrement (cryptsvc) : déjà arrêté.\n" +
+		"Magasin Windows Update (SoftwareDistribution) : renommé en SoftwareDistribution.old.\n" +
+		"Cache de signatures de catalogues (catroot2) : absent, rien à renommer.\n" +
+		"Windows Update (wuauserv) : redémarré.\n" +
+		"\n" +
+		"Windows reconstruira ces dossiers à la prochaine recherche : lancer « Rechercher les mises à jour » pour vérifier que le poste repart."
+	if out.Text != want {
+		t.Errorf("report:\n%q\nwant\n%q", out.Text, want)
+	}
+	if code, _ := msg.Coded(out); code != "wu_reset.report" {
+		t.Errorf("code = %q", code)
 	}
 }
 
@@ -89,9 +105,9 @@ func TestWUResetLogSucceedsWhenNothingFailed(t *testing.T) {
 // report has to carry both halves, because that is the diagnosis.
 func TestWUResetLogReportsAPartialRun(t *testing.T) {
 	var log wuResetLog
-	log.step("Magasin Windows Update : renommé en SoftwareDistribution.old.")
-	log.fail("renommage de C:\\Windows\\System32\\catroot2", errors.New("access is denied"))
-	log.step("Windows Update (wuauserv) : redémarré.")
+	log.step(msg.WUResetRenamed, "software_distribution", "SoftwareDistribution.old")
+	log.fail(msg.WUResetRenameFailed, "catroot2", `C:\Windows\System32\catroot2`, errors.New("access is denied"))
+	log.step(msg.WUResetRestarted, "wuauserv", "")
 
 	if !log.failed() {
 		t.Fatal("a recorded failure must show")
@@ -100,33 +116,53 @@ func TestWUResetLogReportsAPartialRun(t *testing.T) {
 	if err == nil {
 		t.Fatal("a partial reset must fail the command")
 	}
-	if !strings.Contains(err.Error(), "catroot2") {
+	// What did work is not dropped: the poste's store *has* moved, and an
+	// administrator reading only "échec" would redo the whole thing. The
+	// failing step is in the report too, with the underlying cause.
+	want := "Magasin Windows Update (SoftwareDistribution) : renommé en SoftwareDistribution.old.\n" +
+		`ÉCHEC — renommage de C:\Windows\System32\catroot2 : access is denied` + "\n" +
+		"Windows Update (wuauserv) : redémarré."
+	if out.Text != want {
+		t.Errorf("report:\n%q\nwant\n%q", out.Text, want)
+	}
+	if err.Error() != `réinitialisation incomplète : renommage de C:\Windows\System32\catroot2` {
 		t.Errorf("the error should name what did not work: %v", err)
 	}
-	// What did work is not dropped: the poste's store *has* moved, and an
-	// administrator reading only "échec" would redo the whole thing.
-	if !strings.Contains(out, "SoftwareDistribution.old") {
-		t.Errorf("successful steps lost from the report:\n%s", out)
+	if code, params := msg.Of(err); code != "wu_reset.incomplete" ||
+		params["failed"] != "rename_failed\tcatroot2\t"+`C:\Windows\System32\catroot2` {
+		t.Errorf("error code = %q %v", code, params)
 	}
-	// The failing step is in the report too, with the underlying cause.
-	if !strings.Contains(out, "access is denied") {
-		t.Errorf("the cause is missing from the report:\n%s", out)
+	if code, params := msg.Coded(out); code != "wu_reset.report" || params["e1"] != "access is denied" {
+		t.Errorf("report code = %q %v", code, params)
 	}
 }
 
 func TestWUResetLogJoinsEveryFailure(t *testing.T) {
 	var log wuResetLog
-	log.fail("arrêt du service BITS (bits)", errors.New("timeout"))
-	log.fail("redémarrage du service Windows Update (wuauserv)", errors.New("access denied"))
+	log.fail(msg.WUResetStopFailed, "bits", "", errors.New("timeout"))
+	log.step(msg.WUResetKept, "", "")
+	log.fail(msg.WUResetRestartFailed, "wuauserv", "",
+		msg.Wrap("service.query_failed", nil, errors.New("access denied")))
 
-	_, err := log.verdict()
+	out, err := log.verdict()
 	if err == nil {
 		t.Fatal("failures must fail the command")
 	}
-	for _, want := range []string{"bits", "wuauserv"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not name %q", err, want)
-		}
+	if err.Error() != "réinitialisation incomplète : arrêt du service Transfert intelligent en arrière-plan (BITS) (bits) ; "+
+		"redémarrage du service Windows Update (wuauserv)" {
+		t.Errorf("error = %q", err)
+	}
+	want := "ÉCHEC — arrêt du service Transfert intelligent en arrière-plan (BITS) (bits) : timeout\n" +
+		"Aucun dossier renommé : un service tient encore le magasin de mises à jour.\n" +
+		"ÉCHEC — redémarrage du service Windows Update (wuauserv) : interrogation du service : access denied"
+	if out.Text != want {
+		t.Errorf("report:\n%q\nwant\n%q", out.Text, want)
+	}
+	// Each failure's error is quoted with its own code, when it has one.
+	_, params := msg.Coded(out)
+	if params["e1"] != "timeout" || params["e1_code"] != nil ||
+		params["e2_code"] != "service.query_failed" || params["e2_detail"] != "access denied" {
+		t.Errorf("params = %v", params)
 	}
 }
 
@@ -134,8 +170,8 @@ func TestWUResetLogJoinsEveryFailure(t *testing.T) {
 // update it. The last line of a successful run says so, and points at the
 // command that verifies the repair.
 func TestWUResetNextStepPointsAtTheSearch(t *testing.T) {
-	if !strings.Contains(wuResetNextStep, "Rechercher les mises à jour") {
-		t.Errorf("the guidance should name the follow-up command: %q", wuResetNextStep)
+	if !strings.Contains(msg.WUResetNextStep, "Rechercher les mises à jour") {
+		t.Errorf("the guidance should name the follow-up command: %q", msg.WUResetNextStep)
 	}
 }
 

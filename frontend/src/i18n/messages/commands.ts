@@ -226,6 +226,19 @@ const fr = {
       known_error: '{hint} ({detail})',
       install_incomplete: "{failed} mise(s) à jour sur {selected} n'ont pas été installées",
       install_result: 'installation {result} (code {code})',
+      /** The install's report, line by line (`words.wuInstall`). */
+      install_report: '{report}',
+    },
+    wu_reset: {
+      /** The reset's steps, line by line (`words.wuReset`). */
+      report: '{report}',
+      incomplete: 'réinitialisation incomplète : {failed}',
+      backup_not_removed: 'suppression du renommage précédent ({path}) : {detail}',
+    },
+    service: {
+      manager_failed: 'connexion au gestionnaire de services : {detail}',
+      open_failed: 'ouverture du service {service} : {detail}',
+      query_failed: 'interrogation du service : {detail}',
     },
     inventory: {
       scan: '{disks}, {volumes}, {nics}, {software}.',
@@ -266,6 +279,8 @@ const fr = {
       source_missing:
         "source de réparation inaccessible ({hresult}) : ce poste ne joint ni Windows Update ni son serveur WSUS, ou la source de réparation n'y est pas publiée",
       failed: 'dism a terminé en erreur (code {code})',
+      /** dism's own output, then the agent's sentence. */
+      reboot_required: "{output}\n\nRedémarrage requis pour finaliser l'opération.",
     },
     chkdsk: {
       failed: 'chkdsk a terminé avec le code {code}',
@@ -283,6 +298,11 @@ const fr = {
       start_failed: 'démarrage du spouleur : {detail}',
       purge_failed: "purge de la file d'impression : {detail}",
       state_timeout: "le service n'a pas atteint l'état attendu en {timeout}",
+      /** A reset that went partly, line by line (`words.spoolerReport`). */
+      report: '{report}',
+      queue_unreadable: 'lecture de {dir} : {detail}',
+      files_not_removed:
+        '{failed} fichier(s) non supprimé(s), première erreur : {detail} | {failed} fichier(s) non supprimé(s), première erreur : {detail}',
     },
     deploy: {
       unsupported: 'déploiement logiciel non pris en charge sur ce système',
@@ -297,6 +317,8 @@ const fr = {
         'paquet non signé, et aucun éditeur approuvé sur ce poste (DeployPublishers)',
       install_removes:
         "l'installation de ce paquet lance une désinstallation (msiexec /x, /uninstall ou REMOVE=) : refusée — placez cette commande dans la désinstallation du paquet",
+      /** Method B's refusal, then method A's (`words.methodA`). */
+      both_refused: 'méthode B : {b} ; {a}',
       method_a: {
         msiexec: "méthode A : msiexec n'est accepté que pour désinstaller un code produit",
         exe_only:
@@ -425,6 +447,56 @@ const fr = {
     howSeparator: ', ',
     rebootToFinish: '\nRedémarrage requis pour terminer.',
     wingetAlready: ' (déjà installé, rien à faire)',
+    methodA: 'méthode A : {refusal}',
+    /** The lines of a Windows Update install's report (wu.install_report). */
+    wuInstall: {
+      upToDate: 'Aucune mise à jour applicable : le poste est à jour.',
+      nothingInstallable: 'Aucune mise à jour installable sans intervention sur le poste.',
+      selected:
+        '{selected} mise(s) à jour retenue(s), {installed} installée(s). | {selected} mise(s) à jour retenue(s), {installed} installée(s).',
+      skipped:
+        '{count} ignorée(s) : elles réclament une interaction utilisateur, impossible depuis un service. | {count} ignorée(s) : elles réclament une interaction utilisateur, impossible depuis un service.',
+      update: '{name} : {result}',
+      updateHresult: '{name} : {result} ({hresult})',
+      notDownloaded:
+        "{count} mise(s) à jour n'ont pas pu être téléchargée(s), et n'ont donc pas été installée(s). | {count} mise(s) à jour n'ont pas pu être téléchargée(s), et n'ont donc pas été installée(s).",
+      reboot: "Redémarrage requis pour finaliser l'installation (commande « Redémarrer »).",
+    },
+    /** The steps of a Windows Update reset (wu_reset.report, wu_reset.incomplete). */
+    wuReset: {
+      services: {
+        wuauserv: 'Windows Update',
+        cryptsvc: 'Services de chiffrement',
+        bits: 'Transfert intelligent en arrière-plan (BITS)',
+        msiserver: 'Windows Installer',
+      },
+      folders: {
+        software_distribution: 'Magasin Windows Update (SoftwareDistribution)',
+        catroot2: 'Cache de signatures de catalogues (catroot2)',
+      },
+      service: '{label} ({name})',
+      already_stopped: '{service} : déjà arrêté.',
+      stopped: '{service} : arrêté.',
+      restarted: '{service} : redémarré.',
+      kept: 'Aucun dossier renommé : un service tient encore le magasin de mises à jour.',
+      renamed: '{folder} : renommé en {backup}.',
+      absent: '{folder} : absent, rien à renommer.',
+      next: 'Windows reconstruira ces dossiers à la prochaine recherche : lancer « Rechercher les mises à jour » pour vérifier que le poste repart.',
+      failed: 'ÉCHEC — {what} : {detail}',
+      stop_failed: 'arrêt du service {service}',
+      restart_failed: 'redémarrage du service {service}',
+      rename_failed: 'renommage de {path}',
+      separator: ' ; ',
+    },
+    /** The lines of a spooler reset that went partly (spooler.report). */
+    spoolerReport: {
+      stopped: "Spouleur d'impression arrêté.",
+      purged:
+        "File d'impression purgée ({removed} fichier(s)). | File d'impression purgée ({removed} fichier(s)).",
+      purgeIncomplete: 'Purge incomplète de la file : {detail}',
+      restarted: "Spouleur d'impression redémarré.",
+      notRestarted: "Le spouleur n'a PAS pu être redémarré.",
+    },
   },
 };
 
@@ -633,6 +705,17 @@ const en: Translation<typeof fr> = {
       install_incomplete:
         '{failed} of {selected} updates was not installed | {failed} of {selected} updates were not installed',
       install_result: 'installation {result} (code {code})',
+      install_report: '{report}',
+    },
+    wu_reset: {
+      report: '{report}',
+      incomplete: 'incomplete reset: {failed}',
+      backup_not_removed: 'removing the previous rename ({path}): {detail}',
+    },
+    service: {
+      manager_failed: 'connecting to the service manager: {detail}',
+      open_failed: 'opening the service {service}: {detail}',
+      query_failed: 'querying the service: {detail}',
     },
     inventory: {
       scan: '{disks}, {volumes}, {nics}, {software}.',
@@ -671,6 +754,7 @@ const en: Translation<typeof fr> = {
       source_missing:
         'repair source unreachable ({hresult}): this computer reaches neither Windows Update nor its WSUS server, or the repair source is not published there',
       failed: 'dism ended with an error (code {code})',
+      reboot_required: '{output}\n\nRestart required to finish the operation.',
     },
     chkdsk: {
       failed: 'chkdsk ended with code {code}',
@@ -688,6 +772,10 @@ const en: Translation<typeof fr> = {
       start_failed: 'starting the spooler: {detail}',
       purge_failed: 'emptying the print queue: {detail}',
       state_timeout: 'the service did not reach the expected state within {timeout}',
+      report: '{report}',
+      queue_unreadable: 'reading {dir}: {detail}',
+      files_not_removed:
+        '{failed} file not deleted, first error: {detail} | {failed} files not deleted, first error: {detail}',
     },
     deploy: {
       unsupported: 'software deployment not supported on this system',
@@ -702,6 +790,7 @@ const en: Translation<typeof fr> = {
         'unsigned package, and no approved publisher on this computer (DeployPublishers)',
       install_removes:
         'this package’s installation runs an uninstallation (msiexec /x, /uninstall or REMOVE=): refused — put this command in the package’s uninstallation',
+      both_refused: 'method B: {b}; {a}',
       method_a: {
         msiexec: 'method A: msiexec is only accepted to uninstall a product code',
         exe_only:
@@ -830,6 +919,52 @@ const en: Translation<typeof fr> = {
     howSeparator: ', ',
     rebootToFinish: '\nRestart required to finish.',
     wingetAlready: ' (already installed, nothing to do)',
+    methodA: 'method A: {refusal}',
+    wuInstall: {
+      upToDate: 'No applicable update: the computer is up to date.',
+      nothingInstallable: 'No update can be installed without action on the computer.',
+      selected:
+        '{selected} update selected, {installed} installed. | {selected} updates selected, {installed} installed.',
+      skipped:
+        '{count} skipped: it needs user interaction, impossible from a service. | {count} skipped: they need user interaction, impossible from a service.',
+      update: '{name}: {result}',
+      updateHresult: '{name}: {result} ({hresult})',
+      notDownloaded:
+        '{count} update could not be downloaded, so it was not installed. | {count} updates could not be downloaded, so they were not installed.',
+      reboot: 'Restart required to finish the installation (“Restart the computer” command).',
+    },
+    wuReset: {
+      services: {
+        wuauserv: 'Windows Update',
+        cryptsvc: 'Cryptographic Services',
+        bits: 'Background Intelligent Transfer Service (BITS)',
+        msiserver: 'Windows Installer',
+      },
+      folders: {
+        software_distribution: 'Windows Update store (SoftwareDistribution)',
+        catroot2: 'Catalog signature cache (catroot2)',
+      },
+      service: '{label} ({name})',
+      already_stopped: '{service}: already stopped.',
+      stopped: '{service}: stopped.',
+      restarted: '{service}: restarted.',
+      kept: 'No folder renamed: a service still holds the update store.',
+      renamed: '{folder}: renamed to {backup}.',
+      absent: '{folder}: absent, nothing to rename.',
+      next: 'Windows will rebuild these folders at the next check: run “Check for updates” to confirm the computer is back on track.',
+      failed: 'FAILED — {what}: {detail}',
+      stop_failed: 'stopping the service {service}',
+      restart_failed: 'restarting the service {service}',
+      rename_failed: 'renaming {path}',
+      separator: '; ',
+    },
+    spoolerReport: {
+      stopped: 'Print spooler stopped.',
+      purged: 'Print queue emptied ({removed} file). | Print queue emptied ({removed} files).',
+      purgeIncomplete: 'Print queue only partly emptied: {detail}',
+      restarted: 'Print spooler restarted.',
+      notRestarted: 'The spooler could NOT be restarted.',
+    },
   },
 };
 

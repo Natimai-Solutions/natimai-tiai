@@ -63,6 +63,31 @@ var french = map[string]func(Params) string{
 	"wu.install_result": func(p Params) string {
 		return fmt.Sprintf("installation %s (code %v)", WUResults[str(p, "result")], p["code"])
 	},
+	// The install's report, line by line (reports.go: WUInstall).
+	"wu.install_report": func(p Params) string {
+		return wuInstallFrom(p).french()
+	},
+
+	// --- Windows Update reset (collector/wureset*.go; reports.go).
+	"wu_reset.report": func(p Params) string {
+		return wuResetFrench(wuResetStepsFrom(p))
+	},
+	"wu_reset.incomplete": wuResetIncompleteFrench,
+	"wu_reset.backup_not_removed": func(p Params) string {
+		return fmt.Sprintf("suppression du renommage précédent (%s) : %s", str(p, "path"), str(p, "detail"))
+	},
+
+	// --- The service manager, for the spooler and the Windows Update reset
+	// (collector/maintenance_windows.go, wureset_windows.go).
+	"service.manager_failed": func(p Params) string {
+		return "connexion au gestionnaire de services : " + str(p, "detail")
+	},
+	"service.open_failed": func(p Params) string {
+		return fmt.Sprintf("ouverture du service %s : %s", str(p, "service"), str(p, "detail"))
+	},
+	"service.query_failed": func(p Params) string {
+		return "interrogation du service : " + str(p, "detail")
+	},
 
 	// --- Inventory (internal/agent/inventory.go).
 	"inventory.scan": func(p Params) string {
@@ -130,6 +155,11 @@ var french = map[string]func(Params) string{
 		return fmt.Sprintf("source de réparation inaccessible (%s) : ce poste ne joint ni Windows Update "+
 			"ni son serveur WSUS, ou la source de réparation n'y est pas publiée", str(p, "hresult"))
 	},
+	// dism's own output (Windows' words, raw), and the agent's sentence after
+	// it: an exit code 3010 is a success that wants a restart.
+	"dism.reboot_required": func(p Params) string {
+		return str(p, "output") + "\n\nRedémarrage requis pour finaliser l'opération."
+	},
 	"dism.failed": func(p Params) string {
 		return fmt.Sprintf("dism a terminé en erreur (code %s)", str(p, "code"))
 	},
@@ -162,6 +192,14 @@ var french = map[string]func(Params) string{
 	},
 	"spooler.purge_failed": func(p Params) string {
 		return "purge de la file d'impression : " + str(p, "detail")
+	},
+	// A reset that went partly (reports.go: SpoolerReport).
+	"spooler.report": spoolerReportFrench,
+	"spooler.queue_unreadable": func(p Params) string {
+		return fmt.Sprintf("lecture de %s : %s", str(p, "dir"), str(p, "detail"))
+	},
+	"spooler.files_not_removed": func(p Params) string {
+		return fmt.Sprintf("%v fichier(s) non supprimé(s), première erreur : %s", p["failed"], str(p, "detail"))
 	},
 
 	// --- Wake-on-LAN relayed by this poste (collector/wol.go).
@@ -230,6 +268,8 @@ var french = map[string]func(Params) string{
 		return fmt.Sprintf("méthode A : %s ne peut pas accompagner l'exécutable (fichier que Windows "+
 			"pourrait charger ou lancer) — signez le paquet (méthode B)", str(p, "file"))
 	},
+	// Method B's refusal, then method A's (reports.go: BothMethodsRefused).
+	"deploy.both_refused": bothRefusedFrench,
 	"deploy.signature.unsigned": func(Params) string {
 		return "paquet non signé"
 	},

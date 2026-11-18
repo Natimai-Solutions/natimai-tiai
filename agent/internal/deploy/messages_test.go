@@ -73,15 +73,36 @@ func TestWingetVerdictsAreCoded(t *testing.T) {
 	}
 }
 
-// A method B refusal followed by method A's: one sentence of two, with no
-// code — neither code words the whole of it.
-func TestBothMethodsRefusedHasNoCode(t *testing.T) {
-	err := bothMethodsRefused(msg.Err("deploy.signature.invalid", nil), msg.Err("deploy.method_a.exe_only", nil))
-	if code, _ := msg.Of(err); code != "" {
-		t.Errorf("composite refusal kept code %q", code)
+// A method B refusal followed by method A's: one sentence of two, coded
+// deploy.both_refused, each refusal quoted with its own code — the text the
+// agent always wrote (verification of 2026-11-18: it was uncoded, and reached
+// an English console in French).
+func TestBothMethodsRefusedIsCoded(t *testing.T) {
+	err := bothMethodsRefused(
+		msg.Err("deploy.signature.untrusted", msg.Params{"thumbprint": "0A1B"}),
+		msg.Err("deploy.method_a.exe_only", nil))
+	if err.Error() != "méthode B : certificat de signature non approuvé sur ce poste (empreinte 0A1B absente de DeploySigners) ; "+
+		"méthode A : seul un exécutable (.exe) signé par un éditeur approuvé peut être lancé — signez le paquet (méthode B)" {
+		t.Errorf("text = %q", err)
 	}
-	if !errors.Is(err, err) || err.Error() == "" {
-		t.Error("the text stays")
+	code, params := msg.Of(err)
+	if code != "deploy.both_refused" || params["b_code"] != "deploy.signature.untrusted" ||
+		params["b_thumbprint"] != "0A1B" || params["a_code"] != "deploy.method_a.exe_only" {
+		t.Errorf("code = %q %v", code, params)
+	}
+
+	// Method A's refusal without its prefix gets it, as it always did; an
+	// uncoded refusal is quoted as text.
+	err = bothMethodsRefused(msg.Err("deploy.signature.invalid", nil),
+		msg.Err("deploy.publisher_not_approved", msg.Params{"publisher": msg.Quote("X")}))
+	if err.Error() != `méthode B : signature invalide : le manifeste a changé depuis sa signature ; `+
+		`méthode A : éditeur "X" non approuvé sur ce poste (DeployPublishers)` {
+		t.Errorf("text = %q", err)
+	}
+	err = bothMethodsRefused(errors.New("b"), errors.New("a"))
+	if code, params := msg.Of(err); err.Error() != "méthode B : b ; méthode A : a" ||
+		code != "deploy.both_refused" || params["a_code"] != nil {
+		t.Errorf("uncoded: %q %q %v", err, code, params)
 	}
 }
 

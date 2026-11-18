@@ -40,16 +40,16 @@ func ReadWUState(ctx context.Context) (*models.WUState, error) {
 // The timeout is a parameter rather than a constant: it is the one WU budget an
 // administrator legitimately needs to raise, on a parc behind a slow link where
 // a cumulative update is a gigabyte away.
-func RunWUInstall(ctx context.Context, includeDrivers bool, timeout time.Duration) (string, error) {
+func RunWUInstall(ctx context.Context, includeDrivers bool, timeout time.Duration) (msg.Message, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return msg.Message{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	out, err := runPowerShellJSON(ctx, buildWUScript(wuInstallScript, includeDrivers))
 	if err != nil {
-		return "", wrapWUError(err)
+		return msg.Message{}, wrapWUError(err)
 	}
 	return summarizeInstall(out)
 }

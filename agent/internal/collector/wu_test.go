@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -292,7 +293,8 @@ func TestSummarizeInstallSuccess(t *testing.T) {
         {"title": "Defender", "kb_article_ids": ["2267602"], "result_code": 3, "hresult": 0}
       ]
     }`
-	output, err := summarizeInstall([]byte(result))
+	report, err := summarizeInstall([]byte(result))
+	output := report.Text
 	if err != nil {
 		t.Fatalf("a batch where everything applied must succeed: %v", err)
 	}
@@ -317,7 +319,8 @@ func TestSummarizeInstallFailureKeepsTheBreakdown(t *testing.T) {
         {"title": "Broken", "kb_article_ids": ["5062660"], "result_code": 4, "hresult": -2145124329}
       ]
     }`
-	output, err := summarizeInstall([]byte(result))
+	report, err := summarizeInstall([]byte(result))
+	output := report.Text
 	if err == nil {
 		t.Fatal("a failed update must fail the command")
 	}
@@ -333,7 +336,8 @@ func TestSummarizeInstallFailureKeepsTheBreakdown(t *testing.T) {
 }
 
 func TestSummarizeInstallNothingApplicable(t *testing.T) {
-	output, err := summarizeInstall([]byte(`{"selected":0,"installed":0,"updates":[]}`))
+	report, err := summarizeInstall([]byte(`{"selected":0,"installed":0,"updates":[]}`))
+	output := report.Text
 	if err != nil {
 		t.Fatalf("an up-to-date machine is a success, not a failure: %v", err)
 	}
@@ -350,7 +354,8 @@ func TestSummarizeInstallReportsSkippedAndUndownloaded(t *testing.T) {
         {"title": "Cumulative", "kb_article_ids": ["5063878"], "result_code": 2, "hresult": 0}
       ]
     }`
-	output, err := summarizeInstall([]byte(result))
+	report, err := summarizeInstall([]byte(result))
+	output := report.Text
 	// Two selected updates never reached the installer: their download failed,
 	// and WUA reports no per-update result for them — counting them is the only
 	// thing that keeps them from vanishing silently.
@@ -362,6 +367,47 @@ func TestSummarizeInstallReportsSkippedAndUndownloaded(t *testing.T) {
 	}
 	if !strings.Contains(output, "interaction utilisateur") {
 		t.Errorf("interactive updates not reported:\n%s", output)
+	}
+}
+
+// The report reads, byte for byte, what the agent wrote before it had a code
+// (an older server shows the text), and carries the code an English console
+// words it from: on a success the output's own, on a failure beside the
+// error's (agent.resultOf). The expected texts are the previous agent's.
+func TestSummarizeInstallIsCodedAndReadsAsBefore(t *testing.T) {
+	for _, c := range []struct {
+		in, text, err string
+	}{
+		{`{"selected": 2, "installed": 2, "skipped_interactive": 0, "result_code": 2, "reboot_required": true, "updates": [{"title": "Mise à jour cumulative", "kb_article_ids": ["5063878"], "result_code": 2, "hresult": 0}, {"title": "Defender", "kb_article_ids": ["2267602"], "result_code": 3, "hresult": 0}]}`,
+			"2 mise(s) à jour retenue(s), 2 installée(s).\nKB5063878 — Mise à jour cumulative : installée\nKB2267602 — Defender : installée avec des erreurs\n\nRedémarrage requis pour finaliser l'installation (commande « Redémarrer »).",
+			""},
+		{`{"selected": 3, "installed": 2, "skipped_interactive": 1, "result_code": 4, "reboot_required": false, "updates": [{"title": "Cumulative", "kb_article_ids": ["5063878"], "result_code": 2, "hresult": 0}, {"title": "Broken", "kb_article_ids": ["5062660"], "result_code": 4, "hresult": -2145124329}, {"title": "Pilote", "kb_article_ids": [], "result_code": 5, "hresult": 0}]}`,
+			"3 mise(s) à jour retenue(s), 2 installée(s).\n1 ignorée(s) : elles réclament une interaction utilisateur, impossible depuis un service.\nKB5063878 — Cumulative : installée\nKB5062660 — Broken : échec (0x80240017)\nPilote : abandonnée (0x00000000)\n1 mise(s) à jour n'ont pas pu être téléchargée(s), et n'ont donc pas été installée(s).",
+			"3 mise(s) à jour sur 3 n'ont pas été installées"},
+		{`{"selected":0,"installed":0,"updates":[]}`,
+			"Aucune mise à jour applicable : le poste est à jour.", ""},
+		{`{"selected":0,"installed":0,"skipped_interactive":2,"updates":[]}`,
+			"Aucune mise à jour installable sans intervention sur le poste.\n2 ignorée(s) : elles réclament une interaction utilisateur, impossible depuis un service.",
+			""},
+		{`{"selected": 1, "installed": 1, "result_code": 4, "updates": [{"title": "X", "kb_article_ids": ["1"], "result_code": 2, "hresult": 0}]}`,
+			"1 mise(s) à jour retenue(s), 1 installée(s).\nKB1 — X : installée",
+			"installation échec (code 4)"},
+	} {
+		report, err := summarizeInstall([]byte(c.in))
+		if report.Text != c.text {
+			t.Errorf("text = %q\nwant   %q", report.Text, c.text)
+		}
+		if got := fmt.Sprint(err); (err == nil && c.err != "") || (err != nil && got != c.err) {
+			t.Errorf("err = %v, want %q", err, c.err)
+		}
+		if code, _ := msg.Coded(report); code != "wu.install_report" {
+			t.Errorf("%q: code %q", c.text, code)
+		}
+	}
+	// A title the list cannot carry (a line break): the text alone.
+	odd, _ := summarizeInstall([]byte(`{"selected": 1, "installed": 1, "result_code": 2, "updates": [{"title": "A\nB", "kb_article_ids": ["1"], "result_code": 2}]}`))
+	if odd.Code != "" || odd.Text != "1 mise(s) à jour retenue(s), 1 installée(s).\nKB1 — A\nB : installée" {
+		t.Errorf("odd title: %+v", odd)
 	}
 }
 
