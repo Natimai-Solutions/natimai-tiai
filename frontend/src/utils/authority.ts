@@ -1,3 +1,4 @@
+import { t } from 'src/i18n';
 import type { Group, GroupScope } from 'src/services/groups';
 
 /**
@@ -18,9 +19,15 @@ export interface Authority {
   scope: GroupScope | null;
 }
 
-/** The tooltip on what is withheld for that reason. */
-export const MORE_RIGHTS_ACCOUNT = 'Ce compte détient plus de droits que vous';
-export const MORE_RIGHTS_GROUP = 'Ce groupe accorde plus de droits que vous n’en détenez';
+/** The tooltip on an account withheld for that reason, in the reader's language. */
+export function moreRightsAccount(): string {
+  return t('permissions.authority.moreRightsAccount');
+}
+
+/** The tooltip on a group withheld for that reason, in the reader's language. */
+export function moreRightsGroup(): string {
+  return t('permissions.authority.moreRightsGroup');
+}
 
 function emptyScope(): GroupScope {
   return { locations: [], buildings: [], rooms: [] };

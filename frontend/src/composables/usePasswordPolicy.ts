@@ -1,6 +1,7 @@
 import { computed, reactive } from 'vue';
 import { api } from 'boot/axios';
 import { PASSWORD_MIN_LENGTH } from 'src/services/users';
+import { t } from 'src/i18n';
 
 /**
  * The password rules the server is configured with (PASSWORD_MIN_LENGTH,
@@ -24,13 +25,16 @@ export function loadPasswordPolicy(): Promise<void> {
   return loading;
 }
 
-/** « 1 heure », « 30 minutes », « 2 heures » — the link's lifetime, in words. */
+/** « une heure », « 30 minutes », « 2 heures » — the link's lifetime, in the
+ *  reader's words. */
 export function durationLabel(minutes: number): string {
   if (minutes % 60 === 0) {
     const h = minutes / 60;
-    return h === 1 ? 'une heure' : `${h} heures`;
+    return h === 1
+      ? t('account.passwordPolicy.oneHour')
+      : t('account.passwordPolicy.hours', { count: h });
   }
-  return `${minutes} minutes`;
+  return t('account.passwordPolicy.minutes', { count: minutes });
 }
 
 export function usePasswordPolicy() {

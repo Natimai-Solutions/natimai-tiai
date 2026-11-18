@@ -1,19 +1,19 @@
 <template>
   <q-page padding>
-    <h1 class="text-h5 q-mb-md">Mon compte</h1>
+    <h1 class="text-h5 q-mb-md">{{ t('account.title') }}</h1>
 
     <q-card flat bordered class="q-mb-md" style="max-width: 520px">
       <q-card-section class="q-gutter-xs">
         <div class="row items-center">
-          <div class="col-4 text-muted">E-mail</div>
+          <div class="col-4 text-muted">{{ t('account.profile.email') }}</div>
           <div class="col">{{ auth.user?.email ?? '—' }}</div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-muted">Nom</div>
+          <div class="col-4 text-muted">{{ t('account.profile.name') }}</div>
           <div class="col">{{ auth.user?.full_name || '—' }}</div>
         </div>
         <div class="row items-center">
-          <div class="col-4 text-muted">Groupes</div>
+          <div class="col-4 text-muted">{{ t('account.profile.groups') }}</div>
           <div class="col">
             <template v-if="auth.user?.groups.length">
               <q-chip
@@ -27,7 +27,7 @@
                 {{ group.name }}
               </q-chip>
             </template>
-            <span v-else class="text-muted">Aucun — ce compte ne peut rien consulter</span>
+            <span v-else class="text-muted">{{ t('account.profile.noGroup') }}</span>
           </div>
         </div>
       </q-card-section>
@@ -62,10 +62,9 @@
 
     <q-card flat bordered class="q-mb-md" style="max-width: 520px">
       <q-card-section class="text-subtitle1">
-        Notifications par e-mail
+        {{ t('account.notifications.title') }}
         <div class="text-caption text-muted">
-          Ce que Tia'i vous envoie. Le choix est personnel : il ne change rien pour les autres
-          comptes de la console.
+          {{ t('account.notifications.hint') }}
         </div>
       </q-card-section>
       <q-separator />
@@ -92,20 +91,20 @@
         </q-option-group>
         <div v-if="savingPreference" class="text-caption text-muted q-mt-sm">
           <q-spinner size="14px" class="q-mr-xs" />
-          Enregistrement…
+          {{ t('account.notifications.saving') }}
         </div>
       </q-card-section>
     </q-card>
 
     <q-card flat bordered style="max-width: 520px">
-      <q-card-section class="text-subtitle1">Changer mon mot de passe</q-card-section>
+      <q-card-section class="text-subtitle1">{{ t('account.password.title') }}</q-card-section>
 
       <q-form @submit="onSubmit">
         <q-card-section class="q-gutter-md q-pt-none">
           <q-input
             v-model="currentPassword"
             type="password"
-            label="Mot de passe actuel"
+            :label="t('account.password.current')"
             outlined
             dense
             autocomplete="current-password"
@@ -114,17 +113,17 @@
           <q-input
             v-model="newPassword"
             type="password"
-            label="Nouveau mot de passe"
+            :label="t('account.password.new')"
             outlined
             dense
             autocomplete="new-password"
-            :hint="`${passwordMin} caractères minimum`"
+            :hint="t('account.password.minLength', { count: passwordMin })"
             :rules="[required, longEnough]"
           />
           <q-input
             v-model="confirmation"
             type="password"
-            label="Confirmer le nouveau mot de passe"
+            :label="t('account.password.confirm')"
             outlined
             dense
             autocomplete="new-password"
@@ -132,12 +131,17 @@
           />
           <q-banner dense class="surface-blue">
             <template #avatar><q-icon name="info" /></template>
-            Toutes vos sessions seront fermées : vous devrez vous reconnecter.
+            {{ t('account.password.sessionsClosed') }}
           </q-banner>
         </q-card-section>
 
         <q-card-actions class="q-px-md q-pb-md">
-          <q-btn type="submit" color="primary" label="Changer le mot de passe" :loading="loading" />
+          <q-btn
+            type="submit"
+            color="primary"
+            :label="t('account.password.submit')"
+            :loading="loading"
+          />
         </q-card-actions>
       </q-form>
     </q-card>
@@ -145,10 +149,9 @@
     <q-card flat bordered class="q-mt-md" style="max-width: 520px">
       <q-card-section class="row items-start no-wrap">
         <div class="col">
-          <div class="text-subtitle1">Sessions ouvertes</div>
+          <div class="text-subtitle1">{{ t('account.sessions.title') }}</div>
           <div class="text-caption text-muted">
-            Les appareils connectés à votre compte. Fermez celles que vous ne reconnaissez pas :
-            l'accès y est coupé immédiatement.
+            {{ t('account.sessions.hint') }}
           </div>
         </div>
         <q-btn
@@ -156,7 +159,7 @@
           dense
           round
           icon="refresh"
-          aria-label="Actualiser les sessions"
+          :aria-label="t('account.sessions.refresh')"
           :loading="sessionsLoading"
           @click="loadSessions"
         />
@@ -167,7 +170,7 @@
            stranger's session (item 2). -->
       <q-card-section v-if="sessionsError" class="q-pa-sm">
         <CardLoadError
-          what="vos sessions ouvertes"
+          :what="t('account.sessions.what')"
           :loading="sessionsLoading"
           @retry="loadSessions"
         />
@@ -183,27 +186,35 @@
           <q-item-section>
             <q-item-label>
               {{ describeUserAgent(s.user_agent) }}
-              <q-badge v-if="s.current" color="primary" class="q-ml-xs">Cette session</q-badge>
+              <q-badge v-if="s.current" color="primary" class="q-ml-xs">{{
+                t('account.sessions.current')
+              }}</q-badge>
             </q-item-label>
             <q-item-label caption>
-              {{ s.ip || 'Adresse inconnue' }} · dernière activité
-              {{ timeAgoLabel(s.last_used_at) }}
+              {{
+                t('account.sessions.lastActivity', {
+                  ip: s.ip || t('account.sessions.unknownAddress'),
+                  ago: timeAgoLabel(s.last_used_at),
+                })
+              }}
             </q-item-label>
-            <q-item-label caption>Ouverte le {{ formatDateTime(s.created_at) }}</q-item-label>
+            <q-item-label caption>{{
+              t('account.sessions.openedOn', { date: formatDateTime(s.created_at) })
+            }}</q-item-label>
           </q-item-section>
           <q-item-section side>
             <q-btn
               flat
               dense
               color="negative"
-              :label="s.current ? 'Se déconnecter' : 'Fermer'"
+              :label="s.current ? t('account.sessions.logout') : t('account.sessions.close')"
               :loading="closing === s.id"
               @click="onCloseSession(s)"
             />
           </q-item-section>
         </q-item>
         <q-item v-if="!sessionsLoading && !sessionsError && sessions.length === 0">
-          <q-item-section class="text-muted">Aucune session ouverte.</q-item-section>
+          <q-item-section class="text-muted">{{ t('account.sessions.none') }}</q-item-section>
         </q-item>
       </q-list>
     </q-card>
@@ -228,7 +239,12 @@ import {
 } from 'src/services/auth';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
-import { EMAIL_PREFERENCE_OPTIONS, formatDateTime, timeAgoLabel } from 'src/utils/format';
+import {
+  EMAIL_PREFERENCE_OPTIONS,
+  emailPreferenceLabel,
+  formatDateTime,
+  timeAgoLabel,
+} from 'src/utils/format';
 import { describeUserAgent } from 'src/utils/userAgent';
 
 const { passwordMin } = usePasswordPolicy();
@@ -266,8 +282,11 @@ const confirmation = ref('');
 const loading = ref(false);
 
 // `value`/`label` are what q-option-group binds on; the rest is read by the
-// slot that renders each option with its explanation.
-const preferenceOptions = EMAIL_PREFERENCE_OPTIONS;
+// slot that renders each option with its explanation. A computed, the label
+// worded in the language shown.
+const preferenceOptions = computed(() =>
+  EMAIL_PREFERENCE_OPTIONS.map((o) => ({ ...o, label: emailPreferenceLabel(o.value) })),
+);
 const emailPreference = ref<EmailPreference>(auth.user?.email_preference ?? 'digest_daily');
 const savingPreference = ref(false);
 
@@ -281,12 +300,15 @@ async function savePreference(choice: EmailPreference) {
     const user = await updateMe({ email_preference: choice });
     auth.user = user;
     emailPreference.value = user.email_preference;
-    $q.notify({ type: 'positive', message: 'Préférence enregistrée' });
+    $q.notify({ type: 'positive', message: t('account.notifications.saved') });
   } catch (e) {
     // Rolled back to what the server still holds: leaving the radio on a choice
     // that was never saved would have the user believe they had changed it.
     emailPreference.value = previous;
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+    $q.notify({
+      type: 'negative',
+      message: apiErrorMessage(e, t('account.notifications.saveFailed')),
+    });
   } finally {
     savingPreference.value = false;
   }
@@ -307,10 +329,10 @@ watch(
   { immediate: true },
 );
 
-const required = (v: string) => !!v || 'Requis';
+const required = (v: string) => !!v || t('account.password.required');
 const longEnough = (v: string) =>
-  v.length >= passwordMin.value || `${passwordMin.value} caractères minimum`;
-const matches = (v: string) => v === newPassword.value || 'Les mots de passe ne correspondent pas';
+  v.length >= passwordMin.value || t('account.password.minLength', { count: passwordMin.value });
+const matches = (v: string) => v === newPassword.value || t('account.password.mismatch');
 
 async function onSubmit() {
   loading.value = true;
@@ -323,11 +345,11 @@ async function onSubmit() {
     await auth.logout();
     $q.notify({
       type: 'positive',
-      message: 'Mot de passe changé. Reconnectez-vous.',
+      message: t('account.password.changed'),
     });
     await router.push({ name: 'login' });
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Changement impossible') });
+    $q.notify({ type: 'negative', message: apiErrorMessage(e, t('account.password.failed')) });
   } finally {
     loading.value = false;
   }
@@ -362,10 +384,10 @@ function onCloseSession(session: AuthSession) {
     return;
   }
   $q.dialog({
-    title: 'Se déconnecter',
-    message: 'Fermer cette session vous déconnecte de la console sur cet appareil.',
-    cancel: { label: 'Annuler', flat: true },
-    ok: { label: 'Se déconnecter', color: 'negative', flat: true },
+    title: t('account.sessions.logoutTitle'),
+    message: t('account.sessions.logoutMessage'),
+    cancel: { label: t('account.sessions.cancel'), flat: true },
+    ok: { label: t('account.sessions.logout'), color: 'negative', flat: true },
     persistent: true,
   }).onOk(() => void closeOne(session));
 }
@@ -381,9 +403,12 @@ async function closeOne(session: AuthSession) {
     }
     await closeSession(session.id);
     sessions.value = sessions.value.filter((s) => s.id !== session.id);
-    $q.notify({ type: 'positive', message: 'Session fermée' });
+    $q.notify({ type: 'positive', message: t('account.sessions.closed') });
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Fermeture impossible') });
+    $q.notify({
+      type: 'negative',
+      message: apiErrorMessage(e, t('account.sessions.closeFailed')),
+    });
     // Closed elsewhere in the meantime, or not: the server's list is the truth.
     void loadSessions();
   } finally {

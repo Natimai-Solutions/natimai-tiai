@@ -19,19 +19,6 @@ const PENDING = new Set<string>([
   'utils/numberField.ts',
   'utils/settingsSchedule.ts',
 
-  // --- Lot C2 : comptes, groupes, audit
-  'components/audit/AuditDetailsDialog.vue',
-  'components/audit/AuditFiltersBar.vue',
-  'composables/usePasswordPolicy.ts',
-  'pages/AccountPage.vue',
-  'pages/AuditPage.vue',
-  'pages/GroupsPage.vue',
-  'pages/UsersPage.vue',
-  'utils/auditLabels.ts',
-  'utils/authority.ts',
-  'utils/permissions.ts',
-  'utils/userAgent.ts',
-
   // --- Lot D : salles, maintenance, vérifications, tâches
   'components/check/CheckCloseDialog.vue',
   'components/check/CheckRequestDialog.vue',
