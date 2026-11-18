@@ -9,6 +9,7 @@ is a record, and a record that vanishes must leave a trace.
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.exceptions import RequestValidationError
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.core.errors import AppError, ErrorCode
+from app.core.validation import refusal
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.intervention import crud
@@ -42,6 +44,11 @@ class InterventionOut(BaseModel):
     machine_id: uuid.UUID
     kind: str
     title: str | None
+    # Set when the server wrote the title itself (« Maintenance non faite —
+    # A101 »): the console words it from the code and its parameters, in the
+    # reader's language, ``title`` keeping the French. Null on a typed title.
+    title_code: str | None = None
+    title_params: dict[str, Any] | None = None
     note: str | None
     performed_by: str
     performed_at: datetime
@@ -186,22 +193,30 @@ async def update_intervention(
         # The date is not sent, so the request model did not check it: a
         # line dated in the future (an old check closing, a legacy entry)
         # turned into a maintenance would push the cycle out (audit B06).
+        # The coded refusal the request model would give (« Value error, »
+        # once, its code for the console), not the validator's own text: a
+        # PydanticCustomError already reads « Value error, … ».
         try:
             crud.not_in_the_future(row.performed_at)
-        except ValueError as exc:
+        except ValueError:
             raise RequestValidationError(
                 [
-                    {
-                        "loc": ("body", "performed_at"),
-                        "msg": f"Value error, {exc}",
-                        "type": "value_error",
-                    }
+                    refusal(
+                        ["body", "performed_at"],
+                        "date_in_future",
+                        "la date ne peut pas être dans le futur",
+                    )
                 ]
             ) from None
     if "kind" in fields:
         row.kind = payload.kind.value if payload.kind else row.kind
-    if "title" in fields:
+    if "title" in fields and _clean(fields["title"]) != row.title:
         row.title = _clean(fields["title"])
+        # Typed by someone now: no longer the server's words. Sent back as
+        # it was (an older console, a script PATCHing the whole line), it
+        # still is: the line keeps reading in the reader's language.
+        row.title_code = None
+        row.title_params = None
     if "note" in fields:
         row.note = _clean(fields["note"])
     if "performed_at" in fields and fields["performed_at"] is not None:

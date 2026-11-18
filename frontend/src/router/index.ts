@@ -5,9 +5,16 @@ import {
   createRouter,
   createWebHashHistory,
   createWebHistory,
+  type RouteLocationNormalized,
 } from 'vue-router';
 import routes from './routes';
 import { documentTitle } from 'src/utils/format';
+import { onLocaleChange, t } from 'src/i18n';
+
+/** A route's `meta.title` — a key of the catalogues — in the language shown. */
+function pageTitle(key: unknown): string | undefined {
+  return typeof key === 'string' && key ? t(key) : undefined;
+}
 
 import { refreshSession } from 'boot/axios';
 import { ensureSession, getAccessToken } from 'src/services/session';
@@ -100,11 +107,22 @@ export default defineRouter(() => {
   // One title per page: it is what a screen reader announces on navigation,
   // and what tells twelve open tabs apart. The fiches of a poste and of a room
   // replace it with their name once loaded.
+  // The title the router itself last wrote: a change of language rewrites it,
+  // and leaves alone one a page put in its place (the poste's name).
+  let routeTitle: string | null = null;
+  function showRouteTitle(to: RouteLocationNormalized) {
+    document.title = documentTitle(pageTitle(to.meta.title));
+    routeTitle = document.title;
+  }
   router.afterEach((to, from) => {
     // A query change on the same page — a fiche's tab, a filter, a page of
     // results — keeps the title the page set: the poste's name, not « Poste ».
     if (from !== START_LOCATION && to.path === from.path) return;
-    document.title = documentTitle(to.meta.title as string | undefined);
+    showRouteTitle(to);
+  });
+  onLocaleChange(() => {
+    if (typeof document === 'undefined' || document.title !== routeTitle) return;
+    showRouteTitle(router.currentRoute.value);
   });
 
   // A tab opened before a deployment asks for chunks the new build no longer

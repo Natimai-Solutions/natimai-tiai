@@ -10,7 +10,7 @@
         outlined
         dense
         options-dense
-        label="Action"
+        :label="t('audit.filters.action')"
         @update:model-value="(v: string | null) => set({ action: v || null })"
       />
     </div>
@@ -21,9 +21,9 @@
         dense
         clearable
         debounce="300"
-        label="Auteur"
+        :label="t('audit.filters.actor')"
         maxlength="320"
-        placeholder="E-mail…"
+        :placeholder="t('audit.filters.actorPlaceholder')"
         @update:model-value="(v) => set({ actor: v == null ? '' : String(v) })"
       >
         <template #prepend><q-icon name="search" /></template>
@@ -39,7 +39,7 @@
         outlined
         dense
         options-dense
-        label="Type de ressource"
+        :label="t('audit.filters.resourceType')"
         @update:model-value="
           (v: string | null) => set({ resourceType: v || null, resourceId: null })
         "
@@ -55,7 +55,7 @@
         dense
         clearable
         stack-label
-        label="Du"
+        :label="t('audit.filters.from')"
         :max="modelValue.to ?? undefined"
         @update:model-value="(v) => set({ from: v ? String(v) : null })"
       />
@@ -68,10 +68,10 @@
         dense
         clearable
         stack-label
-        label="Au (inclus)"
+        :label="t('audit.filters.to')"
         :min="modelValue.from ?? undefined"
         :error="inverted"
-        error-message="Antérieure à la date de début"
+        :error-message="t('audit.filters.inverted')"
         hide-bottom-space
         @update:model-value="(v) => set({ to: v ? String(v) : null })"
       />
@@ -98,7 +98,7 @@
         no-caps
         color="primary"
         icon="filter_alt_off"
-        label="Réinitialiser les filtres"
+        :label="t('audit.filters.reset')"
         @click="emit('update:modelValue', emptyAuditFilters())"
       />
     </div>
@@ -107,10 +107,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { t } from 'src/i18n';
 import {
-  AUDIT_RESOURCE_TYPE_LABELS,
   auditActionOptions,
   auditResourceTypeLabel,
+  auditResourceTypeOptions,
 } from 'src/utils/auditLabels';
 import {
   emptyAuditFilters,
@@ -134,10 +135,7 @@ const actionOptions = computed(() =>
   ),
 );
 
-const resourceTypeOptions = Object.entries(AUDIT_RESOURCE_TYPE_LABELS).map(([value, label]) => ({
-  value,
-  label,
-}));
+const resourceTypeOptions = computed(() => auditResourceTypeOptions());
 
 const active = computed(() => hasAuditFilters(props.modelValue));
 const inverted = computed(() => isAuditPeriodInverted(props.modelValue.from, props.modelValue.to));

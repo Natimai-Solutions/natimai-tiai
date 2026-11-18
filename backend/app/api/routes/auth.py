@@ -46,7 +46,7 @@ from app.features.auth_session.models import AuthSession
 from app.features.base import utcnow
 from app.features.user import addresses as login_addresses
 from app.features.user import crud, emails
-from app.features.user.models import EmailPreference, User
+from app.features.user.models import EmailPreference, Language, User
 
 # The security log: authentication events, one greppable line each. Without it
 # a brute-force attempt leaves no trace at all outside the rate limiter's 429s.
@@ -127,6 +127,10 @@ class GroupRef(BaseModel):
 
     id: uuid.UUID
     name: str
+    # A built-in group's stable key (``admin``, ``readonly``, ``technician``):
+    # the console names such a group in its reader's language while its name
+    # is still the one the installation gave it.
+    builtin_key: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -142,6 +146,9 @@ class UserOut(BaseModel):
     email: str
     full_name: str | None
     email_preference: str
+    # The account's language, or None to follow the browser (and
+    # DEFAULT_LANGUAGE for its mail).
+    language: Language | None = None
     # The console's own per-account settings (the machine list's columns and
     # their order, ...), handed back as stored. Keys and shapes are the
     # console's vocabulary; the server only bounds their size.
@@ -159,6 +166,9 @@ async def _profile(
         email=user.email,
         full_name=user.full_name,
         email_preference=user.email_preference,
+        # A value written by hand that is not a language reads as no choice,
+        # rather than failing the whole profile.
+        language=user.language if user.language in set(Language) else None,
         # A value stored before its depth was bounded is left out rather
         # than served: the response would fail on it, and with it the whole
         # profile. The key stays in the database, where a write replaces or
@@ -484,6 +494,8 @@ class ProfileUpdate(BaseModel):
     """Self-service profile update — only the supplied fields are changed."""
 
     email_preference: EmailPreference | None = None
+    # Sent as null: back to « follow the browser ». Not sent: left alone.
+    language: Language | None = None
     # Merged into the stored document key by key: a key sent with ``null``
     # is removed, a key not sent is left alone. So the page that remembers
     # the machine list's columns never overwrites what another page stored.
@@ -571,6 +583,8 @@ async def update_me(
         await _merge_stored_preferences(session, user, payload.preferences)
     if payload.email_preference is not None:
         user.email_preference = payload.email_preference
+    if "language" in payload.model_fields_set:
+        user.language = payload.language
     user.updated_at = utcnow()
     session.add(user)
     await session.commit()
@@ -817,7 +831,7 @@ async def _issue_reset_link(session: SessionDep, email: str, ip: str) -> None:
     # Queued before the commit, so the mail and the token it links to are one
     # transaction: no link mailed for a token that was rolled back, no token
     # whose mail was lost to a Mailgun outage — the worker sends with retries.
-    emails.send_password_reset(session, user.email, token)
+    emails.send_password_reset(session, user.email, token, language=user.language)
     await session.commit()
 
 

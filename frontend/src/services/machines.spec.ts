@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the axios boot module before importing the service under test.
 vi.mock('boot/axios', () => ({
@@ -6,6 +6,8 @@ vi.mock('boot/axios', () => ({
 }));
 
 import { api } from 'boot/axios';
+import { setLocale } from 'src/i18n';
+import { commandMessage } from 'src/services/commands';
 import {
   exportMachines,
   getDuplicates,
@@ -448,5 +450,36 @@ describe('listMachines inventory facets', () => {
     expect(api.get).toHaveBeenCalledWith('/machines', {
       params: { hw_model: 'OptiPlex', disk_free_below: 10, software_id: 7 },
     });
+  });
+});
+
+describe('wakeNotification — the server’s detail in the reader’s language', () => {
+  afterEach(() => setLocale('fr'));
+
+  const failed = (detail_code?: string) => ({
+    woken: 0,
+    failed: 1,
+    results: [
+      {
+        machine_id: 'm',
+        hostname: 'PC-01',
+        ok: false,
+        detail: 'Phrase française du serveur',
+        ...(detail_code ? { detail_code, detail_params: {} } : {}),
+      },
+    ],
+  });
+
+  it('words a coded detail, and quotes an uncoded one as the server wrote it', () => {
+    setLocale('en');
+    const coded = wakeNotification(failed('wol.no_mac')).message;
+    expect(coded).not.toContain('Phrase française');
+    expect(coded).toBe(
+      wakeNotification({
+        ...failed(),
+        results: [{ ...failed().results[0]!, detail: commandMessage('wol.no_mac', {})! }],
+      }).message,
+    );
+    expect(wakeNotification(failed()).message).toContain('Phrase française du serveur');
   });
 });

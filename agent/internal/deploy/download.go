@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"tiai/agent/internal/msg"
 )
 
 // Fetcher streams one package file from the server, from offset, into f. When
@@ -68,7 +70,7 @@ func Download(ctx context.Context, fetch Fetcher, packageID string, f FileRef, d
 	}
 	if !ok {
 		_ = os.Remove(dest)
-		return errors.New("empreinte SHA-256 différente de celle du manifeste : fichier rejeté")
+		return msg.Err("deploy.hash_mismatch", nil)
 	}
 	return nil
 }

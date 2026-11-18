@@ -1,9 +1,9 @@
 <template>
   <q-card flat bordered class="q-mt-md">
-    <q-card-section class="text-subtitle1">Dernières commandes</q-card-section>
+    <q-card-section class="text-subtitle1">{{ t('commands.card.title') }}</q-card-section>
     <q-separator />
     <q-card-section v-if="failed" class="q-pa-sm">
-      <CardLoadError what="les commandes" :loading="loading" @retry="emit('refresh')" />
+      <CardLoadError :what="t('commands.card.what')" :loading="loading" @retry="emit('refresh')" />
     </q-card-section>
     <q-table
       v-model:pagination="pagination"
@@ -13,7 +13,7 @@
       :loading="loading"
       flat
       :rows-per-page-options="[10, 25, 50]"
-      :no-data-label="failed ? 'Commandes non chargées.' : 'Aucune commande.'"
+      :no-data-label="failed ? t('commands.card.notLoaded') : t('commands.card.empty')"
       @request="onRequest"
     >
       <template #body-cell-type="props">
@@ -24,7 +24,7 @@
           <q-badge :color="statusColor(props.value)">{{ statusLabel(props.value) }}</q-badge>
           <q-btn
             v-if="props.row.result_output"
-            aria-label="Voir le résultat"
+            :aria-label="t('commands.card.showOutput')"
             flat
             dense
             round
@@ -34,11 +34,11 @@
             class="q-ml-xs"
             @click="emit('show-detail', props.row, 'output')"
           >
-            <q-tooltip>Voir le résultat</q-tooltip>
+            <q-tooltip>{{ t('commands.card.showOutput') }}</q-tooltip>
           </q-btn>
           <q-btn
             v-if="props.row.error"
-            aria-label="Voir l'erreur"
+            :aria-label="t('commands.card.showError')"
             flat
             dense
             round
@@ -48,7 +48,7 @@
             class="q-ml-xs"
             @click="emit('show-detail', props.row, 'error')"
           >
-            <q-tooltip>Voir l'erreur</q-tooltip>
+            <q-tooltip>{{ t('commands.card.showError') }}</q-tooltip>
           </q-btn>
         </q-td>
       </template>
@@ -63,10 +63,12 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { QTableColumn } from 'quasar';
+import { t } from 'src/i18n';
 import CardLoadError from 'src/components/CardLoadError.vue';
 import { DEFAULT_PAGE_SIZE, type TablePagination } from './types';
-import { commandRowLabel, type Command } from 'src/services/commands';
+import { commandRowLabel, commandStatusLabel, type Command } from 'src/services/commands';
 import { formatDateTime } from 'src/utils/format';
 
 /** `failed`: the last read of this list failed — the rows, if any, are an earlier read's. */
@@ -79,13 +81,29 @@ const emit = defineEmits<{
   'show-detail': [command: Command, kind: 'output' | 'error'];
 }>();
 
-const columns: QTableColumn<Command>[] = [
-  { name: 'type', label: 'Type', field: 'type', align: 'left' },
-  { name: 'status', label: 'Statut', field: 'status', align: 'left' },
-  { name: 'created_by', label: 'Par', field: 'created_by', align: 'left' },
-  { name: 'created_at', label: 'Créée le', field: 'created_at', align: 'left' },
-  { name: 'finished_at', label: 'Terminée le', field: 'finished_at', align: 'left' },
-];
+// A computed: the headers follow a change of language.
+const columns = computed<QTableColumn<Command>[]>(() => [
+  { name: 'type', label: t('commands.card.columns.type'), field: 'type', align: 'left' },
+  { name: 'status', label: t('commands.card.columns.status'), field: 'status', align: 'left' },
+  {
+    name: 'created_by',
+    label: t('commands.card.columns.createdBy'),
+    field: 'created_by',
+    align: 'left',
+  },
+  {
+    name: 'created_at',
+    label: t('commands.card.columns.createdAt'),
+    field: 'created_at',
+    align: 'left',
+  },
+  {
+    name: 'finished_at',
+    label: t('commands.card.columns.finishedAt'),
+    field: 'finished_at',
+    align: 'left',
+  },
+]);
 
 const STATUS_COLORS: Record<string, string> = {
   pending: 'grey-7',
@@ -96,21 +114,12 @@ const STATUS_COLORS: Record<string, string> = {
   expired: 'orange',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'En attente',
-  delivered: 'Transmise',
-  running: 'En cours',
-  succeeded: 'Réussie',
-  failed: 'Échec',
-  expired: 'Expirée',
-};
-
 function statusColor(status: string): string {
   return STATUS_COLORS[status] ?? 'grey-7';
 }
 
 function statusLabel(status: string): string {
-  return STATUS_LABELS[status] ?? status;
+  return commandStatusLabel(status);
 }
 
 /** Turn a page of the command history (server-side). */

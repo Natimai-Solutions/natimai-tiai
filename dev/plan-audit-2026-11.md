@@ -422,8 +422,7 @@ Les limites acceptées après la troisième passe ont été reprises le 2026-11-
 - **Limiteur d'enrôlement et grandes salles** (B33) : au-delà d'environ 130 postes en attente d'approbation derrière une même adresse (NAT, proxy), le limiteur d'enrôlement (30 par 5 minutes et par adresse) se remplit de nouveau ; les postes approuvés reprennent alors plus lentement.
 - **E-mail en vol à l'arrêt du worker** : un envoi qui dépasse les 8 secondes de grâce est abandonné « en attente » ; si le serveur de messagerie l'accepte quand même, il repart au démarrage suivant.
 - **Verrou des essais lents** (T06) : une adresse non habituelle qui se trompe une fois pendant ce verrou est refusée jusqu'à sa fin ; l'issue est « Mot de passe oublié », dont le plafond par compte est levé pendant le verrou.
-- **Non exécutés** : le script de signature et le script GPO (PowerShell), le MSI (compilé au prochain tag seulement), la construction de l'image `db-backup` (faite par l'e2e de la CI). `backup.sh` tourne désormais sous busybox `sh` dans les tests.
-
+- **Non exécutés** : le script de signature (PowerShell), le MSI (compilé au prochain tag seulement), la construction de l'image `db-backup` (faite par l'e2e de la CI). `backup.sh` tourne désormais sous busybox `sh` dans les tests. Le script GPO est validé sur le parc (retour du 2026-11-18).
 ### 6.5 Recette de solidité du 2026-11-16
 
 Hors audit : sept recetteurs ont éprouvé les fonctionnalités existantes sur un banc complet (API, worker, console construite pilotée dans Chromium, agent Go réel), avec des requêtes concurrentes, des pannes de réseau et de messagerie, des comptes aux droits réduits et des parcs de plusieurs centaines de postes. Les défauts relevés sont corrigés sur la branche `claude/inspiring-tesla-m56uvk`, chacun avec un test qui échoue sans sa correction ; la liste est dans `dev/notes-de-version-v1.2.1.md` § « Recette de solidité ». Une seule touche une tâche de l'audit : l'attente d'un poste refusé (T37, B33) passe d'un palier de 15 à 30 minutes à une montée de 1 à 15 minutes.
@@ -474,6 +473,22 @@ Verdict : aucun défaut critique ni grave ; onze défauts moyens, dont sept rég
 | Documentation | Notes de version et `DEPLOYMENT.md` faux sur six points (double envoi du résumé, secret d'enrôlement, retour arrière, verrou lent, confirmation de Paramètres, reprise d'une séance) | Corrigés |
 
 Agent : seul un succès termine désormais l'attente d'approbation ; un 429 allonge le palier, `Retry-After` est respecté (borné à 15 min) et, au plafond, un 429 fait passer le poste à un palier de 30 min. La simulation du limiteur (30 enrôlements par 5 min et par adresse) est gardée en test : à 40 et 100 postes en attente derrière une adresse, il n'est plus saturé après la première heure. Limite restante, côté serveur : au-delà d'environ 130 postes derrière une seule adresse, il se remplit de nouveau.
+
+
+### 6.8 Vérification indépendante du 2026-11-18
+
+Deuxième vérification indépendante, sur tout ce qui n'avait pas été relu : les corrections du §6.7 (PR #130) et la console bilingue (PR #131, `dev/plan-console-bilingue.md`). Quatre-vingt-onze relecteurs et vérificateurs, par domaine et par thème transverse : non-régression du français (ancienne et nouvelle console côte à côte, mêmes données), affichage PC et téléphone en clair et en sombre, mise à jour d'une base remplie et versions mélangées (anciens agents, ancien onglet de console), conformité des documents ; chaque constat soumis à des vérificateurs chargés de le réfuter.
+
+Verdict : aucun défaut critique ni grave ; quatre défauts moyens introduits, deux défauts moyens antérieurs, une cinquantaine de défauts mineurs. Repris le 2026-11-18 sur la même branche :
+
+| Domaine | Défaut trouvé | Correction |
+|---|---|---|
+| Comptes (T06, §6.7) | **Régression de 120f598** : une réinitialisation par un administrateur pendant une connexion réussie du même compte s'interbloquait (500) | Compte verrouillé FOR NO KEY UPDATE, comme `lock_account` ; idem à l'usage d'un lien de réinitialisation ; test qui échoue sans la correction |
+| Journal d'audit (B25, U03) | **Régression de b37c548** : le détail d'une entrée ne s'ouvrait plus que par un bouton hors de l'écran (PC 1024–1440 px, téléphone) | La date, première colonne, ouvre le détail |
+| U27 | Réglages du serveur illisibles sur téléphone (lignes superposées) : la correction du §6 ne tenait pas | Cellules empilées à hauteur libre ; vérifié dans un navigateur, français et anglais |
+| Maintenance (T30) | Une partie de séance envoyée pendant la fusion d'un de ses postes répond 500 (antérieur) | Repris ensuite : les postes sont lus sous verrou partagé de clé ; la partie attend la fusion et répond 404 `machine.not_found` en nommant le poste fusionné, sans rien écrire ; test qui échoue sans la correction |
+
+Les défauts mineurs ont été repris ensuite, chacun avec un test qui échoue sans sa correction (détail dans `dev/notes-de-version-v1.2.1.md`, § « Vérification du 18 novembre 2026 ») : curseur décimal et demi-caractère UTF-16 en octets bruts (500), suppression d'un bâtiment en concurrence avec une salle homonyme (500), titre bilingue perdu sur un PATCH inchangé, caractères invisibles en bord de nom ; dialogue de séance (postes refusés nommés et retirables, boutons en vue sur PC, liste des refus bornée sur téléphone), badges de « Mes tâches », adresse longue dans l'en-tête (U29 entre 600 et 1023 px) ; changement de langue à chaud des erreurs de champ, des confirmations, des notifications persistantes et des erreurs gardées ; argument `msiexec` refusé cité ; titres à trait d'union en anglais ; groupes homonymes en anglais ; lien de l'audit en mode sombre ; zones tactiles des noms ; valeurs longues sur téléphone. Les limites notées ensuite ont été reprises à leur tour : textes composés de l'agent codés (dont la phrase « Redémarrage requis… » de DISM), CSV anglais séparé par des virgules avec le point décimal, toutes les notifications suivant un changement de langue et placées en haut quand un dialogue est ouvert, fusion pendant l'envoi d'une séance (ligne ci-dessus).
 
 ## 7. Détail des constats
 

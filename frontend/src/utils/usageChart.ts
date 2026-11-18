@@ -1,4 +1,5 @@
 import type { MachineUsage } from 'src/services/machines';
+import { intlTag } from 'src/i18n';
 
 /**
  * The fiche's usage histogram, as data: one bar per calendar day.
@@ -67,7 +68,7 @@ export function usageBars(usage: MachineUsage): UsageBar[] {
       hours,
       percent: Math.min(100, Math.max(0, (hours / HOURS_PER_DAY) * 100)),
       counted: from !== null && date >= from,
-      label: day.toLocaleDateString('fr-FR', {
+      label: day.toLocaleDateString(intlTag(), {
         weekday: 'short',
         day: '2-digit',
         month: '2-digit',

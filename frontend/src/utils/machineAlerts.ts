@@ -1,4 +1,5 @@
 import type { MachineTab } from 'src/components/machine/types';
+import { t } from 'src/i18n';
 import type { MachineDetail } from 'src/services/machines';
 import { isAgentOutdated } from './agentVersion';
 import { diskThresholds, freePercent, sizeLabel } from './format';
@@ -13,7 +14,9 @@ import { diskThresholds, freePercent, sizeLabel } from './format';
  * bad. A poste with nothing to report gets an empty list, which the card
  * renders as one green line.
  *
- * Pure, so it is testable: everything time-dependent takes `now`.
+ * Pure, so it is testable: everything time-dependent takes `now`. The texts are
+ * worded in the language shown when it is called (`machine.alerts.*`): call it
+ * at render time — the status card does, from a computed.
  */
 export interface MachineAlert {
   key: string;
@@ -49,10 +52,6 @@ function ageDays(value: string | null | undefined, now: Date): number | null {
   return Math.floor((now.getTime() - then) / DAY_MS);
 }
 
-function plural(n: number, one: string, many: string): string {
-  return n === 1 ? one : many;
-}
-
 export function machineAlerts(
   m: MachineDetail,
   activeThreats: number,
@@ -67,7 +66,7 @@ export function machineAlerts(
       key: 'threats',
       level: 'negative',
       icon: 'coronavirus',
-      text: `${activeThreats} ${plural(activeThreats, 'menace active', 'menaces actives')} — Defender n'a pas traité ${plural(activeThreats, 'la détection', 'les détections')}`,
+      text: t('machine.alerts.threats', { count: activeThreats }, activeThreats),
       tab: 'antivirus',
     });
   }
@@ -78,7 +77,7 @@ export function machineAlerts(
       key: 'no-antivirus',
       level: 'negative',
       icon: 'gpp_bad',
-      text: 'Aucun antivirus enregistré au Security Center : le poste est sans protection',
+      text: t('machine.alerts.noAntivirus'),
       tab: 'antivirus',
     });
   } else if (m.is_up_to_date === false) {
@@ -94,7 +93,7 @@ export function machineAlerts(
       key: 'av-unknown',
       level: 'warning',
       icon: 'help',
-      text: "État de l'antivirus inconnu : l'agent n'a pas pu le mesurer",
+      text: t('machine.alerts.avUnknown'),
       tab: 'antivirus',
     });
   }
@@ -110,8 +109,8 @@ export function machineAlerts(
       icon: 'search_off',
       text:
         fullScanAge === null
-          ? 'Aucun scan complet Defender relevé sur ce poste'
-          : `Dernier scan complet il y a ${fullScanAge} jours`,
+          ? t('machine.alerts.fullScanNone')
+          : t('machine.alerts.fullScanOld', { days: fullScanAge }),
       tab: 'antivirus',
     });
   }
@@ -125,9 +124,10 @@ export function machineAlerts(
       key: 'disk',
       level: critical ? 'negative' : 'warning',
       icon: 'storage',
-      text: `Disque système ${critical ? 'presque plein' : 'bientôt plein'} : ${sizeLabel(
-        m.system_volume_free_mb,
-      )} libres (${free} %)`,
+      text: t(critical ? 'machine.alerts.diskCritical' : 'machine.alerts.diskWarning', {
+        size: sizeLabel(m.system_volume_free_mb),
+        percent: free,
+      }),
       tab: 'hardware',
     });
   }
@@ -137,7 +137,10 @@ export function machineAlerts(
         key: `disk-health-${d.id}`,
         level: 'negative',
         icon: 'sd_card_alert',
-        text: `Disque ${d.model || d.device_id} en état « ${d.health_status} »`,
+        text: t('machine.alerts.diskHealth', {
+          name: d.model || d.device_id,
+          status: d.health_status,
+        }),
         tab: 'hardware',
       });
     }
@@ -152,8 +155,8 @@ export function machineAlerts(
       level: critical > 0 ? 'negative' : 'warning',
       icon: 'system_update',
       text:
-        `${n} ${plural(n, 'mise à jour Windows en attente', 'mises à jour Windows en attente')}` +
-        (critical > 0 ? `, dont ${critical} ${plural(critical, 'critique', 'critiques')}` : ''),
+        t('machine.alerts.wuPending', { count: n }, n) +
+        (critical > 0 ? t('machine.alerts.wuCritical', { count: critical }, critical) : ''),
       tab: 'windows_update',
     });
   }
@@ -162,7 +165,7 @@ export function machineAlerts(
       key: 'reboot',
       level: 'warning',
       icon: 'restart_alt',
-      text: 'Redémarrage requis pour terminer une installation',
+      text: t('machine.alerts.reboot'),
       tab: 'windows_update',
     });
   }
@@ -172,7 +175,7 @@ export function machineAlerts(
       key: 'wu-unknown',
       level: 'warning',
       icon: 'help',
-      text: "Windows Update jamais relevé : l'agent est trop ancien ou le service ne répond pas",
+      text: t('machine.alerts.wuUnknown'),
       tab: 'windows_update',
     });
   } else if (searchAge !== null && searchAge > WU_SEARCH_MAX_DAYS) {
@@ -180,7 +183,7 @@ export function machineAlerts(
       key: 'wu-stale',
       level: 'warning',
       icon: 'update_disabled',
-      text: `Aucune recherche de mises à jour depuis ${searchAge} jours`,
+      text: t('machine.alerts.wuStale', { days: searchAge }),
       tab: 'windows_update',
     });
   }
@@ -193,7 +196,10 @@ export function machineAlerts(
       key: 'agent-outdated',
       level: 'info',
       icon: 'system_update_alt',
-      text: `Agent ${m.agent_version} obsolète : la référence du parc est ${m.agent_latest_version}`,
+      text: t('machine.alerts.agentOutdated', {
+        version: m.agent_version,
+        latest: m.agent_latest_version,
+      }),
       tab: 'identity',
     });
   }
@@ -205,7 +211,7 @@ export function machineAlerts(
       key: 'contact',
       level: 'warning',
       icon: 'power_off',
-      text: `Aucun contact depuis ${contactAge} jours`,
+      text: t('machine.alerts.contact', { days: contactAge }),
       tab: 'identity',
     });
   }
@@ -215,7 +221,7 @@ export function machineAlerts(
       key: 'inventory-none',
       level: 'info',
       icon: 'inventory',
-      text: 'Aucun inventaire matériel relevé sur ce poste',
+      text: t('machine.alerts.inventoryNone'),
       tab: 'hardware',
     });
   } else if (
@@ -228,7 +234,7 @@ export function machineAlerts(
       key: 'inventory-stale',
       level: 'info',
       icon: 'inventory',
-      text: `Inventaire vieux de ${inventoryAge} jours sur un poste vu aujourd'hui`,
+      text: t('machine.alerts.inventoryStale', { days: inventoryAge }, inventoryAge),
       tab: 'hardware',
     });
   }
@@ -240,7 +246,7 @@ export function machineAlerts(
       key: 'unencrypted',
       level: 'info',
       icon: 'lock_open',
-      text: 'Disque système non chiffré (BitLocker)',
+      text: t('machine.alerts.unencrypted'),
       tab: 'hardware',
     });
   }
@@ -252,18 +258,22 @@ export function machineAlerts(
 function antivirusOutdatedText(m: MachineDetail): string {
   if (m.av_product_is_defender === false) {
     if (m.av_product_enabled === false) {
-      return `${m.av_product_name} : protection désactivée`;
+      return t('machine.alerts.productDisabled', { product: m.av_product_name });
     }
     if (m.av_product_signatures_up_to_date === false) {
-      return `${m.av_product_name} : signatures périmées`;
+      return t('machine.alerts.productSignatures', { product: m.av_product_name });
     }
-    return `${m.av_product_name} : protection non confirmée`;
+    return t('machine.alerts.productUnconfirmed', { product: m.av_product_name });
   }
   if (m.av_enabled === false || m.rtp_enabled === false) {
-    return 'Defender : protection désactivée';
+    return t('machine.alerts.defenderDisabled');
   }
   if (m.signature_age_days != null) {
-    return `Defender : signatures vieilles de ${m.signature_age_days} jours`;
+    return t(
+      'machine.alerts.defenderSignatures',
+      { days: m.signature_age_days },
+      m.signature_age_days,
+    );
   }
-  return 'Antivirus non à jour';
+  return t('machine.alerts.avOutdated');
 }

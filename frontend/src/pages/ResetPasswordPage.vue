@@ -6,18 +6,18 @@
         <q-card style="width: 380px; max-width: 90vw">
           <q-card-section class="text-center">
             <q-icon name="lock_reset" size="48px" color="primary" />
-            <div class="text-h6 q-mt-sm">Nouveau mot de passe</div>
+            <div class="text-h6 q-mt-sm">{{ t('auth.reset.title') }}</div>
           </q-card-section>
 
           <q-card-section v-if="!token" class="q-pt-none">
             <q-banner dense class="surface-red">
               <template #avatar><q-icon name="error" /></template>
-              Lien incomplet : il ne contient pas de jeton de réinitialisation.
+              {{ t('auth.reset.noToken') }}
             </q-banner>
           </q-card-section>
 
           <q-card-section v-else-if="linkState === 'checking'" class="row justify-center">
-            <q-spinner size="md" color="primary" aria-label="Vérification du lien" />
+            <q-spinner size="md" color="primary" :aria-label="t('auth.reset.checking')" />
           </q-card-section>
 
           <!-- Expired, already used or garbled: said before anything is typed,
@@ -25,14 +25,13 @@
           <q-card-section v-else-if="linkState === 'invalid'" class="q-pt-none q-gutter-sm">
             <q-banner dense class="surface-orange" role="alert">
               <template #avatar><q-icon name="link_off" /></template>
-              Ce lien n'est plus valable : il a expiré, a déjà servi, ou a été coupé en route.
-              Demandez-en un nouveau.
+              {{ t('auth.reset.invalid') }}
             </q-banner>
             <q-btn
               color="primary"
               no-caps
               class="full-width"
-              label="Mot de passe oublié"
+              :label="t('auth.reset.forgot')"
               :to="{ name: 'forgot-password' }"
             />
           </q-card-section>
@@ -42,21 +41,23 @@
               <q-input
                 v-model="password"
                 type="password"
-                label="Nouveau mot de passe"
+                :label="t('auth.reset.password')"
                 outlined
                 dense
                 autofocus
                 autocomplete="new-password"
-                :hint="`${passwordMin} caractères minimum`"
+                :hint="t('auth.reset.minLength', { min: passwordMin })"
+                reactive-rules
                 :rules="[required, longEnough]"
               />
               <q-input
                 v-model="confirmation"
                 type="password"
-                label="Confirmer le mot de passe"
+                :label="t('auth.reset.confirm')"
                 outlined
                 dense
                 autocomplete="new-password"
+                reactive-rules
                 :rules="[required, matches]"
               />
             </q-card-section>
@@ -66,14 +67,14 @@
                 type="submit"
                 color="primary"
                 class="full-width"
-                label="Définir le mot de passe"
+                :label="t('auth.reset.submit')"
                 :loading="loading"
               />
             </q-card-actions>
           </q-form>
 
           <q-card-actions class="q-px-md q-pb-md">
-            <q-btn flat class="full-width" label="Retour à la connexion" :to="{ name: 'login' }" />
+            <q-btn flat class="full-width" :label="t('auth.backToLogin')" :to="{ name: 'login' }" />
           </q-card-actions>
         </q-card>
       </q-page>
@@ -86,8 +87,10 @@ import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
+import { t } from 'src/i18n';
 import { checkPasswordResetToken, confirmPasswordReset } from 'src/services/auth';
 import { apiErrorCode, apiErrorMessage } from 'src/services/errors';
+import { notify } from 'src/utils/notify';
 
 const { passwordMin } = usePasswordPolicy();
 
@@ -107,16 +110,16 @@ onMounted(async () => {
   linkState.value = await checkPasswordResetToken(token.value);
 });
 
-const required = (v: string) => !!v || 'Requis';
+const required = (v: string) => !!v || t('auth.required');
 const longEnough = (v: string) =>
-  v.length >= passwordMin.value || `${passwordMin.value} caractères minimum`;
-const matches = (v: string) => v === password.value || 'Les mots de passe ne correspondent pas';
+  v.length >= passwordMin.value || t('auth.reset.minLength', { min: passwordMin.value });
+const matches = (v: string) => v === password.value || t('auth.reset.mismatch');
 
 async function onSubmit() {
   loading.value = true;
   try {
     await confirmPasswordReset(token.value, password.value);
-    $q.notify({ type: 'positive', message: 'Mot de passe défini. Vous pouvez vous connecter.' });
+    notify($q, () => ({ type: 'positive', message: t('auth.reset.done') }));
     await router.push({ name: 'login' });
   } catch (e) {
     // The link died while the form was open (or the check was not available):
@@ -125,7 +128,7 @@ async function onSubmit() {
       linkState.value = 'invalid';
       return;
     }
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Réinitialisation impossible') });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('auth.reset.failed')) }));
   } finally {
     loading.value = false;
   }

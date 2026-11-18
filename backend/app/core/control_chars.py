@@ -35,18 +35,22 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.core.validation import PREFIX
 
 # C0 controls minus \t \n \r, and the surrogates left once the parser has
 # joined every well-formed pair into its character: the lone ones.
 _STRIPPED = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff]")
 # How such a character can be spelled in JSON text: a \u escape of the C0
-# range or of a surrogate, the two short escapes of the set (\b, \f), or the
-# raw byte, which makes the JSON invalid anyway. A cheap scan before any
+# range or of a surrogate, the two short escapes of the set (\b, \f), the
+# raw byte, which makes the JSON invalid anyway, or a surrogate's own three
+# bytes (ED A0..BF xx) — not UTF-8, but read by Python's JSON parser all the
+# same, into the very character the escape gives. A cheap scan before any
 # parse: most bodies carry none, and are passed on untouched. A false
 # positive (an escaped backslash followed by "b", an escaped pair that is
 # well formed) only costs the parse.
 _JSON_CONTROL = re.compile(
     rb"\\u00[01][0-9a-fA-F]|\\u[dD][89a-fA-F]|\\[bf]|[\x00-\x08\x0b\x0c\x0e-\x1f]"
+    rb"|\xed[\xa0-\xbf]"
 )
 _JSON_NUL = re.compile(rb"\\u0000|\x00")
 _URL_NUL = re.compile(rb"%00|\x00")
@@ -112,12 +116,21 @@ def _contains_nul(value: Any) -> bool:
     return False
 
 
+# The console words these by code (plan console bilingue); the message
+# stays as it was, without « Value error, »: it never had it.
+_CODES = {NUL_REFUSED: "nul_refused", TOO_NESTED: "too_nested"}
+
+
+def _raw_refusal(code: str, message: str) -> dict[str, Any]:
+    return {"loc": [], "msg": message, "type": PREFIX + code, "params": {}}
+
+
 def _nul_refusal() -> AppError:
     return AppError(
         code=ErrorCode.REQUEST_VALIDATION_ERROR,
         status_code=422,
         message=NUL_REFUSED,
-        details={"errors": [{"loc": [], "msg": NUL_REFUSED, "type": "value_error"}]},
+        details={"errors": [_raw_refusal("nul_refused", NUL_REFUSED)]},
     )
 
 
@@ -161,9 +174,7 @@ async def _refuse(send: Send, message: str = NUL_REFUSED) -> None:
             "error": {
                 "code": ErrorCode.REQUEST_VALIDATION_ERROR.value,
                 "message": message,
-                "details": {
-                    "errors": [{"loc": [], "msg": message, "type": "value_error"}]
-                },
+                "details": {"errors": [_raw_refusal(_CODES[message], message)]},
             }
         }
     ).encode()

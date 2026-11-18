@@ -1,16 +1,13 @@
 <template>
   <MachineInfoCard
     v-if="show"
-    title="Antivirus enregistré"
-    caption="Vu par le Security Center de Windows — un produit tiers, ou aucun."
+    :title="t('machine.antivirus.title')"
+    :caption="t('machine.antivirus.caption')"
     :rows="rows"
   >
     <template v-if="unread" #default>
       <q-card-section class="text-caption text-muted">
-        Jamais relevé sur ce poste : son agent est antérieur à la lecture du Security Center, ou
-        l'hôte n'en a pas — un SKU Windows Server n'en embarque aucun. C'est ce que dit « Non relevé
-        » dans la liste des postes : non pas que le poste soit sans antivirus, mais que ce relevé-là
-        manque. L'état Defender ci-dessus, lui, est bien à jour.
+        {{ t('machine.antivirus.unread') }}
       </q-card-section>
     </template>
   </MachineInfoCard>
@@ -18,6 +15,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { t } from 'src/i18n';
 import MachineInfoCard from './MachineInfoCard.vue';
 import type { InfoRow } from './types';
 import type { MachineDetail } from 'src/services/machines';
@@ -48,16 +46,21 @@ const rows = computed<InfoRow[]>(() => {
   const m = props.machine;
   // Never read: the card shows its explanation instead, not a table of dashes.
   if (m.av_product_name == null) return [];
-  const rows: InfoRow[] = [{ label: 'Produit', value: antivirusLabel(m.av_product_name) }];
+  const rows: InfoRow[] = [
+    { label: t('machine.antivirus.product'), value: antivirusLabel(m.av_product_name) },
+  ];
   // Both bits below describe a *product*. With none registered they would only
   // add two "Inconnu" under a "Aucun" that has already said everything.
   if (m.av_product_name !== '') {
     rows.push(
-      { label: 'Protection active', value: boolLabel(m.av_product_enabled) },
+      { label: t('machine.antivirus.enabled'), value: boolLabel(m.av_product_enabled) },
       // The Security Center exposes a freshness bit and nothing else — no
       // version, no date, which is why this card carries no scan or update
       // action for a third-party product.
-      { label: 'Signatures à jour', value: boolLabel(m.av_product_signatures_up_to_date) },
+      {
+        label: t('machine.antivirus.signatures'),
+        value: boolLabel(m.av_product_signatures_up_to_date),
+      },
     );
   }
   // No "Est Defender" row: the card being here at all is that answer, and the

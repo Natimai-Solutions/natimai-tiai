@@ -10,6 +10,7 @@ from sqlalchemy import func, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.validation import invalid
 from app.features.base import utcnow
 from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
@@ -57,7 +58,7 @@ def not_in_the_future(value: datetime) -> datetime:
     bring it back (audit B06)."""
     aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
     if aware > utcnow() + FUTURE_TOLERANCE:
-        raise ValueError("la date ne peut pas être dans le futur")
+        raise invalid("date_in_future", "la date ne peut pas être dans le futur")
     return value
 
 

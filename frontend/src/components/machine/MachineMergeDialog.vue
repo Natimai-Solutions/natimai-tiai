@@ -1,22 +1,25 @@
 <template>
   <q-dialog v-model="open">
     <q-card style="width: 560px; max-width: 95vw">
-      <q-card-section class="text-h6">Fusionner un doublon</q-card-section>
+      <q-card-section class="text-h6">{{ t('machine.merge.title') }}</q-card-section>
 
       <!-- Which record is kept, said with the UUID and not only the hostname:
            two records of one poste carry the *same* hostname, and naming both
            sides "PC-042" is what made the dialog read as a merge with itself. -->
       <q-card-section class="q-pt-none">
-        <div class="text-caption text-muted">Poste conservé (celui-ci)</div>
+        <div class="text-caption text-muted">{{ t('machine.merge.kept') }}</div>
         <div class="text-body2 text-weight-medium">{{ title }}</div>
         <div class="text-caption text-muted merge-uuid">{{ machine?.machine_uuid }}</div>
         <div class="text-caption text-muted q-mt-xs">
-          Enrôlé le {{ formatDateTime(machine?.first_seen) }} — vu le
-          {{ formatDateTime(machine?.last_seen) }}
+          {{
+            t('machine.merge.enrolledSeen', {
+              enrolled: formatDateTime(machine?.first_seen),
+              seen: formatDateTime(machine?.last_seen),
+            })
+          }}
         </div>
         <div class="text-caption text-muted q-mt-sm">
-          Le poste choisi ci-dessous sera supprimé : ses menaces et commandes seront rattachées à
-          l'enregistrement conservé. Action irréversible.
+          {{ t('machine.merge.warning') }}
         </div>
       </q-card-section>
 
@@ -36,19 +39,28 @@
                  its own UUID, when it was enrolled, when it last reported. -->
             <q-item-label caption class="merge-uuid">{{ d.machine_uuid }}</q-item-label>
             <q-item-label caption>
-              Enrôlé le {{ formatDateTime(d.first_seen) }} — vu le
-              {{ formatDateTime(d.last_seen) }} ({{ timeAgoLabel(d.last_seen) }})
+              {{
+                t('machine.merge.enrolledSeen', {
+                  enrolled: formatDateTime(d.first_seen),
+                  seen: formatDateTime(d.last_seen),
+                })
+              }}
+              ({{ timeAgoLabel(d.last_seen) }})
             </q-item-label>
             <q-item-label caption>{{ matchReasonHint(d.match_reason) }}</q-item-label>
           </q-item-section>
           <q-item-section side>
-            <q-btn dense color="primary" label="Fusionner ici" @click="doMerge(d)" />
+            <q-btn
+              dense
+              color="primary"
+              :label="t('machine.merge.mergeHere')"
+              @click="doMerge(d)"
+            />
           </q-item-section>
         </q-item>
         <q-item v-if="!duplicates.length">
           <q-item-section class="text-muted">
-            Aucun doublon détecté : aucun autre poste ne partage l'ancre matérielle (SMBIOS ou TPM)
-            ni le nom de celui-ci. Un doublon dont le nom a changé se cherche ci-dessous.
+            {{ t('machine.merge.none') }}
           </q-item-section>
         </q-item>
       </q-list>
@@ -59,17 +71,16 @@
            nothing left in common for the server to match on. -->
       <q-card-section>
         <div class="text-caption text-muted q-mb-sm">
-          Chercher un autre poste à fusionner dans celui-ci — vérifiez l'UUID avant de
-          confirmer&nbsp;: rien ne garantit qu'il s'agisse du même matériel.
+          {{ t('machine.merge.searchHint') }}
         </div>
         <q-input
           v-model="search"
-          aria-label="Poste à fusionner"
+          :aria-label="t('machine.merge.searchAria')"
           dense
           outlined
           clearable
           debounce="300"
-          placeholder="Nom, IP ou UUID du poste à fusionner…"
+          :placeholder="t('machine.merge.searchPlaceholder')"
           :loading="searching"
           @update:model-value="runSearch"
         >
@@ -80,20 +91,28 @@
             <q-item-section>
               <q-item-label>{{ m.hostname || m.machine_uuid }}</q-item-label>
               <q-item-label caption class="merge-uuid">{{ m.machine_uuid }}</q-item-label>
-              <q-item-label caption>Vu le {{ formatDateTime(m.last_seen) }}</q-item-label>
+              <q-item-label caption>{{
+                t('machine.merge.seen', { date: formatDateTime(m.last_seen) })
+              }}</q-item-label>
             </q-item-section>
             <q-item-section side>
-              <q-btn dense flat color="primary" label="Fusionner ici" @click="doMerge(m)" />
+              <q-btn
+                dense
+                flat
+                color="primary"
+                :label="t('machine.merge.mergeHere')"
+                @click="doMerge(m)"
+              />
             </q-item-section>
           </q-item>
         </q-list>
         <div v-else-if="search && !searching" class="text-caption text-muted q-mt-sm">
-          Aucun autre poste ne correspond.
+          {{ t('machine.merge.noMatch') }}
         </div>
       </q-card-section>
 
       <q-card-actions align="right">
-        <q-btn v-close-popup flat label="Fermer" />
+        <q-btn v-close-popup flat :label="t('machine.merge.close')" />
       </q-card-actions>
     </q-card>
   </q-dialog>
@@ -102,6 +121,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
+import { t } from 'src/i18n';
 import {
   listMachines,
   mergeMachines,
@@ -113,6 +133,8 @@ import {
 import { apiErrorMessage } from 'src/services/errors';
 import { formatDateTime, timeAgoLabel } from 'src/utils/format';
 import { escapeHtml } from 'src/utils/html';
+import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{
   /** The record being kept — the merge target. */
@@ -132,7 +154,9 @@ const search = ref('');
 const results = ref<Machine[]>([]);
 const searching = ref(false);
 
-const title = computed(() => props.machine?.hostname || props.machine?.machine_uuid || 'Poste');
+const title = computed(
+  () => props.machine?.hostname || props.machine?.machine_uuid || t('machine.page.title'),
+);
 
 // A search left over from the previous opening would offer candidates gathered
 // for another poste — or for this one before a merge already removed them.
@@ -143,25 +167,13 @@ watch(open, (isOpen) => {
   }
 });
 
-const MATCH_REASON_LABELS: Record<MatchReason, string> = {
-  smbios_uuid: 'Même carte mère',
-  tpm_ek_hash: 'Même TPM',
-  hostname: 'Même nom',
-};
-
-const MATCH_REASON_HINTS: Record<MatchReason, string> = {
-  smbios_uuid: 'Ancre matérielle identique (SMBIOS UUID) : très probablement le même poste.',
-  tpm_ek_hash: 'Même clé TPM : très probablement le même poste.',
-  hostname:
-    'Seul le nom correspond — cela peut aussi être un poste remplacé qui a repris le nom de l’ancien. À vérifier avant de fusionner.',
-};
-
+// Worded at render time, from `machine.merge.reasons` and `machine.merge.hints`.
 function matchReasonLabel(reason: MatchReason): string {
-  return MATCH_REASON_LABELS[reason];
+  return t(`machine.merge.reasons.${reason}`);
 }
 
 function matchReasonHint(reason: MatchReason): string {
-  return MATCH_REASON_HINTS[reason];
+  return t(`machine.merge.hints.${reason}`);
 }
 
 /** Hardware evidence in the accent colour, a name match in a warning one: the
@@ -183,7 +195,10 @@ async function runSearch() {
     results.value = data.items.filter((m) => m.id !== props.machineId);
   } catch (e) {
     results.value = [];
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec de la recherche') });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('machine.merge.searchFailed')),
+    }));
   } finally {
     searching.value = false;
   }
@@ -193,20 +208,20 @@ function doMerge(source: Machine) {
   // Both UUIDs in the confirmation: on two records of one poste the hostnames
   // are identical, and a confirmation naming the same string twice is exactly
   // the one an administrator clicks through without reading.
-  const kept = props.machine?.machine_uuid ?? title.value;
   const removed = source.hostname
     ? `${escapeHtml(source.machine_uuid)} (${escapeHtml(source.hostname)})`
     : escapeHtml(source.machine_uuid);
-  $q.dialog({
-    title: 'Fusionner les postes',
+  liveDialog($q, () => ({
+    title: t('machine.merge.confirmTitle'),
     message:
-      `<div>Supprimer l'enregistrement <b>${removed}</b> et rattacher son historique à ` +
-      `<b>${escapeHtml(kept)}</b> ?</div>` +
-      `<div class="q-mt-sm">Cette action est irréversible.</div>`,
+      `<div>${t('machine.merge.confirmMessage', {
+        removed: `<b>${removed}</b>`,
+        kept: `<b>${escapeHtml(props.machine?.machine_uuid ?? title.value)}</b>`,
+      })}</div>` + `<div class="q-mt-sm">${escapeHtml(t('machine.merge.irreversible'))}</div>`,
     html: true,
     cancel: true,
     persistent: true,
-  }).onOk(() => {
+  })).onOk(() => {
     void runMerge(source.id);
   });
 }
@@ -214,11 +229,14 @@ function doMerge(source: Machine) {
 async function runMerge(sourceId: string) {
   try {
     await mergeMachines(props.machineId, sourceId);
-    $q.notify({ type: 'positive', message: 'Postes fusionnés' });
+    notify($q, () => ({ type: 'positive', message: t('machine.merge.merged') }));
     open.value = false;
     emit('merged');
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec de la fusion') });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('machine.merge.failed')),
+    }));
   }
 }
 </script>

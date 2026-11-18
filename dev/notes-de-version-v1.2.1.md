@@ -8,7 +8,9 @@ Enfin, elle reprend les limites que l'audit avait acceptées (§6.6 de `dev/plan
 
 Une vérification indépendante de l'ensemble (17 novembre 2026) a ensuite cherché à prendre ces corrections en défaut : sept relecteurs, par reproduction sur le banc, et en retirant les corrections une à une pour voir si un test échouait. Elle a trouvé onze défauts moyens, dont sept introduits par les corrections elles-mêmes, et une quarantaine de défauts mineurs ; tous sont corrigés ici. Voir § « Vérification du 17 novembre ».
 
-Elle contient treize migrations de base (`0032` à `0044`).
+Elle rend enfin la console bilingue, français et anglais, au choix de chaque compte (`dev/plan-console-bilingue.md`). Voir § « Console bilingue ».
+
+Elle contient seize migrations de base (`0032` à `0047`).
 
 ---
 
@@ -36,7 +38,8 @@ Elle contient treize migrations de base (`0032` à `0044`).
 13. **`max_connections` de PostgreSQL.** Un processus d'API peut ouvrir jusqu'à deux fois son pool en connexions (60 avec les valeurs par défaut), plus 30 pour le worker : la valeur par défaut de PostgreSQL (100) suffit pour une API et un worker, pas au-delà (`DEPLOYMENT.md`, ligne `POSTGRES_POOL_SIZE`).
 14. **Script de signature.** `Sign-TiaiPackage.ps1` est à remplacer par celui de cette version : il applique la nouvelle règle sur `msiexec` (voir plus bas).
 15. **Postes enrôlés dans l'heure qui précède la mise à jour.** Un poste dont la réponse d'enrôlement s'est perdue juste avant la mise à jour demandera une approbation au lieu d'être servi de nouveau.
-16. **Sauvegardes manuelles.** La purge de `backup.sh` ne retire plus que les dumps quotidiens (`tiai-AAAAMMJJ-HHMMSS.dump`). Les dumps manuels déjà présents dans `deploy/backups/` sous un autre nom sont désormais gardés indéfiniment : les supprimer à la main quand ils ne servent plus.
+16. **Langue de la console.** Un compte qui n'a pas choisi de langue suit celle de son navigateur : un navigateur réglé en anglais affiche désormais la console en anglais. Pour garder le français, choisir **Français** dans **Mon compte → Langue**. Les e-mails d'un compte sans choix partent dans `DEFAULT_LANGUAGE` (`fr` par défaut, donc comme avant).
+17. **Sauvegardes manuelles.** La purge de `backup.sh` ne retire plus que les dumps quotidiens (`tiai-AAAAMMJJ-HHMMSS.dump`). Les dumps manuels déjà présents dans `deploy/backups/` sous un autre nom sont désormais gardés indéfiniment : les supprimer à la main quand ils ne servent plus.
 
 ### Agent : mettre à jour le parc
 
@@ -44,12 +47,14 @@ Les correctifs de l'agent n'agissent qu'après la mise à jour par GPO.
 
 - **Script GPO.** `Install-TiaiAgent.ps1` n'est pas un fichier de la release : le recopier à la main sur le partage. Il accepte désormais `-AllowInsecureHttp` (`true` ou `false`), et le MSI la propriété `ALLOWINSECUREHTTP` (`1` ou `0`).
 - **Ordre à respecter.** Copier le nouveau script **avant** d'ajouter `-AllowInsecureHttp` aux arguments de la GPO. L'ancien script refuse ce paramètre inconnu sans rien journaliser, et plus aucun poste n'est installé ni mis à jour.
+- **Messages de l'agent.** Un agent de cette version envoie un code avec ses propres messages (refus, délais dépassés, réveil relayé, déploiements) : la console les affiche dans la langue du lecteur. Un agent plus ancien continue d'envoyer son texte français, affiché tel quel.
 - **Onglets ouverts.** Les onglets de la console ouverts avant cette mise à jour doivent être rechargés à la main, une fois. Le rechargement automatique n'existe qu'à partir de cette version.
 
 ---
 
 ## Changements de comportement à annoncer aux utilisateurs
 
+- **Langue.** La console existe en français et en anglais. Chaque compte choisit dans **Mon compte → Langue** : français, anglais, ou celle du navigateur (le choix par défaut). Le changement s'applique tout de suite, sans recharger la page, et suit le compte d'un poste à l'autre. Les e-mails partent dans la langue du compte, l'e-mail de test dans celle de l'administrateur qui l'envoie, et les exports Excel et CSV dans la langue de la console.
 - **Verrouillage de compte.**
   - Un échec de connexion de plus de 15 minutes (`LOGIN_LOCKOUT_MINUTES`) ne compte plus : quelques fautes de frappe étalées dans la semaine ne verrouillent plus.
   - Dès que 10 adresses distinctes (`LOGIN_SIEGE_ADDRESSES`) ont échoué sur un compte pendant un verrou, seules ses adresses habituelles restent admises : celles qui l'ont ouvert dans les 30 derniers jours (`LOGIN_KNOWN_ADDRESS_DAYS`), ou sur lesquelles une session est restée en usage.
@@ -172,7 +177,7 @@ Chaque correction a un test qui échoue sans elle. La vérification du 17 novemb
 
 - Quand une partie de la fiche ne peut pas être chargée (menaces, commandes, utilisation, historique, maintenance), la carte le dit et propose « Réessayer » ; la fiche n'affiche plus « Aucune alerte » sur des données manquantes. Un chargement initial en échec affiche un bandeau permanent (Utilisateurs, Groupes, Paramètres, Mon compte, profil). Un poste inexistant affiche « Poste introuvable », sans bouton d'action.
 - La console ne propose plus que ce que le compte peut consulter : menu et page d'accueil adaptés, cases à cocher et actions groupées masquées sans droit d'action, actions sur les comptes et groupes plus puissants désactivées. Cocher un droit de modification coche sa consultation. Des droits modifiés par un administrateur sont pris en compte sans recharger la page.
-- Un double clic sur une action de la fiche n'envoie plus la commande deux fois. Sélectionner du texte dans un tableau n'ouvre plus la ligne. Dans la liste des postes, la fiche s'ouvre par le nom du poste (lien souligné) ; le reste de la ligne est du texte que l'on sélectionne et copie, double-clic compris.
+- Un double clic sur une action de la fiche n'envoie plus la commande deux fois. Sélectionner du texte dans un tableau n'ouvre plus la ligne. Dans les tableaux (postes, salles, postes d'une salle, Mes tâches, paquets), la fiche s'ouvre par le nom, souligné ; le reste de la ligne est du texte que l'on sélectionne et copie, double-clic compris. Dans le journal d'audit, le détail s'ouvre par le bouton en bout de ligne.
 - Après un clic hors connexion, la page demandée se recharge d'elle-même au retour du réseau. Quand la session prend fin, la page de connexion l'indique.
 - Filtres des postes : tout type de poste est accepté, la mémoire garde son opérateur, la recherche ignore les espaces, un domaine passé dans l'adresse a sa puce.
 - Le seuil « disque presque plein » réglé dans Paramètres s'applique à la fiche et aux barres de la liste ; le tableau de bord montre les postes à renouveler.
@@ -265,11 +270,67 @@ Ces corrections n'agissent qu'après la diffusion du nouvel agent.
 
 - Un e-mail en cours d'envoi qui dépasse les 8 secondes de grâce à l'arrêt du worker est abandonné « en attente » ; si le serveur de messagerie l'accepte quand même, il repart au démarrage suivant.
 - Pendant un verrou des essais lents, une adresse non habituelle qui se trompe une fois est refusée jusqu'à la fin du verrou ; l'issue est « Mot de passe oublié ».
-- Un double-clic ouvre encore la ligne dans le journal d'audit et les pages Salles, Mes tâches et Paquets (seule la liste des postes a changé).
 - La construction de l'image `db-backup` se fait sur l'hôte et demande le miroir Alpine ; l'image n'est pas publiée avec la release.
-- Non exécutés ici : les commandes Docker de la documentation, les scripts PowerShell, le MSI et tout ce qui demande Windows.
+- Non exécutés ici : les commandes Docker de la documentation, le script de signature, le MSI et ce qui demande Windows. Le script GPO, les commandes à distance et l'installation des mises à jour Windows sont validés sur le parc (retour du 18 novembre 2026).
 
 ---
+
+## Console bilingue (Phase 6)
+
+Plan : `dev/plan-console-bilingue.md`. Le backend ne rédige plus de phrases pour la console : il envoie des codes, des paramètres et des valeurs brutes, à côté de son texte français d'avant, et la console écrit la phrase dans la langue du lecteur.
+
+- **Toute la console** est traduite : menus, pages, fiches, dialogues, confirmations, notifications, titres d'onglet, pack Quasar (pagination, sélecteurs de date), dates et nombres (`fr-FR` ou `en-GB`). Le français est inchangé, mot pour mot : aucune attente française des tests existants n'a été modifiée (quelques tests ont reçu des assertions de plus, et deux comparent désormais le résumé quotidien dans sa rédaction française).
+- **Textes écrits par le serveur** : diagnostics et refus des paquets, refus de validation des formulaires, variables de la page **Paramètres → serveur**, résultat de l'e-mail de test, verdicts enregistrés des commandes (commande perdue, poste fusionné, paquet retiré, réveil), ligne « Maintenance non faite » et note de clôture par fusion. Les lignes enregistrées avant la mise à jour gardent leur texte français.
+- **Groupes intégrés** : nommés dans la langue du lecteur tant qu'ils gardent le nom et la description donnés à l'installation ; renommés, ils s'affichent tels que saisis.
+- **E-mails** : réinitialisation, résumé quotidien, alertes de menace, vérification affectée, rappel des maintenances, e-mail de test, dans la langue du destinataire ; le français est inchangé.
+- **Exports** Excel et CSV des postes et des logiciels : en-têtes, valeurs, nom de la feuille et du fichier dans la langue de la console (`lang=en`). Sans ce paramètre, le fichier est identique à celui d'avant. Le CSV anglais est séparé par des virgules, avec le point décimal, comme l'Excel d'un poste réglé en anglais l'attend ; le CSV français garde `;` et la virgule décimale.
+- **Ne se traduit pas** : la sortie des outils Windows (dans la langue du poste), y compris quand l'agent la cite dans un détail, ce que les utilisateurs saisissent (noms, notes, consignes), les titres des mises à jour et les messages d'erreur de Windows cités dans un compte rendu, et quelques causes internes de l'agent citées dans un détail (manifeste mal formé, signature illisible).
+- **API** : des ajouts, et un seul changement de valeur : dans les refus 422 écrits par Tia'i, `details.errors[].type` passe de `value_error` à `tiai_<code>` (le `msg` est inchangé, octet pour octet). Ajouts : `users.language` (`/auth/me`), `params` et `install_blocker_problems` sur les paquets, `details.cause` / `details.causes` sur les refus de paquet, `type` `tiai_<code>` et `params` dans les refus 422 (le `msg` est inchangé), `code`/`raw`/`format`/`params` sur l'environnement du serveur, `code`/`params` sur l'e-mail de test, `result_code`/`result_params` sur les commandes, `detail_code`/`detail_params` sur le réveil, `title_code`/`title_params` sur les interventions, `closing_note_code` sur les vérifications, `builtin_key` sur les groupes d'un compte, paramètre `lang` des exports. L'agent ajoute `message_code`/`message_params` à ses résultats, et `output_code`/`output_<nom>` pour la sortie qu'il a lui-même écrite d'une commande échouée.
+
+### Vérification du 18 novembre 2026
+
+Une deuxième vérification indépendante a relu les corrections du 17 novembre et la console bilingue (`dev/plan-audit-2026-11.md` §6.8). Corrigé depuis :
+
+- Journal d'audit : la date d'une entrée ouvre son détail (le bouton en bout de ligne sortait de l'écran sur la plupart des écrans et sur téléphone).
+- Une réinitialisation de mot de passe par un administrateur pendant que le titulaire se connecte ne fait plus échouer l'une des deux.
+- Paramètres → Réglages du serveur est de nouveau lisible sur téléphone.
+- Une deuxième commande groupée confirmée pendant l'envoi d'une première part bien ; seul le doublon de la même commande est écarté.
+- Le journal refuse une ligne datée dans le futur avec le message d'avant (« Value error, » n'est plus doublé).
+- Français : « À jour due le … » et « … en retard Maintenance : … » retrouvent leur espace dans le texte copié.
+- Anglais : pluriels (« 1 core », « 1 day old »…), libellés cités qui n'existaient pas (« Rarely used », « To take », « Refresh the inventory »), détail du journal pour l'e-mail de test, et phrases propres de l'agent (manifeste, téléchargement, délais, Windows Update), désormais codées, y compris dans le détail d'un autre message.
+
+Défauts mineurs de la même vérification, repris ensuite :
+
+- Un curseur de navigation falsifié portant un nombre décimal d'exposant extrême (`0E-20000`, `1E-16384`…) est désormais ignoré lui aussi, au lieu de finir en erreur 500 sur la flèche « poste suivant ».
+- Un demi-caractère UTF-16 isolé envoyé par un poste sous forme d'octets bruts, et non échappé, est retiré comme sa forme échappée ; l'inscription ou le battement n'échoue plus en 500.
+- Supprimer un bâtiment pendant qu'une salle sans bâtiment du même nom (à la casse près) est créée ne finit plus en erreur 500 : la salle du bâtiment est renommée d'après lui, comme quand le nom était déjà pris (au pire, 409 « nom déjà utilisé »).
+- Une modification qui renvoie le titre d'une ligne du journal sans le changer (ancienne console, script) garde le titre bilingue ; seule une vraie modification du titre le fige dans la langue saisie.
+- Les caractères invisibles (espace sans chasse, gluon…) en tête ou en fin d'un nom de salle ou de bâtiment sont retirés : un nom qui ne diffère d'un autre que par eux est refusé comme déjà utilisé (409).
+- Un poste refusé dès la première partie d'une séance (supprimé, fusionné ou sorti de la salle), y compris à la reprise d'un envoi interrompu, est nommé dans le bandeau orange ; « Retirer ces postes et reprendre l'envoi » le décoche, le marque « Retiré de cette séance » et envoie la séance sans lui.
+- Sur ordinateur aussi, le dialogue de séance tient dans la fenêtre : la liste des postes défile, le titre, l'état de l'envoi et les boutons « Reprendre l'envoi » et « Annuler » restent visibles.
+- Les postes refusés sont nommés jusqu'à cinq, puis « et N autre(s) », dans le bandeau comme dans la notification : sur un téléphone, la liste et les boutons restent à l'écran.
+- Une séance de maintenance qui n'a pas pu être lue dit pourquoi dans la langue affichée, même si la langue change pendant que le dialogue est ouvert.
+- Les badges de « Mes tâches » se mettent à jour dès que les droits du compte changent, sans attendre une navigation ; un droit retiré remet son compte à zéro.
+- Sur tablette, une adresse e-mail longue est coupée dans l'en-tête (adresse entière au survol) et ne masque plus le titre « Tia'i — Console ».
+- Un message d'erreur sous un champ de formulaire (« Requis », « 12 caractères minimum », « Les mots de passe ne correspondent pas »…) suit un changement de langue à chaud, sans attendre que le champ soit modifié.
+- Une confirmation ouverte (« Révoquer le token », « Retirer le paquet »…), l'avertissement de la resynchronisation de l'annuaire et l'avis « Impossible de charger cette page » passent dans la nouvelle langue quand elle change pendant qu'ils sont affichés.
+- Le bandeau d'échec de « Envoyer un e-mail de test » et l'erreur de chargement des colonnes de l'export du parc suivent la langue ; l'export recharge ses colonnes dans la nouvelle langue si le premier chargement avait échoué.
+- Paquet refusé parce que l'installation lance une désinstallation : la console cite l'argument en cause (« … (argument « {dir}\mon appli -x64.msi ») »), par exemple un nom de fichier contenant « -x ».
+- En anglais, un titre d'intervention commençant par un mot composé (« Check-up of the screen ») n'est plus coupé après le type ; seul « Type — », « Type : » ou « Type - » (trait d'union précédé d'une espace) est retiré.
+- En anglais, un groupe intégré garde son nom français quand un autre groupe porte déjà sa traduction (« Administrators » créé à côté d'« Administrateurs ») : les deux restent distincts dans le choix des groupes et les pastilles.
+- Mode sombre : le lien vers le poste dans la colonne « Ressource » du journal d'audit prend la couleur du texte, souligné, au lieu du bleu du navigateur illisible sur fond sombre.
+- Sur écran tactile, le nom souligné qui ouvre une ligne (paquets, salles, postes, mes tâches) se touche sur une hauteur plus confortable, sans que la mise en page bouge.
+- Sur téléphone, un nom de menace, un identifiant winget ou un nom de groupe très long sans espace passe à la ligne au lieu d'élargir la page.
+
+Limites notées à l'issue de cette vérification, reprises ensuite :
+
+- Maintenance : une partie de séance qui nomme un poste en cours de fusion attend la fin de la fusion et répond « poste introuvable » (404, `machine.not_found`, avec le poste fusionné dans `details.machine_ids`) au lieu d'une erreur 500 ; rien n'est écrit, et la partie renvoyée sans ce poste est enregistrée.
+- Exports : le CSV anglais est séparé par des virgules, avec le point décimal ; le CSV français est inchangé.
+- Toutes les notifications de la console (« Commande envoyée », « Préférence enregistrée », messages d'erreur…) passent dans la nouvelle langue quand elle change pendant qu'elles sont affichées ; un message d'erreur est réécrit à partir de la réponse du serveur. Les notifications identiques restent regroupées, avec leur compteur.
+- Une notification levée pendant qu'un dialogue est ouvert s'affiche en haut de l'écran : elle ne masque plus les boutons du dialogue (« Reprendre l'envoi », « Enregistrer »…). Celle qui accompagne la fermeture d'un dialogue reste en bas, comme avant.
+- Agent : le compte rendu d'une installation Windows Update, les étapes d'une réinitialisation de Windows Update, la remise à zéro du spouleur qui n'aboutit qu'en partie, la phrase « Redémarrage requis pour finaliser l'opération. » ajoutée à la sortie de DISM et le refus « méthode B … ; méthode A … » d'un déploiement partent désormais avec un code : la console anglaise les écrit en anglais. Le texte français est inchangé, et un serveur ou une console plus anciens l'affichent comme avant.
+- Agent : la sortie d'une commande échouée, quand c'est l'agent qui l'a écrite (rapport de réinitialisation, d'installation), porte son propre code à côté de celui de l'erreur (`output_code`) ; un rapport trop long pour le serveur part en texte seul, comme avant.
+- Agent : une cause codée citée dans un message codé transmet aussi son propre détail (en anglais, « transfer interrupted: » s'affichait sans la cause).
 
 ## Nouvelles variables d'environnement
 
@@ -290,6 +351,7 @@ Toutes facultatives : leur valeur par défaut est celle décrite plus haut.
 | `LOGIN_SLOW_WINDOW_HOURS` | `24` | Fenêtre longue des échecs, et durée du verrou qu'elle déclenche. Non définie : 24, ou le double de `LOGIN_LOCKOUT_MINUTES` si c'est davantage |
 | `TRUSTED_PROXIES_ALLOW_WIDE` | `false` | Accepte dans `TRUSTED_PROXIES` une plage plus large qu'un /24 ou un /64 |
 | `BACKUP_ENCRYPT_RECIPIENT` | vide | Clés publiques `age` pour chiffrer les sauvegardes ; vide = dumps en clair |
+| `DEFAULT_LANGUAGE` | `fr` | Langue des e-mails d'un compte qui n'a pas choisi la sienne (`fr` ou `en`) |
 
 Clés de registre de l'agent : `DeployMethodAMaxGB` et `DeployCacheMaxGB` (`REG_DWORD`), voir plus haut.
 
@@ -317,5 +379,8 @@ Clés de registre de l'agent : `DeployMethodAMaxGB` et `DeployCacheMaxGB` (`REG_
 | `0042` | Période du résumé et du rappel déjà servie le jour de la mise à jour (`app_settings`, `worker.last_run.*`) ; rien sur une installation neuve |
 | `0043` | Noms de salle et de bâtiment uniques à la casse près (doublons renommés « (2) »…) |
 | `0044` | Fin du verrou des essais lents (`users.slow_locked_until`) ; `users.lock_admits_known_only` supprimée |
+| `0045` | Langue du compte (`users.language`), nulle pour les comptes existants : « celle du navigateur » |
+| `0046` | Code des verdicts de commande (`commands.result_code`, `result_params`), nul pour les commandes existantes |
+| `0047` | Code des textes écrits par le serveur dans le journal des interventions (`interventions.title_code`, `title_params`) et à la clôture d'une vérification (`machine_checks.closing_note_code`) |
 
 Le backend applique les migrations à son démarrage.

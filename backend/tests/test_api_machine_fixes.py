@@ -466,6 +466,8 @@ async def test_a_merge_closes_the_open_commands_it_absorbs(client, db_session):
         row = await _command(db_session, command_id)
         assert str(row.machine_id) == kept["machine_id"]
         assert (row.status, row.error) == ("failed", MERGED_ERROR)
+        # The code beside the French text: what the English console reads.
+        assert (row.result_code, row.result_params) == ("command.merged", {})
         assert row.finished_at is not None
     closed = await _command(db_session, done["created"][0])
     assert (str(closed.machine_id), closed.status) == (kept["machine_id"], "succeeded")
@@ -687,6 +689,11 @@ async def test_a_lone_surrogate_from_a_poste_is_stripped_like_a_nul(client, db_s
         (b'{"hostname": "PC\\udc00-2\\u0000"}', "PC-2"),
         (b'{"hostname": "PC\\uD83D\\uDE00-3"}', "PC\U0001f600-3"),
         (b'{"hostname": "PC\\ud83d-4\\ud83d\\ude00\\ude00"}', "PC-4\U0001f600"),
+        # Its three bytes as they come, unescaped: not UTF-8, yet read by the
+        # JSON parser into the same character.
+        (b'{"hostname": "PC-\xed\xa0\x805"}', "PC-5"),
+        (b'{"hostname": "PC-6", "os_version": "Win\xed\xb0\x80"}', "PC-6"),
+        ('{"hostname": "PC-\U0001f600-7é"}'.encode(), "PC-\U0001f600-7é"),
     ):
         hb = await client.post("/api/v1/agent/heartbeat", headers=auth, content=body)
         assert hb.status_code == 200, (body, hb.text)
@@ -1126,6 +1133,7 @@ async def test_the_digest_and_the_export_age_a_silent_poste_too(client, db_sessi
     """The mail and the spreadsheet read the signature age the console reads:
     a poste silent for a month is not « à jour » there either."""
     from app.features.notification.digest import build_digest
+    from app.features.notification.digest_texts import FR as DIGEST_FR
 
     headers = await _admin(client, db_session)
     m = await _enroll(client, "m-silent-mail", hostname="PC-SILENCE")
@@ -1137,9 +1145,9 @@ async def test_the_digest_and_the_export_age_a_silent_poste_too(client, db_sessi
 
     digest = await build_digest(db_session)
     assert digest.outdated_antivirus == 1
-    assert [(line.hostname, line.detail) for line in digest.outdated_lines] == [
-        ("PC-SILENCE", "signatures vieilles de 30 j")
-    ]
+    assert [
+        (line.hostname, line.worded(DIGEST_FR)) for line in digest.outdated_lines
+    ] == [("PC-SILENCE", "signatures vieilles de 30 j")]
     export = await client.get(
         "/api/v1/machines/export.csv?columns=hostname,is_up_to_date,signature_age_days",
         headers=headers,
@@ -1263,6 +1271,7 @@ async def test_a_huge_stored_signature_age_breaks_nothing(
     must not overflow on it — one poste used to cost the whole parc its
     dashboard, its filters and its mail."""
     from app.features.notification.digest import build_digest
+    from app.features.notification.digest_texts import FR as DIGEST_FR
 
     headers = await _admin(client, db_session)
     huge = await _enroll(client, "m-huge", hostname="PC-HUGE")
@@ -1312,7 +1321,9 @@ async def test_a_huge_stored_signature_age_breaks_nothing(
     stats = (await client.get("/api/v1/stats/overview", headers=headers)).json()
     assert (stats["up_to_date"], stats["outdated"]) == expected
     assert digest.outdated_antivirus == expected[1]
-    assert [(line.hostname, line.detail) for line in digest.outdated_lines] == (
+    assert [
+        (line.hostname, line.worded(DIGEST_FR)) for line in digest.outdated_lines
+    ] == (
         []
         if third_party
         else [("PC-HUGE", f"signatures vieilles de {2147483647 + 2} j")]

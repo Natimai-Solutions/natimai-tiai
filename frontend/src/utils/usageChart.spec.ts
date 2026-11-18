@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { setLocale } from 'src/i18n';
 import type { MachineUsage } from 'src/services/machines';
 import { countedFrom, localDate, measuredDays, usageBars } from './usageChart';
 
@@ -19,6 +20,8 @@ function usage(overrides: Partial<MachineUsage> = {}): MachineUsage {
     ...overrides,
   };
 }
+
+afterEach(() => setLocale('fr'));
 
 describe('countedFrom', () => {
   it('starts at the later of enrolment and the first count', () => {
@@ -45,6 +48,11 @@ describe('usageBars', () => {
 
   it('labels days in French', () => {
     expect(usageBars(usage())[2]!.label).toBe('lun. 28/09');
+  });
+
+  it('labels days in English once the language is English', () => {
+    setLocale('en');
+    expect(usageBars(usage())[2]!.label).toBe('Mon 28/09');
   });
 
   it('measures nothing before the first count', () => {

@@ -1,0 +1,113 @@
+[
+ {
+  "code": "name_blank",
+  "params": {},
+  "message": "le nom ne peut pas être vide ou fait seulement d'espaces"
+ },
+ {
+  "code": "name_too_long",
+  "params": {
+   "max": 5,
+   "length": 8
+  },
+  "message": "le nom ne doit pas dépasser 5 caractères (reçu : 8)"
+ },
+ {
+  "code": "null_refused",
+  "params": {
+   "fields": [
+    "name",
+    "email"
+   ]
+  },
+  "message": "name, email : valeur requise (null refusé)"
+ },
+ {
+  "code": "password_too_long",
+  "params": {
+   "max_bytes": 72
+  },
+  "message": "le mot de passe ne doit pas dépasser 72 octets (72 caractères sans accent, moins avec des accents ou des symboles) : au-delà, la fin ne serait pas prise en compte"
+ },
+ {
+  "code": "name_empty",
+  "params": {},
+  "message": "le nom ne peut pas être vide"
+ },
+ {
+  "code": "date_in_future",
+  "params": {},
+  "message": "la date ne peut pas être dans le futur"
+ },
+ {
+  "code": "control_character",
+  "params": {},
+  "message": "caractère de contrôle refusé"
+ },
+ {
+  "code": "too_long",
+  "params": {
+   "max": 200
+  },
+  "message": "200 caractères au plus"
+ },
+ {
+  "code": "too_long",
+  "params": {
+   "max": 5000
+  },
+  "message": "5000 caractères au plus"
+ },
+ {
+  "code": "too_many_arguments",
+  "params": {
+   "max": 64
+  },
+  "message": "au plus 64 arguments"
+ },
+ {
+  "code": "argument_refused",
+  "params": {
+   "max": 1024
+  },
+  "message": "argument trop long ou contenant un caractère de contrôle"
+ },
+ {
+  "code": "arguments_required",
+  "params": {},
+  "message": "liste d'arguments requise (vide pour aucun argument)"
+ },
+ {
+  "code": "success_codes_count",
+  "params": {
+   "min": 1,
+   "max": 32
+  },
+  "message": "entre 1 et 32 codes de succès"
+ },
+ {
+  "code": "exit_code_out_of_range",
+  "params": {},
+  "message": "code de sortie hors limites"
+ },
+ {
+  "code": "name_required",
+  "params": {},
+  "message": "nom requis"
+ },
+ {
+  "code": "date_before_request",
+  "params": {},
+  "message": "la date ne peut pas précéder la demande"
+ },
+ {
+  "code": "nul_refused",
+  "params": {},
+  "message": "Caractère nul refusé"
+ },
+ {
+  "code": "too_nested",
+  "params": {},
+  "message": "Corps JSON trop imbriqué"
+ }
+]

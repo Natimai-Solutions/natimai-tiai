@@ -1,6 +1,7 @@
 import { api } from 'boot/axios';
 import type { Command, CommandList, CreateCommandsResponse } from './commands';
 import { frNumber } from 'src/utils/format';
+import { intlTag, t } from 'src/i18n';
 
 /**
  * Software packages the console deploys (dev/plan-deploiement-logiciel.md).
@@ -24,6 +25,12 @@ export interface PackageFile {
 
 export interface PackageProblem {
   code: string;
+  /**
+   * What fills the sentence the code names, worded by the console in its
+   * reader's language (`utils/packageText`). Absent from an older server.
+   */
+  params?: Record<string, unknown>;
+  /** The same sentence, in French, as the server writes it. */
   message: string;
   /**
    * Whether it stands in the way of an uninstallation too. Decided by the
@@ -77,6 +84,8 @@ export interface Package {
    * retirement is said by `retired_at`, not here.
    */
   install_blockers: string[];
+  /** The same, as codes to word in the reader's language; absent from an older server. */
+  install_blocker_problems?: PackageProblem[];
   /** Postes whose inventory shows the program; null without `detect_name`. */
   installed_count: number | null;
   created_by: string | null;
@@ -206,15 +215,13 @@ export function publisherOf(p: Package, action: DeployAction = 'install'): strin
 
 /** The method A bound as the sentences say it: whole Gio, as it is set. */
 export function methodAMaxLabel(p: Package): string {
-  return `${Math.round(p.method_a_max_bytes / 1024 ** 3)} Gio`;
+  return t('packagePages.size.gib', { n: Math.round(p.method_a_max_bytes / 1024 ** 3) });
 }
 
-export const trustLabels: Record<TrustMethod, string> = {
-  winget: 'winget',
-  signed: 'Signé (méthode B)',
-  publisher: 'Éditeur (méthode A)',
-  none: 'Non signé',
-};
+/** How the package reaches a poste, in a word (a chip of the lists). */
+export function trustLabel(method: TrustMethod): string {
+  return t(`packagePages.trust.${method}`);
+}
 
 /**
  * File names as a French reader sorts them: case and accents aside, digits by
@@ -261,13 +268,15 @@ export function packageChoiceLabel(p: Package, among: Package[]): string {
   if (!twins.length) return base;
   const kind =
     p.kind === 'winget'
-      ? `winget ${p.winget_id ?? ''}`.trim()
-      : `fichiers, ${p.install_run ?? 'sans fichier à lancer'}`;
-  const created = new Date(p.created_at).toLocaleString('fr-FR', {
+      ? t('packagePages.choice.winget', { id: p.winget_id ?? '' }).trim()
+      : t('packagePages.choice.files', {
+          run: p.install_run ?? t('packagePages.choice.noRun'),
+        });
+  const created = new Date(p.created_at).toLocaleString(intlTag(), {
     dateStyle: 'short',
     timeStyle: 'short',
   });
-  return `${base} (${kind} — créé le ${created})`;
+  return t('packagePages.choice.label', { base, kind, created });
 }
 
 /** Ready to deploy: complete, not retired. */
@@ -323,23 +332,36 @@ export function splitArgs(line: string): string[] {
   return out;
 }
 
+/**
+ * One argument written so that `splitArgs` reads it back unchanged. A quote
+ * becomes `\"`; a backslash right before a quote stays a plain backslash
+ * there, since `splitArgs` only reads `\"` as special. Trailing backslashes
+ * go after the closing quote: inside, the last one would join that quote
+ * into a literal `\"` (`/D="C:\Mon dossier\"` would lose its end).
+ */
+function quoteArg(arg: string): string {
+  let end = arg.length;
+  while (end > 0 && arg.charAt(end - 1) === '\\') end--;
+  let body = '';
+  for (const c of arg.slice(0, end)) body += c === '"' ? '\\"' : c;
+  return `"${body}"${arg.slice(end)}`;
+}
+
 /** The inverse of `splitArgs`, for showing a stored list in one field. */
 export function joinArgs(args: string[]): string {
-  return args
-    .map((a) => (a === '' || /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a))
-    .join(' ');
+  return args.map((a) => (a === '' || /[\s"]/.test(a) ? quoteArg(a) : a)).join(' ');
 }
 
 export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} o`;
-  const units = ['Kio', 'Mio', 'Gio'];
+  if (bytes < 1024) return t('packagePages.size.bytes', { n: bytes });
+  const units = ['kib', 'mib', 'gib'];
   let value = bytes / 1024;
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {
     value /= 1024;
     unit++;
   }
-  return `${frNumber(value, value < 10 ? 1 : 0)} ${units[unit]}`;
+  return t(`packagePages.size.${units[unit]}`, { n: frNumber(value, value < 10 ? 1 : 0) });
 }
 
 export async function listPackages(retired = false): Promise<Package[]> {

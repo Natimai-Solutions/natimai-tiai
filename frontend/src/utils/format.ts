@@ -1,4 +1,5 @@
 import type { EmailPreference } from 'src/services/auth';
+import { intlTag, t } from 'src/i18n';
 
 /**
  * A number the French way — decimal comma, narrow space between thousands —
@@ -6,7 +7,7 @@ import type { EmailPreference } from 'src/services/auth';
  * beside « 7,5 h » read as two different notations.
  */
 export function frNumber(value: number, digits = 0): string {
-  return value.toLocaleString('fr-FR', {
+  return value.toLocaleString(intlTag(), {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
@@ -22,7 +23,7 @@ export function dash(value: string | number | null | undefined): string {
 /** Format an ISO timestamp for display, or a dash when absent. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—';
-  return new Date(value).toLocaleString('fr-FR');
+  return new Date(value).toLocaleString(intlTag());
 }
 
 /**
@@ -37,12 +38,13 @@ export function timeAgoLabel(value: string | null | undefined): string {
   const seconds = Math.round((Date.now() - then) / 1000);
   // Negative means this browser's clock trails the server's. A few seconds of
   // skew is ordinary, and "à l'instant" is truer than a negative age.
-  if (seconds < 60) return "à l'instant";
+  if (seconds < 60) return t('format.timeAgo.now');
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `il y a ${minutes} min`;
+  if (minutes < 60) return t('format.timeAgo.minutes', { count: minutes }, minutes);
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `il y a ${hours} h`;
-  return `il y a ${Math.floor(hours / 24)} j`;
+  if (hours < 24) return t('format.timeAgo.hours', { count: hours }, hours);
+  const days = Math.floor(hours / 24);
+  return t('format.timeAgo.days', { count: days }, days);
 }
 
 /**
@@ -65,13 +67,13 @@ export function onlineColor(isOnline: boolean): string {
  * the server cannot tell apart: a poste off, and one whose agent cannot reach it.
  */
 export function onlineLabel(isOnline: boolean): string {
-  return isOnline ? 'Poste allumé' : 'Poste éteint ou injoignable';
+  return t(isOnline ? 'format.online.on' : 'format.online.off');
 }
 
 /** Human label for a nullable boolean (e.g. Defender flags). */
 export function boolLabel(value: boolean | null | undefined): string {
-  if (value === null || value === undefined) return 'Inconnu';
-  return value ? 'Oui' : 'Non';
+  if (value === null || value === undefined) return t('format.bool.unknown');
+  return t(value ? 'format.bool.yes' : 'format.bool.no');
 }
 
 /**
@@ -83,11 +85,11 @@ export function sessionLabel(
   present: boolean | null | undefined,
   username: string | null | undefined,
 ): string {
-  if (present === null || present === undefined) return 'Inconnu';
-  if (!present) return 'Aucun utilisateur';
+  if (present === null || present === undefined) return t('format.session.unknown');
+  if (!present) return t('format.session.none');
   // `||` rather than `??`: an empty string must fall through to the anonymous
   // label too.
-  return username || 'Utilisateur connecté';
+  return username || t('format.session.anonymous');
 }
 
 /**
@@ -114,8 +116,8 @@ export function sessionColor(present: boolean | null | undefined): string {
  * what is missing, and the label now says which.
  */
 export function antivirusLabel(name: string | null | undefined): string {
-  if (name === null || name === undefined) return 'Non relevé';
-  return name === '' ? 'Aucun' : name;
+  if (name === null || name === undefined) return t('format.antivirus.notReported');
+  return name === '' ? t('format.antivirus.none') : name;
 }
 
 /** Badge colour for the antivirus cell: red for none or stopped, grey for unknown. */
@@ -157,17 +159,25 @@ export function antivirusStatusLabel(
   signaturesUpToDate: boolean | null | undefined,
 ): string {
   if (name === null || name === undefined) {
-    return 'Security Center jamais relevé (agent antérieur, ou hôte sans Security Center)';
+    return t('format.antivirus.neverReported');
   }
-  if (name === '') return 'Aucun antivirus enregistré';
+  if (name === '') return t('format.antivirus.noneRegistered');
 
   const parts: string[] = [];
-  if (enabled === null || enabled === undefined) parts.push('protection à l’état inconnu');
-  else parts.push(enabled ? 'protection active' : 'protection désactivée');
-  if (signaturesUpToDate === true) parts.push('signatures à jour');
-  else if (signaturesUpToDate === false) parts.push('signatures périmées');
+  if (enabled === null || enabled === undefined)
+    parts.push(t('format.antivirus.protectionUnknown'));
+  else {
+    parts.push(
+      t(enabled ? 'format.antivirus.protectionActive' : 'format.antivirus.protectionDisabled'),
+    );
+  }
+  if (signaturesUpToDate === true) parts.push(t('format.antivirus.signaturesUpToDate'));
+  else if (signaturesUpToDate === false) parts.push(t('format.antivirus.signaturesOutdated'));
 
-  return `${name} — ${parts.join(', ')}`;
+  return t('format.antivirus.status', {
+    name,
+    parts: parts.join(t('format.antivirus.partSeparator')),
+  });
 }
 
 /**
@@ -176,8 +186,8 @@ export function antivirusStatusLabel(
  * same finding as one measured and found behind.
  */
 export function protectionLabel(isUpToDate: boolean | null | undefined): string {
-  if (isUpToDate === null || isUpToDate === undefined) return 'État inconnu';
-  return isUpToDate ? 'À jour' : 'Non à jour';
+  if (isUpToDate === null || isUpToDate === undefined) return t('format.protection.unknown');
+  return t(isUpToDate ? 'format.protection.upToDate' : 'format.protection.notUpToDate');
 }
 
 /**
@@ -190,8 +200,9 @@ export function protectionBadgeLabel(
   isUpToDate: boolean | null | undefined,
 ): string {
   if (isUpToDate === true) return productLabel;
-  if (isUpToDate === false) return `${productLabel} · non à jour`;
-  return `${productLabel} · état inconnu`;
+  if (isUpToDate === false)
+    return t('format.protection.badgeNotUpToDate', { product: productLabel });
+  return t('format.protection.badgeUnknown', { product: productLabel });
 }
 
 /** Badge colour for the overall protection state: grey when never computed. */
@@ -212,12 +223,12 @@ export function runningModeLabel(mode: string | null | undefined): string {
   if (!mode) return '—';
   switch (mode) {
     case 'Normal':
-      return 'Normal';
+      return t('format.runningMode.normal');
     case 'Passive':
     case 'SxS Passive Mode':
-      return 'Passif (un antivirus tiers protège le poste)';
+      return t('format.runningMode.passive');
     case 'EDR Block Mode':
-      return 'EDR en mode blocage';
+      return t('format.runningMode.edrBlock');
     default:
       return mode;
   }
@@ -229,8 +240,10 @@ export function sessionTypeLabel(
   isRemote: boolean | null | undefined,
 ): string {
   if (!state) return '—';
-  const base = state === 'active' ? 'Active' : 'Déconnectée';
-  return `${base} (${isRemote ? 'Bureau à distance' : 'console'})`;
+  return t('format.sessionType.line', {
+    state: t(state === 'active' ? 'format.sessionType.active' : 'format.sessionType.disconnected'),
+    kind: t(isRemote ? 'format.sessionType.remote' : 'format.sessionType.console'),
+  });
 }
 
 /**
@@ -240,8 +253,8 @@ export function sessionTypeLabel(
  * would credit a machine we know nothing about.
  */
 export function wuPendingLabel(count: number | null | undefined): string {
-  if (count === null || count === undefined) return 'Inconnu';
-  return count === 0 ? 'À jour' : String(count);
+  if (count === null || count === undefined) return t('format.wuPending.unknown');
+  return count === 0 ? t('format.wuPending.upToDate') : String(count);
 }
 
 /** Badge colour for the pending count: grey unknown, green none, amber some. */
@@ -274,13 +287,10 @@ export function wuSeverityColor(severity: string | null | undefined): string {
 export function wuSeverityLabel(severity: string | null | undefined): string {
   switch (severity) {
     case 'critical':
-      return 'Critique';
     case 'important':
-      return 'Importante';
     case 'moderate':
-      return 'Modérée';
     case 'low':
-      return 'Faible';
+      return t(`format.wuSeverity.${severity}`);
     // Shown as-is rather than swallowed: a rating Microsoft adds later should
     // surface, not vanish.
     default:
@@ -290,8 +300,8 @@ export function wuSeverityLabel(severity: string | null | undefined): string {
 
 /** Update kind, spelled out: the distinction the two install commands hinge on. */
 export function wuTypeLabel(type: string | null | undefined): string {
-  if (type === 'driver') return 'Pilote';
-  if (type === 'software') return 'Logicielle';
+  if (type === 'driver') return t('format.wuType.driver');
+  if (type === 'software') return t('format.wuType.software');
   return type || '—';
 }
 
@@ -307,7 +317,7 @@ export function wuTypeLabel(type: string | null | undefined): string {
  */
 export function wuSizeLabel(sizeMb: number | null | undefined): string {
   if (sizeMb === null || sizeMb === undefined) return '—';
-  return `≤ ${sizeMb.toLocaleString('fr-FR')} Mio`;
+  return t('format.wuSize', { size: sizeMb.toLocaleString(intlTag()) });
 }
 
 /**
@@ -318,16 +328,16 @@ export function wuSizeLabel(sizeMb: number | null | undefined): string {
 export function threatSeverityLabel(severity: string | null | undefined): string {
   switch (severity) {
     case 'low':
-      return 'Faible';
+      return t('format.threatSeverity.low');
     case 'medium':
     case 'moderate':
-      return 'Moyenne';
+      return t('format.threatSeverity.medium');
     case 'high':
-      return 'Élevée';
+      return t('format.threatSeverity.high');
     case 'severe':
-      return 'Grave';
+      return t('format.threatSeverity.severe');
     case 'unknown':
-      return 'Inconnue';
+      return t('format.threatSeverity.unknown');
     // Shown as-is rather than swallowed: a rating Defender adds later should
     // surface, not vanish.
     default:
@@ -361,29 +371,18 @@ export function threatSeverityColor(severity: string | null | undefined): string
 export function threatStatusLabel(status: string | null | undefined): string {
   switch (status) {
     case 'active':
-      return 'Active';
     case 'cleaned':
-      return 'Nettoyée';
     case 'quarantined':
-      return 'En quarantaine';
     case 'removed':
-      return 'Supprimée';
     case 'allowed':
-      return 'Autorisée';
     case 'blocked':
-      return 'Bloquée';
     case 'quarantine_failed':
-      return 'Échec de mise en quarantaine';
     case 'remove_failed':
-      return 'Échec de suppression';
     case 'allow_failed':
-      return "Échec d'autorisation";
     case 'block_failed':
-      return 'Échec de blocage';
     case 'abandoned':
-      return 'Abandonnée';
     case 'unknown':
-      return 'Inconnu';
+      return t(`format.threatStatus.${status}`);
     default:
       return status || '—';
   }
@@ -428,6 +427,23 @@ export function ipAddressLabel(ip: string | null, prefixLength: number | null): 
 }
 
 /**
+ * One cadence, its words read from the catalogue each time they are shown:
+ * the list itself is built once, its label and hint follow the language.
+ */
+function emailPreferenceOption(value: EmailPreference, icon: string) {
+  return {
+    value,
+    icon,
+    get label(): string {
+      return t(`format.emailPreference.${value}.label`);
+    },
+    get hint(): string {
+      return t(`format.emailPreference.${value}.hint`);
+    },
+  };
+}
+
+/**
  * The four e-mail cadences, in the order they are offered: from silence to a
  * message every morning. Each carries the sentence that tells an operator what
  * they will actually receive — « digest » says nothing to someone choosing.
@@ -438,30 +454,10 @@ export const EMAIL_PREFERENCE_OPTIONS: {
   hint: string;
   icon: string;
 }[] = [
-  {
-    value: 'none',
-    label: 'Aucun e-mail',
-    hint: "Rien ne vous sera envoyé, pas même une vérification qu'on vous affecte ni un rappel de vos maintenances. Les messages liés au compte, comme la réinitialisation du mot de passe, continuent d'arriver.",
-    icon: 'notifications_off',
-  },
-  {
-    value: 'immediate',
-    label: 'Alerte immédiate à chaque menace',
-    hint: 'Un e-mail dès qu’un poste signale une menace nouvellement détectée, plus vos tâches : une vérification qu’on vous affecte, le rappel hebdomadaire de vos maintenances. Pas de résumé quotidien.',
-    icon: 'notification_important',
-  },
-  {
-    value: 'digest_events',
-    label: 'Résumé quotidien, seulement s’il y a du nouveau',
-    hint: 'Un e-mail par jour, uniquement les jours où il y a quelque chose à traiter : menace active, mise à jour critique ou importante en attente, identité de poste à confirmer. Il se termine par vos tâches : vérifications affectées, maintenances dues.',
-    icon: 'event_note',
-  },
-  {
-    value: 'digest_daily',
-    label: 'Résumé quotidien, tous les jours',
-    hint: 'Un e-mail chaque matin, même sans incident : état du parc, antivirus périmés, postes à mettre à jour, puis vos tâches. Un « rien à signaler » est aussi une information.',
-    icon: 'calendar_month',
-  },
+  emailPreferenceOption('none', 'notifications_off'),
+  emailPreferenceOption('immediate', 'notification_important'),
+  emailPreferenceOption('digest_events', 'event_note'),
+  emailPreferenceOption('digest_daily', 'calendar_month'),
 ];
 
 /** The chosen cadence in one short phrase, for a list or a badge. */
@@ -482,13 +478,13 @@ export function emailPreferenceLabel(preference: string | null | undefined): str
  */
 export function sizeLabel(mb: number | null | undefined): string {
   if (mb == null) return '—';
-  if (mb < 1024) return `${Math.round(mb)} Mio`;
+  if (mb < 1024) return t('format.size.mib', { size: Math.round(mb) });
   const gib = mb / 1024;
   if (gib < 1024) {
     // One decimal below ten, none above: "3,5 Gio" is useful, "487,3 Gio" is not.
-    return `${gib < 10 ? frNumber(gib, 1) : Math.round(gib)} Gio`;
+    return t('format.size.gib', { size: gib < 10 ? frNumber(gib, 1) : Math.round(gib) });
   }
-  return `${frNumber(gib / 1024, 1)} Tio`;
+  return t('format.size.tib', { size: frNumber(gib / 1024, 1) });
 }
 
 /** Free space as a whole percentage, or null when there is nothing to divide. */
@@ -531,13 +527,8 @@ export function diskThresholds(lowPercent?: number | null): { critical: number; 
   return { critical, warning: critical + 10 };
 }
 
-const MEDIA_TYPE_LABELS: Record<string, string> = {
-  SSD: 'SSD',
-  HDD: 'Disque dur',
-  NVMe: 'SSD NVMe',
-  SCM: 'Mémoire persistante',
-  unknown: 'Type inconnu',
-};
+/** The media types worded by the catalogue (`format.mediaType`). */
+const MEDIA_TYPES = new Set(['SSD', 'HDD', 'NVMe', 'SCM', 'unknown']);
 
 /**
  * A drive's media type in words.
@@ -549,30 +540,24 @@ const MEDIA_TYPE_LABELS: Record<string, string> = {
  */
 export function mediaTypeLabel(value: string | null | undefined): string {
   if (!value) return '—';
-  return MEDIA_TYPE_LABELS[value] ?? value;
+  return MEDIA_TYPES.has(value) ? t(`format.mediaType.${value}`) : value;
 }
 
-const CHASSIS_LABELS: Record<string, string> = {
-  desktop: 'Poste fixe',
-  laptop: 'Portable',
-  tablet: 'Tablette',
-  'all-in-one': 'Tout-en-un',
-  server: 'Serveur',
-};
+const CHASSIS_TYPES = new Set(['desktop', 'laptop', 'tablet', 'all-in-one', 'server']);
 
 export function chassisLabel(value: string | null | undefined): string {
   if (!value) return '—';
-  return CHASSIS_LABELS[value] ?? value;
+  return CHASSIS_TYPES.has(value) ? t(`format.chassis.${value}`) : value;
 }
 
-const ENCRYPTION_LABELS: Record<string, string> = {
-  FullyEncrypted: 'Chiffré',
-  FullyDecrypted: 'Non chiffré',
-  EncryptionInProgress: 'Chiffrement en cours',
-  DecryptionInProgress: 'Déchiffrement en cours',
-  EncryptionPaused: 'Chiffrement en pause',
-  DecryptionPaused: 'Déchiffrement en pause',
-};
+const ENCRYPTION_STATES = new Set([
+  'FullyEncrypted',
+  'FullyDecrypted',
+  'EncryptionInProgress',
+  'DecryptionInProgress',
+  'EncryptionPaused',
+  'DecryptionPaused',
+]);
 
 /**
  * BitLocker status in words. null is "non relevé", which is deliberately *not*
@@ -581,8 +566,8 @@ const ENCRYPTION_LABELS: Record<string, string> = {
  * ignored.
  */
 export function encryptionLabel(value: string | null | undefined): string {
-  if (!value) return 'Non relevé';
-  return ENCRYPTION_LABELS[value] ?? value;
+  if (!value) return t('format.encryption.notReported');
+  return ENCRYPTION_STATES.has(value) ? t(`format.encryption.${value}`) : value;
 }
 
 export function encryptionColor(value: string | null | undefined): string {
@@ -592,15 +577,11 @@ export function encryptionColor(value: string | null | undefined): string {
   return 'orange';
 }
 
-const NIC_TYPE_LABELS: Record<string, string> = {
-  ethernet: 'Ethernet',
-  wifi: 'Wi-Fi',
-  other: 'Autre',
-};
+const NIC_TYPES = new Set(['ethernet', 'wifi', 'other']);
 
 export function nicTypeLabel(value: string | null | undefined): string {
   if (!value) return '—';
-  return NIC_TYPE_LABELS[value] ?? value;
+  return NIC_TYPES.has(value) ? t(`format.nicType.${value}`) : value;
 }
 
 /** A link speed in the unit it is quoted in — 1 Gb/s, not 1000 Mb/s. */
@@ -608,9 +589,9 @@ export function linkSpeedLabel(mbps: number | null | undefined): string {
   if (mbps == null) return '—';
   if (mbps >= 1000) {
     const gbps = mbps / 1000;
-    return `${Number.isInteger(gbps) ? gbps : frNumber(gbps, 1)} Gb/s`;
+    return t('format.linkSpeed.gbps', { speed: Number.isInteger(gbps) ? gbps : frNumber(gbps, 1) });
   }
-  return `${mbps} Mb/s`;
+  return t('format.linkSpeed.mbps', { speed: mbps });
 }
 
 /**
@@ -627,10 +608,11 @@ export function cpuLabel(
 ): string {
   if (!model) return '—';
   const parts: string[] = [];
-  if (count && count > 1) parts.push(`${count} processeurs`);
-  if (cores) parts.push(`${cores} cœurs`);
-  if (threads) parts.push(`${threads} threads`);
-  return parts.length ? `${model} (${parts.join(', ')})` : model;
+  if (count && count > 1) parts.push(t('format.cpu.processors', { count }));
+  if (cores) parts.push(t('format.cpu.cores', { count: cores }, cores));
+  if (threads) parts.push(t('format.cpu.threads', { count: threads }, threads));
+  if (!parts.length) return model;
+  return t('format.cpu.line', { model, parts: parts.join(t('format.cpu.partSeparator')) });
 }
 
 /** RAM as "32 Gio (2 barrettes sur 4)" — the sentence an upgrade decision needs. */
@@ -642,7 +624,7 @@ export function ramLabel(
   if (totalMb == null) return '—';
   const size = sizeLabel(totalMb);
   if (slotsUsed == null || slotsTotal == null || slotsTotal === 0) return size;
-  return `${size} (${slotsUsed} barrette(s) sur ${slotsTotal})`;
+  return t('format.ram', { size, used: slotsUsed, total: slotsTotal });
 }
 
 /**
@@ -690,5 +672,5 @@ export function documentTitle(page?: string | null): string {
 export function threatNameLabel(name: string | null | undefined, fallback?: string | null): string {
   if (name && name.trim()) return name;
   if (fallback && fallback.trim()) return fallback;
-  return '(sans nom)';
+  return t('format.threatNameless');
 }

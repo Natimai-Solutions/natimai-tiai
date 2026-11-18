@@ -551,6 +551,11 @@ async def test_a_package_changed_after_queueing_is_not_delivered(
     cmd = await _command(client, admin, machine_id)
     assert cmd["status"] == "failed"
     assert "modifié après la mise en file" in cmd["error"]
+    # The code beside the French text: what the English console reads.
+    assert (cmd["result_code"], cmd["result_params"]) == (
+        "package.changed_after_queue",
+        {},
+    )
 
     # Queued again, the new version goes out.
     await _deploy(client, admin, package["id"], machine_id)
@@ -733,6 +738,11 @@ async def test_a_package_retired_after_queueing_is_not_installed(
     assert by_type["package_install"]["error"] == (
         "Paquet retiré : installation annulée"
     )
+    # The code beside the French text: what the English console reads.
+    assert (
+        by_type["package_install"]["result_code"],
+        by_type["package_install"]["result_params"],
+    ) == ("package.retired", {})
     assert by_type["package_install"]["finished_at"] is not None
     assert by_type["package_uninstall"]["status"] == "pending"
 
@@ -979,6 +989,13 @@ async def test_an_uninstall_no_poste_would_run_is_refused(client, db_session, st
     error = refused.json()["error"]
     assert error["code"] == "package.not_ready"
     assert "aucun poste ne l'exécutera" in error["details"]["problems"][0]
+    # The same, as the console words it in its reader's language.
+    assert error["details"]["causes"] == [
+        {
+            "code": "untrusted",
+            "params": {"file": "msiexec", "reason": "msiexec_uninstall"},
+        }
+    ]
 
     # A data file of the package, not an executable.
     await client.patch(

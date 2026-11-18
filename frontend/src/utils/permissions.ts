@@ -1,9 +1,13 @@
 /**
  * The permission catalogue, mirrored from the backend
  * (`app/features/user/permissions.py`, `PERMISSION_CATALOGUE`). Keys are
- * `resource:action`; the labels are the console's, and the order is the
- * order of the grid on the groups page.
+ * `resource:action`; the labels are the console's
+ * (`src/i18n/messages/permissions.ts`), worded when the grid is drawn, and the
+ * order is the order of the grid on the groups page.
  */
+
+import { intlTag, t } from 'src/i18n';
+import permissionMessages from 'src/i18n/messages/permissions';
 
 export type Resource =
   | 'machine'
@@ -21,10 +25,15 @@ export type Resource =
 
 export type Action = 'read' | 'write' | 'execute';
 
-export interface PermissionEntry {
+/** One permission of the catalogue: what it is, without words. */
+export interface PermissionKey {
   key: string;
   resource: Resource;
   action: Action;
+}
+
+/** A permission as the grid shows it, in the reader's language. */
+export interface PermissionEntry extends PermissionKey {
   /** What the resource is, as a row header. */
   resourceLabel: string;
   /** What granting this lets someone do, as the checkbox's label. */
@@ -37,168 +46,57 @@ export function permissionKey(resource: Resource, action: Action): string {
   return `${resource}:${action}`;
 }
 
-export const PERMISSION_CATALOGUE: PermissionEntry[] = [
-  {
-    key: 'machine:read',
-    resource: 'machine',
-    action: 'read',
-    resourceLabel: 'Postes',
-    label: 'Consulter',
-    hint: 'Le tableau de bord, la liste et la fiche des postes, les logiciels, les exports.',
-  },
-  {
-    key: 'machine:write',
-    resource: 'machine',
-    action: 'write',
-    resourceLabel: 'Postes',
-    label: 'Gérer',
-    hint: 'Révoquer un token, autoriser un ré-enrôlement, fusionner des doublons.',
-  },
-  {
-    key: 'threat:read',
-    resource: 'threat',
-    action: 'read',
-    resourceLabel: 'Menaces',
-    label: 'Consulter',
-  },
-  {
-    key: 'command:read',
-    resource: 'command',
-    action: 'read',
-    resourceLabel: 'Commandes',
-    label: "Consulter l'historique",
-  },
-  {
-    key: 'command:execute',
-    resource: 'command',
-    action: 'execute',
-    resourceLabel: 'Commandes',
-    label: 'Exécuter les commandes courantes',
-    hint: 'Scans, mise à jour des signatures, recherche de mises à jour, cache DNS, stratégies, diagnostics, réveil Wake-on-LAN…',
-  },
-  {
-    key: 'risky_command:execute',
-    resource: 'risky_command',
-    action: 'execute',
-    resourceLabel: 'Commandes à risque',
-    label: 'Exécuter les commandes à risque',
-    hint: 'Redémarrage, arrêt, installation des mises à jour, réinitialisation de Windows Update, réparations DISM, réinitialisation du spouleur. Requiert aussi les commandes courantes.',
-  },
-  {
-    key: 'room:read',
-    resource: 'room',
-    action: 'read',
-    resourceLabel: 'Salles et bâtiments',
-    label: 'Consulter',
-  },
-  {
-    key: 'room:write',
-    resource: 'room',
-    action: 'write',
-    resourceLabel: 'Salles et bâtiments',
-    label: 'Gérer',
-    hint: 'Créer et modifier les salles et les bâtiments, y affecter des postes.',
-  },
-  {
-    key: 'intervention:read',
-    resource: 'intervention',
-    action: 'read',
-    resourceLabel: 'Historique des interventions',
-    label: 'Consulter',
-  },
-  {
-    key: 'intervention:write',
-    resource: 'intervention',
-    action: 'write',
-    resourceLabel: 'Historique des interventions',
-    label: 'Saisir',
-    hint: 'Ajouter, modifier et supprimer des interventions sur tout poste ; les suppressions sont tracées.',
-  },
-  {
-    key: 'check:read',
-    resource: 'check',
-    action: 'read',
-    resourceLabel: 'Vérifications demandées',
-    label: 'Consulter',
-  },
-  {
-    key: 'check:write',
-    resource: 'check',
-    action: 'write',
-    resourceLabel: 'Vérifications demandées',
-    label: 'Demander, affecter et clore',
-    hint: 'Demander une vérification sur tout poste, l’affecter à un compte, la clore avec une note.',
-  },
-  {
-    key: 'maintenance:read',
-    resource: 'maintenance',
-    action: 'read',
-    resourceLabel: 'Maintenance',
-    label: 'Consulter',
-    hint: 'Ce qui est dû, les séances enregistrées, les cycles et responsables.',
-  },
-  {
-    key: 'maintenance:write',
-    resource: 'maintenance',
-    action: 'write',
-    resourceLabel: 'Maintenance',
-    label: 'Effectuer et régler',
-    hint: 'Enregistrer une séance, fixer le cycle et le responsable d’une salle ou d’un poste, transmettre une maintenance.',
-  },
-  {
-    key: 'settings:read',
-    resource: 'settings',
-    action: 'read',
-    resourceLabel: 'Paramètres',
-    label: 'Consulter',
-  },
-  {
-    key: 'settings:write',
-    resource: 'settings',
-    action: 'write',
-    resourceLabel: 'Paramètres',
-    label: 'Modifier',
-    hint: 'Les défauts du parc : cycle et responsable de maintenance, fenêtre « à échéance ».',
-  },
-  {
-    key: 'user:read',
-    resource: 'user',
-    action: 'read',
-    resourceLabel: 'Comptes et groupes',
-    label: 'Consulter',
-  },
-  {
-    key: 'user:write',
-    resource: 'user',
-    action: 'write',
-    resourceLabel: 'Comptes et groupes',
-    label: 'Gérer',
-    hint: 'Créer, modifier et supprimer des comptes et des groupes, réinitialiser des mots de passe.',
-  },
-  {
-    key: 'audit:read',
-    resource: 'audit',
-    action: 'read',
-    resourceLabel: "Journal d'audit",
-    label: 'Consulter',
-  },
-  {
-    key: 'package:read',
-    resource: 'package',
-    action: 'read',
-    resourceLabel: 'Paquets logiciels',
-    label: 'Consulter',
-    hint: 'Voir le catalogue des paquets. Déployer demande en plus les commandes à risque.',
-  },
-  {
-    key: 'package:write',
-    resource: 'package',
-    action: 'write',
-    resourceLabel: 'Paquets logiciels',
-    label: 'Gérer',
-    hint: 'Créer des paquets, déposer leurs fichiers, joindre la signature, les retirer.',
-  },
+function entry(resource: Resource, action: Action): PermissionKey {
+  return { key: permissionKey(resource, action), resource, action };
+}
+
+export const PERMISSION_CATALOGUE: PermissionKey[] = [
+  entry('machine', 'read'),
+  entry('machine', 'write'),
+  entry('threat', 'read'),
+  entry('command', 'read'),
+  entry('command', 'execute'),
+  entry('risky_command', 'execute'),
+  entry('room', 'read'),
+  entry('room', 'write'),
+  entry('intervention', 'read'),
+  entry('intervention', 'write'),
+  entry('check', 'read'),
+  entry('check', 'write'),
+  entry('maintenance', 'read'),
+  entry('maintenance', 'write'),
+  entry('settings', 'read'),
+  entry('settings', 'write'),
+  entry('user', 'read'),
+  entry('user', 'write'),
+  entry('audit', 'read'),
+  entry('package', 'read'),
+  entry('package', 'write'),
 ];
+
+/** Whether the catalogue has a hint for a permission (the same in both languages). */
+function hasHint({ resource, action }: PermissionKey): boolean {
+  const byAction: Record<string, { label: string; hint?: string }> =
+    permissionMessages.fr.entries[resource];
+  return byAction[action]?.hint !== undefined;
+}
+
+/** What the resource is, as a row header, in the reader's language. */
+export function permissionResourceLabel(resource: Resource): string {
+  return t(`permissions.resources.${resource}`);
+}
+
+/** A permission with its words, in the reader's language. */
+export function permissionEntry(permission: PermissionKey): PermissionEntry {
+  const { resource, action } = permission;
+  const words: PermissionEntry = {
+    ...permission,
+    resourceLabel: permissionResourceLabel(resource),
+    label: t(`permissions.entries.${resource}.${action}.label`),
+  };
+  if (hasHint(permission)) words.hint = t(`permissions.entries.${resource}.${action}.hint`);
+  return words;
+}
 
 /** The catalogue as the grid shows it: one row per resource, in order. */
 export interface PermissionRow {
@@ -207,21 +105,28 @@ export interface PermissionRow {
   entries: PermissionEntry[];
 }
 
+/** The grid's rows, worded now — call it where it is drawn. */
 export function permissionRows(): PermissionRow[] {
   const rows: PermissionRow[] = [];
-  for (const entry of PERMISSION_CATALOGUE) {
-    const row = rows.find((r) => r.resource === entry.resource);
-    if (row) row.entries.push(entry);
+  for (const permission of PERMISSION_CATALOGUE) {
+    const words = permissionEntry(permission);
+    const row = rows.find((r) => r.resource === permission.resource);
+    if (row) row.entries.push(words);
     else
-      rows.push({ resource: entry.resource, resourceLabel: entry.resourceLabel, entries: [entry] });
+      rows.push({ resource: words.resource, resourceLabel: words.resourceLabel, entries: [words] });
   }
   return rows;
 }
 
 /** A readable name for a key, for lists that show what a group grants. */
 export function permissionLabel(key: string): string {
-  const entry = PERMISSION_CATALOGUE.find((e) => e.key === key);
-  return entry ? `${entry.resourceLabel} — ${entry.label.toLowerCase()}` : key;
+  const permission = PERMISSION_CATALOGUE.find((e) => e.key === key);
+  if (!permission) return key;
+  const words = permissionEntry(permission);
+  return t('permissions.named', {
+    resource: words.resourceLabel,
+    action: words.label.toLocaleLowerCase(intlTag()),
+  });
 }
 
 /**

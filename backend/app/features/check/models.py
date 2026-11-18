@@ -59,3 +59,9 @@ class MachineCheck(SQLModel, table=True):
     closed_at: datetime | None = utc_field(default=None, nullable=True)
     closed_by: str | None = Field(default=None, max_length=255)
     closing_note: str | None = Field(default=None, max_length=5000)
+    # Set when the server wrote the note itself (``CLOSED_BY_MERGE``): the
+    # console words it from the code, in the reader's language, and
+    # ``closing_note`` keeps the French for an older console. NULL on a note
+    # typed by someone, and on the rows written before (plan console
+    # bilingue: they keep their French).
+    closing_note_code: str | None = Field(default=None, max_length=64)

@@ -55,18 +55,28 @@ describe('AuditPage', () => {
     expect(w.find('thead th.gt-xs').text()).toContain('Adresse');
   });
 
-  // Item 3: selecting text to copy it does not open the details.
-  it('opens nothing on a click that ends a text selection', async () => {
+  // Item 3: the row is text to select and copy; the eye button opens the details.
+  it('opens the details from the eye button only, not from a click on the row', async () => {
     const w = await mountPage();
-    const selection = vi
-      .spyOn(window, 'getSelection')
-      .mockReturnValue({ isCollapsed: false, toString: () => 'admin@x' } as unknown as Selection);
-    await w.find('tbody tr').trigger('click');
+    const row = w.find('tbody tr');
+    const cell = row.find('td.audit-summary');
+    // The two clicks of a double-click on a word, then the double-click.
+    await cell.trigger('click');
+    await cell.trigger('click');
+    await cell.trigger('dblclick');
     expect(w.findComponent(AuditDetailsDialog).props('modelValue')).toBe(false);
 
-    selection.mockReturnValue({ isCollapsed: true, toString: () => '' } as unknown as Selection);
-    await w.find('tbody tr').trigger('click');
+    await row.find('button[aria-label="Voir le détail"]').trigger('click');
     expect(w.findComponent(AuditDetailsDialog).props('modelValue')).toBe(true);
-    selection.mockRestore();
+  });
+
+  // The eye button sits at the end of a wide row, off-screen on most screens
+  // (verification of 2026-11-18): the date, first column, opens the entry too.
+  it('opens the details from the date, always in view', async () => {
+    const w = await mountPage();
+    const date = w.find('tbody tr button.audit-open');
+    expect(date.attributes('title')).toBe('Voir le détail');
+    await date.trigger('click');
+    expect(w.findComponent(AuditDetailsDialog).props('modelValue')).toBe(true);
   });
 });

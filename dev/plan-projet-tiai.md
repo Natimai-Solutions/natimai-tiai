@@ -150,7 +150,7 @@ Les erreurs API suivent un **contrat partagé** entre backend et frontend (comme
 - **Centralisé** : une exception applicative `AppError(code, status_code, message, details)` + des *exception handlers* enregistrés produisent l'enveloppe de façon uniforme ; les 500 **masquent les détails** hors environnement local.
 - **Source unique des codes** : maintenir la liste des codes côté backend et la **refléter côté frontend** (table de correspondance code → message), pour éviter la divergence.
 
-État actuel : **migré** ✅. Le backend lève des `AppError(code, status_code, message, details)` ([app/core/errors.py](backend/app/core/errors.py)) ; quatre handlers (AppError, validation 422, HTTPException framework, 500 masqué hors `local`) produisent l'enveloppe `{"error": {code, message, details}}`. Catalogue stable `ErrorCode` côté backend, reflété côté frontend ([frontend/src/services/errors.ts](frontend/src/services/errors.ts)) en table `code → message` (FR) consommée par les pages via `apiErrorMessage`. Reste : une vraie lib i18n (vue-i18n) si le multilingue devient nécessaire.
+État actuel : **migré** ✅. Le backend lève des `AppError(code, status_code, message, details)` ([app/core/errors.py](backend/app/core/errors.py)) ; quatre handlers (AppError, validation 422, HTTPException framework, 500 masqué hors `local`) produisent l'enveloppe `{"error": {code, message, details}}`. Catalogue stable `ErrorCode` côté backend, reflété côté console ([frontend/src/i18n/messages/errorCodes.ts](frontend/src/i18n/messages/errorCodes.ts)) en tables `code → message`, une par langue (français et anglais), consommées par les pages via `apiErrorMessage` ([frontend/src/services/errors.ts](frontend/src/services/errors.ts)). Les traductions passent par vue-i18n depuis la Phase 6 (`plan-console-bilingue.md`).
 
 ---
 
@@ -399,11 +399,12 @@ Cf. `plan-salles-maintenance-interventions.md`. Groupes de droits composés dans
   - la CI ajoute des builds croisés `linux/amd64`, `linux/arm64`, `darwin/amd64` et `darwin/arm64`, ainsi que govulncheck sur ces cibles.
 - **DoD** : un poste Linux et un Mac pilotes enrôlés, visibles dans la console avec leur inventaire et leur session, et des commandes non applicables refusées proprement.
 
-### Phase 6 — Console bilingue français / anglais *(à planifier)*
-La console n'existe aujourd'hui qu'en français : textes écrits en dur dans les composants, pack de langue Quasar `fr`, et une partie des messages du backend (problèmes d'un paquet, verdicts de commande, e-mails) en français.
+### Phase 6 — Console bilingue français / anglais · 🟢 livrée (2026-11-18)
+Cf. `plan-console-bilingue.md`.
 - **Langues** : français et anglais.
-- **Choix** : par utilisateur, enregistré avec ses préférences de compte ; tant qu'il n'a rien choisi, la console suit la langue du navigateur.
-- **À cadrer** : la bibliothèque de traduction côté console, le sort des textes renvoyés par le backend (codes traduits par la console, ou langue demandée par la requête), et la langue des e-mails, qui partent sans navigateur.
+- **Choix** : par compte, enregistré côté serveur (`users.language`) ; tant que le compte n'a rien choisi, la console suit la langue du navigateur.
+- **Backend agnostique** : il renvoie des codes, des paramètres et des valeurs brutes ; la console compose les phrases. Exceptions : les e-mails (langue du destinataire, sinon `DEFAULT_LANGUAGE`) et les exports (langue demandée par la console).
+- **Compatibilité** : une installation mise à jour reste en français tant que l'anglais n'est pas complet ; l'API et le protocole de l'agent ne changent que par ajout.
 
 ---
 

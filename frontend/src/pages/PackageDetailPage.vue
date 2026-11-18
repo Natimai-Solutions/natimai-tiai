@@ -1,21 +1,32 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <q-btn flat round dense icon="arrow_back" :to="{ name: 'packages' }" aria-label="Retour" />
+      <q-btn
+        flat
+        round
+        dense
+        icon="arrow_back"
+        :to="{ name: 'packages' }"
+        :aria-label="t('packagePages.detail.back')"
+      />
       <h1 class="text-h5 q-my-none col-auto break-anywhere">
-        {{ pkg ? `${pkg.name}${pkg.version ? ' ' + pkg.version : ''}` : 'Paquet' }}
+        {{
+          pkg
+            ? `${pkg.name}${pkg.version ? ' ' + pkg.version : ''}`
+            : t('packagePages.detail.titleFallback')
+        }}
       </h1>
       <q-chip v-if="pkg" dense :color="trustColor" text-color="white">
-        {{ trustLabels[method] }}
+        {{ trustLabel(method) }}
       </q-chip>
-      <q-chip v-if="pkg?.retired_at" dense>Retiré</q-chip>
+      <q-chip v-if="pkg?.retired_at" dense>{{ t('packagePages.detail.retired') }}</q-chip>
       <q-space />
       <template v-if="pkg">
         <q-btn
           v-if="canDeploy"
           color="primary"
           icon="install_desktop"
-          label="Déployer"
+          :label="t('packagePages.detail.deploy')"
           no-caps
           :disable="!deployable(pkg)"
           class="q-mr-sm"
@@ -26,7 +37,7 @@
           outline
           color="negative"
           icon="delete_sweep"
-          label="Désinstaller"
+          :label="t('packagePages.detail.uninstall')"
           no-caps
           :disable="!uninstallable(pkg)"
           class="q-mr-sm"
@@ -37,7 +48,9 @@
           flat
           no-caps
           :icon="pkg.retired_at ? 'unarchive' : 'archive'"
-          :label="pkg.retired_at ? 'Remettre au catalogue' : 'Retirer'"
+          :label="
+            pkg.retired_at ? t('packagePages.detail.restore') : t('packagePages.detail.retire')
+          "
           @click="toggleRetired"
         />
       </template>
@@ -49,21 +62,24 @@
       <!-- Definition -->
       <div class="col-12 col-lg-6">
         <q-card flat bordered>
-          <q-card-section class="text-subtitle1">Définition</q-card-section>
+          <q-card-section class="text-subtitle1">{{
+            t('packagePages.detail.definition.title')
+          }}</q-card-section>
           <q-form ref="formRef" @submit="save">
             <q-card-section class="q-gutter-sm">
               <q-input
                 v-model="form.name"
-                label="Nom"
+                :label="t('packagePages.detail.definition.name')"
                 outlined
                 dense
                 :maxlength="LIMITS.name"
+                reactive-rules
                 :rules="[rules.name]"
                 :readonly="!canWrite"
               />
               <q-input
                 v-model="form.version"
-                label="Version"
+                :label="t('packagePages.detail.definition.version')"
                 outlined
                 dense
                 :maxlength="LIMITS.version"
@@ -72,16 +88,17 @@
               <template v-if="pkg.kind === 'winget'">
                 <q-input
                   v-model="form.winget_id"
-                  label="Identifiant winget"
+                  :label="t('packagePages.detail.definition.wingetId')"
                   outlined
                   dense
                   :maxlength="LIMITS.winget_id"
+                  reactive-rules
                   :rules="[rules.wingetId]"
                   :readonly="!canWrite"
                 />
                 <q-input
                   v-model="form.winget_version"
-                  label="Version winget (vide = la plus récente)"
+                  :label="t('packagePages.detail.definition.wingetVersion')"
                   outlined
                   dense
                   :maxlength="LIMITS.winget_version"
@@ -92,7 +109,7 @@
                 <q-select
                   v-model="form.install_run"
                   :options="['msiexec', ...fileNames]"
-                  label="Fichier à lancer pour installer"
+                  :label="t('packagePages.detail.definition.installRun')"
                   outlined
                   dense
                   clearable
@@ -100,17 +117,18 @@
                 />
                 <q-input
                   v-model="form.install_args"
-                  label="Arguments d'installation"
+                  :label="t('packagePages.detail.definition.installArgs')"
                   outlined
                   dense
+                  reactive-rules
                   :rules="[(v: string) => rules.msiexecArgs(form.install_run, v)]"
                   :readonly="!canWrite"
-                  hint='Ex. -s -f1"{dir}\ClientPRONOTE.iss" — {dir} = dossier des fichiers sur le poste'
+                  :hint="t('packagePages.detail.definition.installArgsHint')"
                 />
                 <q-select
                   v-model="form.uninstall_run"
                   :options="['msiexec', ...fileNames]"
-                  label="Désinstallation : fichier à lancer (facultatif)"
+                  :label="t('packagePages.detail.definition.uninstallRun')"
                   outlined
                   dense
                   clearable
@@ -118,35 +136,37 @@
                 />
                 <q-input
                   v-model="form.uninstall_args"
-                  label="Arguments de désinstallation"
+                  :label="t('packagePages.detail.definition.uninstallArgs')"
                   outlined
                   dense
+                  reactive-rules
                   :rules="[(v: string) => rules.msiexecArgs(form.uninstall_run, v)]"
                   :readonly="!canWrite"
-                  hint="Avec msiexec : /x {code produit} /qn"
+                  :hint="t('packagePages.detail.definition.uninstallArgsHint')"
                 />
                 <q-input
                   v-model="form.success_codes"
-                  label="Codes de sortie acceptés"
+                  :label="t('packagePages.detail.definition.successCodes')"
                   outlined
                   dense
+                  reactive-rules
                   :rules="[rules.successCodes]"
                   :readonly="!canWrite"
-                  hint="Séparés par des virgules. 3010 et 1641 = redémarrage requis."
+                  :hint="t('packagePages.detail.definition.successCodesHint')"
                 />
               </template>
               <q-input
                 v-model="form.detect_name"
-                label="Nom dans l'inventaire"
+                :label="t('packagePages.detail.definition.detectName')"
                 outlined
                 dense
                 :maxlength="LIMITS.detect_name"
                 :readonly="!canWrite"
-                hint="Tel qu'il apparaît dans « Applications et fonctionnalités » ; sert à compter les postes équipés"
+                :hint="t('packagePages.detail.definition.detectNameHint')"
               />
               <q-input
                 v-model="form.notes"
-                label="Notes"
+                :label="t('packagePages.detail.definition.notes')"
                 outlined
                 dense
                 :maxlength="LIMITS.notes"
@@ -156,12 +176,18 @@
             </q-card-section>
             <q-card-actions v-if="canWrite" align="right" class="q-px-md q-pb-md">
               <span v-if="pkg.signed" class="text-caption text-muted q-mr-md">
-                Modifier la ligne de commande annule la signature.
+                {{ t('packagePages.detail.definition.signedEditWarning') }}
               </span>
               <span v-if="dirty" class="text-caption text-warn q-mr-md">
-                Modifications non enregistrées
+                {{ t('packagePages.detail.definition.unsaved') }}
               </span>
-              <q-btn type="submit" color="primary" no-caps label="Enregistrer" :loading="saving" />
+              <q-btn
+                type="submit"
+                color="primary"
+                no-caps
+                :label="t('packagePages.detail.definition.save')"
+                :loading="saving"
+              />
             </q-card-actions>
           </q-form>
         </q-card>
@@ -173,17 +199,21 @@
              why neither method B nor method A carries it). -->
         <q-banner v-if="pkg.install_blockers.length" class="surface-orange break-anywhere">
           <div class="text-weight-medium">
-            {{ pkg.problems.length ? 'Pas encore déployable' : 'Aucun poste ne l’installera' }}
+            {{
+              pkg.problems.length
+                ? t('packagePages.detail.blockers.notDeployable')
+                : t('packagePages.detail.blockers.noComputer')
+            }}
           </div>
           <ul class="q-my-xs q-pl-md">
-            <li v-for="m in pkg.install_blockers" :key="m">{{ m }}</li>
+            <li v-for="m in installBlockerTexts(pkg)" :key="m">{{ m }}</li>
           </ul>
         </q-banner>
 
         <!-- Files -->
         <q-card v-if="pkg.kind === 'files'" flat bordered>
           <q-card-section class="row items-center">
-            <div class="text-subtitle1">Fichiers</div>
+            <div class="text-subtitle1">{{ t('packagePages.detail.files.title') }}</div>
             <q-space />
             <template v-if="canWrite">
               <q-file
@@ -191,7 +221,7 @@
                 multiple
                 dense
                 outlined
-                label="Choisir des fichiers"
+                :label="t('packagePages.detail.files.choose')"
                 style="min-width: 220px"
                 class="q-mr-sm"
               />
@@ -199,7 +229,7 @@
                 color="primary"
                 no-caps
                 icon="upload"
-                label="Déposer"
+                :label="t('packagePages.detail.files.upload')"
                 :disable="!toUpload?.length"
                 :loading="uploading"
                 @click="upload"
@@ -208,7 +238,14 @@
           </q-card-section>
           <div v-if="uploading" class="row items-center no-wrap q-px-md q-pb-sm">
             <q-linear-progress :value="uploadProgress" color="primary" class="col" />
-            <q-btn flat dense no-caps label="Annuler" class="q-ml-sm" @click="cancelUpload" />
+            <q-btn
+              flat
+              dense
+              no-caps
+              :label="t('packagePages.detail.files.cancel')"
+              class="q-ml-sm"
+              @click="cancelUpload"
+            />
           </div>
           <q-list separator>
             <q-item v-for="f in files" :key="f.name">
@@ -216,14 +253,16 @@
                 <q-item-label class="break-anywhere">
                   {{ f.name }}
                   <q-badge v-if="f.name === pkg.install_run" color="primary" class="q-ml-xs">
-                    lancé
+                    {{ t('packagePages.detail.files.run') }}
                   </q-badge>
                 </q-item-label>
                 <q-item-label caption>
                   {{ formatSize(f.size) }} · SHA-256 {{ f.sha256.slice(0, 16) }}…
-                  <template v-if="f.publisher_name">
-                    · signé par <b>{{ f.publisher_name }}</b>
-                  </template>
+                  <PackageRichText
+                    v-if="f.publisher_name"
+                    path="packagePages.detail.files.signedBy"
+                    :bold="{ publisher: f.publisher_name }"
+                  />
                 </q-item-label>
               </q-item-section>
               <q-item-section v-if="canWrite" side>
@@ -232,14 +271,14 @@
                   round
                   dense
                   icon="delete"
-                  :aria-label="`Retirer ${f.name}`"
+                  :aria-label="t('packagePages.detail.files.remove', { name: f.name })"
                   @click="removeFile(f.name)"
                 />
               </q-item-section>
             </q-item>
             <q-item v-if="!pkg.files.length">
               <q-item-section class="text-muted">
-                Aucun fichier. Pour Pronote : l'installateur et le fichier de réponses .iss.
+                {{ t('packagePages.detail.files.empty') }}
               </q-item-section>
             </q-item>
           </q-list>
@@ -247,30 +286,40 @@
 
         <!-- Trust -->
         <q-card flat bordered>
-          <q-card-section class="text-subtitle1">Confiance des postes</q-card-section>
+          <q-card-section class="text-subtitle1">{{
+            t('packagePages.detail.trust.title')
+          }}</q-card-section>
           <q-card-section v-if="pkg.kind === 'winget'" class="text-body2">
-            Les postes l'installent si leur GPO active winget (<code>DeployWinget</code> = 1) et,
-            quand elle est posée, si <code>{{ pkg.winget_id }}</code> figure dans
-            <code>DeployWingetAllow</code>. winget télécharge l'installateur et vérifie son
-            empreinte.
+            <PackageRichText
+              path="packagePages.detail.trust.winget"
+              :code="{
+                deployWinget: 'DeployWinget',
+                id: pkg.winget_id ?? '',
+                allow: 'DeployWingetAllow',
+              }"
+            />
           </q-card-section>
           <template v-else>
             <q-card-section class="text-body2">
               <div class="text-weight-medium q-mb-xs">
-                Méthode B — signature de l'administrateur
+                {{ t('packagePages.detail.methodB.title') }}
               </div>
               <template v-if="pkg.signed">
-                Signé par <b>{{ pkg.signer_subject }}</b> le {{ formatDateTime(pkg.signed_at) }} ({{
-                  pkg.signed_by
-                }}). Les postes l'exécutent si la GPO liste l'empreinte de ce certificat dans
-                <code>DeploySigners</code> :
+                <PackageRichText
+                  path="packagePages.detail.methodB.signed"
+                  :named="{ date: formatDateTime(pkg.signed_at), by: pkg.signed_by ?? '' }"
+                  :bold="{ subject: pkg.signer_subject ?? '' }"
+                  :code="{ signers: 'DeploySigners' }"
+                />
                 <div class="q-mt-xs">
                   <code style="word-break: break-all">{{ pkg.signer_thumbprint }}</code>
                 </div>
               </template>
               <template v-else>
-                Non signé. Téléchargez le manifeste, signez-le sur votre poste avec
-                <code>Sign-TiaiPackage.ps1</code>, puis déposez le fichier de signature produit.
+                <PackageRichText
+                  path="packagePages.detail.methodB.unsigned"
+                  :code="{ script: 'Sign-TiaiPackage.ps1' }"
+                />
               </template>
               <div v-if="canWrite" class="q-mt-sm row q-gutter-sm">
                 <q-btn
@@ -278,7 +327,7 @@
                   no-caps
                   color="primary"
                   icon="download"
-                  label="Télécharger le manifeste"
+                  :label="t('packagePages.detail.methodB.downloadManifest')"
                   :disable="pkg.problems.length > 0"
                   @click="getManifest"
                 />
@@ -287,7 +336,7 @@
                   dense
                   outlined
                   accept=".json"
-                  label="Déposer la signature (.sig.json)"
+                  :label="t('packagePages.detail.methodB.uploadSignature')"
                   style="min-width: 240px"
                   :disable="pkg.problems.length > 0"
                   @update:model-value="sendSignature"
@@ -297,42 +346,49 @@
                   flat
                   no-caps
                   color="negative"
-                  label="Retirer la signature"
+                  :label="t('packagePages.detail.methodB.removeSignature')"
                   @click="unsign"
                 />
               </div>
             </q-card-section>
             <q-separator />
             <q-card-section class="text-body2">
-              <div class="text-weight-medium q-mb-xs">Méthode A — éditeur approuvé (repli)</div>
+              <div class="text-weight-medium q-mb-xs">
+                {{ t('packagePages.detail.methodA.title') }}
+              </div>
               <template v-if="tooLargeForMethodA(pkg, 'install')">
-                Indisponible : les fichiers pèsent plus de
-                {{ methodAMaxLabel(pkg) }} au total, ce que les postes refusent de télécharger pour
-                un paquet non signé. Signez le paquet (méthode B).
+                {{ t('packagePages.detail.methodA.tooLarge', { max: methodAMaxLabel(pkg) }) }}
               </template>
               <template v-else-if="method === 'publisher'">
-                Le fichier lancé est signé par <b>{{ pkg.publisher_name }}</b>. Sans signature de
-                l'administrateur, les postes l'exécutent si la GPO liste ce nom dans
-                <code>DeployPublishers</code>.
+                <PackageRichText
+                  path="packagePages.detail.methodA.publisher"
+                  :bold="{ publisher: pkg.publisher_name ?? '' }"
+                  :code="{ publishers: 'DeployPublishers' }"
+                />
               </template>
-              <template v-else-if="pkg.signed">Inutile : le paquet est signé.</template>
+              <template v-else-if="pkg.signed">{{
+                t('packagePages.detail.methodA.signed')
+              }}</template>
               <template v-else-if="pkg.publisher_name && besideRun.length">
-                <span class="break-anywhere">
-                  Indisponible : le fichier lancé est signé par <b>{{ pkg.publisher_name }}</b>,
-                  mais {{ quoted(besideRun) }} {{ besideRun.length > 1 ? 'sont' : 'est' }} à côté,
-                  et les postes refusent sous la méthode A tout fichier que Windows pourrait charger
-                  ou lancer (.dll, .exe, .msi, scripts…) à côté de l'exécutable. Retirez
-                  {{ besideRun.length > 1 ? 'ces fichiers' : 'ce fichier' }} du paquet, ou signez-le
-                  (méthode B).
-                </span>
+                <PackageRichText
+                  class="break-anywhere"
+                  path="packagePages.detail.methodA.loadable"
+                  :named="{ files: quoted(besideRun) }"
+                  :bold="{ publisher: pkg.publisher_name }"
+                  :plural="besideRun.length"
+                />
               </template>
               <template v-else>
-                Indisponible : le fichier lancé n'est pas un exécutable (.exe) signé par un éditeur.
+                {{ t('packagePages.detail.methodA.notExe') }}
               </template>
             </q-card-section>
           </template>
           <q-card-section v-if="pkg.installed_count !== null" class="text-body2">
-            Présent d'après l'inventaire sur <b>{{ pkg.installed_count }}</b> poste(s).
+            <PackageRichText
+              path="packagePages.detail.trust.installed"
+              :bold="{ count: String(pkg.installed_count) }"
+              :plural="pkg.installed_count"
+            />
           </q-card-section>
         </q-card>
       </div>
@@ -341,14 +397,14 @@
       <div class="col-12">
         <q-card flat bordered>
           <q-card-section class="row items-center">
-            <div class="text-subtitle1">Déploiements</div>
+            <div class="text-subtitle1">{{ t('packagePages.detail.deployments.title') }}</div>
             <q-space />
             <q-btn
               flat
               round
               dense
               icon="refresh"
-              aria-label="Actualiser les déploiements"
+              :aria-label="t('packagePages.detail.deployments.refresh')"
               :loading="loadingCommands"
               @click="loadCommands"
             />
@@ -357,10 +413,13 @@
                table below pages, this does not (audit B14). A chip filters. -->
           <q-card-section v-if="summary && summary.postes" class="q-pt-none">
             <div class="text-body2 q-mb-xs">
-              {{ summary.postes }} poste{{ summary.postes > 1 ? 's' : '' }} visé{{
-                summary.postes > 1 ? 's' : ''
+              {{
+                t(
+                  'packagePages.detail.deployments.summary',
+                  { count: summary.postes },
+                  summary.postes,
+                )
               }}
-              — dernier déploiement de chacun ; un état filtre le tableau sur ces postes :
             </div>
             <q-chip
               v-for="(n, status) in summary.by_status"
@@ -373,14 +432,16 @@
               :aria-pressed="statusFilter === status"
               @click="toggleStatusFilter(status)"
             >
-              {{ STATUS_LABELS[status] ?? status }} : {{ n }}
+              {{ t('packagePages.detail.deployments.chip', { label: statusLabel(status), n }) }}
             </q-chip>
           </q-card-section>
           <div class="text-caption text-muted q-px-md">
             {{
               statusFilter
-                ? `Dernier déploiement de chaque poste, ${(STATUS_LABELS[statusFilter] ?? statusFilter).toLowerCase()}`
-                : 'Historique : tous les envois, du plus récent au plus ancien'
+                ? t('packagePages.detail.deployments.filtered', {
+                    status: statusLabel(statusFilter).toLowerCase(),
+                  })
+                : t('packagePages.detail.deployments.history')
             }}
           </div>
           <q-table
@@ -391,7 +452,11 @@
             flat
             :loading="loadingCommands"
             :rows-per-page-options="[25, 50, 100]"
-            :no-data-label="statusFilter ? 'Aucun déploiement dans cet état' : 'Jamais déployé'"
+            :no-data-label="
+              statusFilter
+                ? t('packagePages.detail.deployments.noDataFiltered')
+                : t('packagePages.detail.deployments.noData')
+            "
             @request="onCommandsRequest"
           >
             <template #body-cell-machine="cell">
@@ -404,7 +469,7 @@
             <template #body-cell-status="cell">
               <q-td :props="cell">
                 <q-badge :color="STATUS_COLORS[cell.row.status] ?? 'grey-7'">
-                  {{ STATUS_LABELS[cell.row.status] ?? cell.row.status }}
+                  {{ statusLabel(cell.row.status) }}
                 </q-badge>
               </q-td>
             </template>
@@ -414,7 +479,7 @@
                 class="break-anywhere"
                 style="white-space: normal; max-width: 520px"
               >
-                {{ cell.row.error || cell.row.result_output || '' }}
+                {{ commandVerdictText(cell.row) }}
               </q-td>
             </template>
           </q-table>
@@ -432,13 +497,16 @@
 </template>
 
 <script setup lang="ts">
+import { installBlockerTexts } from 'src/utils/packageText';
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import { isCancel } from 'axios';
 import { useQuasar, type QForm, type QTableColumn } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import PackageDeployDialog from 'src/components/package/PackageDeployDialog.vue';
-import { commandTypeLabel, type Command } from 'src/services/commands';
+import PackageRichText from 'src/components/package/PackageRichText.vue';
+import { t } from 'src/i18n';
+import { commandTypeLabel, commandVerdictText, type Command } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import {
   attachSignature,
@@ -460,7 +528,7 @@ import {
   splitArgs,
   tooLargeFiles,
   tooLargeForMethodA,
-  trustLabels,
+  trustLabel,
   trustMethod,
   uninstallable,
   updatePackage,
@@ -470,6 +538,8 @@ import {
 } from 'src/services/packages';
 import { useAuthStore } from 'src/stores/auth';
 import { downloadBlob, formatDateTime } from 'src/utils/format';
+import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{ id: string }>();
 const $q = useQuasar();
@@ -524,7 +594,7 @@ const LIMITS = {
 };
 
 function quoted(names: string[]): string {
-  return names.map((n) => `« ${n} »`).join(', ');
+  return names.map((name) => t('packages.quoted', { name })).join(t('packages.listSeparator'));
 }
 const method = computed(() => (pkg.value ? trustMethod(pkg.value) : 'none'));
 const trustColor = computed(
@@ -540,22 +610,51 @@ const STATUS_COLORS: Record<string, string> = {
   failed: 'negative',
   expired: 'orange',
 };
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'En attente',
-  delivered: 'Transmise',
-  running: 'En cours',
-  succeeded: 'Réussie',
-  failed: 'Échec',
-  expired: 'Expirée',
-};
-const commandColumns: QTableColumn<Command>[] = [
-  { name: 'machine', label: 'Poste', field: 'machine_id', align: 'left' },
-  { name: 'type', label: 'Action', field: (c) => commandTypeLabel(c.type), align: 'left' },
-  { name: 'status', label: 'Statut', field: 'status', align: 'left' },
-  { name: 'created_by', label: 'Par', field: 'created_by', align: 'left' },
-  { name: 'created_at', label: 'Le', field: (c) => formatDateTime(c.created_at), align: 'left' },
-  { name: 'result', label: 'Résultat', field: 'id', align: 'left' },
-];
+const STATUSES = new Set(['pending', 'delivered', 'running', 'succeeded', 'failed', 'expired']);
+
+/** A deployment's state in words; a state this build does not know, as sent. */
+function statusLabel(status: string): string {
+  return STATUSES.has(status) ? t(`packagePages.status.${status}`) : status;
+}
+
+const commandColumns = computed<QTableColumn<Command>[]>(() => [
+  {
+    name: 'machine',
+    label: t('packagePages.detail.deployments.columns.machine'),
+    field: 'machine_id',
+    align: 'left',
+  },
+  {
+    name: 'type',
+    label: t('packagePages.detail.deployments.columns.type'),
+    field: (c) => commandTypeLabel(c.type),
+    align: 'left',
+  },
+  {
+    name: 'status',
+    label: t('packagePages.detail.deployments.columns.status'),
+    field: 'status',
+    align: 'left',
+  },
+  {
+    name: 'created_by',
+    label: t('packagePages.detail.deployments.columns.createdBy'),
+    field: 'created_by',
+    align: 'left',
+  },
+  {
+    name: 'created_at',
+    label: t('packagePages.detail.deployments.columns.createdAt'),
+    field: (c) => formatDateTime(c.created_at),
+    align: 'left',
+  },
+  {
+    name: 'result',
+    label: t('packagePages.detail.deployments.columns.result'),
+    field: 'id',
+    align: 'left',
+  },
+]);
 
 type PackageForm = typeof form;
 
@@ -607,25 +706,31 @@ onBeforeRouteLeave(() => {
   if (!dirty.value && !uploading.value) return true;
   // Leaving cancels an upload under way: said before, not after (the toast
   // « Dépôt annulé » came once the files were lost).
-  const what = [
-    uploading.value
-      ? 'Un dépôt de fichiers est en cours : quitter la page l’interrompt (les fichiers déjà envoyés sont gardés).'
-      : '',
-    dirty.value ? 'La définition du paquet a été modifiée sans être enregistrée.' : '',
-  ].filter(Boolean);
+  // As things stand when it asks: the words follow the language, not the upload.
+  const wasUploading = uploading.value;
+  const wasDirty = dirty.value;
+  const what = () =>
+    [
+      wasUploading ? t('packagePages.detail.leave.uploading') : '',
+      wasDirty ? t('packagePages.detail.leave.dirty') : '',
+    ].filter(Boolean);
   return new Promise<boolean>((resolve) => {
-    $q.dialog({
-      title: uploading.value ? 'Dépôt en cours' : 'Modifications non enregistrées',
-      message: `${what.join(' ')} Quitter la page ?`,
-      cancel: { flat: true, noCaps: true, label: 'Rester' },
+    liveDialog($q, () => ({
+      title: wasUploading
+        ? t('packagePages.detail.leave.titleUploading')
+        : t('packagePages.detail.leave.titleDirty'),
+      message: t('packagePages.detail.leave.question', { what: what().join(' ') }),
+      cancel: { flat: true, noCaps: true, label: t('packagePages.detail.leave.stay') },
       ok: {
         flat: true,
         noCaps: true,
-        label: uploading.value ? 'Quitter et interrompre' : 'Quitter sans enregistrer',
+        label: wasUploading
+          ? t('packagePages.detail.leave.okUploading')
+          : t('packagePages.detail.leave.okDirty'),
         color: 'negative',
       },
       persistent: true,
-    })
+    }))
       .onOk(() => {
         cancelUpload();
         resolve(true);
@@ -714,24 +819,25 @@ function toggleStatusFilter(status: string) {
 // What the server would refuse, said under the field before sending
 // (audit U03) — the same rules as backend/app/api/routes/packages.py.
 const rules = {
-  name: (v: string) => !!v.trim() || 'Nom requis',
+  name: (v: string) => !!v.trim() || t('packagePages.detail.rules.nameRequired'),
   wingetId: (v: string) =>
     /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(v.trim()) ||
-    'Identifiant winget invalide (ex. Mozilla.Firefox)',
+    t('packagePages.detail.rules.wingetIdInvalid'),
   msiexecArgs: (run: string | null, v: string) =>
-    run !== 'msiexec' ||
-    splitArgs(v).length > 0 ||
-    'Avec msiexec, indiquer les arguments (ex. /i "{dir}\\app.msi" /qn)',
+    run !== 'msiexec' || splitArgs(v).length > 0 || t('packagePages.detail.rules.msiexecArgs'),
   successCodes: (v: string) => {
     const parts = v.split(/[,;\s]+/).filter(Boolean);
-    if (!parts.length) return 'Au moins un code (ex. 0, 3010, 1641)';
-    if (parts.length > 32) return '32 codes au plus';
-    return parts.every((p) => /^-?\d+$/.test(p)) || 'Des nombres entiers, séparés par des virgules';
+    if (!parts.length) return t('packagePages.detail.rules.successCodesNone');
+    if (parts.length > 32) return t('packagePages.detail.rules.successCodesMax');
+    return (
+      parts.every((p) => /^-?\d+$/.test(p)) || t('packagePages.detail.rules.successCodesIntegers')
+    );
   },
 };
 
-function notifyError(e: unknown, fallback: string) {
-  $q.notify({ type: 'negative', message: apiErrorMessage(e, fallback) });
+/** The fallback is a function: worded again with the notification. */
+function notifyError(e: unknown, fallback: () => string) {
+  notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, fallback()) }));
 }
 
 /** Saves the definition; whether it was saved. */
@@ -766,16 +872,16 @@ async function save(): Promise<boolean> {
     const wasSigned = pkg.value.signed;
     const updated = await updatePackage(pkg.value.id, fields);
     fill(updated);
-    $q.notify({
+    notify($q, () => ({
       type: wasSigned && !updated.signed ? 'warning' : 'positive',
       message:
         wasSigned && !updated.signed
-          ? 'Enregistré — le manifeste a changé : la signature est à refaire'
-          : 'Enregistré',
-    });
+          ? t('packagePages.detail.savedResign')
+          : t('packagePages.detail.saved'),
+    }));
     return true;
   } catch (e) {
-    notifyError(e, 'Enregistrement impossible');
+    notifyError(e, () => t('packagePages.detail.saveFailed'));
     return false;
   } finally {
     saving.value = false;
@@ -796,11 +902,16 @@ async function upload() {
   // Against the server's own bound, as the package reports it.
   const tooBig = tooLargeFiles(pkg.value, files);
   if (tooBig.length) {
-    $q.notify({
+    const maxBytes = pkg.value.file_max_bytes;
+    notify($q, () => ({
       type: 'negative',
-      message: `Trop volumineux : ${tooBig.map((f) => f.name).join(', ')}`,
-      caption: `Limite de ce serveur : ${formatSize(pkg.value.file_max_bytes)} par fichier.`,
-    });
+      message: t('packagePages.detail.upload.tooLarge', {
+        files: tooBig.map((f) => f.name).join(t('packages.listSeparator')),
+      }),
+      caption: t('packagePages.detail.upload.tooLargeCaption', {
+        size: formatSize(maxBytes),
+      }),
+    }));
     return;
   }
   const total = files.reduce((n, f) => n + f.size, 0) || 1;
@@ -832,40 +943,58 @@ async function upload() {
       if (exe) form.install_run = exe.name;
     }
     toUpload.value = null;
-    $q.notify({
+    const unsaved = dirty.value;
+    notify($q, () => ({
       type: 'positive',
-      message: files.length > 1 ? 'Fichiers déposés' : 'Fichier déposé',
-      ...(dirty.value ? { caption: 'Pensez à enregistrer la définition.' } : {}),
-    });
+      message: t('packagePages.detail.upload.done', files.length),
+      ...(unsaved ? { caption: t('packagePages.detail.upload.rememberSave') } : {}),
+    }));
   } catch (e) {
     const notSent = files.slice(kept.length).map((f) => f.name);
-    const caption =
+    // Built with the notification, in the language it is shown in.
+    const caption = () =>
       files.length > 1
         ? [
-            kept.length ? `Déposé${kept.length > 1 ? 's' : ''} : ${kept.join(', ')}.` : '',
-            `Non envoyé${notSent.length > 1 ? 's' : ''} : ${notSent.join(', ')}.`,
+            kept.length
+              ? t(
+                  'packagePages.detail.upload.kept',
+                  { files: kept.join(t('packages.listSeparator')) },
+                  kept.length,
+                )
+              : '',
+            t(
+              'packagePages.detail.upload.notSent',
+              { files: notSent.join(t('packages.listSeparator')) },
+              notSent.length,
+            ),
           ]
             .filter(Boolean)
             .join(' ')
         : undefined;
     if (isCancel(e)) {
-      $q.notify({
+      notify($q, () => ({
         type: 'info',
-        message: sent ? 'Dépôt interrompu : les fichiers déjà envoyés sont gardés' : 'Dépôt annulé',
-        ...(caption ? { caption } : {}),
-      });
+        message: sent
+          ? t('packagePages.detail.upload.interrupted')
+          : t('packagePages.detail.upload.cancelled'),
+        ...withCaption(caption()),
+      }));
     } else {
-      $q.notify({
+      notify($q, () => ({
         type: 'negative',
-        message: apiErrorMessage(e, 'Dépôt impossible'),
-        ...(caption ? { caption } : {}),
+        message: apiErrorMessage(e, t('packagePages.detail.upload.failed')),
+        ...withCaption(caption()),
         ...(files.length > 1 ? { timeout: 10000 } : {}),
-      });
+      }));
     }
   } finally {
     uploading.value = false;
     uploadAbort = null;
   }
+}
+
+function withCaption(caption: string | undefined): { caption?: string } {
+  return caption ? { caption } : {};
 }
 
 function cancelUpload() {
@@ -877,17 +1006,17 @@ onBeforeUnmount(cancelUpload);
 function removeFile(name: string) {
   if (!pkg.value) return;
   const id = pkg.value.id;
-  $q.dialog({
-    title: 'Retirer le fichier',
-    message: `Retirer « ${name} » du paquet ?`,
+  liveDialog($q, () => ({
+    title: t('packagePages.detail.removeFile.title'),
+    message: t('packagePages.detail.removeFile.message', { name }),
     cancel: true,
-    ok: { label: 'Retirer', color: 'negative' },
-  }).onOk(() => {
+    ok: { label: t('packagePages.detail.removeFile.ok'), color: 'negative' },
+  })).onOk(() => {
     void (async () => {
       try {
         refresh(await deletePackageFile(id, name));
       } catch (e) {
-        notifyError(e, 'Suppression impossible');
+        notifyError(e, () => t('packagePages.detail.removeFile.failed'));
       }
     })();
   });
@@ -899,7 +1028,7 @@ async function getManifest() {
     const blob = await downloadManifest(pkg.value.id);
     downloadBlob(blob, manifestFileName(pkg.value));
   } catch (e) {
-    notifyError(e, 'Téléchargement impossible');
+    notifyError(e, () => t('packagePages.detail.downloadFailed'));
   }
 }
 
@@ -908,11 +1037,12 @@ async function sendSignature(file: File | null) {
   try {
     const document: unknown = JSON.parse(await file.text());
     refresh(await attachSignature(pkg.value.id, document));
-    $q.notify({ type: 'positive', message: 'Signature vérifiée et jointe au paquet' });
+    notify($q, () => ({ type: 'positive', message: t('packagePages.detail.signature.attached') }));
   } catch (e) {
-    notifyError(
-      e,
-      e instanceof SyntaxError ? 'Ce fichier n’est pas une signature' : 'Signature refusée',
+    notifyError(e, () =>
+      e instanceof SyntaxError
+        ? t('packagePages.detail.signature.notSignature')
+        : t('packagePages.detail.signature.refused'),
     );
   } finally {
     signatureFile.value = null;
@@ -924,23 +1054,23 @@ async function unsign() {
   try {
     refresh(await removeSignature(pkg.value.id));
   } catch (e) {
-    notifyError(e, 'Opération impossible');
+    notifyError(e, () => t('packagePages.detail.operationFailed'));
   }
 }
 
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n > 1 ? many : one}`;
-}
-
-function confirm(title: string, message: string, ok: string, color: string): Promise<boolean> {
+/** A confirmation; `texts` words it, again on a change of language. */
+function confirm(
+  texts: () => { title: string; message: string; ok: string },
+  color: string,
+): Promise<boolean> {
   return new Promise((resolve) => {
-    $q.dialog({
-      title,
-      message,
-      cancel: { flat: true, noCaps: true, label: 'Annuler' },
-      ok: { unelevated: true, noCaps: true, label: ok, color },
+    liveDialog($q, () => ({
+      title: texts().title,
+      message: texts().message,
+      cancel: { flat: true, noCaps: true, label: t('packagePages.detail.cancel') },
+      ok: { unelevated: true, noCaps: true, label: texts().ok, color },
       persistent: true,
-    })
+    }))
       .onOk(() => resolve(true))
       .onCancel(() => resolve(false));
   });
@@ -956,21 +1086,23 @@ async function toggleRetired() {
   const p = pkg.value;
   if (p.retired_at) {
     const ok = await confirm(
-      'Remettre au catalogue',
-      `« ${p.name} » pourra de nouveau être déployé. Les installations annulées lors du retrait ne sont pas relancées : redéployez le paquet sur les postes voulus.`,
-      'Remettre au catalogue',
+      () => ({
+        title: t('packagePages.detail.restoreConfirm.title'),
+        message: t('packagePages.detail.restoreConfirm.message', { name: p.name }),
+        ok: t('packagePages.detail.restoreConfirm.ok'),
+      }),
       'primary',
     );
     if (!ok) return;
     try {
       refresh(await restorePackage(p.id));
-      $q.notify({
+      notify($q, () => ({
         type: 'positive',
-        message: 'Paquet remis au catalogue',
-        caption: 'Les installations annulées au retrait ne sont pas relancées.',
-      });
+        message: t('packagePages.detail.restoreConfirm.done'),
+        caption: t('packagePages.detail.restoreConfirm.doneCaption'),
+      }));
     } catch (e) {
-      notifyError(e, 'Opération impossible');
+      notifyError(e, () => t('packagePages.detail.operationFailed'));
     }
     void loadCommands();
     return;
@@ -979,32 +1111,38 @@ async function toggleRetired() {
   const tally = await getPackageSummary(p.id).catch(() => summary.value);
   if (tally) summary.value = tally;
   const pending = tally?.pending_installs ?? null;
-  const cancelled =
+  const cancelled = () =>
     pending === null
-      ? 'Les installations en attente (pas encore reçues par leur poste) seront annulées.'
+      ? t('packagePages.detail.retireConfirm.pendingUnknown')
       : pending > 0
-        ? `${plural(pending, 'installation en attente', 'installations en attente')} (pas encore ${pending > 1 ? 'reçues' : 'reçue'} par ${pending > 1 ? 'leur poste' : 'son poste'}) ${pending > 1 ? 'seront annulées' : 'sera annulée'}.`
-        : 'Aucune installation n’est en attente.';
+        ? t('packagePages.detail.retireConfirm.pending', { count: pending }, pending)
+        : t('packagePages.detail.retireConfirm.noPending');
   const ok = await confirm(
-    'Retirer le paquet',
-    `${cancelled} Celles déjà transmises vont à leur terme ; les désinstallations ne sont pas touchées. Le paquet ne sera plus proposé au déploiement, et le remettre au catalogue ne relancera pas les installations annulées.`,
-    'Retirer',
+    () => ({
+      title: t('packagePages.detail.retireConfirm.title'),
+      message: t('packagePages.detail.retireConfirm.message', { cancelled: cancelled() }),
+      ok: t('packagePages.detail.retireConfirm.ok'),
+    }),
     'negative',
   );
   if (!ok) return;
   try {
     refresh(await retirePackage(p.id));
-    $q.notify({
+    notify($q, () => ({
       type: 'positive',
-      message: 'Paquet retiré',
+      message: t('packagePages.detail.retireConfirm.done'),
       ...(pending
         ? {
-            caption: `${plural(pending, 'installation en attente annulée', 'installations en attente annulées')}.`,
+            caption: t(
+              'packagePages.detail.retireConfirm.doneCaption',
+              { count: pending },
+              pending,
+            ),
           }
         : {}),
-    });
+    }));
   } catch (e) {
-    notifyError(e, 'Opération impossible');
+    notifyError(e, () => t('packagePages.detail.operationFailed'));
   }
   void loadCommands();
 }
@@ -1017,9 +1155,11 @@ async function toggleRetired() {
 async function openDeploy(action: 'install' | 'uninstall') {
   if (dirty.value && canWrite.value) {
     const ok = await confirm(
-      'Modifications non enregistrées',
-      'La définition du paquet a été modifiée sans être enregistrée : le déploiement enverrait la version enregistrée, sans ces modifications.',
-      'Enregistrer puis déployer',
+      () => ({
+        title: t('packagePages.detail.unsavedDeploy.title'),
+        message: t('packagePages.detail.unsavedDeploy.message'),
+        ok: t('packagePages.detail.unsavedDeploy.ok'),
+      }),
       'primary',
     );
     if (!ok) return;

@@ -52,6 +52,8 @@ describe('MachineMaintenanceCard', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('due le 02/12/2026');
+    // Two words in the text, as before the bilingual console: copied, read.
+    expect(wrapper.text()).toMatch(/[^\s] due le 02\/12\/2026/);
     expect(wrapper.text()).not.toMatch(/\d{2}:\d{2}:\d{2}/);
   });
 
@@ -165,6 +167,30 @@ describe('MachineMaintenanceCard — a read that fails', () => {
     await wrapper.setProps({ machineId: 'm2' });
     await flushPromises();
     expect(wrapper.findComponent(CardLoadError).exists()).toBe(true);
+    expect(wrapper.text()).not.toContain('due le 02/12/2026');
+    wrapper.unmount();
+  });
+
+  // Prev/next keeps the same card: a slow read of the poste left, answering
+  // after the next one's, must not put its state under the next one's name.
+  it('keeps the next poste’s maintenance when the read of the poste left answers late', async () => {
+    let answerLeft: (read: MachineMaintenance) => void = () => undefined;
+    vi.mocked(getMachineMaintenance).mockImplementation((id: string) =>
+      id === 'm1'
+        ? new Promise((resolve) => (answerLeft = resolve))
+        : Promise.resolve({
+            ...info,
+            resolved: { ...info.resolved, due_at: '2027-01-10T01:00:00Z', state: 'overdue' },
+          }),
+    );
+    const wrapper = mountCard();
+    await wrapper.setProps({ machineId: 'm2', hostname: 'PC-02' });
+    await flushPromises();
+    expect(wrapper.text()).toContain('due le 09/01/2027');
+
+    answerLeft(info);
+    await flushPromises();
+    expect(wrapper.text()).toContain('due le 09/01/2027');
     expect(wrapper.text()).not.toContain('due le 02/12/2026');
     wrapper.unmount();
   });

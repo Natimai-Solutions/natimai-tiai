@@ -3,10 +3,9 @@
     <q-card style="width: 460px; max-width: 95vw">
       <q-card-section class="row items-center q-pb-none">
         <div>
-          <div class="text-h6">Colonnes de la liste</div>
+          <div class="text-h6">{{ t('machines.columnsDialog.title') }}</div>
           <div class="text-caption text-muted">
-            Cochez les colonnes à afficher et ordonnez-les. Le choix est enregistré sur votre
-            compte.
+            {{ t('machines.columnsDialog.hint') }}
           </div>
         </div>
       </q-card-section>
@@ -22,12 +21,12 @@
               />
             </q-item-section>
             <q-item-section :class="{ 'text-muted': !entry.visible }">
-              {{ entry.label }}
+              {{ labels[entry.key] ?? entry.key }}
             </q-item-section>
             <q-item-section side>
               <div class="row no-wrap">
                 <q-btn
-                  aria-label="Monter la colonne"
+                  :aria-label="t('machines.columnsDialog.moveUp')"
                   flat
                   dense
                   round
@@ -37,7 +36,7 @@
                   @click="move(index, -1)"
                 />
                 <q-btn
-                  aria-label="Descendre la colonne"
+                  :aria-label="t('machines.columnsDialog.moveDown')"
                   flat
                   dense
                   round
@@ -53,13 +52,18 @@
       </q-card-section>
 
       <q-card-actions align="right" class="q-px-md q-pb-md">
-        <q-btn flat no-caps label="Par défaut" @click="resetToDefaults" />
+        <q-btn
+          flat
+          no-caps
+          :label="t('machines.columnsDialog.defaults')"
+          @click="resetToDefaults"
+        />
         <q-space />
-        <q-btn v-close-popup flat no-caps label="Annuler" />
+        <q-btn v-close-popup flat no-caps :label="t('machines.columnsDialog.cancel')" />
         <q-btn
           color="primary"
           no-caps
-          label="Appliquer"
+          :label="t('machines.columnsDialog.apply')"
           :loading="saving"
           :disable="!visibleKeys.length"
           @click="apply"
@@ -71,6 +75,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { t } from 'src/i18n';
 import {
   DEFAULT_MACHINE_COLUMNS,
   MACHINE_COLUMN_KEYS,
@@ -95,9 +100,10 @@ const props = defineProps<{
 
 const open = defineModel<boolean>('open', { required: true });
 
+// No label kept on the entry: it is read from `labels` at render, so it
+// follows a change of language while the dialog is open.
 interface Entry {
   key: MachineColumnKey;
-  label: string;
   visible: boolean;
 }
 
@@ -112,7 +118,6 @@ function build(shown: readonly MachineColumnKey[]) {
   const hidden = MACHINE_COLUMN_KEYS.filter((key) => !shown.includes(key));
   entries.value = [...shown, ...hidden].map((key) => ({
     key,
-    label: props.labels[key] ?? key,
     visible: shown.includes(key),
   }));
 }

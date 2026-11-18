@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
 from app.features.check import crud as check_crud
+from app.features.command import texts
 from app.features.command.models import Command, CommandStatus
 from app.features.intervention import crud as intervention_crud
 from app.features.machine.models import Machine
@@ -16,7 +17,8 @@ from app.features.maintenance.reach import owner_reach
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 
-MERGED_ERROR = "Poste fusionné : commande annulée"
+# What a closed command says (``texts.merged``).
+MERGED_ERROR = texts.merged().text
 
 # What a merge closes on the absorbed record rather than hand to the kept one.
 _OPEN_STATUSES = [
@@ -59,6 +61,8 @@ async def merge_into(
         .values(
             status=CommandStatus.FAILED.value,
             error=MERGED_ERROR,
+            result_code=texts.merged().code,
+            result_params={},
             finished_at=utcnow(),
         )
         .returning(col(Command.package_files))

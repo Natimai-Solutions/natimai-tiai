@@ -22,6 +22,7 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { getMe, type User } from 'src/services/auth';
 import { listChecks } from 'src/services/checks';
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { getDue } from 'src/services/maintenance';
 import { setAccessToken } from 'src/services/session';
 import { PROFILE_REFRESH_MS, useAuthStore } from 'src/stores/auth';
@@ -278,6 +279,76 @@ describe('MainLayout', () => {
       ).toEqual(['4']);
     });
 
+    // A right withdrawn during the session takes its count with it, at the
+    // next count (the entry stays: the other right still offers it).
+    it('drops the count of a right withdrawn during the session', async () => {
+      vi.mocked(listChecks).mockResolvedValue({ items: [], total: 2 } as never);
+      vi.mocked(getDue).mockResolvedValue({ overdue: 5 } as never);
+      const { w } = await mountLayout(profile(['check:read', 'maintenance:read']), '/account');
+      const badges = () =>
+        tasksEntry(w)
+          .findAll('.q-badge')
+          .map((b) => b.text());
+      expect(badges()).toEqual(['2', '5']);
+      const auth = useAuthStore();
+
+      auth.user = profile(['maintenance:read']);
+      notifyTasksChanged();
+      await flushPromises();
+      expect(badges()).toEqual(['5']);
+
+      auth.user = profile(['check:read']);
+      notifyTasksChanged();
+      await flushPromises();
+      expect(badges()).toEqual(['2']);
+    });
+
+    // Review gap-2-1: the profile read again is enough, no navigation needed.
+    it('recounts as soon as the profile says a right changed', async () => {
+      vi.mocked(listChecks).mockResolvedValue({ items: [], total: 1 } as never);
+      vi.mocked(getDue).mockResolvedValue({ overdue: 2 } as never);
+      const { w } = await mountLayout(profile(['check:read', 'maintenance:read']), '/account');
+      const badges = () =>
+        tasksEntry(w)
+          .findAll('.q-badge')
+          .map((b) => b.text());
+      expect(badges()).toEqual(['1', '2']);
+      const auth = useAuthStore();
+
+      auth.user = profile(['maintenance:read']);
+      await flushPromises();
+      expect(badges()).toEqual(['2']);
+
+      vi.mocked(listChecks).mockClear();
+      vi.mocked(getDue).mockClear();
+      // The same rights read again: nothing to recount.
+      auth.user = profile(['maintenance:read']);
+      await flushPromises();
+      expect(getDue).not.toHaveBeenCalled();
+
+      auth.user = profile(['check:read', 'maintenance:read']);
+      await flushPromises();
+      expect(badges()).toEqual(['1', '2']);
+    });
+
+    it('drops a count whose read answers 403, the profile not yet read again', async () => {
+      vi.mocked(listChecks).mockResolvedValue({ items: [], total: 1 } as never);
+      vi.mocked(getDue).mockResolvedValue({ overdue: 2 } as never);
+      const { w } = await mountLayout(profile(['check:read', 'maintenance:read']), '/account');
+      const badges = () =>
+        tasksEntry(w)
+          .findAll('.q-badge')
+          .map((b) => b.text());
+      expect(badges()).toEqual(['1', '2']);
+
+      vi.mocked(listChecks).mockRejectedValue({ response: { status: 403 } });
+      // Any other failure keeps the count: the badge is a hint.
+      vi.mocked(getDue).mockRejectedValue({ response: { status: 500 } });
+      notifyTasksChanged();
+      await flushPromises();
+      expect(badges()).toEqual(['2']);
+    });
+
     it('asks nothing for an account with neither right', async () => {
       await mountLayout(profile(['machine:read']));
       expect(listChecks).not.toHaveBeenCalled();
@@ -293,6 +364,17 @@ describe('MainLayout', () => {
     expect(link.attributes('href')).toBe('#main-content');
     await link.trigger('click');
     expect(document.activeElement?.id).toBe('main-content');
+  });
+
+  // Review display-mobile-5: on a tablet a long address must not hide the title.
+  it('cuts a long address short in the header, whole in its tooltip', async () => {
+    const email = 'marie-antoinette.rasoanaivo@lycee-polytechnique.edu.pf';
+    const { w } = await mountLayout({ ...profile(['machine:read']), email });
+    const el = w.find('[data-test="header-email"]');
+    expect(el.text()).toBe(email);
+    expect(el.attributes('title')).toBe(email);
+    expect(el.classes()).toContain('ellipsis');
+    expect(el.attributes('style')).toContain('max-width');
   });
 
   // Review finding 7: every page is a `q-page`, which is the `<main>`

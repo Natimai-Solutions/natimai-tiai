@@ -4,13 +4,14 @@ package deploy
 
 import (
 	"context"
-	"errors"
+
+	"tiai/agent/internal/msg"
 )
 
 // Supported tells whether this platform can deploy at all.
 const Supported = false
 
-var errUnsupported = errors.New("déploiement logiciel non pris en charge sur ce système")
+var errUnsupported = msg.Err("deploy.unsupported", nil)
 
 func (e *SystemEnv) VerifyAuthenticode(string) (string, error) { return "", errUnsupported }
 

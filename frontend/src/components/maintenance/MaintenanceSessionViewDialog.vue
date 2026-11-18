@@ -15,34 +15,42 @@
       data-test="visit-card"
     >
       <q-card-section class="text-h6">
-        Séance de maintenance{{ visit?.room_name ? ` — ${visit.room_name}` : '' }}
+        {{
+          visit?.room_name
+            ? t('maintenance.view.titleIn', { room: visit.room_name })
+            : t('maintenance.view.title')
+        }}
       </q-card-section>
       <q-card-section v-if="loading" class="row justify-center">
         <q-spinner size="32px" />
       </q-card-section>
-      <q-card-section v-else-if="error" class="text-negative">{{ error }}</q-card-section>
+      <q-card-section v-else-if="error" class="text-negative">{{
+        apiErrorMessage(error.cause, t('maintenance.view.loadFailed'))
+      }}</q-card-section>
       <div v-else-if="visit" :class="small ? 'col scroll' : ''">
         <!-- Seen through a poste of the reader's scope: the rest of the visit
              — other postes, and the room and its note when the room is not
              the reader's — is not shown (audit S06). -->
         <q-card-section v-if="visit.partial" class="q-pt-none" data-test="visit-partial">
           <q-banner rounded dense class="surface-blue">
-            Cette séance déborde de votre périmètre : seuls vos postes sont affichés{{
-              visit.note === null ? ", sans l'observation générale" : ''
-            }}.
+            {{
+              visit.note === null
+                ? t('maintenance.view.partialNoNote')
+                : t('maintenance.view.partial')
+            }}
           </q-banner>
         </q-card-section>
         <q-card-section class="q-pt-none q-gutter-xs">
           <div class="row">
-            <div class="col-4 text-muted">Date</div>
+            <div class="col-4 text-muted">{{ t('maintenance.view.date') }}</div>
             <div class="col" data-test="visit-date">{{ formatDateTime(visit.performed_at) }}</div>
           </div>
           <div class="row">
-            <div class="col-4 text-muted">Par</div>
+            <div class="col-4 text-muted">{{ t('maintenance.view.by') }}</div>
             <div class="col">{{ visit.performed_by }}</div>
           </div>
           <div class="row">
-            <div class="col-4 text-muted">Observation générale</div>
+            <div class="col-4 text-muted">{{ t('maintenance.view.generalNote') }}</div>
             <div class="col" style="white-space: pre-line" data-test="visit-note">
               {{ visit.note || '—' }}
             </div>
@@ -50,7 +58,9 @@
         </q-card-section>
         <q-separator />
         <q-card-section>
-          <div class="text-subtitle2 q-mb-xs">Postes faits ({{ visit.machine_count }})</div>
+          <div class="text-subtitle2 q-mb-xs">
+            {{ t('maintenance.view.done', { count: visit.machine_count }) }}
+          </div>
           <q-list v-if="visit.items.length" dense data-test="visit-done">
             <q-item v-for="i in visit.items" :key="i.intervention_id" class="q-px-none">
               <q-item-section>
@@ -61,9 +71,9 @@
               </q-item-section>
             </q-item>
           </q-list>
-          <div v-else class="text-muted">Aucun poste ne garde de ligne de cette séance.</div>
+          <div v-else class="text-muted">{{ t('maintenance.view.noneDone') }}</div>
           <template v-if="visit.skipped?.length">
-            <div class="text-subtitle2 q-mt-md q-mb-xs">Postes non faits</div>
+            <div class="text-subtitle2 q-mt-md q-mb-xs">{{ t('maintenance.view.skipped') }}</div>
             <q-list dense data-test="visit-skipped">
               <q-item v-for="i in visit.skipped" :key="i.intervention_id" class="q-px-none">
                 <q-item-section>
@@ -86,12 +96,12 @@
           flat
           color="negative"
           icon="delete"
-          label="Supprimer la séance"
+          :label="t('maintenance.view.delete')"
           :loading="deleting"
           @click="confirmDelete"
         />
         <q-space />
-        <q-btn v-close-popup flat label="Fermer" />
+        <q-btn v-close-popup flat :label="t('maintenance.actions.close')" />
       </q-card-actions>
     </q-card>
   </q-dialog>
@@ -105,6 +115,9 @@ import { apiErrorMessage } from 'src/services/errors';
 import { deleteSession, getSession, type MaintenanceSession } from 'src/services/maintenance';
 import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime } from 'src/utils/format';
+import { t } from 'src/i18n';
+import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{ modelValue: boolean; sessionId: string | null }>();
 const emit = defineEmits<{
@@ -119,7 +132,9 @@ const canDelete = computed(() => auth.can('maintenance', 'write'));
 const visit = ref<MaintenanceSession | null>(null);
 const loading = ref(false);
 const deleting = ref(false);
-const error = ref<string | null>(null);
+// The failure itself, worded at render: a language changed while the dialog
+// is open shows in it too.
+const error = ref<{ cause: unknown } | null>(null);
 
 watch(
   () => [props.modelValue, props.sessionId] as const,
@@ -136,7 +151,7 @@ async function load(id: string) {
   try {
     visit.value = await getSession(id);
   } catch (e) {
-    error.value = apiErrorMessage(e, 'Séance indisponible');
+    error.value = { cause: e };
   } finally {
     loading.value = false;
   }
@@ -146,26 +161,30 @@ function confirmDelete() {
   const v = visit.value;
   if (!v) return;
   const lines = v.items.length + (v.skipped?.length ?? 0);
-  $q.dialog({
-    title: 'Supprimer la séance',
-    message:
-      `Supprimer la séance du ${formatDateTime(v.performed_at)} et ses ${lines} ligne(s) ` +
-      "d'historique ? La dernière maintenance de chaque poste revient à la précédente. " +
-      "La suppression est tracée dans le journal d'audit.",
+  liveDialog($q, () => ({
+    title: t('maintenance.view.deleteTitle'),
+    message: t(
+      'maintenance.view.deleteAsk',
+      { date: formatDateTime(v.performed_at), count: lines },
+      lines,
+    ),
     cancel: true,
-    ok: { label: 'Supprimer', color: 'negative' },
-  }).onOk(() => {
+    ok: { label: t('maintenance.actions.delete'), color: 'negative' },
+  })).onOk(() => {
     void (async () => {
       deleting.value = true;
       try {
         await deleteSession(v.id);
-        $q.notify({ type: 'positive', message: 'Séance supprimée' });
+        notify($q, () => ({ type: 'positive', message: t('maintenance.view.deleted') }));
         // The postes' due dates moved: « Mes tâches » and its badge too.
         notifyTasksChanged();
         emit('update:modelValue', false);
         emit('deleted');
       } catch (e) {
-        $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Suppression impossible') });
+        notify($q, () => ({
+          type: 'negative',
+          message: apiErrorMessage(e, t('maintenance.view.deleteFailed')),
+        }));
       } finally {
         deleting.value = false;
       }

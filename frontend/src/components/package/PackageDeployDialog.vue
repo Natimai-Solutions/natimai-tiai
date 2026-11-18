@@ -4,7 +4,11 @@
   <q-dialog :model-value="modelValue" @update:model-value="emit('update:modelValue', $event)">
     <q-card style="width: 520px; max-width: 95vw">
       <q-card-section class="text-h6">
-        {{ action === 'install' ? 'Installer un logiciel' : 'Désinstaller un logiciel' }}
+        {{
+          action === 'install'
+            ? t('packagePages.deploy.titleInstall')
+            : t('packagePages.deploy.titleUninstall')
+        }}
       </q-card-section>
 
       <q-card-section class="q-gutter-md">
@@ -14,8 +18,12 @@
           unelevated
           toggle-color="primary"
           :options="[
-            { label: 'Installer', value: 'install' },
-            { label: 'Désinstaller', value: 'uninstall', disable: !canUninstall },
+            { label: t('packagePages.deploy.install'), value: 'install' },
+            {
+              label: t('packagePages.deploy.uninstall'),
+              value: 'uninstall',
+              disable: !canUninstall,
+            },
           ]"
         />
 
@@ -24,20 +32,20 @@
           v-model="chosenId"
           :options="packageOptions"
           :loading="loadingPackages"
-          label="Paquet"
+          :label="t('packagePages.deploy.package')"
           outlined
           dense
           emit-value
           map-options
-          :hint="packageOptions.length ? '' : 'Aucun paquet prêt — voir la page Paquets'"
+          :hint="packageOptions.length ? '' : t('packagePages.deploy.noPackage')"
         />
 
         <template v-if="!machineIds?.length">
           <q-option-group
             v-model="scope"
             :options="[
-              { label: 'Tout le parc', value: 'all' },
-              { label: 'Un emplacement', value: 'location' },
+              { label: t('packagePages.deploy.scopeAll'), value: 'all' },
+              { label: t('packagePages.deploy.scopeLocation'), value: 'location' },
             ]"
             inline
           />
@@ -45,27 +53,31 @@
             v-if="scope === 'location'"
             v-model="location"
             :options="locations"
-            label="Emplacement"
+            :label="t('packagePages.deploy.location')"
             outlined
             dense
           />
         </template>
         <div v-else class="text-body2">
-          Sur {{ machineIds.length > 1 ? `${machineIds.length} postes` : 'ce poste' }}.
+          {{ t('packagePages.deploy.onMachines', { count: machineIds.length }, machineIds.length) }}
         </div>
 
         <!-- What the server would refuse the command for, said before it is
              sent: an uninstall is held back by fewer problems than an install. -->
         <q-banner v-if="chosen && blocking.length" dense class="surface-orange">
           <div class="text-weight-medium">
-            {{ action === 'install' ? 'Pas encore déployable' : 'Désinstallation impossible' }}
+            {{
+              action === 'install'
+                ? t('packagePages.deploy.notDeployable')
+                : t('packagePages.deploy.cannotUninstall')
+            }}
           </div>
           <ul class="q-my-xs q-pl-md">
-            <li v-for="p in blocking" :key="p.code">{{ p.message }}</li>
+            <li v-for="p in blocking" :key="p.code">{{ problemText(p) }}</li>
           </ul>
         </q-banner>
         <q-banner v-else-if="installBlockers.length" dense class="surface-orange">
-          <div class="text-weight-medium">Aucun poste ne l’installera</div>
+          <div class="text-weight-medium">{{ t('packagePages.deploy.noComputer') }}</div>
           <ul class="q-my-xs q-pl-md" style="overflow-wrap: anywhere">
             <li v-for="m in installBlockers" :key="m">{{ m }}</li>
           </ul>
@@ -76,7 +88,7 @@
       </q-card-section>
 
       <q-card-actions align="right" class="q-px-md q-pb-md">
-        <q-btn v-close-popup flat no-caps label="Annuler" />
+        <q-btn v-close-popup flat no-caps :label="t('packagePages.deploy.cancel')" />
         <q-btn
           unelevated
           no-caps
@@ -92,8 +104,10 @@
 </template>
 
 <script setup lang="ts">
+import { installBlockerTexts, problemText } from 'src/utils/packageText';
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
+import { t } from 'src/i18n';
 import { bulkSendNotification } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import { listLocations, listMachines } from 'src/services/machines';
@@ -112,6 +126,8 @@ import {
   type DeployTarget,
   type Package,
 } from 'src/services/packages';
+import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -163,7 +179,7 @@ const blocking = computed(() => (chosen.value ? blockingProblems(chosen.value, a
 // exécutable d'éditeur » whatever the cause.
 const installBlockers = computed(() =>
   chosen.value && action.value === 'install' && !blocking.value.length
-    ? (chosen.value.install_blockers ?? [])
+    ? installBlockerTexts(chosen.value)
     : [],
 );
 const ready = computed(() => {
@@ -179,33 +195,42 @@ const ready = computed(() => {
   if (!props.machineIds?.length && scope.value === 'location' && !location.value) return false;
   return true;
 });
+/** The action's verb, alone on a button or first in a sentence. */
+function verbLabel(): string {
+  return action.value === 'install'
+    ? t('packagePages.deploy.install')
+    : t('packagePages.deploy.uninstall');
+}
+
 const okLabel = computed(() => {
-  const verb = action.value === 'install' ? 'Installer' : 'Désinstaller';
+  const verb = verbLabel();
   if (props.machineIds?.length)
-    return props.machineIds.length > 1 ? `${verb} sur ${props.machineIds.length} postes` : verb;
+    return props.machineIds.length > 1
+      ? t('packagePages.deploy.okMachines', { verb, count: props.machineIds.length })
+      : verb;
   return scope.value === 'all'
-    ? `${verb} sur tout le parc`
-    : `${verb} sur ${location.value ?? '…'}`;
+    ? t('packagePages.deploy.okAll', { verb })
+    : t('packagePages.deploy.okLocation', { verb, location: location.value ?? '…' });
 });
 
 function trustSentence(p: Package, step: DeployAction): string {
   switch (stepTrust(p, step)) {
     case 'winget':
       return step === 'install'
-        ? 'Paquet winget : seuls les postes où la GPO active winget (DeployWinget) l’installeront.'
-        : 'Paquet winget : seuls les postes où la GPO active winget (DeployWinget) le désinstalleront.';
+        ? t('packagePages.deploy.trust.wingetInstall')
+        : t('packagePages.deploy.trust.wingetUninstall');
     case 'signed':
-      return 'Paquet signé : seuls les postes dont la GPO approuve ce certificat (DeploySigners) l’exécuteront.';
+      return t('packagePages.deploy.trust.signed');
     case 'publisher':
-      return `Non signé par l’administrateur : seuls les postes dont la GPO approuve l’éditeur « ${publisherOf(p, step) ?? ''} » (DeployPublishers) l’exécuteront.`;
+      return t('packagePages.deploy.trust.publisher', { publisher: publisherOf(p, step) ?? '' });
     case 'product_code':
-      return 'Désinstallation par code produit (msiexec /x) : seuls les postes dont la GPO approuve au moins un éditeur (DeployPublishers) l’exécuteront.';
+      return t('packagePages.deploy.trust.productCode');
     default:
       if (tooLargeForMethodA(p, step))
-        return `Plus de ${methodAMaxLabel(p)} de fichiers : sans signature de l’administrateur, aucun poste ne les téléchargera (plafond de la méthode A). Signez le paquet avant de le déployer.`;
+        return t('packagePages.deploy.trust.tooLarge', { max: methodAMaxLabel(p) });
       return step === 'install'
-        ? 'Ni signé, ni lancé par un exécutable d’éditeur : aucun poste ne l’exécutera. Signez le paquet avant de le déployer.'
-        : 'Désinstallation ni signée, ni lancée par un exécutable d’éditeur, ni par « msiexec /x {code produit} » : aucun poste ne l’exécutera. Signez le paquet avant de le déployer.';
+        ? t('packagePages.deploy.trust.noneInstall')
+        : t('packagePages.deploy.trust.noneUninstall');
   }
 }
 
@@ -231,7 +256,10 @@ watch(
       try {
         packages.value = await listPackages();
       } catch (e) {
-        $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
+        notify($q, () => ({
+          type: 'negative',
+          message: apiErrorMessage(e, t('packagePages.deploy.loadFailed')),
+        }));
       } finally {
         loadingPackages.value = false;
       }
@@ -263,26 +291,34 @@ async function confirmed(mine: number): Promise<boolean> {
   // Closed while the postes were being counted: nothing is asked, nothing
   // is sent.
   if (mine !== showing) return false;
-  const where =
+  const where = () =>
     count === null
       ? wide
-        ? 'tout le parc'
-        : 'les postes visés'
-      : `${count} poste${count > 1 ? 's' : ''}${wide ? ' (tout le parc)' : ''}`;
-  const verb = action.value === 'install' ? 'Installer' : 'Désinstaller';
+        ? t('packagePages.deploy.confirm.whereAll')
+        : t('packagePages.deploy.confirm.whereTargets')
+      : t(
+          wide
+            ? 'packagePages.deploy.confirm.whereCountAll'
+            : 'packagePages.deploy.confirm.whereCount',
+          { count },
+          count,
+        );
   return new Promise((resolve) => {
-    $q.dialog({
-      title: `${verb} ${chosen.value?.name ?? ''}`,
-      message: `${verb} sur ${where} ?`,
-      cancel: { flat: true, noCaps: true, label: 'Annuler' },
+    liveDialog($q, () => ({
+      title: t('packagePages.deploy.confirm.title', {
+        verb: verbLabel(),
+        name: chosen.value?.name ?? '',
+      }),
+      message: t('packagePages.deploy.confirm.message', { verb: verbLabel(), where: where() }),
+      cancel: { flat: true, noCaps: true, label: t('packagePages.deploy.cancel') },
       ok: {
         unelevated: true,
         noCaps: true,
-        label: verb,
+        label: verbLabel(),
         color: action.value === 'uninstall' ? 'negative' : 'primary',
       },
       persistent: true,
-    })
+    }))
       .onOk(() => resolve(true))
       .onCancel(() => resolve(false));
   });
@@ -301,11 +337,14 @@ async function send() {
     if (!(await confirmed(mine))) return;
     sending.value = true;
     const res = await deployPackage(chosen.value.id, action.value, target);
-    $q.notify(bulkSendNotification(res));
+    notify($q, () => bulkSendNotification(res));
     emit('update:modelValue', false);
     emit('sent');
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Envoi impossible') });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('packagePages.deploy.sendFailed')),
+    }));
   } finally {
     // Only for the showing this send was started in: a later one has its
     // own state, reset when it opened.

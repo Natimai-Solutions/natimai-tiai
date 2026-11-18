@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf16"
+
+	"tiai/agent/internal/msg"
 )
 
 // catalogueTypes is the catalogue as documented in plan-commandes-distantes.md
@@ -352,8 +354,22 @@ func TestVerdictDISMRebootRequiredIsASuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("3010 must be a success, got %v", err)
 	}
-	if !strings.Contains(out, "Redémarrage requis") {
-		t.Errorf("reboot notice missing from output: %q", out)
+	// The text it always was, dism's own output first; coded, dism's output
+	// as a parameter, so that an English console words the agent's sentence.
+	if out.Text != "L'opération a réussi.\n\nRedémarrage requis pour finaliser l'opération." {
+		t.Errorf("output = %q", out.Text)
+	}
+	if code, params := msg.Coded(out); code != "dism.reboot_required" || params["output"] != "L'opération a réussi." {
+		t.Errorf("code = %q %v", code, params)
+	}
+	// dism's output beyond what the server keeps: the text alone, as before.
+	long, _ := verdictDISM(dismRebootRequired, strings.Repeat("x", 2000))
+	if code, _ := msg.Coded(long); code != "" || !strings.HasSuffix(long.Text, "\n\nRedémarrage requis pour finaliser l'opération.") {
+		t.Errorf("long output: code %q, text …%q", code, long.Text[len(long.Text)-60:])
+	}
+	// The tool's output alone carries no code.
+	if ok, _ := verdictDISM(0, "L'opération a réussi."); ok.Code != "" {
+		t.Errorf("exit 0: %+v", ok)
 	}
 }
 

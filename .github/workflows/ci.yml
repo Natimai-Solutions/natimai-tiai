@@ -20,6 +20,7 @@ jobs:
   backend:
     name: Backend (lint · types · tests · coverage)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write # coverage comment on the PR
@@ -119,6 +120,7 @@ jobs:
   agent:
     name: Agent (gofmt · vet · tests · builds)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: agent
@@ -162,6 +164,7 @@ jobs:
     # suppose Defender, un domaine ni le Security Center ; les tests de DACL
     # visent une clé HKCU et un dossier temporaires, jamais HKLM.
     runs-on: windows-latest
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: agent
@@ -185,6 +188,7 @@ jobs:
   frontend:
     name: Frontend (format · tests · coverage)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: write # coverage comment on the PR
@@ -262,6 +266,7 @@ jobs:
   images:
     name: Images Docker (build)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     # Ne publie rien : vérifie que les deux Dockerfiles construisent encore,
     # pour qu'une release ne découvre pas la casse au moment de pousser.
     strategy:
@@ -286,6 +291,7 @@ jobs:
   e2e:
     name: Console (bout en bout)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # The console in a real browser against the real stack, as Compose runs it
     # (Caddy, API, worker, PostgreSQL): login and session cookie, a command
     # from a button to the database and back, the audit log, a setting that
@@ -341,3 +347,22 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 7
+
+  # Le seul statut à exiger dans le ruleset de main : vert quand chaque job
+  # ci-dessus a réussi. Toujours exécuté (if: always()), pour qu'un job en
+  # échec ou annulé le fasse échouer au lieu de le laisser en attente.
+  ci-green:
+    name: CI verte
+    needs: [backend, agent, agent-windows, frontend, images, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Résultat des jobs
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for r in $RESULTS; do
+            [ "$r" = success ] || exit 1
+          done

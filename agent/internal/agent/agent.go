@@ -29,6 +29,7 @@ import (
 	"tiai/agent/internal/identity"
 	"tiai/agent/internal/logging"
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/msg"
 	"tiai/agent/internal/queue"
 	"tiai/agent/internal/sysinfo"
 )
@@ -841,9 +842,7 @@ func (a *Agent) accept(cmd models.Command) {
 		a.release(cmd.ID)
 		log.Printf("agent: backlog full (%d), refusing %q (id %s)",
 			maxPendingCommands, cmd.Type, cmd.ID)
-		a.failLater(cmd, fmt.Sprintf(
-			"file d'attente de l'agent pleine (%d commandes) : commande non exécutée, à relancer",
-			maxPendingCommands))
+		a.failLater(cmd, msg.Err("agent.backlog_full", msg.Params{"max": maxPendingCommands}))
 	}
 }
 
@@ -865,8 +864,8 @@ func (a *Agent) enqueue(cmd models.Command) bool {
 // the local queue: replayed at the next poll, never lost to a network error
 // or a shutdown. Used where a network call is not wanted — on the polling
 // loop, or while the service stops.
-func (a *Agent) failLater(cmd models.Command, reason string) {
-	res := models.CommandResult{Status: "failed", Error: reason}
+func (a *Agent) failLater(cmd models.Command, reason error) {
+	res := resultOf(msg.Message{}, reason)
 	if err := a.queue.Enqueue(queue.Item{CommandID: cmd.ID, Result: res}); err != nil {
 		log.Printf("agent: queue refusal %s: %v", cmd.ID, err)
 	}
@@ -912,7 +911,8 @@ func (a *Agent) stop() {
 	a.mu.Unlock()
 }
 
-const abandonedOnStop = "interrompue par l'arrêt de l'agent avant d'avoir commencé : à relancer"
+// abandonedOnStop is the verdict of a command the worker never started.
+var abandonedOnStop = msg.Err("agent.stopped", nil)
 
 func (a *Agent) abandon(cmd models.Command) {
 	log.Printf("agent: stopping, %q (id %s) not run", cmd.Type, cmd.ID)
@@ -942,9 +942,8 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	if !ok {
 		// A newer server talking to an older agent: the console must say so,
 		// not show the command "transmise" for ever.
-		a.refuse(ctx, cmd, fmt.Errorf(
-			"type de commande %q non pris en charge par l'agent %s : mettez l'agent à jour",
-			cmd.Type, Version))
+		a.refuse(ctx, cmd, msg.Err("agent.unsupported_type",
+			msg.Params{"type": msg.Quote(cmd.Type), "version": Version}))
 		return
 	}
 
@@ -952,9 +951,8 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	// seconds must not start anything at all. The refusal says to queue it
 	// again once the poste is back: the server does not re-offer it.
 	if kind := a.power.pending(time.Now()); kind != "" {
-		a.refuse(ctx, cmd, fmt.Errorf(
-			"un %s de ce poste est déjà programmé : commande non exécutée, "+
-				"à relancer une fois le poste revenu en ligne", kind))
+		a.refuse(ctx, cmd, msg.Err("agent.power_pending",
+			msg.Params{"action": powerActionCode(kind)}))
 		return
 	}
 
@@ -965,10 +963,8 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	start := time.Now()
 	output, err := run(ctx)
 
-	res := models.CommandResult{Status: "succeeded", Output: output}
+	res := resultOf(output, err)
 	if err != nil {
-		res.Status = "failed"
-		res.Error = err.Error()
 		log.Printf("agent: %s (id %s) failed after %s: %v",
 			cmd.Type, cmd.ID, time.Since(start).Round(time.Second), err)
 	} else {
@@ -983,6 +979,36 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 	}
 }
 
+// resultOf is the verdict to post for a command that ran — or that will
+// not, err saying why: the text as it always was, and the code the console
+// words it from when the agent wrote the whole of it (msg): the error's on a
+// failure, the output's on a success. A tool's own output carries none.
+//
+// A failure whose output is a report of the agent's (the steps of a partial
+// reset, an install's per-update lines) carries the output's code too,
+// beside the error's (msg.WithOutput: "output_code", "output_<name>").
+func resultOf(output msg.Message, err error) models.CommandResult {
+	if err != nil {
+		res := models.CommandResult{Status: "failed", Output: output.Text, Error: err.Error()}
+		res.MessageCode, res.MessageParams = msg.Of(err)
+		if res.MessageCode != "" {
+			res.MessageParams = msg.WithOutput(res.MessageParams, output)
+		}
+		return res
+	}
+	res := models.CommandResult{Status: "succeeded", Output: output.Text}
+	res.MessageCode, res.MessageParams = msg.Coded(output)
+	return res
+}
+
+// plain adapts a runner whose output is a tool's, or uncoded text.
+func plain(run func(context.Context) (string, error)) func(context.Context) (msg.Message, error) {
+	return func(ctx context.Context) (msg.Message, error) {
+		out, err := run(ctx)
+		return msg.Plain(out), err
+	}
+}
+
 // resolve maps a command to what runs it, and to whether it is long enough to
 // announce with an intermediate `running`. ok is false for a type this agent
 // does not know — a newer server talking to an older agent.
@@ -990,27 +1016,27 @@ func (a *Agent) execute(ctx context.Context, cmd models.Command) {
 // Every entry must be bounded — by its collector or here: the worker is
 // sequential, so one command that never returns would hold back every command
 // queued after it on this poste, a reboot included.
-func (a *Agent) resolve(cmd models.Command) (run func(context.Context) (string, error), long, ok bool) {
+func (a *Agent) resolve(cmd models.Command) (run func(context.Context) (msg.Message, error), long, ok bool) {
 	switch cmd.Type {
 	case "quick_scan":
 		// Not long: minutes, like a wu_scan. Bounded by the collector.
-		return collector.RunQuickScan, false, true
+		return plain(collector.RunQuickScan), false, true
 	case "full_scan":
 		// Long: tens of minutes on a small disk, hours on a large one —
 		// exactly what the intermediate `running` exists for. The budget is
 		// a setting (defender_full_scan_timeout_seconds), read per run like
 		// the WU install budget.
-		return func(ctx context.Context) (string, error) {
+		return plain(func(ctx context.Context) (string, error) {
 			return runFullScan(ctx, a.fullScanTimeout())
-		}, true, true
+		}), true, true
 	case "update_signatures":
-		return collector.UpdateSignatures, false, true
+		return plain(collector.UpdateSignatures), false, true
 	case "wu_scan":
 		return a.runWUScan, false, true
 	case "wu_install":
-		return func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, false) }, true, true
+		return func(ctx context.Context) (msg.Message, error) { return a.runWUInstall(ctx, false) }, true, true
 	case "wu_install_full":
-		return func(ctx context.Context) (string, error) { return a.runWUInstall(ctx, true) }, true, true
+		return func(ctx context.Context) (msg.Message, error) { return a.runWUInstall(ctx, true) }, true, true
 	case "inventory_scan":
 		// Not long: a dozen WMI queries and two registry walks are seconds, not
 		// minutes, and a `running` nobody has time to read is noise.
@@ -1022,18 +1048,18 @@ func (a *Agent) resolve(cmd models.Command) (run func(context.Context) (string, 
 		// intermediate `running` exists to replace.
 		return a.runWUReset, true, true
 	case "reboot":
-		return func(ctx context.Context) (string, error) {
+		return func(ctx context.Context) (msg.Message, error) {
 			return a.runPowerAction(ctx, actionReboot, collector.Reboot)
 		}, false, true
 	case "shutdown":
-		return func(ctx context.Context) (string, error) {
+		return func(ctx context.Context) (msg.Message, error) {
 			return a.runPowerAction(ctx, actionShutdown, collector.Shutdown)
 		}, false, true
 	case "package_install", "package_uninstall":
 		// Long: a download, then an installer that takes minutes. What may run
 		// is decided in internal/deploy, from the trust anchors the GPO set.
 		pkg, cmdType := cmd.Package, cmd.Type
-		return func(ctx context.Context) (string, error) {
+		return func(ctx context.Context) (msg.Message, error) {
 			return a.runPackage(ctx, cmdType, pkg)
 		}, true, true
 	case "wake_on_lan":
@@ -1042,7 +1068,7 @@ func (a *Agent) resolve(cmd models.Command) (run func(context.Context) (string, 
 		// in the command — the one argument the protocol carries — and the
 		// agent broadcasts on its own subnets only (collector.RelayWake).
 		target := cmd.TargetMAC
-		return func(ctx context.Context) (string, error) {
+		return func(ctx context.Context) (msg.Message, error) {
 			return collector.RelayWake(ctx, target)
 		}, false, true
 	}
@@ -1055,7 +1081,7 @@ func (a *Agent) resolve(cmd models.Command) (run func(context.Context) (string, 
 		return nil, false, false
 	}
 	cmdType := cmd.Type
-	return func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (msg.Message, error) {
 		return collector.RunMaintenance(ctx, cmdType)
 	}, info.Long, true
 }
@@ -1078,11 +1104,11 @@ func (a *Agent) fullScanTimeout() time.Duration {
 // together (one machine, one power state), and a poste that just restarted is
 // no more available to be stopped than to be restarted again.
 func (a *Agent) runPowerAction(
-	ctx context.Context, kind string, schedule func(context.Context) (string, error),
-) (string, error) {
+	ctx context.Context, kind string, schedule func(context.Context) (msg.Message, error),
+) (msg.Message, error) {
 	now := time.Now()
 	if err := a.power.allow(now); err != nil {
-		return "", err
+		return msg.Message{}, err
 	}
 	output, err := schedule(ctx)
 	if err != nil {
@@ -1102,7 +1128,7 @@ func (a *Agent) runPowerAction(
 // triggered it would have no idea the poste had decided otherwise.
 func (a *Agent) refuse(ctx context.Context, cmd models.Command, reason error) {
 	log.Printf("agent: refusing %q (id %s): %v", cmd.Type, cmd.ID, reason)
-	res := models.CommandResult{Status: "failed", Error: reason.Error()}
+	res := resultOf(msg.Message{}, reason)
 	if err := a.client.PostResult(ctx, cmd.ID, res); err != nil {
 		if qerr := a.queue.Enqueue(queue.Item{CommandID: cmd.ID, Result: res}); qerr != nil {
 			log.Printf("agent: queue refusal %s: %v", cmd.ID, qerr)
@@ -1239,9 +1265,9 @@ var jitterDraw = rand.N[time.Duration]
 const packageBudget = 4 * time.Hour
 
 // runPackage installs or removes a software package (internal/deploy).
-func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.PackageDelivery) (string, error) {
+func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.PackageDelivery) (msg.Message, error) {
 	if !deploy.Supported {
-		return "", errors.New("déploiement logiciel non pris en charge sur ce système")
+		return msg.Message{}, msg.Err("deploy.unsupported", nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, packageBudget)
 	defer cancel()
@@ -1253,14 +1279,14 @@ func (a *Agent) runPackage(ctx context.Context, cmdType string, pkg *models.Pack
 
 	res, err := a.executePackage(ctx, cmdType, pkg)
 	if err != nil {
-		return "", err
+		return msg.Message{}, err
 	}
 	// So that the console shows the program — or its absence — now, rather
 	// than at the next daily collection.
 	if _, ierr := a.runInventoryScan(ctx); ierr != nil {
 		log.Printf("agent: inventory after %s: %v", cmdType, ierr)
 	}
-	return res.Output, nil
+	return res.Message, nil
 }
 
 // executePackage hands the deployment to internal/deploy, under the trust and

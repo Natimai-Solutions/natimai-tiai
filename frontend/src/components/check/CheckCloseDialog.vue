@@ -3,28 +3,28 @@
        stays on the request and goes into the poste's journal. -->
   <q-dialog :model-value="modelValue" @update:model-value="(v) => emit('update:modelValue', v)">
     <q-card style="width: 480px; max-width: 95vw">
-      <q-card-section class="text-h6">Clore la vérification</q-card-section>
+      <q-card-section class="text-h6">{{ t('checks.close.title') }}</q-card-section>
       <q-card-section v-if="check?.instructions" class="q-pt-none text-body2 text-muted">
-        Consignes : {{ check.instructions }}
+        {{ t('checks.close.instructions', { text: check.instructions }) }}
       </q-card-section>
       <q-form @submit="submit">
         <q-card-section class="q-gutter-md">
           <q-input
             v-model="note"
-            label="Ce qui a été constaté"
+            :label="t('checks.close.found')"
             outlined
             dense
             autogrow
             type="textarea"
             maxlength="5000"
             autofocus
-            hint="Conservé sur la demande et inscrit dans l'historique du poste"
+            :hint="t('checks.close.foundHint')"
           />
           <!-- When it was done, if not now: never before the request, never
                in the future — the server refuses both. -->
           <q-input
             v-model="closedAt"
-            label="Date"
+            :label="t('checks.close.date')"
             outlined
             dense
             type="datetime-local"
@@ -33,15 +33,15 @@
             :max="maxInput"
             :error="dateError !== null"
             :error-message="dateError ?? ''"
-            hint="Laisser tel quel pour maintenant ; antidater est permis"
+            :hint="t('checks.close.dateHint')"
           />
         </q-card-section>
         <q-card-actions align="right" class="q-px-md q-pb-md">
-          <q-btn v-close-popup flat label="Annuler" />
+          <q-btn v-close-popup flat :label="t('checks.actions.cancel')" />
           <q-btn
             type="submit"
             color="primary"
-            label="Clore"
+            :label="t('checks.close.close')"
             :disable="dateError !== null"
             :loading="saving"
           />
@@ -57,6 +57,8 @@ import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { closeCheck } from 'src/services/checks';
 import { apiErrorMessage } from 'src/services/errors';
+import { t } from 'src/i18n';
+import { notify } from 'src/utils/notify';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -89,12 +91,12 @@ const maxInput = ref<string | undefined>(undefined);
 const dateError = computed<string | null>(() => {
   if (!closedAt.value || closedAt.value === openedAt) return null;
   const when = new Date(closedAt.value).getTime();
-  if (Number.isNaN(when)) return 'Date invalide';
-  if (when > Date.now() + 5 * 60 * 1000) return 'Pas dans le futur';
+  if (Number.isNaN(when)) return t('checks.close.invalidDate');
+  if (when > Date.now() + 5 * 60 * 1000) return t('checks.close.future');
   // To the minute, as the input shows it: the request's own minute is fine.
   const created = props.check?.created_at ? new Date(props.check.created_at).getTime() : null;
   if (created !== null && when < created - (created % 60000)) {
-    return 'Pas avant la demande';
+    return t('checks.close.beforeRequest');
   }
   return null;
 });
@@ -128,12 +130,15 @@ async function submit() {
       note: note.value.trim() || null,
       ...(at ? { closed_at: at } : {}),
     });
-    $q.notify({ type: 'positive', message: 'Vérification close' });
+    notify($q, () => ({ type: 'positive', message: t('checks.close.closed') }));
     emit('update:modelValue', false);
     notifyTasksChanged();
     emit('closed');
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Clôture impossible') });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('checks.close.closeFailed')),
+    }));
   } finally {
     saving.value = false;
   }

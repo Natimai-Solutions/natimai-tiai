@@ -1,4 +1,6 @@
 import { api } from 'boot/axios';
+import { currentLocale, t } from 'src/i18n';
+import { wakeDetailText } from 'src/services/commands';
 
 export type MachineStatus = 'up_to_date' | 'outdated' | 'needs_verification' | 'inactive';
 
@@ -608,12 +610,26 @@ export interface ExportColumn {
 }
 
 /**
+ * The language of an export's words — headers, sheet, values — as the
+ * console shows them; nothing in French, the server's default, so the
+ * request stays the one an older console sent.
+ */
+function exportLanguage(): { lang?: string } {
+  const lang = currentLocale();
+  return lang === 'fr' ? {} : { lang };
+}
+
+/**
  * The export's column catalogue, in the order the picker shows it. Served
  * rather than hardcoded: the catalogue is what the export reads, and a picker
- * offering a column the server does not know would fail at the click.
+ * offering a column the server does not know would fail at the click. Its
+ * labels are in the language shown.
  */
 export async function listExportColumns(): Promise<ExportColumn[]> {
-  const { data } = await api.get<ExportColumn[]>('/machines/export-columns');
+  const params = exportLanguage();
+  const { data } = params.lang
+    ? await api.get<ExportColumn[]>('/machines/export-columns', { params })
+    : await api.get<ExportColumn[]>('/machines/export-columns');
   return data;
 }
 
@@ -640,6 +656,7 @@ export async function exportMachines(
   const query: Record<string, unknown> = { ...params };
   if (options.columns?.length) query.columns = options.columns.join(',');
   if (options.tz) query.tz = options.tz;
+  Object.assign(query, exportLanguage());
   const { data } = await api.get<Blob>(`/machines/export.${options.format}`, {
     params: query,
     responseType: 'blob',
@@ -727,15 +744,15 @@ export function approveReenrollNotification(res: ApproveReenrollResponse): {
   message: string;
 } {
   if (res.approved === 0) {
-    return {
-      type: 'warning',
-      message: 'Aucun ré-enrôlement à autoriser parmi les postes sélectionnés.',
-    };
+    return { type: 'warning', message: t('machines.reenroll.none') };
   }
-  const done = `Ré-enrôlement autorisé pour ${res.approved} poste(s)`;
+  const done = t('machines.reenroll.done', { count: res.approved }, res.approved);
   return {
     type: 'positive',
-    message: res.skipped > 0 ? `${done} — ${res.skipped} sans demande en attente, ignoré(s)` : done,
+    message:
+      res.skipped > 0
+        ? t('machines.reenroll.doneSkipped', { done, skipped: res.skipped }, res.skipped)
+        : done,
   };
 }
 
@@ -766,10 +783,13 @@ export interface WakeResult {
   ok: boolean;
   /**
    * The server's own sentence, in French: the destination the packet went to,
-   * or why none could be found. Shown as-is — it is the only thing that
-   * explains a poste that did not come back.
+   * or why none could be found — the only thing that explains a poste that
+   * did not come back. Worded in the reader's language from `detail_code`
+   * and `detail_params` (`wakeDetailText`); absent from an older server.
    */
   detail: string;
+  detail_code?: string | null;
+  detail_params?: Record<string, unknown> | null;
 }
 
 export interface WakeResponse {
@@ -820,21 +840,25 @@ export function wakeNotification(res: WakeResponse): {
     return {
       type: 'negative',
       message: only
-        ? `Réveil impossible : ${only.detail}`
-        : `Réveil impossible sur ${res.failed} poste(s) : aucun paquet émis.`,
+        ? t('machines.wake.failedOne', {
+            detail: wakeDetailText(only.detail, only.detail_code, only.detail_params),
+          })
+        : t('machines.wake.failedAll', { count: res.failed }, res.failed),
     };
   }
   // In relay mode the packet has not left anywhere yet: a poste of the site
   // will emit it on its next contact with the server, and the sentence must
   // not claim more than that.
-  const sent = res.relayed
-    ? `Réveil confié aux postes voisins de ${res.woken} poste(s)`
-    : `Paquet de réveil émis vers ${res.woken} poste(s)`;
+  const sent = t(
+    res.relayed ? 'machines.wake.relayed' : 'machines.wake.sent',
+    { count: res.woken },
+    res.woken,
+  );
   if (res.failed > 0) {
-    const left = res.relayed ? 'sans cible ni relais' : 'sans cible connue';
-    return { type: 'warning', message: `${sent} — ${res.failed} ${left}` };
+    const left = res.relayed ? 'machines.wake.leftRelayed' : 'machines.wake.leftDirect';
+    return { type: 'warning', message: t(left, { sent, failed: res.failed }) };
   }
-  return { type: 'positive', message: `${sent} — le poste remontera à son prochain démarrage` };
+  return { type: 'positive', message: t('machines.wake.done', { sent }) };
 }
 
 /** Merge `sourceId` into `targetId` (kept); returns the updated target. */

@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"tiai/agent/internal/msg"
 )
 
 // Remote maintenance and diagnostic commands (plan-commandes-distantes.md).
@@ -103,8 +105,17 @@ type maintenanceSpec struct {
 	// which covers most of them.
 	enc toolEncoding
 	// verdict turns an exit code plus the collected output into the result the
-	// console shows: a nil error means succeeded.
-	verdict func(code int, output string) (string, error)
+	// console shows: a nil error means succeeded. The output is the tool's,
+	// uncoded (plainVerdict), unless the agent adds a sentence of its own.
+	verdict func(code int, output string) (msg.Message, error)
+}
+
+// plainVerdict is a verdict that leaves the tool's output as it printed it.
+func plainVerdict(verdict func(code int, output string) (string, error)) func(int, string) (msg.Message, error) {
+	return func(code int, output string) (msg.Message, error) {
+		out, err := verdict(code, output)
+		return msg.Plain(out), err
+	}
 }
 
 // maintenanceCatalogue is the closed set of remotely triggerable commands.
@@ -123,19 +134,19 @@ var maintenanceCatalogue = map[string]maintenanceSpec{
 		exe:     "gpupdate.exe",
 		args:    []string{"/target:computer", "/force"},
 		timeout: shortTimeout,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 	"flush_dns": {
 		exe:     "ipconfig.exe",
 		args:    []string{"/flushdns"},
 		timeout: shortTimeout,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 	"time_resync": {
 		exe:     "w32tm.exe",
 		args:    []string{"/resync"},
 		timeout: shortTimeout,
-		verdict: verdictTimeResync,
+		verdict: plainVerdict(verdictTimeResync),
 	},
 	// Forces an immediate certificate autoenrollment pass against the internal
 	// CA — the fix for a machine whose certificate did not renew on its own.
@@ -146,12 +157,12 @@ var maintenanceCatalogue = map[string]maintenanceSpec{
 		args:    []string{"-pulse"},
 		timeout: shortTimeout,
 		enc:     encANSI,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 	"spooler_reset": {
 		native:  true,
 		timeout: shortTimeout,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 	"sfc_scan": {
 		exe:     "sfc.exe",
@@ -159,7 +170,7 @@ var maintenanceCatalogue = map[string]maintenanceSpec{
 		timeout: sfcTimeout,
 		long:    true,
 		enc:     encUTF16LE,
-		verdict: verdictSFC,
+		verdict: plainVerdict(verdictSFC),
 	},
 	"dism_restore_health": {
 		exe:     "dism.exe",
@@ -183,7 +194,7 @@ var maintenanceCatalogue = map[string]maintenanceSpec{
 		args:    []string{"/scan"},
 		timeout: longTimeout,
 		long:    true,
-		verdict: verdictChkdsk,
+		verdict: plainVerdict(verdictChkdsk),
 	},
 
 	// --- Diagnostics (read-only) -------------------------------------------
@@ -192,13 +203,13 @@ var maintenanceCatalogue = map[string]maintenanceSpec{
 		exe:     "gpresult.exe",
 		args:    []string{"/r", "/scope:computer"},
 		timeout: shortTimeout,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 	"net_config": {
 		exe:     "ipconfig.exe",
 		args:    []string{"/all"},
 		timeout: shortTimeout,
-		verdict: verdictExitCode,
+		verdict: plainVerdict(verdictExitCode),
 	},
 }
 
@@ -268,6 +279,13 @@ func lastSignificantLine(s string) string {
 	return ""
 }
 
+// TruncatedNote is what ends a text the agent cut at max bytes. Not a code:
+// a cut tool output is still the tool's, and the console recognises the note
+// at its end to word it.
+func TruncatedNote(max int) string {
+	return fmt.Sprintf("\n[…] sortie tronquée à %d Kio par l'agent", max/1024)
+}
+
 // truncateOutput caps the reported text, keeping the head.
 //
 // The head, not the tail: for the diagnostics (ipconfig /all, gpresult) the
@@ -286,7 +304,7 @@ func truncateOutput(s string, max int) string {
 		}
 		cut = cut[:len(cut)-1]
 	}
-	return cut + fmt.Sprintf("\n[…] sortie tronquée à %d Kio par l'agent", max/1024)
+	return cut + TruncatedNote(max)
 }
 
 // isProbablyUTF8 reports whether bytes should be read as UTF-8 rather than
@@ -379,7 +397,7 @@ func verdictExitCode(code int, output string) (string, error) {
 	if code == 0 {
 		return output, nil
 	}
-	return output, fmt.Errorf("code de retour %s", formatExitCode(code))
+	return output, msg.Err("maintenance.exit_code", msg.Params{"code": formatExitCode(code)})
 }
 
 // verdictSFC reads sfc /scannow. The tool's wording *is* the verdict and it is
@@ -390,10 +408,10 @@ func verdictSFC(code int, output string) (string, error) {
 		return output, nil
 	}
 	if summary := lastSignificantLine(output); summary != "" {
-		return output, fmt.Errorf("sfc a terminé en erreur (code %s) : %s",
-			formatExitCode(code), summary)
+		return output, msg.Err("sfc.failed_summary",
+			msg.Params{"code": formatExitCode(code), "summary": summary})
 	}
-	return output, fmt.Errorf("sfc a terminé en erreur (code %s)", formatExitCode(code))
+	return output, msg.Err("sfc.failed", msg.Params{"code": formatExitCode(code)})
 }
 
 // dismSourceMissing is the HRESULT dism reports when it cannot reach the source
@@ -408,28 +426,29 @@ const dismSourceMissing = "0x800f081f"
 // owns the reboot command, so here it is only reported.
 const dismRebootRequired = 3010
 
-func verdictDISM(code int, output string) (string, error) {
+// On a 3010 the output is dism's followed by the agent's sentence, coded
+// with dism's text as a parameter (dism.reboot_required) — sent as text
+// alone when that text is beyond what the server keeps (msg.Coded).
+func verdictDISM(code int, output string) (msg.Message, error) {
 	if strings.Contains(strings.ToLower(output), dismSourceMissing) {
-		return output, fmt.Errorf(
-			"source de réparation inaccessible (%s) : ce poste ne joint ni Windows Update "+
-				"ni son serveur WSUS, ou la source de réparation n'y est pas publiée",
-			dismSourceMissing)
+		return msg.Plain(output), msg.Err("dism.source_missing", msg.Params{"hresult": dismSourceMissing})
 	}
 	switch code {
 	case 0:
-		return output, nil
+		return msg.Plain(output), nil
 	case dismRebootRequired:
-		return output + "\n\nRedémarrage requis pour finaliser l'opération.", nil
+		return msg.New("dism.reboot_required", msg.Params{"output": output}), nil
 	}
-	return output, fmt.Errorf("dism a terminé en erreur (code %s)", formatExitCode(code))
+	return msg.Plain(output), msg.Err("dism.failed", msg.Params{"code": formatExitCode(code)})
 }
 
 // chkdskMeanings holds the exit codes Microsoft actually documents for chkdsk.
 // Anything else is reported as a bare number rather than guessed at.
+// Their sentences are in msg.ChkdskMeanings.
 var chkdskMeanings = map[int]string{
-	1: "des erreurs ont été trouvées",
-	2: "le volume n'a pas pu être entièrement vérifié",
-	3: "le volume n'a pas pu être vérifié",
+	1: "errors_found",
+	2: "partly_checked",
+	3: "not_checked",
 }
 
 // verdictChkdsk reads chkdsk /scan. The online scan only ever *reports*; any
@@ -439,13 +458,11 @@ func verdictChkdsk(code int, output string) (string, error) {
 	if code == 0 {
 		return output, nil
 	}
-	msg, known := chkdskMeanings[code]
+	meaning, known := chkdskMeanings[code]
 	if !known {
-		return output, fmt.Errorf("chkdsk a terminé avec le code %s", formatExitCode(code))
+		return output, msg.Err("chkdsk.failed", msg.Params{"code": formatExitCode(code)})
 	}
-	return output, fmt.Errorf(
-		"chkdsk : %s (code %d) — une réparation hors ligne (chkdsk /spotfix, "+
-			"appliquée au redémarrage) est nécessaire", msg, code)
+	return output, msg.Err("chkdsk.offline_repair", msg.Params{"meaning": meaning, "code": code})
 }
 
 // w32tmServiceStopped is the Win32 error (ERROR_SERVICE_NOT_ACTIVE) w32tm
@@ -459,10 +476,7 @@ func verdictTimeResync(code int, output string) (string, error) {
 		return output, nil
 	}
 	if strings.Contains(output, w32tmServiceStopped) {
-		return output, fmt.Errorf(
-			"le service de temps Windows (W32Time) est arrêté sur ce poste (%s)",
-			w32tmServiceStopped)
+		return output, msg.Err("time.service_stopped", msg.Params{"hresult": w32tmServiceStopped})
 	}
-	return output, fmt.Errorf("la resynchronisation de l'horloge a échoué (code %s)",
-		formatExitCode(code))
+	return output, msg.Err("time.failed", msg.Params{"code": formatExitCode(code)})
 }

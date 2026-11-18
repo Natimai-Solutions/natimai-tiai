@@ -1,22 +1,41 @@
 <template>
   <q-layout view="hHh lpR fFf">
     <!-- First stop of the Tab key: past the toolbar and the drawer's ten links. -->
-    <a class="skip-link" href="#main-content" @click.prevent="skipToContent">Aller au contenu</a>
+    <a class="skip-link" href="#main-content" @click.prevent="skipToContent">{{
+      t('layout.shell.skipToContent')
+    }}</a>
     <q-header elevated>
       <q-toolbar>
-        <q-btn flat dense round icon="menu" aria-label="Menu" @click="drawer = !drawer" />
+        <q-btn
+          flat
+          dense
+          round
+          icon="menu"
+          :aria-label="t('layout.shell.menu')"
+          @click="drawer = !drawer"
+        />
         <q-toolbar-title>
           <q-icon name="shield" class="q-mr-sm" />
           Tia'i — Console
         </q-toolbar-title>
-        <!-- Not on a phone: it pushed the title down to « Tia'i … » (U29). -->
-        <div v-if="auth.user" class="text-caption q-mr-sm gt-xs">{{ auth.user.email }}</div>
+        <!-- Not on a phone: it pushed the title down to « Tia'i … » (U29). On a
+             tablet a long address is cut short, whole in its tooltip: the
+             title keeps its room. -->
+        <div
+          v-if="auth.user"
+          class="text-caption q-mr-sm gt-xs ellipsis"
+          style="max-width: 40vw"
+          :title="auth.user.email"
+          data-test="header-email"
+        >
+          {{ auth.user.email }}
+        </div>
         <q-btn
           flat
           dense
           round
           icon="account_circle"
-          aria-label="Mon compte"
+          :aria-label="t('layout.shell.account')"
           :to="{ name: 'account' }"
         />
         <q-btn
@@ -24,7 +43,7 @@
           dense
           round
           icon="logout"
-          aria-label="Déconnexion"
+          :aria-label="t('layout.shell.logout')"
           :loading="loggingOut"
           @click="onLogout"
         />
@@ -37,19 +56,19 @@
              would only open 403s there (it lands on its first readable page). -->
         <q-item v-if="canReadMachines" v-ripple clickable exact :to="{ name: 'dashboard' }">
           <q-item-section avatar><q-icon name="dashboard" /></q-item-section>
-          <q-item-section>Tableau de bord</q-item-section>
+          <q-item-section>{{ t('layout.pages.dashboard') }}</q-item-section>
         </q-item>
         <q-item v-if="canReadMachines" v-ripple clickable :to="{ name: 'machines' }">
           <q-item-section avatar><q-icon name="devices" /></q-item-section>
-          <q-item-section>Postes</q-item-section>
+          <q-item-section>{{ t('layout.pages.machines') }}</q-item-section>
         </q-item>
         <q-item v-if="canReadMachines" v-ripple clickable :to="{ name: 'software' }">
           <q-item-section avatar><q-icon name="inventory_2" /></q-item-section>
-          <q-item-section>Logiciels</q-item-section>
+          <q-item-section>{{ t('layout.pages.software') }}</q-item-section>
         </q-item>
         <q-item v-if="auth.can('package', 'read')" v-ripple clickable :to="{ name: 'packages' }">
           <q-item-section avatar><q-icon name="install_desktop" /></q-item-section>
-          <q-item-section>Paquets</q-item-section>
+          <q-item-section>{{ t('layout.pages.packages') }}</q-item-section>
         </q-item>
         <q-item
           v-if="auth.can('check', 'read') || auth.can('maintenance', 'read')"
@@ -58,39 +77,39 @@
           :to="{ name: 'tasks' }"
         >
           <q-item-section avatar><q-icon name="task_alt" /></q-item-section>
-          <q-item-section>Mes tâches</q-item-section>
+          <q-item-section>{{ t('layout.pages.tasks') }}</q-item-section>
           <!-- Two counts, two colours: the checks given to me, and the postes of
                mine overdue for maintenance (audit U19). -->
           <q-item-section v-if="myTasks || myOverdue" side>
             <div class="row no-wrap q-gutter-xs">
               <q-badge v-if="myTasks" color="primary" :label="myTasks">
-                <q-tooltip>Vérifications qui vous sont affectées</q-tooltip>
+                <q-tooltip>{{ t('layout.shell.myChecks') }}</q-tooltip>
               </q-badge>
               <q-badge v-if="myOverdue" color="negative" :label="myOverdue">
-                <q-tooltip>Postes en retard de maintenance dont vous êtes responsable</q-tooltip>
+                <q-tooltip>{{ t('layout.shell.myOverdue') }}</q-tooltip>
               </q-badge>
             </div>
           </q-item-section>
         </q-item>
         <q-item v-if="auth.can('room', 'read')" v-ripple clickable :to="{ name: 'rooms' }">
           <q-item-section avatar><q-icon name="meeting_room" /></q-item-section>
-          <q-item-section>Salles</q-item-section>
+          <q-item-section>{{ t('layout.pages.rooms') }}</q-item-section>
         </q-item>
         <q-item v-if="auth.canManageUsers" v-ripple clickable :to="{ name: 'users' }">
           <q-item-section avatar><q-icon name="person" /></q-item-section>
-          <q-item-section>Utilisateurs</q-item-section>
+          <q-item-section>{{ t('layout.pages.users') }}</q-item-section>
         </q-item>
         <q-item v-if="auth.canManageUsers" v-ripple clickable :to="{ name: 'groups' }">
           <q-item-section avatar><q-icon name="group" /></q-item-section>
-          <q-item-section>Groupes</q-item-section>
+          <q-item-section>{{ t('layout.pages.groups') }}</q-item-section>
         </q-item>
         <q-item v-if="auth.can('settings', 'read')" v-ripple clickable :to="{ name: 'settings' }">
           <q-item-section avatar><q-icon name="settings" /></q-item-section>
-          <q-item-section>Paramètres</q-item-section>
+          <q-item-section>{{ t('layout.pages.settings') }}</q-item-section>
         </q-item>
         <q-item v-if="auth.can('audit', 'read')" v-ripple clickable :to="{ name: 'audit' }">
           <q-item-section avatar><q-icon name="history_edu" /></q-item-section>
-          <q-item-section>Journal d'audit</q-item-section>
+          <q-item-section>{{ t('layout.pages.audit') }}</q-item-section>
         </q-item>
       </q-list>
     </q-drawer>
@@ -121,6 +140,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { t } from 'src/i18n';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { canOpen, firstReadablePage } from 'src/router/access';
 import { PROFILE_REFRESH_MS, useAuthStore } from 'src/stores/auth';
@@ -144,6 +164,9 @@ const router = useRouter();
 // of checks — and one count that fails says nothing about the other.
 const myTasks = ref(0);
 const myOverdue = ref(0);
+function isForbidden(e: unknown): boolean {
+  return (e as { response?: { status?: number } } | null)?.response?.status === 403;
+}
 async function countMyChecks() {
   // A right withdrawn during the session takes its count with it.
   if (!auth.can('check', 'read')) {
@@ -152,8 +175,10 @@ async function countMyChecks() {
   }
   try {
     myTasks.value = (await listChecks({ open: true, assigned_to: 'me', page_size: 1 })).total;
-  } catch {
-    // The badge is a hint; the page says the truth.
+  } catch (e) {
+    // The badge is a hint; the page says the truth. A 403 is the right
+    // withdrawn before the profile says so: the count goes with it.
+    if (isForbidden(e)) myTasks.value = 0;
   }
 }
 async function countMyOverdue() {
@@ -163,8 +188,9 @@ async function countMyOverdue() {
   }
   try {
     myOverdue.value = (await getDue('me')).overdue;
-  } catch {
+  } catch (e) {
     // As above.
+    if (isForbidden(e)) myOverdue.value = 0;
   }
 }
 async function countMyTasks() {
@@ -192,10 +218,7 @@ async function retryProfile() {
 // tell them why — then what the server answered, when it answered.
 const profileErrorMessage = computed(() => {
   const reason = apiErrorMessage(auth.profileError, '');
-  return (
-    'Impossible de charger votre profil : les menus et les actions sont incomplets' +
-    (reason ? ` — ${reason}.` : '.')
-  );
+  return reason ? t('layout.shell.profileErrorReason', { reason }) : t('layout.shell.profileError');
 });
 
 // The periodic read goes through `useAutoRefresh` for what it does beyond a
@@ -232,8 +255,10 @@ const mainEl = ref<HTMLElement | null>(null);
 function skipToContent() {
   mainEl.value?.focus();
 }
+// The account, and its two rights: one withdrawn or given during the session
+// (the profile read again) recounts at once, not at the next navigation.
 watch(
-  () => auth.user?.id,
+  [() => auth.user?.id, () => auth.can('check', 'read'), () => auth.can('maintenance', 'read')],
   () => void countMyTasks(),
   { immediate: true },
 );

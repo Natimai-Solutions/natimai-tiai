@@ -161,6 +161,8 @@ async def test_get_shows_the_environment_and_nothing_stored(
     assert email["smtp_password_set"] is False
     assert email["configured"] is False
     assert email["missing"] == ["le domaine Mailgun", "la clé API Mailgun"]
+    # The same as codes, for a console in another language.
+    assert email["missing_codes"] == ["mailgun_domain", "mailgun_api_key"]
     assert email["env"]["provider"] == "mailgun"
     assert email["env"]["smtp_password_set"] is True
     assert email["env"]["smtp_user_set"] is True
@@ -330,6 +332,13 @@ async def test_test_send_uses_the_stored_smtp_settings(client, db_session, fake_
     body = resp.json()
     assert body["ok"] is True
     assert "admin@test.local" in body["message"]
+    assert body["code"] == "sent"
+    assert body["params"] == {
+        "to": "admin@test.local",
+        "provider": "smtp",
+        "host": "smtp.x.fr",
+        "port": 587,
+    }
     (session,) = fake_smtp.instances
     assert session.host == "smtp.x.fr"
     assert session.login_args == ("tiai@x.fr", "pw-stored")
@@ -345,6 +354,9 @@ async def test_test_send_uses_the_stored_smtp_settings(client, db_session, fake_
     (entry,) = await _audit(db_session, "settings.email_test")
     assert entry.details["ok"] == "oui"
     assert entry.details["to"] == "admin@test.local"
+    # The console words the journal's message from these, as the page does.
+    assert entry.details["message_code"] == "sent"
+    assert entry.details["message_params"]["to"] == "admin@test.local"
     assert "pw-stored" not in str(entry.details)
 
 
@@ -561,6 +573,8 @@ async def test_a_withheld_environment_password_is_said_on_the_page(
     assert legacy["withheld"] == ["smtp_password"]
     assert legacy["configured"] is False
     assert any("mot de passe SMTP" in item for item in legacy["missing"])
+    assert legacy["missing_codes"][-1] == "smtp_password_retype"
+    assert len(legacy["missing_codes"]) == len(legacy["missing"])
 
 
 async def test_an_unreadable_secret_does_not_follow_a_server_change(
@@ -672,6 +686,9 @@ async def test_test_send_reports_an_smtp_refusal_in_words(
     assert body["message"].startswith("Identifiants refusés")
     assert "535" in body["message"]
     assert "wrong-password" not in body["message"]
+    assert body["code"] == "smtp_auth_failed"
+    assert "535" in body["params"]["response"]
+    assert "wrong-password" not in str(body["params"])
     (entry,) = await _audit(db_session, "settings.email_test")
     assert entry.details["ok"] == "non"
     assert "wrong-password" not in str(entry.details)
@@ -689,6 +706,8 @@ async def test_test_send_with_an_incomplete_configuration(client, db_session):
     assert body["message"] == (
         "Configuration incomplète : il manque le serveur SMTP, l'adresse d'expéditeur."
     )
+    assert body["code"] == "incomplete"
+    assert body["params"] == {"missing": ["smtp_host", "from_email"]}
 
 
 @pytest.mark.parametrize(

@@ -5,14 +5,16 @@
     v-if="count && (actionGroups.length || canPlace || canCheck || canDeploy || canReenroll)"
     class="row items-center q-mb-sm"
   >
-    <div class="text-caption text-muted q-mr-md">{{ count }} sélectionné(s)</div>
+    <div class="text-caption text-muted q-mr-md">
+      {{ t('machines.bulk.selected', { count }, count) }}
+    </div>
     <q-btn
       v-if="canPlace"
       flat
       dense
       color="primary"
       icon="meeting_room"
-      label="Affecter à une salle"
+      :label="t('machines.bulk.place')"
       class="q-mr-sm"
       @click="emit('place')"
     />
@@ -22,7 +24,7 @@
       dense
       color="primary"
       icon="fact_check"
-      label="Demander une vérification"
+      :label="t('machines.bulk.check')"
       class="q-mr-sm"
       @click="emit('ask')"
     />
@@ -32,7 +34,7 @@
       dense
       color="primary"
       icon="install_desktop"
-      label="Installer un logiciel"
+      :label="t('machines.bulk.deploy')"
       class="q-mr-sm"
       @click="emit('deploy')"
     />
@@ -43,7 +45,7 @@
       dense
       color="primary"
       icon="key"
-      label="Autoriser le ré-enrôlement"
+      :label="t('machines.bulk.reenroll')"
       class="q-mr-sm"
       @click="emit('reenroll')"
     />
@@ -51,7 +53,7 @@
       v-if="actionGroups.length"
       color="primary"
       dense
-      label="Action groupée"
+      :label="t('machines.bulk.actions')"
       icon="bolt"
     >
       <q-list>
@@ -74,6 +76,7 @@
 </template>
 
 <script setup lang="ts">
+import { t } from 'src/i18n';
 import type { CommandAction, CommandActionGroup } from 'src/services/commands';
 
 /** What can be done to the selected postes, in one bar above the table. */

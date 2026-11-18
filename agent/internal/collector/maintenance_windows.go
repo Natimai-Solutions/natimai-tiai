@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 
+	"tiai/agent/internal/msg"
 	"tiai/agent/internal/winpath"
 )
 
@@ -24,10 +25,10 @@ import (
 // On failure the collected output is returned alongside the error rather than
 // dropped: for these tools the output is usually the explanation, and the
 // caller stores both (models.CommandResult carries an output and an error).
-func RunMaintenance(ctx context.Context, cmdType string) (string, error) {
+func RunMaintenance(ctx context.Context, cmdType string) (msg.Message, error) {
 	spec, ok := maintenanceCatalogue[cmdType]
 	if !ok {
-		return "", fmt.Errorf("unknown maintenance command %q", cmdType)
+		return msg.Message{}, fmt.Errorf("unknown maintenance command %q", cmdType)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, spec.timeout)
@@ -40,18 +41,20 @@ func RunMaintenance(ctx context.Context, cmdType string) (string, error) {
 	raw, code, err := runSystem32(ctx, spec.exe, spec.args...)
 	output := truncateOutput(normalizeConsoleOutput(decodeToolOutput(raw, spec.enc)), maxOutputBytes)
 	if err != nil {
-		return output, err
+		return msg.Plain(output), err
 	}
+	// The tool's own output carries no code, whatever the verdict's error
+	// carries — unless the verdict adds a sentence of the agent's to it.
 	return spec.verdict(code, output)
 }
 
 // runNativeMaintenance covers the catalogue entries that are not an .exe call.
-func runNativeMaintenance(ctx context.Context, cmdType string) (string, error) {
+func runNativeMaintenance(ctx context.Context, cmdType string) (msg.Message, error) {
 	switch cmdType {
 	case "spooler_reset":
 		return runSpoolerReset(ctx)
 	default:
-		return "", fmt.Errorf("no native implementation for %q", cmdType)
+		return msg.Message{}, fmt.Errorf("no native implementation for %q", cmdType)
 	}
 }
 
@@ -76,17 +79,17 @@ func runSystem32(ctx context.Context, exe string, args ...string) ([]byte, int, 
 
 	// The deadline is ours (spec.timeout); cancellation is the service stopping.
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return out, 0, fmt.Errorf("délai d'exécution dépassé pour %s", exe)
+		return out, 0, msg.Err("maintenance.timeout", msg.Params{"exe": exe})
 	}
 	if errors.Is(ctx.Err(), context.Canceled) {
-		return out, 0, fmt.Errorf("exécution de %s interrompue (arrêt de l'agent)", exe)
+		return out, 0, msg.Err("maintenance.interrupted", msg.Params{"exe": exe})
 	}
 
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return out, exitErr.ExitCode(), nil
 	}
-	return out, 0, fmt.Errorf("lancement de %s : %w", exe, err)
+	return out, 0, msg.Wrap("maintenance.launch_failed", msg.Params{"exe": exe}, err)
 }
 
 // system32Path resolves a catalogue executable to an absolute path.
@@ -171,45 +174,37 @@ const (
 // the API reports the actual service state instead of a localized sentence, it
 // needs no shell, and stopAndWait can genuinely wait for Stopped rather than
 // racing the deletion against a service that has not let go of the files yet.
-func runSpoolerReset(ctx context.Context) (string, error) {
+func runSpoolerReset(ctx context.Context) (msg.Message, error) {
 	m, err := mgr.Connect()
 	if err != nil {
-		return "", fmt.Errorf("connexion au gestionnaire de services : %w", err)
+		return msg.Message{}, msg.Wrap("service.manager_failed", nil, err)
 	}
 	defer m.Disconnect()
 
 	s, err := m.OpenService(spoolerService)
 	if err != nil {
-		return "", fmt.Errorf("ouverture du service %s : %w", spoolerService, err)
+		return msg.Message{}, msg.Wrap("service.open_failed", msg.Params{"service": spoolerService}, err)
 	}
 	defer s.Close()
 
-	var lines []string
 	if err := setServiceState(ctx, s, svc.Stop, svc.Stopped); err != nil {
-		return "", fmt.Errorf("arrêt du spouleur : %w", err)
+		return msg.Message{}, msg.Wrap("spooler.stop_failed", nil, err)
 	}
-	lines = append(lines, "Spouleur d'impression arrêté.")
-
 	removed, purgeErr := purgeSpoolQueue()
-	if purgeErr != nil {
-		lines = append(lines, fmt.Sprintf("Purge incomplète de la file : %v", purgeErr))
-	} else {
-		lines = append(lines, fmt.Sprintf("File d'impression purgée (%d fichier(s)).", removed))
-	}
 
 	// Attempted whatever happened above: a machine left with no print spooler at
 	// all is a worse outcome than a queue that is still full.
+	//
+	// The report (msg.SpoolerReport) says what went, line by line: the
+	// spooler stopped, the queue emptied or not, the spooler restarted or not.
 	if err := setServiceState(ctx, s, svc.Cmd(0), svc.Running); err != nil {
-		lines = append(lines, "Le spouleur n'a PAS pu être redémarré.")
-		return strings.Join(lines, "\n"), fmt.Errorf("démarrage du spouleur : %w", err)
+		return msg.SpoolerReport(removed, purgeErr, false), msg.Wrap("spooler.start_failed", nil, err)
 	}
-	lines = append(lines, "Spouleur d'impression redémarré.")
-
-	output := strings.Join(lines, "\n")
 	if purgeErr != nil {
-		return output, fmt.Errorf("purge de la file d'impression : %w", purgeErr)
+		return msg.SpoolerReport(removed, purgeErr, true), msg.Wrap("spooler.purge_failed", nil, purgeErr)
 	}
-	return output, nil
+	// The nominal run, worded by the console (msg); the same three lines.
+	return msg.SpoolerReport(removed, nil, true), nil
 }
 
 // setServiceState drives the service to want, then waits for it to get there.
@@ -217,7 +212,7 @@ func runSpoolerReset(ctx context.Context) (string, error) {
 func setServiceState(ctx context.Context, s *mgr.Service, control svc.Cmd, want svc.State) error {
 	status, err := s.Query()
 	if err != nil {
-		return fmt.Errorf("interrogation du service : %w", err)
+		return msg.Wrap("service.query_failed", nil, err)
 	}
 	if status.State == want {
 		return nil
@@ -242,13 +237,13 @@ func setServiceState(ctx context.Context, s *mgr.Service, control svc.Cmd, want 
 		case <-time.After(servicePollInterval):
 		}
 		if status, err = s.Query(); err != nil {
-			return fmt.Errorf("interrogation du service : %w", err)
+			return msg.Wrap("service.query_failed", nil, err)
 		}
 		if status.State == want {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("le service n'a pas atteint l'état attendu en %s", serviceStateTimeout)
+			return msg.Err("spooler.state_timeout", msg.Params{"timeout": serviceStateTimeout.String()})
 		}
 	}
 }
@@ -261,7 +256,7 @@ func purgeSpoolQueue() (int, error) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return 0, fmt.Errorf("lecture de %s : %w", dir, err)
+		return 0, msg.Wrap("spooler.queue_unreadable", msg.Params{"dir": dir}, err)
 	}
 
 	removed, failed := 0, 0
@@ -285,7 +280,7 @@ func purgeSpoolQueue() (int, error) {
 		removed++
 	}
 	if firstErr != nil {
-		return removed, fmt.Errorf("%d fichier(s) non supprimé(s), première erreur : %w", failed, firstErr)
+		return removed, msg.Wrap("spooler.files_not_removed", msg.Params{"failed": failed}, firstErr)
 	}
 	return removed, nil
 }

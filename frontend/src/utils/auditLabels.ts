@@ -1,152 +1,98 @@
 /**
  * Words for the audit log. The backend records stable slugs (`machine.merge`,
- * `user`) and a free-form `details` object; the console turns both into French
- * here, and falls back on the raw slug for anything it does not know yet — an
- * action added server-side must show up readable enough, never as a blank.
+ * `user`) and a free-form `details` object; the console words both here, in
+ * the reader's language (`src/i18n/messages/audit.ts`), and falls back on the
+ * raw slug for anything it does not know yet — an action added server-side
+ * must show up readable enough, never as a blank.
+ *
+ * Every text is worded when asked for, never once at load: the language can
+ * change while the page is open.
  */
 
 import { commandTypeLabel } from 'src/services/commands';
+import { intlTag, t } from 'src/i18n';
+import auditMessages from 'src/i18n/messages/audit';
 
-/** Action slug → label. Mirrors the `audit.record(action=…)` calls of the backend. */
-export const AUDIT_ACTION_LABELS: Record<string, string> = {
-  'building.create': "Création d'un bâtiment",
-  'building.update': "Modification d'un bâtiment",
-  'building.delete': "Suppression d'un bâtiment",
-  'check.update': "Mise à jour d'une vérification",
-  'command.bulk': 'Commande envoyée à plusieurs postes',
-  'group.create': "Création d'un groupe",
-  'group.update': "Modification d'un groupe",
-  'group.delete': "Suppression d'un groupe",
-  'intervention.update': "Modification d'une intervention",
-  'intervention.delete': "Suppression d'une intervention",
-  'machine.allow_reenroll': 'Ré-enrôlement autorisé',
-  'machine.revoke_token': "Révocation du token d'un poste",
-  'machine.merge': 'Fusion de deux fiches poste',
-  'machine.reenroll_requested': "Demande de ré-enrôlement d'un poste",
-  'machine.wake_bulk': 'Réveil groupé de postes',
-  'machine.identity_confirmed': "Identité d'un poste confirmée",
-  'machine.enrollment_retried': "Enrôlement d'un poste repris (réponse perdue)",
-  'maintenance.machine_settings': "Réglage de maintenance d'un poste",
-  'maintenance.room_settings': "Réglage de maintenance d'une salle",
-  'maintenance.delete': "Suppression d'une visite de maintenance",
-  'package.create': "Création d'un paquet",
-  'package.update': "Modification d'un paquet",
-  'package.upload': 'Dépôt de fichiers dans un paquet',
-  'package.file_delete': "Retrait d'un fichier d'un paquet",
-  'package.sign': "Signature d'un paquet",
-  'package.unsign': "Retrait de la signature d'un paquet",
-  'package.retire': "Retrait d'un paquet",
-  'package.restore': "Remise en service d'un paquet",
-  'room.create': "Création d'une salle",
-  'room.update': "Modification d'une salle",
-  'room.delete': "Suppression d'une salle",
-  'room.place_machines': 'Affectation de postes à une salle',
-  'room.sync_directory': "Synchronisation des salles avec l'annuaire",
-  'room.unassign_machines': 'Retrait de postes de leur salle',
-  'settings.update': 'Modification des paramètres',
-  'settings.email_test': "Envoi d'un e-mail de test",
-  'auth.session_revoked': "Fermeture d'une session console",
-  'user.create': "Création d'un compte",
-  'user.update': "Modification d'un compte",
-  'user.delete': "Suppression d'un compte",
-  'user.reset_password': "Réinitialisation d'un mot de passe",
-  'user.locked': 'Compte verrouillé après des échecs de connexion',
-};
+/** The shape of the catalogue — the same in both languages. */
+const CATALOGUE = auditMessages.fr;
 
-/** Resource type → label, in the order the filter offers them. */
-export const AUDIT_RESOURCE_TYPE_LABELS: Record<string, string> = {
-  machine: 'Poste',
-  command: 'Commande',
-  room: 'Salle',
-  building: 'Bâtiment',
-  intervention: 'Intervention',
-  maintenance: 'Maintenance',
-  check: 'Vérification',
-  user: 'Compte',
-  group: 'Groupe',
-  package: 'Paquet',
-  settings: 'Paramètres',
-};
+function hasOwn(node: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(node, key);
+}
 
-/** Detail key → label, for the full view of an entry. */
-export const AUDIT_DETAIL_KEY_LABELS: Record<string, string> = {
-  to: 'Destinataire',
-  current: 'Session en cours',
-  user_agent: 'Appareil',
-  ip: 'Adresse IP',
-  created_at: 'Ouverte le',
-  provider: 'Fournisseur',
-  ok: 'Réussi',
-  unsaved: 'Valeurs essayées sans être enregistrées',
-  message: 'Résultat',
-  hostname: 'Nom du poste',
-  machine_uuid: 'UUID du poste',
-  machine_id: 'Poste',
-  machine_ids: 'Postes',
-  source_id: 'Fiche fusionnée (id)',
-  source_hostname: 'Fiche fusionnée (nom)',
-  source_machine_uuid: 'Fiche fusionnée (UUID)',
-  source_location: 'Fiche fusionnée (emplacement)',
-  source_room_id: 'Fiche fusionnée (salle)',
-  source_withheld: 'Fiche fusionnée hors de votre périmètre',
-  via: 'Déclenché par',
-  failures: 'Échecs',
-  email: 'E-mail',
-  generated: 'Mot de passe généré',
-  group_ids: 'Groupes',
-  permissions: 'Droits',
-  name: 'Nom',
-  location: 'Emplacement',
-  building_id: 'Bâtiment',
-  fields: 'Champs modifiés',
-  title: 'Titre',
-  kind: 'Type',
-  author: 'Auteur',
-  performed_at: "Date de l'intervention",
-  assigned_to_id: 'Affectée à',
-  source: 'Source',
-  placed: 'Postes placés',
-  unplaced: 'Postes non placés',
-  rooms_created: 'Salles créées',
-  command_type: 'Commande',
-  target: 'Cible',
-  domain: 'Domaine',
-  status: 'Statut visé',
-  requested: 'Postes demandés',
-  created: 'Commandes créées',
-  skipped: 'Postes ignorés (commande déjà en cours)',
-  ttl_minutes: 'Durée de vie (minutes)',
-  woken: 'Réveils émis ou confiés',
-  failed: 'Échecs',
-  relayed: 'Confié à un poste relais',
-  revoked: 'Postes au jeton révoqué (écartés)',
-  room_name: 'Salle',
-  performed_by: 'Effectuée par',
-  note: 'Note',
-  hostnames: 'Postes',
-  lines: 'Lignes de visite',
-};
+/** Whether `path` names a text of `tree` — own properties only, so that a slug
+ *  or a key such as `toString` or `a.b` is never mistaken for one. */
+function hasText(tree: unknown, path: readonly string[]): boolean {
+  let node = tree;
+  for (const part of path) {
+    if (typeof node !== 'object' || node === null || !hasOwn(node, part)) return false;
+    node = (node as Record<string, unknown>)[part];
+  }
+  return typeof node === 'string';
+}
+
+/** Every leaf of a nested table, as dotted paths. */
+function leafPaths(tree: object, prefix = ''): string[] {
+  return Object.entries(tree).flatMap(([key, value]) =>
+    typeof value === 'string'
+      ? [`${prefix}${key}`]
+      : leafPaths(value as object, `${prefix}${key}.`),
+  );
+}
+
+/**
+ * Action slug → catalogue key of its label (`audit.actions.<slug>`). One entry
+ * per `audit.record(action=…)` call of the backend; the label itself is
+ * `auditActionLabel(slug)`, worded when it is shown.
+ */
+export const AUDIT_ACTION_LABELS: Record<string, string> = Object.fromEntries(
+  leafPaths(CATALOGUE.actions).map((slug) => [slug, `audit.actions.${slug}`]),
+);
+
+/** Resource type → catalogue key of its label, in the order the filter offers them. */
+export const AUDIT_RESOURCE_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  Object.keys(CATALOGUE.resourceTypes).map((type) => [type, `audit.resourceTypes.${type}`]),
+);
+
+/** Detail key → catalogue key of its label, for the full view of an entry. */
+export const AUDIT_DETAIL_KEY_LABELS: Record<string, string> = Object.fromEntries(
+  Object.keys(CATALOGUE.detailKeys).map((key) => [key, `audit.detailKeys.${key}`]),
+);
+
+/** Whether the console has a label for an action slug. */
+export function isKnownAuditAction(action: string): boolean {
+  return hasText(CATALOGUE.actions, action.split('.'));
+}
 
 /** A readable label for an action slug; the slug itself when unknown. */
 export function auditActionLabel(action: string): string {
-  return AUDIT_ACTION_LABELS[action] ?? action;
+  return isKnownAuditAction(action) ? t(`audit.actions.${action}`) : action;
 }
 
 /** A readable label for a resource type; the type itself when unknown. */
 export function auditResourceTypeLabel(type: string): string {
-  return AUDIT_RESOURCE_TYPE_LABELS[type] ?? type;
+  return hasText(CATALOGUE.resourceTypes, [type]) ? t(`audit.resourceTypes.${type}`) : type;
 }
 
 /** A readable label for a details key; the key itself when unknown. */
 export function auditDetailKeyLabel(key: string): string {
-  return AUDIT_DETAIL_KEY_LABELS[key] ?? key;
+  return hasText(CATALOGUE.detailKeys, [key]) ? t(`audit.detailKeys.${key}`) : key;
+}
+
+/** Options for the resource type filter, in the catalogue's order. */
+export function auditResourceTypeOptions(): { value: string; label: string }[] {
+  return Object.keys(AUDIT_RESOURCE_TYPE_LABELS).map((value) => ({
+    value,
+    label: auditResourceTypeLabel(value),
+  }));
 }
 
 /** Options for the action filter: the given slugs, deduplicated, sorted by label. */
 export function auditActionOptions(slugs: readonly string[]): { value: string; label: string }[] {
+  const locale = intlTag();
   return [...new Set(slugs)]
     .map((value) => ({ value, label: auditActionLabel(value) }))
-    .sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+    .sort((a, b) => a.label.localeCompare(b.label, locale));
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -170,22 +116,24 @@ export function auditResourceLink(
     : null;
 }
 
-/** What triggered a lock or a closed session (`via`), in the console's words. */
-const VIA_LABELS: Record<string, string> = {
-  slow_attempts: 'essais espacés (24 h)',
-  password_change: 'changement de mot de passe',
-};
+/** How the server records a test e-mail's outcome (`ok`): values, not text shown. */
+const [OK_YES, OK_NO] = ['oui', 'non']; // i18n-ignore — stored values, worded by the catalogue
 
 /**
  * One detail value as text: lists joined, booleans in words, objects as JSON.
  * `key` names the detail, for the few whose values have words of their own.
  */
 export function auditDetailValue(value: unknown, key?: string): string {
-  if (key === 'via' && typeof value === 'string' && VIA_LABELS[value]) return VIA_LABELS[value];
+  if (key === 'via' && typeof value === 'string' && hasText(CATALOGUE.values.via, [value])) {
+    return t(`audit.values.via.${value}`);
+  }
+  // A test e-mail's outcome, stored in French words by the server.
+  if (key === 'ok' && value === OK_YES) return t('audit.values.okYes');
+  if (key === 'ok' && value === OK_NO) return t('audit.values.okNo');
   if (value === null || value === undefined || value === '') return '—';
-  if (typeof value === 'boolean') return value ? 'Oui' : 'Non';
+  if (typeof value === 'boolean') return value ? t('audit.values.yes') : t('audit.values.no');
   if (typeof value === 'string') return value;
-  if (typeof value === 'number') return value.toLocaleString('fr-FR');
+  if (typeof value === 'number') return value.toLocaleString(intlTag());
   if (Array.isArray(value)) {
     if (!value.length) return '—';
     return value.every((v) => typeof v !== 'object' || v === null)
@@ -207,36 +155,38 @@ function count(details: Record<string, unknown>, key: string): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-/** The console's words for a status filter, as a bulk command's target. */
-const TARGET_STATUS_LABELS: Record<string, string> = {
-  up_to_date: 'à jour',
-  outdated: 'non à jour',
-  needs_verification: 'à vérifier',
-  inactive: 'inactifs',
-};
+/** `{count} …` in the reader's language, the plural chosen by `n`. */
+function counted(key: string, n: number): string {
+  return t(key, { count: n }, n);
+}
 
 /** What a bulk command was aimed at, in a few words; null when unreadable. */
 function bulkTarget(details: Record<string, unknown>): string | null {
   switch (details.target) {
     case 'all':
-      return 'tout le parc';
+      return t('audit.summary.target.all');
     case 'domain': {
       // "" is a real target: the postes that are in no domain.
       const domain = details.domain;
       if (typeof domain !== 'string') return null;
-      return domain ? `domaine « ${domain} »` : 'postes hors domaine';
+      return domain
+        ? t('audit.summary.target.domain', { domain })
+        : t('audit.summary.target.noDomain');
     }
     case 'location': {
       const location = text(details, 'location');
-      return location ? `emplacement « ${location} »` : null;
+      return location ? t('audit.summary.target.location', { location }) : null;
     }
     case 'status': {
       const status = text(details, 'status');
-      return status ? `postes ${TARGET_STATUS_LABELS[status] ?? status}` : null;
+      if (!status) return null;
+      return hasText(CATALOGUE.summary.target.statuses, [status])
+        ? t(`audit.summary.target.statuses.${status}`)
+        : t('audit.summary.target.status', { status });
     }
     case 'machines': {
       const requested = count(details, 'requested');
-      return requested === null ? null : `${requested} poste(s) listé(s)`;
+      return requested === null ? null : counted('audit.summary.target.listed', requested);
     }
     default:
       return null;
@@ -245,9 +195,11 @@ function bulkTarget(details: Record<string, unknown>): string | null {
 
 /** A lifetime in minutes, in the largest whole unit: 60 → 1 h, 2880 → 2 j. */
 export function formatTtlMinutes(minutes: number): string {
-  if (minutes >= 1440 && minutes % 1440 === 0) return `${minutes / 1440} j`;
-  if (minutes >= 60 && minutes % 60 === 0) return `${minutes / 60} h`;
-  return `${minutes} min`;
+  if (minutes >= 1440 && minutes % 1440 === 0) {
+    return t('audit.ttl.days', { count: minutes / 1440 });
+  }
+  if (minutes >= 60 && minutes % 60 === 0) return t('audit.ttl.hours', { count: minutes / 60 });
+  return t('audit.ttl.minutes', { count: minutes });
 }
 
 /** Keys the summary already spells out, or that only matter in the full view. */
@@ -266,23 +218,25 @@ export function auditDetailsSummary(action: string, details: Record<string, unkn
 
   // Right after the subject: how many postes, before what happened to them.
   const machineIds = details.machine_ids;
-  if (Array.isArray(machineIds)) parts.push(`${machineIds.length} poste(s)`);
+  if (Array.isArray(machineIds)) parts.push(counted('audit.summary.machines', machineIds.length));
 
   if (action === 'machine.merge') {
     const source =
       text(details, 'source_hostname') ??
       text(details, 'source_machine_uuid') ??
       text(details, 'source_id');
-    if (source) parts.push(`a absorbé « ${source} »`);
+    if (source) parts.push(t('audit.summary.absorbed', { source }));
     // A confined reader is not told which record a poste of its scope absorbed
     // when that record stood elsewhere (audit S17): say so rather than nothing.
     else if (details.source_withheld === true) {
-      parts.push('a absorbé une fiche hors de votre périmètre');
+      parts.push(t('audit.summary.absorbedWithheld'));
     }
   }
 
   if (action === 'user.reset_password' && typeof details.generated === 'boolean') {
-    parts.push(details.generated ? 'mot de passe généré' : 'mot de passe saisi');
+    parts.push(
+      details.generated ? t('audit.summary.passwordGenerated') : t('audit.summary.passwordTyped'),
+    );
   }
 
   if (action === 'command.bulk') {
@@ -293,10 +247,10 @@ export function auditDetailsSummary(action: string, details: Record<string, unkn
     const created = count(details, 'created');
     const skipped = count(details, 'skipped');
     const ttl = count(details, 'ttl_minutes');
-    if (created !== null) parts.push(`${created} créée(s)`);
+    if (created !== null) parts.push(counted('audit.summary.created', created));
     // Only when some were: "0 ignorée(s)" on every line would be noise.
-    if (skipped) parts.push(`${skipped} ignorée(s), déjà en cours`);
-    if (ttl !== null) parts.push(`valable ${formatTtlMinutes(ttl)}`);
+    if (skipped) parts.push(counted('audit.summary.skipped', skipped));
+    if (ttl !== null) parts.push(t('audit.summary.validFor', { ttl: formatTtlMinutes(ttl) }));
   }
 
   if (action === 'machine.wake_bulk') {
@@ -305,31 +259,35 @@ export function auditDetailsSummary(action: string, details: Record<string, unkn
     // In relay mode an "ok" is a wake handed to a poste of the site, not a
     // packet the server sent: the line must not promise more than that.
     if (woken !== null) {
-      parts.push(details.relayed === true ? `${woken} confié(s) à un relais` : `${woken} émis`);
+      parts.push(
+        details.relayed === true
+          ? counted('audit.summary.wokenRelayed', woken)
+          : counted('audit.summary.woken', woken),
+      );
     }
-    if (failed) parts.push(`${failed} en échec`);
+    if (failed) parts.push(counted('audit.summary.wakeFailed', failed));
   }
 
   if (action === 'room.sync_directory') {
     const placed = count(details, 'placed');
     const unplaced = count(details, 'unplaced');
     const created = count(details, 'rooms_created');
-    if (placed !== null) parts.push(`${placed} poste(s) placé(s)`);
-    if (unplaced !== null) parts.push(`${unplaced} non placé(s)`);
-    if (created !== null) parts.push(`${created} salle(s) créée(s)`);
+    if (placed !== null) parts.push(counted('audit.summary.placed', placed));
+    if (unplaced !== null) parts.push(counted('audit.summary.unplaced', unplaced));
+    if (created !== null) parts.push(counted('audit.summary.roomsCreated', created));
   }
 
   if (action === 'settings.email_test') {
     // Who received it and whether it left: the two things an auditor asks.
     const to = details.to;
-    if (typeof to === 'string' && to) parts.push(`à ${to}`);
-    if (details.ok === 'oui') parts.push('envoyé');
-    else if (details.ok === 'non') parts.push('échec');
+    if (typeof to === 'string' && to) parts.push(t('audit.summary.emailTo', { to }));
+    if (details.ok === OK_YES) parts.push(t('audit.summary.emailSent'));
+    else if (details.ok === OK_NO) parts.push(t('audit.summary.emailFailed'));
   }
 
   const fields = details.fields;
   if (Array.isArray(fields) && fields.length) {
-    parts.push(`champs : ${fields.map((f) => String(f)).join(', ')}`);
+    parts.push(t('audit.summary.fields', { fields: fields.map((f) => String(f)).join(', ') }));
   } else if (
     action === 'settings.update' ||
     action === 'maintenance.machine_settings' ||
@@ -337,7 +295,7 @@ export function auditDetailsSummary(action: string, details: Record<string, unkn
   ) {
     // These record the changed values themselves, keyed by field.
     const changed = Object.keys(details).filter((k) => !SUMMARY_SUBJECT_KEYS.includes(k));
-    if (changed.length) parts.push(`champs : ${changed.join(', ')}`);
+    if (changed.length) parts.push(t('audit.summary.fields', { fields: changed.join(', ') }));
   }
 
   return parts.length ? parts.join(' · ') : '—';

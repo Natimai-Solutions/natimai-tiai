@@ -18,6 +18,8 @@ export type EmailPreference = 'none' | 'immediate' | 'digest_events' | 'digest_d
 export interface GroupRef {
   id: string;
   name: string;
+  /** A built-in group's key (`utils/groupText`); absent from an older server. */
+  builtin_key?: string | null;
 }
 
 /**
@@ -28,11 +30,19 @@ export interface GroupRef {
  */
 export type Preferences = Record<string, unknown>;
 
+/** A language the account can choose (`users.language` on the server). */
+export type AccountLanguage = 'fr' | 'en';
+
 export interface User {
   id: string;
   email: string;
   full_name: string | null;
   email_preference: EmailPreference;
+  /**
+   * The language the account chose, or null to follow the browser. Absent
+   * from a server older than the bilingual console: read as null.
+   */
+  language?: AccountLanguage | null;
   preferences: Preferences;
   groups: GroupRef[];
   /**
@@ -98,6 +108,8 @@ export async function getMe(): Promise<User> {
 
 export interface ProfileUpdate {
   email_preference?: EmailPreference;
+  /** A language, or `null` to go back to the browser's. */
+  language?: AccountLanguage | null;
   /**
    * Merged into the stored document key by key: a key set to `null` is
    * removed, a key not sent is left alone — so a page that remembers one

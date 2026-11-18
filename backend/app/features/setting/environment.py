@@ -14,11 +14,19 @@ credentials, the first admin's password. ``_NEVER_SHOWN`` is the list, and a
 test holds the catalogue to it. A value that may carry one — the Mailgun
 proxy's URL, ``http://user:password@proxy:3128`` — is shown by its host and
 port alone (``_proxy_host``).
+
+Each line is written in French (``value``, ``description``), for the clients
+that print it as it comes, and also carries what a console in another language
+needs to word it itself (plan ``dev/plan-console-bilingue.md``, I2): the group's
+stable ``code``, the value as the environment holds it (``raw``, never a
+secret), and how to show it (``format``, with ``params`` where the French
+sentence has variable parts). The console words a description by the
+variable's name.
 """
 
 import ipaddress
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -55,15 +63,35 @@ _ROOM_SOURCES = {
 @dataclass(frozen=True)
 class EnvItem:
     """One variable: its name as written in ``.env``, its value as a reader
-    would say it, and what it decides."""
+    would say it, and what it decides.
+
+    ``raw`` is the value itself, JSON-ready, and ``format`` says how ``value``
+    words it, for a console that words it in its own language:
+
+    - ``plain``: ``value`` is ``raw`` as is (a number, a name, a path);
+    - ``bool``: « oui » or « non »;
+    - ``list``: the entries joined by « , »;
+    - ``bytes``: a size in bytes, with its amount in Gio or Mio;
+    - ``weekday``: 0 = Monday … 6 = Sunday, with the day's name;
+    - ``room_source``: the mode, with what it means;
+    - ``mail_state``: the provider, and whether the environment alone sends
+      mail (``params.configured``);
+    - ``proxy``: the proxy's host and port, never more; ``raw`` is null and
+      ``params.unreadable`` true when it does not read cleanly.
+    """
 
     key: str
     value: str | None
     description: str
+    raw: Any = None
+    format: str = "plain"
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class EnvGroup:
+    # Stable, for a console to name the group in its own language.
+    code: str
     label: str
     items: list[EnvItem]
 
@@ -128,12 +156,41 @@ def _bytes(value: int) -> str:
     return f"{value} octets"
 
 
-def _item(env: Settings, key: str, description: str, value: Any = ...) -> EnvItem:
-    """An item read off ``env`` by name, unless a rendered value is given."""
+def _format_of(raw: Any) -> str:
+    if isinstance(raw, bool):
+        return "bool"
+    if isinstance(raw, list | tuple):
+        return "list"
+    return "plain"
+
+
+def _item(
+    env: Settings,
+    key: str,
+    description: str,
+    value: Any = ...,
+    *,
+    raw: Any = ...,
+    fmt: str | None = None,
+    params: dict[str, Any] | None = None,
+) -> EnvItem:
+    """An item read off ``env`` by name, unless a rendered value is given —
+    then with the ``raw`` value it words and its ``format``."""
     if key in _NEVER_SHOWN:  # pragma: no cover - a catalogue bug, caught by test
         raise ValueError(f"{key} must not be shown")
-    raw = getattr(env, key) if value is ... else value
-    return EnvItem(key=key, value=_fmt(raw), description=description)
+    shown = getattr(env, key) if value is ... else value
+    if raw is ...:
+        raw = shown
+    if isinstance(raw, tuple):
+        raw = list(raw)
+    return EnvItem(
+        key=key,
+        value=_fmt(shown),
+        description=description,
+        raw=raw,
+        format=fmt or _format_of(raw),
+        params=params or {},
+    )
 
 
 # Appended to every mail variable the card « Envoi des e-mails » can override:
@@ -161,6 +218,9 @@ def _email_group(env: Settings) -> EnvGroup:
             "Canal de sortie du courrier : l'API Mailgun ou un serveur SMTP"
             + _MAIL_INITIAL,
             f"{env.EMAIL_PROVIDER} ({state})",
+            raw=env.EMAIL_PROVIDER,
+            fmt="mail_state",
+            params={"configured": env.alerts_enabled},
         ),
         _item(
             env,
@@ -176,6 +236,7 @@ def _email_group(env: Settings) -> EnvGroup:
             env.email_from_name,
         ),
     ]
+    proxy = _proxy_host(env.MAILGUN_PROXY_URL)
     if env.EMAIL_PROVIDER == "smtp":
         items += [
             _item(
@@ -226,7 +287,11 @@ def _email_group(env: Settings) -> EnvGroup:
                 "Proxy HTTP par lequel passent les appels à Mailgun, et eux seuls ; "
                 "vide = connexion directe. Seuls l'hôte et le port sont affichés, "
                 "jamais un identifiant ni un mot de passe",
-                _proxy_host(env.MAILGUN_PROXY_URL),
+                proxy,
+                # Never the URL itself: it may carry an account and a password.
+                raw=None if proxy == _UNREADABLE else proxy,
+                fmt="proxy",
+                params={"unreadable": proxy == _UNREADABLE},
             ),
         ]
     items += [
@@ -249,6 +314,11 @@ def _email_group(env: Settings) -> EnvGroup:
         ),
         _item(
             env,
+            "DEFAULT_LANGUAGE",
+            "Langue des e-mails d'un compte qui n'a pas choisi la sienne (fr ou en)",
+        ),
+        _item(
+            env,
             "EMAIL_MAX_ATTEMPTS",
             "Tentatives d'envoi d'un e-mail (de 1 min à 1 h d'écart) avant qu'il "
             "soit abandonné et gardé avec sa dernière erreur",
@@ -259,7 +329,7 @@ def _email_group(env: Settings) -> EnvGroup:
             "Jours de conservation des e-mails envoyés ou abandonnés dans la file de sortie",
         ),
     ]
-    return EnvGroup(label="E-mails", items=items)
+    return EnvGroup(code="email", label="E-mails", items=items)
 
 
 def environment_overview(env: Settings = settings) -> list[EnvGroup]:
@@ -267,6 +337,7 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
     weekday = env.MAINTENANCE_REMINDER_WEEKDAY
     return [
         EnvGroup(
+            code="fleet",
             label="Postes et seuils",
             items=[
                 _item(
@@ -359,6 +430,7 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
             ],
         ),
         EnvGroup(
+            code="maintenance",
             label="Maintenance",
             items=[
                 _item(
@@ -378,10 +450,13 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "Jour du rappel hebdomadaire envoyé aux responsables (0 = lundi … "
                     "6 = dimanche), à l'heure du résumé — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                     f"{weekday} ({_WEEKDAYS[weekday]})",
+                    raw=weekday,
+                    fmt="weekday",
                 ),
             ],
         ),
         EnvGroup(
+            code="usage",
             label="Utilisation des postes",
             items=[
                 _item(
@@ -411,6 +486,7 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
             ],
         ),
         EnvGroup(
+            code="rooms",
             label="Salles",
             items=[
                 _item(
@@ -419,11 +495,14 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "Comment les postes sont rangés en salles : manual, ad_ou ou ad_location. "
                     "Dans un mode annuaire, le rattachement manuel est verrouillé",
                     f"{env.ROOM_SOURCE} ({_ROOM_SOURCES.get(env.ROOM_SOURCE, env.ROOM_SOURCE)})",
+                    raw=env.ROOM_SOURCE,
+                    fmt="room_source",
                 ),
             ],
         ),
         _email_group(env),
         EnvGroup(
+            code="wol",
             label="Réveil des postes (Wake-on-LAN)",
             items=[
                 _item(
@@ -485,6 +564,7 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
             ],
         ),
         EnvGroup(
+            code="console",
             label="Console et sécurité",
             items=[
                 _item(
@@ -658,6 +738,7 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
             ],
         ),
         EnvGroup(
+            code="packages",
             label="Paquets logiciels",
             items=[
                 _item(
@@ -672,6 +753,8 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "Taille maximale d'un fichier de paquet déposé, en octets ; le "
                     "proxy devant le serveur est dimensionné en conséquence",
                     _bytes(env.PACKAGE_MAX_BYTES),
+                    raw=env.PACKAGE_MAX_BYTES,
+                    fmt="bytes",
                 ),
                 _item(
                     env,

@@ -1,11 +1,14 @@
 import type { RouteRecordRaw } from 'vue-router';
 
+// `meta.title` is a key of the catalogues (`layout.pages.*`): the router
+// translates it into the tab's title, again on each change of language.
+
 const routes: RouteRecordRaw[] = [
   {
     path: '/login',
     name: 'login',
     component: () => import('pages/LoginPage.vue'),
-    meta: { title: 'Connexion' },
+    meta: { title: 'layout.pages.login' },
   },
   // Parcours « mot de passe oublié » : pages publiques, atteintes sans session
   // (depuis la page de connexion, ou depuis le lien reçu par e-mail).
@@ -13,13 +16,13 @@ const routes: RouteRecordRaw[] = [
     path: '/forgot-password',
     name: 'forgot-password',
     component: () => import('pages/ForgotPasswordPage.vue'),
-    meta: { title: 'Mot de passe oublié' },
+    meta: { title: 'layout.pages.forgotPassword' },
   },
   {
     path: '/reset-password',
     name: 'reset-password',
     component: () => import('pages/ResetPasswordPage.vue'),
-    meta: { title: 'Nouveau mot de passe' },
+    meta: { title: 'layout.pages.resetPassword' },
   },
   {
     path: '/',
@@ -30,38 +33,38 @@ const routes: RouteRecordRaw[] = [
         path: '',
         name: 'dashboard',
         component: () => import('pages/DashboardPage.vue'),
-        meta: { title: 'Tableau de bord', requiresPermission: 'machine:read' },
+        meta: { title: 'layout.pages.dashboard', requiresPermission: 'machine:read' },
       },
       {
         path: 'machines',
         name: 'machines',
         component: () => import('pages/MachinesPage.vue'),
-        meta: { title: 'Postes', requiresPermission: 'machine:read' },
+        meta: { title: 'layout.pages.machines', requiresPermission: 'machine:read' },
       },
       {
         path: 'software',
         name: 'software',
         component: () => import('pages/SoftwarePage.vue'),
-        meta: { title: 'Logiciels', requiresPermission: 'machine:read' },
+        meta: { title: 'layout.pages.software', requiresPermission: 'machine:read' },
       },
       {
         path: 'packages',
         name: 'packages',
         component: () => import('pages/PackagesPage.vue'),
-        meta: { title: 'Paquets', requiresPermission: 'package:read' },
+        meta: { title: 'layout.pages.packages', requiresPermission: 'package:read' },
       },
       {
         path: 'packages/:id',
         name: 'package-detail',
         component: () => import('pages/PackageDetailPage.vue'),
         props: true,
-        meta: { title: 'Paquet', requiresPermission: 'package:read' },
+        meta: { title: 'layout.pages.package', requiresPermission: 'package:read' },
       },
       {
         path: 'settings',
         name: 'settings',
         component: () => import('pages/SettingsPage.vue'),
-        meta: { title: 'Paramètres', requiresPermission: 'settings:read' },
+        meta: { title: 'layout.pages.settings', requiresPermission: 'settings:read' },
       },
       {
         path: 'tasks',
@@ -69,64 +72,67 @@ const routes: RouteRecordRaw[] = [
         component: () => import('pages/TasksPage.vue'),
         // Either suffices: an account that only owns maintenances is sent
         // here by its reminders (/tasks), and the page shows what it reads.
-        meta: { title: 'Mes tâches', requiresPermission: ['check:read', 'maintenance:read'] },
+        meta: {
+          title: 'layout.pages.tasks',
+          requiresPermission: ['check:read', 'maintenance:read'],
+        },
       },
       {
         path: 'rooms',
         name: 'rooms',
         component: () => import('pages/RoomsPage.vue'),
-        meta: { title: 'Salles', requiresPermission: 'room:read' },
+        meta: { title: 'layout.pages.rooms', requiresPermission: 'room:read' },
       },
       {
         path: 'rooms/:id',
         name: 'room-detail',
         component: () => import('pages/RoomDetailPage.vue'),
         props: true,
-        meta: { title: 'Salle', requiresPermission: 'room:read' },
+        meta: { title: 'layout.pages.room', requiresPermission: 'room:read' },
       },
       {
         path: 'machines/:id',
         name: 'machine-detail',
         component: () => import('pages/MachineDetailPage.vue'),
         props: true,
-        meta: { title: 'Poste', requiresPermission: 'machine:read' },
+        meta: { title: 'layout.pages.machine', requiresPermission: 'machine:read' },
       },
       {
         path: 'users',
         name: 'users',
         component: () => import('pages/UsersPage.vue'),
-        meta: { title: 'Utilisateurs', requiresPermission: 'user:read' },
+        meta: { title: 'layout.pages.users', requiresPermission: 'user:read' },
       },
       {
         path: 'groups',
         name: 'groups',
         component: () => import('pages/GroupsPage.vue'),
-        meta: { title: 'Groupes', requiresPermission: 'user:read' },
+        meta: { title: 'layout.pages.groups', requiresPermission: 'user:read' },
       },
       {
         path: 'audit',
         name: 'audit',
         component: () => import('pages/AuditPage.vue'),
-        meta: { title: "Journal d'audit", requiresPermission: 'audit:read' },
+        meta: { title: 'layout.pages.audit', requiresPermission: 'audit:read' },
       },
       {
         path: 'account',
         name: 'account',
         component: () => import('pages/AccountPage.vue'),
-        meta: { title: 'Mon compte' },
+        meta: { title: 'layout.pages.account' },
       },
       {
         // Where an account whose groups grant nothing to read lands.
         path: 'no-access',
         name: 'no-access',
         component: () => import('pages/NoAccessPage.vue'),
-        meta: { title: 'Aucune page accessible' },
+        meta: { title: 'layout.pages.noAccess' },
       },
     ],
   },
   {
     path: '/:catchAll(.*)*',
-    meta: { title: 'Page introuvable' },
+    meta: { title: 'layout.pages.notFound' },
     component: () => import('pages/ErrorNotFound.vue'),
   },
 ];

@@ -1,7 +1,7 @@
 <template>
   <div class="col-12 col-md-6">
     <q-card flat bordered>
-      <q-card-section class="text-subtitle1">Cartes graphiques</q-card-section>
+      <q-card-section class="text-subtitle1">{{ t('machine.gpu.title') }}</q-card-section>
       <q-separator />
       <q-list v-if="machine.gpus.length" dense>
         <q-item v-for="g in machine.gpus" :key="g.id">
@@ -11,7 +11,7 @@
               <span v-if="g.memory_mb != null">{{ sizeLabel(g.memory_mb) }}</span>
               <span v-if="g.resolution"> — {{ g.resolution }}</span>
               <span v-if="g.driver_version">
-                — pilote {{ g.driver_version }}
+                — {{ t('machine.gpu.driver', { version: g.driver_version }) }}
                 <span v-if="g.driver_date">({{ formatDate(g.driver_date) }})</span>
               </span>
             </q-item-label>
@@ -19,13 +19,14 @@
         </q-item>
       </q-list>
       <q-card-section v-else class="text-caption text-muted">
-        Aucune carte graphique relevée sur ce poste.
+        {{ t('machine.gpu.none') }}
       </q-card-section>
     </q-card>
   </div>
 </template>
 
 <script setup lang="ts">
+import { t } from 'src/i18n';
 import type { MachineDetail } from 'src/services/machines';
 import { formatDate, sizeLabel } from 'src/utils/format';
 

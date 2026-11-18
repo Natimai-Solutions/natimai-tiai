@@ -38,6 +38,7 @@ from app.features.audit import crud as audit
 from app.features.base import contains, utcnow
 from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
+from app.features.command import texts as command_texts
 from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.inventory.models import (
     Disk,
@@ -81,7 +82,7 @@ from app.features.setting.crud import FleetPolicy, MaintenancePolicy, UsagePolic
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 from app.features.usage.models import SECONDS_PER_HOUR
-from app.features.user.models import User
+from app.features.user.models import Language, User
 from app.features.user.permissions import Action, Resource
 from app.features.user.scope import Scope, machine_clause, machine_visible, restrict
 from app.features.windows_update.models import WindowsUpdate
@@ -1362,6 +1363,12 @@ _INT4_MIN, _INT4_MAX = -(2**31), 2**31 - 1
 # Far past any percentage or number of hours, and far within what a double
 # and a numeric both take: the derived sort keys are compared as either.
 _NUMBER_MAX = 10**15
+# And far from what either refuses at the other end: a numeric holds no
+# more than 16383 digits after the point (``0E-20000`` « overflows » it),
+# a double nothing finer than about 1e-308 (a smaller numeric cast to it is
+# « out of range »). No percentage or number of hours needs either.
+_NUMBER_EXPONENT_MIN = -1000
+_NUMBER_ADJUSTED_MIN = -300
 
 
 def _value_fits(value: Any, kinds: tuple[type, ...]) -> bool:
@@ -1388,7 +1395,12 @@ def _value_fits(value: Any, kinds: tuple[type, ...]) -> bool:
     if isinstance(value, float):
         return math.isfinite(value) and abs(value) <= _NUMBER_MAX
     if isinstance(value, Decimal):
-        return value.is_finite() and abs(value) <= _NUMBER_MAX
+        return (
+            value.is_finite()
+            and abs(value) <= _NUMBER_MAX
+            and int(value.as_tuple().exponent) >= _NUMBER_EXPONENT_MIN
+            and (value == 0 or value.adjusted() >= _NUMBER_ADJUSTED_MIN)
+        )
     if isinstance(value, datetime):
         # Every stored instant is aware; a naive one would be read in the
         # database session's time zone, which is nobody's intent.
@@ -1788,20 +1800,29 @@ class ExportColumnOut(BaseModel):
     default: bool
 
 
+# The language of an export's words — its headers, sheet, values — as the
+# console asks for it. French when absent: a script or an older console gets
+# the file it always got.
+ExportLanguage = Annotated[Language, Query(description="fr or en; fr when absent")]
+
+
 @router.get("/export-columns", response_model=list[ExportColumnOut])
-async def list_export_columns() -> list[ExportColumnOut]:
+async def list_export_columns(
+    lang: ExportLanguage = Language.FR,
+) -> list[ExportColumnOut]:
     """The export's column catalogue, in the order the picker shows it.
 
     Served rather than duplicated in the console: the catalogue is what the
     export reads, and a picker offering a column the server does not know
-    would produce a 422 at the moment the reader clicks « Exporter ».
+    would produce a 422 at the moment the reader clicks « Exporter ». The
+    labels are in ``lang``, the headers the file will carry.
     """
     return [
         ExportColumnOut(
             key=c.key,
-            label=c.label,
+            label=machine_export.column_label(c, lang),
             group=c.group,
-            group_label=machine_export.GROUP_LABELS[c.group],
+            group_label=machine_export.group_label(c.group, lang),
             kind=c.kind,
             default=c.default,
         )
@@ -1810,7 +1831,7 @@ async def list_export_columns() -> list[ExportColumnOut]:
 
 
 async def _export_rows(
-    session: SessionDep, filters: MachineFilters
+    session: SessionDep, filters: MachineFilters, language: Language
 ) -> tuple[list[machine_export.ExportRow], UsageWindow]:
     """The filtered fleet, every row, hostname order.
 
@@ -1850,6 +1871,7 @@ async def _export_rows(
             usage_hours=usage_crud.usage_hours(seconds, m.first_seen, usage.start),
             signature_max_age_days=policies.fleet.signature_max_age_days,
             taken_at=now,
+            language=language,
         )
         for m, room, building, check, seconds in all_rows
     ], usage
@@ -1867,22 +1889,26 @@ async def export_machines_csv(
     filters: FiltersDep,
     columns: str | None = None,
     tz: str | None = None,
+    lang: ExportLanguage = Language.FR,
 ) -> Response:
     """The filtered fleet as CSV — every facet of the list, no pages.
 
     ``columns`` is a comma-separated list of catalogue keys (default set when
-    absent); ``tz`` the IANA zone timestamps are written in (UTC when absent).
+    absent); ``tz`` the IANA zone timestamps are written in (UTC when absent);
+    ``lang`` the language of the file's words (French when absent).
     """
     chosen = machine_export.resolve_columns(columns)
     zone = machine_export.resolve_timezone(tz)
-    machines, usage = await _export_rows(session, filters)
+    machines, usage = await _export_rows(session, filters, lang)
+    texts = machine_export.EXPORT_TEXTS[lang]
     return csv_response(
-        "parc.csv",
-        machine_export.headers(chosen, usage_days=usage.days),
+        f"{texts.file_stem}.csv",
+        machine_export.headers(chosen, usage_days=usage.days, language=lang),
         [
-            [machine_export.csv_value(c, c.read(m), zone) for c in chosen]
+            [machine_export.csv_value(c, c.read(m), zone, lang) for c in chosen]
             for m in machines
         ],
+        lang,
     )
 
 
@@ -1892,24 +1918,26 @@ async def export_machines_xlsx(
     filters: FiltersDep,
     columns: str | None = None,
     tz: str | None = None,
+    lang: ExportLanguage = Language.FR,
 ) -> Response:
     """The filtered fleet as an Excel workbook, with real dates and numbers.
 
-    Same facets, same column catalogue and the same ``tz`` as the CSV; the
-    difference is what lands in the cells — values Excel can sort, filter and
-    sum without a conversion step.
+    Same facets, same column catalogue, the same ``tz`` and ``lang`` as the
+    CSV; the difference is what lands in the cells — values Excel can sort,
+    filter and sum without a conversion step.
     """
     chosen = machine_export.resolve_columns(columns)
     zone = machine_export.resolve_timezone(tz)
-    machines, usage = await _export_rows(session, filters)
+    machines, usage = await _export_rows(session, filters, lang)
+    texts = machine_export.EXPORT_TEXTS[lang]
     return await xlsx_response(
-        "parc.xlsx",
-        machine_export.headers(chosen, usage_days=usage.days),
+        f"{texts.file_stem}.xlsx",
+        machine_export.headers(chosen, usage_days=usage.days, language=lang),
         [
-            [machine_export.xlsx_value(c, c.read(m), zone) for c in chosen]
+            [machine_export.xlsx_value(c, c.read(m), zone, lang) for c in chosen]
             for m in machines
         ],
-        sheet_title="Parc",
+        sheet_title=texts.sheet_title,
     )
 
 
@@ -1929,6 +1957,10 @@ class WakeOut(BaseModel):
     hostname: str | None
     ok: bool
     detail: str
+    # What the console words ``detail`` from (``command.texts``, plan console
+    # bilingue): its code and parameters. ``detail`` stays, in French.
+    detail_code: str | None = None
+    detail_params: dict[str, Any] = {}
 
 
 class WakeResponse(BaseModel):
@@ -2005,12 +2037,15 @@ async def wake_machines(
             # Reported rather than 404'd: one stale id in a selection of thirty
             # must not cost the other twenty-nine their wake. Nothing is
             # recorded — there is no machine left to record it against.
+            unknown = command_texts.wake_unknown_machine()
             results.append(
                 WakeOut(
                     machine_id=machine_id,
                     hostname=None,
                     ok=False,
-                    detail="Poste introuvable : il a été supprimé ou fusionné.",
+                    detail=unknown.text,
+                    detail_code=unknown.code,
+                    detail_params=unknown.params,
                 )
             )
             continue
@@ -2027,6 +2062,8 @@ async def wake_machines(
                     hostname=machine.hostname,
                     ok=outcome.ok,
                     detail=outcome.detail,
+                    detail_code=outcome.code,
+                    detail_params=outcome.params,
                 )
             )
             continue
@@ -2057,6 +2094,8 @@ async def wake_machines(
                 finished_at=now,
                 result_output=outcome.detail if outcome.ok else None,
                 error=None if outcome.ok else outcome.detail,
+                result_code=outcome.code,
+                result_params=outcome.params,
             )
         )
         results.append(
@@ -2065,6 +2104,8 @@ async def wake_machines(
                 hostname=machine.hostname,
                 ok=outcome.ok,
                 detail=outcome.detail,
+                detail_code=outcome.code,
+                detail_params=outcome.params,
             )
         )
 

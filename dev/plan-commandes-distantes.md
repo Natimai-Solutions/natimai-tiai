@@ -153,9 +153,13 @@ Le plan prévoyait de « filtrer les lignes de progression (`\r`) » de `dism`, 
 
 Deux prédictions se sont vérifiées telles quelles et méritent d'être notées, parce qu'elles justifient l'architecture de M3 : le backend n'a coûté **qu'une extension d'énumération, sans migration**, et le dispatch agent s'est réduit à **une consultation de table** au lieu des onze `case` annoncés — une douzième commande coûtera trois lignes de données réparties sur trois composants, et zéro ligne de logique.
 
-### Reste à faire
+### Validation sur le parc (2026-11-18)
 
-La validation en `LocalSystem` des huit commandes qui exigent l'élévation (§5). Une seule porte un vrai risque résiduel : **`sfc_scan` est la dernière branche d'encodage du catalogue à n'avoir jamais vu d'octets réels** — son UTF-16 est documenté et testé sur fixture, mais pas mesuré comme les trois autres, et c'est précisément la mesure qui a démenti le plan pour les autres outils. Le repli est en place (`looksUTF16LE` vérifie avant de décoder, donc une surprise dégrade vers du texte lisible plutôt que vers des idéogrammes), mais la vérification reste à faire.
+Retour de l'exploitant : les commandes à distance fonctionnent sur le parc,
+en `LocalSystem`. Les cases ⬜ du §5 sont couvertes par ce retour, sans relevé
+commande par commande ici.
+
+*Note d'origine, conservée :* restait la validation en `LocalSystem` des huit commandes qui exigent l'élévation (§5). Une seule portait un vrai risque résiduel : **`sfc_scan` est la dernière branche d'encodage du catalogue à n'avoir jamais vu d'octets réels** — son UTF-16 est documenté et testé sur fixture, mais pas mesuré comme les trois autres, et c'est précisément la mesure qui a démenti le plan pour les autres outils. Le repli est en place (`looksUTF16LE` vérifie avant de décoder, donc une surprise dégrade vers du texte lisible plutôt que vers des idéogrammes), mais la vérification reste à faire.
 
 Pour le reste, ce sont les chemins nominaux de commandes dont le chemin d'échec, la livraison et la remontée sont déjà éprouvés.
 

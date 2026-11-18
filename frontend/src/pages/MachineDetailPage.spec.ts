@@ -558,6 +558,12 @@ describe('MachineDetailPage', () => {
     answer('B');
     await flushPromises();
     const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk: (fn: () => void) => {
         fn();
         fn();
@@ -582,6 +588,42 @@ describe('MachineDetailPage', () => {
       .vm.$emit('click');
     await flushPromises();
     expect(vi.mocked(api.post).mock.calls.filter(([url]) => url === '/commands')).toHaveLength(2);
+    dialog.mockRestore();
+  });
+
+  // Item 5, the confirmed side: a double click on an entry that asks first
+  // opens one confirmation, and « Annuler » gives the menu back.
+  it('asks once on a double click of a confirmed entry, and frees the menu on Cancel', async () => {
+    vi.mocked(api.post).mockReset();
+    const w = await mountPage('B', ['machine:read', 'command:execute']);
+    answer('B');
+    await flushPromises();
+    let cancel: () => void = () => undefined;
+    const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
+      onOk: () => ({ onCancel: (fn: () => void) => (cancel = fn) }),
+    } as never);
+    const entry = (label: string) =>
+      w.findAllComponents(QItem).find((i) => i.text().includes(label))!;
+
+    entry('Scan complet').vm.$emit('click');
+    entry('Scan complet').vm.$emit('click');
+    await flushPromises();
+    expect(dialog).toHaveBeenCalledTimes(1);
+    expect(entry('Vider le cache DNS').props('disable')).toBe(true);
+
+    cancel();
+    await flushPromises();
+    expect(entry('Vider le cache DNS').props('disable')).toBe(false);
+    entry('Scan complet').vm.$emit('click');
+    await flushPromises();
+    expect(dialog).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.post).mock.calls.filter(([url]) => url === '/commands')).toHaveLength(0);
     dialog.mockRestore();
   });
 
@@ -627,6 +669,12 @@ describe('MachineDetailPage', () => {
     answer('B', 0, { needs_verification: true });
     await flushPromises();
     const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk: (fn: () => void) => {
         fn();
         return { onCancel: () => undefined };

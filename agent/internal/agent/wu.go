@@ -2,13 +2,13 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
 	"tiai/agent/internal/collector"
 	"tiai/agent/internal/logging"
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/msg"
 )
 
 // wuFirstCollectDelay keeps the first search off the boot path: a machine
@@ -74,16 +74,16 @@ func (a *Agent) collectWU(ctx context.Context) {
 // Its whole value is immediacy: an administrator who has just approved a KB on
 // the WSUS server does not want to wait out the six-hour cycle to see the parc
 // react. The refreshed cache rides the next heartbeat, seconds later.
-func (a *Agent) runWUScan(ctx context.Context) (string, error) {
+func (a *Agent) runWUScan(ctx context.Context) (msg.Message, error) {
 	a.wuOp.Lock()
 	defer a.wuOp.Unlock()
 
 	state, err := collector.ReadWUState(ctx)
 	if err != nil {
-		return "", err
+		return msg.Message{}, err
 	}
 	a.wu.store(state)
-	return fmt.Sprintf("%d mise(s) à jour en attente.", len(state.Pending)), nil
+	return msg.New("wu.scan", msg.Params{"count": len(state.Pending)}), nil
 }
 
 // runWUReset moves the Windows Update store aside — the repair for a poste
@@ -102,7 +102,7 @@ func (a *Agent) runWUScan(ctx context.Context) (string, error) {
 // registry, which the reset does not touch either. The next cycle — or a
 // wu_scan, which is what the command's own output tells the administrator to
 // run — re-reads all of it.
-func (a *Agent) runWUReset(ctx context.Context) (string, error) {
+func (a *Agent) runWUReset(ctx context.Context) (msg.Message, error) {
 	a.wuOp.Lock()
 	defer a.wuOp.Unlock()
 
@@ -117,7 +117,7 @@ func (a *Agent) runWUReset(ctx context.Context) (string, error) {
 // now installed would be worse than showing none. The refreshed reading — and
 // with it "restart required", which only becomes true here — reaches the console
 // on the next heartbeat, a minute later.
-func (a *Agent) runWUInstall(ctx context.Context, includeDrivers bool) (string, error) {
+func (a *Agent) runWUInstall(ctx context.Context, includeDrivers bool) (msg.Message, error) {
 	a.wuOp.Lock()
 	defer a.wuOp.Unlock()
 

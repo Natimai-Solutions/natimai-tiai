@@ -28,12 +28,14 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.config import settings
 from app.features.base import utcnow
 from app.features.machine.models import Machine
+from app.features.notification.language import mail_language, texts_for
 from app.features.notification.outbox import queue_email
 from app.features.notification.recipients import users_for
+from app.features.notification.threat_alert_texts import TEXTS
 from app.features.setting.email_policy import email_policy
 from app.features.threat.crud import NewDetection
 from app.features.user import crud as user_crud
-from app.features.user.models import EmailPreference
+from app.features.user.models import EmailPreference, Language
 from app.features.user.scope import machine_visible
 
 
@@ -79,57 +81,53 @@ def recent_detections(detections: list[NewDetection]) -> list[NewDetection]:
 
 
 def render_alert(
-    machine: MachineContext, detections: list[NewDetection]
+    machine: MachineContext,
+    detections: list[NewDetection],
+    language: Language | None = None,
 ) -> tuple[str, str]:
-    """The alert as (subject, plain-text body)."""
+    """The alert as (subject, plain-text body), in ``language``, else
+    ``DEFAULT_LANGUAGE``."""
+    t = texts_for(TEXTS, language)
     name = machine.hostname or machine.machine_uuid
     count = len(detections)
     subject = (
-        f"{settings.PROJECT_NAME} — menace détectée sur {name}"
+        t.subject_one(settings.PROJECT_NAME, name)
         if count == 1
-        else f"{settings.PROJECT_NAME} — {count} menaces détectées sur {name}"
+        else t.subject_many(settings.PROJECT_NAME, count, name)
     )
 
-    lines = [
-        f"Microsoft Defender a signalé {count} détection(s) sur le poste {name}.",
-        "",
-    ]
+    lines = [t.intro(count, name), ""]
     # Capped like the digest's own lists: a poste whose whole undated history
     # arrives at once — nothing dates it, so nothing filters it out by age —
     # would otherwise produce a mail of several hundred bullet lines. The
     # remainder is stated rather than dropped, and the fiche has them all.
     cap = settings.NOTIFICATION_MAX_ITEMS
     for d in detections[:cap]:
-        parts = [d.threat_name or "menace non nommée"]
+        parts = [d.threat_name or t.unnamed]
         if d.severity:
-            parts.append(f"sévérité {d.severity}")
+            parts.append(t.severity(d.severity))
         if d.status:
-            parts.append(f"statut {d.status}")
+            parts.append(t.status(d.status))
         if d.detected_at:
-            parts.append(
-                f"détectée le {d.detected_at.strftime('%d/%m/%Y à %H:%M UTC')}"
-            )
+            parts.append(t.detected_at(d.detected_at))
         lines.append(f"  • {' — '.join(parts)}")
     if count > cap:
-        lines.append(f"  … et {count - cap} autre(s) détection(s)")
+        lines.append(t.more(count - cap))
 
     lines += [
         "",
-        f"Poste : {name}",
-        f"UUID : {machine.machine_uuid}",
-        f"Domaine : {machine.domain or '—'}",
-        f"Adresse IP : {machine.ip_address or '—'}",
-        f"Session ouverte : {machine.session_username or '—'}",
+        f"{t.machine}{name}",
+        f"{t.uuid}{machine.machine_uuid}",
+        f"{t.domain}{machine.domain or '—'}",
+        f"{t.ip_address}{machine.ip_address or '—'}",
+        f"{t.session}{machine.session_username or '—'}",
         "",
     ]
     if settings.console_base_url:
         base = settings.console_base_url
-        lines.append(f"Ouvrir la fiche du poste : {base}/machines/{machine.id}")
+        lines.append(t.open_page(f"{base}/machines/{machine.id}"))
         lines.append("")
-    lines.append(
-        "Vous recevez ce message parce que votre compte est réglé sur les alertes "
-        "immédiates. Changez-le dans la console, page « Mon compte »."
-    )
+    lines.append(t.footer)
     return subject, "\n".join(lines)
 
 
@@ -150,7 +148,7 @@ async def queue_threat_alert(
     # an alert names a machine, and naming it to somebody confined to another
     # site is exactly what the scope exists to prevent.
     recipients = [
-        user.email
+        (user.email, mail_language(user.language))
         for user in await users_for(session, [EmailPreference.IMMEDIATE])
         if await machine_visible(
             session, machine.id, await user_crud.user_scope(session, user.id)
@@ -163,9 +161,13 @@ async def queue_threat_alert(
     if not (await email_policy(session)).enabled:
         return 0
 
-    subject, text = render_alert(machine, fresh)
+    # Written once per language among the recipients, each in their own.
+    rendered: dict[Language, tuple[str, str]] = {}
     queued = 0
-    for address in recipients:
+    for address, language in recipients:
+        if language not in rendered:
+            rendered[language] = render_alert(machine, fresh, language)
+        subject, text = rendered[language]
         if queue_email(session, to=address, subject=subject, text=text):
             queued += 1
     return queued

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/msg"
 	"tiai/agent/internal/winpath"
 )
 
@@ -39,16 +40,16 @@ func ReadWUState(ctx context.Context) (*models.WUState, error) {
 // The timeout is a parameter rather than a constant: it is the one WU budget an
 // administrator legitimately needs to raise, on a parc behind a slow link where
 // a cumulative update is a gigabyte away.
-func RunWUInstall(ctx context.Context, includeDrivers bool, timeout time.Duration) (string, error) {
+func RunWUInstall(ctx context.Context, includeDrivers bool, timeout time.Duration) (msg.Message, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return msg.Message{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	out, err := runPowerShellJSON(ctx, buildWUScript(wuInstallScript, includeDrivers))
 	if err != nil {
-		return "", wrapWUError(err)
+		return msg.Message{}, wrapWUError(err)
 	}
 	return summarizeInstall(out)
 }
@@ -96,10 +97,10 @@ func runPowerShellJSON(ctx context.Context, script string) ([]byte, error) {
 		// Ours (wuSearchTimeout / the configured install budget) versus the
 		// service being stopped — two very different things to report.
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, errors.New("délai d'exécution dépassé pour l'opération Windows Update")
+			return nil, msg.Err("wu.timeout", nil)
 		}
 		if errors.Is(ctx.Err(), context.Canceled) {
-			return nil, errors.New("opération Windows Update interrompue (arrêt de l'agent)")
+			return nil, msg.Err("wu.interrupted", nil)
 		}
 		detail := strings.TrimSpace(stderr.String())
 		if detail == "" {

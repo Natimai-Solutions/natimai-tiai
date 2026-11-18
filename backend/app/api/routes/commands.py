@@ -152,6 +152,11 @@ class CommandOut(BaseModel):
     finished_at: datetime | None
     result_output: str | None
     error: str | None
+    # What the console words the verdict from (``command.texts``): the
+    # ``error`` of a failed command, the ``result_output`` of a succeeded one.
+    # Null on an older row, and wherever the text is a tool's own output.
+    result_code: str | None = None
+    result_params: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -253,7 +258,11 @@ async def _deployable_package(
             code=ErrorCode.PACKAGE_NOT_READY,
             status_code=409,
             message="This package cannot be deployed yet",
-            details={"problems": [p.message for p in problems]},
+            details={
+                "problems": [p.message for p in problems],
+                # What the console words them from (plan console bilingue).
+                "causes": [{"code": p.code, "params": p.params} for p in problems],
+            },
         )
     return package
 

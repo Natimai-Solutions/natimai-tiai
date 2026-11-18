@@ -102,6 +102,12 @@ function answerDialogs(vm: VM, answer: 'ok' | 'cancel'): DialogOptions[] {
   vi.spyOn(vm.$q, 'dialog').mockImplementation((opts: unknown) => {
     seen.push(opts as DialogOptions);
     const chain = {
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk(fn: () => void) {
         if (answer === 'ok') queueMicrotask(fn);
         return chain;

@@ -1,4 +1,6 @@
 import { api } from 'boot/axios';
+import { t } from 'src/i18n';
+import catalogue from 'src/i18n/messages/commands';
 
 export type CommandType =
   // Defender (phase 1).
@@ -70,20 +72,60 @@ export interface CommandAction {
   serverSide?: boolean;
 }
 
-export const commandGroupLabels: Record<CommandGroup, string> = {
-  defender: 'Defender',
-  windows_update: 'Windows Update',
-  // The restart used to sit in the Windows Update section, on the grounds that
-  // what makes an admin reach for it is the « redémarrage requis » an update
-  // just raised. With a shutdown and a wake beside it that no longer holds:
-  // the three actions that change a poste's power state are one decision family
-  // and belong in one section. The « Redémarrage requis » badge on the Windows
-  // Update card still says when to reach for it.
-  inventory: 'Inventaire',
-  power: 'Alimentation',
-  maintenance: 'Maintenance',
-  diagnostic: 'Diagnostic',
-};
+/** A group's name in the language shown, read when it is shown. */
+export function commandGroupLabel(group: CommandGroup): string {
+  return t(`commands.groups.${group}`);
+}
+
+// The restart used to sit in the Windows Update section, on the grounds that
+// what makes an admin reach for it is the « redémarrage requis » an update
+// just raised. With a shutdown and a wake beside it that no longer holds: the
+// three actions that change a poste's power state are one decision family and
+// belong in one section. The « Redémarrage requis » badge on the Windows
+// Update card still says when to reach for it.
+const GROUPS: CommandGroup[] = [
+  'defender',
+  'windows_update',
+  'inventory',
+  'power',
+  'maintenance',
+  'diagnostic',
+];
+
+/**
+ * The groups' names, each read in the language shown at the moment it is
+ * read (a getter per group): a table kept across a change of language
+ * still says the right thing.
+ */
+export const commandGroupLabels = Object.defineProperties(
+  {} as Record<CommandGroup, string>,
+  Object.fromEntries(
+    GROUPS.map((group) => [group, { get: () => commandGroupLabel(group), enumerable: true }]),
+  ),
+);
+
+type CommandSpec = Omit<CommandAction, 'label' | 'hint'>;
+
+/**
+ * A catalogue entry whose `label` (and `hint`, with `withHint`) are read
+ * from `commands.actions.<type>` each time they are read: in the language
+ * shown at that moment, never the one of the page's first render.
+ */
+function entry(spec: CommandSpec & { withHint?: boolean }): CommandAction {
+  const { withHint, ...rest } = spec;
+  const action = { ...rest } as CommandAction;
+  Object.defineProperty(action, 'label', {
+    get: () => t(`commands.actions.${spec.type}.label`),
+    enumerable: true,
+  });
+  if (withHint) {
+    Object.defineProperty(action, 'hint', {
+      get: () => t(`commands.actions.${spec.type}.hint`),
+      enumerable: true,
+    });
+  }
+  return action;
+}
 
 /**
  * The single source of the console's command catalogue.
@@ -96,107 +138,97 @@ export const commandGroupLabels: Record<CommandGroup, string> = {
  * catalogue (`agent/internal/collector/maintenance.go`) and the backend enum.
  */
 export const commandActions: CommandAction[] = [
-  {
+  entry({
     type: 'quick_scan',
-    label: 'Scan rapide',
     icon: 'bolt',
     group: 'defender',
     confirm: false,
     bulk: true,
-  },
-  {
+  }),
+  entry({
     type: 'full_scan',
-    label: 'Scan complet',
     icon: 'travel_explore',
     group: 'defender',
     confirm: true,
     bulk: true,
-    hint: 'Un scan complet mobilise le poste pendant plusieurs dizaines de minutes.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     type: 'update_signatures',
-    label: 'Mise à jour des signatures',
     icon: 'sync',
     group: 'defender',
     confirm: false,
     bulk: true,
-  },
-  {
+  }),
+  entry({
     type: 'wu_scan',
-    label: 'Rechercher les mises à jour',
     icon: 'search',
     group: 'windows_update',
     confirm: false,
     bulk: true,
-  },
-  {
+  }),
+  entry({
     type: 'wu_install',
     risky: true,
-    label: 'Installer les mises à jour (hors pilotes)',
     icon: 'system_update',
     group: 'windows_update',
     confirm: true,
     bulk: true,
-    hint: 'Le poste télécharge et installe ses mises à jour logicielles ; compter plusieurs dizaines de minutes. Aucun redémarrage automatique : le poste signalera s’il en attend un.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     type: 'wu_install_full',
     risky: true,
-    label: 'Installer les mises à jour (pilotes compris)',
     icon: 'browser_updated',
     group: 'windows_update',
     confirm: true,
     bulk: true,
-    hint: 'Le poste télécharge et installe ses mises à jour, y compris les pilotes proposés par Windows Update — à réserver aux postes où c’est souhaité ; compter plusieurs dizaines de minutes. Aucun redémarrage automatique : le poste signalera s’il en attend un.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     // Last in the section, after the two installs: it is what an admin reaches
     // for once those have failed on a poste, not something to try first.
     type: 'wu_reset',
     risky: true,
-    label: 'Réinitialiser Windows Update',
     icon: 'settings_backup_restore',
     group: 'windows_update',
     confirm: true,
     bulk: true,
-    hint: 'Procédure Microsoft : les services Windows Update sont arrêtés, le magasin de mises à jour et le cache de signatures sont renommés, puis les services repartent. Windows les reconstruit à la recherche suivante — l’historique des mises à jour du poste est perdu et les correctifs déjà téléchargés le seront à nouveau. Rien n’est installé ni redémarré.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     type: 'inventory_scan',
-    label: "Rafraîchir l'inventaire",
     icon: 'inventory_2',
     group: 'inventory',
     // A read, and a fast one: a dozen WMI queries and two registry walks. There
     // is nothing to warn about and nothing to undo, so no confirmation.
     confirm: false,
     bulk: true,
-  },
-  {
+  }),
+  entry({
     // Never automatic, whatever a poste reports as needing one: restarting a
     // machine somebody is working on is an explicit decision.
     type: 'reboot',
     risky: true,
-    label: 'Redémarrer le poste',
     icon: 'restart_alt',
     group: 'power',
     confirm: true,
     bulk: true,
-    hint: 'Le redémarrage a lieu dans 60 secondes ; l’utilisateur connecté voit un avertissement et peut enregistrer son travail. Les documents non enregistrés seront perdus.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     // The counterpart of the wake below, and the reason that one exists: a parc
     // somebody switches off in the evening is a parc somebody has to switch
     // back on in the morning.
     type: 'shutdown',
     risky: true,
-    label: 'Arrêter le poste',
     icon: 'power_settings_new',
     group: 'power',
     confirm: true,
     bulk: true,
-    hint: 'Le poste s’éteint dans 60 secondes ; l’utilisateur connecté voit un avertissement et peut enregistrer son travail. Les documents non enregistrés seront perdus. Le poste ne remontera plus rien tant qu’il n’aura pas été rallumé — sur place, ou par « Réveiller le poste » si son matériel le permet.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     // The one action the server performs itself: the poste is off, there is no
     // agent to ask. No confirmation — a wake costs three datagrams and wakes a
     // machine at worst, where the two above can cost somebody their work.
@@ -204,115 +236,103 @@ export const commandActions: CommandAction[] = [
     // a poste of the same site, which emits it on its next contact. Same menu
     // entry either way — the notification says which happened.
     type: 'wake_on_lan',
-    label: 'Réveiller le poste (Wake-on-LAN)',
     icon: 'wifi_tethering',
     group: 'power',
     confirm: false,
     bulk: true,
     serverSide: true,
-  },
-  {
+  }),
+  entry({
     // /target:computer: l'agent tourne en LocalSystem, il n'y a pas de ruche
     // utilisateur à rafraîchir — le libellé l'assume plutôt que de laisser
     // croire que les stratégies utilisateur suivront.
     type: 'gpo_update',
-    label: 'Appliquer les stratégies (ordinateur)',
     icon: 'policy',
     group: 'maintenance',
     confirm: false,
     bulk: true,
-  },
-  {
+  }),
+  entry({
     type: 'flush_dns',
-    label: 'Vider le cache DNS',
     icon: 'dns',
     group: 'maintenance',
     confirm: false,
     bulk: true,
-  },
-  {
+  }),
+  entry({
     type: 'time_resync',
-    label: "Resynchroniser l'horloge",
     icon: 'schedule',
     group: 'maintenance',
     confirm: false,
     bulk: true,
-  },
-  {
+  }),
+  entry({
     type: 'cert_pulse',
-    label: 'Relancer l’inscription des certificats',
     icon: 'verified_user',
     group: 'maintenance',
     confirm: false,
     bulk: true,
-  },
-  {
+  }),
+  entry({
     type: 'spooler_reset',
     risky: true,
-    label: 'Réinitialiser le spouleur d’impression',
     icon: 'print',
     group: 'maintenance',
     confirm: true,
     bulk: true,
-    hint: 'Le service est arrêté, la file d’impression est vidée, puis le service redémarre : les travaux en attente sont perdus.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     type: 'sfc_scan',
-    label: 'Vérifier l’intégrité système (sfc)',
     icon: 'health_and_safety',
     group: 'maintenance',
     confirm: true,
     bulk: true,
-    hint: 'Compter 10 à 20 minutes, pendant lesquelles le poste est sollicité.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     type: 'dism_restore_health',
     risky: true,
-    label: 'Réparer l’image système (DISM)',
     icon: 'build',
     group: 'maintenance',
     confirm: true,
     bulk: true,
-    hint: 'Jusqu’à une heure. Les correctifs sont téléchargés depuis Windows Update ou le serveur WSUS du poste.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     type: 'dism_component_cleanup',
     risky: true,
-    label: 'Nettoyer le magasin de composants (DISM)',
     icon: 'cleaning_services',
     group: 'maintenance',
     confirm: true,
     bulk: true,
-    hint: 'Libère de l’espace disque ; compter plusieurs dizaines de minutes.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     type: 'chkdsk_scan',
-    label: 'Analyser le disque (chkdsk)',
     icon: 'storage',
     group: 'maintenance',
     confirm: true,
     bulk: true,
-    hint: 'Analyse en ligne : elle signale les erreurs sans les corriger, le poste reste utilisable.',
-  },
-  {
+    withHint: true,
+  }),
+  entry({
     // Diagnostics: bulk: false on purpose. Their value is reading one machine's
     // output; fired on the whole fleet they produce a hundred reports nobody
     // opens, at the price of a hundred commands.
     type: 'gpo_report',
-    label: 'Rapport de stratégies (gpresult)',
     icon: 'fact_check',
     group: 'diagnostic',
     confirm: false,
     bulk: false,
-  },
-  {
+  }),
+  entry({
     type: 'net_config',
-    label: 'Configuration réseau (ipconfig)',
     icon: 'lan',
     group: 'diagnostic',
     confirm: false,
     bulk: false,
-  },
+  }),
 ];
 
 export interface CommandActionGroup {
@@ -323,14 +343,7 @@ export interface CommandActionGroup {
 
 // Every group of the catalogue must be here: a group left out vanishes from
 // every menu, its actions with it (audit B12, « Rafraîchir l'inventaire »).
-const groupOrder: CommandGroup[] = [
-  'defender',
-  'windows_update',
-  'inventory',
-  'power',
-  'maintenance',
-  'diagnostic',
-];
+const groupOrder: CommandGroup[] = GROUPS;
 
 /**
  * Whether a permission set lets someone trigger `action`: the everyday grant
@@ -354,13 +367,20 @@ export function commandActionGroups(
   const allowed = (a: CommandAction) =>
     options.permissions === undefined || canRunCommand(options.permissions, a);
   return groupOrder
-    .map((group) => ({
-      group,
-      label: commandGroupLabels[group],
-      actions: commandActions.filter(
-        (a) => a.group === group && (!options.bulkOnly || a.bulk) && allowed(a),
-      ),
-    }))
+    .map((group) => {
+      const section = {
+        group,
+        actions: commandActions.filter(
+          (a) => a.group === group && (!options.bulkOnly || a.bulk) && allowed(a),
+        ),
+      } as CommandActionGroup;
+      // Read when shown, like the actions' labels.
+      Object.defineProperty(section, 'label', {
+        get: () => commandGroupLabel(group),
+        enumerable: true,
+      });
+      return section;
+    })
     .filter((section) => section.actions.length > 0);
 }
 
@@ -369,26 +389,26 @@ export function commandActionGroups(
  * value: a type this build does not know (an older console against a newer
  * server) must still be readable, not blank.
  */
-const packageCommandLabels: Record<string, string> = {
-  package_install: 'Installation de logiciel',
-  package_uninstall: 'Désinstallation de logiciel',
-};
-
 export function commandTypeLabel(type: string): string {
-  return commandActions.find((a) => a.type === type)?.label ?? packageCommandLabels[type] ?? type;
+  return Object.prototype.hasOwnProperty.call(catalogue.fr.actions, type)
+    ? t(`commands.actions.${type}.label`)
+    : type;
 }
 
 /** A history row's label: the type, and for a deployment the package it carried. */
 export function commandRowLabel(cmd: Pick<Command, 'type' | 'package_name'>): string {
   const label = commandTypeLabel(cmd.type);
-  return cmd.package_name ? `${label} — ${cmd.package_name}` : label;
+  return cmd.package_name ? t('commands.rowLabel', { label, package: cmd.package_name }) : label;
 }
 
-const ALREADY_THERE: Record<string, string> = {
-  pending: 'déjà en attente',
-  delivered: 'déjà transmise',
-  running: 'déjà en cours',
-};
+const ALREADY_THERE = ['pending', 'delivered', 'running'];
+
+/** A command's status in the language shown; the raw value for one unknown. */
+export function commandStatusLabel(status: string): string {
+  return Object.prototype.hasOwnProperty.call(catalogue.fr.status, status)
+    ? t(`commands.status.${status}`)
+    : status;
+}
 
 /**
  * What a single-poste send did, as a notification. The server creates nothing
@@ -400,15 +420,13 @@ export function singleSendNotification(
   action: Pick<CommandAction, 'label'>,
   res: CreateCommandsResponse,
 ): { type: 'positive' | 'warning' | 'negative'; message: string } {
-  if (res.count > 0) return { type: 'positive', message: 'Commande envoyée' };
+  if (res.count > 0) return { type: 'positive', message: t('commands.send.sent') };
   if ((res.revoked ?? 0) > 0) {
-    return {
-      type: 'negative',
-      message: `« ${action.label} » non envoyée : le token de ce poste est révoqué.`,
-    };
+    return { type: 'negative', message: t('commands.send.revoked', { label: action.label }) };
   }
-  const where = ALREADY_THERE[res.reason ?? ''] ?? ALREADY_THERE.pending;
-  return { type: 'warning', message: `« ${action.label} » est ${where} sur ce poste.` };
+  const reason = ALREADY_THERE.includes(res.reason ?? '') ? res.reason! : 'pending';
+  const where = t(`commands.send.where.${reason}`);
+  return { type: 'warning', message: t('commands.send.already', { label: action.label, where }) };
 }
 
 export interface CreateCommandsPayload {
@@ -473,6 +491,14 @@ export interface Command {
   finished_at: string | null;
   result_output: string | null;
   error: string | null;
+  /**
+   * What the console words the verdict from (`commandResultText`): the
+   * `error` of a failed command, the `result_output` of a succeeded one —
+   * written by the server, or by the agent. Optional: an older server sends
+   * neither, and a row stored before, or a tool's own output, has none.
+   */
+  result_code?: string | null;
+  result_params?: Record<string, unknown> | null;
 }
 
 export interface CommandList {
@@ -518,24 +544,31 @@ export function commandConfirm(
   withSession = 0,
 ): CommandConfirm {
   const plural = count > 1;
-  const target = plural ? `${count} postes` : 'ce poste';
   const disruptive = isDisruptive(action);
-  const lines = [`Lancer « ${action.label} » sur ${target} ?`];
+  const label = action.label;
+  const lines = [
+    plural
+      ? t('commands.confirm.questionMany', { label, count })
+      : t('commands.confirm.questionOne', { label }),
+  ];
   if (disruptive && withSession > 0) {
     lines.push(
       plural
-        ? `Dont ${withSession} avec une session ouverte.`
-        : 'Une session utilisateur est ouverte sur ce poste.',
+        ? t('commands.confirm.withSessions', { count: withSession })
+        : t('commands.confirm.withSessionOne'),
     );
   }
-  if (action.hint) lines.push(action.hint);
+  const hint = action.hint;
+  if (hint) lines.push(hint);
   const okLabel = disruptive
-    ? action.label.replace(' le poste', plural ? ` ${count} postes` : ' le poste')
+    ? plural
+      ? t(`commands.actions.${action.type}.okMany`, { count })
+      : label
     : plural
-      ? `Lancer sur ${count} postes`
-      : 'Lancer';
+      ? t('commands.confirm.runMany', { count })
+      : t('commands.confirm.runOne');
   return {
-    title: action.label,
+    title: label,
     message: lines.join(' '),
     ok: {
       label: okLabel,
@@ -543,7 +576,7 @@ export function commandConfirm(
       unelevated: true,
       noCaps: true,
     },
-    cancel: { label: 'Annuler', flat: true, noCaps: true },
+    cancel: { label: t('commands.confirm.cancel'), flat: true, noCaps: true },
     persistent: true,
   };
 }
@@ -564,20 +597,32 @@ export function bulkSendNotification(res: CreateCommandsResponse): {
   // in a notification is worse than an undercount.
   const skipped = res.skipped ?? 0;
   const revoked = res.revoked ?? 0;
-  const revokedPart = revoked > 0 ? `${revoked} au token révoqué` : '';
   if (res.count === 0 && (skipped > 0 || revoked > 0)) {
     const parts = [
-      skipped > 0 ? `cette commande est déjà en attente sur ${skipped} poste(s)` : '',
-      revokedPart ? `${revoked} poste(s) au token révoqué` : '',
+      skipped > 0 ? t('commands.bulk.alreadyEverywhere', { count: skipped }, skipped) : '',
+      revoked > 0 ? t('commands.bulk.revokedPostes', { count: revoked }, revoked) : '',
     ].filter(Boolean);
-    return { type: 'warning', message: `Rien à envoyer : ${parts.join(' ; ')}.` };
+    return {
+      type: 'warning',
+      message: t('commands.bulk.nothing', {
+        parts: parts.join(t('commands.bulk.partsSeparator')),
+      }),
+    };
   }
-  const sent = `${res.count} commande(s) envoyée(s)`;
-  const left = [skipped > 0 ? `${skipped} déjà en attente` : '', revokedPart].filter(Boolean);
+  const sent = t('commands.bulk.sent', { count: res.count }, res.count);
+  const left = [
+    skipped > 0 ? t('commands.bulk.alreadyPending', { count: skipped }) : '',
+    revoked > 0 ? t('commands.bulk.revoked', { count: revoked }) : '',
+  ].filter(Boolean);
   return {
     // Skipped ones are routine (pressed twice); a revoked poste is not.
     type: revoked > 0 ? 'warning' : 'positive',
-    message: left.length ? `${sent} — ${left.join(', ')}, ignoré(s)` : sent,
+    message: left.length
+      ? t('commands.bulk.sentAndLeft', {
+          sent,
+          left: left.join(t('commands.bulk.leftSeparator')),
+        })
+      : sent,
   };
 }
 
@@ -591,4 +636,420 @@ export async function createCommands(
 export async function listCommands(params: ListCommandsParams = {}): Promise<CommandList> {
   const { data } = await api.get<CommandList>('/commands', { params });
   return data;
+}
+
+// --- Verdicts, worded from their codes ---------------------------------------
+
+type Params = Record<string, unknown>;
+
+/** Whether `code` names a sentence of the catalogue (`commands.results`). */
+function knownCode(code: string): boolean {
+  let node: unknown = catalogue.fr.results;
+  for (const part of code.split('.')) {
+    if (typeof node !== 'object' || node === null) return false;
+    if (!Object.prototype.hasOwnProperty.call(node, part)) return false;
+    node = (node as Record<string, unknown>)[part];
+  }
+  return typeof node === 'string';
+}
+
+/** A parameter as the sentence shows it: the server's are flat values. */
+function text(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
+function count(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function word(key: string, named: Params = {}, plural?: number): string {
+  return plural === undefined ? t(key, named) : t(key, named, plural);
+}
+
+/** « 12 min », « 1 h 05 », « moins d'une minute » — as the server writes it. */
+function elapsed(minutes: number): string {
+  if (minutes < 1) return word('commands.words.elapsed.lessThanMinute');
+  if (minutes < 60) return word('commands.words.elapsed.minutes', { minutes });
+  return word('commands.words.elapsed.hours', {
+    hours: Math.floor(minutes / 60),
+    minutes: String(minutes % 60).padStart(2, '0'),
+  });
+}
+
+function site(p: Params): string {
+  const kind = p.site_kind === 'location' ? 'location' : 'domain';
+  return word(`commands.words.site.${kind}`, { site: text(p.site) });
+}
+
+function powerWord(form: 'noun' | 'label', p: Params): string {
+  return word(`commands.words.power.${form}.${p.action === 'shutdown' ? 'shutdown' : 'reboot'}`);
+}
+
+/** What let a package run (the agent's trust note), or ''. */
+function trustNote(p: Params): string {
+  if (p.trust === 'signer') return word('commands.words.trustSigner', { by: text(p.by) });
+  if (p.trust !== 'publisher') return '';
+  const note = word('commands.words.trustPublisher', { by: text(p.by) });
+  return p.revocation_offline === true ? note + word('commands.words.revocationOffline') : note;
+}
+
+function wordFrom(table: object, prefix: string, key: unknown): string {
+  return typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key)
+    ? word(`${prefix}.${key}`)
+    : '';
+}
+
+/**
+ * A message the agent quotes in another under `key` (its `msg.Nest`): the
+ * text as `key`, its code as `key_code` and its parameters as `key_<name>`.
+ * Worded in the language shown when this console knows the code, else null.
+ */
+function nestedMessage(p: Params, key: string): string | null {
+  const code = p[`${key}_code`];
+  if (typeof code !== 'string') return null;
+  const prefix = `${key}_`;
+  const inner = Object.fromEntries(
+    Object.entries(p)
+      .filter(([k]) => k.startsWith(prefix) && k !== `${key}_code`)
+      .map(([k, v]) => [k.slice(prefix.length), v]),
+  );
+  return commandMessage(code, inner);
+}
+
+/** A quoted message, worded when it can be, else its text as the agent wrote it. */
+function nested(p: Params, key: string): string {
+  return nestedMessage(p, key) ?? text(p[key]);
+}
+
+/**
+ * A list parameter (the agent's `msg.listParam`): one item per line, its
+ * fields separated by tabs, the last field keeping any tab of its own.
+ */
+function listItems(value: unknown, fields: number): string[][] {
+  const joined = text(value);
+  if (!joined) return [];
+  return joined.split('\n').map((line) => {
+    const parts = line.split('\t');
+    const item = [...parts.slice(0, fields - 1), parts.slice(fields - 1).join('\t')];
+    while (item.length < fields) item.push('');
+    return item;
+  });
+}
+
+/** The lines of a Windows Update install's report (wu.install_report). */
+function wuInstallReport(p: Params): string {
+  const selected = count(p.selected);
+  const installed = count(p.installed);
+  const skipped = count(p.skipped);
+  const lines: string[] = [];
+  if (selected === 0 && skipped === 0) lines.push(word('commands.words.wuInstall.upToDate'));
+  else if (selected === 0) lines.push(word('commands.words.wuInstall.nothingInstallable'));
+  else lines.push(word('commands.words.wuInstall.selected', { selected, installed }, selected));
+  if (skipped > 0) {
+    lines.push(word('commands.words.wuInstall.skipped', { count: skipped }, skipped));
+  }
+  for (const [result = '', hresult = '', name = ''] of listItems(p.updates, 3)) {
+    const label = wordFrom(catalogue.fr.words.wuResult, 'commands.words.wuResult', result);
+    lines.push(
+      hresult
+        ? word('commands.words.wuInstall.updateHresult', { name, result: label, hresult })
+        : word('commands.words.wuInstall.update', { name, result: label }),
+    );
+  }
+  const missing = selected - installed;
+  if (missing > 0) {
+    lines.push(word('commands.words.wuInstall.notDownloaded', { count: missing }, missing));
+  }
+  if (p.reboot === true) lines.push('', word('commands.words.wuInstall.reboot'));
+  return lines.join('\n');
+}
+
+const WU_RESET_FAILURES = new Set(['stop_failed', 'rename_failed', 'restart_failed']);
+
+function wuResetService(name: string): string {
+  const label =
+    wordFrom(catalogue.fr.words.wuReset.services, 'commands.words.wuReset.services', name) || name;
+  return word('commands.words.wuReset.service', { label, name });
+}
+
+function wuResetFolder(key: string): string {
+  return wordFrom(catalogue.fr.words.wuReset.folders, 'commands.words.wuReset.folders', key) || key;
+}
+
+/** What a failed step of a reset was doing. */
+function wuResetWhat(kind: string, subject: string, arg: string): string {
+  if (kind === 'rename_failed') return word('commands.words.wuReset.rename_failed', { path: arg });
+  return word(`commands.words.wuReset.${kind === 'stop_failed' ? 'stop' : 'restart'}_failed`, {
+    service: wuResetService(subject),
+  });
+}
+
+/** The steps of a Windows Update reset (wu_reset.report); `e<n>` quotes the nth failure's error. */
+function wuResetReport(p: Params): string {
+  const lines: string[] = [];
+  let failures = 0;
+  for (const [kind = '', subject = '', arg = ''] of listItems(p.steps, 3)) {
+    if (WU_RESET_FAILURES.has(kind)) {
+      failures += 1;
+      lines.push(
+        word('commands.words.wuReset.failed', {
+          what: wuResetWhat(kind, subject, arg),
+          detail: nested(p, `e${failures}`),
+        }),
+      );
+      continue;
+    }
+    switch (kind) {
+      case 'already_stopped':
+      case 'stopped':
+      case 'restarted':
+        lines.push(word(`commands.words.wuReset.${kind}`, { service: wuResetService(subject) }));
+        break;
+      case 'kept':
+        lines.push(word('commands.words.wuReset.kept'));
+        break;
+      case 'renamed':
+        lines.push(
+          word('commands.words.wuReset.renamed', { folder: wuResetFolder(subject), backup: arg }),
+        );
+        break;
+      case 'absent':
+        lines.push(word('commands.words.wuReset.absent', { folder: wuResetFolder(subject) }));
+        break;
+      case 'next':
+        lines.push('', word('commands.words.wuReset.next'));
+        break;
+    }
+  }
+  return lines.join('\n');
+}
+
+/** The lines of a spooler reset that went partly (spooler.report). */
+function spoolerReport(p: Params): string {
+  const lines = [word('commands.words.spoolerReport.stopped')];
+  if (p.purge !== undefined) {
+    lines.push(
+      word('commands.words.spoolerReport.purgeIncomplete', { detail: nested(p, 'purge') }),
+    );
+  } else {
+    const removed = count(p.removed);
+    lines.push(word('commands.words.spoolerReport.purged', { removed }, removed));
+  }
+  lines.push(
+    word(`commands.words.spoolerReport.${p.restarted === true ? 'restarted' : 'notRestarted'}`),
+  );
+  return lines.join('\n');
+}
+
+/**
+ * The parameters a code's sentence is filled with — its own, and the pieces
+ * built from them — and the number its plural follows, if any.
+ */
+function filled(code: string, p: Params): { named: Params; plural?: number } {
+  const named: Params = Object.fromEntries(Object.entries(p).map(([k, v]) => [k, text(v)]));
+  const words = catalogue.fr.words;
+  switch (code) {
+    case 'wol.address_not_allowed':
+    case 'wol.subnet_not_allowed': {
+      named.allowed =
+        p.allowed === null || p.allowed === undefined
+          ? word('commands.words.privateRanges')
+          : text(p.allowed);
+      const fallback = word('commands.words.defaultMask', {
+        prefix: text(p.default_prefix_length),
+      });
+      named.masks =
+        p.prefix_length === null || p.prefix_length === undefined
+          ? word('commands.words.masksDefault', { fallback })
+          : word('commands.words.masksReported', { prefix: text(p.prefix_length), fallback });
+      return { named };
+    }
+    case 'wol.sent':
+    case 'wol.relay.sent':
+      return { named, plural: count(p.copies) };
+    case 'wol.no_relay':
+      named.site = site(p);
+      return { named };
+    case 'wol.relay_queued':
+      named.site = site(p);
+      return { named, plural: count(p.peers) };
+    case 'wol.relay_already':
+      named.state = word(
+        `commands.words.relayState.${p.state === 'delivered' ? 'delivered' : 'pending'}`,
+      );
+      named.elapsed = elapsed(count(p.minutes));
+      return { named };
+    case 'agent.power_pending':
+    case 'power.too_soon':
+      named.noun = powerWord('noun', p);
+      return { named };
+    case 'power.scheduled':
+    case 'power.schedule_failed':
+      named.label = powerWord('label', p);
+      return { named };
+    case 'wu.scan':
+      return { named, plural: count(p.count) };
+    case 'wu.install_incomplete':
+      return { named, plural: count(p.failed) };
+    case 'wu.known_error':
+      named.hint = wordFrom(words.wuHints, 'commands.words.wuHints', `h${text(p.hresult)}`);
+      return { named };
+    case 'wu.install_result':
+      named.result = wordFrom(words.wuResult, 'commands.words.wuResult', p.result);
+      return { named };
+    case 'inventory.scan':
+    case 'inventory.scan_without_software':
+      for (const key of ['disks', 'volumes', 'nics', 'software'] as const) {
+        const n = count(p[key]);
+        named[key] = word(`commands.words.inventory.${key}`, { count: n }, n);
+      }
+      return { named };
+    case 'chkdsk.offline_repair':
+      named.meaning = wordFrom(words.chkdsk, 'commands.words.chkdsk', p.meaning);
+      return { named };
+    case 'spooler.reset':
+      return { named, plural: count(p.removed) };
+    case 'deploy.no_step':
+      named.step = wordFrom(words.deployStep, 'commands.words.deployStep', p.action);
+      return { named };
+    case 'deploy.exit_code': {
+      const note = trustNote(p);
+      named.trust = note ? word('commands.words.trustInParentheses', { note }) : '';
+      return { named };
+    }
+    case 'deploy.done': {
+      named.verb = wordFrom(words.deployVerb, 'commands.words.deployVerb', p.action);
+      named.what = text(p.name) || word('commands.words.packageId', { id: text(p.package_id) });
+      named.how = [word('commands.words.method', { method: text(p.method) }), trustNote(p)]
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join(word('commands.words.howSeparator'));
+      named.reboot = p.reboot === true ? word('commands.words.rebootToFinish') : '';
+      return { named };
+    }
+    case 'deploy.winget_done':
+      named.already = p.already === true ? word('commands.words.wingetAlready') : '';
+      return { named };
+    case 'wu.install_report':
+      named.report = wuInstallReport(p);
+      return { named };
+    case 'wu_reset.report':
+      named.report = wuResetReport(p);
+      return { named };
+    case 'wu_reset.incomplete':
+      named.failed = listItems(p.failed, 3)
+        .map(([kind = '', subject = '', arg = '']) => wuResetWhat(kind, subject, arg))
+        .join(word('commands.words.wuReset.separator'));
+      return { named };
+    case 'spooler.report':
+      named.report = spoolerReport(p);
+      return { named };
+    case 'spooler.files_not_removed':
+      return { named, plural: count(p.failed) };
+    case 'deploy.both_refused': {
+      // As the agent writes it: method A's refusal gets its prefix unless
+      // its French already starts with it (the method_a.* refusals).
+      named.b = nested(p, 'b');
+      const refusal = nested(p, 'a');
+      named.a = text(p.a).startsWith(catalogue.fr.words.method.replace('{method}', 'A'))
+        ? refusal
+        : word('commands.words.methodA', { refusal });
+      return { named };
+    }
+  }
+  return { named };
+}
+
+/**
+ * The sentence of a verdict's code in the language shown, or null for a
+ * code this console does not know (a newer server or agent): the caller
+ * then shows the stored text. A verdict a relay emitted (`params.relay`) is
+ * signed with the relay's name, as the server signs its text.
+ */
+export function commandMessage(
+  code: string | null | undefined,
+  params?: Record<string, unknown> | null,
+): string | null {
+  if (!code || !knownCode(code)) return null;
+  const p = params ?? {};
+  const { named, plural } = filled(code, p);
+  // A detail that is itself one of the agent's coded messages (detail_code,
+  // its parameters as detail_<name>): worded too, not quoted in French.
+  const detail = nestedMessage(p, 'detail');
+  if (detail !== null) named.detail = detail;
+  const sentence = word(`commands.results.${code}`, named, plural);
+  const relay = typeof p.relay === 'string' ? p.relay : '';
+  return relay ? word('commands.relayed', { relay, text: sentence }) : sentence;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * A stored text with the note that ends a text cut short — the server's or
+ * the agent's, always written in French — in the language shown.
+ */
+function withTruncationWorded(stored: string): string {
+  const server = catalogue.fr.truncated.server;
+  if (stored.endsWith(server)) {
+    return stored.slice(0, -server.length) + word('commands.truncated.server');
+  }
+  const [before = '', after = ''] = catalogue.fr.truncated.agent.split('{kib}');
+  const agent = new RegExp(`${escapeRegExp(before)}(\\d+)${escapeRegExp(after)}$`);
+  const cut = agent.exec(stored);
+  if (cut) {
+    return stored.slice(0, cut.index) + word('commands.truncated.agent', { kib: cut[1] });
+  }
+  return stored;
+}
+
+type Verdict = Pick<
+  Command,
+  'status' | 'result_output' | 'error' | 'result_code' | 'result_params'
+>;
+
+/**
+ * A command's output or error as the console shows it: worded from its code
+ * in the language shown when the code words that text — the error of a
+ * failed command, the output of a succeeded one — and this console knows
+ * it; else the stored text as the server or the agent wrote it (a tool's
+ * output, a row stored before codes, an older agent), its truncation note
+ * worded. The output of a failed command, when the agent wrote it (the
+ * steps of a partial reset, an install's report), is worded from the code
+ * it carries beside the error's (`output_code`, `output_<name>`).
+ */
+export function commandResultText(cmd: Verdict, kind: 'output' | 'error'): string {
+  const stored = (kind === 'error' ? cmd.error : cmd.result_output) ?? '';
+  if (!stored) return '';
+  const worded = cmd.status === 'failed' ? 'error' : 'output';
+  if (kind === worded) {
+    const sentence = commandMessage(cmd.result_code, cmd.result_params);
+    if (sentence !== null) return sentence;
+  } else if (kind === 'output' && cmd.result_code && cmd.result_params) {
+    const report = nestedMessage(cmd.result_params, 'output');
+    if (report !== null) return report;
+  }
+  return withTruncationWorded(stored);
+}
+
+/** A row's verdict in one line of text: its error, else its output. */
+export function commandVerdictText(cmd: Verdict): string {
+  return commandResultText(cmd, 'error') || commandResultText(cmd, 'output');
+}
+
+/**
+ * What the server did about one poste asked to wake (`WakeResult.detail`),
+ * in the language shown: worded from `detail_code` and `detail_params` when
+ * this console knows the code, else the server's own sentence; null when
+ * there is none.
+ */
+export function wakeDetailText(
+  detail: string | null,
+  code?: string | null,
+  params?: Record<string, unknown> | null,
+): string | null {
+  return commandMessage(code, params) ?? detail;
 }

@@ -24,6 +24,7 @@ jobs:
   secrets:
     name: Secrets commis (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -47,6 +48,7 @@ jobs:
   python-deps:
     name: Dépendances Python (pip-audit)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: backend
@@ -63,6 +65,7 @@ jobs:
   js-deps:
     name: Dépendances JavaScript (npm audit)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: frontend
@@ -79,6 +82,7 @@ jobs:
   go-deps:
     name: Dépendances Go (govulncheck)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: agent
@@ -108,6 +112,7 @@ jobs:
   image:
     name: Image backend (Trivy)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -123,6 +128,7 @@ jobs:
   image-frontend:
     name: Image frontend (Trivy)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -138,6 +144,7 @@ jobs:
   semgrep:
     name: Analyse statique (Semgrep)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

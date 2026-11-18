@@ -1,3 +1,4 @@
+import { intlTag, t } from 'src/i18n';
 /**
  * The machine list's « Utilisation » filter, as pure functions.
  *
@@ -27,15 +28,15 @@ export interface UsageThresholds {
 /** The bounds a preset stands for. `custom` has none of its own. */
 export function usagePresetBounds(
   preset: Exclude<UsagePreset, 'custom'>,
-  t: UsageThresholds,
+  thresholds: UsageThresholds,
 ): UsageBounds {
   switch (preset) {
     case 'low':
-      return { below: t.low, above: null };
+      return { below: thresholds.low, above: null };
     case 'mid':
-      return { below: t.high, above: t.low };
+      return { below: thresholds.high, above: thresholds.low };
     case 'high':
-      return { below: null, above: t.high };
+      return { below: null, above: thresholds.high };
   }
 }
 
@@ -44,11 +45,14 @@ export function usagePresetBounds(
  * all, `custom` when there are bounds no preset matches — or no thresholds
  * yet to match them against.
  */
-export function usagePresetOf(bounds: UsageBounds, t: UsageThresholds | null): UsagePreset | null {
+export function usagePresetOf(
+  bounds: UsageBounds,
+  thresholds: UsageThresholds | null,
+): UsagePreset | null {
   if (bounds.below === null && bounds.above === null) return null;
-  if (t) {
+  if (thresholds) {
     for (const preset of ['low', 'mid', 'high'] as const) {
-      const p = usagePresetBounds(preset, t);
+      const p = usagePresetBounds(preset, thresholds);
       if (p.below === bounds.below && p.above === bounds.above) return preset;
     }
   }
@@ -57,19 +61,26 @@ export function usagePresetOf(bounds: UsageBounds, t: UsageThresholds | null): U
 
 /** Hours as the console writes them: « 12,4 h », « 0 h ». */
 export function hoursLabel(hours: number): string {
-  return `${hours.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
+  return t('machines.usage.hours', {
+    hours: hours.toLocaleString(intlTag(), { maximumFractionDigits: 1 }),
+  });
 }
 
 /** The chip under the search bar, in words: what the list is narrowed to. */
 export function usageFilterLabel(bounds: UsageBounds, days: number | null): string {
-  const window = days ? ` sur ${days} j` : '';
   const { below, above } = bounds;
+  // The window named when there is one: « … sur 7 j ».
+  const over = days ? 'Over' : '';
   if (below !== null && above !== null) {
-    return `Allumés entre ${hoursLabel(above)} et ${hoursLabel(below)}${window}`;
+    return t(`machines.usage.between${over}`, {
+      above: hoursLabel(above),
+      below: hoursLabel(below),
+      days,
+    });
   }
-  if (below !== null) return `Allumés moins de ${hoursLabel(below)}${window}`;
-  if (above !== null) return `Allumés plus de ${hoursLabel(above)}${window}`;
-  return 'Utilisation';
+  if (below !== null) return t(`machines.usage.below${over}`, { below: hoursLabel(below), days });
+  if (above !== null) return t(`machines.usage.above${over}`, { above: hoursLabel(above), days });
+  return t('machines.usage.none');
 }
 
 /**
@@ -95,20 +106,20 @@ export function usageSettingsError(
 ): string | null {
   const whole = (v: unknown) => typeof v === 'number' && Number.isInteger(v);
   if (!whole(windowDays) || (windowDays as number) < 1 || (windowDays as number) > 90) {
-    return 'La fenêtre doit être un nombre entier de jours, de 1 à 90.';
+    return t('machines.usage.settings.window');
   }
   if (!whole(lowHours) || (lowHours as number) < 0) {
-    return 'Le seuil « peu utilisé » doit être un nombre entier d’heures.';
+    return t('machines.usage.settings.low');
   }
   if (!whole(highHours) || (highHours as number) < 1) {
-    return 'Le seuil « toujours allumé » doit être un nombre entier d’heures, au moins 1.';
+    return t('machines.usage.settings.high');
   }
   if ((lowHours as number) >= (highHours as number)) {
-    return 'Le seuil « peu utilisé » doit rester sous le seuil « toujours allumé ».';
+    return t('machines.usage.settings.order');
   }
   const hours = 24 * (windowDays as number);
   if ((highHours as number) > hours) {
-    return `Le seuil « toujours allumé » dépasse les ${hours} heures que compte la fenêtre.`;
+    return t('machines.usage.settings.highOverWindow', { hours });
   }
   return null;
 }

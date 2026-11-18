@@ -129,8 +129,8 @@ func TestRelayWakeEmitsOnEachSubnetAndSaysSo(t *testing.T) {
 	// The verdict names the MAC and each destination: an administrator whose
 	// poste did not come back reads it to know which wire the frame went on.
 	for _, want := range []string{"AA:BB:CC:DD:EE:FF", "192.168.1.255:9", "10.4.255.255:9"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("output lacks %q:\n%s", want, out.Text)
 		}
 	}
 }

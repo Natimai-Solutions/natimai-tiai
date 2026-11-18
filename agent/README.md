@@ -32,6 +32,7 @@ internal/
   acl/       DACL SYSTEM + Administrateurs sur HKLM\SOFTWARE\Tiai et %ProgramData%\Tiai (mêmes SDDL que MSI/GPO)
   winpath/   chemins absolus des binaires système (System32, powershell.exe) — jamais le PATH
   agent/     boucle de polling + exécution des commandes
+  msg/       messages propres de l'agent : code + paramètres pour la console, texte français à côté
   models/    types de la couche transport
 ```
 
@@ -830,6 +831,54 @@ journalisée et l'agent se connecte en direct plutôt que de refuser de démarre
   anciens partent jusqu'à repasser sous le plafond, le paquet à télécharger
   compté pour sa taille annoncée et jamais retiré (audit S24). Chaque retrait
   est une ligne `deploy: removed package folder …` de `agent.log`.
+
+## Messages des résultats : code et texte
+
+Ce que l'agent écrit lui-même dans le résultat d'une commande — un refus, un
+délai dépassé, « 3 mise(s) à jour en attente. », la ligne de fin d'un
+déploiement — part sous deux formes (console bilingue, plan
+`dev/plan-console-bilingue.md`, I5) :
+
+- le **texte français** dans `output` ou `error`, comme toujours : c'est ce
+  qu'un serveur plus ancien enregistre et affiche ;
+- un **code** et ses **paramètres**, champs facultatifs `message_code` et
+  `message_params` du résultat, que la console met en mots dans la langue de
+  son lecteur. Le code décrit l'`error` d'un résultat en échec, l'`output`
+  d'un résultat réussi — le texte entier, jamais une partie.
+
+Les phrases sont écrites dans `internal/msg/catalogue.go` et nulle part
+ailleurs ; le catalogue de la console
+(`frontend/src/i18n/messages/commands.ts`) doit dire la même chose mot pour
+mot, ce que vérifient de part et d'autre les cas partagés
+`internal/msg/testdata/messages_fr.json` (à régénérer après un changement de
+formulation : `go test ./internal/msg -update`).
+
+Quand le `detail` d'un message est lui-même un message codé de l'agent (un
+téléchargement refusé parce que le serveur est occupé, une signature refusée
+parce que le fichier n'est pas signé), `msg.Wrap` transmet son code et ses
+paramètres : `detail_code` et `detail_<nom>`. La console écrit alors le
+détail dans la langue du lecteur.
+
+Restent sans code, en texte seul : la **sortie des outils Windows** (`ipconfig`,
+`gpresult`, `sfc`…, dans la langue du poste, citée telle quelle — y compris dans
+un paramètre `detail`, `summary` ou `output`), les titres des mises à jour et
+les messages d'erreur de Windows cités dans un compte rendu, et quelques causes
+internes citées dans un détail (clé en double ou inattendue d'un manifeste,
+signature Authenticode illisible, « powershell: aucune sortie JSON »). Les
+textes composés de l'agent — compte rendu d'une installation Windows Update,
+étapes d'une réinitialisation de Windows Update, remise à zéro partielle du
+spouleur, double refus « méthode B … ; méthode A … », phrase « Redémarrage
+requis… » ajoutée à la sortie de DISM — sont codés : une liste passe dans un
+seul paramètre, un élément par ligne et ses champs séparés par des
+tabulations ; l'erreur citée par un élément est imbriquée comme un détail
+(`e1`, `e1_code`, `e1_<nom>`). La sortie d'une commande échouée, quand l'agent
+l'a écrite, porte son code à côté de celui de l'erreur (`output_code`,
+`output_<nom>`). Un message dont les paramètres dépassent ce que le serveur
+garde (16 clés, 1 024 caractères par texte), ou qu'une liste ne peut pas
+porter (un titre avec un saut de ligne), part sans code ; une sortie de
+commande échouée trop longue perd seulement son propre code. La note « […]
+sortie tronquée à N Kio par l'agent » n'est pas un code : la console la
+reconnaît en fin de texte.
 
 ## Build & essai
 

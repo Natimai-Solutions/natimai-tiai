@@ -92,7 +92,7 @@ func TestInventoryScanSummarySaysWhenSoftwareIsOff(t *testing.T) {
 		Nics:     []models.Nic{{Key: "A"}},
 		Software: nil,
 	}
-	off := inventoryScanSummary(inv, false)
+	off := inventoryScanSummary(inv, false).Text
 	if !strings.Contains(off, "désactivé") {
 		t.Errorf("a disabled collection must say so, got %q", off)
 	}
@@ -101,7 +101,7 @@ func TestInventoryScanSummarySaysWhenSoftwareIsOff(t *testing.T) {
 	}
 
 	inv.Software = []models.Software{{Name: "7-Zip"}}
-	on := inventoryScanSummary(inv, true)
+	on := inventoryScanSummary(inv, true).Text
 	if !strings.Contains(on, "1 logiciel(s)") {
 		t.Errorf("an enabled collection must report its count, got %q", on)
 	}

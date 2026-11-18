@@ -1,6 +1,7 @@
 import type { AxiosError } from 'axios';
 import { api } from 'boot/axios';
 import type { ApiErrorBody } from './errors';
+import { intlTag, t } from 'src/i18n';
 
 /**
  * Maintenance: a cycle and an owner resolved over three levels (the poste,
@@ -159,7 +160,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** A deadline as a date alone, in the browser's time zone. */
 export function dueDate(value: string): string {
-  return new Date(value).toLocaleDateString('fr-FR');
+  return new Date(value).toLocaleDateString(intlTag());
 }
 
 /**
@@ -172,37 +173,44 @@ export function dueLabel(dueAt: string | null, now: Date = new Date()): string {
   const due = new Date(dueAt);
   const late = Math.floor((now.getTime() - due.getTime()) / DAY_MS);
   if (due.getTime() <= now.getTime()) {
-    if (late < 1) return "en retard depuis aujourd'hui";
-    return `en retard depuis ${late} jour${late > 1 ? 's' : ''}`;
+    if (late < 1) return t('maintenance.due.overdueToday');
+    return t('maintenance.due.overdueDays', { count: late }, late);
   }
-  return `échéance le ${dueDate(dueAt)}`;
+  return t('maintenance.due.dueOn', { date: dueDate(dueAt) });
 }
 
-export const MAINTENANCE_STATES: Record<MaintenanceState, { label: string; color: string }> = {
-  overdue: { label: 'En retard', color: 'negative' },
-  due_soon: { label: 'À échéance', color: 'orange' },
-  ok: { label: 'À jour', color: 'positive' },
-  excluded: { label: 'Exclu', color: 'grey-6' },
+/** Each state's colour; its label is `maintenance.states.<state>`. */
+export const MAINTENANCE_STATE_COLORS: Record<MaintenanceState, string> = {
+  overdue: 'negative',
+  due_soon: 'orange',
+  ok: 'positive',
+  excluded: 'grey-6',
 };
 
+function isState(state: string): state is MaintenanceState {
+  return Object.prototype.hasOwnProperty.call(MAINTENANCE_STATE_COLORS, state);
+}
+
 export function maintenanceStateLabel(state: string | null | undefined): string {
-  return state ? (MAINTENANCE_STATES[state as MaintenanceState]?.label ?? state) : '—';
+  if (!state) return '—';
+  return isState(state) ? t(`maintenance.states.${state}`) : state;
 }
 
 export function maintenanceStateColor(state: string | null | undefined): string {
-  return state ? (MAINTENANCE_STATES[state as MaintenanceState]?.color ?? 'grey') : 'grey';
+  return state && isState(state) ? MAINTENANCE_STATE_COLORS[state] : 'grey';
 }
 
-export const ORIGIN_LABELS: Record<Origin, string> = {
-  machine: 'propre au poste',
-  room: 'hérité de la salle',
-  global: 'défaut du parc',
-};
+/** Where a resolved cycle or owner comes from: « hérité de la salle »… */
+export function originLabel(origin: Origin): string {
+  return t(`maintenance.origins.${origin}`);
+}
 
 /** "90 jours (hérité de la salle)", or "exclu" for a zero cycle. */
 export function cycleLabel(days: number, origin: Origin): string {
-  const from = ORIGIN_LABELS[origin];
-  return days > 0 ? `${days} jours (${from})` : `exclu de la maintenance (${from})`;
+  const from = originLabel(origin);
+  return days > 0
+    ? t('maintenance.cycle.days', { days, from }, days)
+    : t('maintenance.cycle.excluded', { from });
 }
 
 export async function getMachineMaintenance(machineId: string): Promise<MachineMaintenance> {
@@ -433,5 +441,7 @@ export async function deleteSession(id: string): Promise<void> {
 /** « Responsable » as a level shows it: the name, and « (désactivé) » when it is. */
 export function ownerLabel(owner: UserRef | null | undefined): string {
   if (!owner) return '';
-  return owner.active === false ? `${owner.name} (désactivé)` : owner.name;
+  return owner.active === false
+    ? t('maintenance.ownerDeactivated', { name: owner.name })
+    : owner.name;
 }

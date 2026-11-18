@@ -11,11 +11,16 @@ from collections.abc import Iterable, Sequence
 
 from fastapi import Response
 
-# Excel on a French Windows reads a comma-separated file as one column: it
-# expects the list separator of the locale, which is a semicolon. This export
-# exists to be opened in Excel, so semicolon it is — the API's JSON is what a
-# script should be reading anyway.
+from app.features.user.models import Language
+
+# Excel reads a CSV with the list separator of the Windows regional settings,
+# not one the file declares: a semicolon on a French Windows, a comma on an
+# English one. The file follows the language the console asked for, since a
+# reader of the English console almost always has an English Windows; the
+# French file is the one it always was. The workbook (XLSX), the default
+# format, has no separator to guess.
 DELIMITER = ";"
+DELIMITERS: dict[Language, str] = {Language.FR: ";", Language.EN: ","}
 
 # Excel guesses the encoding of a file it has no BOM for, and guesses the ANSI
 # codepage — which turns every accented hostname and program name into mojibake.
@@ -41,18 +46,22 @@ def neutralize(value: object) -> object:
 
 
 def csv_response(
-    filename: str, header: Sequence[str], rows: Iterable[Sequence[object]]
+    filename: str,
+    header: Sequence[str],
+    rows: Iterable[Sequence[object]],
+    language: Language = Language.FR,
 ) -> Response:
     """Render rows as a downloadable CSV.
 
     Values are written through ``str`` except ``None``, which becomes an empty
     cell — a spreadsheet has no notion of "never reported", and "None" printed
     in a column of serial numbers reads as a serial number. Text that Excel would
-    run as a formula is neutralized (``neutralize``).
+    run as a formula is neutralized (``neutralize``). The separator follows
+    ``language`` (``DELIMITERS``).
     """
     buffer = io.StringIO()
     buffer.write(BOM)
-    writer = csv.writer(buffer, delimiter=DELIMITER, lineterminator="\r\n")
+    writer = csv.writer(buffer, delimiter=DELIMITERS[language], lineterminator="\r\n")
     writer.writerow(header)
     for row in rows:
         writer.writerow([neutralize(value) for value in row])

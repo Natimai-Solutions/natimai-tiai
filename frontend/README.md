@@ -20,6 +20,9 @@ npm run build        # génère dist/spa, servi par nginx (cf. Dockerfile)
 
 ```
 src/
+  boot/i18n.ts              vue-i18n, langue du compte ou du navigateur, pack Quasar
+  i18n/                     traductions : `t()` importable, langues offertes (locales.ts),
+                            catalogues par domaine dans messages/ (français et anglais)
   boot/axios.ts             instance axios (baseURL = API_BASE_URL, défaut /api/v1) ; sur 401,
                             un seul POST /auth/refresh partagé puis la requête rejouée
   services/session.ts       jeton d'accès en mémoire, logique du 401 et rafraîchissement
@@ -58,8 +61,39 @@ l'URL, et c'est la relecture de l'URL qui recharge la liste.
 
 L'interface est en français jusque dans les libellés internes de Quasar
 (pagination des tableaux, sélecteurs de date) : `framework.lang: 'fr'` dans
-`quasar.config.ts`. Une page ne surcharge un de ces libellés que lorsqu'elle
-veut autre chose que le pack.
+`quasar.config.ts`, puis le pack de la langue courante (`boot/i18n.ts`). Une
+page ne surcharge un de ces libellés que lorsqu'elle veut autre chose que le
+pack.
+
+## Langues
+
+La console est en français et en anglais (`dev/plan-console-bilingue.md`). Un
+compte choisit sa langue dans « Mon compte » ; sans choix, la console suit le
+navigateur.
+
+- Un texte d'interface vit dans un catalogue, `src/i18n/messages/<domaine>.ts`,
+  avec son français et son anglais côte à côte ; l'anglais est typé d'après le
+  français (`Translation`), une clé sans traduction ne compile pas.
+- Il s'écrit `t('domaine.cle')`, avec `t` importé de `src/i18n` — dans le
+  script comme dans le gabarit, jamais `$t` : les tests montent les
+  composants sans le plugin.
+- Jamais de `t()` au chargement d'un module ni dans une constante : la langue
+  change sans recharger la page. Colonnes et listes d'options sont des
+  `computed`, les utilitaires des fonctions.
+- Les dates et nombres se mettent en forme avec `intlTag()` (`fr-FR` ou
+  `en-GB`), jamais un `'fr-FR'` écrit en dur.
+- Le serveur envoie des codes et des paramètres à côté de son texte français
+  (problèmes de paquet, refus de validation, verdicts de commande, variables
+  du serveur…) : la console écrit la phrase ; un code inconnu garde le texte
+  du serveur. Les jeux de cas partagés `backend/tests/data/*_fr.json`
+  vérifient que le français de la console est celui du serveur.
+- Les messages des codes d'erreur de l'API sont dans
+  `src/i18n/messages/errorCodes.ts` ; le test backend `test_errors_unit.py`
+  vérifie que chaque code y figure en français et en anglais.
+- `src/i18n/noHardcodedFrench.spec.ts` refuse un texte d'interface français
+  hors des catalogues (une ligne qui doit le garder porte `i18n-ignore`).
+- Une nouvelle langue s'ajoute à `LOCALES` (`src/i18n/locales.ts`) et à chaque
+  catalogue, et n'est proposée qu'une fois complète.
 
 ## Thème clair et sombre
 
@@ -79,10 +113,10 @@ avant par `text-strong` ; une couleur posée en CSS par une variable `--ti-*`
   placeholder n'en est pas un).
 - Ce qui mène ailleurs est un lien (`router-link`, `:to`), jamais un `@click`
   sur une carte ou un bloc : atteignable au clavier, ouvrable dans un nouvel
-  onglet. Dans un tableau, le nom est le lien (classe `row-link`). Dans la
-  liste des postes, lui seul ouvre la fiche : le reste de la ligne est du
-  texte que l'on sélectionne et copie, double-clic compris. Les autres
-  tableaux gardent en plus la ligne cliquable à la souris.
+  onglet. Dans un tableau, le nom est le lien (classe `row-link`, souligné) et
+  lui seul ouvre la fiche : le reste de la ligne est du texte que l'on
+  sélectionne et copie, double-clic compris. Pas de `@row-click` ; une ligne
+  sans nom à suivre (journal d'audit) a un bouton.
 - Chaque page a un `h1` et un titre d'onglet (`meta.title` de la route).
 - Un état ne se dit pas qu'en couleur : le badge antivirus écrit « non à
   jour ».

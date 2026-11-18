@@ -7,6 +7,9 @@
 #
 # Les mises à jour de sécurité (Dependabot alerts) ignorent `schedule` et
 # `open-pull-requests-limit` : elles sont ouvertes dès la publication de l'avis.
+#
+# Rythme mensuel, deux PR ouvertes au plus par écosystème : moins de PR à
+# relire. Les correctifs de sécurité n'attendent pas ce rythme (ci-dessus).
 version: 2
 
 updates:
@@ -14,40 +17,45 @@ updates:
   - package-ecosystem: uv
     directory: /backend
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:00"
       timezone: Europe/Paris
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "deps(backend)"
     groups:
       # Les patchs/mineures passent en un lot : elles sont sans risque dans les
       # bornes de pyproject.toml et la CI (ruff, mypy, pytest) les tranche.
       #
-      # Les majeures ne sont volontairement pas groupées : sans groupe qui les
-      # capte, Dependabot ouvre une PR par mise à jour. Une majeure infusable
-      # ne peut donc pas retenir les autres en otage dans la même PR.
+      # Les majeures ont leur propre groupe : une majeure difficile ne retient
+      # pas les patchs/mineures en otage, et toutes les majeures du mois
+      # partent en une PR. Une majeure qui bloque les autres s'ignore le temps de la
+      # traiter (`ignore` ou commentaire `@dependabot ignore`).
       backend-mineures:
         patterns: ["*"]
         update-types: [minor, patch]
+      backend-majeures:
+        patterns: ["*"]
+        update-types: [major]
 
   # ── Frontend (npm) ─────────────────────────────────────────────────────────
   - package-ecosystem: npm
     directory: /frontend
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:00"
       timezone: Europe/Paris
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "deps(frontend)"
     groups:
-      # Majeures non groupées, une PR chacune — voir le commentaire du backend.
+      # Majeures dans leur propre groupe — voir le commentaire du backend.
       frontend-mineures:
         patterns: ["*"]
         update-types: [minor, patch]
+      frontend-majeures:
+        patterns: ["*"]
+        update-types: [major]
     ignore:
       # @types/node suit la version de Node ciblée (`engines`, setup-node@22),
       # pas la dernière publiée : une majeure ici décrit des API absentes du
@@ -66,11 +74,10 @@ updates:
   - package-ecosystem: gomod
     directory: /agent
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:00"
       timezone: Europe/Paris
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "deps(agent)"
     groups:
@@ -86,18 +93,20 @@ updates:
   - package-ecosystem: docker
     directories: [/backend, /frontend, /deploy/backup]
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:00"
       timezone: Europe/Paris
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "deps(images)"
     groups:
-      # Majeures non groupées, une PR chacune — voir le commentaire du backend.
+      # Majeures dans leur propre groupe — voir le commentaire du backend.
       images-mineures:
         patterns: ["*"]
         update-types: [minor, patch]
+      images-majeures:
+        patterns: ["*"]
+        update-types: [major]
     # Une montée de Python dans backend/Dockerfile ne passe pas seule : la CI
     # exige que backend/.python-version nomme la même version (test
     # test_python_version.py), pour que les tests tournent sous le Python
@@ -116,17 +125,19 @@ updates:
   - package-ecosystem: docker-compose
     directory: /deploy
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:00"
       timezone: Europe/Paris
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "deps(deploy)"
     groups:
       deploy-mineures:
         patterns: ["*"]
         update-types: [minor, patch]
+      deploy-majeures:
+        patterns: ["*"]
+        update-types: [major]
     ignore:
       # Une majeure de PostgreSQL change le format du répertoire de données :
       # le nouveau serveur refuse de démarrer sur le volume existant sans
@@ -141,7 +152,7 @@ updates:
     schedule:
       interval: monthly
       timezone: Europe/Paris
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "deps(ci)"
     groups:

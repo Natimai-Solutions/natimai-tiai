@@ -10,6 +10,7 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
 }));
 
 import { tasksVersion } from 'src/composables/useTasksBadge';
+import { setLocale } from 'src/i18n';
 import { deleteSession, getSession } from 'src/services/maintenance';
 import { useAuthStore } from 'src/stores/auth';
 import MaintenanceSessionViewDialog from './MaintenanceSessionViewDialog.vue';
@@ -48,6 +49,12 @@ describe('MaintenanceSessionViewDialog (item 6)', () => {
     expect(document.body.textContent).toContain('Aucun poste ne garde de ligne');
     let confirm: (() => void) | null = null;
     const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk(fn: () => void) {
         confirm = fn;
         return this;
@@ -112,5 +119,22 @@ describe('MaintenanceSessionViewDialog (item 6)', () => {
     const wrapper = await open(['maintenance:read']);
     expect(wrapper.findComponent(QDialog).props('maximized')).toBe(false);
     wrapper.unmount();
+  });
+
+  // Review i18n-core-2: the failure is worded at render, in the language shown.
+  it('says a visit could not be read in the language switched to while open', async () => {
+    vi.mocked(getSession).mockRejectedValue(new Error('Network Error'));
+    try {
+      const wrapper = await open(['maintenance:read']);
+      const card = () => document.body.querySelector('[data-test="visit-card"]')!.textContent;
+      expect(card()).toContain('Séance indisponible');
+      setLocale('en');
+      await flushPromises();
+      expect(card()).toContain('Session unavailable');
+      expect(card()).toContain('Maintenance session');
+      wrapper.unmount();
+    } finally {
+      setLocale('fr');
+    }
   });
 });

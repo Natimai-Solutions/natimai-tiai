@@ -784,11 +784,18 @@ async def _resolve_lines(
     wanted = set(ids) | set(skipped)
     every: list[Machine] = []
     if wanted:
+        # Held until the lines are written: a poste being merged (its row
+        # locked by the merge, then deleted) is waited for and found gone —
+        # read without the lock, its line met the deleted row, a 500. A key
+        # share leaves the heartbeat's updates free; taken in id order, as
+        # the merge takes its own.
         found = await session.exec(
             restrict(
                 select(Machine).where(col(Machine.id).in_(wanted)),
                 machine_clause(scope),
             )
+            .order_by(col(Machine.id))
+            .with_for_update(key_share=True, of=Machine)
         )
         every = list(found.all())
     if len(every) != len(wanted):

@@ -1,6 +1,6 @@
 <template>
   <q-page padding>
-    <h1 class="text-h5 q-mb-md">Paramètres</h1>
+    <h1 class="text-h5 q-mb-md">{{ t('settings.title') }}</h1>
 
     <!-- The settings could not be read: said once, with « Réessayer », rather
          than a toast over cards with nothing in them (item 2). -->
@@ -13,10 +13,9 @@
 
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
-        Maintenance
+        {{ t('settings.maintenance.title') }}
         <div class="text-caption text-muted">
-          Les défauts du parc. Une salle ou un poste peut les remplacer ; la valeur la plus précise
-          gagne.
+          {{ t('settings.maintenance.caption') }}
         </div>
       </q-card-section>
       <q-separator />
@@ -28,11 +27,11 @@
           type="number"
           min="0"
           max="3650"
-          suffix="jours"
-          label="Cycle par défaut"
+          :suffix="t('settings.units.days')"
+          :label="t('settings.maintenance.cycle')"
           outlined
           dense
-          :hint="`0 = aucune maintenance par défaut · variable d'environnement : ${settings.env_default_cycle_days} jours`"
+          :hint="t('settings.maintenance.cycleHint', { days: settings.env_default_cycle_days })"
           :disable="!canWrite"
         />
         <q-select
@@ -40,11 +39,11 @@
           :options="ownerOptions"
           emit-value
           map-options
-          label="Responsable par défaut"
+          :label="t('settings.maintenance.owner')"
           outlined
           dense
           clearable
-          hint="Reçoit dans « Mes tâches » les salles et postes qui n'ont pas de responsable propre"
+          :hint="t('settings.maintenance.ownerHint')"
           :disable="!canWrite"
         />
         <q-input
@@ -54,18 +53,18 @@
           type="number"
           min="0"
           max="365"
-          suffix="jours"
-          label="Fenêtre « à échéance »"
+          :suffix="t('settings.units.days')"
+          :label="t('settings.maintenance.dueSoon')"
           outlined
           dense
-          :hint="`Un poste est signalé à échéance ce nombre de jours avant sa date — au plus la moitié de son cycle · variable d'environnement : ${settings.env_due_soon_days} jours`"
+          :hint="t('settings.maintenance.dueSoonHint', { days: settings.env_due_soon_days })"
           :disable="!canWrite"
         />
       </q-card-section>
       <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
         <q-btn
           color="primary"
-          label="Enregistrer"
+          :label="t('settings.save')"
           :loading="saving"
           :disable="maintenanceInvalid"
           @click="save"
@@ -78,10 +77,9 @@
          threshold never holds the maintenance settings back. -->
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
-        Utilisation des postes
+        {{ t('settings.usage.title') }}
         <div class="text-caption text-muted">
-          Ce que comptent les cartes « Peu utilisés » et « Toujours allumés » du tableau de bord, et
-          le filtre Utilisation de la liste des postes.
+          {{ t('settings.usage.caption') }}
         </div>
       </q-card-section>
       <q-separator />
@@ -91,33 +89,33 @@
           type="number"
           min="1"
           max="90"
-          suffix="jours"
-          label="Fenêtre d'observation"
+          :suffix="t('settings.units.days')"
+          :label="t('settings.usage.windowDays')"
           outlined
           dense
-          :hint="`Les heures sont comptées sur ce nombre de jours glissants · variable d'environnement : ${settings.env_usage_window_days} jours`"
+          :hint="t('settings.usage.windowHint', { days: settings.env_usage_window_days })"
           :disable="!canWrite"
         />
         <q-input
           v-model.number="usageForm.lowHours"
           type="number"
           min="0"
-          suffix="heures"
-          label="Poste peu utilisé en dessous de"
+          :suffix="t('settings.units.hours')"
+          :label="t('settings.usage.lowHours')"
           outlined
           dense
-          :hint="`Un poste enrôlé pendant la fenêtre n'est jamais compté peu utilisé · variable d'environnement : ${settings.env_usage_low_hours} heures`"
+          :hint="t('settings.usage.lowHint', { hours: settings.env_usage_low_hours })"
           :disable="!canWrite"
         />
         <q-input
           v-model.number="usageForm.highHours"
           type="number"
           min="1"
-          suffix="heures"
-          label="Poste toujours allumé au-dessus de"
+          :suffix="t('settings.units.hours')"
+          :label="t('settings.usage.highHours')"
           outlined
           dense
-          :hint="`variable d'environnement : ${settings.env_usage_high_hours} heures`"
+          :hint="t('settings.usage.highHint', { hours: settings.env_usage_high_hours })"
           :disable="!canWrite"
         />
         <div v-if="usageError" class="text-negative text-caption">{{ usageError }}</div>
@@ -125,7 +123,7 @@
       <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
         <q-btn
           color="primary"
-          label="Enregistrer"
+          :label="t('settings.save')"
           :loading="savingUsage"
           :disable="usageError !== null"
           @click="saveUsage"
@@ -139,10 +137,9 @@
          initial value; the value saved here wins, without a restart. -->
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
-        Supervision du parc
+        {{ t('settings.fleet.title') }}
         <div class="text-caption text-muted">
-          Les seuils qui décident de ce que la console signale sur un poste. Appliqués aussitôt,
-          sans redémarrer le serveur.
+          {{ t('settings.fleet.caption') }}
         </div>
       </q-card-section>
       <q-separator />
@@ -154,11 +151,13 @@
           type="number"
           min="0"
           max="365"
-          suffix="jours"
-          label="Base antivirus périmée au-delà de"
+          :suffix="t('settings.units.days')"
+          :label="t('settings.fleet.signatureMaxAge')"
           outlined
           dense
-          :hint="`Âge des signatures ; recalculé aussitôt pour tout le parc, postes éteints compris · variable d'environnement : ${settings.env_signature_max_age_days} jours`"
+          :hint="
+            t('settings.fleet.signatureMaxAgeHint', { days: settings.env_signature_max_age_days })
+          "
           :disable="!canWrite"
         />
         <q-input
@@ -168,11 +167,11 @@
           type="number"
           min="1"
           max="3650"
-          suffix="jours"
-          label="Poste inactif après"
+          :suffix="t('settings.units.days')"
+          :label="t('settings.fleet.inactiveAfter')"
           outlined
           dense
-          :hint="`Jours sans contact de l'agent · variable d'environnement : ${settings.env_inactive_after_days} jours`"
+          :hint="t('settings.fleet.inactiveAfterHint', { days: settings.env_inactive_after_days })"
           :disable="!canWrite"
         />
         <q-input
@@ -182,11 +181,11 @@
           type="number"
           min="1"
           max="99"
-          suffix="% libres"
-          label="Disque presque plein en dessous de"
+          :suffix="t('settings.units.percentFree')"
+          :label="t('settings.fleet.lowDisk')"
           outlined
           dense
-          :hint="`Sur le volume système · variable d'environnement : ${settings.env_low_disk_free_percent} %`"
+          :hint="t('settings.fleet.lowDiskHint', { percent: settings.env_low_disk_free_percent })"
           :disable="!canWrite"
         />
         <q-input
@@ -196,23 +195,29 @@
           type="number"
           min="1"
           max="30"
-          suffix="ans"
-          label="Poste à renouveler à partir de"
+          :suffix="t('settings.units.years')"
+          :label="t('settings.fleet.hardwareAging')"
           outlined
           dense
-          :hint="`Âge lu sur la date du BIOS · variable d'environnement : ${settings.env_hardware_aging_years} ans`"
+          :hint="
+            t('settings.fleet.hardwareAgingHint', { years: settings.env_hardware_aging_years })
+          "
           :disable="!canWrite"
         />
         <q-input
           v-model="fleetForm.agentExpectedVersion"
-          label="Version d'agent de référence"
-          placeholder="Automatique"
+          :label="t('settings.fleet.agentVersion')"
+          :placeholder="t('settings.fleet.agentVersionPlaceholder')"
           outlined
           dense
           clearable
           :error="!agentVersionValid"
-          error-message="Une version comme 1.2.0 ou v1.2.0-rc.1, ou vide pour automatique"
-          :hint="`Vide = automatique, la plus haute version remontée par le parc · variable d'environnement : ${settings.env_agent_expected_version ?? 'automatique'}`"
+          :error-message="t('settings.fleet.agentVersionError')"
+          :hint="
+            t('settings.fleet.agentVersionHint', {
+              version: settings.env_agent_expected_version ?? t('settings.fleet.automatic'),
+            })
+          "
           :disable="!canWrite"
         />
         <q-input
@@ -222,18 +227,22 @@
           type="number"
           min="1"
           :max="60 * 24 * 30"
-          suffix="minutes"
-          label="Durée de vie d'une commande en attente"
+          :suffix="t('settings.units.minutes')"
+          :label="t('settings.fleet.commandTtl')"
           outlined
           dense
-          :hint="`Au-delà, une commande jamais remise à son poste est périmée · variable d'environnement : ${settings.env_command_default_ttl_minutes} minutes`"
+          :hint="
+            t('settings.fleet.commandTtlHint', {
+              minutes: settings.env_command_default_ttl_minutes,
+            })
+          "
           :disable="!canWrite"
         />
       </q-card-section>
       <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
         <q-btn
           color="primary"
-          label="Enregistrer"
+          :label="t('settings.save')"
           :loading="savingFleet"
           :disable="!agentVersionValid || fleetInvalid"
           @click="saveFleet"
@@ -245,10 +254,9 @@
          mail lands on the reader's own clock, weekday shift included. -->
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
-        E-mails programmés
+        {{ t('settings.schedule.title') }}
         <div class="text-caption text-muted">
-          L'heure du résumé quotidien et le jour du rappel hebdomadaire des maintenances. Pris en
-          compte en moins d'une minute, sans redémarrer le serveur.
+          {{ t('settings.schedule.caption') }}
         </div>
       </q-card-section>
       <q-separator />
@@ -258,10 +266,15 @@
           :options="hourOptions"
           emit-value
           map-options
-          label="Heure du résumé quotidien (UTC)"
+          :label="t('settings.schedule.digestHour')"
           outlined
           dense
-          :hint="`Arrive ${digestHint} · variable d'environnement : ${settings.env_digest_hour_utc} h UTC`"
+          :hint="
+            t('settings.schedule.digestHint', {
+              when: digestHint,
+              hour: settings.env_digest_hour_utc,
+            })
+          "
           :disable="!canWrite"
         />
         <q-select
@@ -269,17 +282,22 @@
           :options="weekdayOptions"
           emit-value
           map-options
-          label="Jour du rappel des maintenances (UTC)"
+          :label="t('settings.schedule.reminderDay')"
           outlined
           dense
-          :hint="`À l'heure du résumé : arrive ${reminderHint} · variable d'environnement : ${WEEKDAYS_FR[settings.env_maintenance_reminder_weekday]}`"
+          :hint="
+            t('settings.schedule.reminderHint', {
+              when: reminderHint,
+              day: weekdayName(settings.env_maintenance_reminder_weekday),
+            })
+          "
           :disable="!canWrite"
         />
       </q-card-section>
       <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
         <q-btn
           color="primary"
-          label="Enregistrer"
+          :label="t('settings.save')"
           :loading="savingSchedule"
           @click="saveSchedule"
         />
@@ -292,10 +310,10 @@
          is stored, and whether it must be typed again. -->
     <q-card v-if="settings" flat bordered style="max-width: 640px" class="q-mb-md">
       <q-card-section class="text-subtitle1">
-        Envoi des e-mails
+        {{ t('settings.email.title') }}
         <div class="text-caption text-muted">
-          Le chemin des alertes, des résumés et des liens « mot de passe oublié ». Un champ laissé
-          vide reprend la valeur du serveur (<code>deploy/.env</code>), rappelée en dessous.
+          {{ t('settings.email.captionBefore') }}<code>deploy/.env</code
+          >{{ t('settings.email.captionAfter') }}
         </div>
       </q-card-section>
       <q-separator />
@@ -308,7 +326,7 @@
           <span>{{ status.text }}</span>
         </div>
         <div>
-          <div class="text-caption text-muted q-mb-xs">Fournisseur</div>
+          <div class="text-caption text-muted q-mb-xs">{{ t('settings.email.provider') }}</div>
           <q-btn-toggle
             v-model="emailForm.provider"
             :options="providerOptions"
@@ -318,36 +336,46 @@
             :disable="!canWrite"
           />
           <div class="text-caption text-muted q-mt-xs">
-            valeur du serveur : {{ providerLabel(settings.email.env.provider) }}
+            {{
+              t('settings.email.serverValue', { value: providerLabel(settings.email.env.provider) })
+            }}
           </div>
         </div>
         <q-input
           v-model="emailForm.fromEmail"
-          label="Adresse d'expéditeur"
+          :label="t('settings.email.fromEmail')"
           outlined
           dense
           :placeholder="settings.email.env.from_email ?? ''"
-          :hint="`Avec un compte SMTP authentifié, en général l'adresse du compte · valeur du serveur : ${settings.email.env.from_email ?? 'non définie'}`"
+          :hint="
+            t('settings.email.fromEmailHint', {
+              value: settings.email.env.from_email ?? t('settings.email.notSetFeminine'),
+            })
+          "
           :disable="!canWrite"
         />
         <q-input
           v-model="emailForm.fromName"
-          label="Nom d'expéditeur"
+          :label="t('settings.email.fromName')"
           outlined
           dense
           :placeholder="settings.email.env.from_name"
-          :hint="`valeur du serveur : ${settings.email.env.from_name}`"
+          :hint="t('settings.email.serverValue', { value: settings.email.env.from_name })"
           :disable="!canWrite"
         />
 
         <template v-if="emailForm.provider === 'smtp'">
           <q-input
             v-model="emailForm.smtpHost"
-            label="Serveur SMTP"
+            :label="t('settings.email.smtpHost')"
             outlined
             dense
             :placeholder="settings.email.env.smtp_host ?? 'smtp.office365.com'"
-            :hint="`Relais de l'établissement, Microsoft 365, Google Workspace… · valeur du serveur : ${settings.email.env.smtp_host ?? 'non définie'}`"
+            :hint="
+              t('settings.email.smtpHostHint', {
+                value: settings.email.env.smtp_host ?? t('settings.email.notSetFeminine'),
+              })
+            "
             :disable="!canWrite"
           />
           <div class="row q-col-gutter-md">
@@ -356,11 +384,15 @@
               :options="SECURITY_OPTIONS"
               emit-value
               map-options
-              label="Sécurité"
+              :label="t('settings.email.security')"
               outlined
               dense
               class="col-12 col-sm-7"
-              :hint="`valeur du serveur : ${securityLabel(settings.email.env.smtp_security)}`"
+              :hint="
+                t('settings.email.serverValue', {
+                  value: securityLabel(settings.email.env.smtp_security),
+                })
+              "
               :disable="!canWrite"
             />
             <q-input
@@ -368,33 +400,39 @@
               type="number"
               min="1"
               max="65535"
-              label="Port"
+              :label="t('settings.email.port')"
               outlined
               dense
               class="col-12 col-sm-5"
               :placeholder="String(settings.email.env.smtp_port)"
-              :hint="`valeur du serveur : ${settings.email.env.smtp_port}`"
+              :hint="t('settings.email.serverValue', { value: settings.email.env.smtp_port })"
               :disable="!canWrite"
             />
           </div>
           <q-input
             v-model="emailForm.smtpUser"
-            label="Utilisateur"
+            :label="t('settings.email.user')"
             outlined
             dense
             autocomplete="off"
-            :hint="`Vide = pas d'authentification (relais qui reconnaît le serveur) · valeur du serveur : ${settings.email.env.smtp_user_set ? 'définie' : 'aucune'}`"
+            :hint="
+              t('settings.email.userHint', {
+                value: settings.email.env.smtp_user_set
+                  ? t('settings.email.userSet')
+                  : t('settings.email.userNone'),
+              })
+            "
             :disable="!canWrite"
           />
           <q-input
             v-model="emailForm.smtpPassword"
             type="password"
-            label="Mot de passe"
+            :label="t('settings.email.password')"
             outlined
             dense
             autocomplete="new-password"
-            :placeholder="smtpPasswordState.label === 'enregistré' ? '••••••••' : ''"
-            :hint="secretHint(smtpPasswordState.label, emailForm.clearSmtpPassword)"
+            :placeholder="smtpPasswordKind === 'stored' ? '••••••••' : ''"
+            :hint="secretHint(smtpPasswordKind, emailForm.clearSmtpPassword)"
             :disable="!canWrite"
           >
             <template #append>
@@ -410,8 +448,8 @@
                 "
                 :aria-label="
                   emailForm.clearSmtpPassword
-                    ? 'Garder le mot de passe SMTP'
-                    : 'Effacer le mot de passe SMTP'
+                    ? t('settings.email.keepPasswordAria')
+                    : t('settings.email.clearPasswordAria')
                 "
                 flat
                 dense
@@ -422,8 +460,8 @@
               >
                 <q-tooltip>{{
                   emailForm.clearSmtpPassword
-                    ? 'Garder le mot de passe enregistré'
-                    : 'Effacer le mot de passe enregistré'
+                    ? t('settings.email.keepPassword')
+                    : t('settings.email.clearPassword')
                 }}</q-tooltip>
               </q-btn>
             </template>
@@ -432,14 +470,17 @@
             <div class="col-12 col-sm-7">
               <q-toggle
                 v-model="emailForm.smtpVerifyTls"
-                label="Vérifier le certificat du serveur"
+                :label="t('settings.email.verifyTls')"
                 :disable="!canWrite"
               />
               <div class="text-caption text-muted">
-                À ne désactiver que pour un relais interne à certificat privé : sans vérification,
-                une interception du trafic SMTP (et du mot de passe) passe inaperçue · valeur du
-                serveur :
-                {{ settings.email.env.smtp_verify_tls ? 'oui' : 'non' }}
+                {{
+                  t('settings.email.verifyTlsHint', {
+                    value: settings.email.env.smtp_verify_tls
+                      ? t('settings.email.yes')
+                      : t('settings.email.no'),
+                  })
+                }}
               </div>
             </div>
             <q-input
@@ -448,12 +489,16 @@
               min="1"
               max="120"
               suffix="s"
-              label="Délai d'attente"
+              :label="t('settings.email.timeout')"
               outlined
               dense
               class="col-12 col-sm-5"
               :placeholder="String(settings.email.env.smtp_timeout_seconds)"
-              :hint="`valeur du serveur : ${settings.email.env.smtp_timeout_seconds} s`"
+              :hint="
+                t('settings.email.serverValueSeconds', {
+                  value: settings.email.env.smtp_timeout_seconds,
+                })
+              "
               :disable="!canWrite"
             />
           </div>
@@ -462,22 +507,28 @@
         <template v-else>
           <q-input
             v-model="emailForm.mailgunDomain"
-            label="Domaine d'envoi Mailgun"
+            :label="t('settings.email.mailgunDomain')"
             outlined
             dense
-            :placeholder="settings.email.env.mailgun_domain ?? 'mg.exemple.fr'"
-            :hint="`valeur du serveur : ${settings.email.env.mailgun_domain ?? 'non définie'}`"
+            :placeholder="
+              settings.email.env.mailgun_domain ?? t('settings.email.mailgunDomainPlaceholder')
+            "
+            :hint="
+              t('settings.email.serverValue', {
+                value: settings.email.env.mailgun_domain ?? t('settings.email.notSetFeminine'),
+              })
+            "
             :disable="!canWrite"
           />
           <q-input
             v-model="emailForm.mailgunApiKey"
             type="password"
-            label="Clé API Mailgun"
+            :label="t('settings.email.mailgunApiKey')"
             outlined
             dense
             autocomplete="new-password"
-            :placeholder="mailgunKeyState.label === 'enregistré' ? '••••••••' : ''"
-            :hint="secretHint(mailgunKeyState.label, emailForm.clearMailgunApiKey)"
+            :placeholder="mailgunKeyKind === 'stored' ? '••••••••' : ''"
+            :hint="secretHint(mailgunKeyKind, emailForm.clearMailgunApiKey)"
             :disable="!canWrite"
           >
             <template #append>
@@ -492,7 +543,9 @@
                   (settings.email.mailgun_api_key_set || settings.email.mailgun_api_key_unreadable)
                 "
                 :aria-label="
-                  emailForm.clearMailgunApiKey ? 'Garder la clé Mailgun' : 'Effacer la clé Mailgun'
+                  emailForm.clearMailgunApiKey
+                    ? t('settings.email.keepKeyAria')
+                    : t('settings.email.clearKeyAria')
                 "
                 flat
                 dense
@@ -503,19 +556,21 @@
               >
                 <q-tooltip>{{
                   emailForm.clearMailgunApiKey
-                    ? 'Garder la clé enregistrée'
-                    : 'Effacer la clé enregistrée'
+                    ? t('settings.email.keepKey')
+                    : t('settings.email.clearKey')
                 }}</q-tooltip>
               </q-btn>
             </template>
           </q-input>
           <q-input
             v-model="emailForm.mailgunBaseUrl"
-            label="Adresse de l'API Mailgun"
+            :label="t('settings.email.mailgunBaseUrl')"
             outlined
             dense
             :placeholder="settings.email.env.mailgun_base_url"
-            :hint="`Région EU : https://api.eu.mailgun.net/v3 · valeur du serveur : ${settings.email.env.mailgun_base_url}`"
+            :hint="
+              t('settings.email.mailgunBaseUrlHint', { value: settings.email.env.mailgun_base_url })
+            "
             :disable="!canWrite"
           />
         </template>
@@ -529,21 +584,21 @@
           <div class="row items-start q-col-gutter-sm">
             <q-input
               v-model="testTo"
-              label="Destinataire du test"
+              :label="t('settings.test.recipient')"
               outlined
               dense
               class="col-12 col-sm"
               :placeholder="auth.user?.email ?? ''"
               :error="testToError !== null"
               :error-message="testToError ?? undefined"
-              hint="Vide = votre adresse. Le test essaie les valeurs du formulaire, même non enregistrées."
+              :hint="t('settings.test.recipientHint')"
             />
             <div class="col-12 col-sm-auto">
               <q-btn
                 outline
                 color="primary"
                 icon="send"
-                label="Envoyer un e-mail de test"
+                :label="t('settings.test.send')"
                 no-caps
                 :loading="testing"
                 :disable="emailError !== null || testToError !== null"
@@ -552,21 +607,21 @@
             </div>
           </div>
           <q-banner
-            v-if="testResult"
+            v-if="testBanner"
             dense
             rounded
-            :class="testResult.ok ? 'surface-green' : 'surface-red'"
+            :class="testBanner.ok ? 'surface-green' : 'surface-red'"
           >
             <template #avatar>
-              <q-icon :name="testResult.ok ? 'check_circle' : 'error_outline'" />
+              <q-icon :name="testBanner.ok ? 'check_circle' : 'error_outline'" />
             </template>
-            {{ testResult.message }}
+            {{ testBanner.text }}
           </q-banner>
         </q-card-section>
         <q-card-actions align="right" class="q-px-md q-pb-md">
           <q-btn
             color="primary"
-            label="Enregistrer"
+            :label="t('settings.save')"
             :loading="savingEmail"
             :disable="emailError !== null"
             @click="saveEmail"
@@ -580,28 +635,27 @@
          « pourquoi ce poste est-il signalé ? » without opening a shell. -->
     <q-card v-if="settings" flat bordered style="max-width: 960px">
       <q-card-section class="text-subtitle1">
-        Réglages du serveur
+        {{ t('settings.environment.title') }}
         <div class="text-caption text-muted">
-          Variables d'environnement du serveur (<code>deploy/.env</code>), en lecture seule ici. Une
-          valeur se change dans ce fichier, puis en redémarrant le serveur — sauf celles marquées «
-          valeur initiale », que les réglages ci-dessus remplacent dès qu'ils sont enregistrés.
+          {{ t('settings.environment.captionBefore') }}<code>deploy/.env</code
+          >{{ t('settings.environment.captionAfter') }}
         </div>
       </q-card-section>
       <q-separator />
       <q-card-section class="q-pt-sm">
         <q-input
           v-model="envFilter"
-          aria-label="Rechercher un réglage"
+          :aria-label="t('settings.environment.search')"
           dense
           outlined
           clearable
-          placeholder="Rechercher un réglage…"
+          :placeholder="t('settings.environment.searchPlaceholder')"
           style="max-width: 360px"
         >
           <template #prepend><q-icon name="search" /></template>
         </q-input>
       </q-card-section>
-      <template v-for="group in environmentGroups" :key="group.label">
+      <template v-for="group in environmentGroups" :key="group.key">
         <q-separator />
         <q-card-section class="q-pb-none text-subtitle2">{{ group.label }}</q-card-section>
         <q-markup-table flat dense wrap-cells class="env-table">
@@ -612,7 +666,7 @@
               </td>
               <td class="env-value">
                 <span v-if="item.value !== null">{{ item.value }}</span>
-                <span v-else class="text-muted">— non défini</span>
+                <span v-else class="text-muted">{{ t('settings.environment.notSet') }}</span>
               </td>
               <td class="text-muted">{{ item.description }}</td>
             </tr>
@@ -620,7 +674,7 @@
         </q-markup-table>
       </template>
       <q-card-section v-if="!environmentGroups.length" class="text-muted">
-        Aucun réglage ne correspond.
+        {{ t('settings.environment.noMatch') }}
       </q-card-section>
     </q-card>
   </q-page>
@@ -631,6 +685,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import { useQuasar } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
+import { t } from 'src/i18n';
 import { rememberFleetThresholds } from 'src/composables/useFleetThresholds';
 import { formSnapshot } from 'src/utils/formSnapshot';
 import { listAssignableOwners } from 'src/services/maintenance';
@@ -640,11 +695,7 @@ import {
   sendTestEmail,
   updateSettings,
   type ConsoleSettings,
-  type EmailProvider,
   type EmailTestResult,
-  type EnvGroup,
-  type EnvItem,
-  type SmtpSecurity,
 } from 'src/services/settings';
 import { useAuthStore } from 'src/stores/auth';
 import {
@@ -653,19 +704,28 @@ import {
   emailFormFrom,
   emailPayload,
   emailStatus,
+  providerLabel,
+  secretHint,
+  secretKind,
   secretState,
+  securityLabel,
   testRecipientError,
+  testResultText,
   type EmailForm,
 } from 'src/utils/emailSettings';
 import { intFieldError } from 'src/utils/numberField';
 import { usageSettingsError } from 'src/utils/usageFilter';
+import { envDescription, envGroupLabel, envValue } from 'src/utils/serverEnvironment';
 import {
-  WEEKDAYS_FR,
+  WEEKDAY_KEYS,
   digestSummary,
   isAgentVersion,
   readerTimeZone,
   reminderSummary,
+  weekdayName,
 } from 'src/utils/settingsSchedule';
+import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -762,14 +822,19 @@ function fillFleetForm(s: ConsoleSettings) {
 const savingSchedule = ref(false);
 const scheduleForm = reactive({ digestHourUtc: 18, reminderWeekday: 0 });
 const timeZone = readerTimeZone();
-const hourOptions = Array.from({ length: 24 }, (_, h) => ({
-  label: `${h} h UTC`,
-  value: h,
-}));
-const weekdayOptions = WEEKDAYS_FR.map((day, i) => ({
-  label: day.charAt(0).toUpperCase() + day.slice(1),
-  value: i,
-}));
+// Computed: their labels follow the reader's language.
+const hourOptions = computed(() =>
+  Array.from({ length: 24 }, (_, h) => ({
+    label: t('settings.schedule.hourOption', { hour: h }),
+    value: h,
+  })),
+);
+const weekdayOptions = computed(() =>
+  WEEKDAY_KEYS.map((_, i) => {
+    const day = weekdayName(i);
+    return { label: day.charAt(0).toUpperCase() + day.slice(1), value: i };
+  }),
+);
 const digestHint = computed(() => digestSummary(scheduleForm.digestHourUtc, timeZone));
 const reminderHint = computed(() =>
   reminderSummary(scheduleForm.reminderWeekday, scheduleForm.digestHourUtc, timeZone),
@@ -804,48 +869,45 @@ const emailError = computed(() => emailFormError(emailForm));
 const status = computed(() =>
   settings.value ? emailStatus(settings.value.email) : { ok: false, text: '' },
 );
-const smtpPasswordState = computed(() => {
+// Each secret's case: stored, unreadable, the server's, or none.
+function smtpPasswordArgs(): [boolean, boolean, boolean] {
   const e = settings.value?.email;
   // A `.env` password the server holds back is not « celui du .env ».
-  return secretState(
+  return [
     e?.smtp_password_set ?? false,
     e?.smtp_password_unreadable ?? false,
     (e?.env.smtp_password_set ?? false) && !e?.withheld?.includes('smtp_password'),
-  );
-});
-const mailgunKeyState = computed(() => {
+  ];
+}
+function mailgunKeyArgs(): [boolean, boolean, boolean] {
   const e = settings.value?.email;
-  return secretState(
+  return [
     e?.mailgun_api_key_set ?? false,
     e?.mailgun_api_key_unreadable ?? false,
     (e?.env.mailgun_api_key_set ?? false) && !e?.withheld?.includes('mailgun_api_key'),
-  );
-});
-const providerOptions = [
-  { label: 'Serveur SMTP', value: 'smtp' },
-  { label: 'Mailgun', value: 'mailgun' },
-];
+  ];
+}
+const smtpPasswordKind = computed(() => secretKind(...smtpPasswordArgs()));
+const smtpPasswordState = computed(() => secretState(...smtpPasswordArgs()));
+const mailgunKeyKind = computed(() => secretKind(...mailgunKeyArgs()));
+const mailgunKeyState = computed(() => secretState(...mailgunKeyArgs()));
+const providerOptions = computed(() => [
+  { label: t('settings.email.providers.smtp'), value: 'smtp' },
+  { label: t('settings.email.providers.mailgun'), value: 'mailgun' },
+]);
 const testTo = ref('');
 const testToError = computed(() => testRecipientError(testTo.value ?? ''));
 const testing = ref(false);
 const testResult = ref<EmailTestResult | null>(null);
-
-function providerLabel(provider: EmailProvider): string {
-  return provider === 'smtp' ? 'serveur SMTP' : 'Mailgun';
-}
-
-function securityLabel(security: SmtpSecurity): string {
-  return SECURITY_OPTIONS.find((o) => o.value === security)?.label ?? security;
-}
-
-/** The line under a secret box: what saving will do with it. */
-function secretHint(state: string, clearing: boolean): string {
-  if (clearing) return "Sera effacé à l'enregistrement : la valeur du serveur s'appliquera.";
-  if (state === 'à ressaisir')
-    return 'Enregistré avec une autre clé SECRET_KEY du serveur, illisible : à ressaisir.';
-  if (state === 'enregistré') return 'Laisser vide pour garder la valeur enregistrée.';
-  return 'Chiffré dans la base, jamais réaffiché.';
-}
+// A test the server refused: the error itself, worded at render so a change
+// of language rewords it.
+const testFailure = ref<{ error: unknown } | null>(null);
+const testBanner = computed(() => {
+  if (testResult.value) return { ok: testResult.value.ok, text: testResultText(testResult.value) };
+  if (testFailure.value)
+    return { ok: false, text: apiErrorMessage(testFailure.value.error, t('settings.test.failed')) };
+  return null;
+});
 
 function fillEmailForm(s: ConsoleSettings) {
   Object.assign(emailForm, emailFormFrom(s.email));
@@ -857,14 +919,15 @@ function fillEmailForm(s: ConsoleSettings) {
 // sent. All five cards: a cycle retyped and left unsaved is lost like any
 // other field.
 const saved = reactive({ maintenance: '', usage: '', fleet: '', schedule: '', email: '' });
+// The cards by their key in the catalogue (`settings.unsaved.cards`).
 const unsavedCards = computed(() => {
   if (!settings.value || !canWrite.value) return [];
   const cards: string[] = [];
-  if (formSnapshot(form) !== saved.maintenance) cards.push('Maintenance');
-  if (formSnapshot(usageForm) !== saved.usage) cards.push('Utilisation');
-  if (formSnapshot(fleetForm) !== saved.fleet) cards.push('Seuils du parc');
-  if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('Calendrier des e-mails');
-  if (formSnapshot(emailForm) !== saved.email) cards.push('Envoi des e-mails');
+  if (formSnapshot(form) !== saved.maintenance) cards.push('maintenance');
+  if (formSnapshot(usageForm) !== saved.usage) cards.push('usage');
+  if (formSnapshot(fleetForm) !== saved.fleet) cards.push('fleet');
+  if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('schedule');
+  if (formSnapshot(emailForm) !== saved.email) cards.push('email');
   return cards;
 });
 
@@ -872,13 +935,22 @@ onBeforeRouteLeave(() => {
   const cards = unsavedCards.value;
   if (!cards.length) return true;
   return new Promise<boolean>((resolve) => {
-    $q.dialog({
-      title: 'Modifications non enregistrées',
-      message: `Les changements de « ${cards.join(' », « ')} » n'ont pas été enregistrés. Quitter la page les perd.`,
-      cancel: { flat: true, noCaps: true, label: 'Rester sur la page' },
-      ok: { unelevated: true, noCaps: true, label: 'Quitter sans enregistrer', color: 'negative' },
+    liveDialog($q, () => ({
+      title: t('settings.unsaved.title'),
+      message: t('settings.unsaved.message', {
+        cards: cards
+          .map((card) => t(`settings.unsaved.cards.${card}`))
+          .join(t('settings.unsaved.cardSeparator')),
+      }),
+      cancel: { flat: true, noCaps: true, label: t('settings.unsaved.stay') },
+      ok: {
+        unelevated: true,
+        noCaps: true,
+        label: t('settings.unsaved.leave'),
+        color: 'negative',
+      },
       persistent: true,
-    })
+    }))
       .onOk(() => resolve(true))
       .onCancel(() => resolve(false));
   });
@@ -893,20 +965,34 @@ function onBeforeUnload(event: BeforeUnloadEvent) {
 window.addEventListener('beforeunload', onBeforeUnload);
 onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload));
 
-// The environment card, narrowed by the search box: on the variable's name,
-// its value and its description alike, since a reader may know any of the
-// three (« ROOM_SOURCE », « ad_ou », « salles »).
+// The environment card, worded in the reader's language
+// (`utils/serverEnvironment.ts`) and narrowed by the search box: on the
+// variable's name, its value and its description alike, as shown, since a
+// reader may know any of the three (« ROOM_SOURCE », « ad_ou », « salles »).
+interface ShownEnvItem {
+  key: string;
+  value: string | null;
+  description: string;
+}
 const envFilter = ref('');
-const environmentGroups = computed<EnvGroup[]>(() => {
-  const groups = settings.value?.environment ?? [];
-  const needle = (envFilter.value ?? '').trim().toLocaleLowerCase('fr-FR');
+const environmentGroups = computed<{ key: string; label: string; items: ShownEnvItem[] }[]>(() => {
+  const groups = (settings.value?.environment ?? []).map((g) => ({
+    key: g.code ?? g.label,
+    label: envGroupLabel(g),
+    items: g.items.map((i) => ({
+      key: i.key,
+      value: envValue(i),
+      description: envDescription(i),
+    })),
+  }));
+  const needle = (envFilter.value ?? '').trim().toLocaleLowerCase();
   if (!needle) return groups;
-  const matches = (item: EnvItem) =>
+  const matches = (item: ShownEnvItem) =>
     [item.key, item.value ?? '', item.description].some((text) =>
-      text.toLocaleLowerCase('fr-FR').includes(needle),
+      text.toLocaleLowerCase().includes(needle),
     );
   return groups
-    .map((g) => ({ label: g.label, items: g.items.filter(matches) }))
+    .map((g) => ({ ...g, items: g.items.filter(matches) }))
     .filter((g) => g.items.length);
 });
 
@@ -941,14 +1027,21 @@ async function load() {
       value: u.id,
     }));
     if (unavailable && !options.some((o) => o.value === unavailable.id)) {
-      options.unshift({ label: `Compte désactivé : ${unavailable.name}`, value: unavailable.id });
+      options.unshift({
+        label: t('settings.maintenance.ownerDeactivated', { name: unavailable.name }),
+        value: unavailable.id,
+      });
     }
     ownerOptions.value = options;
   } catch (e) {
     // Before the settings: nothing to show, the banner says why. After them
     // (the owner list): the cards are shown, the toast names what is missing.
     if (!settings.value) loadError.value = e;
-    else $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Chargement impossible') });
+    else
+      notify($q, () => ({
+        type: 'negative',
+        message: apiErrorMessage(e, t('settings.loadFailed')),
+      }));
   }
 }
 
@@ -962,9 +1055,9 @@ async function save() {
       maintenance_due_soon_days: Number(form.dueSoon),
     });
     fillMaintenanceForm(settings.value);
-    $q.notify({ type: 'positive', message: 'Paramètres enregistrés' });
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     saving.value = false;
   }
@@ -980,9 +1073,9 @@ async function saveUsage() {
       usage_high_hours: Number(usageForm.highHours),
     });
     fillUsageForm(settings.value);
-    $q.notify({ type: 'positive', message: 'Paramètres enregistrés' });
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     savingUsage.value = false;
   }
@@ -1003,9 +1096,9 @@ async function saveFleet() {
       command_default_ttl_minutes: Number(fleetForm.commandDefaultTtlMinutes),
     });
     fillFleetForm(settings.value);
-    $q.notify({ type: 'positive', message: 'Paramètres enregistrés' });
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     savingFleet.value = false;
   }
@@ -1019,9 +1112,9 @@ async function saveSchedule() {
       maintenance_reminder_weekday: scheduleForm.reminderWeekday,
     });
     fillScheduleForm(settings.value);
-    $q.notify({ type: 'positive', message: 'Paramètres enregistrés' });
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     savingSchedule.value = false;
   }
@@ -1033,9 +1126,9 @@ async function saveEmail() {
   try {
     settings.value = await updateSettings({ email: emailPayload(emailForm, settings.value.email) });
     fillEmailForm(settings.value);
-    $q.notify({ type: 'positive', message: 'Envoi des e-mails enregistré' });
+    notify($q, () => ({ type: 'positive', message: t('settings.email.saved') }));
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     savingEmail.value = false;
   }
@@ -1045,6 +1138,7 @@ async function sendTest() {
   if (!settings.value || emailError.value || testToError.value) return;
   testing.value = true;
   testResult.value = null;
+  testFailure.value = null;
   try {
     const to = (testTo.value ?? '').trim();
     testResult.value = await sendTestEmail({
@@ -1052,7 +1146,7 @@ async function sendTest() {
       email: emailPayload(emailForm, settings.value.email),
     });
   } catch (e) {
-    testResult.value = { ok: false, message: apiErrorMessage(e, 'Envoi du test impossible') };
+    testFailure.value = { error: e };
   } finally {
     testing.value = false;
   }
@@ -1072,10 +1166,13 @@ onMounted(load);
 /* Phone: the long keys no longer squeeze the description into a sliver —
    each line stacks, key and value above, description below (audit U27). */
 @media (max-width: 599px) {
-  .env-table tr,
-  .env-table td {
+  /* Stacked on a phone (audit U27). « height: auto »: Quasar's dense table
+     fixes a cell at 28 px, and the stacked blocks then overlapped. */
+  .env-table tbody tr,
+  .env-table tbody td {
     display: block;
     width: 100%;
+    height: auto;
   }
   .env-key {
     white-space: normal;

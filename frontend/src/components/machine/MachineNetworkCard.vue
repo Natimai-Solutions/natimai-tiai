@@ -2,10 +2,9 @@
   <div class="col-12 col-md-6">
     <q-card flat bordered>
       <q-card-section class="text-subtitle1">
-        Cartes réseau
+        {{ t('machine.network.title') }}
         <div class="text-caption text-muted">
-          L'adresse en gras est celle que le serveur utilise pour joindre et réveiller ce poste ;
-          elle est relue à chaque battement, cette liste une fois par jour.
+          {{ t('machine.network.caption') }}
         </div>
       </q-card-section>
       <q-separator />
@@ -16,14 +15,26 @@
               :name="n.type === 'wifi' ? 'wifi' : 'settings_ethernet'"
               :color="n.is_up ? 'positive' : 'grey-5'"
             >
-              <q-tooltip>{{ n.is_up ? 'Connectée' : 'Déconnectée' }}</q-tooltip>
+              <q-tooltip>{{
+                n.is_up ? t('machine.network.connected') : t('machine.network.disconnected')
+              }}</q-tooltip>
             </q-icon>
           </q-item-section>
           <q-item-section>
             <q-item-label>
               {{ n.name || n.mac }}
-              <q-badge v-if="n.is_virtual" color="blue-grey-8" class="q-ml-sm" label="Virtuelle" />
-              <q-badge v-if="isElected(n)" color="primary" class="q-ml-sm" label="Élue" />
+              <q-badge
+                v-if="n.is_virtual"
+                color="blue-grey-8"
+                class="q-ml-sm"
+                :label="t('machine.network.virtual')"
+              />
+              <q-badge
+                v-if="isElected(n)"
+                color="primary"
+                class="q-ml-sm"
+                :label="t('machine.network.elected')"
+              />
             </q-item-label>
             <q-item-label caption>
               {{ nicTypeLabel(n.type) }}
@@ -32,20 +43,25 @@
             </q-item-label>
             <q-item-label caption :class="{ 'text-weight-bold text-strong': isElected(n) }">
               {{ ipAddressLabel(n.ip_address, n.ip_prefix_length) }}
-              <span v-if="n.gateway"> — passerelle {{ n.gateway }}</span>
-              <span v-if="n.is_dhcp != null"> — {{ n.is_dhcp ? 'DHCP' : 'adresse fixe' }}</span>
+              <span v-if="n.gateway">
+                — {{ t('machine.network.gateway', { gateway: n.gateway }) }}</span
+              >
+              <span v-if="n.is_dhcp != null">
+                — {{ n.is_dhcp ? t('machine.network.dhcp') : t('machine.network.static') }}</span
+              >
             </q-item-label>
           </q-item-section>
         </q-item>
       </q-list>
       <q-card-section v-else class="text-caption text-muted">
-        Aucune carte réseau relevée sur ce poste.
+        {{ t('machine.network.none') }}
       </q-card-section>
     </q-card>
   </div>
 </template>
 
 <script setup lang="ts">
+import { t } from 'src/i18n';
 import type { MachineDetail, Nic } from 'src/services/machines';
 import { ipAddressLabel, linkSpeedLabel, nicTypeLabel } from 'src/utils/format';
 

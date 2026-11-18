@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/msg"
 )
 
 // Windows Update: reading what a machine is missing, and installing it on
@@ -448,21 +449,21 @@ type rawWUInstall struct {
 	Updates            []rawWUInstallUpdate `json:"updates"`
 }
 
-// wuResultLabel names an OperationResultCode in the console's language.
-func wuResultLabel(code int) string {
+// wuResultKey names an OperationResultCode for the console (msg.WUResults).
+func wuResultKey(code int) string {
 	switch code {
 	case wuResultSucceeded:
-		return "installée"
+		return "succeeded"
 	case wuResultSucceededWithErrors:
-		return "installée avec des erreurs"
+		return "succeeded_with_errors"
 	case wuResultFailed:
-		return "échec"
+		return "failed"
 	case wuResultAborted:
-		return "abandonnée"
+		return "aborted"
 	case wuResultInProgress:
-		return "encore en cours"
+		return "in_progress"
 	default:
-		return "non démarrée"
+		return "not_started"
 	}
 }
 
@@ -478,72 +479,50 @@ func wuResultOK(code int) bool {
 // The output is built in both outcomes, success and failure alike: for these
 // operations the per-KB breakdown *is* the useful part, and an error with no
 // list behind it would send an administrator to the machine's own WU log — the
-// thing this feature exists to avoid.
-func summarizeInstall(data []byte) (string, error) {
+// thing this feature exists to avoid. Its sentences are msg's (msg.WUInstall),
+// coded for the console; the updates' titles are Windows', as it gave them.
+func summarizeInstall(data []byte) (msg.Message, error) {
 	var raw rawWUInstall
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return "", fmt.Errorf("parse windows update install result: %w", err)
+		return msg.Message{}, fmt.Errorf("parse windows update install result: %w", err)
 	}
 
-	var lines []string
-	switch {
-	case raw.Selected == 0 && raw.SkippedInteractive == 0:
-		// A success, not a failure: the machine is up to date, which is exactly
-		// what the command was asked to achieve.
-		lines = append(lines, "Aucune mise à jour applicable : le poste est à jour.")
-	case raw.Selected == 0:
-		lines = append(lines, "Aucune mise à jour installable sans intervention sur le poste.")
-	default:
-		lines = append(lines, fmt.Sprintf("%d mise(s) à jour retenue(s), %d installée(s).",
-			raw.Selected, raw.Installed))
-	}
-	if raw.SkippedInteractive > 0 {
-		lines = append(lines, fmt.Sprintf(
-			"%d ignorée(s) : elles réclament une interaction utilisateur, impossible depuis un service.",
-			raw.SkippedInteractive))
-	}
-
+	report := msg.WUInstall{Selected: raw.Selected, Installed: raw.Installed,
+		Skipped: raw.SkippedInteractive, Reboot: raw.RebootRequired}
 	failed := 0
 	for _, u := range raw.Updates {
 		if !wuResultOK(u.ResultCode) {
 			failed++
 		}
-		lines = append(lines, formatInstalledUpdate(u))
+		report.Updates = append(report.Updates, installedUpdate(u))
 	}
 	// Retained but never handed to the installer: their download is what failed.
 	// Counted separately because WUA reports no per-update result for them —
-	// they would otherwise vanish from the summary entirely.
+	// they would otherwise vanish from the summary entirely (the report says
+	// how many: Selected - Installed).
 	if missing := raw.Selected - raw.Installed; missing > 0 {
 		failed += missing
-		lines = append(lines, fmt.Sprintf(
-			"%d mise(s) à jour n'ont pas pu être téléchargée(s), et n'ont donc pas été installée(s).",
-			missing))
 	}
 
-	if raw.RebootRequired {
-		lines = append(lines,
-			"", "Redémarrage requis pour finaliser l'installation (commande « Redémarrer »).")
-	}
-
-	output := strings.Join(lines, "\n")
+	output := report.Message()
 	if failed > 0 {
-		return output, fmt.Errorf("%d mise(s) à jour sur %d n'ont pas été installées",
-			failed, raw.Selected)
+		return output, msg.Err("wu.install_incomplete",
+			msg.Params{"failed": failed, "selected": raw.Selected})
 	}
 	// The global code is checked last: it can report an overall failure even
 	// when every individual update went through (an aborted batch, typically).
 	if raw.Installed > 0 && !wuResultOK(raw.ResultCode) {
-		return output, fmt.Errorf("installation %s (code %d)",
-			wuResultLabel(raw.ResultCode), raw.ResultCode)
+		return output, msg.Err("wu.install_result",
+			msg.Params{"result": wuResultKey(raw.ResultCode), "code": raw.ResultCode})
 	}
 	return output, nil
 }
 
-// formatInstalledUpdate renders one update's outcome: "KB5063878 — Titre :
-// installée". The HRESULT is shown in hex only when something went wrong —
-// 0x8007000d is searchable, 134217741 is not — and never on a success, where it
+// installedUpdate is one update's outcome: « KB5063878 — Titre », its
+// result, and its HRESULT in hex only when something went wrong —
+// 0x8007000d is searchable, 134217741 is not — never on a success, where it
 // is always zero and only adds noise.
-func formatInstalledUpdate(u rawWUInstallUpdate) string {
+func installedUpdate(u rawWUInstallUpdate) msg.WUInstalled {
 	name := formatKB(u.KBArticleIDs)
 	title := strings.TrimSpace(u.Title)
 	switch {
@@ -552,10 +531,11 @@ func formatInstalledUpdate(u rawWUInstallUpdate) string {
 	case title != "":
 		name = name + " — " + title
 	}
-	if wuResultOK(u.ResultCode) && u.HResult == 0 {
-		return fmt.Sprintf("%s : %s", name, wuResultLabel(u.ResultCode))
+	out := msg.WUInstalled{Name: name, Result: wuResultKey(u.ResultCode)}
+	if !wuResultOK(u.ResultCode) || u.HResult != 0 {
+		out.HResult = fmt.Sprintf("0x%08x", uint32(u.HResult))
 	}
-	return fmt.Sprintf("%s : %s (0x%08x)", name, wuResultLabel(u.ResultCode), uint32(u.HResult))
+	return out
 }
 
 // --- Diagnosing a failure ---------------------------------------------------
@@ -567,29 +547,28 @@ func formatInstalledUpdate(u rawWUInstallUpdate) string {
 // Only documented codes are translated, like the maintenance verdicts: anything
 // else is reported raw rather than guessed at, because a confidently wrong
 // diagnosis on a console screen costs more than a bare number.
-var wuErrorHints = []struct {
-	code string
-	hint string
-}{
-	{"0x80070422", "le service Windows Update (wuauserv) est désactivé sur ce poste"},
-	{"0x8024402c", "la source de mises à jour est injoignable : le poste ne résout pas le nom de son serveur WSUS (ou de Windows Update)"},
-	{"0x80072ee2", "délai dépassé en joignant la source de mises à jour : réseau, proxy ou serveur WSUS indisponible"},
-	{"0x8024002e", "l'accès à Windows Update est interdit par stratégie : ce poste doit passer par son serveur WSUS"},
-	{"0x80248014", "service de mises à jour inconnu : la configuration WSUS du poste pointe vers un service qui n'existe pas"},
-	{"0x80244022", "le serveur de mises à jour a répondu « service indisponible » (HTTP 503)"},
-	{"0x80240016", "une autre installation est déjà en cours (TrustedInstaller occupé) : réessayer plus tard"},
-	{"0x80240438", "aucune source de mises à jour n'est configurée sur ce poste"},
+//
+// The sentences are in msg.WUHints, the console's catalogue beside them; this
+// list fixes the order they are looked for in.
+var wuErrorHints = []string{
+	"0x80070422", "0x8024402c", "0x80072ee2", "0x8024002e",
+	"0x80248014", "0x80244022", "0x80240016", "0x80240438",
+}
+
+// wuErrorCode returns the known WU failure code in message, or "".
+func wuErrorCode(message string) string {
+	lower := strings.ToLower(message)
+	for _, code := range wuErrorHints {
+		if strings.Contains(lower, code) {
+			return code
+		}
+	}
+	return ""
 }
 
 // wuErrorHint returns an actionable sentence for a known WU failure, or "".
 func wuErrorHint(message string) string {
-	lower := strings.ToLower(message)
-	for _, h := range wuErrorHints {
-		if strings.Contains(lower, h.code) {
-			return h.hint
-		}
-	}
-	return ""
+	return msg.WUHints[wuErrorCode(message)]
 }
 
 // wrapWUError adds the hint above to a raw WUA failure, keeping the original
@@ -598,8 +577,8 @@ func wrapWUError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if hint := wuErrorHint(err.Error()); hint != "" {
-		return fmt.Errorf("%s (%w)", hint, err)
+	if code := wuErrorCode(err.Error()); code != "" {
+		return msg.Wrap("wu.known_error", msg.Params{"hresult": code}, err)
 	}
 	return err
 }

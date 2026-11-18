@@ -534,7 +534,9 @@ async def consume_reset_token(session: AsyncSession, token: str) -> User | None:
     if user_id is None:
         return None
     locked = await session.exec(
-        select(User).where(col(User.id) == user_id).with_for_update()
+        # FOR NO KEY UPDATE: a login of the account must still insert its
+        # session (KEY SHARE through the foreign key), or the two deadlock.
+        select(User).where(col(User.id) == user_id).with_for_update(key_share=True)
     )
     user = locked.one_or_none()
     if user is None or not user.is_active:

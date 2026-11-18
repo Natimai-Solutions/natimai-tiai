@@ -1,23 +1,19 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <h1 class="text-h5 q-my-none col-auto">Groupes</h1>
+      <h1 class="text-h5 q-my-none col-auto">{{ t('groups.page.title') }}</h1>
       <q-space />
       <q-btn
         v-if="auth.can('user', 'write')"
         color="primary"
         icon="group_add"
-        label="Nouveau groupe"
+        :label="t('groups.page.create')"
         @click="openCreate"
       />
     </div>
 
     <div class="text-body2 text-muted q-mb-md" style="max-width: 720px">
-      Un compte peut ce que ses groupes lui accordent, tous groupes confondus. Les trois groupes
-      intégrés se renomment et, sauf les administrateurs, se modifient comme les autres ; ils ne se
-      suppriment pas. Un groupe peut être limité à des emplacements, bâtiments ou salles : ses
-      membres ne voient alors que ces postes — à condition qu'aucun de leurs autres groupes ne soit
-      ouvert à tout le parc.
+      {{ t('groups.page.intro') }}
     </div>
 
     <LoadErrorBanner v-if="loadError" :error="loadError" :loading="loading" @retry="reload" />
@@ -27,7 +23,7 @@
       :columns="columns"
       row-key="id"
       :loading="loading"
-      :no-data-label="loadError ? 'Groupes non chargés.' : 'Aucun groupe.'"
+      :no-data-label="loadError ? t('groups.page.notLoaded') : t('groups.page.empty')"
       :rows-per-page-options="[0]"
       hide-pagination
       flat
@@ -41,12 +37,12 @@
               size="18px"
               class="q-mr-sm text-muted"
             >
-              <q-tooltip v-if="props.row.builtin_key">Groupe intégré</q-tooltip>
+              <q-tooltip v-if="props.row.builtin_key">{{ t('groups.row.builtin') }}</q-tooltip>
             </q-icon>
             <div>
-              <div>{{ props.row.name }}</div>
+              <div>{{ groupName(props.row, rows) }}</div>
               <div v-if="props.row.description" class="text-caption text-muted">
-                {{ props.row.description }}
+                {{ groupDescription(props.row) }}
               </div>
             </div>
           </div>
@@ -57,8 +53,12 @@
         <!-- Wrapping, unlike a table cell's default: a group carries a dozen
              chips, and a single line would push the actions off the screen. -->
         <q-td :props="props" style="white-space: normal; max-width: 720px">
-          <span v-if="props.row.is_admin" class="text-weight-medium">Tous les droits</span>
-          <span v-else-if="!props.row.permissions.length" class="text-muted">Aucun</span>
+          <span v-if="props.row.is_admin" class="text-weight-medium">{{
+            t('groups.row.allPermissions')
+          }}</span>
+          <span v-else-if="!props.row.permissions.length" class="text-muted">{{
+            t('groups.row.noPermission')
+          }}</span>
           <template v-else>
             <q-chip
               v-for="key in props.row.permissions"
@@ -77,7 +77,9 @@
 
       <template #body-cell-scope="props">
         <q-td :props="props" style="white-space: normal; max-width: 320px">
-          <span v-if="props.row.is_admin || !props.row.scope" class="text-muted">Tout le parc</span>
+          <span v-if="props.row.is_admin || !props.row.scope" class="text-muted">{{
+            t('groups.row.wholeFleet')
+          }}</span>
           <template v-else>
             <q-chip
               v-for="(label, i) in scopeLabels(props.row)"
@@ -101,7 +103,7 @@
             dense
             round
             icon="more_vert"
-            :aria-label="`Actions pour ${props.row.name}`"
+            :aria-label="t('groups.row.actionsFor', { name: props.row.name })"
             @click="rememberTrigger"
           >
             <q-menu>
@@ -110,7 +112,7 @@
                      refuses to edit or delete it (item 4). -->
                 <q-item v-if="beyondMe(props.row)" dense class="text-caption text-muted">
                   <q-item-section avatar><q-icon name="lock" size="xs" /></q-item-section>
-                  <q-item-section>{{ MORE_RIGHTS_GROUP }}</q-item-section>
+                  <q-item-section>{{ moreRightsGroup() }}</q-item-section>
                 </q-item>
                 <q-item
                   v-close-popup
@@ -119,7 +121,7 @@
                   @click="openEdit(props.row)"
                 >
                   <q-item-section avatar><q-icon name="edit" /></q-item-section>
-                  <q-item-section>Modifier</q-item-section>
+                  <q-item-section>{{ t('groups.row.edit') }}</q-item-section>
                 </q-item>
                 <q-separator />
                 <q-item
@@ -130,7 +132,7 @@
                   @click="confirmDelete(props.row)"
                 >
                   <q-item-section avatar><q-icon name="delete" /></q-item-section>
-                  <q-item-section>Supprimer</q-item-section>
+                  <q-item-section>{{ t('groups.row.delete') }}</q-item-section>
                 </q-item>
               </q-list>
             </q-menu>
@@ -145,23 +147,24 @@
     <q-dialog v-model="formOpen" @hide="restoreFocus">
       <q-card style="width: 640px; max-width: 95vw">
         <q-card-section class="text-h6">
-          {{ editing ? 'Modifier le groupe' : 'Nouveau groupe' }}
+          {{ editing ? t('groups.form.editTitle') : t('groups.form.createTitle') }}
         </q-card-section>
 
         <q-form @submit="submitForm">
           <q-card-section class="q-gutter-md">
             <q-input
               v-model="form.name"
-              label="Nom"
+              :label="t('groups.form.name')"
               outlined
               dense
               autofocus
               maxlength="100"
+              reactive-rules
               :rules="[required]"
             />
             <q-input
               v-model="form.description"
-              label="Description"
+              :label="t('groups.form.description')"
               outlined
               dense
               maxlength="500"
@@ -169,14 +172,12 @@
             />
 
             <div>
-              <div class="text-subtitle2 q-mb-xs">Droits</div>
+              <div class="text-subtitle2 q-mb-xs">{{ t('groups.form.permissions') }}</div>
               <q-banner v-if="editing?.is_admin" dense class="surface-blue q-mb-sm">
-                Les administrateurs ont tous les droits, y compris ceux des ressources à venir.
-                Cette grille n'est pas modifiable.
+                {{ t('groups.form.adminBanner') }}
               </q-banner>
               <div class="text-caption text-muted q-mb-xs">
-                Cocher un droit de modification ou d'exécution coche aussi la consultation dont il a
-                besoin ; décocher une consultation retire les droits qui en dépendent.
+                {{ t('groups.form.dependencies') }}
               </div>
               <q-list dense bordered separator>
                 <q-item v-for="row in permissionRows()" :key="row.resource">
@@ -194,7 +195,7 @@
                         @update:model-value="onPermissions"
                       >
                         <q-tooltip v-if="cannotGrant(entry.key)">
-                          Vous ne détenez pas ce droit : vous ne pouvez pas l'accorder
+                          {{ t('groups.form.cannotGrant') }}
                         </q-tooltip>
                       </q-checkbox>
                       <div v-if="entry.hint" class="text-caption text-muted q-ml-lg q-mb-xs">
@@ -205,30 +206,27 @@
                 </q-item>
               </q-list>
               <div v-if="riskyWithoutEveryday" class="text-caption text-warn q-mt-xs">
-                Les commandes à risque ne s'exécutent pas sans les commandes courantes : ce droit
-                seul n'ouvre rien.
+                {{ t('groups.form.riskyWithoutEveryday') }}
               </div>
             </div>
 
             <div v-if="!editing?.is_admin">
-              <div class="text-subtitle2 q-mb-xs">Postes concernés</div>
+              <div class="text-subtitle2 q-mb-xs">{{ t('groups.form.scope') }}</div>
               <div class="text-caption text-muted q-mb-sm">
-                Rien de coché : tout le parc. Sinon, les postes d'au moins un de ces emplacements,
-                bâtiments ou salles — et les salles, vérifications, maintenances et e-mails qui s'y
-                rapportent.
+                {{ t('groups.form.scopeHint') }}
               </div>
               <div class="q-gutter-sm">
                 <q-select
                   v-model="form.scope.locations"
                   :options="locationOptions"
-                  label="Emplacements"
+                  :label="t('groups.form.locations')"
                   outlined
                   dense
                   multiple
                   use-chips
                   use-input
                   new-value-mode="add-unique"
-                  hint="Tels que les agents les déclarent ; saisie libre possible"
+                  :hint="t('groups.form.locationsHint')"
                   :input-debounce="0"
                   @input-value="locationTyping = $event"
                   @blur="commitTypedLocation"
@@ -236,7 +234,7 @@
                 <q-select
                   v-model="form.scope.buildings"
                   :options="buildingOptions"
-                  label="Bâtiments"
+                  :label="t('groups.form.buildings')"
                   outlined
                   dense
                   multiple
@@ -247,7 +245,7 @@
                 <q-select
                   v-model="form.scope.rooms"
                   :options="roomOptions"
-                  label="Salles"
+                  :label="t('groups.form.rooms')"
                   outlined
                   dense
                   multiple
@@ -260,8 +258,8 @@
           </q-card-section>
 
           <q-card-actions align="right" class="q-px-md q-pb-md">
-            <q-btn v-close-popup flat label="Annuler" />
-            <q-btn type="submit" color="primary" label="Enregistrer" :loading="saving" />
+            <q-btn v-close-popup flat :label="t('groups.form.cancel')" />
+            <q-btn type="submit" color="primary" :label="t('groups.form.save')" :loading="saving" />
           </q-card-actions>
         </q-form>
       </q-card>
@@ -270,10 +268,12 @@
 </template>
 
 <script setup lang="ts">
+import { groupDescription, groupName } from 'src/utils/groupText';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useFocusReturn } from 'src/composables/useFocusReturn';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
-import { MORE_RIGHTS_GROUP, callerAuthority, exceeds, groupsAuthority } from 'src/utils/authority';
+import { t } from 'src/i18n';
+import { callerAuthority, exceeds, groupsAuthority, moreRightsGroup } from 'src/utils/authority';
 import { useQuasar, type QTableColumn } from 'quasar';
 import {
   createGroup,
@@ -289,6 +289,8 @@ import { escapeHtml } from 'src/utils/html';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { applyPermissionChange, permissionLabel, permissionRows } from 'src/utils/permissions';
+import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -332,7 +334,9 @@ const buildings = ref<Building[]>([]);
 const rooms = ref<Room[]>([]);
 const locationOptions = computed(() => locations.value);
 /** A deleted building or room, wherever its id is still named (C6). */
-const DELETED_PLACE = 'Lieu supprimé';
+function deletedPlace(): string {
+  return t('groups.deleted.place');
+}
 
 /**
  * The scope entries of the group being edited, as the server names them: an
@@ -343,7 +347,7 @@ const DELETED_PLACE = 'Lieu supprimé';
 function editedLabels(kind: 'building' | 'room'): { label: string; value: string }[] {
   return (editing.value?.scope_labels ?? [])
     .filter((l) => l.kind === kind)
-    .map((l) => ({ label: l.exists ? l.label : DELETED_PLACE, value: l.id }));
+    .map((l) => ({ label: l.exists ? l.label : deletedPlace(), value: l.id }));
 }
 
 function withEdited(
@@ -378,7 +382,7 @@ function scopeLabels(group: Group): string[] {
   // Named by the server when it can (C6): right for an account without
   // room:read, which cannot list the rooms, and for a deleted place.
   if (group.scope_labels) {
-    return group.scope_labels.map((l) => (l.exists ? l.label : DELETED_PLACE));
+    return group.scope_labels.map((l) => (l.exists ? l.label : deletedPlace()));
   }
   const building = new Map(buildingOptions.value.map((o) => [o.value, o.label]));
   const room = new Map(roomOptions.value.map((o) => [o.value, o.label]));
@@ -386,20 +390,31 @@ function scopeLabels(group: Group): string[] {
     ...group.scope.locations,
     // An id that names nothing any more matches no poste: shown as such so
     // that an administrator can tidy it, never silently dropped.
-    ...group.scope.buildings.map((id) => building.get(id) ?? 'Bâtiment supprimé'),
-    ...group.scope.rooms.map((id) => room.get(id) ?? 'Salle supprimée'),
+    ...group.scope.buildings.map((id) => building.get(id) ?? t('groups.deleted.building')),
+    ...group.scope.rooms.map((id) => room.get(id) ?? t('groups.deleted.room')),
   ];
 }
 
-const columns: QTableColumn<Group>[] = [
-  { name: 'name', label: 'Groupe', field: 'name', align: 'left' },
-  { name: 'permissions', label: 'Droits', field: 'permissions', align: 'left' },
-  { name: 'scope', label: 'Postes', field: 'scope', align: 'left' },
-  { name: 'member_count', label: 'Comptes', field: 'member_count', align: 'center' },
+// A computed: the labels follow the language, which can change on the page.
+const columns = computed<QTableColumn<Group>[]>(() => [
+  { name: 'name', label: t('groups.columns.name'), field: 'name', align: 'left' },
+  {
+    name: 'permissions',
+    label: t('groups.columns.permissions'),
+    field: 'permissions',
+    align: 'left',
+  },
+  { name: 'scope', label: t('groups.columns.scope'), field: 'scope', align: 'left' },
+  {
+    name: 'member_count',
+    label: t('groups.columns.members'),
+    field: 'member_count',
+    align: 'center',
+  },
   { name: 'actions', label: '', field: 'id', align: 'right' },
-];
+]);
 
-const required = (v: string) => !!v.trim() || 'Requis';
+const required = (v: string) => !!v.trim() || t('groups.form.required');
 
 // The one combination the grid lets you tick that grants nothing: said in the
 // form rather than discovered on the first 403.
@@ -483,15 +498,13 @@ function confirmWholeParc(): Promise<boolean> {
     return Promise.resolve(true);
   }
   return new Promise((resolve) => {
-    $q.dialog({
-      title: 'Tout le parc',
-      message:
-        'Aucun emplacement, bâtiment ni salle n’est choisi : les membres de ce groupe ' +
-        'verront tous les postes et pourront y exercer ses droits. Enregistrer ainsi ?',
-      cancel: { flat: true, noCaps: true, label: 'Revenir au formulaire' },
-      ok: { unelevated: true, noCaps: true, label: 'Enregistrer pour tout le parc' },
+    liveDialog($q, () => ({
+      title: t('groups.wholeFleet.title'),
+      message: t('groups.wholeFleet.message'),
+      cancel: { flat: true, noCaps: true, label: t('groups.wholeFleet.back') },
+      ok: { unelevated: true, noCaps: true, label: t('groups.wholeFleet.confirm') },
       persistent: true,
-    })
+    }))
       .onOk(() => resolve(true))
       .onCancel(() => resolve(false));
   });
@@ -511,7 +524,7 @@ async function submitForm() {
           ? {}
           : { permissions: form.permissions, scope: scopeOrNull(form.scope) }),
       });
-      $q.notify({ type: 'positive', message: 'Groupe mis à jour' });
+      notify($q, () => ({ type: 'positive', message: t('groups.notify.updated') }));
     } else {
       await createGroup({
         name: form.name.trim(),
@@ -519,37 +532,43 @@ async function submitForm() {
         permissions: form.permissions,
         scope: scopeOrNull(form.scope),
       });
-      $q.notify({ type: 'positive', message: 'Groupe créé' });
+      notify($q, () => ({ type: 'positive', message: t('groups.notify.created') }));
     }
     formOpen.value = false;
     await reload();
     // One's own rights may just have changed: the menus follow the profile.
     await auth.fetchMe();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('groups.notify.saveFailed')),
+    }));
   } finally {
     saving.value = false;
   }
 }
 
 function confirmDelete(group: Group) {
-  $q.dialog({
-    title: 'Supprimer le groupe',
+  liveDialog($q, () => ({
+    title: t('groups.delete.title'),
     message:
-      `Supprimer <b>${escapeHtml(group.name)}</b> ?<br>` +
-      `Les ${group.member_count} compte(s) qui en font partie perdent ce qu'il leur accordait.`,
+      `${t('groups.delete.question', { name: `<b>${escapeHtml(groupName(group, rows.value))}</b>` })}<br>` +
+      t('groups.delete.members', { count: group.member_count }, group.member_count),
     html: true,
     cancel: true,
-    ok: { label: 'Supprimer', color: 'negative' },
-  }).onOk(() => {
+    ok: { label: t('groups.delete.ok'), color: 'negative' },
+  })).onOk(() => {
     void (async () => {
       try {
         await deleteGroup(group.id);
-        $q.notify({ type: 'positive', message: 'Groupe supprimé' });
+        notify($q, () => ({ type: 'positive', message: t('groups.notify.deleted') }));
         await reload();
         await auth.fetchMe();
       } catch (e) {
-        $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Suppression impossible') });
+        notify($q, () => ({
+          type: 'negative',
+          message: apiErrorMessage(e, t('groups.notify.deleteFailed')),
+        }));
       }
     })();
   });

@@ -1,14 +1,41 @@
 import { api } from 'boot/axios';
 
+/**
+ * How the server words a variable's value (`EnvItem.format`):
+ * - `plain`: the value as is (a number, a name, a path);
+ * - `bool`: yes or no; `list`: the entries joined;
+ * - `bytes`: a size, with its amount in GiB or MiB;
+ * - `weekday`: 0 = Monday … 6 = Sunday, with the day's name;
+ * - `room_source`: the mode, with what it means;
+ * - `mail_state`: the provider, and whether the environment alone sends mail
+ *   (`params.configured`);
+ * - `proxy`: host and port only; `params.unreadable` when it does not read.
+ */
+export type EnvFormat =
+  'plain' | 'bool' | 'list' | 'bytes' | 'weekday' | 'room_source' | 'mail_state' | 'proxy';
+
 /** One variable of the server's environment, as the page prints it. */
 export interface EnvItem {
   key: string;
-  /** Already rendered server-side; `null` = not set. */
+  /** Already rendered server-side, in French; `null` = not set. */
   value: string | null;
+  /** In French. */
   description: string;
+  /**
+   * For the console to word the line in its reader's language: the value as
+   * the environment holds it (never a secret), how `value` words it, and the
+   * variable parts of that wording. Absent from an older server, which the
+   * console shows as it comes; a format it does not know, likewise.
+   */
+  raw?: unknown;
+  format?: EnvFormat | (string & {});
+  params?: Record<string, unknown>;
 }
 
 export interface EnvGroup {
+  /** Stable (`fleet`, `email`, …); absent from an older server. */
+  code?: string;
+  /** In French. */
   label: string;
   items: EnvItem[];
 }
@@ -60,8 +87,12 @@ export interface EmailSettings {
   /** The policy as it resolves now. */
   effective_provider: EmailProvider;
   configured: boolean;
-  /** What the chosen provider still lacks, in words. */
+  /** What the chosen provider still lacks, in the server's French. */
   missing: string[];
+  /** The same as codes, in the same order (`smtp_host`, `from_email`,
+   * `mailgun_domain`, `mailgun_api_key`, `smtp_password_retype`). Absent on an
+   * older server. */
+  missing_codes?: string[];
   /** The `.env` secrets the server holds back because the console points at
    * another server than the `.env`'s: to be typed here. Absent on an older
    * server. */
@@ -96,8 +127,12 @@ export interface EmailTestRequest {
 
 export interface EmailTestResult {
   ok: boolean;
-  /** Readable as is: what went out, or what to fix. */
+  /** Readable as is, in French: what went out, or what to fix. */
   message: string;
+  /** The same outcome as a code and the parts of its sentence, for the
+   * console to word (`utils/emailSettings.ts`). Absent on an older server. */
+  code?: string | null;
+  params?: Record<string, unknown>;
 }
 
 /** The console's parc-wide settings (page Paramètres), editable without a restart. */

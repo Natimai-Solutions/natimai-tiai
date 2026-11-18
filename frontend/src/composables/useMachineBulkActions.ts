@@ -1,5 +1,6 @@
 import { ref, type Ref } from 'vue';
 import { useQuasar } from 'quasar';
+import { t } from 'src/i18n';
 import { bulkCheckNotification, createChecksBulk, type CheckPayload } from 'src/services/checks';
 import {
   bulkSendNotification,
@@ -18,6 +19,8 @@ import {
 } from 'src/services/machines';
 import { placeMachines, placementNotification, unassignMachines } from 'src/services/rooms';
 import { ROOM_NONE } from 'src/utils/machineListFilters';
+import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 /**
  * What the machine list does to its selection: a command, a verification
@@ -48,7 +51,7 @@ export function useMachineBulkActions(options: {
     // Checks handed out change what « Mes tâches » counts — the asker's own
     // when the requests are theirs: the menu badge reads again (audit U19).
     notifyTasksChanged();
-    $q.notify(bulkCheckNotification(res));
+    notify($q, () => bulkCheckNotification(res));
     selected.value = [];
     await reload();
   }
@@ -68,13 +71,16 @@ export function useMachineBulkActions(options: {
       // A poste follows its room's maintenance owner and cycle: moved, it
       // enters or leaves somebody's « Mes tâches » (audit U19).
       notifyTasksChanged();
-      $q.notify(placementNotification(res));
+      notify($q, () => placementNotification(res));
       placeOpen.value = false;
       selected.value = [];
       await reload();
       onPlaced();
     } catch (e) {
-      $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Affectation impossible') });
+      notify($q, () => ({
+        type: 'negative',
+        message: apiErrorMessage(e, t('machines.bulk.placeFailed')),
+      }));
     }
   }
 
@@ -88,19 +94,21 @@ export function useMachineBulkActions(options: {
     // The count is the whole point of the confirmation here: "sfc sur 1 poste"
     // and "sfc sur 340 postes" are very different decisions.
     const withSession = selected.value.filter((m) => m.session_user_present).length;
-    $q.dialog(commandConfirm(action, ids.length, withSession)).onOk(() => {
+    liveDialog($q, () => commandConfirm(action, ids.length, withSession)).onOk(() => {
       void sendBulk(action, ids);
     });
   }
 
-  // One send at a time: the menu entry clicked twice before it closes, or the
-  // confirmation accepted twice in the same instant, queued the command twice
-  // on every poste of the selection.
-  let sending = false;
+  // One send of a given command at a time: the menu entry clicked twice
+  // before it closes, or the confirmation accepted twice in the same
+  // instant, queued the command twice on every poste of the selection.
+  // Another command still goes: refusing it silently lost what the operator
+  // had just confirmed (verification of 2026-11-18).
+  const sending = new Set<string>();
 
   async function sendBulk(action: CommandAction, ids: string[]) {
-    if (sending) return;
-    sending = true;
+    if (sending.has(action.type)) return;
+    sending.add(action.type);
     try {
       // The wake is emitted by the server, not queued for agents that — by
       // definition of the action — are not running. Everything around it is
@@ -111,25 +119,29 @@ export function useMachineBulkActions(options: {
       }
       try {
         const res = await createCommands({ type: action.type, machine_ids: ids });
-        $q.notify(bulkSendNotification(res));
+        notify($q, () => bulkSendNotification(res));
         selected.value = [];
       } catch (e) {
-        $q.notify({
+        notify($q, () => ({
           type: 'negative',
-          message: apiErrorMessage(e, "Échec de l'envoi des commandes"),
-        });
+          message: apiErrorMessage(e, t('machines.bulk.sendFailed')),
+        }));
       }
     } finally {
-      sending = false;
+      sending.delete(action.type);
     }
   }
 
   async function wakeBulk(ids: string[]) {
     try {
-      $q.notify(wakeNotification(await wakeMachines(ids)));
+      const res = await wakeMachines(ids);
+      notify($q, () => wakeNotification(res));
       selected.value = [];
     } catch (e) {
-      $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Échec du réveil') });
+      notify($q, () => ({
+        type: 'negative',
+        message: apiErrorMessage(e, t('machines.bulk.wakeFailed')),
+      }));
     }
   }
 
@@ -137,27 +149,28 @@ export function useMachineBulkActions(options: {
   function reenrollSelection() {
     const ids = selectedIds();
     if (!ids.length) return;
-    $q.dialog({
-      title: 'Autoriser le ré-enrôlement',
-      message:
-        `Autoriser le ré-enrôlement de ${ids.length} poste(s) ? Les postes sans demande en ` +
-        'attente ni token révoqué sont ignorés. Chaque poste revient de lui-même à sa prochaine ' +
-        "tentative d'enrôlement.",
-      cancel: { flat: true, noCaps: true, label: 'Annuler' },
-      ok: { unelevated: true, noCaps: true, label: 'Autoriser' },
+    liveDialog($q, () => ({
+      title: t('machines.bulk.reenrollTitle'),
+      message: t('machines.bulk.reenrollMessage', { count: ids.length }, ids.length),
+      cancel: { flat: true, noCaps: true, label: t('machines.bulk.cancel') },
+      ok: { unelevated: true, noCaps: true, label: t('machines.bulk.allow') },
       persistent: true,
-    }).onOk(() => {
+    })).onOk(() => {
       void doReenroll(ids);
     });
   }
 
   async function doReenroll(ids: string[]) {
     try {
-      $q.notify(approveReenrollNotification(await approveReenroll(ids)));
+      const res = await approveReenroll(ids);
+      notify($q, () => approveReenrollNotification(res));
       selected.value = [];
       await reload();
     } catch (e) {
-      $q.notify({ type: 'negative', message: apiErrorMessage(e, "Échec de l'autorisation") });
+      notify($q, () => ({
+        type: 'negative',
+        message: apiErrorMessage(e, t('machines.bulk.reenrollFailed')),
+      }));
     }
   }
 

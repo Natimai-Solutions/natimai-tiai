@@ -17,6 +17,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import contains, utcnow
 from app.features.command import crud as command_crud
+from app.features.command import texts
 from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.inventory.models import MachineSoftware, Software
 from app.features.package import manifest, storage
@@ -33,7 +34,7 @@ OPEN_STATUSES = [
 
 
 # What a cancelled installation says in the console (``cancel_pending_installs``).
-RETIRED_ERROR = "Paquet retiré : installation annulée"
+RETIRED_ERROR = texts.package_retired().text
 
 
 async def locked(session: AsyncSession, package_id: uuid.UUID) -> Package | None:
@@ -83,14 +84,20 @@ async def cancel_pending_installs(
         .where(col(Command.package_id) == package_id)
         .where(col(Command.type) == CommandType.PACKAGE_INSTALL.value)
         .where(col(Command.status) == CommandStatus.PENDING.value)
-        .values(status=CommandStatus.FAILED, error=RETIRED_ERROR, finished_at=now)
+        .values(
+            status=CommandStatus.FAILED,
+            error=RETIRED_ERROR,
+            result_code=texts.package_retired().code,
+            result_params={},
+            finished_at=now,
+        )
     )
     return result.rowcount or 0
 
 
 # What a pending deployment replaced by a newer one says in the console
 # (``supersede_stale_pending``).
-SUPERSEDED_ERROR = "Remplacée par un nouveau déploiement"
+SUPERSEDED_ERROR = texts.package_superseded().text
 
 
 async def supersede_stale_pending(
@@ -123,7 +130,13 @@ async def supersede_stale_pending(
         .where(col(Command.machine_id).in_(list(machine_ids)))
         .where(col(Command.package_digest).is_not(None))
         .where(col(Command.package_digest) != digest)
-        .values(status=CommandStatus.FAILED, error=SUPERSEDED_ERROR, finished_at=now)
+        .values(
+            status=CommandStatus.FAILED,
+            error=SUPERSEDED_ERROR,
+            result_code=texts.package_superseded().code,
+            result_params={},
+            finished_at=now,
+        )
     )
     return result.rowcount or 0
 

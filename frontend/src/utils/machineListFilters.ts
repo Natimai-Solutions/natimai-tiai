@@ -1,4 +1,5 @@
 import type { LocationQuery } from 'vue-router';
+import { t } from 'src/i18n';
 import type {
   ListMachinesParams,
   MachineStatus,
@@ -43,6 +44,26 @@ export interface FilterOption<T = string | null> {
   label: string;
   value: T;
   disable?: boolean;
+}
+
+/**
+ * A dropdown entry whose label is worded when it is read, not when the entry
+ * is made: the language may change while the list is open (« Mon compte »),
+ * and the dropdowns, their chips and the fleet's entries must follow. The
+ * label is an enumerable getter, so a copy or a comparison sees the words.
+ */
+export function liveOption<T>(label: () => string, value: T): FilterOption<T> {
+  return {
+    get label() {
+      return label();
+    },
+    value,
+  };
+}
+
+/** An entry worded by a key of the `machines` catalogue. */
+function keyed<T>(key: string, value: T): FilterOption<T> {
+  return liveOption(() => t(`machines.${key}`), value);
 }
 
 export interface MachineFilters {
@@ -160,51 +181,51 @@ export function emptyMachineFilters(): MachineFilters {
 // that is not offered here could not be shown, nor cleared from its chip.
 
 export const MAINTENANCE_OPTIONS: FilterOption[] = [
-  { label: 'Maintenance : tous', value: null },
-  { label: 'Maintenance en retard', value: 'overdue' },
-  { label: 'Maintenance à échéance', value: 'due_soon' },
-  { label: 'Maintenance à jour', value: 'ok' },
-  { label: 'Exclus de la maintenance', value: 'excluded' },
+  keyed('options.maintenance.all', null),
+  keyed('options.maintenance.overdue', 'overdue'),
+  keyed('options.maintenance.due_soon', 'due_soon'),
+  keyed('options.maintenance.ok', 'ok'),
+  keyed('options.maintenance.excluded', 'excluded'),
 ];
 
 export const CHECK_OPTIONS: FilterOption[] = [
-  { label: 'Vérifications : toutes', value: null },
-  { label: 'Vérification demandée (ouverte)', value: 'true' },
+  keyed('options.check.all', null),
+  keyed('options.check.open', 'true'),
 ];
 
 // « Antivirus » in the labels, not just « à jour » : since the Windows Update
 // filter joined it, this axis has to say which of the two updates it means.
 export const STATUS_OPTIONS: FilterOption[] = [
-  { label: 'Antivirus : Tous statuts', value: null },
-  { label: 'Antivirus à jour', value: 'up_to_date' },
-  { label: 'Antivirus périmé', value: 'outdated' },
-  { label: 'Identité à confirmer', value: 'needs_verification' },
-  { label: 'Inactif', value: 'inactive' },
+  keyed('options.status.all', null),
+  keyed('options.status.up_to_date', 'up_to_date'),
+  keyed('options.status.outdated', 'outdated'),
+  keyed('options.status.needs_verification', 'needs_verification'),
+  keyed('options.status.inactive', 'inactive'),
 ];
 
 export const WU_OPTIONS: FilterOption[] = [
-  { label: 'Windows Update : Tous statuts', value: null },
-  { label: 'MAJ Windows requises', value: 'pending' },
-  { label: 'Redémarrage requis', value: 'reboot_required' },
+  keyed('options.wu.all', null),
+  keyed('options.wu.pending', 'pending'),
+  keyed('options.wu.reboot_required', 'reboot_required'),
 ];
 
 // « > 1 sem. » / « > 1 mois » : the two questions asked of a scan date. A
 // never-run scan counts as overdue server-side — those are the postes the
 // filter exists to surface.
 export const SCAN_OPTIONS: FilterOption[] = [
-  { label: 'Scan AV : Tous', value: null },
-  { label: 'Scan rapide > 1 sem.', value: 'quick:7' },
-  { label: 'Scan rapide > 1 mois', value: 'quick:30' },
-  { label: 'Scan complet > 1 sem.', value: 'full:7' },
-  { label: 'Scan complet > 1 mois', value: 'full:30' },
-  { label: 'Les 2 scans > 1 sem.', value: 'both:7' },
-  { label: 'Les 2 scans > 1 mois', value: 'both:30' },
+  keyed('options.scan.all', null),
+  keyed('options.scan.quick7', 'quick:7'),
+  keyed('options.scan.quick30', 'quick:30'),
+  keyed('options.scan.full7', 'full:7'),
+  keyed('options.scan.full30', 'full:30'),
+  keyed('options.scan.both7', 'both:7'),
+  keyed('options.scan.both30', 'both:30'),
 ];
 
 export const ENROLLMENT_OPTIONS: FilterOption[] = [
-  { label: 'Enrôlement : tous', value: null },
-  { label: 'Ré-enrôlement à autoriser', value: 'pending' },
-  { label: 'Token révoqué', value: 'revoked' },
+  keyed('options.enrollment.all', null),
+  keyed('options.enrollment.pending', 'pending'),
+  keyed('options.enrollment.revoked', 'revoked'),
 ];
 
 /**
@@ -218,30 +239,30 @@ export function optionsWithCurrent(
   labelOf: (value: string) => string = (value) => value,
 ): FilterOption[] {
   if (current == null || options.some((o) => o.value === current)) return options;
-  return [...options, { label: labelOf(current), value: current }];
+  return [...options, liveOption(() => labelOf(current), current)];
 }
 
 export const MISMATCH_OPTIONS: FilterOption[] = [
-  { label: 'Emplacement / salle : tous', value: null },
-  { label: 'Emplacement divergent de la salle', value: 'true' },
+  keyed('options.mismatch.all', null),
+  keyed('options.mismatch.mismatch', 'true'),
 ];
 
 export const RAM_OP_OPTIONS: FilterOption<'min' | 'max' | null>[] = [
-  { label: 'Mémoire : toutes', value: null },
-  { label: 'Mémoire : au moins', value: 'min' },
-  { label: 'Mémoire : au plus', value: 'max' },
-];
-
-export const DISK_OPTIONS: FilterOption<number | null>[] = [
-  { label: 'Espace disque : tous', value: null },
-  { label: 'Moins de 10 % libres', value: 10 },
-  { label: 'Moins de 20 % libres', value: 20 },
+  keyed('options.ram.all', null),
+  keyed('options.ram.min', 'min'),
+  keyed('options.ram.max', 'max'),
 ];
 
 /** The chip and menu label of a free-space threshold, whatever its value. */
 export function diskFreeLabel(percent: number): string {
-  return `Moins de ${percent} % libres`;
+  return t('machines.options.disk.below', { percent });
 }
+
+export const DISK_OPTIONS: FilterOption<number | null>[] = [
+  keyed('options.disk.all', null),
+  liveOption(() => diskFreeLabel(10), 10),
+  liveOption(() => diskFreeLabel(20), 20),
+];
 
 /**
  * The menu's choices, plus the threshold in use when it is none of them —
@@ -250,7 +271,7 @@ export function diskFreeLabel(percent: number): string {
  */
 export function diskOptionsFor(current: number | null): FilterOption<number | null>[] {
   if (current == null || DISK_OPTIONS.some((o) => o.value === current)) return DISK_OPTIONS;
-  return [...DISK_OPTIONS, { label: diskFreeLabel(current), value: current }].sort(
+  return [...DISK_OPTIONS, liveOption(() => diskFreeLabel(current), current)].sort(
     (a, b) => (a.value ?? -1) - (b.value ?? -1),
   );
 }
@@ -274,22 +295,27 @@ export interface MachineFleetOptions {
   chassis: FilterOption[];
 }
 
+/** A fleet dropdown's « Tous » entry. */
+export function fleetAllOption(key: keyof MachineFleetOptions): FilterOption {
+  return keyed(`options.fleet.${key}`, null);
+}
+
 /** The fleet dropdowns before anything is loaded: each its « Tous » entry alone. */
 export function initialFleetOptions(): MachineFleetOptions {
   return {
-    antivirus: [{ label: 'Tous les antivirus', value: null }],
-    os: [{ label: 'Tous les OS', value: null }],
-    agent: [{ label: 'Agent : toutes versions', value: null }],
-    location: [{ label: 'Tous les emplacements', value: null }],
-    building: [{ label: 'Tous les bâtiments', value: null }],
-    room: [{ label: 'Toutes les salles', value: null }],
-    model: [{ label: 'Tous les modèles', value: null }],
-    manufacturer: [{ label: 'Tous les constructeurs', value: null }],
-    processor: [{ label: 'Tous les processeurs', value: null }],
+    antivirus: [fleetAllOption('antivirus')],
+    os: [fleetAllOption('os')],
+    agent: [fleetAllOption('agent')],
+    location: [fleetAllOption('location')],
+    building: [fleetAllOption('building')],
+    room: [fleetAllOption('room')],
+    model: [fleetAllOption('model')],
+    manufacturer: [fleetAllOption('manufacturer')],
+    processor: [fleetAllOption('processor')],
     // The kinds are a closed list the agent normalises to, so the entries are
     // known in advance; the fleet only says which of them are present, and
     // how many of each.
-    chassis: [{ label: 'Tous les types de poste', value: null }],
+    chassis: [fleetAllOption('chassis')],
   };
 }
 
@@ -541,7 +567,8 @@ export function machineFilterChips(
   const chips: MachineFilterChip[] = [];
   // No dropdown for the domain: it arrives by a link or a hand-typed URL, and
   // its chip is the only thing on screen that says it narrows the list.
-  if (f.domain) chips.push({ key: 'domain', label: `Domaine : ${f.domain}` });
+  if (f.domain)
+    chips.push({ key: 'domain', label: t('machines.chips.domain', { domain: f.domain }) });
   if (f.enrollment) {
     chips.push({ key: 'enrollment', label: label(ENROLLMENT_OPTIONS, f.enrollment) });
   }
@@ -570,7 +597,7 @@ export function machineFilterChips(
   if (isRamActive(f)) {
     chips.push({
       key: 'ram',
-      label: `Mémoire ${f.ramOp === 'min' ? '≥' : '≤'} ${ramGbValue(f)} Gio`,
+      label: t('machines.chips.ram', { op: f.ramOp === 'min' ? '≥' : '≤', gb: ramGbValue(f) }),
     });
   }
   if (f.diskFree != null) {
@@ -586,10 +613,10 @@ export function machineFilterChips(
   // No option list behind this one: it comes from a link, so the chip is what
   // tells the reader why the list is short — and the only way back out of it.
   if (f.softwareId != null) {
-    chips.push({ key: 'software', label: 'Postes portant un logiciel' });
+    chips.push({ key: 'software', label: t('machines.chips.software') });
   }
   // From the dashboard's card, like the software one: the chip says why.
-  if (f.aging) chips.push({ key: 'aging', label: 'Matériel à renouveler' });
+  if (f.aging) chips.push({ key: 'aging', label: t('machines.chips.aging') });
   return chips;
 }
 
@@ -616,13 +643,13 @@ export function unmatchedExactFilters(
   options: MachineFleetOptions,
 ): UnmatchedFilter[] {
   const facets: [MachineFilterKey, string, string | null, FilterOption[]][] = [
-    ['location', 'Emplacement', f.location, options.location],
-    ['antivirus', 'Antivirus', f.antivirus, options.antivirus],
-    ['os', 'Système', f.os, options.os],
-    ['agent', "Version de l'agent", f.agent, options.agent],
-    ['manufacturer', 'Constructeur', f.manufacturer, options.manufacturer],
-    ['model', 'Modèle', f.model, options.model],
-    ['processor', 'Processeur', f.processor, options.processor],
+    ['location', t('machines.facets.location'), f.location, options.location],
+    ['antivirus', t('machines.facets.antivirus'), f.antivirus, options.antivirus],
+    ['os', t('machines.facets.os'), f.os, options.os],
+    ['agent', t('machines.facets.agent'), f.agent, options.agent],
+    ['manufacturer', t('machines.facets.manufacturer'), f.manufacturer, options.manufacturer],
+    ['model', t('machines.facets.model'), f.model, options.model],
+    ['processor', t('machines.facets.processor'), f.processor, options.processor],
   ];
   return facets.flatMap(([key, facet, value, known]) => {
     // The « Tous » entry alone: the listing has not answered.

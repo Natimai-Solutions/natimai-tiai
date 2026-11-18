@@ -25,6 +25,7 @@ from app.api.deps import (
     require_permission,
 )
 from app.core.errors import AppError, ErrorCode
+from app.core.validation import refusal
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.check import crud
@@ -122,6 +123,9 @@ class CheckOut(BaseModel):
     closed_at: datetime | None
     closed_by: str | None
     closing_note: str | None
+    # Set when the server wrote the note itself (a merge): the console words
+    # it in the reader's language, ``closing_note`` keeping the French.
+    closing_note_code: str | None = None
     # Filled on the task lists, where the reader has no fiche open.
     machine: MachineRef | None = None
 
@@ -306,6 +310,7 @@ async def _out(
             closed_at=r.closed_at,
             closed_by=r.closed_by,
             closing_note=r.closing_note,
+            closing_note_code=r.closing_note_code,
             machine=machines.get(r.machine_id),
         )
         for r in rows
@@ -637,11 +642,11 @@ async def close_check(
         # that would read before the request it answers.
         raise RequestValidationError(
             [
-                {
-                    "loc": ("body", "closed_at"),
-                    "msg": "Value error, la date ne peut pas précéder la demande",
-                    "type": "value_error",
-                }
+                refusal(
+                    ["body", "closed_at"],
+                    "date_before_request",
+                    "la date ne peut pas précéder la demande",
+                )
             ]
         )
     note = _clean(payload.note)

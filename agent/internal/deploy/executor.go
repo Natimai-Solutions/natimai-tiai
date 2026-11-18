@@ -5,12 +5,14 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/msg"
 )
 
 // Env is what the executor needs from the outside world: the server, Windows,
@@ -35,15 +37,28 @@ type Env interface {
 }
 
 // Result is what the console shows.
+//
+// Message is Output as a message (msg), coded when the agent wrote the whole
+// of it; Output is its text.
 type Result struct {
 	Output         string
+	Message        msg.Message
 	RebootRequired bool
+}
+
+// RevocationOffline is the note VerifyAuthenticode returns for a signature
+// verified without its revocation check, the revocation servers being out of
+// reach.
+const RevocationOffline = "révocation non vérifiable hors ligne"
+
+func result(m msg.Message, reboot bool) Result {
+	return Result{Output: m.Text, Message: m, RebootRequired: reboot}
 }
 
 // Execute runs a package_install or package_uninstall.
 func Execute(ctx context.Context, env Env, policy Policy, cmdType string, pkg *models.PackageDelivery) (Result, error) {
 	if pkg == nil {
-		return Result{}, errors.New("commande sans paquet")
+		return Result{}, msg.Err("deploy.no_package", nil)
 	}
 	action := "install"
 	if cmdType == "package_uninstall" {
@@ -58,7 +73,7 @@ func Execute(ctx context.Context, env Env, policy Policy, cmdType string, pkg *m
 	case "files":
 		return executeFiles(ctx, env, policy, action, pkg)
 	}
-	return Result{}, fmt.Errorf("type de paquet inconnu %q", pkg.Kind)
+	return Result{}, msg.Err("deploy.unknown_kind", msg.Params{"kind": msg.Quote(pkg.Kind)})
 }
 
 func executeWinget(ctx context.Context, env Env, policy Policy, action string, pkg *models.PackageDelivery) (Result, error) {
@@ -81,24 +96,24 @@ func executeWinget(ctx context.Context, env Env, policy Policy, action string, p
 	if err != nil {
 		return Result{}, fmt.Errorf("winget : %w", err)
 	}
-	ok, note := WingetVerdict(code)
+	ok, note := wingetVerdict(code)
 	if !ok {
-		return Result{}, errors.New(note)
+		return Result{}, &msg.Error{Message: note}
 	}
-	out := fmt.Sprintf("winget %s %s : terminé", action, pkg.WingetID)
-	if note != "" {
-		out += " (" + note + ")"
-	}
-	return Result{Output: out}, nil
+	return result(msg.New("deploy.winget_done", msg.Params{
+		"action":  action,
+		"id":      pkg.WingetID,
+		"already": note.Text != "",
+	}), false), nil
 }
 
 func executeFiles(ctx context.Context, env Env, policy Policy, action string, pkg *models.PackageDelivery) (Result, error) {
 	if !ValidPackageID(pkg.ID) {
-		return Result{}, fmt.Errorf("identifiant de paquet refusé : %q", pkg.ID)
+		return Result{}, msg.Err("deploy.package_id_refused", msg.Params{"id": msg.Quote(pkg.ID)})
 	}
 	raw, err := base64.StdEncoding.DecodeString(pkg.Manifest)
 	if err != nil || len(raw) == 0 {
-		return Result{}, errors.New("manifeste absent ou mal encodé")
+		return Result{}, msg.Err("deploy.bad_manifest", nil)
 	}
 	manifest, err := ParseManifest(raw, pkg.ID)
 	if err != nil {
@@ -109,8 +124,7 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 		step = manifest.Uninstall
 	}
 	if step == nil {
-		return Result{}, fmt.Errorf("le paquet ne définit pas de %s", map[string]string{
-			"install": "installation", "uninstall": "désinstallation"}[action])
+		return Result{}, msg.Err("deploy.no_step", msg.Params{"action": action})
 	}
 
 	dir, err := PackageDir(env.PackagesDir(), pkg.ID)
@@ -121,7 +135,10 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	// Method B first: when it holds, the manifest is the administrator's
 	// word for every file and argument.
 	method := ""
-	var trustNote string
+	// What let the package run, for the result line (msg's trust, by and
+	// revocation_offline): the administrator's signature, or the approved
+	// publisher of its executable.
+	trust := msg.Params{}
 	// Why method B refused a signed package, kept when method A is tried
 	// next: the administrator signed it, so that refusal — a thumbprint
 	// missing from DeploySigners, a manifest changed since — is the one they
@@ -131,7 +148,7 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 		subject, verr := VerifyAdminSignature(raw, pkg.Signature, pkg.SignatureAlgorithm, pkg.Certificate, policy.Signers)
 		if verr == nil {
 			method = "B"
-			trustNote = "paquet signé par " + subject
+			trust = msg.Params{"trust": "signer", "by": subject}
 		} else if len(policy.Publishers) == 0 {
 			return Result{}, verr
 		} else {
@@ -154,9 +171,9 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	if method == "" {
 		if len(policy.Publishers) == 0 {
 			if len(policy.Signers) == 0 {
-				return Result{}, errors.New("aucune méthode de confiance pour les paquets de fichiers n'est activée sur ce poste (DeploySigners / DeployPublishers)")
+				return Result{}, msg.Err("deploy.no_trust_method", nil)
 			}
-			return Result{}, errors.New("paquet non signé, et aucun éditeur approuvé sur ce poste (DeployPublishers)")
+			return Result{}, msg.Err("deploy.unsigned_no_publisher", nil)
 		}
 		method = "A"
 		checked, aerr := MethodAStep(*step, action)
@@ -172,7 +189,7 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	// signing script refuse to produce one — what reaches a poste anyway is
 	// refused here too.
 	if action == "install" && MsiExecRemoves(*step) {
-		return Result{}, errors.New("l'installation de ce paquet lance une désinstallation (msiexec /x, /uninstall ou REMOVE=) : refusée — placez cette commande dans la désinstallation du paquet")
+		return Result{}, msg.Err("deploy.install_removes", nil)
 	}
 
 	files := manifest.Files
@@ -198,19 +215,19 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	}
 	SweepPackages(env.PackagesDir(), pkg.ID, need, policy.CacheMaxBytes(), time.Now())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return Result{}, fmt.Errorf("dossier du paquet : %w", err)
+		return Result{}, msg.Wrap("deploy.package_dir", nil, err)
 	}
 	// Whatever an earlier attempt left that this manifest does not name goes
 	// before anything runs: a failed run must not leave a file for the next.
 	if err := PruneDir(dir, files); err != nil {
-		return Result{}, fmt.Errorf("dossier du paquet : %w", err)
+		return Result{}, msg.Wrap("deploy.package_dir", nil, err)
 	}
 	// What gets downloaded is what the manifest names — by hash. Under method
 	// A an unsigned manifest names them too, but the file that runs is then
 	// checked by Windows, and the others are data it reads (MethodAFiles).
 	for _, f := range files {
 		if err := env.Download(ctx, pkg.ID, f, filepath.Join(dir, f.Name)); err != nil {
-			err = fmt.Errorf("téléchargement de %s : %w", f.Name, err)
+			err = msg.Wrap("deploy.download_failed", msg.Params{"file": f.Name}, err)
 			if method == "A" && !resumable(err) {
 				return refused(err)
 			}
@@ -225,62 +242,74 @@ func executeFiles(ctx context.Context, env Env, policy Policy, action string, pk
 	if method == "A" && step.Run != MsiExec {
 		note, verr := env.VerifyAuthenticode(exe)
 		if verr != nil {
-			return refused(fmt.Errorf("signature de %s refusée par Windows : %w", step.Run, verr))
+			return refused(msg.Wrap("deploy.authenticode_refused", msg.Params{"file": step.Run}, verr))
 		}
 		name, nerr := SignerName(exe)
 		if nerr != nil {
 			return refused(nerr)
 		}
 		if !PublisherApproved(name, policy.Publishers) {
-			return refused(fmt.Errorf("éditeur %q non approuvé sur ce poste (DeployPublishers)", name))
+			return refused(msg.Err("deploy.publisher_not_approved", msg.Params{"publisher": msg.Quote(name)}))
 		}
-		trustNote = "éditeur approuvé : " + name
-		if note != "" {
-			trustNote += " (" + note + ")"
+		trust = msg.Params{"trust": "publisher", "by": name}
+		switch note {
+		case "":
+		case RevocationOffline:
+			trust["revocation_offline"] = true
+		default:
+			// A note the console has no words for: the line keeps it, as
+			// text, and goes without a code.
+			trust["note"] = note
 		}
 	}
 
 	code, err := env.Run(ctx, exe, ExpandArgs(step.Args, dir), dir)
 	if err != nil {
-		return Result{}, fmt.Errorf("lancement de %s : %w", step.Run, err)
+		return Result{}, msg.Wrap("deploy.launch_failed", msg.Params{"file": step.Run}, err)
 	}
 	ok, reboot := ExitVerdict(code, manifest.SuccessCodes)
 	if !ok {
-		msg := fmt.Sprintf("%s a renvoyé le code %d", step.Run, code)
-		if trustNote != "" {
-			msg += " (" + trustNote + ")"
-		}
-		return Result{}, errors.New(msg)
+		params := msg.Params{"file": step.Run, "code": code}
+		maps.Copy(params, trust)
+		return Result{}, &msg.Error{Message: noted(msg.New("deploy.exit_code", params), trust)}
 	}
 	// The files have done their job; a failed run keeps them for a retry
 	// (PruneDir clears anything the next manifest does not name).
 	_ = os.RemoveAll(dir)
 
-	verb := map[string]string{"install": "Installation", "uninstall": "Désinstallation"}[action]
 	// Built from the parts that are there: a package without a version, or a
 	// method A uninstall by product code (no file, so no publisher to name),
 	// must not read « de App  terminée (méthode A, ) ».
-	what := joinNonEmpty(" ", manifest.Name, manifest.Version)
-	if what == "" {
-		what = "paquet " + pkg.ID
+	params := msg.Params{
+		"action":     action,
+		"name":       joinNonEmpty(" ", manifest.Name, manifest.Version),
+		"package_id": pkg.ID,
+		"method":     method,
+		"reboot":     reboot,
 	}
-	lines := []string{fmt.Sprintf("%s de %s terminée (%s)", verb, what,
-		joinNonEmpty(", ", "méthode "+method, trustNote))}
-	if reboot {
-		lines = append(lines, "Redémarrage requis pour terminer.")
+	maps.Copy(params, trust)
+	return result(noted(msg.New("deploy.done", params), trust), reboot), nil
+}
+
+// noted is m, unless the publisher's verification carried a note the
+// console has no words for: then its text, with the note in place of the
+// revocation one, and no code.
+func noted(m msg.Message, trust msg.Params) msg.Message {
+	note, ok := trust["note"].(string)
+	if !ok {
+		return m
 	}
-	return Result{Output: strings.Join(lines, "\n"), RebootRequired: reboot}, nil
+	by := fmt.Sprint(trust["by"])
+	return msg.Plain(strings.Replace(m.Text, "éditeur approuvé : "+by,
+		"éditeur approuvé : "+by+" ("+note+")", 1))
 }
 
 // bothMethodsRefused reports a signed package that method B refused and
 // method A refused after it: method B first — the administrator signed the
-// package, its refusal is the cause — then method A.
+// package, its refusal is the cause — then method A. One sentence, coded
+// "deploy.both_refused", each refusal quoted with its own code (msg).
 func bothMethodsRefused(methodB, methodA error) error {
-	a := methodA.Error()
-	if !strings.HasPrefix(a, "méthode A") {
-		a = "méthode A : " + a
-	}
-	return fmt.Errorf("méthode B : %v ; %s", methodB, a)
+	return msg.BothMethodsRefused(methodB, methodA)
 }
 
 // joinNonEmpty joins the parts that are not empty.

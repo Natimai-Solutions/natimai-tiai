@@ -9,8 +9,9 @@ scheme breaks (two serialisers disagreeing on a space or a key order).
 import json
 import re
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 from app.features.package import storage
@@ -58,42 +59,81 @@ def _shown(char: str) -> str:
     )
 
 
-def file_name_problem(name: str) -> str | None:
-    """Why ``valid_file_name`` refuses this name, as the console says it after
-    « « nom » refusé : » — None when it is accepted. The same rule, read
-    clause by clause, so that the administrator learns which one: a name made
-    of allowed characters only may still start with one that may not lead, or
-    be a device name (audit: « _config.ini », « nul.txt »)."""
+@dataclass(frozen=True)
+class NameRefusal:
+    """Why ``valid_file_name`` refuses a name: ``code`` and ``params`` for the
+    console to word (plan ``dev/plan-console-bilingue.md``), ``message`` in
+    French as the API always said it."""
+
+    code: str
+    message: str
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+def file_name_refusal(name: str) -> NameRefusal | None:
+    """Why ``valid_file_name`` refuses this name, None when it is accepted.
+    The same rule, read clause by clause, so that the administrator learns
+    which one: a name made of allowed characters only may still start with
+    one that may not lead, or be a device name (audit: « _config.ini »,
+    « nul.txt »)."""
     if not name:
-        return "nom vide"
+        return NameRefusal("empty", "nom vide")
     bad = list(dict.fromkeys(c for c in name if not _NAME_CHAR.fullmatch(c)))
     if bad:
-        return (
+        return NameRefusal(
+            "forbidden_characters",
             "caractère"
             + ("s" if len(bad) > 1 else "")
             + " interdit"
             + ("s" if len(bad) > 1 else "")
             + " "
             + ", ".join(_shown(c) for c in bad)
-            + f" (permis : {ALLOWED_CHARACTERS})"
+            + f" (permis : {ALLOWED_CHARACTERS})",
+            # As shown, quotes aside: a control or an odd space by its code point.
+            {
+                "characters": [
+                    c if c.isprintable() and not c.isspace() else f"U+{ord(c):04X}"
+                    for c in bad
+                ]
+            },
         )
     if len(name) > 255:
-        return "plus de 255 caractères"
+        return NameRefusal("too_long", "plus de 255 caractères", {"max": 255})
     if not name[0].isascii() or not name[0].isalnum():
-        return "le nom doit commencer par une lettre sans accent ou un chiffre"
+        return NameRefusal(
+            "bad_first_character",
+            "le nom doit commencer par une lettre sans accent ou un chiffre",
+        )
     if _RESERVED.fullmatch(name):
-        return (
+        return NameRefusal(
+            "reserved",
             "nom réservé par Windows (CON, PRN, AUX, NUL, COM1 à COM9, LPT1 à "
-            "LPT9, quelle que soit l'extension)"
+            "LPT9, quelle que soit l'extension)",
         )
     if name.endswith((".", " ")):
-        return "le nom ne doit finir ni par un point ni par une espace"
+        return NameRefusal(
+            "bad_ending", "le nom ne doit finir ni par un point ni par une espace"
+        )
     return None
+
+
+def file_name_problem(name: str) -> str | None:
+    """``file_name_refusal``'s French sentence, as the console says it after
+    « « nom » refusé : » — None when the name is accepted."""
+    refusal = file_name_refusal(name)
+    return refusal.message if refusal else None
 
 
 @dataclass(frozen=True)
 class Problem:
-    """Why a package cannot be deployed yet, in the console's words.
+    """Why a package cannot be deployed yet.
+
+    ``code`` and ``params`` are what the console words, in its reader's
+    language (plan ``dev/plan-console-bilingue.md``): the code names the
+    sentence, ``params`` fills it — file names, lists of them, a size, and
+    for ``untrusted`` the ``reason`` method A refuses the step for.
+    ``message`` is the same sentence in French, kept for an older console
+    and for whatever reads the API without one.
 
     ``blocks_uninstall``: whether it stands in the way of an uninstallation
     too. The agent reads the whole manifest before either step (deploy
@@ -102,6 +142,7 @@ class Problem:
     code: str
     message: str
     blocks_uninstall: bool = True
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 def _quoted(names: Sequence[str]) -> str:
@@ -198,7 +239,9 @@ def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
     elif package.install_run != MSIEXEC and package.install_run not in names:
         out.append(
             Problem(
-                "install_missing", f"« {package.install_run} » n'est pas dans le paquet"
+                "install_missing",
+                f"« {package.install_run} » n'est pas dans le paquet",
+                params={"file": package.install_run},
             )
         )
     elif msiexec_removes(package.install_run, package.install_args):
@@ -217,6 +260,7 @@ def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
             Problem(
                 "uninstall_missing",
                 f"« {package.uninstall_run} » n'est pas dans le paquet",
+                params={"file": package.uninstall_run},
             )
         )
     duplicates = case_duplicates(files)
@@ -228,6 +272,7 @@ def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
                 "fichier sous Windows, les postes refusent le paquet) : "
                 + " ; ".join(_quoted(group) for group in duplicates)
                 + " — retirez ceux en trop",
+                params={"groups": duplicates},
             )
         )
     # A row whose stored file is gone: every poste would get a 404 on it. Left
@@ -245,6 +290,7 @@ def problems(package: Package, files: Sequence[PackageFile]) -> list[Problem]:
                 # msiexec /x {code}, which method A runs without any file.
                 blocks_uninstall=package.signature is not None
                 or not by_product_code(package),
+                params={"files": lost},
             )
         )
     return out
@@ -332,6 +378,7 @@ def _untrusted(package: Package, files: Sequence[PackageFile], action: str) -> P
             f"Plus de {gib} Gio de fichiers : sans signature de "
             "l'administrateur, aucun poste ne les téléchargera "
             "(plafond de la méthode A). Signez le paquet.",
+            params={"gib": gib},
         )
     run = (
         package.uninstall_run if action == "uninstall" else package.install_run
@@ -345,22 +392,27 @@ def _untrusted(package: Package, files: Sequence[PackageFile], action: str) -> P
         ),
         key=str.lower,
     )
+    params: dict[str, Any] = {"file": run}
     if run == MSIEXEC and action == "uninstall":
+        params["reason"] = "msiexec_uninstall"
         reason = (
             "sa désinstallation lance msiexec sans code produit {…} parmi ses "
             "arguments : la méthode A ne lance msiexec que pour « /x {code produit} »"
         )
     elif run == MSIEXEC:
+        params["reason"] = "msiexec_install"
         reason = (
             "son installation lance msiexec : la méthode A ne lance qu'un "
             "exécutable (.exe) signé par un éditeur"
         )
     elif not run.lower().endswith(".exe"):
+        params["reason"] = "not_exe"
         reason = (
             f"« {run} » n'est pas un exécutable (.exe) : la méthode A ne lance "
             "qu'un .exe signé par un éditeur"
         )
     elif run_file is None or not run_file.publisher_name:
+        params["reason"] = "no_publisher"
         reason = (
             f"« {run} » ne porte pas de signature d'éditeur (Authenticode) : la "
             "méthode A ne le lance pas"
@@ -379,13 +431,16 @@ def _untrusted(package: Package, files: Sequence[PackageFile], action: str) -> P
             "untrusted",
             f"Paquet non signé, et {reason} signez-le : en l'état, aucun poste "
             "ne l'exécutera.",
+            params={**params, "reason": "loadable", "files": loadable},
         )
     else:
+        params["reason"] = "other"
         reason = "la méthode A ne le lance pas"
     return Problem(
         "untrusted",
         f"Paquet non signé, et {reason} : aucun poste ne l'exécutera. Signez le "
         "paquet.",
+        params=params,
     )
 
 

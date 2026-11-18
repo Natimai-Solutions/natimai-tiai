@@ -74,6 +74,12 @@ async function resync(wrapper: Awaited<ReturnType<typeof mountPage>>, answer = t
   }) => {
     asked.push(opts.message);
     const chain = {
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk(fn: () => void) {
         if (answer) fn();
         return chain;
@@ -131,10 +137,12 @@ describe('RoomsPage — re-sync from the directory', () => {
 
     const notify = await resync(wrapper);
 
-    expect(notify).toHaveBeenCalledWith({
-      type: 'positive',
-      message: '12 poste(s) rangé(s), 0 retiré(s), 1 salle(s) créée(s)',
-    });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'positive',
+        message: '12 poste(s) rangé(s), 0 retiré(s), 1 salle(s) créée(s)',
+      }),
+    );
   });
 });
 
@@ -222,19 +230,20 @@ describe('RoomsPage — what the scope lets create, and selecting text (items 14
     expect(buttons(wrapper).some((t) => t.includes('Nouveau bâtiment'))).toBe(false);
   });
 
-  it('does not open a room when the click ends a text selection', async () => {
+  it('opens a room by its name only: the rest of the row is text to select', async () => {
     vi.mocked(getRoomCreation).mockResolvedValue({ rooms: true, buildings: true });
     const wrapper = await mountPage();
     const push = vi.spyOn(wrapper.vm.$router, 'push');
-    const selection = vi
-      .spyOn(window, 'getSelection')
-      .mockReturnValue({ toString: () => 'B12' } as Selection);
-    await wrapper.find('tbody tr').trigger('click');
+    const row = wrapper.find('tbody tr');
+    const cell = row.findAll('td').at(-1)!;
+    // The two clicks of a double-click on a word, then the double-click.
+    await cell.trigger('click');
+    await cell.trigger('click');
+    await cell.trigger('dblclick');
+    await flushPromises();
     expect(push).not.toHaveBeenCalled();
-    selection.mockReturnValue({ toString: () => '' } as Selection);
-    await wrapper.find('tbody tr').trigger('click');
-    expect(push).toHaveBeenCalledWith({ name: 'room-detail', params: { id: 'r-1' } });
-    selection.mockRestore();
+    expect(row.classes()).not.toContain('cursor-pointer');
+    expect(row.find('a.row-link').attributes('href')).toBe('/rooms/r-1');
   });
 });
 
@@ -284,6 +293,9 @@ describe('RoomsPage — on a phone (audit U23)', () => {
     expect(text).toContain('24 poste(s)');
     expect(text).toContain('2 divergent(s)');
     expect(text).toContain('3 en retard');
+    // The badges and the maintenance line stay separate words.
+    expect(text).not.toMatch(/(retard|échéance)Maintenance/);
+    expect(text).toContain(' Maintenance : ');
     expect(text).toContain('90 j');
     expect(card.find('a').attributes('href')).toBe('/rooms/r-1');
 

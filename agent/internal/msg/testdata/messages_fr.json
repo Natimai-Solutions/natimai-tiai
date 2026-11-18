@@ -1,0 +1,1187 @@
+[
+ {
+  "code": "agent.backlog_full",
+  "params": {
+   "max": 64
+  },
+  "message": "file d'attente de l'agent pleine (64 commandes) : commande non exécutée, à relancer"
+ },
+ {
+  "code": "agent.stopped",
+  "params": {},
+  "message": "interrompue par l'arrêt de l'agent avant d'avoir commencé : à relancer"
+ },
+ {
+  "code": "agent.unsupported_type",
+  "params": {
+   "type": "\"format_c\"",
+   "version": "1.3.0"
+  },
+  "message": "type de commande \"format_c\" non pris en charge par l'agent 1.3.0 : mettez l'agent à jour"
+ },
+ {
+  "code": "agent.power_pending",
+  "params": {
+   "action": "reboot"
+  },
+  "message": "un redémarrage de ce poste est déjà programmé : commande non exécutée, à relancer une fois le poste revenu en ligne"
+ },
+ {
+  "code": "agent.power_pending",
+  "params": {
+   "action": "shutdown"
+  },
+  "message": "un arrêt de ce poste est déjà programmé : commande non exécutée, à relancer une fois le poste revenu en ligne"
+ },
+ {
+  "code": "power.too_soon",
+  "params": {
+   "action": "reboot",
+   "ago": "3 min",
+   "min": "10 min"
+  },
+  "message": "opération refusée : un redémarrage a déjà été programmé sur ce poste il y a 3 min (délai minimum 10 min)"
+ },
+ {
+  "code": "power.too_soon",
+  "params": {
+   "action": "shutdown",
+   "ago": "45 s",
+   "min": "10 min"
+  },
+  "message": "opération refusée : un arrêt a déjà été programmé sur ce poste il y a 45 s (délai minimum 10 min)"
+ },
+ {
+  "code": "power.too_soon_boot",
+  "params": {
+   "ago": "2 min",
+   "min": "10 min"
+  },
+  "message": "opération refusée : ce poste a démarré il y a 2 min (délai minimum 10 min avant de l'arrêter ou de le redémarrer à nouveau)"
+ },
+ {
+  "code": "power.scheduled",
+  "params": {
+   "action": "reboot",
+   "seconds": 60
+  },
+  "message": "Redémarrage programmé dans 60 secondes.\n"
+ },
+ {
+  "code": "power.scheduled",
+  "params": {
+   "action": "shutdown",
+   "seconds": 60
+  },
+  "message": "Arrêt programmé dans 60 secondes.\n"
+ },
+ {
+  "code": "power.schedule_failed",
+  "params": {
+   "action": "reboot",
+   "code": "1190"
+  },
+  "message": "Redémarrage : l'opération n'a pas pu être programmée (code 1190)"
+ },
+ {
+  "code": "power.schedule_failed",
+  "params": {
+   "action": "shutdown",
+   "code": "0x80070005"
+  },
+  "message": "Arrêt : l'opération n'a pas pu être programmée (code 0x80070005)"
+ },
+ {
+  "code": "wu.scan",
+  "params": {
+   "count": 0
+  },
+  "message": "0 mise(s) à jour en attente."
+ },
+ {
+  "code": "wu.scan",
+  "params": {
+   "count": 7
+  },
+  "message": "7 mise(s) à jour en attente."
+ },
+ {
+  "code": "wu.timeout",
+  "params": {},
+  "message": "délai d'exécution dépassé pour l'opération Windows Update"
+ },
+ {
+  "code": "wu.interrupted",
+  "params": {},
+  "message": "opération Windows Update interrompue (arrêt de l'agent)"
+ },
+ {
+  "code": "wu.known_error",
+  "params": {
+   "detail": "powershell: exit status 1 (Exception from HRESULT: 0x80070422)",
+   "hresult": "0x80070422"
+  },
+  "message": "le service Windows Update (wuauserv) est désactivé sur ce poste (powershell: exit status 1 (Exception from HRESULT: 0x80070422))"
+ },
+ {
+  "code": "wu.known_error",
+  "params": {
+   "detail": "x",
+   "hresult": "0x8024402c"
+  },
+  "message": "la source de mises à jour est injoignable : le poste ne résout pas le nom de son serveur WSUS (ou de Windows Update) (x)"
+ },
+ {
+  "code": "wu.known_error",
+  "params": {
+   "detail": "x",
+   "hresult": "0x80072ee2"
+  },
+  "message": "délai dépassé en joignant la source de mises à jour : réseau, proxy ou serveur WSUS indisponible (x)"
+ },
+ {
+  "code": "wu.known_error",
+  "params": {
+   "detail": "x",
+   "hresult": "0x8024002e"
+  },
+  "message": "l'accès à Windows Update est interdit par stratégie : ce poste doit passer par son serveur WSUS (x)"
+ },
+ {
+  "code": "wu.known_error",
+  "params": {
+   "detail": "x",
+   "hresult": "0x80248014"
+  },
+  "message": "service de mises à jour inconnu : la configuration WSUS du poste pointe vers un service qui n'existe pas (x)"
+ },
+ {
+  "code": "wu.known_error",
+  "params": {
+   "detail": "x",
+   "hresult": "0x80244022"
+  },
+  "message": "le serveur de mises à jour a répondu « service indisponible » (HTTP 503) (x)"
+ },
+ {
+  "code": "wu.known_error",
+  "params": {
+   "detail": "x",
+   "hresult": "0x80240016"
+  },
+  "message": "une autre installation est déjà en cours (TrustedInstaller occupé) : réessayer plus tard (x)"
+ },
+ {
+  "code": "wu.known_error",
+  "params": {
+   "detail": "x",
+   "hresult": "0x80240438"
+  },
+  "message": "aucune source de mises à jour n'est configurée sur ce poste (x)"
+ },
+ {
+  "code": "wu.install_incomplete",
+  "params": {
+   "failed": 2,
+   "selected": 5
+  },
+  "message": "2 mise(s) à jour sur 5 n'ont pas été installées"
+ },
+ {
+  "code": "wu.install_result",
+  "params": {
+   "code": 2,
+   "result": "succeeded"
+  },
+  "message": "installation installée (code 2)"
+ },
+ {
+  "code": "wu.install_result",
+  "params": {
+   "code": 3,
+   "result": "succeeded_with_errors"
+  },
+  "message": "installation installée avec des erreurs (code 3)"
+ },
+ {
+  "code": "wu.install_result",
+  "params": {
+   "code": 4,
+   "result": "failed"
+  },
+  "message": "installation échec (code 4)"
+ },
+ {
+  "code": "wu.install_result",
+  "params": {
+   "code": 5,
+   "result": "aborted"
+  },
+  "message": "installation abandonnée (code 5)"
+ },
+ {
+  "code": "wu.install_result",
+  "params": {
+   "code": 1,
+   "result": "in_progress"
+  },
+  "message": "installation encore en cours (code 1)"
+ },
+ {
+  "code": "wu.install_result",
+  "params": {
+   "code": 0,
+   "result": "not_started"
+  },
+  "message": "installation non démarrée (code 0)"
+ },
+ {
+  "code": "inventory.scan",
+  "params": {
+   "disks": 1,
+   "nics": 1,
+   "software": 143,
+   "volumes": 2
+  },
+  "message": "1 disque(s), 2 volume(s), 1 carte(s) réseau, 143 logiciel(s)."
+ },
+ {
+  "code": "inventory.scan_without_software",
+  "params": {
+   "disks": 2,
+   "nics": 2,
+   "volumes": 3
+  },
+  "message": "2 disque(s), 3 volume(s), 2 carte(s) réseau, inventaire logiciel désactivé sur ce poste."
+ },
+ {
+  "code": "inventory.unavailable",
+  "params": {},
+  "message": "inventaire indisponible sur cette plateforme"
+ },
+ {
+  "code": "defender.quick_scan.timeout",
+  "params": {
+   "budget": "1 h"
+  },
+  "message": "délai dépassé : l'analyse rapide Defender ne s'est pas terminée en 1 h. L'analyse peut se poursuivre sur le poste : vérifier la date de dernière analyse rapide avant de la relancer. Un dépassement répété signale un moteur Defender bloqué (redémarrer le poste)."
+ },
+ {
+  "code": "defender.full_scan.timeout",
+  "params": {
+   "budget": "8 h"
+  },
+  "message": "délai dépassé : l'analyse complète Defender ne s'est pas terminée en 8 h. L'analyse peut se poursuivre sur le poste : vérifier la date de dernière analyse complète avant de la relancer. Si les analyses complètes de ce parc sont légitimement plus longues (gros disques mécaniques), augmenter defender_full_scan_timeout_seconds (registre : DefenderFullScanTimeoutSeconds)."
+ },
+ {
+  "code": "defender.signatures.timeout",
+  "params": {
+   "budget": "1 h 30 min"
+  },
+  "message": "délai dépassé : la mise à jour des signatures Defender ne s'est pas terminée en 1 h 30 min. Vérifier que le poste joint sa source de signatures (WSUS, Windows Update ou partage de définitions configuré par stratégie)."
+ },
+ {
+  "code": "defender.quick_scan.interrupted",
+  "params": {},
+  "message": "l'analyse rapide Defender a été interrompue (arrêt de l'agent) : à relancer"
+ },
+ {
+  "code": "defender.full_scan.interrupted",
+  "params": {},
+  "message": "l'analyse complète Defender a été interrompue (arrêt de l'agent) : à relancer"
+ },
+ {
+  "code": "defender.signatures.interrupted",
+  "params": {},
+  "message": "la mise à jour des signatures Defender a été interrompue (arrêt de l'agent) : à relancer"
+ },
+ {
+  "code": "maintenance.timeout",
+  "params": {
+   "exe": "sfc.exe"
+  },
+  "message": "délai d'exécution dépassé pour sfc.exe"
+ },
+ {
+  "code": "maintenance.interrupted",
+  "params": {
+   "exe": "dism.exe"
+  },
+  "message": "exécution de dism.exe interrompue (arrêt de l'agent)"
+ },
+ {
+  "code": "maintenance.launch_failed",
+  "params": {
+   "detail": "exec: file does not exist",
+   "exe": "gpupdate.exe"
+  },
+  "message": "lancement de gpupdate.exe : exec: file does not exist"
+ },
+ {
+  "code": "maintenance.exit_code",
+  "params": {
+   "code": "1"
+  },
+  "message": "code de retour 1"
+ },
+ {
+  "code": "sfc.failed",
+  "params": {
+   "code": "1"
+  },
+  "message": "sfc a terminé en erreur (code 1)"
+ },
+ {
+  "code": "sfc.failed_summary",
+  "params": {
+   "code": "0x800f081f",
+   "summary": "La protection des ressources Windows a trouvé des fichiers corrompus."
+  },
+  "message": "sfc a terminé en erreur (code 0x800f081f) : La protection des ressources Windows a trouvé des fichiers corrompus."
+ },
+ {
+  "code": "dism.source_missing",
+  "params": {
+   "hresult": "0x800f081f"
+  },
+  "message": "source de réparation inaccessible (0x800f081f) : ce poste ne joint ni Windows Update ni son serveur WSUS, ou la source de réparation n'y est pas publiée"
+ },
+ {
+  "code": "dism.failed",
+  "params": {
+   "code": "87"
+  },
+  "message": "dism a terminé en erreur (code 87)"
+ },
+ {
+  "code": "chkdsk.failed",
+  "params": {
+   "code": "0xc0000005"
+  },
+  "message": "chkdsk a terminé avec le code 0xc0000005"
+ },
+ {
+  "code": "chkdsk.offline_repair",
+  "params": {
+   "code": 1,
+   "meaning": "errors_found"
+  },
+  "message": "chkdsk : des erreurs ont été trouvées (code 1) — une réparation hors ligne (chkdsk /spotfix, appliquée au redémarrage) est nécessaire"
+ },
+ {
+  "code": "chkdsk.offline_repair",
+  "params": {
+   "code": 2,
+   "meaning": "partly_checked"
+  },
+  "message": "chkdsk : le volume n'a pas pu être entièrement vérifié (code 2) — une réparation hors ligne (chkdsk /spotfix, appliquée au redémarrage) est nécessaire"
+ },
+ {
+  "code": "chkdsk.offline_repair",
+  "params": {
+   "code": 3,
+   "meaning": "not_checked"
+  },
+  "message": "chkdsk : le volume n'a pas pu être vérifié (code 3) — une réparation hors ligne (chkdsk /spotfix, appliquée au redémarrage) est nécessaire"
+ },
+ {
+  "code": "time.service_stopped",
+  "params": {
+   "hresult": "0x80070426"
+  },
+  "message": "le service de temps Windows (W32Time) est arrêté sur ce poste (0x80070426)"
+ },
+ {
+  "code": "time.failed",
+  "params": {
+   "code": "0x800705b4"
+  },
+  "message": "la resynchronisation de l'horloge a échoué (code 0x800705b4)"
+ },
+ {
+  "code": "spooler.reset",
+  "params": {
+   "removed": 3
+  },
+  "message": "Spouleur d'impression arrêté.\nFile d'impression purgée (3 fichier(s)).\nSpouleur d'impression redémarré."
+ },
+ {
+  "code": "spooler.stop_failed",
+  "params": {
+   "detail": "Access is denied."
+  },
+  "message": "arrêt du spouleur : Access is denied."
+ },
+ {
+  "code": "spooler.start_failed",
+  "params": {
+   "detail": "The service did not respond."
+  },
+  "message": "démarrage du spouleur : The service did not respond."
+ },
+ {
+  "code": "spooler.purge_failed",
+  "params": {
+   "detail": "lecture de C:\\Windows\\System32\\spool\\PRINTERS : Access is denied."
+  },
+  "message": "purge de la file d'impression : lecture de C:\\Windows\\System32\\spool\\PRINTERS : Access is denied."
+ },
+ {
+  "code": "wol.relay.sent",
+  "params": {
+   "copies": 3,
+   "mac": "AA:BB:CC:DD:EE:FF",
+   "targets": "192.168.1.255:9, 10.4.255.255:9"
+  },
+  "message": "Paquet magique émis vers AA:BB:CC:DD:EE:FF depuis ce poste — 3 copie(s) sur 192.168.1.255:9, 10.4.255.255:9.\nL'émission ne prouve pas le réveil : le protocole n'accuse rien, et le poste visé ne réapparaîtra dans la console qu'à la remontée de son agent."
+ },
+ {
+  "code": "wol.relay.no_subnet",
+  "params": {},
+  "message": "ce poste n'a aucun sous-réseau IPv4 sur lequel diffuser le paquet magique"
+ },
+ {
+  "code": "wol.relay.nic_failed",
+  "params": {
+   "detail": "The system cannot find the file specified."
+  },
+  "message": "lecture des cartes réseau de ce poste : The system cannot find the file specified."
+ },
+ {
+  "code": "wol.relay.send_failed",
+  "params": {
+   "detail": "network is unreachable"
+  },
+  "message": "émission du paquet magique impossible : network is unreachable"
+ },
+ {
+  "code": "wol.relay.bad_mac",
+  "params": {
+   "mac": "\"00:00:00:00:00:00\""
+  },
+  "message": "adresse MAC à réveiller invalide : \"00:00:00:00:00:00\""
+ },
+ {
+  "code": "deploy.unsupported",
+  "params": {},
+  "message": "déploiement logiciel non pris en charge sur ce système"
+ },
+ {
+  "code": "deploy.not_enabled",
+  "params": {},
+  "message": "déploiement non activé sur ce poste (aucune clé Deploy* posée par GPO)"
+ },
+ {
+  "code": "deploy.no_package",
+  "params": {},
+  "message": "commande sans paquet"
+ },
+ {
+  "code": "deploy.package_id_refused",
+  "params": {
+   "id": "\"../etc\""
+  },
+  "message": "identifiant de paquet refusé : \"../etc\""
+ },
+ {
+  "code": "deploy.bad_manifest",
+  "params": {},
+  "message": "manifeste absent ou mal encodé"
+ },
+ {
+  "code": "deploy.no_step",
+  "params": {
+   "action": "install"
+  },
+  "message": "le paquet ne définit pas de installation"
+ },
+ {
+  "code": "deploy.no_step",
+  "params": {
+   "action": "uninstall"
+  },
+  "message": "le paquet ne définit pas de désinstallation"
+ },
+ {
+  "code": "deploy.no_trust_method",
+  "params": {},
+  "message": "aucune méthode de confiance pour les paquets de fichiers n'est activée sur ce poste (DeploySigners / DeployPublishers)"
+ },
+ {
+  "code": "deploy.unsigned_no_publisher",
+  "params": {},
+  "message": "paquet non signé, et aucun éditeur approuvé sur ce poste (DeployPublishers)"
+ },
+ {
+  "code": "deploy.install_removes",
+  "params": {},
+  "message": "l'installation de ce paquet lance une désinstallation (msiexec /x, /uninstall ou REMOVE=) : refusée — placez cette commande dans la désinstallation du paquet"
+ },
+ {
+  "code": "deploy.method_a.msiexec",
+  "params": {},
+  "message": "méthode A : msiexec n'est accepté que pour désinstaller un code produit"
+ },
+ {
+  "code": "deploy.method_a.exe_only",
+  "params": {},
+  "message": "méthode A : seul un exécutable (.exe) signé par un éditeur approuvé peut être lancé — signez le paquet (méthode B)"
+ },
+ {
+  "code": "deploy.method_a.too_large",
+  "params": {
+   "gib": 8
+  },
+  "message": "méthode A : le manifeste annonce plus de 8 Gio à télécharger — signez le paquet (méthode B)"
+ },
+ {
+  "code": "deploy.method_a.loadable",
+  "params": {
+   "file": "\"version.dll\""
+  },
+  "message": "méthode A : \"version.dll\" ne peut pas accompagner l'exécutable (fichier que Windows pourrait charger ou lancer) — signez le paquet (méthode B)"
+ },
+ {
+  "code": "deploy.signature.unsigned",
+  "params": {},
+  "message": "paquet non signé"
+ },
+ {
+  "code": "deploy.signature.bad_certificate",
+  "params": {},
+  "message": "certificat de signature mal encodé"
+ },
+ {
+  "code": "deploy.signature.untrusted",
+  "params": {
+   "thumbprint": "0A1B2C"
+  },
+  "message": "certificat de signature non approuvé sur ce poste (empreinte 0A1B2C absente de DeploySigners)"
+ },
+ {
+  "code": "deploy.signature.unreadable_certificate",
+  "params": {
+   "detail": "x509: malformed certificate"
+  },
+  "message": "certificat de signature illisible : x509: malformed certificate"
+ },
+ {
+  "code": "deploy.signature.bad_signature",
+  "params": {},
+  "message": "signature mal encodée"
+ },
+ {
+  "code": "deploy.signature.algorithm_mismatch",
+  "params": {},
+  "message": "algorithme incompatible avec la clé"
+ },
+ {
+  "code": "deploy.signature.invalid",
+  "params": {},
+  "message": "signature invalide : le manifeste a changé depuis sa signature"
+ },
+ {
+  "code": "deploy.signature.unsupported_key",
+  "params": {},
+  "message": "type de clé non pris en charge"
+ },
+ {
+  "code": "deploy.not_signed",
+  "params": {},
+  "message": "fichier non signé (pas de signature Authenticode)"
+ },
+ {
+  "code": "deploy.authenticode_refused",
+  "params": {
+   "detail": "fichier non signé (pas de signature Authenticode)",
+   "file": "setup.exe"
+  },
+  "message": "signature de setup.exe refusée par Windows : fichier non signé (pas de signature Authenticode)"
+ },
+ {
+  "code": "deploy.publisher_not_approved",
+  "params": {
+   "publisher": "\"Contoso Ltd\""
+  },
+  "message": "éditeur \"Contoso Ltd\" non approuvé sur ce poste (DeployPublishers)"
+ },
+ {
+  "code": "deploy.download_failed",
+  "params": {
+   "detail": "serveur occupé (429)",
+   "file": "setup.exe"
+  },
+  "message": "téléchargement de setup.exe : serveur occupé (429)"
+ },
+ {
+  "code": "deploy.launch_failed",
+  "params": {
+   "detail": "The system cannot find the file specified.",
+   "file": "setup.exe"
+  },
+  "message": "lancement de setup.exe : The system cannot find the file specified."
+ },
+ {
+  "code": "deploy.manifest.unreadable",
+  "params": {
+   "detail": "json: unknown field \"x\""
+  },
+  "message": "manifeste illisible : json: unknown field \"x\""
+ },
+ {
+  "code": "deploy.manifest.trailing_data",
+  "params": {},
+  "message": "manifeste illisible : données après le document"
+ },
+ {
+  "code": "deploy.manifest.unknown_format",
+  "params": {
+   "format": "\"tiai-package-9\""
+  },
+  "message": "format de manifeste inconnu \"tiai-package-9\""
+ },
+ {
+  "code": "deploy.manifest.other_package",
+  "params": {},
+  "message": "le manifeste ne décrit pas ce paquet"
+ },
+ {
+  "code": "deploy.manifest.no_file",
+  "params": {},
+  "message": "manifeste sans fichier"
+ },
+ {
+  "code": "deploy.manifest.bad_name",
+  "params": {
+   "name": "\"nul.txt\""
+  },
+  "message": "nom de fichier refusé dans le manifeste : \"nul.txt\""
+ },
+ {
+  "code": "deploy.manifest.bad_hash",
+  "params": {
+   "name": "\"setup.exe\""
+  },
+  "message": "empreinte invalide pour \"setup.exe\""
+ },
+ {
+  "code": "deploy.manifest.not_in_package",
+  "params": {
+   "file": "\"setup.exe\""
+  },
+  "message": "\"setup.exe\" n'est pas un fichier du paquet"
+ },
+ {
+  "code": "deploy.manifest.bad_argument",
+  "params": {},
+  "message": "argument invalide"
+ },
+ {
+  "code": "deploy.unknown_kind",
+  "params": {
+   "kind": "\"zip\""
+  },
+  "message": "type de paquet inconnu \"zip\""
+ },
+ {
+  "code": "deploy.package_dir",
+  "params": {
+   "detail": "mkdir C:\\ProgramData\\Tiai: Access is denied."
+  },
+  "message": "dossier du paquet : mkdir C:\\ProgramData\\Tiai: Access is denied."
+ },
+ {
+  "code": "deploy.hash_mismatch",
+  "params": {},
+  "message": "empreinte SHA-256 différente de celle du manifeste : fichier rejeté"
+ },
+ {
+  "code": "deploy.launch_timeout",
+  "params": {
+   "detail": "context deadline exceeded"
+  },
+  "message": "délai dépassé : context deadline exceeded"
+ },
+ {
+  "code": "deploy.download.restart",
+  "params": {},
+  "message": "reprise refusée, nouveau départ"
+ },
+ {
+  "code": "deploy.download.busy",
+  "params": {
+   "status": 429
+  },
+  "message": "serveur occupé (429)"
+ },
+ {
+  "code": "deploy.download.size_announced",
+  "params": {
+   "announced": 2048,
+   "expected": 1024,
+   "path": "/api/v1/agent/packages/p/files/f"
+  },
+  "message": "GET /api/v1/agent/packages/p/files/f : 2048 octets annoncés, 1024 attendus"
+ },
+ {
+  "code": "deploy.download.too_long",
+  "params": {
+   "path": "/api/v1/agent/packages/p/files/f",
+   "size": 1024
+  },
+  "message": "GET /api/v1/agent/packages/p/files/f : le serveur envoie plus que les 1024 octets annoncés"
+ },
+ {
+  "code": "deploy.download.interrupted",
+  "params": {
+   "detail": "unexpected EOF"
+  },
+  "message": "transfert interrompu : unexpected EOF"
+ },
+ {
+  "code": "spooler.state_timeout",
+  "params": {
+   "timeout": "30s"
+  },
+  "message": "le service n'a pas atteint l'état attendu en 30s"
+ },
+ {
+  "code": "deploy.download_failed",
+  "params": {
+   "detail": "empreinte SHA-256 différente de celle du manifeste : fichier rejeté",
+   "detail_code": "deploy.hash_mismatch",
+   "file": "setup.exe"
+  },
+  "message": "téléchargement de setup.exe : empreinte SHA-256 différente de celle du manifeste : fichier rejeté"
+ },
+ {
+  "code": "deploy.download_failed",
+  "params": {
+   "detail": "serveur occupé (503)",
+   "detail_code": "deploy.download.busy",
+   "detail_status": 503,
+   "file": "setup.exe"
+  },
+  "message": "téléchargement de setup.exe : serveur occupé (503)"
+ },
+ {
+  "code": "deploy.authenticode_refused",
+  "params": {
+   "detail": "fichier non signé (pas de signature Authenticode)",
+   "detail_code": "deploy.not_signed",
+   "file": "setup.exe"
+  },
+  "message": "signature de setup.exe refusée par Windows : fichier non signé (pas de signature Authenticode)"
+ },
+ {
+  "code": "deploy.exit_code",
+  "params": {
+   "code": 1603,
+   "file": "setup.exe"
+  },
+  "message": "setup.exe a renvoyé le code 1603"
+ },
+ {
+  "code": "deploy.exit_code",
+  "params": {
+   "by": "CN=Lycée Test",
+   "code": 1603,
+   "file": "setup.exe",
+   "trust": "signer"
+  },
+  "message": "setup.exe a renvoyé le code 1603 (paquet signé par CN=Lycée Test)"
+ },
+ {
+  "code": "deploy.exit_code",
+  "params": {
+   "by": "Igor Pavlov",
+   "code": 2,
+   "file": "setup.exe",
+   "trust": "publisher"
+  },
+  "message": "setup.exe a renvoyé le code 2 (éditeur approuvé : Igor Pavlov)"
+ },
+ {
+  "code": "deploy.exit_code",
+  "params": {
+   "by": "Igor Pavlov",
+   "code": 2,
+   "file": "setup.exe",
+   "revocation_offline": true,
+   "trust": "publisher"
+  },
+  "message": "setup.exe a renvoyé le code 2 (éditeur approuvé : Igor Pavlov (révocation non vérifiable hors ligne))"
+ },
+ {
+  "code": "deploy.done",
+  "params": {
+   "action": "install",
+   "by": "Igor Pavlov",
+   "method": "A",
+   "name": "7-Zip 23.01",
+   "package_id": "p",
+   "reboot": false,
+   "trust": "publisher"
+  },
+  "message": "Installation de 7-Zip 23.01 terminée (méthode A, éditeur approuvé : Igor Pavlov)"
+ },
+ {
+  "code": "deploy.done",
+  "params": {
+   "action": "install",
+   "by": "Igor Pavlov",
+   "method": "A",
+   "name": "7-Zip 23.01",
+   "package_id": "p",
+   "reboot": true,
+   "revocation_offline": true,
+   "trust": "publisher"
+  },
+  "message": "Installation de 7-Zip 23.01 terminée (méthode A, éditeur approuvé : Igor Pavlov (révocation non vérifiable hors ligne))\nRedémarrage requis pour terminer."
+ },
+ {
+  "code": "deploy.done",
+  "params": {
+   "action": "uninstall",
+   "method": "A",
+   "name": "",
+   "package_id": "0b9c6a4e-6c1d-4a51-9a51-2f1e8f0c3d11",
+   "reboot": false
+  },
+  "message": "Désinstallation de paquet 0b9c6a4e-6c1d-4a51-9a51-2f1e8f0c3d11 terminée (méthode A)"
+ },
+ {
+  "code": "deploy.done",
+  "params": {
+   "action": "install",
+   "by": "CN=DSI",
+   "method": "B",
+   "name": "Outil",
+   "package_id": "p",
+   "reboot": false,
+   "trust": "signer"
+  },
+  "message": "Installation de Outil terminée (méthode B, paquet signé par CN=DSI)"
+ },
+ {
+  "code": "deploy.winget_done",
+  "params": {
+   "action": "install",
+   "already": false,
+   "id": "Mozilla.Firefox"
+  },
+  "message": "winget install Mozilla.Firefox : terminé"
+ },
+ {
+  "code": "deploy.winget_done",
+  "params": {
+   "action": "uninstall",
+   "already": true,
+   "id": "Mozilla.Firefox"
+  },
+  "message": "winget uninstall Mozilla.Firefox : terminé (déjà installé, rien à faire)"
+ },
+ {
+  "code": "deploy.winget_no_match",
+  "params": {},
+  "message": "aucun paquet winget ne correspond à cet identifiant"
+ },
+ {
+  "code": "deploy.winget_failed",
+  "params": {
+   "code": "0x8A150001"
+  },
+  "message": "winget a échoué (code 0x8A150001)"
+ },
+ {
+  "code": "deploy.winget_not_enabled",
+  "params": {},
+  "message": "winget non activé sur ce poste (valeur DeployWinget absente ou à 0)"
+ },
+ {
+  "code": "deploy.winget_missing",
+  "params": {},
+  "message": "winget absent de ce poste (App Installer non installé — fréquent sur LTSC et Windows Server) : utiliser un paquet de fichiers"
+ },
+ {
+  "code": "deploy.winget_refused",
+  "params": {
+   "id": "\"-x\""
+  },
+  "message": "identifiant winget refusé : \"-x\""
+ },
+ {
+  "code": "deploy.winget_not_allowed",
+  "params": {
+   "id": "\"Mozilla.Firefox\""
+  },
+  "message": "identifiant winget \"Mozilla.Firefox\" absent de DeployWingetAllow"
+ },
+ {
+  "code": "deploy.winget_version_refused",
+  "params": {
+   "version": "\"1 2\""
+  },
+  "message": "version winget refusée : \"1 2\""
+ },
+ {
+  "code": "dism.reboot_required",
+  "params": {
+   "output": "Deployment Image Servicing and Management tool\nThe operation completed successfully."
+  },
+  "message": "Deployment Image Servicing and Management tool\nThe operation completed successfully.\n\nRedémarrage requis pour finaliser l'opération."
+ },
+ {
+  "code": "dism.reboot_required",
+  "params": {
+   "output": ""
+  },
+  "message": "\n\nRedémarrage requis pour finaliser l'opération."
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 2,
+   "reboot": true,
+   "selected": 2,
+   "skipped": 0,
+   "updates": "succeeded\t\tKB5063878 — 2025-08 Cumulative Update\nsucceeded_with_errors\t\tKB2267602 — Defender"
+  },
+  "message": "2 mise(s) à jour retenue(s), 2 installée(s).\nKB5063878 — 2025-08 Cumulative Update : installée\nKB2267602 — Defender : installée avec des erreurs\n\nRedémarrage requis pour finaliser l'installation (commande « Redémarrer »)."
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 3,
+   "reboot": false,
+   "selected": 4,
+   "skipped": 1,
+   "updates": "succeeded\t\tKB5063878 — Cumulative\nfailed\t0x80240017\tKB5062660 — Broken\naborted\t0x00000000\tDriver"
+  },
+  "message": "4 mise(s) à jour retenue(s), 3 installée(s).\n1 ignorée(s) : elles réclament une interaction utilisateur, impossible depuis un service.\nKB5063878 — Cumulative : installée\nKB5062660 — Broken : échec (0x80240017)\nDriver : abandonnée (0x00000000)\n1 mise(s) à jour n'ont pas pu être téléchargée(s), et n'ont donc pas été installée(s)."
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 0,
+   "reboot": false,
+   "selected": 0,
+   "skipped": 0,
+   "updates": ""
+  },
+  "message": "Aucune mise à jour applicable : le poste est à jour."
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 0,
+   "reboot": false,
+   "selected": 0,
+   "skipped": 2,
+   "updates": ""
+  },
+  "message": "Aucune mise à jour installable sans intervention sur le poste.\n2 ignorée(s) : elles réclament une interaction utilisateur, impossible depuis un service."
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 1,
+   "reboot": false,
+   "selected": 1,
+   "skipped": 0,
+   "updates": "in_progress\t0x00000001\tKB1 — X"
+  },
+  "message": "1 mise(s) à jour retenue(s), 1 installée(s).\nKB1 — X : encore en cours (0x00000001)"
+ },
+ {
+  "code": "wu.install_report",
+  "params": {
+   "installed": 1,
+   "reboot": false,
+   "selected": 1,
+   "skipped": 0,
+   "updates": "not_started\t0x00000002\tKB1 — X"
+  },
+  "message": "1 mise(s) à jour retenue(s), 1 installée(s).\nKB1 — X : non démarrée (0x00000002)"
+ },
+ {
+  "code": "wu_reset.report",
+  "params": {
+   "steps": "stopped\twuauserv\nalready_stopped\tcryptsvc\nstopped\tbits\nalready_stopped\tmsiserver\nrenamed\tsoftware_distribution\tSoftwareDistribution.old\nabsent\tcatroot2\nrestarted\twuauserv\nrestarted\tbits\nnext\t"
+  },
+  "message": "Windows Update (wuauserv) : arrêté.\nServices de chiffrement (cryptsvc) : déjà arrêté.\nTransfert intelligent en arrière-plan (BITS) (bits) : arrêté.\nWindows Installer (msiserver) : déjà arrêté.\nMagasin Windows Update (SoftwareDistribution) : renommé en SoftwareDistribution.old.\nCache de signatures de catalogues (catroot2) : absent, rien à renommer.\nWindows Update (wuauserv) : redémarré.\nTransfert intelligent en arrière-plan (BITS) (bits) : redémarré.\n\nWindows reconstruira ces dossiers à la prochaine recherche : lancer « Rechercher les mises à jour » pour vérifier que le poste repart."
+ },
+ {
+  "code": "wu_reset.report",
+  "params": {
+   "e1": "suppression du renommage précédent (C:\\Windows\\System32\\catroot2.old) : Access is denied.",
+   "e1_code": "wu_reset.backup_not_removed",
+   "e1_detail": "Access is denied.",
+   "e1_path": "C:\\Windows\\System32\\catroot2.old",
+   "e2": "The service did not respond.",
+   "steps": "stopped\twuauserv\nrenamed\tsoftware_distribution\tSoftwareDistribution.old\nrename_failed\tcatroot2\tC:\\Windows\\System32\\catroot2\nrestart_failed\twuauserv"
+  },
+  "message": "Windows Update (wuauserv) : arrêté.\nMagasin Windows Update (SoftwareDistribution) : renommé en SoftwareDistribution.old.\nÉCHEC — renommage de C:\\Windows\\System32\\catroot2 : suppression du renommage précédent (C:\\Windows\\System32\\catroot2.old) : Access is denied.\nÉCHEC — redémarrage du service Windows Update (wuauserv) : The service did not respond."
+ },
+ {
+  "code": "wu_reset.incomplete",
+  "params": {
+   "failed": "rename_failed\tcatroot2\tC:\\Windows\\System32\\catroot2\nrestart_failed\twuauserv"
+  },
+  "message": "réinitialisation incomplète : renommage de C:\\Windows\\System32\\catroot2 ; redémarrage du service Windows Update (wuauserv)"
+ },
+ {
+  "code": "wu_reset.incomplete",
+  "params": {
+   "failed": "stop_failed\tcryptsvc"
+  },
+  "message": "réinitialisation incomplète : arrêt du service Services de chiffrement (cryptsvc)"
+ },
+ {
+  "code": "wu_reset.backup_not_removed",
+  "params": {
+   "detail": "Access is denied.",
+   "path": "C:\\Windows\\SoftwareDistribution.old"
+  },
+  "message": "suppression du renommage précédent (C:\\Windows\\SoftwareDistribution.old) : Access is denied."
+ },
+ {
+  "code": "service.manager_failed",
+  "params": {
+   "detail": "Access is denied."
+  },
+  "message": "connexion au gestionnaire de services : Access is denied."
+ },
+ {
+  "code": "service.open_failed",
+  "params": {
+   "detail": "The specified service does not exist as an installed service.",
+   "service": "Spooler"
+  },
+  "message": "ouverture du service Spooler : The specified service does not exist as an installed service."
+ },
+ {
+  "code": "service.query_failed",
+  "params": {
+   "detail": "Access is denied."
+  },
+  "message": "interrogation du service : Access is denied."
+ },
+ {
+  "code": "spooler.report",
+  "params": {
+   "removed": 4,
+   "restarted": false
+  },
+  "message": "Spouleur d'impression arrêté.\nFile d'impression purgée (4 fichier(s)).\nLe spouleur n'a PAS pu être redémarré."
+ },
+ {
+  "code": "spooler.report",
+  "params": {
+   "purge": "2 fichier(s) non supprimé(s), première erreur : The process cannot access the file.",
+   "purge_code": "spooler.files_not_removed",
+   "purge_detail": "The process cannot access the file.",
+   "purge_failed": 2,
+   "restarted": true
+  },
+  "message": "Spouleur d'impression arrêté.\nPurge incomplète de la file : 2 fichier(s) non supprimé(s), première erreur : The process cannot access the file.\nSpouleur d'impression redémarré."
+ },
+ {
+  "code": "spooler.report",
+  "params": {
+   "purge": "lecture de C:\\Windows\\System32\\spool\\PRINTERS : Access is denied.",
+   "purge_code": "spooler.queue_unreadable",
+   "purge_detail": "Access is denied.",
+   "purge_dir": "C:\\Windows\\System32\\spool\\PRINTERS",
+   "restarted": false
+  },
+  "message": "Spouleur d'impression arrêté.\nPurge incomplète de la file : lecture de C:\\Windows\\System32\\spool\\PRINTERS : Access is denied.\nLe spouleur n'a PAS pu être redémarré."
+ },
+ {
+  "code": "spooler.report",
+  "params": {
+   "purge": "boom",
+   "restarted": true
+  },
+  "message": "Spouleur d'impression arrêté.\nPurge incomplète de la file : boom\nSpouleur d'impression redémarré."
+ },
+ {
+  "code": "spooler.queue_unreadable",
+  "params": {
+   "detail": "Access is denied.",
+   "dir": "C:\\Windows\\System32\\spool\\PRINTERS"
+  },
+  "message": "lecture de C:\\Windows\\System32\\spool\\PRINTERS : Access is denied."
+ },
+ {
+  "code": "spooler.files_not_removed",
+  "params": {
+   "detail": "The process cannot access the file.",
+   "failed": 2
+  },
+  "message": "2 fichier(s) non supprimé(s), première erreur : The process cannot access the file."
+ },
+ {
+  "code": "spooler.purge_failed",
+  "params": {
+   "detail": "1 fichier(s) non supprimé(s), première erreur : Access is denied.",
+   "detail_code": "spooler.files_not_removed",
+   "detail_detail": "Access is denied.",
+   "detail_failed": 1
+  },
+  "message": "purge de la file d'impression : 1 fichier(s) non supprimé(s), première erreur : Access is denied."
+ },
+ {
+  "code": "deploy.both_refused",
+  "params": {
+   "a": "méthode A : seul un exécutable (.exe) signé par un éditeur approuvé peut être lancé — signez le paquet (méthode B)",
+   "a_code": "deploy.method_a.exe_only",
+   "b": "certificat de signature non approuvé sur ce poste (empreinte 0A1B2C absente de DeploySigners)",
+   "b_code": "deploy.signature.untrusted",
+   "b_thumbprint": "0A1B2C"
+  },
+  "message": "méthode B : certificat de signature non approuvé sur ce poste (empreinte 0A1B2C absente de DeploySigners) ; méthode A : seul un exécutable (.exe) signé par un éditeur approuvé peut être lancé — signez le paquet (méthode B)"
+ },
+ {
+  "code": "deploy.both_refused",
+  "params": {
+   "a": "éditeur \"Contoso Ltd\" non approuvé sur ce poste (DeployPublishers)",
+   "a_code": "deploy.publisher_not_approved",
+   "a_publisher": "\"Contoso Ltd\"",
+   "b": "signature invalide : le manifeste a changé depuis sa signature",
+   "b_code": "deploy.signature.invalid"
+  },
+  "message": "méthode B : signature invalide : le manifeste a changé depuis sa signature ; méthode A : éditeur \"Contoso Ltd\" non approuvé sur ce poste (DeployPublishers)"
+ },
+ {
+  "code": "deploy.both_refused",
+  "params": {
+   "a": "signature de setup.exe refusée par Windows : fichier non signé (pas de signature Authenticode)",
+   "a_code": "deploy.authenticode_refused",
+   "a_detail": "fichier non signé (pas de signature Authenticode)",
+   "a_detail_code": "deploy.not_signed",
+   "a_file": "setup.exe",
+   "b": "signature invalide : le manifeste a changé depuis sa signature",
+   "b_code": "deploy.signature.invalid"
+  },
+  "message": "méthode B : signature invalide : le manifeste a changé depuis sa signature ; méthode A : signature de setup.exe refusée par Windows : fichier non signé (pas de signature Authenticode)"
+ },
+ {
+  "code": "deploy.both_refused",
+  "params": {
+   "a": "unexpected",
+   "b": "x509: unknown authority"
+  },
+  "message": "méthode B : x509: unknown authority ; méthode A : unexpected"
+ },
+ {
+  "code": "deploy.download_failed",
+  "params": {
+   "detail": "transfert interrompu : unexpected EOF",
+   "detail_code": "deploy.download.interrupted",
+   "detail_detail": "unexpected EOF",
+   "file": "setup.exe"
+  },
+  "message": "téléchargement de setup.exe : transfert interrompu : unexpected EOF"
+ }
+]

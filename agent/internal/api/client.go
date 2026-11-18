@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +21,7 @@ import (
 
 	"tiai/agent/internal/deploy"
 	"tiai/agent/internal/models"
+	"tiai/agent/internal/msg"
 )
 
 // StatusError is a non-2xx response from the server, kept typed so the agent
@@ -316,13 +316,13 @@ func (c *Client) FetchPackageFile(ctx context.Context, packageID, sha256 string,
 		if err := f.Truncate(0); err != nil {
 			return err
 		}
-		return &deploy.RetryLater{Wait: time.Second, Err: errors.New("reprise refusée, nouveau départ")}
+		return &deploy.RetryLater{Wait: time.Second, Err: msg.Err("deploy.download.restart", nil)}
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
 		wait := time.Minute
 		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
 			wait = time.Duration(s) * time.Second
 		}
-		return &deploy.RetryLater{Wait: wait, Err: fmt.Errorf("serveur occupé (%d)", resp.StatusCode)}
+		return &deploy.RetryLater{Wait: wait, Err: msg.Err("deploy.download.busy", msg.Params{"status": resp.StatusCode})}
 	default:
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 		return fmt.Errorf("GET %s: %w", path, &StatusError{StatusCode: resp.StatusCode, Body: string(b)})
@@ -332,10 +332,10 @@ func (c *Client) FetchPackageFile(ctx context.Context, packageID, sha256 string,
 	// (audit S24). One byte more than what remains tells « too long » apart.
 	remaining := size - offset
 	if resp.ContentLength > 0 && resp.StatusCode == http.StatusPartialContent && resp.ContentLength > remaining {
-		return fmt.Errorf("GET %s : %d octets annoncés, %d attendus", path, resp.ContentLength, remaining)
+		return msg.Err("deploy.download.size_announced", msg.Params{"path": path, "announced": resp.ContentLength, "expected": remaining})
 	}
 	if resp.StatusCode == http.StatusOK && resp.ContentLength > size {
-		return fmt.Errorf("GET %s : %d octets annoncés, %d attendus", path, resp.ContentLength, size)
+		return msg.Err("deploy.download.size_announced", msg.Params{"path": path, "announced": resp.ContentLength, "expected": size})
 	}
 	limit := remaining
 	if resp.StatusCode == http.StatusOK {
@@ -343,10 +343,10 @@ func (c *Client) FetchPackageFile(ctx context.Context, packageID, sha256 string,
 	}
 	n, err := io.Copy(f, io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return &deploy.RetryLater{Err: fmt.Errorf("transfert interrompu : %w", err)}
+		return &deploy.RetryLater{Err: msg.Wrap("deploy.download.interrupted", nil, err)}
 	}
 	if n > limit {
-		return fmt.Errorf("GET %s : le serveur envoie plus que les %d octets annoncés", path, size)
+		return msg.Err("deploy.download.too_long", msg.Params{"path": path, "size": size})
 	}
 	return nil
 }

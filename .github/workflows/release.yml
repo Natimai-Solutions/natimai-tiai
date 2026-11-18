@@ -70,6 +70,7 @@ jobs:
   agent:
     name: Agent Windows (.exe)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       version: ${{ steps.version.outputs.version }}
 
@@ -139,6 +140,7 @@ jobs:
   msi:
     name: Signature et installateur Windows (.msi)
     runs-on: windows-latest # WiX et signtool sont chez eux sous Windows
+    timeout-minutes: 30
     needs: agent
 
     env:
@@ -237,6 +239,7 @@ jobs:
   images:
     name: Image Docker (${{ matrix.component }})
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     permissions:
       contents: read
       packages: write # pousser les images Docker sur ghcr.io
@@ -297,6 +300,7 @@ jobs:
     name: Publier la release
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write # créer la release et téléverser les binaires
     needs: [agent, msi, images]

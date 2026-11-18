@@ -1,15 +1,15 @@
 <template>
   <q-page padding>
     <div class="row items-center q-col-gutter-sm q-mb-md">
-      <h1 class="text-h5 q-my-none col-auto">Utilisateurs</h1>
+      <h1 class="text-h5 q-my-none col-auto">{{ t('users.page.title') }}</h1>
       <q-space />
       <q-input
         v-model="search"
-        aria-label="Rechercher un compte"
+        :aria-label="t('users.page.search')"
         dense
         outlined
         debounce="300"
-        placeholder="E-mail ou nom…"
+        :placeholder="t('users.page.searchPlaceholder')"
         class="col-auto"
         style="min-width: 220px"
         @update:model-value="searchAgain"
@@ -20,7 +20,12 @@
            and on a bare button that padding landed inside the button, which
            sat a few pixels low and flush against the search box. -->
       <div v-if="auth.can('user', 'write')" class="col-auto">
-        <q-btn color="primary" icon="person_add" label="Nouveau compte" @click="openCreate" />
+        <q-btn
+          color="primary"
+          icon="person_add"
+          :label="t('users.page.create')"
+          @click="openCreate"
+        />
       </div>
     </div>
 
@@ -35,7 +40,7 @@
       row-key="id"
       :loading="loading"
       :rows-per-page-options="[25, 50, 100]"
-      :no-data-label="loadError ? 'Comptes non chargés.' : 'Aucun compte.'"
+      :no-data-label="loadError ? t('users.page.notLoaded') : t('users.page.empty')"
       class="users-table"
       @request="onRequest"
     >
@@ -51,27 +56,24 @@
               text-color="white"
               class="q-ml-none"
             >
-              {{ group.name }}
+              {{ groupName(group, groups.length ? groups : props.row.groups) }}
             </q-chip>
           </template>
-          <span v-else class="text-muted">Aucun</span>
+          <span v-else class="text-muted">{{ t('users.row.noGroup') }}</span>
         </q-td>
       </template>
 
       <template #body-cell-is_active="props">
         <q-td :props="props">
           <q-badge :color="props.value ? 'positive' : 'negative'">
-            {{ props.value ? 'Actif' : 'Désactivé' }}
+            {{ props.value ? t('users.row.active') : t('users.row.disabled') }}
           </q-badge>
           <!-- A lock lifts by itself; until then the way out is a password
                reset, from the menu of the row. -->
           <q-badge v-if="isLocked(props.row)" color="warning" class="q-ml-xs">
-            Verrouillé
+            {{ t('users.row.locked') }}
             <q-tooltip>
-              Trop d’échecs de connexion — jusqu’à {{ formatDateTime(props.row.locked_until) }}.
-              Seules les adresses qui ont échoué sont refusées : le bon mot de passe saisi depuis un
-              autre poste ouvre la session (depuis un poste habituel du compte seulement, si les
-              essais viennent de nombreuses adresses). Réinitialiser le mot de passe lève le verrou.
+              {{ t('users.row.lockedTooltip', { until: formatDateTime(props.row.locked_until) }) }}
             </q-tooltip>
           </q-badge>
         </q-td>
@@ -97,7 +99,7 @@
             dense
             round
             icon="more_vert"
-            :aria-label="`Actions pour ${props.row.email}`"
+            :aria-label="t('users.row.actionsFor', { email: props.row.email })"
             @click="rememberTrigger"
           >
             <q-menu>
@@ -106,7 +108,7 @@
                      refuses every action on it, so none is offered (item 4). -->
                 <q-item v-if="beyondMe(props.row)" dense class="text-caption text-muted">
                   <q-item-section avatar><q-icon name="lock" size="xs" /></q-item-section>
-                  <q-item-section>{{ MORE_RIGHTS_ACCOUNT }}</q-item-section>
+                  <q-item-section>{{ moreRightsAccount() }}</q-item-section>
                 </q-item>
                 <q-item
                   v-close-popup
@@ -115,7 +117,7 @@
                   @click="openEdit(props.row)"
                 >
                   <q-item-section avatar><q-icon name="edit" /></q-item-section>
-                  <q-item-section>Modifier</q-item-section>
+                  <q-item-section>{{ t('users.row.edit') }}</q-item-section>
                 </q-item>
                 <q-item
                   v-close-popup
@@ -124,7 +126,7 @@
                   @click="openReset(props.row)"
                 >
                   <q-item-section avatar><q-icon name="lock_reset" /></q-item-section>
-                  <q-item-section>Réinitialiser le mot de passe</q-item-section>
+                  <q-item-section>{{ t('users.row.resetPassword') }}</q-item-section>
                 </q-item>
 
                 <q-separator />
@@ -141,7 +143,9 @@
                     <q-icon :name="props.row.is_active ? 'block' : 'check_circle'" />
                   </q-item-section>
                   <q-item-section>
-                    {{ props.row.is_active ? 'Désactiver' : 'Réactiver' }}
+                    {{
+                      props.row.is_active ? t('users.row.deactivate') : t('users.row.reactivate')
+                    }}
                   </q-item-section>
                 </q-item>
                 <q-item
@@ -152,7 +156,7 @@
                   @click="confirmDelete(props.row)"
                 >
                   <q-item-section avatar><q-icon name="delete" /></q-item-section>
-                  <q-item-section>Supprimer</q-item-section>
+                  <q-item-section>{{ t('users.row.delete') }}</q-item-section>
                 </q-item>
               </q-list>
             </q-menu>
@@ -166,7 +170,7 @@
     <q-dialog v-model="formOpen" @hide="restoreFocus">
       <q-card style="width: 420px; max-width: 90vw">
         <q-card-section class="text-h6">
-          {{ editing ? 'Modifier le compte' : 'Nouveau compte' }}
+          {{ editing ? t('users.form.editTitle') : t('users.form.createTitle') }}
         </q-card-section>
 
         <q-form @submit="submitForm">
@@ -174,14 +178,15 @@
             <q-input
               v-model="form.email"
               type="email"
-              label="E-mail"
+              :label="t('users.form.email')"
               autocomplete="off"
               outlined
               dense
               autofocus
+              reactive-rules
               :rules="[required]"
             />
-            <q-input v-model="form.full_name" label="Nom complet" outlined dense />
+            <q-input v-model="form.full_name" :label="t('users.form.fullName')" outlined dense />
             <!-- Memberships, not a role: what the account may do is the union
                  of its groups' grants (page « Groupes »). One's own groups are
                  not editable — the backend refuses it — so the field is locked
@@ -193,16 +198,16 @@
               map-options
               multiple
               use-chips
-              label="Groupes"
+              :label="t('users.form.groups')"
               outlined
               dense
               :disable="editing !== null && isSelf(editing)"
               :hint="
                 editing !== null && isSelf(editing)
-                  ? 'Vos propres groupes ne se modifient pas depuis votre compte'
+                  ? t('users.form.ownGroupsHint')
                   : grantableGroupOptions.some((o) => o.disable)
-                    ? 'Grisés : les groupes qui accordent plus de droits que vous n’en détenez'
-                    : 'Aucun groupe : le compte se connecte mais ne voit rien'
+                    ? t('users.form.greyedHint')
+                    : t('users.form.noGroupHint')
               "
             />
             <!-- Only when editing: a new account starts on the default cadence
@@ -215,7 +220,7 @@
               :options="preferenceOptions"
               emit-value
               map-options
-              label="Notifications par e-mail"
+              :label="t('users.form.emailPreference')"
               outlined
               dense
             />
@@ -224,17 +229,18 @@
               v-model="form.password"
               type="password"
               autocomplete="new-password"
-              label="Mot de passe"
+              :label="t('users.form.password')"
               outlined
               dense
-              :hint="`${passwordMin} caractères minimum`"
+              :hint="t('users.form.minLength', { count: passwordMin })"
+              reactive-rules
               :rules="[required, longEnough]"
             />
           </q-card-section>
 
           <q-card-actions align="right" class="q-px-md q-pb-md">
-            <q-btn v-close-popup flat label="Annuler" />
-            <q-btn type="submit" color="primary" label="Enregistrer" :loading="saving" />
+            <q-btn v-close-popup flat :label="t('users.form.cancel')" />
+            <q-btn type="submit" color="primary" :label="t('users.form.save')" :loading="saving" />
           </q-card-actions>
         </q-form>
       </q-card>
@@ -251,7 +257,7 @@
       @hide="onResetHide"
     >
       <q-card style="width: 460px; max-width: 90vw">
-        <q-card-section class="text-h6">Réinitialiser le mot de passe</q-card-section>
+        <q-card-section class="text-h6">{{ t('users.reset.title') }}</q-card-section>
         <q-card-section class="q-pt-none text-body2 text-muted">
           {{ resetTarget?.email }}
         </q-card-section>
@@ -265,21 +271,27 @@
                 v-model="resetPassword"
                 type="password"
                 autocomplete="new-password"
-                label="Nouveau mot de passe"
+                :label="t('users.reset.newPassword')"
                 outlined
                 dense
-                :hint="`${passwordMin} caractères minimum`"
+                :hint="t('users.form.minLength', { count: passwordMin })"
+                reactive-rules
                 :rules="[required, longEnough]"
               />
               <q-banner dense class="surface-orange">
                 <template #avatar><q-icon name="warning" /></template>
-                Les sessions ouvertes de ce compte seront fermées.
+                {{ t('users.reset.sessionsClosed') }}
               </q-banner>
             </q-card-section>
 
             <q-card-actions align="right" class="q-px-md q-pb-md">
-              <q-btn v-close-popup flat label="Annuler" :disable="resetting" />
-              <q-btn type="submit" color="primary" label="Réinitialiser" :loading="resetting" />
+              <q-btn v-close-popup flat :label="t('users.reset.cancel')" :disable="resetting" />
+              <q-btn
+                type="submit"
+                color="primary"
+                :label="t('users.reset.submit')"
+                :loading="resetting"
+              />
             </q-card-actions>
           </q-form>
         </template>
@@ -287,11 +299,10 @@
         <template v-else>
           <q-card-section class="q-gutter-sm">
             <div class="text-body2">
-              Mot de passe défini. Il n'est plus consultable ensuite — transmettez-le maintenant,
-              par un canal distinct de l'e-mail du compte.
+              {{ t('users.reset.done') }}
             </div>
             <q-input
-              aria-label="Mot de passe défini"
+              :aria-label="t('users.reset.result')"
               :model-value="resetResult"
               readonly
               outlined
@@ -304,14 +315,14 @@
                   dense
                   round
                   icon="content_copy"
-                  aria-label="Copier"
+                  :aria-label="t('users.reset.copy')"
                   @click="copyResult"
                 />
               </template>
             </q-input>
           </q-card-section>
           <q-card-actions align="right" class="q-px-md q-pb-md">
-            <q-btn v-close-popup color="primary" flat label="Fermer" />
+            <q-btn v-close-popup color="primary" flat :label="t('users.reset.close')" />
           </q-card-actions>
         </template>
       </q-card>
@@ -320,7 +331,9 @@
 </template>
 
 <script setup lang="ts">
+import { groupName } from 'src/utils/groupText';
 import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
+import { t } from 'src/i18n';
 import { escapeHtml } from 'src/utils/html';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useFocusReturn } from 'src/composables/useFocusReturn';
@@ -336,16 +349,18 @@ import {
 } from 'src/services/users';
 import { listGroups, type Group } from 'src/services/groups';
 import {
-  MORE_RIGHTS_ACCOUNT,
   callerAuthority,
   exceeds,
   groupsAuthority,
   groupsByIds,
+  moreRightsAccount,
 } from 'src/utils/authority';
 import { apiErrorMessage } from 'src/services/errors';
 import type { EmailPreference } from 'src/services/auth';
 import { useAuthStore } from 'src/stores/auth';
 import { EMAIL_PREFERENCE_OPTIONS, emailPreferenceLabel, formatDateTime } from 'src/utils/format';
+import { liveDialog } from 'src/utils/liveDialog';
+import { notify } from 'src/utils/notify';
 
 const { passwordMin } = usePasswordPolicy();
 
@@ -387,7 +402,10 @@ async function loadGroups() {
   try {
     groups.value = await listGroups();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Groupes indisponibles') });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('users.notify.groupsUnavailable')),
+    }));
   }
 }
 
@@ -409,7 +427,7 @@ function beyondMe(user: ConsoleUser): boolean {
 // form says why they cannot be picked rather than failing on « Enregistrer ».
 const grantableGroupOptions = computed(() =>
   groups.value.map((g) => ({
-    label: g.name,
+    label: groupName(g, groups.value),
     value: g.id,
     disable: me.value !== null && exceeds(me.value, groupsAuthority([g])),
   })),
@@ -417,10 +435,12 @@ const grantableGroupOptions = computed(() =>
 
 // Label + value only: the explanatory sentences belong on « Mon compte », where
 // someone is choosing for themselves. Here an admin is reading a list.
-const preferenceOptions = EMAIL_PREFERENCE_OPTIONS.map((o) => ({
-  label: o.label,
-  value: o.value,
-}));
+const preferenceOptions = computed(() =>
+  EMAIL_PREFERENCE_OPTIONS.map((o) => ({
+    label: emailPreferenceLabel(o.value),
+    value: o.value,
+  })),
+);
 
 const resetOpen = ref(false);
 function onResetHide() {
@@ -434,20 +454,26 @@ const resetResult = ref<string | null>(null);
 // Its own flag, not the user form's `saving`: it also holds the dialog open.
 const resetting = ref(false);
 
-const resetModes = [
-  { label: 'Générer un mot de passe', value: 'generate' },
-  { label: 'Saisir un mot de passe', value: 'manual' },
-];
+const resetModes = computed(() => [
+  { label: t('users.reset.generate'), value: 'generate' },
+  { label: t('users.reset.manual'), value: 'manual' },
+]);
 
-const columns: QTableColumn<ConsoleUser>[] = [
-  { name: 'email', label: 'E-mail', field: 'email', align: 'left' },
-  { name: 'full_name', label: 'Nom', field: 'full_name', align: 'left' },
-  { name: 'groups', label: 'Groupes', field: 'groups', align: 'left' },
-  { name: 'is_active', label: 'État', field: 'is_active', align: 'center' },
+// A computed: the labels follow the language, which can change on the page.
+const columns = computed<QTableColumn<ConsoleUser>[]>(() => [
+  { name: 'email', label: t('users.columns.email'), field: 'email', align: 'left' },
+  { name: 'full_name', label: t('users.columns.name'), field: 'full_name', align: 'left' },
+  { name: 'groups', label: t('users.columns.groups'), field: 'groups', align: 'left' },
+  { name: 'is_active', label: t('users.columns.state'), field: 'is_active', align: 'center' },
   // Not sortable, like the columns above: the rows are a server page now, and
   // a client-side sort would only reorder the page in view.
-  { name: 'email_preference', label: 'E-mails', field: 'email_preference', align: 'left' },
-  { name: 'created_at', label: 'Créé le', field: 'created_at', align: 'left' },
+  {
+    name: 'email_preference',
+    label: t('users.columns.emails'),
+    field: 'email_preference',
+    align: 'left',
+  },
+  { name: 'created_at', label: t('users.columns.createdAt'), field: 'created_at', align: 'left' },
   // Sticky on the right: on a phone the table scrolls sideways, and the menu
   // of each row was six columns away, out of reach (item 12).
   {
@@ -458,11 +484,11 @@ const columns: QTableColumn<ConsoleUser>[] = [
     classes: 'users-actions-cell',
     headerClasses: 'users-actions-cell',
   },
-];
+]);
 
-const required = (v: string) => !!v || 'Requis';
+const required = (v: string) => !!v || t('users.form.required');
 const longEnough = (v: string) =>
-  v.length >= passwordMin.value || `${passwordMin.value} caractères minimum`;
+  v.length >= passwordMin.value || t('users.form.minLength', { count: passwordMin.value });
 
 function isSelf(user: ConsoleUser) {
   return user.id === auth.user?.id;
@@ -565,7 +591,7 @@ async function submitForm() {
         ...(isSelf(editing.value) ? {} : { group_ids: form.group_ids }),
         email_preference: form.email_preference,
       });
-      $q.notify({ type: 'positive', message: 'Compte mis à jour' });
+      notify($q, () => ({ type: 'positive', message: t('users.notify.updated') }));
     } else {
       await createUser({
         email: form.email,
@@ -573,12 +599,15 @@ async function submitForm() {
         full_name: form.full_name || null,
         group_ids: form.group_ids,
       });
-      $q.notify({ type: 'positive', message: 'Compte créé' });
+      notify($q, () => ({ type: 'positive', message: t('users.notify.created') }));
     }
     formOpen.value = false;
     await reload();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Enregistrement impossible') });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('users.notify.saveFailed')),
+    }));
   } finally {
     saving.value = false;
   }
@@ -608,7 +637,10 @@ async function submitReset() {
     rows.value = rows.value.map((u) => (u.id === targetId ? { ...u, locked_until: null } : u));
     resetOpen.value = true;
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Réinitialisation impossible') });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('users.notify.resetFailed')),
+    }));
   } finally {
     resetting.value = false;
   }
@@ -618,52 +650,58 @@ async function copyResult() {
   if (!resetResult.value) return;
   try {
     await copyToClipboard(resetResult.value);
-    $q.notify({ type: 'positive', message: 'Copié' });
+    notify($q, () => ({ type: 'positive', message: t('users.notify.copied') }));
   } catch {
-    $q.notify({
+    notify($q, () => ({
       type: 'negative',
-      message: 'Copie impossible : sélectionnez le mot de passe et copiez-le à la main',
-    });
+      message: t('users.notify.copyFailed'),
+    }));
   }
 }
 
 async function toggleActive(user: ConsoleUser) {
   try {
-    await updateUser(user.id, { is_active: !user.is_active });
-    $q.notify(
-      user.is_active
+    const deactivated = user.is_active;
+    await updateUser(user.id, { is_active: !deactivated });
+    notify($q, () =>
+      deactivated
         ? {
             type: 'positive',
-            message: 'Compte désactivé',
+            message: t('users.notify.deactivated'),
             // What a deactivated owner leaves behind is nobody's until it comes back.
-            caption:
-              'Tant que le compte reste désactivé, ses vérifications passent dans « À prendre » et ses salles et postes reviennent au responsable du niveau au-dessus (la salle, puis le responsable par défaut du parc).',
+            caption: t('users.notify.deactivatedCaption'),
           }
-        : { type: 'positive', message: 'Compte réactivé' },
+        : { type: 'positive', message: t('users.notify.reactivated') },
     );
     await reload();
   } catch (e) {
-    $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Modification impossible') });
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('users.notify.editFailed')),
+    }));
   }
 }
 
 function confirmDelete(user: ConsoleUser) {
-  $q.dialog({
-    title: 'Supprimer le compte',
+  liveDialog($q, () => ({
+    title: t('users.delete.title'),
     message:
-      `Supprimer définitivement <b>${escapeHtml(user.email)}</b> ?<br>` +
-      'La désactivation est préférable si vous voulez garder la trace du compte.',
+      `${t('users.delete.question', { email: `<b>${escapeHtml(user.email)}</b>` })}<br>` +
+      t('users.delete.advice'),
     html: true,
     cancel: true,
-    ok: { label: 'Supprimer', color: 'negative' },
-  }).onOk(() => {
+    ok: { label: t('users.delete.ok'), color: 'negative' },
+  })).onOk(() => {
     void (async () => {
       try {
         await deleteUser(user.id);
-        $q.notify({ type: 'positive', message: 'Compte supprimé' });
+        notify($q, () => ({ type: 'positive', message: t('users.notify.deleted') }));
         await reload();
       } catch (e) {
-        $q.notify({ type: 'negative', message: apiErrorMessage(e, 'Suppression impossible') });
+        notify($q, () => ({
+          type: 'negative',
+          message: apiErrorMessage(e, t('users.notify.deleteFailed')),
+        }));
       }
     })();
   });

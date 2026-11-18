@@ -50,7 +50,10 @@ Ajouter une dépendance : `uv add <pkg>` (ou `uv add --dev <pkg>` pour le groupe
 - `POST /api/v1/agent/enroll` — en-tête `X-Enrollment-Secret`, renvoie le token du poste.
   Un `machine_uuid` qui détient déjà un token valide reçoit un 403
   `machine.enrollment.approval_required` : la demande attend
-  `POST /api/v1/machines/{id}/allow-reenroll` depuis la console.
+  `POST /api/v1/machines/{id}/allow-reenroll` depuis la console. Exception :
+  la réponse d'enrôlement perdue, quand le token émis n'a encore servi à
+  aucune requête (`DEPLOYMENT.md` § « Une seule exception : la réponse
+  d'enrôlement perdue »).
 - `POST /api/v1/agent/heartbeat` — `Authorization: Bearer <token>`, renvoie les commandes en attente, et `new_token` quand le token est à renouveler (voir *Rotation des tokens agents*).
 - `POST /api/v1/agent/commands/{id}/result` — résultat d'exécution.
 

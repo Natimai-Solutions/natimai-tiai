@@ -16,6 +16,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import AfterValidator, BaseModel, Field
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
@@ -24,6 +25,7 @@ from app.api.fields import not_null
 from app.api.routes.agent import clean_location
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode, violated_constraint
+from app.core.validation import invalid
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.machine.models import Machine
@@ -74,11 +76,14 @@ def _name(value: str) -> str:
     """A building's or a room's name, its spaces collapsed: « » or «   » is
     no name (it was stored as one, and listed as a blank row) — nor is one
     made only of characters nobody sees, a zero-width space for instance.
-    Inside a name they are left alone: some scripts are written with them."""
+    Inside a name they are left alone: some scripts are written with them.
+    At its ends they are dropped: « Labo 3 » and « Labo 3 » followed by a
+    zero-width space read the same, and must be the same name."""
     cleaned = " ".join(value.split())
-    if all(_invisible(char) for char in cleaned):
-        raise ValueError("le nom ne peut pas être vide")
-    return cleaned
+    shown = [i for i, char in enumerate(cleaned) if not _invisible(char)]
+    if not shown:
+        raise invalid("name_empty", "le nom ne peut pas être vide")
+    return cleaned[shown[0] : shown[-1] + 1]
 
 
 PlaceName = Annotated[str, Field(min_length=1, max_length=100), AfterValidator(_name)]
@@ -576,6 +581,43 @@ async def update_building(
     return (await _buildings_out(session, [building], scope))[0]
 
 
+# Renaming rounds a deletion makes before it gives up: each one is lost only
+# to a building-less room of the same name created meanwhile.
+_DETACH_ATTEMPTS = 3
+
+
+async def _detach_rooms(
+    session: SessionDep, building: Building
+) -> list[tuple[str, str]]:
+    """Take the building's rooms out of it, renamed where their name is
+    taken outside any building (``crud.detach_building``).
+
+    Done here rather than left to the ON DELETE SET NULL of the building's
+    row: a building-less room of the same name created since the renaming
+    read the name free would make that cascade fail on the name's unique
+    index — a 500 from the DELETE itself. Written ahead, inside a savepoint,
+    the collision is caught: the renaming runs again, now seeing that room,
+    and after a few lost rounds the answer is the 409 a room creation gets
+    for the same race (``_flush_name``)."""
+    renamed: list[tuple[str, str]] = []
+    for _ in range(_DETACH_ATTEMPTS):
+        renamed += await crud.detach_building(session, building)
+        try:
+            async with session.begin_nested():
+                await session.exec(
+                    update(Room)
+                    .where(col(Room.building_id) == building.id)
+                    .values(building_id=None, updated_at=utcnow())
+                )
+        except IntegrityError as exc:
+            if _NAME_CONSTRAINTS.get(violated_constraint(exc) or "") is None:
+                raise
+            continue
+        return renamed
+    await session.rollback()
+    raise _room_name_taken()
+
+
 @buildings_router.delete("/{building_id}", status_code=204, dependencies=[_WRITE])
 async def delete_building(
     building_id: uuid.UUID,
@@ -589,7 +631,7 @@ async def delete_building(
     building = await _require_building(session, building_id, scope)
     _reject_out_of_scope(_building_writable(building, scope))
     await _reject_in_group_scope(session, ScopeKind.BUILDING, building.id)
-    renamed = await crud.detach_building(session, building)
+    renamed = await _detach_rooms(session, building)
     audit.record(
         session,
         actor=current.email,

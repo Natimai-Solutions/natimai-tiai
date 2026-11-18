@@ -1,4 +1,5 @@
 import type { LocationQuery } from 'vue-router';
+import { t } from 'src/i18n';
 import type {
   ListMachinesParams,
   MachineSortField,
@@ -78,16 +79,26 @@ export function isSortField(value: string): value is MachineSortField {
   return (MACHINE_SORT_FIELDS as readonly string[]).includes(value);
 }
 
+/** A chassis kind, its words looked up in the reader's language when read. */
+function chassisType(value: string, key: string): { value: string; label: string } {
+  return {
+    value,
+    get label() {
+      return t(`machines.options.chassis.${key}`);
+    },
+  };
+}
+
 /**
  * Chassis kinds the agent normalises to, with the words the console uses for
  * them. A closed list, so the filter is a dropdown and the URL round-trips.
  */
 export const CHASSIS_TYPES: readonly { value: string; label: string }[] = [
-  { value: 'desktop', label: 'Poste fixe' },
-  { value: 'laptop', label: 'Portable' },
-  { value: 'tablet', label: 'Tablette' },
-  { value: 'all-in-one', label: 'Tout-en-un' },
-  { value: 'server', label: 'Serveur' },
+  chassisType('desktop', 'desktop'),
+  chassisType('laptop', 'laptop'),
+  chassisType('tablet', 'tablet'),
+  chassisType('all-in-one', 'allInOne'),
+  chassisType('server', 'server'),
 ];
 
 /** A positive integer from a route-query value, or null. */

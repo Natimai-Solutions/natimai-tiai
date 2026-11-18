@@ -11,8 +11,9 @@ already carries pagination, sorting and a dozen filters, so the drill-down is
 list, and "qui a Java 8 *et* est allumé" costs nothing extra.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
@@ -26,6 +27,7 @@ from app.api.xlsx_export import xlsx_response
 from app.core.errors import AppError, ErrorCode
 from app.features.base import contains
 from app.features.inventory.models import MachineSoftware, Software
+from app.features.user.models import Language
 from app.features.user.permissions import Action, Resource
 from app.features.user.scope import Scope, machine_ids_clause
 
@@ -166,6 +168,30 @@ async def list_software(
 EXPORT_HEADER = ["Nom", "Version", "Éditeur", "Postes", "Vu pour la première fois"]
 
 
+@dataclass(frozen=True)
+class SoftwareExportTexts:
+    """The export's words in one language: the header, the sheet, the file."""
+
+    header: list[str]
+    sheet_title: str
+    file_stem: str
+
+
+# The language the console asks the file in (``lang``, plan
+# ``dev/plan-console-bilingue.md`` I4). French when absent: a script or an
+# older console gets the file it always got.
+EXPORT_TEXTS: dict[Language, SoftwareExportTexts] = {
+    Language.FR: SoftwareExportTexts(EXPORT_HEADER, "Logiciels", "logiciels"),
+    Language.EN: SoftwareExportTexts(
+        ["Name", "Version", "Publisher", "Computers", "First seen"],
+        "Software",
+        "software",
+    ),
+}
+
+ExportLanguage = Annotated[Language, Query(description="fr or en; fr when absent")]
+
+
 async def _export_rows(
     session: SessionDep, search: str | None, scope: Scope | None
 ) -> list[tuple[Software, int]]:
@@ -186,12 +212,16 @@ async def _export_rows(
 # Excel, which is what makes the column sortable there.
 @router.get("/export.csv")
 async def export_software(
-    session: SessionDep, scope: CurrentScope, search: str | None = None
+    session: SessionDep,
+    scope: CurrentScope,
+    search: str | None = None,
+    lang: ExportLanguage = Language.FR,
 ) -> Response:
     """The catalogue as CSV, honouring the same search."""
+    texts = EXPORT_TEXTS[lang]
     return csv_response(
-        "logiciels.csv",
-        EXPORT_HEADER,
+        f"{texts.file_stem}.csv",
+        texts.header,
         [
             (
                 entry.name,
@@ -202,22 +232,27 @@ async def export_software(
             )
             for entry, count in await _export_rows(session, search, scope)
         ],
+        lang,
     )
 
 
 @router.get("/export.xlsx")
 async def export_software_xlsx(
-    session: SessionDep, scope: CurrentScope, search: str | None = None
+    session: SessionDep,
+    scope: CurrentScope,
+    search: str | None = None,
+    lang: ExportLanguage = Language.FR,
 ) -> Response:
     """The catalogue as an Excel workbook, honouring the same search."""
+    texts = EXPORT_TEXTS[lang]
     return await xlsx_response(
-        "logiciels.xlsx",
-        EXPORT_HEADER,
+        f"{texts.file_stem}.xlsx",
+        texts.header,
         [
             (entry.name, entry.version, entry.publisher, count, entry.first_seen.date())
             for entry, count in await _export_rows(session, search, scope)
         ],
-        sheet_title="Logiciels",
+        sheet_title=texts.sheet_title,
     )
 
 

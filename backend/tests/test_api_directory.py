@@ -871,6 +871,70 @@ async def test_a_resync_beside_heartbeats_filing_the_same_postes_does_not_deadlo
     assert sum(r["machine_count"] for r in rooms) == 30
 
 
+async def test_a_resync_takes_its_postes_before_any_room(
+    client, db_session, engine, room_source
+):
+    """The crossing above, forced rather than left to the scheduler: a
+    heartbeat has written its poste and not yet created the room its OU
+    names when the re-sync starts. The sync must wait on the poste before it
+    creates anything; created first, its uncommitted room is what the
+    heartbeat then waits for, while the sync waits for the poste — a
+    deadlock, a 500 for one of the two."""
+    import asyncio
+
+    from sqlalchemy import text, update
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.features.machine.models import Machine
+    from app.features.room import crud as room_crud
+
+    headers = await _admin(client, db_session)
+    enrolled = await _enroll(client, "pc-1", hostname="H1")
+    # Stored in manual mode: the room is still to create.
+    room_source("manual")
+    await _report(client, enrolled, _dir(ou="R1", ou_dn="OU=R1,DC=lycee,DC=local"))
+    room_source("ad_ou")
+
+    async def lock_waiters() -> int:
+        async with engine.connect() as conn:
+            return await conn.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                )
+            )
+
+    async with AsyncSession(engine) as beating:
+        # The heartbeat's first write: its poste.
+        await beating.exec(
+            update(Machine)
+            .where(Machine.id == uuid.UUID(enrolled["machine_id"]))
+            .values(hostname="H1")
+        )
+        sync = asyncio.create_task(
+            client.post("/api/v1/rooms/sync-directory", headers=headers)
+        )
+        # The sync has run into the heartbeat's poste.
+        for _ in range(200):
+            if await lock_waiters():
+                break
+            await asyncio.sleep(0.05)
+        else:
+            sync.cancel()
+            pytest.fail("the re-sync never waited on the heartbeat's poste")
+        # Then the room its OU names, as place_from_directory does.
+        room, created = await room_crud.room_for_key(
+            beating, "OU=R1,DC=lycee,DC=local", "R1", adopt=False, capped=True
+        )
+        assert created
+        await beating.commit()
+    resp = await sync
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["placed"] == 1
+    assert resp.json()["rooms_created"] == 0
+    assert (await _machine(client, headers, enrolled))["room_name"] == "R1"
+
+
 async def test_postes_reporting_a_new_ou_at_the_same_time_are_all_filed(
     client, db_session, room_source
 ):

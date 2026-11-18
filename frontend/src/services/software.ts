@@ -1,4 +1,5 @@
 import { api } from 'boot/axios';
+import { currentLocale } from 'src/i18n';
 
 /**
  * The parc's software catalogue — the reason the inventory module is worth
@@ -72,14 +73,16 @@ export type SoftwareExportFormat = 'xlsx' | 'csv';
  * export.
  *
  * Fetched as a blob rather than linked to: the API needs the Authorization
- * header, which a plain `<a href>` would not carry.
+ * header, which a plain `<a href>` would not carry. In the language shown
+ * (`lang`), sent only when it is not French, the server's default.
  */
 export async function exportSoftware(
   format: SoftwareExportFormat,
   params: { search?: string } = {},
 ): Promise<Blob> {
+  const lang = currentLocale();
   const { data } = await api.get<Blob>(`/software/export.${format}`, {
-    params,
+    params: lang === 'fr' ? params : { ...params, lang },
     responseType: 'blob',
   });
   return data;

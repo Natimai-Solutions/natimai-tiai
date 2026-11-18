@@ -1,4 +1,5 @@
 import { api } from 'boot/axios';
+import { t } from 'src/i18n';
 
 /**
  * Where a poste is, as the console organises it — distinct from the site the
@@ -223,24 +224,27 @@ export function syncNotification(res: SyncResult): {
   timeout?: number;
   actions?: { label: string; color: string }[];
 } {
-  const message = `${res.placed} poste(s) rangé(s), ${res.unplaced} retiré(s), ${res.rooms_created} salle(s) créée(s)`;
+  const message = t('rooms.sync.done', {
+    placed: res.placed,
+    unplaced: res.unplaced,
+    created: res.rooms_created,
+  });
   const undecided = res.undecided ?? 0;
   if (!undecided) return { type: 'positive', message };
   const rooms = res.undecided_rooms ?? [];
   const named = rooms
     .slice(0, UNDECIDED_ROOMS_NAMED)
-    .map((name) => `« ${name} »`)
-    .join(', ');
-  const which = !rooms.length
-    ? ''
-    : ` pour ${named}${rooms.length > UNDECIDED_ROOMS_NAMED ? " et d'autres salles" : ''}`;
+    .map((name) => t('rooms.sync.quoted', { name }))
+    .join(t('rooms.sync.listSeparator'));
+  const names =
+    rooms.length > UNDECIDED_ROOMS_NAMED ? t('rooms.sync.namesAndOthers', { names: named }) : named;
   return {
     type: 'warning',
-    message: `${message} — ${undecided} poste(s) laissé(s) en place`,
-    caption: `Aucune unité d'organisation n'est majoritaire${which}. Renommez la salle créée à la main, puis resynchronisez : les postes iront dans la salle de leur unité d'organisation.`,
+    message: t('rooms.sync.undecided', { message, count: undecided }, undecided),
+    caption: rooms.length ? t('rooms.sync.captionFor', { names }) : t('rooms.sync.caption'),
     // Names to act on: it stays until read.
     timeout: 0,
-    actions: [{ label: 'Fermer', color: 'white' }],
+    actions: [{ label: t('rooms.actions.close'), color: 'white' }],
   };
 }
 
@@ -261,22 +265,21 @@ export async function syncDirectory(dryRun = false): Promise<SyncResult> {
 /** The confirmation a re-sync asks, from its dry run. */
 export function syncPreviewMessage(res: SyncResult): string {
   const moved = res.moved_out ?? 0;
-  const lines = [
-    `${moved} poste(s) changeront de salle, ${res.rooms_created} salle(s) seront créées.`,
-  ];
-  if (res.unplaced) lines.push(`Dont ${res.unplaced} retiré(s) de toute salle.`);
-  if (res.undecided) lines.push(`${res.undecided} poste(s) resteront en place (salle indécise).`);
-  lines.push(
-    "Les postes sans aucune information d'annuaire restent où ils sont. Lancer la resynchronisation ?",
-  );
+  const lines = [t('rooms.sync.previewMoved', { moved, created: res.rooms_created })];
+  if (res.unplaced) lines.push(t('rooms.sync.previewUnplaced', { count: res.unplaced }));
+  if (res.undecided) {
+    lines.push(t('rooms.sync.previewUndecided', { count: res.undecided }, res.undecided));
+  }
+  lines.push(t('rooms.sync.previewAsk'));
   return lines.join(' ');
 }
 
-export const ROOM_SOURCE_LABELS: Record<string, string> = {
-  manual: 'à la main, depuis la console',
-  ad_ou: "par l'unité d'organisation de l'objet ordinateur",
-  ad_location: "par l'attribut Emplacement de l'objet ordinateur",
-};
+const ROOM_SOURCES = ['manual', 'ad_ou', 'ad_location'];
+
+/** How postes are filed, after « Les postes sont rangés »; an unknown mode as is. */
+export function roomSourceLabel(source: string): string {
+  return ROOM_SOURCES.includes(source) ? t(`rooms.sources.${source}`) : source;
+}
 
 /**
  * "Bâtiment B › B12", or the room alone when it has no building — and
@@ -310,10 +313,14 @@ export function placementNotification(res: PlacementResult): {
   type: 'positive' | 'warning';
   message: string;
 } {
-  const moved = `${res.moved} poste(s) affecté(s)`;
+  const moved = t('rooms.placement.moved', { count: res.moved }, res.moved);
   if (!res.mismatched.length) return { type: 'positive', message: moved };
   return {
     type: 'warning',
-    message: `${moved} — ${res.mismatched.length} dont l'agent déclare un autre emplacement que la salle`,
+    message: t(
+      'rooms.placement.mismatch',
+      { moved, count: res.mismatched.length },
+      res.mismatched.length,
+    ),
   };
 }

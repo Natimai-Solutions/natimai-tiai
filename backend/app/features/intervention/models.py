@@ -16,8 +16,10 @@ arrive with their milestone.
 import enum
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Column, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
@@ -50,6 +52,16 @@ class Intervention(SQLModel, table=True):
     kind: str = Field(max_length=40)
     # One line, optional: « Remplacement SSD ». The note carries the rest.
     title: str | None = Field(default=None, max_length=200)
+    # Set when the server wrote the title itself (« Maintenance non faite —
+    # A101 »): the console words it from the code and its parameters, in the
+    # reader's language; ``title`` keeps the French for an older console.
+    # NULL on a title typed by someone — an edit of the title clears both —
+    # and on the rows written before (plan console bilingue: they keep their
+    # French).
+    title_code: str | None = Field(default=None, max_length=64)
+    title_params: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
     note: str | None = Field(default=None, max_length=5000)
     # The acting account's e-mail, as text, the audit log's convention: the
     # entry must outlive the account.

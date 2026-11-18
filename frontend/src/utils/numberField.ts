@@ -1,3 +1,5 @@
+import { t } from 'src/i18n';
+
 /**
  * What is wrong with a whole number typed in a settings field, in the page's
  * words; null when nothing. An emptied field is an error, never a 0: the
@@ -9,9 +11,9 @@ export function intFieldError(
   min: number,
   max: number,
 ): string | null {
-  if (value === '' || value === null || value === undefined) return 'Valeur requise';
+  if (value === '' || value === null || value === undefined) return t('settings.number.required');
   const n = typeof value === 'number' ? value : Number(String(value).trim());
-  if (!Number.isFinite(n) || !Number.isInteger(n)) return 'Un nombre entier';
-  if (n < min || n > max) return `Entre ${min} et ${max}`;
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return t('settings.number.integer');
+  if (n < min || n > max) return t('settings.number.between', { min, max });
   return null;
 }
