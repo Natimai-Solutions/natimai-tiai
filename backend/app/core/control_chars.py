@@ -41,13 +41,16 @@ from app.core.validation import PREFIX
 # joined every well-formed pair into its character: the lone ones.
 _STRIPPED = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff]")
 # How such a character can be spelled in JSON text: a \u escape of the C0
-# range or of a surrogate, the two short escapes of the set (\b, \f), or the
-# raw byte, which makes the JSON invalid anyway. A cheap scan before any
+# range or of a surrogate, the two short escapes of the set (\b, \f), the
+# raw byte, which makes the JSON invalid anyway, or a surrogate's own three
+# bytes (ED A0..BF xx) — not UTF-8, but read by Python's JSON parser all the
+# same, into the very character the escape gives. A cheap scan before any
 # parse: most bodies carry none, and are passed on untouched. A false
 # positive (an escaped backslash followed by "b", an escaped pair that is
 # well formed) only costs the parse.
 _JSON_CONTROL = re.compile(
     rb"\\u00[01][0-9a-fA-F]|\\u[dD][89a-fA-F]|\\[bf]|[\x00-\x08\x0b\x0c\x0e-\x1f]"
+    rb"|\xed[\xa0-\xbf]"
 )
 _JSON_NUL = re.compile(rb"\\u0000|\x00")
 _URL_NUL = re.compile(rb"%00|\x00")

@@ -278,3 +278,74 @@ async def test_an_invisible_character_inside_a_name_is_kept(client, db_session):
     admin = await _admin(client, db_session)
     made = await _post(client, admin, "rooms", {"name": "Salle‍A"})
     assert made["name"] == "Salle‍A"
+
+
+@pytest.mark.parametrize("path", ["rooms", "buildings"])
+async def test_invisible_characters_at_the_ends_of_a_name_are_dropped(
+    client, db_session, path
+):
+    """« Labo 3 » with a zero-width space before or after it reads « Labo 3 »:
+    stored as typed, it was another row nobody could tell from the first."""
+    admin = await _admin(client, db_session)
+    made = await _post(client, admin, path, {"name": "​Labo‍3 ⁠"})
+    assert made["name"] == "Labo‍3"
+    await _post(client, admin, path, {"name": "Labo 3"})
+    for twin in ("Labo 3​", "​Labo 3", "labo 3⁠", "﻿LABO 3 ‎"):
+        body = await _post(client, admin, path, {"name": twin}, status=409)
+        assert body["error"]["code"].endswith(".name.taken")
+    resp = await client.patch(
+        f"/api/v1/{path}/{made['id']}", headers=admin, json={"name": "​Salle 9"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "Salle 9"
+    listed = (await client.get(f"/api/v1/{path}", headers=admin)).json()
+    assert sorted(row["name"] for row in listed) == ["Labo 3", "Salle 9"]
+
+
+async def test_a_building_deleted_while_a_twin_of_its_room_is_created(
+    client, db_session, engine
+):
+    """The building's « A100 » goes building-less while a building-less
+    « a100 » is being written: the renaming read the name free, and the ON
+    DELETE SET NULL then met the name's index — a 500 from the DELETE. The
+    deletion now waits for the twin, sees it, and renames its room."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.features.room.models import Room
+
+    admin = await _admin(client, db_session)
+    b = await _post(client, admin, "buildings", {"name": "Bât B"})
+    await _post(client, admin, "rooms", {"name": "A100", "building_id": b["id"]})
+
+    async def lock_waiters() -> int:
+        async with engine.connect() as conn:
+            return await conn.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                )
+            )
+
+    async with AsyncSession(engine) as other:
+        other.add(Room(name="a100"))
+        await other.flush()
+        deleting = asyncio.create_task(
+            client.delete(f"/api/v1/buildings/{b['id']}", headers=admin)
+        )
+        # The deletion has run into the twin's uncommitted index entry.
+        for _ in range(200):
+            if await lock_waiters():
+                break
+            await asyncio.sleep(0.05)
+        else:
+            deleting.cancel()
+            pytest.fail("the deletion never waited on the twin")
+        await other.commit()
+    resp = await deleting
+    assert resp.status_code == 204, resp.text
+    listed = (await client.get("/api/v1/rooms", headers=admin)).json()
+    assert sorted(row["name"] for row in listed) == ["A100 (Bât B)", "a100"]
+    assert all(row["building"] is None for row in listed)

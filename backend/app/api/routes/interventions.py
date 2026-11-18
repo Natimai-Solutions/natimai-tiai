@@ -210,9 +210,11 @@ async def update_intervention(
             ) from None
     if "kind" in fields:
         row.kind = payload.kind.value if payload.kind else row.kind
-    if "title" in fields:
+    if "title" in fields and _clean(fields["title"]) != row.title:
         row.title = _clean(fields["title"])
-        # Typed by someone now: no longer the server's words.
+        # Typed by someone now: no longer the server's words. Sent back as
+        # it was (an older console, a script PATCHing the whole line), it
+        # still is: the line keeps reading in the reader's language.
         row.title_code = None
         row.title_params = None
     if "note" in fields:
