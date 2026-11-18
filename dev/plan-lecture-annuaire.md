@@ -3,7 +3,6 @@
 > **Statut : cadré, non codé** (rédigé le 2026-11-16, décisions du 2026-11-18
 > au §9). Répond aux constats S19 et S20 de l'audit 2026-11, acceptés en limite
 > au §6.4 de `plan-audit-2026-11.md` (« Emplacement et annuaire déclaratifs »).
-> Il reste une question ouverte au §9.2.
 >
 > Objectif : que l'emplacement d'un poste, son OU et l'attribut *Emplacement*
 > de son objet ordinateur ne soient plus **crus sur parole** quand ils décident
@@ -199,7 +198,11 @@ qu'il **observe lui-même**, l'adresse source de la connexion (`client_ip`).
   `DIRECTORY_SITE_WINDOW_MINUTES` dernières minutes, est « sur site ». Une
   adresse qui change est suivie sans intervention.
 - **Relais** : les postes `verified` et sur le site vérifié de la cible
-  passent en premier. Voir la question ouverte du §9.2 pour les autres.
+  passent en premier. Les autres **passent après** (décision du 2026-11-18),
+  comme les postes d'un autre sous-réseau aujourd'hui : ils attendent un
+  délai, puis prennent le réveil si aucun relais vérifié ne l'a pris. Le
+  résultat du réveil dit alors qu'il a été relayé par un poste non vérifié.
+  `WOL_RELAY_VERIFIED_ONLY=true` les écarte au lieu de les faire attendre.
 - L'emplacement déclaré par l'agent reste l'emplacement affiché et filtrable.
 - **Sans vérification possible** (mode désactivé, annuaire injoignable, aucun
   lecteur en ligne) : le comportement actuel est conservé et la page
@@ -233,6 +236,7 @@ révocation reste une décision humaine, proposée en un clic depuis le filtre.
 | `DIRECTORY_STALE_HOURS` | `72` | Au-delà, un enregistrement non relu est `stale` et ne vérifie plus rien |
 | `DIRECTORY_CONFIRM_MOVES` | `20` | Mode `relay` : au-delà de ce nombre de postes déplacés par une lecture, confirmation d'un administrateur (§3.2) |
 | `DIRECTORY_SITE_WINDOW_MINUTES` | `30` | Mode `relay` : durée pendant laquelle l'adresse source d'un lecteur désigne son site (§4.2) |
+| `WOL_RELAY_VERIFIED_ONLY` | `false` | `false` : un relais non vérifié passe après les relais vérifiés ; `true` : il est écarté (§4.2) |
 
 Ces valeurs sont contrôlées au démarrage, avec les mêmes bornes que le reste
 du `.env`. La page Paramètres les affiche, sans le mot de passe.
@@ -280,9 +284,7 @@ Les deux déploiements sont à couvrir. L1 et L2 suffisent à ranger les salles
 d'un serveur qui voit un DC ; L3 apporte la même chose à un serveur hébergé
 ailleurs, et L4 dépend de L3 pour ce cas.
 
-## 9. Décisions et question ouverte
-
-### 9.1 Décisions du 2026-11-18
+## 9. Décisions du 2026-11-18
 
 1. **Les deux déploiements sont pris en charge** : serveur qui voit un DC
    (mode `ldap`) et serveur sans route (mode `relay`).
@@ -294,16 +296,9 @@ ailleurs, et L4 dépend de L3 pour ce cas.
    liste `WOL_SITE_EGRESS` envisagée est abandonnée au profit de l'adresse
    apprise du lecteur (§4.2).
 5. **Écart annuaire / agent** : signalé, pas bloquant.
-
-### 9.2 Question ouverte
-
-**Relais non vérifiés : écartés, ou seulement passés après les autres ?**
-L'adresse apprise est un signal qui peut manquer (lecteur éteint, adresse
-qui vient de changer, site à plusieurs accès).
-- *Écartés* : plus aucun réveil relayé sur un site tant que personne n'y est
-  vérifié.
-- *Passés après* (proposé, avec un réglage pour choisir l'autre) : un relais
-  vérifié est toujours préféré ; à défaut, le réveil part comme aujourd'hui
-  et le résultat dit qu'il a été relayé par un poste non vérifié. Le risque
-  qui reste est celui de S19 : un poste forgé apprend l'adresse MAC de la
-  cible et ne la réveille pas.
+6. **Relais non vérifiés** : passés après les relais vérifiés, pas écartés.
+   L'adresse apprise est un signal qui peut manquer (lecteur éteint, adresse
+   qui vient de changer, site à plusieurs accès), et un site ne doit pas
+   perdre ses réveils pour autant. Le risque qui reste est celui de S19 : un
+   poste forgé apprend l'adresse MAC de la cible et ne la réveille pas.
+   `WOL_RELAY_VERIFIED_ONLY=true` permet de les écarter.
