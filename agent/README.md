@@ -860,15 +860,25 @@ paramètres : `detail_code` et `detail_<nom>`. La console écrit alors le
 détail dans la langue du lecteur.
 
 Restent sans code, en texte seul : la **sortie des outils Windows** (`ipconfig`,
-`gpresult`, `sfc`…, dans la langue du poste, citée telle quelle — y compris
-dans un paramètre `detail` ou `summary`), le compte rendu détaillé d'une
-installation Windows Update et d'une réinitialisation Windows Update, les
-échecs partiels du spouleur, la phrase « Redémarrage requis pour finaliser
-l'opération. » ajoutée à la sortie de DISM, et les phrases composées de deux
-refus (méthode B puis méthode A). Un message dont
-les paramètres dépassent ce que le serveur garde (16 clés, 1 024 caractères
-par texte) part aussi sans code. La note « […] sortie tronquée à N Kio par
-l'agent » n'est pas un code : la console la reconnaît en fin de texte.
+`gpresult`, `sfc`…, dans la langue du poste, citée telle quelle — y compris dans
+un paramètre `detail`, `summary` ou `output`), les titres des mises à jour et
+les messages d'erreur de Windows cités dans un compte rendu, et quelques causes
+internes citées dans un détail (clé en double ou inattendue d'un manifeste,
+signature Authenticode illisible, « powershell: aucune sortie JSON »). Les
+textes composés de l'agent — compte rendu d'une installation Windows Update,
+étapes d'une réinitialisation de Windows Update, remise à zéro partielle du
+spouleur, double refus « méthode B … ; méthode A … », phrase « Redémarrage
+requis… » ajoutée à la sortie de DISM — sont codés : une liste passe dans un
+seul paramètre, un élément par ligne et ses champs séparés par des
+tabulations ; l'erreur citée par un élément est imbriquée comme un détail
+(`e1`, `e1_code`, `e1_<nom>`). La sortie d'une commande échouée, quand l'agent
+l'a écrite, porte son code à côté de celui de l'erreur (`output_code`,
+`output_<nom>`). Un message dont les paramètres dépassent ce que le serveur
+garde (16 clés, 1 024 caractères par texte), ou qu'une liste ne peut pas
+porter (un titre avec un saut de ligne), part sans code ; une sortie de
+commande échouée trop longue perd seulement son propre code. La note « […]
+sortie tronquée à N Kio par l'agent » n'est pas un code : la console la
+reconnaît en fin de texte.
 
 ## Build & essai
 

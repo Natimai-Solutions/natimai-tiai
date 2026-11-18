@@ -170,10 +170,13 @@ serveur à jour traduit le code. Rien ne change pour un agent non mis à jour.
   - les **refus propres à Pydantic** (champ manquant, longueur…) gardent leur
     message anglais, comme avant ;
   - restent en texte, sans code : la sortie des outils Windows (y compris
-    citée dans un détail), le rapport détaillé d'installation des mises à
-    jour Windows, les étapes de la réinitialisation de Windows Update, les
-    échecs partiels du spouleur, le refus combiné « méthode B … ; méthode
-    A … » et la phrase « Redémarrage requis… » ajoutée à la sortie de DISM ;
+    citée dans un détail), les titres des mises à jour et les messages
+    d'erreur de Windows cités dans un compte rendu, et quelques causes
+    internes de l'agent citées dans un détail. Les textes composés de
+    l'agent (compte rendu Windows Update, réinitialisation, spouleur, double
+    refus de déploiement, phrase de DISM) sont codés depuis la vérification
+    du 18 novembre : listes en un paramètre, erreurs imbriquées,
+    `output_code` pour la sortie d'une commande échouée ;
   - une cause elle-même codée, citée dans le détail d'un autre message de
     l'agent, transmet son code (`detail_code`, `detail_<nom>`) : la console
     l'écrit dans la langue du lecteur (vérification du 18 novembre).
