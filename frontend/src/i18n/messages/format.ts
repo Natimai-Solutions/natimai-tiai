@@ -1,8 +1,315 @@
 import type { Translation } from './types';
 
 /** Les libellés partagés : états, durées, présence (lot E1 du plan console bilingue). */
-const fr = {};
+const fr = {
+  timeAgo: {
+    now: "à l'instant",
+    minutes: 'il y a {count} min',
+    hours: 'il y a {count} h',
+    days: 'il y a {count} j',
+  },
+  online: {
+    on: 'Poste allumé',
+    off: 'Poste éteint ou injoignable',
+  },
+  bool: {
+    unknown: 'Inconnu',
+    yes: 'Oui',
+    no: 'Non',
+  },
+  session: {
+    unknown: 'Inconnu',
+    none: 'Aucun utilisateur',
+    anonymous: 'Utilisateur connecté',
+  },
+  sessionType: {
+    active: 'Active',
+    disconnected: 'Déconnectée',
+    remote: 'Bureau à distance',
+    console: 'console',
+    line: '{state} ({kind})',
+  },
+  antivirus: {
+    notReported: 'Non relevé',
+    none: 'Aucun',
+    neverReported: 'Security Center jamais relevé (agent antérieur, ou hôte sans Security Center)',
+    noneRegistered: 'Aucun antivirus enregistré',
+    protectionUnknown: 'protection à l’état inconnu',
+    protectionActive: 'protection active',
+    protectionDisabled: 'protection désactivée',
+    signaturesUpToDate: 'signatures à jour',
+    signaturesOutdated: 'signatures périmées',
+    status: '{name} — {parts}',
+    partSeparator: ', ',
+  },
+  protection: {
+    unknown: 'État inconnu',
+    upToDate: 'À jour',
+    notUpToDate: 'Non à jour',
+    badgeNotUpToDate: '{product} · non à jour',
+    badgeUnknown: '{product} · état inconnu',
+  },
+  runningMode: {
+    normal: 'Normal',
+    passive: 'Passif (un antivirus tiers protège le poste)',
+    edrBlock: 'EDR en mode blocage',
+  },
+  wuPending: {
+    unknown: 'Inconnu',
+    upToDate: 'À jour',
+  },
+  wuSeverity: {
+    critical: 'Critique',
+    important: 'Importante',
+    moderate: 'Modérée',
+    low: 'Faible',
+  },
+  wuType: {
+    driver: 'Pilote',
+    software: 'Logicielle',
+  },
+  wuSize: '≤ {size} Mio',
+  threatSeverity: {
+    low: 'Faible',
+    medium: 'Moyenne',
+    high: 'Élevée',
+    severe: 'Grave',
+    unknown: 'Inconnue',
+  },
+  threatStatus: {
+    active: 'Active',
+    cleaned: 'Nettoyée',
+    quarantined: 'En quarantaine',
+    removed: 'Supprimée',
+    allowed: 'Autorisée',
+    blocked: 'Bloquée',
+    quarantine_failed: 'Échec de mise en quarantaine',
+    remove_failed: 'Échec de suppression',
+    allow_failed: "Échec d'autorisation",
+    block_failed: 'Échec de blocage',
+    abandoned: 'Abandonnée',
+    unknown: 'Inconnu',
+  },
+  threatNameless: '(sans nom)',
+  emailPreference: {
+    none: {
+      label: 'Aucun e-mail',
+      hint: "Rien ne vous sera envoyé, pas même une vérification qu'on vous affecte ni un rappel de vos maintenances. Les messages liés au compte, comme la réinitialisation du mot de passe, continuent d'arriver.",
+    },
+    immediate: {
+      label: 'Alerte immédiate à chaque menace',
+      hint: 'Un e-mail dès qu’un poste signale une menace nouvellement détectée, plus vos tâches : une vérification qu’on vous affecte, le rappel hebdomadaire de vos maintenances. Pas de résumé quotidien.',
+    },
+    digest_events: {
+      label: 'Résumé quotidien, seulement s’il y a du nouveau',
+      hint: 'Un e-mail par jour, uniquement les jours où il y a quelque chose à traiter : menace active, mise à jour critique ou importante en attente, identité de poste à confirmer. Il se termine par vos tâches : vérifications affectées, maintenances dues.',
+    },
+    digest_daily: {
+      label: 'Résumé quotidien, tous les jours',
+      hint: 'Un e-mail chaque matin, même sans incident : état du parc, antivirus périmés, postes à mettre à jour, puis vos tâches. Un « rien à signaler » est aussi une information.',
+    },
+  },
+  size: {
+    mib: '{size} Mio',
+    gib: '{size} Gio',
+    tib: '{size} Tio',
+  },
+  mediaType: {
+    SSD: 'SSD',
+    HDD: 'Disque dur',
+    NVMe: 'SSD NVMe',
+    SCM: 'Mémoire persistante',
+    unknown: 'Type inconnu',
+  },
+  chassis: {
+    desktop: 'Poste fixe',
+    laptop: 'Portable',
+    tablet: 'Tablette',
+    'all-in-one': 'Tout-en-un',
+    server: 'Serveur',
+  },
+  encryption: {
+    notReported: 'Non relevé',
+    FullyEncrypted: 'Chiffré',
+    FullyDecrypted: 'Non chiffré',
+    EncryptionInProgress: 'Chiffrement en cours',
+    DecryptionInProgress: 'Déchiffrement en cours',
+    EncryptionPaused: 'Chiffrement en pause',
+    DecryptionPaused: 'Déchiffrement en pause',
+  },
+  nicType: {
+    ethernet: 'Ethernet',
+    wifi: 'Wi-Fi',
+    other: 'Autre',
+  },
+  linkSpeed: {
+    gbps: '{speed} Gb/s',
+    mbps: '{speed} Mb/s',
+  },
+  cpu: {
+    line: '{model} ({parts})',
+    partSeparator: ', ',
+    processors: '{count} processeurs',
+    cores: '{count} cœurs',
+    threads: '{count} threads',
+  },
+  ram: '{size} ({used} barrette(s) sur {total})',
+};
 
-const en: Translation<typeof fr> = {};
+const en: Translation<typeof fr> = {
+  timeAgo: {
+    now: 'just now',
+    minutes: '{count} min ago',
+    hours: '{count} h ago',
+    days: '1 day ago | {count} days ago',
+  },
+  online: {
+    on: 'Computer on',
+    off: 'Computer off or unreachable',
+  },
+  bool: {
+    unknown: 'Unknown',
+    yes: 'Yes',
+    no: 'No',
+  },
+  session: {
+    unknown: 'Unknown',
+    none: 'No user',
+    anonymous: 'User logged on',
+  },
+  sessionType: {
+    active: 'Active',
+    disconnected: 'Disconnected',
+    remote: 'Remote Desktop',
+    console: 'console',
+    line: '{state} ({kind})',
+  },
+  antivirus: {
+    notReported: 'Not reported',
+    none: 'None',
+    neverReported:
+      'Security Center never reported (older agent, or a host without Security Center)',
+    noneRegistered: 'No antivirus registered',
+    protectionUnknown: 'protection state unknown',
+    protectionActive: 'protection on',
+    protectionDisabled: 'protection off',
+    signaturesUpToDate: 'signatures up to date',
+    signaturesOutdated: 'signatures outdated',
+    status: '{name} — {parts}',
+    partSeparator: ', ',
+  },
+  protection: {
+    unknown: 'State unknown',
+    upToDate: 'Up to date',
+    notUpToDate: 'Not up to date',
+    badgeNotUpToDate: '{product} · not up to date',
+    badgeUnknown: '{product} · state unknown',
+  },
+  runningMode: {
+    normal: 'Normal',
+    passive: 'Passive (another antivirus protects the computer)',
+    edrBlock: 'EDR in block mode',
+  },
+  wuPending: {
+    unknown: 'Unknown',
+    upToDate: 'Up to date',
+  },
+  wuSeverity: {
+    critical: 'Critical',
+    important: 'Important',
+    moderate: 'Moderate',
+    low: 'Low',
+  },
+  wuType: {
+    driver: 'Driver',
+    software: 'Software',
+  },
+  wuSize: '≤ {size} MiB',
+  threatSeverity: {
+    low: 'Low',
+    medium: 'Medium',
+    high: 'High',
+    severe: 'Severe',
+    unknown: 'Unknown',
+  },
+  threatStatus: {
+    active: 'Active',
+    cleaned: 'Cleaned',
+    quarantined: 'Quarantined',
+    removed: 'Removed',
+    allowed: 'Allowed',
+    blocked: 'Blocked',
+    quarantine_failed: 'Quarantine failed',
+    remove_failed: 'Removal failed',
+    allow_failed: 'Allow failed',
+    block_failed: 'Block failed',
+    abandoned: 'Abandoned',
+    unknown: 'Unknown',
+  },
+  threatNameless: '(no name)',
+  emailPreference: {
+    none: {
+      label: 'No email',
+      hint: 'Nothing will be sent to you, not even a check assigned to you or a reminder of your maintenance. Account messages, such as a password reset, still arrive.',
+    },
+    immediate: {
+      label: 'Immediate alert for every threat',
+      hint: 'An email as soon as a computer reports a newly detected threat, plus your tasks: a check assigned to you, the weekly reminder of your maintenance. No daily summary.',
+    },
+    digest_events: {
+      label: 'Daily summary, only when there is something new',
+      hint: 'One email a day, only on days with something to deal with: an active threat, a critical or important update pending, a computer identity to confirm. It ends with your tasks: checks assigned, maintenance due.',
+    },
+    digest_daily: {
+      label: 'Daily summary, every day',
+      hint: 'An email every morning, even with nothing wrong: the state of the fleet, outdated antivirus, computers to update, then your tasks. “Nothing to report” is information too.',
+    },
+  },
+  size: {
+    mib: '{size} MiB',
+    gib: '{size} GiB',
+    tib: '{size} TiB',
+  },
+  mediaType: {
+    SSD: 'SSD',
+    HDD: 'Hard disk',
+    NVMe: 'NVMe SSD',
+    SCM: 'Persistent memory',
+    unknown: 'Unknown type',
+  },
+  chassis: {
+    desktop: 'Desktop',
+    laptop: 'Laptop',
+    tablet: 'Tablet',
+    'all-in-one': 'All-in-one',
+    server: 'Server',
+  },
+  encryption: {
+    notReported: 'Not reported',
+    FullyEncrypted: 'Encrypted',
+    FullyDecrypted: 'Not encrypted',
+    EncryptionInProgress: 'Encryption in progress',
+    DecryptionInProgress: 'Decryption in progress',
+    EncryptionPaused: 'Encryption paused',
+    DecryptionPaused: 'Decryption paused',
+  },
+  nicType: {
+    ethernet: 'Ethernet',
+    wifi: 'Wi-Fi',
+    other: 'Other',
+  },
+  linkSpeed: {
+    gbps: '{speed} Gb/s',
+    mbps: '{speed} Mb/s',
+  },
+  cpu: {
+    line: '{model} ({parts})',
+    partSeparator: ', ',
+    processors: '{count} processors',
+    cores: '{count} cores',
+    threads: '{count} threads',
+  },
+  ram: '{size} ({used} of {total} slots used)',
+};
 
 export default { fr, en };

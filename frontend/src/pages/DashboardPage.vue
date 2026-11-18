@@ -1,12 +1,19 @@
 <template>
   <q-page padding>
     <div class="row items-center q-mb-md">
-      <h1 class="text-h5 q-my-none">Tableau de bord</h1>
+      <h1 class="text-h5 q-my-none">{{ t('dashboard.title') }}</h1>
       <q-space />
       <div v-if="lastRefreshedAt" class="text-caption text-muted q-mr-sm">
-        Actualisé à {{ lastRefreshLabel }}
+        {{ t('dashboard.refreshedAt', { time: lastRefreshLabel }) }}
       </div>
-      <q-btn aria-label="Actualiser" flat round icon="refresh" :loading="loading" @click="reload">
+      <q-btn
+        :aria-label="t('dashboard.refresh')"
+        flat
+        round
+        icon="refresh"
+        :loading="loading"
+        @click="reload"
+      >
         <q-tooltip>{{ autoRefreshHint }}</q-tooltip>
       </q-btn>
     </div>
@@ -95,7 +102,7 @@
         <q-card flat bordered>
           <q-card-section class="text-subtitle1 row items-center">
             <q-icon name="gpp_maybe" color="warning" class="q-mr-sm" />
-            Postes à mettre à jour
+            {{ t('dashboard.outdated.title') }}
           </q-card-section>
           <q-separator />
           <q-list separator>
@@ -111,13 +118,19 @@
                   <!-- Unknown is not « périmé » : a poste the agent could not
                        measure gets its own grey badge, not an accusation. -->
                   <q-badge v-if="m.is_up_to_date === false" color="warning" class="q-ml-xs">
-                    Antivirus périmé
+                    {{ t('dashboard.outdated.antivirusOutdated') }}
                   </q-badge>
                   <q-badge v-else-if="m.is_up_to_date === null" color="grey-6" class="q-ml-xs">
-                    Antivirus inconnu
+                    {{ t('dashboard.outdated.antivirusUnknown') }}
                   </q-badge>
                   <q-badge v-if="m.wu_pending_count" color="orange" class="q-ml-xs">
-                    {{ m.wu_pending_count }} MAJ Windows
+                    {{
+                      t(
+                        'dashboard.outdated.wuPending',
+                        { count: m.wu_pending_count },
+                        m.wu_pending_count,
+                      )
+                    }}
                   </q-badge>
                 </q-item-label>
                 <q-item-label caption>{{ m.domain || '—' }}</q-item-label>
@@ -125,7 +138,9 @@
               <q-item-section side>{{ formatDateTime(m.last_seen) }}</q-item-section>
             </q-item>
             <q-item v-if="outdatedLoaded && !outdated.length">
-              <q-item-section class="text-muted">Tous les postes sont à jour.</q-item-section>
+              <q-item-section class="text-muted">{{
+                t('dashboard.outdated.empty')
+              }}</q-item-section>
             </q-item>
           </q-list>
         </q-card>
@@ -135,26 +150,33 @@
         <q-card flat bordered>
           <q-card-section class="text-subtitle1 row items-center">
             <q-icon name="coronavirus" color="negative" class="q-mr-sm" />
-            Menaces actives
+            {{ t('dashboard.threats.title') }}
           </q-card-section>
           <q-separator />
           <q-list separator>
             <q-item
-              v-for="t in threats"
-              :key="t.id"
+              v-for="threat in threats"
+              :key="threat.id"
               clickable
-              :to="{ name: 'machine-detail', params: { id: t.machine_id } }"
+              :to="{ name: 'machine-detail', params: { id: threat.machine_id } }"
             >
               <q-item-section>
-                <q-item-label>{{ threatNameLabel(t.threat_name, t.detection_id) }}</q-item-label>
+                <q-item-label>{{
+                  threatNameLabel(threat.threat_name, threat.detection_id)
+                }}</q-item-label>
                 <q-item-label caption>
-                  {{ threatSeverityLabel(t.severity) }} — {{ threatStatusLabel(t.status) }}
+                  {{
+                    t('dashboard.threats.line', {
+                      severity: threatSeverityLabel(threat.severity),
+                      status: threatStatusLabel(threat.status),
+                    })
+                  }}
                 </q-item-label>
               </q-item-section>
-              <q-item-section side>{{ formatDateTime(t.detected_at) }}</q-item-section>
+              <q-item-section side>{{ formatDateTime(threat.detected_at) }}</q-item-section>
             </q-item>
             <q-item v-if="threatsLoaded && !threats.length">
-              <q-item-section class="text-muted">Aucune menace active.</q-item-section>
+              <q-item-section class="text-muted">{{ t('dashboard.threats.empty') }}</q-item-section>
             </q-item>
           </q-list>
         </q-card>
@@ -164,7 +186,7 @@
 </template>
 
 <script setup lang="ts">
-import { intlTag } from 'src/i18n';
+import { intlTag, t } from 'src/i18n';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, type RouteLocationRaw } from 'vue-router';
@@ -217,11 +239,13 @@ interface AlertKpi extends Omit<Kpi, 'to'> {
  * window is full.
  */
 function usageCountingCaption(s: StatsOverview): string | undefined {
-  if (!s.usage_since) return 'comptage pas encore commencé';
+  if (!s.usage_since) return t('dashboard.kpi.countingNotStarted');
   const since = new Date(s.usage_since);
   const full = since.getTime() + s.usage_window_days * 24 * 3600 * 1000;
   if (Date.now() >= full) return undefined;
-  return `comptage depuis le ${since.toLocaleDateString(intlTag(), { day: '2-digit', month: '2-digit' })}`;
+  return t('dashboard.kpi.countingSince', {
+    date: since.toLocaleDateString(intlTag(), { day: '2-digit', month: '2-digit' }),
+  });
 }
 
 /**
@@ -235,35 +259,41 @@ const inventoryKpis = computed<Kpi[]>(() => {
   const counting = usageCountingCaption(s);
   return [
     {
-      label: 'Postes',
+      label: t('dashboard.kpi.machines'),
       value: s.total,
       icon: 'devices',
       color: 'primary',
       to: { name: 'machines' },
     },
     {
-      label: 'Logiciels',
+      label: t('dashboard.kpi.software'),
       value: s.software_count,
       icon: 'inventory_2',
       color: 'primary',
       to: { name: 'software' },
     },
     {
-      label: 'Peu utilisés',
+      label: t('dashboard.kpi.usageLow'),
       value: s.machines_usage_low,
       icon: 'bedtime',
       color: 'blue-grey',
       to: { name: 'machines', query: { usage_hours_below: String(s.usage_low_hours) } },
-      detail: `moins de ${s.usage_low_hours} h sur ${s.usage_window_days} j`,
+      detail: t('dashboard.kpi.usageLowDetail', {
+        hours: s.usage_low_hours,
+        days: s.usage_window_days,
+      }),
       ...(counting ? { caption: counting } : {}),
     },
     {
-      label: 'Toujours allumés',
+      label: t('dashboard.kpi.usageHigh'),
       value: s.machines_usage_high,
       icon: 'bolt',
       color: 'amber-8',
       to: { name: 'machines', query: { usage_hours_above: String(s.usage_high_hours) } },
-      detail: `plus de ${s.usage_high_hours} h sur ${s.usage_window_days} j`,
+      detail: t('dashboard.kpi.usageHighDetail', {
+        hours: s.usage_high_hours,
+        days: s.usage_window_days,
+      }),
       ...(counting ? { caption: counting } : {}),
     },
   ];
@@ -281,24 +311,24 @@ const priorityKpis = computed<Kpi[]>(() => {
   const reboot = s.machines_reboot_required;
   return [
     {
-      label: 'Base antivirus périmée',
+      label: t('dashboard.kpi.antivirusOutdated'),
       value: s.outdated,
       icon: 'gpp_maybe',
       color: 'warning',
       to: { name: 'machines', query: { status: 'outdated' } },
     },
     {
-      label: 'Mise à jour Windows requise',
+      label: t('dashboard.kpi.wuPending'),
       value: s.machines_wu_pending,
       icon: 'system_update',
       color: 'warning',
       to: { name: 'machines', query: { wu_status: 'pending' } },
       // Not a subset of the count above: a poste can be fully patched and
       // still waiting on its restart.
-      ...(reboot ? { caption: `${reboot} redémarrage${reboot > 1 ? 's' : ''} requis` } : {}),
+      ...(reboot ? { caption: t('dashboard.kpi.rebootRequired', { count: reboot }, reboot) } : {}),
     },
     {
-      label: 'Avec menaces',
+      label: t('dashboard.kpi.withThreats'),
       value: s.with_active_threats,
       icon: 'coronavirus',
       color: 'negative',
@@ -309,7 +339,7 @@ const priorityKpis = computed<Kpi[]>(() => {
       // roughly ten percent free, Windows stops being able to stage a
       // cumulative update, so a poste crosses this line and then quietly
       // stops patching.
-      label: 'Disque presque plein',
+      label: t('dashboard.kpi.lowDisk'),
       value: s.machines_low_disk,
       icon: 'storage',
       color: 'negative',
@@ -317,7 +347,7 @@ const priorityKpis = computed<Kpi[]>(() => {
         name: 'machines',
         query: { disk_free_below: String(s.low_disk_free_percent) },
       },
-      caption: `moins de ${s.low_disk_free_percent} % libres`,
+      caption: t('dashboard.kpi.lowDiskCaption', { percent: s.low_disk_free_percent }),
     },
   ];
 });
@@ -337,7 +367,7 @@ const alertKpis = computed<AlertKpi[]>(() => {
     ...(s.machines_reenroll_pending !== undefined
       ? [
           {
-            label: 'Ré-enrôlements à autoriser',
+            label: t('dashboard.kpi.reenrollPending'),
             value: s.machines_reenroll_pending,
             icon: 'key',
             color: 'orange',
@@ -348,7 +378,7 @@ const alertKpis = computed<AlertKpi[]>(() => {
     ...(s.machines_token_revoked
       ? [
           {
-            label: 'Tokens révoqués',
+            label: t('dashboard.kpi.tokenRevoked'),
             value: s.machines_token_revoked,
             icon: 'key_off',
             color: 'negative',
@@ -357,7 +387,7 @@ const alertKpis = computed<AlertKpi[]>(() => {
         ]
       : []),
     {
-      label: 'Identité à confirmer',
+      label: t('dashboard.kpi.needsVerification'),
       value: s.needs_verification,
       icon: 'help',
       color: 'orange',
@@ -366,48 +396,54 @@ const alertKpis = computed<AlertKpi[]>(() => {
     {
       // The task the console hands out, beside the findings the parc raised
       // itself: what somebody was asked to go and look at.
-      label: 'Vérifications demandées',
+      label: t('dashboard.kpi.openChecks'),
       value: s.open_checks,
       icon: 'fact_check',
       color: 'primary',
       to: { name: 'machines', query: { check_open: 'true' } },
     },
     {
-      label: 'Inactifs',
+      label: t('dashboard.kpi.inactive'),
       value: s.inactive,
       icon: 'power_off',
       color: 'grey',
       to: { name: 'machines', query: { status: 'inactive' } },
     },
     {
-      label: 'Maintenance en retard',
+      label: t('dashboard.kpi.maintenanceOverdue'),
       value: s.machines_maintenance_overdue,
       icon: 'build',
       color: 'negative',
       to: { name: 'machines', query: { maintenance_state: 'overdue' } },
       ...(s.machines_maintenance_due_soon
-        ? { caption: `${s.machines_maintenance_due_soon} à échéance` }
+        ? {
+            caption: t('dashboard.kpi.maintenanceDueSoon', {
+              count: s.machines_maintenance_due_soon,
+            }),
+          }
         : {}),
     },
     {
       // The deployment's progress bar: how many postes the new agent has not
       // reached. Actionable like the others — the list it opens is the list to
       // go and see (or to wake), and the caption names what "à jour" means.
-      label: 'Agents obsolètes',
+      label: t('dashboard.kpi.agentOutdated'),
       value: s.machines_agent_outdated,
       icon: 'system_update_alt',
       color: 'orange',
       to: { name: 'machines', query: { agent_outdated: 'true' } },
-      ...(s.agent_latest_version ? { caption: `référence ${s.agent_latest_version}` } : {}),
+      ...(s.agent_latest_version
+        ? { caption: t('dashboard.kpi.agentReference', { version: s.agent_latest_version }) }
+        : {}),
     },
     {
       // The hardware-age setting, made visible — and the list it counts.
-      label: 'À renouveler',
+      label: t('dashboard.kpi.aging'),
       value: s.machines_aging,
       icon: 'hourglass_bottom',
       color: 'blue-grey',
       to: { name: 'machines', query: { hardware_aging: 'true' } },
-      detail: `matériel de plus de ${s.hardware_aging_years} ans`,
+      detail: t('dashboard.kpi.agingDetail', { years: s.hardware_aging_years }),
     },
   ];
 });
@@ -429,7 +465,7 @@ const auth = useAuthStore();
 const canReadThreats = computed(() => auth.can('threat', 'read'));
 
 async function fetchAll() {
-  const [s, av, wuBehind, t] = await Promise.allSettled([
+  const [s, av, wuBehind, th] = await Promise.allSettled([
     getOverview(),
     listMachines({ status: 'outdated', page_size: 5 }),
     listMachines({ wu_status: 'pending', page_size: 5 }),
@@ -446,8 +482,8 @@ async function fetchAll() {
   } else {
     outdatedLoaded.value = false;
   }
-  if (t.status === 'fulfilled' && t.value) {
-    threats.value = t.value.items;
+  if (th.status === 'fulfilled' && th.value) {
+    threats.value = th.value.items;
     threatsLoaded.value = true;
   } else {
     threatsLoaded.value = false;
@@ -461,7 +497,7 @@ async function fetchAll() {
   // Same rule for the threats as for the other list: the rows left on screen
   // are those of an earlier load, so this refresh did not succeed — « Actualisé
   // à » stays where it was, and a requested reload says it failed.
-  if (t.status === 'rejected') throw t.reason;
+  if (th.status === 'rejected') throw th.reason;
 }
 
 // The dashboard is a wall screen as much as a page: left open, it has to keep
@@ -486,8 +522,8 @@ async function reload() {
   if (lastError.value && lastRefreshedAt.value) {
     $q.notify({
       type: 'negative',
-      message: apiErrorMessage(lastError.value, 'Actualisation impossible'),
-      caption: 'Les informations affichées sont celles du dernier chargement réussi.',
+      message: apiErrorMessage(lastError.value, t('dashboard.refreshFailed')),
+      caption: t('dashboard.refreshFailedCaption'),
     });
   }
 }
@@ -496,9 +532,9 @@ const lastRefreshLabel = computed(() =>
   lastRefreshedAt.value ? lastRefreshedAt.value.toLocaleTimeString(intlTag()) : '',
 );
 
-const autoRefreshHint = `Actualiser — automatique toutes les ${Math.round(
-  AUTO_REFRESH_INTERVAL_MS / 1000,
-)} s`;
+const autoRefreshHint = computed(() =>
+  t('dashboard.autoRefresh', { seconds: Math.round(AUTO_REFRESH_INTERVAL_MS / 1000) }),
+);
 
 onMounted(reload);
 </script>
