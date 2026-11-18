@@ -430,3 +430,12 @@ async def test_the_renewal_card_opens_as_a_list(client, db_session):
     assert listed.status_code == 200, listed.text
     assert listed.json()["total"] == stats["machines_aging"] == 1
     assert [r["machine_uuid"] for r in listed.json()["items"]] == ["fleet-old"]
+    # The other side is every other poste — one whose BIOS date was never
+    # reported is not known to be old, and belongs to one of the two lists.
+    others = await client.get("/api/v1/machines?hardware_aging=false", headers=headers)
+    assert others.status_code == 200, others.text
+    assert {r["machine_uuid"] for r in others.json()["items"]} == {
+        "fleet-new",
+        "fleet-unknown",
+    }
+    assert others.json()["total"] + listed.json()["total"] == stats["total"]

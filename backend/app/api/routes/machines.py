@@ -2,6 +2,7 @@
 
 import base64
 import json
+import math
 import re
 import uuid
 from collections.abc import Sequence
@@ -21,7 +22,6 @@ from sqlalchemy import (
     false,
     func,
     literal,
-    not_,
     or_,
     true,
 )
@@ -1064,7 +1064,10 @@ def _filtered_machines(
         )
     if filters.hardware_aging is not None:
         aging = aging_hardware_clause(utcnow(), fleet.hardware_aging_years)
-        stmt = stmt.where(aging if filters.hardware_aging else not_(aging))
+        # « Not aging » is the complement, not the negation: a poste whose
+        # BIOS date was never reported is not known to be old, and NOT of a
+        # NULL comparison left it out of both lists.
+        stmt = stmt.where(aging if filters.hardware_aging else aging.is_not(true()))
     if filters.enrollment == "pending":
         stmt = stmt.where(reenroll_pending_clause())
     elif filters.enrollment == "revoked":
@@ -1325,7 +1328,9 @@ def _decode_cursor(
         payload = json.loads(base64.urlsafe_b64decode(padded.encode()))
         values = [_cursor_decode_value(v) for v in payload["v"]]
         same_sort = payload["s"] == (sort_by or "") and payload["d"] is sort_desc
-    except (ValueError, TypeError, KeyError) as exc:
+    except (ValueError, TypeError, KeyError, ArithmeticError) as exc:
+        # ArithmeticError: ``Decimal("abc")`` raises InvalidOperation, which
+        # is no ValueError.
         raise AppError(
             code=ErrorCode.REQUEST_VALIDATION_ERROR,
             status_code=422,
@@ -1352,10 +1357,64 @@ _KEY_KINDS: dict[str, tuple[type, ...]] = {
     "usage_hours": (int, float, Decimal),
 }
 
+# What an integer sort column (and the version rank) can hold.
+_INT4_MIN, _INT4_MAX = -(2**31), 2**31 - 1
+# Far past any percentage or number of hours, and far within what a double
+# and a numeric both take: the derived sort keys are compared as either.
+_NUMBER_MAX = 10**15
+
+
+def _value_fits(value: Any, kinds: tuple[type, ...]) -> bool:
+    """Whether a cursor's value is of the column's kind *and* one the column
+    could hold.
+
+    The kind alone is not enough: the value becomes a parameter cast to the
+    column's type, and PostgreSQL answers one it cannot take — a NUL in a
+    text, an integer past 32 bits, a numeric past its format — with an error,
+    not with « no row ». A cursor is the caller's to edit; whatever it
+    carries, the request must still answer.
+    """
+    if isinstance(value, bool):
+        # Before ``int``: a bool is one in Python, not in SQL.
+        return bool in kinds
+    if not isinstance(value, kinds):
+        return False
+    if isinstance(value, str):
+        return _storable_text(value)
+    if isinstance(value, int):
+        if kinds == (int,):
+            return _INT4_MIN <= value <= _INT4_MAX
+        return abs(value) <= _NUMBER_MAX
+    if isinstance(value, float):
+        return math.isfinite(value) and abs(value) <= _NUMBER_MAX
+    if isinstance(value, Decimal):
+        return value.is_finite() and abs(value) <= _NUMBER_MAX
+    if isinstance(value, datetime):
+        # Every stored instant is aware; a naive one would be read in the
+        # database session's time zone, which is nobody's intent.
+        return value.tzinfo is not None
+    return True
+
+
+def _storable_text(text: str) -> bool:
+    """No NUL, which PostgreSQL refuses in a text, and no lone surrogate,
+    which JSON can spell and UTF-8 cannot carry to it."""
+    if "\x00" in text:
+        return False
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
 
 def _cursor_fits(
     values: Sequence[Any], sort_by: MachineSortField | None, versions: FleetVersions
 ) -> bool:
+    """Whether every value of a decoded cursor can stand where the poste's
+    own would in the comparison. One that cannot — tampered with, or written
+    for a parc whose versions were ranked differently — is not this walk's:
+    the poste's current place is used instead, never an error."""
     fields: list[str] = [] if sort_by is None else [sort_by]
     fields.append("last_seen")
     for field, value in zip(fields, values, strict=True):
@@ -1366,9 +1425,7 @@ def _cursor_fits(
             kinds: tuple[type, ...] = (int,) if versions.counts else (str,)
         else:
             kinds = _KEY_KINDS[field]
-        if bool not in kinds and isinstance(value, bool):
-            return False
-        if not isinstance(value, kinds):
+        if not _value_fits(value, kinds):
             return False
     return True
 

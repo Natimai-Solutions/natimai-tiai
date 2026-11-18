@@ -66,10 +66,15 @@ def offer_new_token(machine: Machine) -> str:
 
 
 def promote_pending(machine: Machine, now: datetime) -> None:
-    """Make the pending token the current one; the previous one dies here."""
+    """Make the pending token the current one; the previous one dies here.
+
+    The new token is in use by the very request that promotes it, on a poste
+    that was heartbeating before: never an « unused enrollment token ».
+    """
     machine.token_hash = machine.pending_token_hash
     machine.pending_token_hash = None
     machine.token_issued_at = now
+    machine.enrollment_token_unused = False
 
 
 def reset_rotation(machine: Machine) -> None:
@@ -92,6 +97,12 @@ async def machine_for_token(
     here, before the endpoint runs: some agent endpoints return without
     committing (an ignored command result), and the old token must die with
     the first request that proved the new one, not with whichever comes next.
+
+    The same goes for the enrollment token's first use: whichever request
+    carries it — a heartbeat, a verdict, a download, one the endpoint then
+    refuses — ``enrollment_token_unused`` is cleared and committed here. The
+    agent has its token from then on, and a second enrollment of the poste
+    is no longer the retry of a lost answer (``routes/agent.py``).
 
     A revoked machine is returned untouched: refusing it is the caller's
     business, and a revocation must not be what promotes a token.
@@ -116,4 +127,10 @@ async def machine_for_token(
         await session.commit()
         await session.refresh(machine)
         security_log.info("token rotated for machine %s", machine_uuid)
+    elif machine.enrollment_token_unused:
+        # Once per token: every later request finds the flag down and writes
+        # nothing.
+        machine.enrollment_token_unused = False
+        await session.commit()
+        await session.refresh(machine)
     return machine

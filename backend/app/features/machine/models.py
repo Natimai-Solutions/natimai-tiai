@@ -259,6 +259,16 @@ class Machine(SQLModel, table=True):
     # have arrived, and the agent must not be locked out by a lost packet.
     # Its first use promotes it (``features/machine/token_rotation.py``).
     pending_token_hash: str | None = Field(default=None, unique=True, index=True)
+    # Whether the token minted by the last enrollment has never authenticated
+    # a request. Set at enrollment, cleared by the first request it
+    # authenticates — whichever endpoint, accepted or refused afterwards —
+    # and never set again by a rotation: a rotated token belongs to a poste
+    # that has been talking for a month. A stored fact rather than a
+    # comparison of ``last_seen`` with ``token_issued_at``, which a rotation
+    # promoted by anything but a heartbeat made true again. It is the one
+    # condition under which the fleet secret replaces a live token without
+    # approval (``routes/agent.py``, the lost enrollment answer).
+    enrollment_token_unused: bool = Field(default=False)
 
     first_seen: datetime = utc_field(default_factory=utcnow)
     last_seen: datetime = utc_field(default_factory=utcnow)

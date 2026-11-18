@@ -12,7 +12,7 @@ import enum
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Integer, and_, cast, extract, false, func, literal, not_, or_
+from sqlalchemy import BigInteger, and_, cast, extract, false, func, literal, not_, or_
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
@@ -154,9 +154,13 @@ def signature_age_expr(now: datetime) -> ColumnElement[Any]:
         / _SECONDS_PER_DAY
     )
     # Whole days, as an integer: ``floor`` over an epoch is a double, and a
-    # reader would otherwise see « 30.0 j ».
-    return col(Machine.signature_age_days) + cast(
-        func.coalesce(func.greatest(elapsed, 0), 0), Integer
+    # reader would otherwise see « 30.0 j ». In 64 bits, both terms: the
+    # column is a 32-bit integer whose stored value nothing bounded before
+    # the heartbeat did, and one row near its limit made this sum — hence
+    # every count, filter and digest reading it — fail for the whole parc.
+    # No clamp: Python adds without a ceiling, and the two must agree.
+    return cast(col(Machine.signature_age_days), BigInteger) + cast(
+        func.coalesce(func.greatest(elapsed, 0), 0), BigInteger
     )
 
 
