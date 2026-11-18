@@ -75,6 +75,19 @@ describe('room config and directory sync', () => {
     expect(api.post).toHaveBeenCalledWith('/rooms/sync-directory', undefined, undefined);
   });
 
+  it('reads the placement mode again after a failed read, not the failure', async () => {
+    // A fresh module: the test above cached a successful read in this one.
+    vi.resetModules();
+    const { api: freshApi } = await import('boot/axios');
+    const { getRoomConfig: freshGetRoomConfig } = await import('./rooms');
+    vi.mocked(freshApi.get)
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValue({ data: { source: 'manual', manual: true } });
+    await expect(freshGetRoomConfig()).rejects.toThrow('network');
+    expect(await freshGetRoomConfig()).toEqual({ source: 'manual', manual: true });
+    expect(freshApi.get).toHaveBeenCalledTimes(2);
+  });
+
   it('asks a dry run with dry_run=true (C9)', async () => {
     vi.mocked(api.post).mockReset();
     vi.mocked(api.post).mockResolvedValue({ data: { placed: 0 } });

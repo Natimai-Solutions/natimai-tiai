@@ -60,7 +60,7 @@ describe('the catalogues', () => {
 });
 
 describe('setLocale', () => {
-  it('switches the texts, the error messages, the formats and the page’s lang', () => {
+  it('switches the texts, the error messages and the formats', () => {
     expect(currentLocale()).toBe('fr');
     expect(errorCodeMessage('machine.not_found')).toBe('Poste introuvable');
     expect(intlTag()).toBe('fr-FR');
@@ -71,6 +71,21 @@ describe('setLocale', () => {
     expect(errorCodeMessage('machine.not_found')).toBe('Computer not found');
     expect(t('common.language.label')).toBe('Language');
     expect(intlTag()).toBe('en-GB');
+  });
+
+  // The suite runs on `node`: a stand-in `document` is enough to see the
+  // line that writes the page's lang (screen readers, hyphenation).
+  it('sets the page’s lang', () => {
+    const documentElement = { lang: 'fr' };
+    vi.stubGlobal('document', { documentElement });
+    try {
+      setLocale('en');
+      expect(documentElement.lang).toBe('en');
+      setLocale('fr');
+      expect(documentElement.lang).toBe('fr');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('tells its listeners, until they leave', () => {

@@ -135,6 +135,30 @@ describe('PackageDeployDialog in English', () => {
     w.unmount();
   });
 
+  // A location counted at zero goes through whereCount, not whereCountAll:
+  // its three forms keep « 0 poste » in the singular too.
+  it('says zero computers of a location in the singular in French, plural in English', async () => {
+    const uninstallOnBuildingA = async (label: string) => {
+      const w = await open({ package: pkg(), initialAction: 'uninstall' });
+      (w.vm as unknown as { location: string }).location = 'Building A';
+      await nextTick();
+      const send = w.findAllComponents(QBtn).find((b) => b.props('label') === label)!;
+      await send.trigger('click');
+      await flushPromises();
+      expect(listMachines).toHaveBeenLastCalledWith({ location: 'Building A', page_size: 1 });
+      return w;
+    };
+    let w = await uninstallOnBuildingA('Désinstaller sur Building A');
+    expect(document.body.textContent).toContain('Désinstaller sur 0 poste ?');
+    w.unmount();
+    document.body.innerHTML = '';
+
+    setLocale('en');
+    w = await uninstallOnBuildingA('Uninstall on Building A');
+    expect(document.body.textContent).toContain('Uninstall on 0 computers?');
+    w.unmount();
+  });
+
   it('follows a change of language while open', async () => {
     const w = await open({ package: pkg({ kind: 'winget', winget_id: 'Mozilla.Firefox' }) });
     expect(dialogText()).toContain('Installer un logiciel');

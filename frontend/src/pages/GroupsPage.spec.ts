@@ -186,6 +186,26 @@ describe('GroupsPage — item 2, item 4, C6', () => {
     document.body.innerHTML = '';
   });
 
+  // The confirmation is rendered as HTML: a name typed by another
+  // administrator is quoted as text, never as markup.
+  it('quotes the group’s name escaped in the delete confirmation', async () => {
+    vi.mocked(listGroups).mockResolvedValue([]);
+    const { wrapper } = await mountPage();
+    const dialog = vi
+      .spyOn(wrapper.vm.$q, 'dialog')
+      .mockReturnValue({ onOk: () => undefined } as never);
+    (wrapper.vm as unknown as { confirmDelete: (g: Group) => void }).confirmDelete({
+      ...restricted,
+      name: '<img src=x> Lab',
+    });
+    const { message, html } = dialog.mock.calls[0]![0] as { message: string; html: boolean };
+    expect(html).toBe(true);
+    expect(message).toContain('<b>&lt;img src=x&gt; Lab</b>');
+    expect(message).not.toContain('<img');
+    dialog.mockRestore();
+    wrapper.unmount();
+  });
+
   it('keeps a banner with « Réessayer » when the groups cannot be read', async () => {
     vi.mocked(listGroups).mockRejectedValueOnce({ response: { status: 500, data: {} } });
     const { wrapper } = await mountPage();

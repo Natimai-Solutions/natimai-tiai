@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h, nextTick } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
+import { QSelect } from 'quasar';
 
 vi.mock('src/services/audit', () => ({
   listAudit: vi.fn(),
@@ -216,9 +217,19 @@ describe('AuditFiltersBar in English', () => {
     });
     expect(w.text()).toContain('Type de ressource');
     expect(w.text()).toContain('Poste abc');
+    // The resource-type list is recomputed too, not frozen at setup.
+    const typeOptions = () =>
+      (
+        w
+          .findAllComponents(QSelect)
+          .find((s) => s.props('options')?.some((o: { value?: unknown }) => o.value === 'machine'))!
+          .props('options') as { value: string; label: string }[]
+      ).find((o) => o.value === 'machine')!.label;
+    expect(typeOptions()).toBe('Poste');
 
     setLocale('en');
     await nextTick();
+    expect(typeOptions()).toBe('Computer');
     const text = w.text();
     expect(text).toContain('Resource type');
     expect(text).toContain('From');

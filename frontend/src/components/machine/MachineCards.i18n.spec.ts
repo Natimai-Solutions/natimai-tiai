@@ -450,4 +450,26 @@ describe('the computer cards — English', () => {
     expect(w.text()).toContain('Motherboard');
     expect(w.text()).not.toContain('Carte mère');
   });
+
+  it('names the usage chart’s days in the language shown, live', async () => {
+    vi.mocked(getMachineUsage).mockResolvedValue({
+      days: 28,
+      tz: 'UTC',
+      total_hours: 0,
+      daily: Array.from({ length: 28 }, (_, i) => ({
+        date: new Date(Date.UTC(2026, 9, 1 + i)).toISOString().slice(0, 10),
+        hours: 0,
+      })),
+      first_seen: '2026-01-01T12:00:00Z',
+      usage_since: '2026-01-01T12:00:00Z',
+    });
+    const w = mount(MachineUsageCard, { props: { machine: computer() } });
+    await flushPromises();
+    // 28/10/2026 is a Wednesday, the last column.
+    const lastDay = () => w.findAll('.usage-col').at(-1)!.attributes('aria-label');
+    expect(lastDay()).toMatch(/^mer\. 28\/10/);
+    setLocale('en');
+    await nextTick();
+    expect(lastDay()).toMatch(/^Wed 28\/10/);
+  });
 });

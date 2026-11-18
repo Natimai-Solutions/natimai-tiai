@@ -22,6 +22,7 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { getMe, type User } from 'src/services/auth';
 import { listChecks } from 'src/services/checks';
+import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { getDue } from 'src/services/maintenance';
 import { setAccessToken } from 'src/services/session';
 import { PROFILE_REFRESH_MS, useAuthStore } from 'src/stores/auth';
@@ -276,6 +277,30 @@ describe('MainLayout', () => {
           .findAll('.q-badge')
           .map((b) => b.text()),
       ).toEqual(['4']);
+    });
+
+    // A right withdrawn during the session takes its count with it, at the
+    // next count (the entry stays: the other right still offers it).
+    it('drops the count of a right withdrawn during the session', async () => {
+      vi.mocked(listChecks).mockResolvedValue({ items: [], total: 2 } as never);
+      vi.mocked(getDue).mockResolvedValue({ overdue: 5 } as never);
+      const { w } = await mountLayout(profile(['check:read', 'maintenance:read']), '/account');
+      const badges = () =>
+        tasksEntry(w)
+          .findAll('.q-badge')
+          .map((b) => b.text());
+      expect(badges()).toEqual(['2', '5']);
+      const auth = useAuthStore();
+
+      auth.user = profile(['maintenance:read']);
+      notifyTasksChanged();
+      await flushPromises();
+      expect(badges()).toEqual(['5']);
+
+      auth.user = profile(['check:read']);
+      notifyTasksChanged();
+      await flushPromises();
+      expect(badges()).toEqual(['2']);
     });
 
     it('asks nothing for an account with neither right', async () => {
