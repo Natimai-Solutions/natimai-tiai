@@ -23,6 +23,7 @@ from sqlmodel import col, select
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.core.validation import invalid
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.inventory.models import MachineSoftware
@@ -88,7 +89,7 @@ _CONTROL = re.compile(
 
 def _no_control(value: str | None) -> str | None:
     if value is not None and _CONTROL.search(value):
-        raise ValueError("caractère de contrôle refusé")
+        raise invalid("control_character", "caractère de contrôle refusé")
     return value
 
 
@@ -96,7 +97,7 @@ def _within(value: str | None, limit: int) -> str | None:
     """A length check said in French: Pydantic's own reads « String should
     have at most 100 characters », and reached the console as is."""
     if value is not None and len(value) > limit:
-        raise ValueError(f"{limit} caractères au plus")
+        raise invalid("too_long", f"{limit} caractères au plus", max=limit)
     return value
 
 
@@ -114,19 +115,27 @@ _LIMITS = {
 
 def _check_args(args: list[str]) -> list[str]:
     if len(args) > _MAX_ARGS:
-        raise ValueError(f"au plus {_MAX_ARGS} arguments")
+        raise invalid(
+            "too_many_arguments", f"au plus {_MAX_ARGS} arguments", max=_MAX_ARGS
+        )
     for a in args:
         if len(a) > _MAX_ARG_LEN or _CONTROL.search(a):
-            raise ValueError("argument trop long ou contenant un caractère de contrôle")
+            raise invalid(
+                "argument_refused",
+                "argument trop long ou contenant un caractère de contrôle",
+                max=_MAX_ARG_LEN,
+            )
     return args
 
 
 def _check_codes(codes: list[int]) -> list[int]:
     if not codes or len(codes) > 32:
-        raise ValueError("entre 1 et 32 codes de succès")
+        raise invalid(
+            "success_codes_count", "entre 1 et 32 codes de succès", min=1, max=32
+        )
     for c in codes:
         if not -(2**31) <= c < 2**32:
-            raise ValueError("code de sortie hors limites")
+            raise invalid("exit_code_out_of_range", "code de sortie hors limites")
     return codes
 
 
@@ -158,7 +167,7 @@ class PackageBody(BaseModel):
     def _not_blank(cls, v: str | None) -> str | None:
         # Given, it says something: null or blank is no name to rename to.
         if not v:
-            raise ValueError("nom requis")
+            raise invalid("name_required", "nom requis")
         return v
 
     @field_validator(*_LIMITS)
@@ -180,14 +189,19 @@ class PackageBody(BaseModel):
     @classmethod
     def _args(cls, v: list[str] | None) -> list[str]:
         if v is None:
-            raise ValueError("liste d'arguments requise (vide pour aucun argument)")
+            raise invalid(
+                "arguments_required",
+                "liste d'arguments requise (vide pour aucun argument)",
+            )
         return _check_args(v)
 
     @field_validator("success_codes")
     @classmethod
     def _codes(cls, v: list[int] | None) -> list[int]:
         if v is None:
-            raise ValueError("entre 1 et 32 codes de succès")
+            raise invalid(
+                "success_codes_count", "entre 1 et 32 codes de succès", min=1, max=32
+            )
         return _check_codes(v)
 
 

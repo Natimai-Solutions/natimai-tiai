@@ -24,6 +24,7 @@ from app.api.fields import not_null
 from app.api.routes.agent import clean_location
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode, violated_constraint
+from app.core.validation import invalid
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.machine.models import Machine
@@ -77,7 +78,7 @@ def _name(value: str) -> str:
     Inside a name they are left alone: some scripts are written with them."""
     cleaned = " ".join(value.split())
     if all(_invisible(char) for char in cleaned):
-        raise ValueError("le nom ne peut pas être vide")
+        raise invalid("name_empty", "le nom ne peut pas être vide")
     return cleaned
 
 

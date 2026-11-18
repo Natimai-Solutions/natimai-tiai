@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
+from app.core.validation import PREFIX as VALIDATION_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -181,11 +182,21 @@ async def app_error_handler(_request: Request, exc: Exception) -> JSONResponse:
 async def validation_error_handler(_request: Request, exc: Exception) -> JSONResponse:
     """Render request validation failures (422) in the envelope."""
     assert isinstance(exc, RequestValidationError)
-    # Slim, JSON-safe view of the errors (drop unserializable ctx).
-    errors = [
-        {"loc": list(e.get("loc", ())), "msg": e.get("msg"), "type": e.get("type")}
-        for e in exc.errors()
-    ]
+    # Slim, JSON-safe view of the errors (drop unserializable ctx). A refusal
+    # of ours (``core.validation.invalid``) hands its parameters on, for the
+    # console to word it in its reader's language.
+    errors = []
+    for e in exc.errors():
+        item: dict[str, Any] = {
+            "loc": list(e.get("loc", ())),
+            "msg": e.get("msg"),
+            "type": e.get("type"),
+        }
+        if "params" in e:  # built by hand: ``core.validation.refusal``
+            item["params"] = e["params"]
+        elif str(e.get("type", "")).startswith(VALIDATION_PREFIX):
+            item["params"] = dict(e.get("ctx") or {})
+        errors.append(item)
     return JSONResponse(
         status_code=422,
         content=_envelope(

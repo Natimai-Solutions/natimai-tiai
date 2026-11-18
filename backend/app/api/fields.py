@@ -6,6 +6,7 @@ from pydantic import AfterValidator, Field, model_validator
 
 from app.core.config import EMAIL_PATTERN, settings
 from app.core.security import PASSWORD_MAX_BYTES
+from app.core.validation import invalid
 from app.features.user.models import normalize_email
 
 
@@ -14,10 +15,12 @@ def _bcrypt_sized(value: str) -> str:
     bytes of the UTF-8 encoding count, and a password whose end does not
     count is not the password its owner thinks they chose."""
     if len(value.encode("utf-8")) > PASSWORD_MAX_BYTES:
-        raise ValueError(
+        raise invalid(
+            "password_too_long",
             f"le mot de passe ne doit pas dépasser {PASSWORD_MAX_BYTES} octets "
             f"({PASSWORD_MAX_BYTES} caractères sans accent, moins avec des "
-            "accents ou des symboles) : au-delà, la fin ne serait pas prise en compte"
+            "accents ou des symboles) : au-delà, la fin ne serait pas prise en compte",
+            max_bytes=PASSWORD_MAX_BYTES,
         )
     return value
 
@@ -38,7 +41,9 @@ def _trimmed_name(value: str | None) -> str | None:
         return None
     value = value.strip()
     if not value:
-        raise ValueError("le nom ne peut pas être vide ou fait seulement d'espaces")
+        raise invalid(
+            "name_blank", "le nom ne peut pas être vide ou fait seulement d'espaces"
+        )
     return value
 
 
@@ -50,9 +55,12 @@ def bounded_name(max_length: int) -> Any:
     def check(value: str | None) -> str | None:
         value = _trimmed_name(value)
         if value is not None and len(value) > max_length:
-            raise ValueError(
+            raise invalid(
+                "name_too_long",
                 f"le nom ne doit pas dépasser {max_length} caractères "
-                f"(reçu : {len(value)})"
+                f"(reçu : {len(value)})",
+                max=max_length,
+                length=len(value),
             )
         return value
 
@@ -81,7 +89,11 @@ def not_null(*names: str) -> Any:
         if isinstance(data, dict):
             bad = [n for n in names if n in data and data[n] is None]
             if bad:
-                raise ValueError(f"{', '.join(bad)} : valeur requise (null refusé)")
+                raise invalid(
+                    "null_refused",
+                    f"{', '.join(bad)} : valeur requise (null refusé)",
+                    fields=bad,
+                )
         return data
 
     return model_validator(mode="before")(check)

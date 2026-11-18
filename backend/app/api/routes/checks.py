@@ -25,6 +25,7 @@ from app.api.deps import (
     require_permission,
 )
 from app.core.errors import AppError, ErrorCode
+from app.core.validation import refusal
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.check import crud
@@ -641,11 +642,11 @@ async def close_check(
         # that would read before the request it answers.
         raise RequestValidationError(
             [
-                {
-                    "loc": ("body", "closed_at"),
-                    "msg": "Value error, la date ne peut pas précéder la demande",
-                    "type": "value_error",
-                }
+                refusal(
+                    ["body", "closed_at"],
+                    "date_before_request",
+                    "la date ne peut pas précéder la demande",
+                )
             ]
         )
     note = _clean(payload.note)
