@@ -1,9 +1,21 @@
 name: CI
 
+# Économie de minutes (les Actions sont facturées) :
+# - pas de CI sur une PR en brouillon : elle part quand la PR passe « prête »
+#   (ready_for_review), puis à chaque push tant qu'elle l'est ;
+# - pas de nouvelle suite à la fusion : la PR l'a déjà passée, et la règle
+#   « Require branches to be up to date » de la protection de main garantit
+#   que le commit testé est celui qui est fusionné ;
+# - chaque job ne part que si sa partie du dépôt a changé (job `changes`) ;
+#   `Tout est vert`, toujours exécuté, est le seul statut à exiger ;
+# - une passe complète chaque lundi sur main (dérive des dépendances, images,
+#   badges de couverture), et à la demande (workflow_dispatch).
 on:
-  push:
-    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -17,8 +29,57 @@ permissions:
   contents: read
 
 jobs:
+  # Ce que la PR touche, lu dans l'API (pas de checkout). Hors PR (lundi, à la
+  # demande) tout est vrai. Une PR en brouillon ne lance rien.
+  changes:
+    name: Parties modifiées
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.paths.outputs.backend }}
+      frontend: ${{ steps.paths.outputs.frontend }}
+      agent: ${{ steps.paths.outputs.agent }}
+      e2e: ${{ steps.paths.outputs.e2e }}
+      images: ${{ steps.paths.outputs.images }}
+    steps:
+      - id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            for k in backend frontend agent e2e images; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
+          gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' > files.txt
+          cat files.txt
+          has() { grep -qE "$1" files.txt && echo true || echo false; }
+          # La CI elle-même : tout repart, pour qu'un changement de workflow
+          # soit essayé sur tous les jobs.
+          ci='^\.github/workflows/ci\.yml$'
+          {
+            # deploy/backup : tests/test_backup_script.py lance backup.sh.
+            echo "backend=$(has "^backend/|^deploy/backup/|$ci")"
+            echo "frontend=$(has "^frontend/|$ci")"
+            echo "agent=$(has "^agent/|$ci")"
+            echo "e2e=$(has "^(backend|frontend|deploy)/|$ci")"
+            # Images (construction + Trivy) : seulement si leur base ou leurs
+            # dépendances changent. Le code, lui, est construit dans l'image
+            # par l'e2e (docker compose --build) ; le lundi, tout est rescanné.
+            echo "images=$(has "^(backend|frontend)/(Dockerfile|\.dockerignore|uv\.lock|pyproject\.toml|package(-lock)?\.json|nginx\.conf)$|$ci")"
+          } >> "$GITHUB_OUTPUT"
+
   backend:
     name: Backend (lint · types · tests · coverage)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -99,12 +160,12 @@ jobs:
           unique-id-for-comment: backend
 
       - name: Read backend coverage
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.HAS_GIST_SECRET == 'true'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && env.HAS_GIST_SECRET == 'true'
         id: cov
         run: echo "pct=$(node -p "Math.round(require('./coverage.json').totals.percent_covered)")" >> "$GITHUB_OUTPUT"
 
       - name: Coverage badge (gist)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.HAS_GIST_SECRET == 'true'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && env.HAS_GIST_SECRET == 'true'
         uses: schneegans/dynamic-badges-action@28b0fa8bdeb46170ac397105ece0c1fe58f68910 # v1.9.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
@@ -118,6 +179,9 @@ jobs:
 
   agent:
     name: Agent (gofmt · vet · tests · builds)
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -156,6 +220,9 @@ jobs:
 
   agent-windows:
     name: Agent (tests Windows)
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    timeout-minutes: 25
     # Les *_windows_test.go (scripts PowerShell parsés par PowerShell lui-même,
     # encodage des sorties System32, DPAPI, DACL) ne compilent que sous
     # Windows : le job Linux ci-dessus ne les a jamais exécutés. Aucun ne
@@ -184,6 +251,9 @@ jobs:
 
   frontend:
     name: Frontend (format · tests · coverage)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -241,12 +311,12 @@ jobs:
           name: Couverture frontend
 
       - name: Read frontend coverage
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.HAS_GIST_SECRET == 'true'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && env.HAS_GIST_SECRET == 'true'
         id: cov
         run: echo "pct=$(node -p "Math.round(require('./coverage/coverage-summary.json').total.lines.pct)")" >> "$GITHUB_OUTPUT"
 
       - name: Coverage badge (gist)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.HAS_GIST_SECRET == 'true'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && env.HAS_GIST_SECRET == 'true'
         continue-on-error: true
         uses: schneegans/dynamic-badges-action@28b0fa8bdeb46170ac397105ece0c1fe58f68910 # v1.9.0
         with:
@@ -260,10 +330,14 @@ jobs:
           maxColorRange: 90
 
   images:
-    name: Images Docker (build)
+    name: Images Docker (build · Trivy)
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     # Ne publie rien : vérifie que les deux Dockerfiles construisent encore,
-    # pour qu'une release ne découvre pas la casse au moment de pousser.
+    # pour qu'une release ne découvre pas la casse au moment de pousser, et
+    # scanne l'image construite.
     strategy:
       matrix:
         component: [backend, frontend]
@@ -280,11 +354,27 @@ jobs:
         with:
           context: ${{ matrix.component }}
           push: false
+          load: true
+          tags: tiai-${{ matrix.component }}:ci
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
+      # Le scan de l'image vient d'ici plutôt que de security.yml : l'image
+      # n'est construite qu'une fois. Le lundi, il repasse sur main, pour les
+      # vulnérabilités publiées depuis.
+      - name: Trivy ${{ matrix.component }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: tiai-${{ matrix.component }}:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
   e2e:
     name: Console (bout en bout)
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     # The console in a real browser against the real stack, as Compose runs it
     # (Caddy, API, worker, PostgreSQL): login and session cookie, a command
@@ -341,3 +431,24 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 7
+
+  # Le seul statut à exiger dans la protection de main : vert quand chaque job
+  # lancé a réussi, un job sauté (partie non modifiée) compte comme réussi.
+  # Toujours exécuté, pour qu'un job sauté ne laisse pas le statut en attente.
+  all-green:
+    name: Tout est vert
+    needs: [changes, backend, agent, agent-windows, frontend, images, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Résultat des jobs
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        # Sur une PR en brouillon, tout est sauté : vert, et rien ne peut être
+        # fusionné tant qu'elle l'est ; le passage « prête » relance tout.
+        run: |
+          echo "$RESULTS"
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) exit 1 ;; esac
+          done
