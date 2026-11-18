@@ -1126,6 +1126,7 @@ async def test_the_digest_and_the_export_age_a_silent_poste_too(client, db_sessi
     """The mail and the spreadsheet read the signature age the console reads:
     a poste silent for a month is not « à jour » there either."""
     from app.features.notification.digest import build_digest
+    from app.features.notification.digest_texts import FR as DIGEST_FR
 
     headers = await _admin(client, db_session)
     m = await _enroll(client, "m-silent-mail", hostname="PC-SILENCE")
@@ -1137,9 +1138,9 @@ async def test_the_digest_and_the_export_age_a_silent_poste_too(client, db_sessi
 
     digest = await build_digest(db_session)
     assert digest.outdated_antivirus == 1
-    assert [(line.hostname, line.detail) for line in digest.outdated_lines] == [
-        ("PC-SILENCE", "signatures vieilles de 30 j")
-    ]
+    assert [
+        (line.hostname, line.worded(DIGEST_FR)) for line in digest.outdated_lines
+    ] == [("PC-SILENCE", "signatures vieilles de 30 j")]
     export = await client.get(
         "/api/v1/machines/export.csv?columns=hostname,is_up_to_date,signature_age_days",
         headers=headers,
@@ -1263,6 +1264,7 @@ async def test_a_huge_stored_signature_age_breaks_nothing(
     must not overflow on it — one poste used to cost the whole parc its
     dashboard, its filters and its mail."""
     from app.features.notification.digest import build_digest
+    from app.features.notification.digest_texts import FR as DIGEST_FR
 
     headers = await _admin(client, db_session)
     huge = await _enroll(client, "m-huge", hostname="PC-HUGE")
@@ -1312,7 +1314,9 @@ async def test_a_huge_stored_signature_age_breaks_nothing(
     stats = (await client.get("/api/v1/stats/overview", headers=headers)).json()
     assert (stats["up_to_date"], stats["outdated"]) == expected
     assert digest.outdated_antivirus == expected[1]
-    assert [(line.hostname, line.detail) for line in digest.outdated_lines] == (
+    assert [
+        (line.hostname, line.worded(DIGEST_FR)) for line in digest.outdated_lines
+    ] == (
         []
         if third_party
         else [("PC-HUGE", f"signatures vieilles de {2147483647 + 2} j")]
