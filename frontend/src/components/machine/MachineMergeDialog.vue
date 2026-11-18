@@ -133,6 +133,7 @@ import {
 import { apiErrorMessage } from 'src/services/errors';
 import { formatDateTime, timeAgoLabel } from 'src/utils/format';
 import { escapeHtml } from 'src/utils/html';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const props = defineProps<{
   /** The record being kept — the merge target. */
@@ -203,21 +204,20 @@ function doMerge(source: Machine) {
   // Both UUIDs in the confirmation: on two records of one poste the hostnames
   // are identical, and a confirmation naming the same string twice is exactly
   // the one an administrator clicks through without reading.
-  const kept = props.machine?.machine_uuid ?? title.value;
   const removed = source.hostname
     ? `${escapeHtml(source.machine_uuid)} (${escapeHtml(source.hostname)})`
     : escapeHtml(source.machine_uuid);
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('machine.merge.confirmTitle'),
     message:
       `<div>${t('machine.merge.confirmMessage', {
         removed: `<b>${removed}</b>`,
-        kept: `<b>${escapeHtml(kept)}</b>`,
+        kept: `<b>${escapeHtml(props.machine?.machine_uuid ?? title.value)}</b>`,
       })}</div>` + `<div class="q-mt-sm">${escapeHtml(t('machine.merge.irreversible'))}</div>`,
     html: true,
     cancel: true,
     persistent: true,
-  }).onOk(() => {
+  })).onOk(() => {
     void runMerge(source.id);
   });
 }

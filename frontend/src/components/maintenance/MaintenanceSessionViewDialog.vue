@@ -114,6 +114,7 @@ import { deleteSession, getSession, type MaintenanceSession } from 'src/services
 import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime } from 'src/utils/format';
 import { t } from 'src/i18n';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const props = defineProps<{ modelValue: boolean; sessionId: string | null }>();
 const emit = defineEmits<{
@@ -155,7 +156,7 @@ function confirmDelete() {
   const v = visit.value;
   if (!v) return;
   const lines = v.items.length + (v.skipped?.length ?? 0);
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('maintenance.view.deleteTitle'),
     message: t(
       'maintenance.view.deleteAsk',
@@ -164,7 +165,7 @@ function confirmDelete() {
     ),
     cancel: true,
     ok: { label: t('maintenance.actions.delete'), color: 'negative' },
-  }).onOk(() => {
+  })).onOk(() => {
     void (async () => {
       deleting.value = true;
       try {

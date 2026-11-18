@@ -188,6 +188,25 @@ describe('interventions', () => {
       }),
     ).toBe('Other — Maintenance not done — B12');
   });
+
+  it('keeps a hyphenated English word whole (rooms-3)', () => {
+    setLocale('en');
+    expect(interventionHeading({ kind: 'verification', title: 'Check-up of the screen' })).toBe(
+      'Check — Check-up of the screen',
+    );
+    expect(interventionHeading({ kind: 'other', title: 'Other-worldly noise' })).toBe(
+      'Other — Other-worldly noise',
+    );
+    expect(interventionHeading({ kind: 'verification', title: 'Check - screen' })).toBe(
+      'Check — screen',
+    );
+    expect(interventionHeading({ kind: 'verification', title: 'Check: screen' })).toBe(
+      'Check — screen',
+    );
+    expect(interventionHeading({ kind: 'verification', title: 'Check – screen' })).toBe(
+      'Check — screen',
+    );
+  });
 });
 
 /**

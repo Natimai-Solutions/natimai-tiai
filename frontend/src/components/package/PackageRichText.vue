@@ -51,3 +51,11 @@ const parts = computed<Part[]>(() => {
   });
 });
 </script>
+
+<style scoped>
+/* A value shown as code (a winget id, a GPO path) has no space to wrap at: it
+   breaks anywhere rather than widening the page on a phone. */
+code {
+  overflow-wrap: anywhere;
+}
+</style>

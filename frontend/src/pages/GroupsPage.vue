@@ -40,7 +40,7 @@
               <q-tooltip v-if="props.row.builtin_key">{{ t('groups.row.builtin') }}</q-tooltip>
             </q-icon>
             <div>
-              <div>{{ groupName(props.row) }}</div>
+              <div>{{ groupName(props.row, rows) }}</div>
               <div v-if="props.row.description" class="text-caption text-muted">
                 {{ groupDescription(props.row) }}
               </div>
@@ -159,6 +159,7 @@
               dense
               autofocus
               maxlength="100"
+              reactive-rules
               :rules="[required]"
             />
             <q-input
@@ -288,6 +289,7 @@ import { escapeHtml } from 'src/utils/html';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { applyPermissionChange, permissionLabel, permissionRows } from 'src/utils/permissions';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const $q = useQuasar();
 const auth = useAuthStore();
@@ -495,13 +497,13 @@ function confirmWholeParc(): Promise<boolean> {
     return Promise.resolve(true);
   }
   return new Promise((resolve) => {
-    $q.dialog({
+    liveDialog($q, () => ({
       title: t('groups.wholeFleet.title'),
       message: t('groups.wholeFleet.message'),
       cancel: { flat: true, noCaps: true, label: t('groups.wholeFleet.back') },
       ok: { unelevated: true, noCaps: true, label: t('groups.wholeFleet.confirm') },
       persistent: true,
-    })
+    }))
       .onOk(() => resolve(true))
       .onCancel(() => resolve(false));
   });
@@ -543,15 +545,15 @@ async function submitForm() {
 }
 
 function confirmDelete(group: Group) {
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('groups.delete.title'),
     message:
-      `${t('groups.delete.question', { name: `<b>${escapeHtml(groupName(group))}</b>` })}<br>` +
+      `${t('groups.delete.question', { name: `<b>${escapeHtml(groupName(group, rows.value))}</b>` })}<br>` +
       t('groups.delete.members', { count: group.member_count }, group.member_count),
     html: true,
     cancel: true,
     ok: { label: t('groups.delete.ok'), color: 'negative' },
-  }).onOk(() => {
+  })).onOk(() => {
     void (async () => {
       try {
         await deleteGroup(group.id);

@@ -9,6 +9,12 @@ const q = vi.hoisted(() => {
     state,
     notify: vi.fn(),
     dialog: vi.fn(() => ({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk: (fn: () => void) => {
         state.onOk = fn;
       },

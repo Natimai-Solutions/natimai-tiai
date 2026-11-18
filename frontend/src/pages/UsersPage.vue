@@ -56,7 +56,7 @@
               text-color="white"
               class="q-ml-none"
             >
-              {{ groupName(group) }}
+              {{ groupName(group, groups.length ? groups : props.row.groups) }}
             </q-chip>
           </template>
           <span v-else class="text-muted">{{ t('users.row.noGroup') }}</span>
@@ -183,6 +183,7 @@
               outlined
               dense
               autofocus
+              reactive-rules
               :rules="[required]"
             />
             <q-input v-model="form.full_name" :label="t('users.form.fullName')" outlined dense />
@@ -232,6 +233,7 @@
               outlined
               dense
               :hint="t('users.form.minLength', { count: passwordMin })"
+              reactive-rules
               :rules="[required, longEnough]"
             />
           </q-card-section>
@@ -273,6 +275,7 @@
                 outlined
                 dense
                 :hint="t('users.form.minLength', { count: passwordMin })"
+                reactive-rules
                 :rules="[required, longEnough]"
               />
               <q-banner dense class="surface-orange">
@@ -356,6 +359,7 @@ import { apiErrorMessage } from 'src/services/errors';
 import type { EmailPreference } from 'src/services/auth';
 import { useAuthStore } from 'src/stores/auth';
 import { EMAIL_PREFERENCE_OPTIONS, emailPreferenceLabel, formatDateTime } from 'src/utils/format';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const { passwordMin } = usePasswordPolicy();
 
@@ -422,7 +426,7 @@ function beyondMe(user: ConsoleUser): boolean {
 // form says why they cannot be picked rather than failing on « Enregistrer ».
 const grantableGroupOptions = computed(() =>
   groups.value.map((g) => ({
-    label: groupName(g),
+    label: groupName(g, groups.value),
     value: g.id,
     disable: me.value !== null && exceeds(me.value, groupsAuthority([g])),
   })),
@@ -668,7 +672,7 @@ async function toggleActive(user: ConsoleUser) {
 }
 
 function confirmDelete(user: ConsoleUser) {
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('users.delete.title'),
     message:
       `${t('users.delete.question', { email: `<b>${escapeHtml(user.email)}</b>` })}<br>` +
@@ -676,7 +680,7 @@ function confirmDelete(user: ConsoleUser) {
     html: true,
     cancel: true,
     ok: { label: t('users.delete.ok'), color: 'negative' },
-  }).onOk(() => {
+  })).onOk(() => {
     void (async () => {
       try {
         await deleteUser(user.id);

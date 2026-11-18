@@ -48,6 +48,12 @@ describe('MaintenanceSessionViewDialog (item 6)', () => {
     expect(document.body.textContent).toContain('Aucun poste ne garde de ligne');
     let confirm: (() => void) | null = null;
     const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk(fn: () => void) {
         confirm = fn;
         return this;

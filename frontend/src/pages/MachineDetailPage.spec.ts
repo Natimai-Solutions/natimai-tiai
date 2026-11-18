@@ -558,6 +558,12 @@ describe('MachineDetailPage', () => {
     answer('B');
     await flushPromises();
     const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk: (fn: () => void) => {
         fn();
         fn();
@@ -594,6 +600,12 @@ describe('MachineDetailPage', () => {
     await flushPromises();
     let cancel: () => void = () => undefined;
     const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk: () => ({ onCancel: (fn: () => void) => (cancel = fn) }),
     } as never);
     const entry = (label: string) =>
@@ -657,6 +669,12 @@ describe('MachineDetailPage', () => {
     answer('B', 0, { needs_verification: true });
     await flushPromises();
     const dialog = vi.spyOn(w.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk: (fn: () => void) => {
         fn();
         return { onCancel: () => undefined };

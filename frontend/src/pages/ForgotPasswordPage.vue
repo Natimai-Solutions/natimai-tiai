@@ -24,6 +24,7 @@
                   outlined
                   dense
                   autofocus
+                  reactive-rules
                   :rules="[required]"
                 />
               </q-card-section>

@@ -161,7 +161,7 @@
               :to="{ name: 'machine-detail', params: { id: threat.machine_id } }"
             >
               <q-item-section>
-                <q-item-label>{{
+                <q-item-label class="threat-name">{{
                   threatNameLabel(threat.threat_name, threat.detection_id)
                 }}</q-item-label>
                 <q-item-label caption>
@@ -540,6 +540,11 @@ onMounted(reload);
 </script>
 
 <style scoped>
+/* A threat name is one word, sometimes of sixty characters: it breaks
+   anywhere rather than widening the page on a phone. */
+.threat-name {
+  overflow-wrap: anywhere;
+}
 /* A coloured edge on a priority card that has something in it: the row is
    read from across the room, and a zero must stay quiet. */
 .priority-card {

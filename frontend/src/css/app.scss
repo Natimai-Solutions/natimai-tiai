@@ -82,6 +82,22 @@
   text-underline-offset: 2px;
 }
 
+// On a touch screen the name is a finger's target: a box 12 px taller above
+// and below it takes the tap, drawn nowhere and moving nothing (the focus ring
+// stays on the name). The machine list's name does the same in its cell
+// (MachinesTable.vue).
+@media (pointer: coarse) {
+  .row-link {
+    position: relative;
+
+    &::after {
+      content: '';
+      position: absolute;
+      inset: -12px 0;
+    }
+  }
+}
+
 // A card that is a link (dashboard figures): no link styling, a visible focus.
 .card-link {
   display: block;

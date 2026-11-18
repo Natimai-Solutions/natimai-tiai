@@ -100,13 +100,15 @@ export function interventionTitle(
 /**
  * The title without a leading `label` followed by a dash, or null when it
  * does not start with it. Only the whole word followed by a dash: «
- * Maintenance non faite » stays.
+ * Maintenance non faite » stays. A plain hyphen counts only after a space,
+ * so a compound word is not cut: « Check-up of the screen » stays whole.
  */
 function withoutKind(title: string, label: string): string | null {
   if (!title.toLocaleLowerCase('fr-FR').startsWith(label.toLocaleLowerCase('fr-FR'))) return null;
   const rest = title.slice(label.length);
-  if (rest.trim() && !/^\s*[—–:-]/.test(rest)) return null;
-  return rest.replace(/^\s*[—–:-]\s*/, '').trim();
+  const dash = /^(?:\s*[—–:]|\s+-)\s*/;
+  if (rest.trim() && !dash.test(rest)) return null;
+  return rest.replace(dash, '').trim();
 }
 
 /**

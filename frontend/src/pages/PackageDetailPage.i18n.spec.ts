@@ -223,6 +223,12 @@ describe('PackageDetailPage in English', () => {
     vi.spyOn(vm.$q, 'dialog').mockImplementation((opts: unknown) => {
       seen.push(opts as { title?: string; message?: string });
       const chain = {
+        onDismiss() {
+          return this;
+        },
+        update() {
+          return this;
+        },
         onOk(fn: () => void) {
           queueMicrotask(fn);
           return chain;

@@ -19,6 +19,7 @@ import {
 } from 'src/services/machines';
 import { placeMachines, placementNotification, unassignMachines } from 'src/services/rooms';
 import { ROOM_NONE } from 'src/utils/machineListFilters';
+import { liveDialog } from 'src/utils/liveDialog';
 
 /**
  * What the machine list does to its selection: a command, a verification
@@ -89,7 +90,7 @@ export function useMachineBulkActions(options: {
     // The count is the whole point of the confirmation here: "sfc sur 1 poste"
     // and "sfc sur 340 postes" are very different decisions.
     const withSession = selected.value.filter((m) => m.session_user_present).length;
-    $q.dialog(commandConfirm(action, ids.length, withSession)).onOk(() => {
+    liveDialog($q, () => commandConfirm(action, ids.length, withSession)).onOk(() => {
       void sendBulk(action, ids);
     });
   }
@@ -140,13 +141,13 @@ export function useMachineBulkActions(options: {
   function reenrollSelection() {
     const ids = selectedIds();
     if (!ids.length) return;
-    $q.dialog({
+    liveDialog($q, () => ({
       title: t('machines.bulk.reenrollTitle'),
       message: t('machines.bulk.reenrollMessage', { count: ids.length }, ids.length),
       cancel: { flat: true, noCaps: true, label: t('machines.bulk.cancel') },
       ok: { unelevated: true, noCaps: true, label: t('machines.bulk.allow') },
       persistent: true,
-    }).onOk(() => {
+    })).onOk(() => {
       void doReenroll(ids);
     });
   }

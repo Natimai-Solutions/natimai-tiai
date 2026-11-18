@@ -27,6 +27,7 @@
                 outlined
                 dense
                 autofocus
+                reactive-rules
                 :rules="[required]"
               />
               <q-input
@@ -36,6 +37,7 @@
                 :label="t('auth.login.password')"
                 outlined
                 dense
+                reactive-rules
                 :rules="[required]"
               />
             </q-card-section>

@@ -191,9 +191,15 @@ describe('GroupsPage — item 2, item 4, C6', () => {
   it('quotes the group’s name escaped in the delete confirmation', async () => {
     vi.mocked(listGroups).mockResolvedValue([]);
     const { wrapper } = await mountPage();
-    const dialog = vi
-      .spyOn(wrapper.vm.$q, 'dialog')
-      .mockReturnValue({ onOk: () => undefined } as never);
+    const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
+      onOk: () => undefined,
+    } as never);
     (wrapper.vm as unknown as { confirmDelete: (g: Group) => void }).confirmDelete({
       ...restricted,
       name: '<img src=x> Lab',

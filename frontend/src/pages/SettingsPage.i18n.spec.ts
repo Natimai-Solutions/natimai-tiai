@@ -10,6 +10,7 @@ vi.mock('src/services/settings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/settings')>()),
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
+  sendTestEmail: vi.fn(),
 }));
 vi.mock('src/services/stats', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/stats')>()),
@@ -21,7 +22,12 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
 }));
 
 import { setLocale } from 'src/i18n';
-import { getSettings, type ConsoleSettings, type EnvGroup } from 'src/services/settings';
+import {
+  getSettings,
+  sendTestEmail,
+  type ConsoleSettings,
+  type EnvGroup,
+} from 'src/services/settings';
 import { useAuthStore } from 'src/stores/auth';
 import SettingsPage from './SettingsPage.vue';
 
@@ -247,6 +253,22 @@ describe('SettingsPage in English', () => {
     expect(app.text()).toContain('2147483648 (2 GiB)');
     expect(app.text()).not.toContain('Paramètres');
     expect(optionLabels(app, 'Day of the maintenance reminder (UTC)')[0]).toBe('Monday');
+    app.unmount();
+  });
+
+  it('rewords a failed e-mail test after a live switch (gap2-3-3)', async () => {
+    vi.mocked(sendTestEmail).mockRejectedValueOnce(new Error('network'));
+    const { app } = await mountPage();
+    const send = app.findAll('button').find((b) => b.text().includes('Envoyer un e-mail de test'))!;
+    await send.trigger('click');
+    await flushPromises();
+    expect(sendTestEmail).toHaveBeenCalled();
+    expect(app.text()).toContain('Envoi du test impossible');
+
+    setLocale('en');
+    await nextTick();
+    expect(app.text()).toContain('Could not send the test');
+    expect(app.text()).not.toContain('Envoi du test impossible');
     app.unmount();
   });
 });

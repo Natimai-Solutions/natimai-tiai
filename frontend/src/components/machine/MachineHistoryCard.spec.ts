@@ -77,6 +77,12 @@ describe('MachineHistoryCard', () => {
     async function deleteLine(wrapper: ReturnType<typeof mountCard>) {
       let confirm: (() => void) | null = null;
       const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+        onDismiss() {
+          return this;
+        },
+        update() {
+          return this;
+        },
         onOk(fn: () => void) {
           confirm = fn;
           return this;

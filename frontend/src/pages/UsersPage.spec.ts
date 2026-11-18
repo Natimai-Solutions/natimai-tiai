@@ -262,9 +262,15 @@ describe('UsersPage — the account form and the delete confirmation', () => {
     vi.mocked(listUsers).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });
     const { wrapper } = mountPage();
     await flushPromises();
-    const dialog = vi
-      .spyOn(wrapper.vm.$q, 'dialog')
-      .mockReturnValue({ onOk: () => undefined } as never);
+    const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
+      onOk: () => undefined,
+    } as never);
     (wrapper.vm as unknown as { confirmDelete: (u: ConsoleUser) => void }).confirmDelete(
       user('x', { email: '<img src=x>@example.org' }),
     );

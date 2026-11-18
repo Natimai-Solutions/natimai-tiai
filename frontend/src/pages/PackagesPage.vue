@@ -105,6 +105,7 @@
               dense
               autofocus
               maxlength="200"
+              reactive-rules
               :rules="[(v: string) => !!v.trim() || t('packagePages.list.form.required')]"
             />
             <q-input
@@ -124,6 +125,7 @@
                 dense
                 maxlength="128"
                 :hint="t('packagePages.list.form.wingetIdHint')"
+                reactive-rules
                 :rules="[
                   (v: string) =>
                     /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(v.trim()) ||

@@ -84,6 +84,12 @@ const elsewhere = machineDetail({ id: 'm-2', hostname: 'PC-02', room_id: 'r-2' }
 async function removeConfirmed(wrapper: Awaited<ReturnType<typeof mountPage>>) {
   let confirm: (() => void) | null = null;
   const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+    onDismiss() {
+      return this;
+    },
+    update() {
+      return this;
+    },
     onOk(fn: () => void) {
       confirm = fn;
       return this;
@@ -236,6 +242,12 @@ describe('RoomDetailPage — acceptance fixes', () => {
   it('asks before taking a poste out of the room (item 14)', async () => {
     const wrapper = await mountPage();
     const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk() {
         return this;
       },
@@ -348,6 +360,12 @@ describe('RoomDetailPage — on a phone (audit U23)', () => {
     expect(remove.classes()).not.toContain('q-btn--dense');
 
     const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockImplementation((() => ({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk() {
         return this;
       },

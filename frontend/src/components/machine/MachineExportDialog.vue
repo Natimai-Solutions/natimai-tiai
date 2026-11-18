@@ -20,7 +20,7 @@
       </q-card-section>
 
       <q-card-section v-if="loadError" class="text-negative">
-        {{ loadError }}
+        {{ apiErrorMessage(loadError.error, t('exports.machines.loadError')) }}
       </q-card-section>
 
       <q-card-section v-else class="row q-col-gutter-md">
@@ -199,7 +199,8 @@ const formatOptions: { label: string; value: ExportFormat }[] = [
 ];
 
 const catalogue = ref<ExportColumn[]>([]);
-const loadError = ref('');
+// The failed load's error, worded at render: a change of language rewords it.
+const loadError = ref<{ error: unknown } | null>(null);
 const selected = ref<string[]>([]);
 const format = ref<ExportFormat>('xlsx');
 const filter = ref('');
@@ -298,13 +299,13 @@ async function loadCatalogue() {
     const first = !catalogue.value.length;
     catalogue.value = columns;
     loadedIn.value = locale;
-    loadError.value = '';
+    loadError.value = null;
     if (first) {
       resetToDefaults();
       restore();
     }
   } catch (e) {
-    loadError.value = apiErrorMessage(e, t('exports.machines.loadError'));
+    loadError.value = { error: e };
   }
 }
 
@@ -314,11 +315,12 @@ async function onOpen() {
   await loadCatalogue();
 }
 
-// The language changed while the dialog is open: the labels follow.
+// The language changed while the dialog is open: the labels follow, and a
+// load that failed is tried again in the new language.
 watch(
   () => currentLocale(),
   () => {
-    if (open.value && catalogue.value.length) void loadCatalogue();
+    if (open.value && (catalogue.value.length || loadError.value)) void loadCatalogue();
   },
 );
 

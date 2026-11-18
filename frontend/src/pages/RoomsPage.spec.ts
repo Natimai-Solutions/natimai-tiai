@@ -74,6 +74,12 @@ async function resync(wrapper: Awaited<ReturnType<typeof mountPage>>, answer = t
   }) => {
     asked.push(opts.message);
     const chain = {
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
       onOk(fn: () => void) {
         if (answer) fn();
         return chain;

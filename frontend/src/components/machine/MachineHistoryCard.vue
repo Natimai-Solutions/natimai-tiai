@@ -185,6 +185,7 @@ import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime } from 'src/utils/format';
 import { t } from 'src/i18n';
+import { liveDialog } from 'src/utils/liveDialog';
 
 const props = withDefaults(
   defineProps<{
@@ -300,7 +301,7 @@ async function submit() {
 }
 
 function confirmDelete(item: Intervention) {
-  $q.dialog({
+  liveDialog($q, () => ({
     title: t('interventions.history.deleteTitle'),
     message: t('interventions.history.deleteAsk', {
       heading: interventionHeading(item),
@@ -308,7 +309,7 @@ function confirmDelete(item: Intervention) {
     }),
     cancel: true,
     ok: { label: t('interventions.actions.delete'), color: 'negative' },
-  }).onOk(() => {
+  })).onOk(() => {
     void (async () => {
       try {
         await deleteIntervention(item.id);
