@@ -1,7 +1,7 @@
 import { api } from 'boot/axios';
 import type { Command, CommandList, CreateCommandsResponse } from './commands';
 import { frNumber } from 'src/utils/format';
-import { intlTag } from 'src/i18n';
+import { intlTag, t } from 'src/i18n';
 
 /**
  * Software packages the console deploys (dev/plan-deploiement-logiciel.md).
@@ -215,15 +215,13 @@ export function publisherOf(p: Package, action: DeployAction = 'install'): strin
 
 /** The method A bound as the sentences say it: whole Gio, as it is set. */
 export function methodAMaxLabel(p: Package): string {
-  return `${Math.round(p.method_a_max_bytes / 1024 ** 3)} Gio`;
+  return t('packagePages.size.gib', { n: Math.round(p.method_a_max_bytes / 1024 ** 3) });
 }
 
-export const trustLabels: Record<TrustMethod, string> = {
-  winget: 'winget',
-  signed: 'Signé (méthode B)',
-  publisher: 'Éditeur (méthode A)',
-  none: 'Non signé',
-};
+/** How the package reaches a poste, in a word (a chip of the lists). */
+export function trustLabel(method: TrustMethod): string {
+  return t(`packagePages.trust.${method}`);
+}
 
 /**
  * File names as a French reader sorts them: case and accents aside, digits by
@@ -270,13 +268,15 @@ export function packageChoiceLabel(p: Package, among: Package[]): string {
   if (!twins.length) return base;
   const kind =
     p.kind === 'winget'
-      ? `winget ${p.winget_id ?? ''}`.trim()
-      : `fichiers, ${p.install_run ?? 'sans fichier à lancer'}`;
+      ? t('packagePages.choice.winget', { id: p.winget_id ?? '' }).trim()
+      : t('packagePages.choice.files', {
+          run: p.install_run ?? t('packagePages.choice.noRun'),
+        });
   const created = new Date(p.created_at).toLocaleString(intlTag(), {
     dateStyle: 'short',
     timeStyle: 'short',
   });
-  return `${base} (${kind} — créé le ${created})`;
+  return t('packagePages.choice.label', { base, kind, created });
 }
 
 /** Ready to deploy: complete, not retired. */
@@ -340,15 +340,15 @@ export function joinArgs(args: string[]): string {
 }
 
 export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} o`;
-  const units = ['Kio', 'Mio', 'Gio'];
+  if (bytes < 1024) return t('packagePages.size.bytes', { n: bytes });
+  const units = ['kib', 'mib', 'gib'];
   let value = bytes / 1024;
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {
     value /= 1024;
     unit++;
   }
-  return `${frNumber(value, value < 10 ? 1 : 0)} ${units[unit]}`;
+  return t(`packagePages.size.${units[unit]}`, { n: frNumber(value, value < 10 ? 1 : 0) });
 }
 
 export async function listPackages(retired = false): Promise<Package[]> {

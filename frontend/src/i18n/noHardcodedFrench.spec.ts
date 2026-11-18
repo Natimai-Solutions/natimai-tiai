@@ -104,12 +104,6 @@ const PENDING = new Set<string>([
   'utils/format.ts',
   'utils/staleChunks.ts',
 
-  // --- Lot E2 : paquets
-  'components/package/PackageDeployDialog.vue',
-  'pages/PackageDetailPage.vue',
-  'pages/PackagesPage.vue',
-  'services/packages.ts',
-
   // --- Lot F : commandes
   'components/machine/CommandOutputDialog.vue',
   'components/machine/MachineCommandsCard.vue',
