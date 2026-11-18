@@ -827,7 +827,7 @@ async def _issue_reset_link(session: SessionDep, email: str, ip: str) -> None:
     # Queued before the commit, so the mail and the token it links to are one
     # transaction: no link mailed for a token that was rolled back, no token
     # whose mail was lost to a Mailgun outage — the worker sends with retries.
-    emails.send_password_reset(session, user.email, token)
+    emails.send_password_reset(session, user.email, token, language=user.language)
     await session.commit()
 
 

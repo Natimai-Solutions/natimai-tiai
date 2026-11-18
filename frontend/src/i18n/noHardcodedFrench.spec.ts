@@ -114,9 +114,6 @@ const PENDING = new Set<string>([
   'components/machine/CommandOutputDialog.vue',
   'components/machine/MachineCommandsCard.vue',
   'services/commands.ts',
-
-  // --- Lot G : exports
-  'components/machine/MachineExportDialog.vue',
 ]);
 
 const SRC = new URL('..', import.meta.url).pathname;

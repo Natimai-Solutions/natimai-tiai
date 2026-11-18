@@ -579,7 +579,7 @@ adresse réelle et modifiable depuis la console.
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `EMAIL_PROVIDER` | `mailgun` | `mailgun` ou `smtp` : le canal par lequel le courrier part. **Valeur initiale** de cette variable et des suivantes, jusqu'à `SMTP_TIMEOUT_SECONDS` (sauf `MAILGUN_TIMEOUT_SECONDS` et `MAILGUN_PROXY_URL`) : la console peut les remplacer |
-| `DEFAULT_LANGUAGE` | `fr` | Langue des e-mails d'un compte qui n'a pas choisi la sienne dans « Mon compte », et de l'e-mail de test : `fr` ou `en`. La console suit le choix du compte, sinon la langue du navigateur |
+| `DEFAULT_LANGUAGE` | `fr` | Langue des e-mails d'un compte qui n'a pas choisi la sienne dans « Mon compte » (l'e-mail de test part dans la langue de l'administrateur qui l'envoie, sinon dans celle-ci) : `fr` ou `en`. Les exports suivent la langue de la console. La console suit le choix du compte, sinon la langue du navigateur |
 | `EMAIL_FROM_EMAIL` / `EMAIL_FROM_NAME` | — / `Tia'i` | Expéditeur, commun aux deux canaux. Avec un compte SMTP authentifié, l'adresse doit en général être celle du compte ou un alias autorisé. `MAILGUN_FROM_EMAIL` / `MAILGUN_FROM_NAME` restent acceptés en repli |
 | `MAILGUN_API_BASE_URL` | `https://api.mailgun.net/v3` | |
 | `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` | — | Vides = aucun e-mail n'est envoyé avec `EMAIL_PROVIDER=mailgun` |

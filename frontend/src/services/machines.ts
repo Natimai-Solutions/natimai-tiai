@@ -1,4 +1,5 @@
 import { api } from 'boot/axios';
+import { currentLocale } from 'src/i18n';
 
 export type MachineStatus = 'up_to_date' | 'outdated' | 'needs_verification' | 'inactive';
 
@@ -608,12 +609,26 @@ export interface ExportColumn {
 }
 
 /**
+ * The language of an export's words — headers, sheet, values — as the
+ * console shows them; nothing in French, the server's default, so the
+ * request stays the one an older console sent.
+ */
+function exportLanguage(): { lang?: string } {
+  const lang = currentLocale();
+  return lang === 'fr' ? {} : { lang };
+}
+
+/**
  * The export's column catalogue, in the order the picker shows it. Served
  * rather than hardcoded: the catalogue is what the export reads, and a picker
- * offering a column the server does not know would fail at the click.
+ * offering a column the server does not know would fail at the click. Its
+ * labels are in the language shown.
  */
 export async function listExportColumns(): Promise<ExportColumn[]> {
-  const { data } = await api.get<ExportColumn[]>('/machines/export-columns');
+  const params = exportLanguage();
+  const { data } = params.lang
+    ? await api.get<ExportColumn[]>('/machines/export-columns', { params })
+    : await api.get<ExportColumn[]>('/machines/export-columns');
   return data;
 }
 
@@ -640,6 +655,7 @@ export async function exportMachines(
   const query: Record<string, unknown> = { ...params };
   if (options.columns?.length) query.columns = options.columns.join(',');
   if (options.tz) query.tz = options.tz;
+  Object.assign(query, exportLanguage());
   const { data } = await api.get<Blob>(`/machines/export.${options.format}`, {
     params: query,
     responseType: 'blob',

@@ -46,10 +46,11 @@ class Settings(BaseSettings):
     )
 
     PROJECT_NAME: str = "Tia'i"
-    # The language of the mail sent to an account that chose none, and of the
-    # mail sent to no account (the test e-mail). The console itself follows
-    # each account's choice, else its browser. French by default: an
-    # installation that does not set it writes the mail it always wrote.
+    # The language of the mail sent to an account that chose none — the test
+    # e-mail included, for an administrator who chose none. The console
+    # itself follows each account's choice, else its browser. French by
+    # default: an installation that does not set it writes the mail it
+    # always wrote.
     DEFAULT_LANGUAGE: Literal["fr", "en"] = "fr"
     API_V1_STR: str = "/api/v1"
     # Production unless told otherwise: a deploy `.env` that forgets this line

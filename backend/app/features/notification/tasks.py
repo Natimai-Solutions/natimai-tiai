@@ -31,7 +31,9 @@ from app.features.machine.models import Machine
 from app.features.maintenance import crud as maintenance_crud
 from app.features.maintenance.crud import DueRoom
 from app.features.maintenance.policy import MaintenanceState, Resolved
+from app.features.notification.language import mail_language
 from app.features.notification.outbox import queue_email
+from app.features.notification.tasks_texts import TEXTS, TasksTexts
 from app.features.room.models import Building, Room
 from app.features.setting import crud as setting_crud
 from app.features.setting.email_policy import email_policy
@@ -70,6 +72,11 @@ def _wants_mail(user: User) -> bool:
     return user.is_active and user.email_preference != EmailPreference.NONE.value
 
 
+def _texts(user: User) -> TasksTexts:
+    """These mails in their reader's language (``language.mail_language``)."""
+    return TEXTS[mail_language(user.language)]
+
+
 # --- A verification handed to somebody ------------------------------------------
 
 
@@ -87,29 +94,28 @@ def send_checks_assigned(
     that was rolled back."""
     if not machines or not _wants_mail(assignee):
         return False
+    t = _texts(assignee)
+    project = settings.PROJECT_NAME
     names = sorted((m.hostname or m.machine_uuid) for m in machines)
     if len(machines) == 1:
-        subject = f"{settings.PROJECT_NAME} — vérification demandée : {names[0]}"
-        intro = f"{requested_by} vous demande de vérifier le poste {names[0]}."
+        subject = t.check_subject_one(project, names[0])
+        intro = t.check_intro_one(requested_by, names[0])
     else:
-        subject = f"{settings.PROJECT_NAME} — vérification demandée sur {len(machines)} postes"
-        intro = f"{requested_by} vous demande de vérifier {len(machines)} postes."
+        subject = t.check_subject_many(project, len(machines))
+        intro = t.check_intro_many(requested_by, len(machines))
     body = [intro, ""]
     if instructions:
-        body += ["Consignes :", instructions, ""]
+        body += [t.instructions, instructions, ""]
     if len(machines) > 1:
         cap = settings.NOTIFICATION_MAX_ITEMS
         body += [f"  • {n}" for n in names[:cap]]
         if len(names) > cap:
-            body.append(f"  … et {len(names) - cap} autre(s)")
+            body.append(f"  {t.more(len(names) - cap)}")
         body.append("")
     link = _console_link("/tasks")
     if link:
-        body += [f"Vos tâches : {link}", ""]
-    body.append(
-        "Vous recevez ce message parce qu'une vérification vous a été affectée. "
-        "Réglez vos e-mails dans la console, page « Mon compte »."
-    )
+        body += [t.tasks_link(link), ""]
+    body.append(t.check_footer)
     return queue_email(
         session, to=assignee.email, subject=subject, text="\n".join(body)
     )
@@ -150,7 +156,23 @@ async def personal_block(
     ``fleet`` is the parc's maintenance already resolved: a run that writes
     to every recipient reads it once, not once per recipient. What a person
     owns is what the resolution names them on — never a poste or a room they
-    no longer reach (``maintenance.reach``), whatever is stored on it."""
+    no longer reach (``maintenance.reach``), whatever is stored on it.
+
+    Written in the recipient's language (``language.mail_language``)."""
+    lines, _ = await _personal_block(session, user, now, fleet=fleet)
+    return lines
+
+
+async def _personal_block(
+    session: AsyncSession,
+    user: User,
+    now: datetime | None = None,
+    *,
+    fleet: FleetMaintenance | None = None,
+) -> tuple[list[str], bool]:
+    """``personal_block``, and whether it names a maintenance due — what the
+    weekly reminder is about."""
+    t = _texts(user)
     now = now or utcnow()
     cap = settings.NOTIFICATION_MAX_ITEMS
     lines: list[str] = []
@@ -174,14 +196,14 @@ async def personal_block(
         if reach.machine(user.id, machine.location, machine.room_id)
     ]
     if check_rows:
-        lines.append(f"  Vérifications qui vous sont affectées : {len(check_rows)}")
+        lines.append(t.checks_assigned(len(check_rows)))
         for check, machine in check_rows[:cap]:
             what = f" — {check.instructions}" if check.instructions else ""
             lines.append(
                 bullet(f"{machine.hostname or machine.machine_uuid}{what}", indent=4)
             )
         if len(check_rows) > cap:
-            lines.append(f"    … et {len(check_rows) - cap} autre(s)")
+            lines.append(f"    {t.more(len(check_rows) - cap)}")
 
     if fleet is None:
         fleet = await fleet_maintenance(session, now)
@@ -212,40 +234,34 @@ async def personal_block(
     due_soon = sum(r.due_soon for r in due_rooms) + sum(
         1 for _, res in due_loose if res.state == MaintenanceState.DUE_SOON
     )
-    if overdue or due_soon:
-        lines.append(
-            f"  Maintenances dont vous êtes responsable : {overdue} poste(s) en retard, "
-            f"{due_soon} à échéance"
-        )
+    maintenance_due = bool(overdue or due_soon)
+    if maintenance_due:
+        lines.append(t.maintenance_summary(overdue, due_soon))
         shown = 0
         for r in due_rooms:
             if shown >= cap:
                 break
             place = f"{r.building.name} › {r.room.name}" if r.building else r.room.name
-            lines.append(
-                f"    • {place} — {r.overdue} en retard, {r.due_soon} à échéance"
-            )
+            lines.append(t.room_line(place, r.overdue, r.due_soon))
             shown += 1
         for m, res in due_loose:
             if shown >= cap:
                 break
-            state = (
-                "en retard" if res.state == MaintenanceState.OVERDUE else "à échéance"
-            )
-            lines.append(f"    • {m.hostname or m.machine_uuid} (sans salle) — {state}")
+            state = t.overdue if res.state == MaintenanceState.OVERDUE else t.due_soon
+            lines.append(t.loose_line(m.hostname or m.machine_uuid, state))
             shown += 1
         hidden = len(due_rooms) + len(due_loose) - shown
         if hidden > 0:
-            lines.append(f"    … et {hidden} autre(s)")
+            lines.append(f"    {t.more(hidden)}")
 
     if not lines:
-        return []
-    out = ["VOS TÂCHES", *lines]
+        return [], False
+    out = [t.your_tasks, *lines]
     link = _console_link("/tasks")
     if link:
-        out.append(f"  Voir : {link}")
+        out.append(t.see(link))
     out.append("")
-    return out
+    return out, maintenance_due
 
 
 # --- The weekly reminder --------------------------------------------------------
@@ -291,18 +307,12 @@ async def send_maintenance_reminders(session: AsyncSession) -> int:
     for user in users.all():
         if not _wants_mail(user) or user.id in in_digest:
             continue
-        block = await personal_block(session, user, now, fleet=fleet)
-        if not any("Maintenances dont vous êtes responsable" in line for line in block):
+        block, maintenance_due = await _personal_block(session, user, now, fleet=fleet)
+        if not maintenance_due:
             continue
-        date = mail_date(now)
-        subject = f"{settings.PROJECT_NAME} — vos maintenances au {date}"
-        body = [
-            "Rappel hebdomadaire de ce qui vous attend.",
-            "",
-            *block,
-            "Vous recevez ce message parce que vous êtes responsable de la maintenance "
-            "de salles ou de postes. Réglez vos e-mails dans la console, page « Mon compte ».",
-        ]
+        t = _texts(user)
+        subject = t.reminder_subject(settings.PROJECT_NAME, mail_date(now))
+        body = [t.reminder_intro, "", *block, t.reminder_footer]
         if queue_email(session, to=user.email, subject=subject, text="\n".join(body)):
             queued += 1
     await session.commit()
