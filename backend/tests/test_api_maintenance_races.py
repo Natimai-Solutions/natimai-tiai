@@ -182,3 +182,100 @@ async def test_the_creating_part_sent_four_times_at_once_is_one_visit(
         assert all(r.status_code == 409 for r in own)
     for m in (ms[0], ms[29], ms[30], ms[39]):
         assert len(await _journal(client, admin, m)) == 1
+
+
+async def _merge_waited_on(engine, keep, merged, request):
+    """Run ``request`` while a merge of ``merged`` into ``keep`` holds its
+    locks, uncommitted, until the request waits on them; then commit it."""
+    from sqlalchemy import text
+    from sqlmodel import col
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.features.machine import crud as machine_crud
+    from app.features.machine.models import Machine
+
+    async def lock_waiters() -> int:
+        async with engine.connect() as conn:
+            return await conn.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                )
+            )
+
+    async with AsyncSession(engine) as other:
+        # What ``POST /machines/{keep}/merge`` does, held open.
+        for locked in sorted((uuid.UUID(keep), uuid.UUID(merged))):
+            await other.exec(
+                select(Machine.id).where(col(Machine.id) == locked).with_for_update()
+            )
+        target = await other.get(Machine, uuid.UUID(keep))
+        source = await other.get(Machine, uuid.UUID(merged))
+        await machine_crud.merge_into(other, target=target, source=source)
+        await other.flush()
+        sent = asyncio.create_task(request())
+        for _ in range(200):
+            if await lock_waiters():
+                break
+            await asyncio.sleep(0.05)
+        else:
+            sent.cancel()
+            raise AssertionError("the request never waited on the merge")
+        await other.commit()
+    return await sent
+
+
+async def test_a_part_naming_a_poste_being_merged_is_refused_not_a_500(
+    client, db_session, engine
+):
+    """A part of a visit names a poste merged at that moment (audit §6.4):
+    it read the poste, then its lines waited on the merge's lock and met the
+    deleted row — a foreign-key failure, 500. It now waits for the merge and
+    answers the 404 that names the merged poste, writing nothing."""
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "Amphi")
+    ms = [await _machine(db_session, f"M{i:03d}", room_id=room) for i in range(6)]
+    visit = await _visit(client, admin, room, ms[:1])
+    part = {"items": [{"machine_id": m} for m in ms[1:5]]}
+
+    async def request():
+        return await client.post(
+            f"/api/v1/maintenance/{visit['id']}/lines", headers=admin, json=part
+        )
+
+    resp = await _merge_waited_on(engine, ms[5], ms[3], request)
+    assert resp.status_code == 404, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == "machine.not_found"
+    assert error["details"]["machine_ids"] == [ms[3]]
+    # Nothing of the part is written: the visit holds its first poste only.
+    assert [str(line.machine_id) for line in await _lines(db_session)] == [ms[0]]
+    # The part sent again without the merged poste is recorded.
+    part = {"items": [{"machine_id": m} for m in ms[1:5] if m != ms[3]]}
+    resp = await request()
+    assert resp.status_code == 200, resp.text
+    assert len(await _lines(db_session)) == 4
+
+
+async def test_a_visit_naming_a_poste_being_merged_is_refused_not_a_500(
+    client, db_session, engine
+):
+    """The creating part too: 404 naming the merged poste, no visit left."""
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "Amphi")
+    ms = [await _machine(db_session, f"M{i:03d}", room_id=room) for i in range(4)]
+
+    async def request():
+        return await client.post(
+            "/api/v1/maintenance",
+            headers=admin,
+            json={"room_id": room, "items": [{"machine_id": m} for m in ms[:3]]},
+        )
+
+    resp = await _merge_waited_on(engine, ms[3], ms[1], request)
+    assert resp.status_code == 404, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == "machine.not_found"
+    assert error["details"]["machine_ids"] == [ms[1]]
+    assert await _visits(db_session) == []
+    assert await _lines(db_session) == []
