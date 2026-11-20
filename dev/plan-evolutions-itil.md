@@ -1,6 +1,6 @@
 # Évolutions inspirées d'ITIL et des autres plateformes : document de travail
 
-> **📝 Document de travail — 2026-11-19, révisé le 2026-11-20. Rien n'est livré.** Il porte sur les fonctionnalités propres à la console. Le fonctionnement avec GLPI, décidé le 2026-11-20, est mis de côté dans son propre document, `plan-connecteur-glpi.md`. Il ordonne onze chantiers, donne pour chacun le cadrage, l'esquisse technique et les jalons, et liste en §6 les décisions à prendre avant de coder. Conformément à l'usage du dépôt, chaque chantier retenu aura son propre `plan-*.md` détaillé au moment de l'ouvrir ; celui-ci sert à choisir et à ordonner.
+> **📝 Document de travail — 2026-11-19, révisé le 2026-11-20. ✅ C1 (alertes) et C2 (actifs) livrés le 2026-11-20 ; écarts en §8.** Il porte sur les fonctionnalités propres à la console. Le fonctionnement avec GLPI, décidé le 2026-11-20, est mis de côté dans son propre document, `plan-connecteur-glpi.md`. Il ordonne onze chantiers, donne pour chacun le cadrage, l'esquisse technique et les jalons, et liste en §6 les décisions à prendre avant de coder. Conformément à l'usage du dépôt, chaque chantier retenu aura son propre `plan-*.md` détaillé au moment de l'ouvrir ; celui-ci sert à choisir et à ordonner.
 
 > Origine : comparaison avec GLPI, Snipe-IT, Lansweeper, Intune, PDQ Deploy, Action1, NinjaOne et Tactical RMM, relue au travers des pratiques ITIL 4. Les estimations sont des ordres de grandeur en jours de développement, tests et documentation compris, validation sur poste réel non comprise.
 
@@ -243,14 +243,14 @@ Au-delà de N postes, une commande à risque attend l'accord d'un second compte 
 
 1. ~~Outil de tickets existant ?~~ **Tranché le 2026-11-20** : Tia'i fonctionnera seul ou avec GLPI ; le connecteur est reporté (`plan-connecteur-glpi.md`).
 2. **Exposition de la console.** « Interne » veut dire que l'adresse de la console n'est joignable que depuis le réseau de l'établissement — son réseau local, ou un réseau qui y est relié par VPN —, même si le serveur est hébergé ailleurs. « Exposée » veut dire joignable depuis n'importe quelle connexion Internet. La documentation actuelle suppose la première (`plan-projet-tiai.md` §8). Si la console doit devenir joignable de l'extérieur, C7 passe avant C4.
-3. **Actifs : table distincte ou colonnes sur `machines` ?** Le plan propose la table (§3.2). Les colonnes seraient plus rapides (−1 j) mais ferment la porte aux matériels sans agent.
-4. **Droits sur les actifs.** Réutiliser `machine:write`, ou une ressource `asset` à part pour que le prix d'achat ne soit pas lisible de tous ?
-5. **Poste réformé.** Faut-il révoquer son jeton d'agent en même temps, ou seulement le sortir des compteurs ?
-6. **Chiffrement.** L'alerte « volume non chiffré » doit-elle viser tous les postes ou seulement les portables ?
+3. ~~Actifs : table distincte ou colonnes ?~~ **Tranché le 2026-11-20** : table distincte `assets`.
+4. ~~Droits sur les actifs.~~ **Tranché le 2026-11-20** : ressource `asset` à part, accordée par défaut aux seuls administrateurs.
+5. ~~Poste réformé.~~ **Tranché le 2026-11-20** : sorti des compteurs et des alertes ; son jeton n'est pas révoqué (la réforme reste réversible).
+6. ~~Chiffrement.~~ **Tranché le 2026-11-20** : portables et tablettes par défaut, tous les postes sur réglage.
 7. **Fuseau de la console.** Un seul fuseau pour tout le serveur, ou un par emplacement ? Un seul suffit tant que le parc est en Polynésie.
 8. **Enchaînements de C3.** « Réveiller, mettre à jour, éteindre » suffit-il, ou faut-il des séquences libres ? Le plan propose de s'en tenir aux deux options.
 9. **Administrateurs locaux (C5).** Collecte à arbitrer avec le DPO, comme le nom de session.
-10. **Périmètre de la prochaine version.** Le lot prioritaire entier (30 j), ou C1 et C2 seulement (13 j) ?
+10. ~~Périmètre de la prochaine version.~~ **Tranché le 2026-11-20** : C1 et C2 d'abord.
 
 ---
 
@@ -261,3 +261,28 @@ Au-delà de N postes, une commande à risque attend l'accord d'un second compte 
 - **C4 attend B3** (jeton public et étiquettes).
 - **C5 impose une version d'agent** : le grouper avec toute autre évolution de l'agent en attente (lecture de l'annuaire en mode relais, `plan-lecture-annuaire.md`) pour ne redéployer qu'une fois.
 - À chaque chantier livré : feuille de route du `README.md`, notes de version, et une section « Écarts constatés à l'implémentation » dans son plan.
+
+---
+
+## 8. Écarts constatés à l'implémentation
+
+### C1 — Alertes
+
+- **Huit règles et non sept** : `warranty_ending` (garantie bientôt terminée, `ALERT_WARRANTY_DAYS`, 30 jours) a été ajoutée avec C2, comme prévu en §3.2.
+- **La table des fins de support de Windows** (`alert/os_support.py`) lit le numéro de build et l'édition dans la chaîne que l'agent compose déjà (« Windows 11 Education 23H2 (Build 22631) ») : rien à changer côté agent. Canaux distingués : Famille/Pro, Entreprise/Éducation, LTSC. Ce qui n'est pas reconnu (serveur, build plus récent que la table) n'est jamais signalé. Les dates sont à revérifier contre les pages de cycle de vie de Microsoft à chaque extension de la table ; les mises à jour de sécurité étendues payantes (ESU) ne sont pas connues de la console.
+- **Logiciels interdits** : un motif est une sous-chaîne du nom du programme, insensible à la casse, jamais une expression `LIKE` (« 100 % » ne correspond pas à tout).
+- **Vérification automatique** : les instructions sont codées (`machine_checks.instructions_code`, `instructions_params`) et mises en mots par la console dans la langue du lecteur ; modifier les instructions à la main efface le code.
+- **Résumé quotidien** : la section « Alertes ouvertes » ne s'affiche que s'il y en a, pour ne pas changer les résumés existants ; elle ne déclenche pas à elle seule le résumé « seulement s'il y a du nouveau ».
+- **`wu_reboot_required_since`** : les postes déjà en attente à la migration comptent depuis la migration.
+- Un test existant dépendait de la date du jour (`test_mail_languages`, détection datée du 18/11) : corrigé au passage.
+
+### C2 — Actifs
+
+- **Droit `asset`** : lecture et écriture ; le scan d'une étiquette (`/assets/by-token`) ne demande que `machine:read`, puisque celui qui scanne veut la fiche du poste.
+- **Portée** : l'actif d'un poste suit son poste ; le matériel sans agent suit sa salle, et celui qui n'est dans aucune salle n'est vu que des comptes sans restriction (un compte restreint ne peut pas en créer hors salle).
+- **Import** : séparateur lu sur la ligne d'en-têtes, pas par `csv.Sniffer`, qui prenait l'apostrophe de « N° d'inventaire » pour un guillemet. 5 000 lignes, 8 Mo au plus. Une ligne n'est écrite que si son n° de série désigne exactement un poste de la portée.
+- **Étiquettes** : QR dessiné côté console (`qrcode-generator`), qui porte `<origine de la console>/a/<jeton>` ; le jeton se renouvelle depuis la fiche d'actif.
+- **Windows 11** : verdict « prêt » au mieux « processeur à vérifier » ; « incompatible » seulement sur le TPM, la mémoire ou le disque. Carte « Bloqués pour Windows 11 » au tableau de bord et filtre `win11_blocked`.
+- **Poste réformé** : sorti de `_count` (tableau de bord) et des alertes ; les autres listes le montrent toujours, filtrables par `asset_status`.
+- **Export** : cinq colonnes d'actif (n° d'inventaire, statut, date d'achat, fin de garantie, fournisseur) offertes aux seuls comptes qui détiennent `asset:read` ; pas le prix, un classeur voyageant plus loin que la console.
+

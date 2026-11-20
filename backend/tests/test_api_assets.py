@@ -290,9 +290,9 @@ async def test_import_reads_excel_and_refuses_the_unreadable(client, db_session)
 
 async def test_merge_moves_the_asset(db_session):
     from app.features.asset import crud
+    from app.features.asset.models import Asset
     from app.features.machine import crud as machine_crud
     from app.features.machine.models import Machine
-    from app.features.asset.models import Asset
 
     source = await machine(db_session, "DUP")
     target = await machine(db_session, "KEPT")
@@ -442,3 +442,38 @@ async def test_scoped_equipment_needs_a_room_in_scope(client, db_session):
     resp = await client.get(f"/api/v1/assets/{other}", headers=scoped)
     assert resp.status_code == 404
     assert uuid.UUID(other)
+
+
+async def test_export_offers_asset_columns_to_asset_readers_only(client, db_session):
+    from app.features.asset.models import Asset
+
+    admin, _ = await _admin(client, db_session)
+    tech, _ = await _tech(client, db_session)
+    m = await machine(db_session, "PC-1")
+    db_session.add(
+        Asset(
+            machine_id=m.id,
+            inventory_number="INV-7",
+            status="on_loan",
+            warranty_end=date(2027, 1, 31),
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/v1/machines/export-columns", headers=admin)
+    assert "asset_inventory_number" in {c["key"] for c in resp.json()}
+    resp = await client.get("/api/v1/machines/export-columns", headers=tech)
+    assert "asset_inventory_number" not in {c["key"] for c in resp.json()}
+
+    params = {
+        "columns": "hostname,asset_inventory_number,asset_status,asset_warranty_end"
+    }
+    resp = await client.get("/api/v1/machines/export.csv", headers=admin, params=params)
+    assert resp.status_code == 200, resp.text
+    rows = list(
+        csv.reader(io.StringIO(resp.content.decode("utf-8-sig")), delimiter=";")
+    )
+    assert rows[1][:3] == ["PC-1", "INV-7", "Prêté"]
+    assert rows[1][3]  # the warranty end, in the file's date format
+    resp = await client.get("/api/v1/machines/export.csv", headers=tech, params=params)
+    assert resp.status_code == 422

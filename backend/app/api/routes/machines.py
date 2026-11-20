@@ -30,7 +30,13 @@ from sqlmodel import col, select
 
 from app.api import machine_export
 from app.api.csv_export import csv_response
-from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
+from app.api.deps import (
+    CurrentPermissions,
+    CurrentScope,
+    CurrentUser,
+    SessionDep,
+    require_permission,
+)
 from app.api.xlsx_export import xlsx_response
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
@@ -87,7 +93,7 @@ from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 from app.features.usage.models import SECONDS_PER_HOUR
 from app.features.user.models import Language, User
-from app.features.user.permissions import Action, Resource
+from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import Scope, machine_clause, machine_visible, restrict
 from app.features.windows_update.models import WindowsUpdate
 from app.features.wol import relay as wol_relay
@@ -1880,6 +1886,7 @@ ExportLanguage = Annotated[Language, Query(description="fr or en; fr when absent
 
 @router.get("/export-columns", response_model=list[ExportColumnOut])
 async def list_export_columns(
+    permissions: CurrentPermissions,
     lang: ExportLanguage = Language.FR,
 ) -> list[ExportColumnOut]:
     """The export's column catalogue, in the order the picker shows it.
@@ -1899,6 +1906,7 @@ async def list_export_columns(
             default=c.default,
         )
         for c in machine_export.COLUMNS
+        if c.group != "asset" or has_permission(permissions, "asset", "read")
     ]
 
 
@@ -1923,6 +1931,19 @@ async def _export_rows(
     names = await setting_crud.user_names(session, _owner_ids(all_rows, policy))
     orphaned = await _orphaned_checks(session, all_rows)
     now = utcnow()
+    machine_ids = [row[0].id for row in all_rows]
+    assets = (
+        {
+            a.machine_id: a
+            for a in (
+                await session.exec(
+                    select(Asset).where(col(Asset.machine_id).in_(machine_ids))
+                )
+            ).all()
+        }
+        if machine_ids
+        else {}
+    )
     return [
         machine_export.ExportRow(
             machine=m,
@@ -1944,6 +1965,7 @@ async def _export_rows(
             signature_max_age_days=policies.fleet.signature_max_age_days,
             taken_at=now,
             language=language,
+            asset=assets.get(m.id),
         )
         for m, room, building, check, seconds in all_rows
     ], usage
@@ -1958,6 +1980,7 @@ async def _export_rows(
 @router.get("/export.csv")
 async def export_machines_csv(
     session: SessionDep,
+    permissions: CurrentPermissions,
     filters: FiltersDep,
     columns: str | None = None,
     tz: str | None = None,
@@ -1969,7 +1992,9 @@ async def export_machines_csv(
     absent); ``tz`` the IANA zone timestamps are written in (UTC when absent);
     ``lang`` the language of the file's words (French when absent).
     """
-    chosen = machine_export.resolve_columns(columns)
+    chosen = machine_export.resolve_columns(
+        columns, with_assets=has_permission(permissions, "asset", "read")
+    )
     zone = machine_export.resolve_timezone(tz)
     machines, usage = await _export_rows(session, filters, lang)
     texts = machine_export.EXPORT_TEXTS[lang]
@@ -1987,6 +2012,7 @@ async def export_machines_csv(
 @router.get("/export.xlsx")
 async def export_machines_xlsx(
     session: SessionDep,
+    permissions: CurrentPermissions,
     filters: FiltersDep,
     columns: str | None = None,
     tz: str | None = None,
@@ -1998,7 +2024,9 @@ async def export_machines_xlsx(
     CSV; the difference is what lands in the cells — values Excel can sort,
     filter and sum without a conversion step.
     """
-    chosen = machine_export.resolve_columns(columns)
+    chosen = machine_export.resolve_columns(
+        columns, with_assets=has_permission(permissions, "asset", "read")
+    )
     zone = machine_export.resolve_timezone(tz)
     machines, usage = await _export_rows(session, filters, lang)
     texts = machine_export.EXPORT_TEXTS[lang]

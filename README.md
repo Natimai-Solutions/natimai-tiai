@@ -78,6 +78,28 @@ gère naturellement les postes éteints.
   installation logicielle, mise à niveau, maintenance, vérification, saisi
   depuis sa fiche avec une date qui peut être antérieure à la console, lu de
   haut en bas comme un cahier. Les suppressions sont tracées.
+- **Alertes** — huit règles évaluées par le serveur toutes les cinq minutes
+  sur ce que les postes remontent déjà : disque système presque plein, disque
+  en mauvaise santé, volume système non chiffré (portables par défaut),
+  redémarrage en attente depuis trop longtemps, **Windows hors support**
+  (selon la version et l'édition : Pro, Éducation, LTSC), logiciel interdit
+  installé, poste sans contact, garantie bientôt terminée. Une alerte s'ouvre
+  et se résout toute seule, avec sa date ; elle est sur la fiche du poste, sur
+  une page qui les range par règle, dans le résumé quotidien, et peut ouvrir
+  une vérification sur le poste. Un disque en mauvaise santé est signalé par
+  e-mail sur le moment. Règles, seuils et liste des logiciels interdits se
+  règlent dans les Paramètres.
+- **Actifs** — ce que le poste ne sait pas de lui-même : n° d'inventaire,
+  date d'achat, fournisseur, fin de garantie, prix, statut (en stock, en
+  service, en réparation, prêté, réformé) et prêts. Saisis sur la fiche, ou
+  **importés** d'un CSV ou d'un classeur Excel rapproché sur les numéros de
+  série, avec un aperçu avant écriture. Le matériel sans agent —
+  vidéoprojecteurs, imprimantes, écrans — a sa place dans les salles. Des
+  **étiquettes QR** s'impriment par lot ; scannées, elles ouvrent la fiche du
+  poste. L'âge du parc se compte depuis la date d'achat, un poste réformé sort
+  des compteurs et des alertes, et la fiche dit si le matériel peut passer à
+  **Windows 11**. Droit à part (`asset`), pour que le prix d'achat ne soit pas
+  lu de tous.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
@@ -173,6 +195,10 @@ l'exécution est figée dans le binaire de l'agent.
 | Historique des interventions | 🟢 Livré |
 | Vérifications demandées | 🟢 Livré |
 | Maintenance (cycles, responsables, séances) | 🟢 Livré |
+| Alertes (règles fermées, résumé, e-mail, vérification automatique) | 🟢 Livré |
+| Actifs (achat, garantie, prêts, import, étiquettes QR, Windows 11) | 🟢 Livré |
+| Planification, signalement, conformité… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
+| Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement
 
