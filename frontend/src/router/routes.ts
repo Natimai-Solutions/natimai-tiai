@@ -24,6 +24,17 @@ const routes: RouteRecordRaw[] = [
     component: () => import('pages/ResetPasswordPage.vue'),
     meta: { title: 'layout.pages.resetPassword' },
   },
+  // A sheet of labels to print: outside the console's frame.
+  {
+    path: '/assets/labels',
+    name: 'asset-labels',
+    component: () => import('pages/AssetLabelsPage.vue'),
+    meta: {
+      title: 'layout.pages.assetLabels',
+      requiresAuth: true,
+      requiresPermission: 'asset:read',
+    },
+  },
   {
     path: '/',
     component: () => import('layouts/MainLayout.vue'),
@@ -46,6 +57,19 @@ const routes: RouteRecordRaw[] = [
         name: 'alerts',
         component: () => import('pages/AlertsPage.vue'),
         meta: { title: 'layout.pages.alerts', requiresPermission: 'machine:read' },
+      },
+      {
+        path: 'assets',
+        name: 'assets',
+        component: () => import('pages/AssetsPage.vue'),
+        meta: { title: 'layout.pages.assets', requiresPermission: 'asset:read' },
+      },
+      {
+        // Where a printed label's QR code leads: the poste behind it.
+        path: 'a/:token',
+        name: 'asset-token',
+        component: () => import('pages/AssetTokenPage.vue'),
+        meta: { title: 'layout.pages.assetToken', requiresPermission: 'machine:read' },
       },
       {
         path: 'software',

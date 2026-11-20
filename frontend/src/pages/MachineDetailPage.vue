@@ -459,6 +459,7 @@
             <MachineIdentityCard :machine="machine" />
             <MachineNetworkCard :machine="machine" />
             <MachineUsageCard :machine="machine" />
+            <MachineAssetCard v-if="auth.can('asset', 'read')" :machine-id="machine.id" />
           </div>
         </q-tab-panel>
 
@@ -490,6 +491,7 @@
             <MachineStorageCard :machine="machine" :low-disk-percent="lowDiskPercent" />
             <MachineMemoryCard :machine="machine" />
             <MachineGpuCard :machine="machine" />
+            <MachineWindows11Card :machine="machine" />
           </div>
         </q-tab-panel>
 
@@ -561,6 +563,8 @@ import { useMachineNavigation } from 'src/composables/useMachineNavigation';
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import CommandOutputDialog from 'src/components/machine/CommandOutputDialog.vue';
 import MachineAlertsCard from 'src/components/machine/MachineAlertsCard.vue';
+import MachineAssetCard from 'src/components/machine/MachineAssetCard.vue';
+import MachineWindows11Card from 'src/components/machine/MachineWindows11Card.vue';
 import MachineAntivirusCard from 'src/components/machine/MachineAntivirusCard.vue';
 import MachineCommandsCard from 'src/components/machine/MachineCommandsCard.vue';
 import MachineDefenderCard from 'src/components/machine/MachineDefenderCard.vue';

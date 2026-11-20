@@ -39,6 +39,7 @@ const fr = {
     os_unsupported: 'Windows hors support',
     forbidden_software: 'Logiciel interdit',
     inactive: 'Sans contact',
+    warranty_ending: 'Garantie bientôt terminée',
   },
   detail: {
     disk_low: '{percent} % libres (seuil : {threshold} %)',
@@ -50,6 +51,7 @@ const fr = {
     forbidden_software: '{programs}',
     forbidden_softwareMore: '{programs} et {count} autre(s)',
     inactive: 'Dernier contact le {date}',
+    warranty_ending: 'Garantie jusqu’au {date}',
   },
   /** The instructions of a verification the server opened for an alert. */
   instructions: 'Alerte : {rule} — {detail}',
@@ -93,6 +95,7 @@ const en: Translation<typeof fr> = {
     os_unsupported: 'Windows out of support',
     forbidden_software: 'Forbidden software',
     inactive: 'No contact',
+    warranty_ending: 'Warranty ending soon',
   },
   detail: {
     disk_low: '{percent} % free (threshold: {threshold} %)',
@@ -104,6 +107,7 @@ const en: Translation<typeof fr> = {
     forbidden_software: '{programs}',
     forbidden_softwareMore: '{programs} and {count} more',
     inactive: 'Last contact on {date}',
+    warranty_ending: 'Warranty until {date}',
   },
   instructions: 'Alert: {rule} — {detail}',
 };

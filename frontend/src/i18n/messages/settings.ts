@@ -66,6 +66,9 @@ const fr = {
       'Une nouvelle alerte de ces règles ouvre une vérification sur le poste, s’il n’en a pas déjà une.',
     rebootDays: 'Redémarrage en attente au-delà de',
     rebootHint: "variable d'environnement : {days} jours",
+    warrantyDays: 'Fin de garantie signalée',
+    warrantyHint:
+      "Jours avant la fin de garantie d'un poste · variable d'environnement : {days} jours",
     unencryptedScope: 'Volume système non chiffré : postes concernés',
     scopeLaptops: 'Portables et tablettes seulement',
     scopeAll: 'Tous les postes',
@@ -350,6 +353,8 @@ const en: Translation<typeof fr> = {
       'A new alert of these rules opens a check on the computer, unless it already has one.',
     rebootDays: 'Restart pending for more than',
     rebootHint: 'environment variable: {days} days',
+    warrantyDays: 'Warranty end raised',
+    warrantyHint: "Days before a computer's warranty ends · environment variable: {days} days",
     unencryptedScope: 'System volume not encrypted: computers covered',
     scopeLaptops: 'Laptops and tablets only',
     scopeAll: 'All computers',

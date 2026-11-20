@@ -161,6 +161,9 @@ const fr = {
     aging: 'Matériel à renouveler',
     alert: 'Alerte : {rule}',
     alertAny: 'En alerte',
+    assetStatus: 'Actif : {status}',
+    assetNone: 'Sans fiche d’actif',
+    win11: 'Bloqués pour Windows 11',
   },
   facets: {
     location: 'Emplacement',
@@ -440,6 +443,9 @@ const en: Translation<typeof fr> = {
     aging: 'Hardware due for renewal',
     alert: 'Alert: {rule}',
     alertAny: 'With an alert',
+    assetStatus: 'Asset: {status}',
+    assetNone: 'Without an asset record',
+    win11: 'Blocked for Windows 11',
   },
   facets: {
     location: 'Location',

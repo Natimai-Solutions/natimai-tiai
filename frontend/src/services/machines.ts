@@ -223,7 +223,20 @@ export interface InstalledSoftware {
   first_seen: string;
 }
 
+/** Whether the hardware can take Windows 11, from the inventory. */
+export interface Windows11Readiness {
+  verdict: 'already' | 'ready' | 'check' | 'blocked' | 'unknown';
+  tpm: 'ok' | 'fail' | 'check' | 'unknown';
+  ram: 'ok' | 'fail' | 'check' | 'unknown';
+  disk: 'ok' | 'fail' | 'check' | 'unknown';
+  architecture: 'ok' | 'fail' | 'check' | 'unknown';
+  secure_boot: 'ok' | 'fail' | 'check' | 'unknown';
+  processor: 'ok' | 'fail' | 'check' | 'unknown';
+}
+
 export interface MachineDetail extends Machine {
+  /** Absent from an older server. */
+  windows11?: Windows11Readiness | null;
   /** The window `usage_hours` covers on the fiche: the console's setting. */
   usage_days: number;
   /**
@@ -447,6 +460,10 @@ export interface ListMachinesParams {
   hardware_aging?: boolean;
   /** Postes with an open alert: a rule of the catalogue, or `any`. */
   alert?: string;
+  /** The status of a poste's asset, or `none` for a poste without one. */
+  asset_status?: string;
+  /** Postes the inventory says cannot take Windows 11. */
+  win11_blocked?: boolean;
   /**
    * Comma-separated facets matched exactly rather than as a substring:
    * antivirus, os_version, hw_model, hw_manufacturer, cpu_model.

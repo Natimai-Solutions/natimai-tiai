@@ -58,6 +58,13 @@ const fr = {
     auth: {
       session_revoked: "Fermeture d'une session console",
     },
+    asset: {
+      create: 'Création d’un actif',
+      update: 'Modification d’un actif',
+      delete: 'Suppression d’un actif',
+      token_renew: 'Renouvellement du QR d’un actif',
+      import: 'Import d’actifs',
+    },
     building: {
       create: "Création d'un bâtiment",
       update: "Modification d'un bâtiment",
@@ -134,6 +141,7 @@ const fr = {
     user: 'Compte',
     group: 'Groupe',
     package: 'Paquet',
+    asset: 'Actif',
     settings: 'Paramètres',
   },
   /** Detail key → label, for the full view of an entry. */
@@ -298,6 +306,13 @@ const en: Translation<typeof fr> = {
     auth: {
       session_revoked: 'Console session closed',
     },
+    asset: {
+      create: 'Asset created',
+      update: 'Asset changed',
+      delete: 'Asset deleted',
+      token_renew: 'Asset QR renewed',
+      import: 'Assets imported',
+    },
     building: {
       create: 'Building created',
       update: 'Building edited',
@@ -373,6 +388,7 @@ const en: Translation<typeof fr> = {
     user: 'Account',
     group: 'Group',
     package: 'Package',
+    asset: 'Asset',
     settings: 'Settings',
   },
   detailKeys: {

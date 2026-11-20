@@ -312,6 +312,9 @@ async def list_assets(
     room_id: uuid.UUID | None = None,
     with_machine: bool | None = None,
     warranty: Literal["active", "soon", "expired", "none"] | None = None,
+    ids: str | None = Query(
+        None, max_length=20_000, description="Comma-separated asset ids (labels)"
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
 ) -> AssetList:
@@ -321,6 +324,16 @@ async def list_assets(
     clause = _scope_clause(scope)
     if clause is not None:
         stmt = stmt.where(clause)
+    if ids:
+        try:
+            wanted = [uuid.UUID(part) for part in ids.split(",") if part.strip()]
+        except ValueError:
+            raise AppError(
+                code=ErrorCode.REQUEST_VALIDATION_ERROR,
+                status_code=422,
+                message="ids must be asset ids",
+            ) from None
+        stmt = stmt.where(col(Asset.id).in_(wanted))
     if kind is not None:
         stmt = stmt.where(col(Asset.kind) == kind)
     if status is not None:

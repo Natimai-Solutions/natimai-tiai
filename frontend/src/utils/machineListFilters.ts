@@ -1,4 +1,5 @@
 import type { LocationQuery } from 'vue-router';
+import { ASSET_STATUSES, assetStatusLabel } from 'src/services/assets';
 import { alertRuleLabel, isAlertRule } from 'src/services/alerts';
 import { t } from 'src/i18n';
 import type {
@@ -144,12 +145,22 @@ export interface MachineFilters {
   /** Postes with an open alert: of one rule, or of any (`any`). From the
    * dashboard's card and the alerts page; cleared from its chip. */
   alert: string | null;
+  /** The status of a poste's asset (`none`: no asset); from the asset pages. */
+  assetStatus: string | null;
+  /** Postes the inventory says cannot take Windows 11; from the dashboard. */
+  win11: 'true' | null;
 }
 
 /** `alert=any` or a rule of the catalogue; anything else is dropped. */
 function alertQuery(value: unknown): string | null {
   const v = queryValue(value);
   return v && (v === 'any' || isAlertRule(v)) ? v : null;
+}
+
+/** An asset status, or `none`; anything else is dropped. */
+function assetStatusQuery(value: unknown): string | null {
+  const v = queryValue(value);
+  return v && (v === 'none' || (ASSET_STATUSES as readonly string[]).includes(v)) ? v : null;
 }
 
 /** The whole parc: no search, no facet, both toggles off. */
@@ -185,6 +196,8 @@ export function emptyMachineFilters(): MachineFilters {
     enrollment: null,
     aging: null,
     alert: null,
+    assetStatus: null,
+    win11: null,
   };
 }
 
@@ -414,6 +427,8 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
     enrollment: enrollment === 'pending' || enrollment === 'revoked' ? enrollment : null,
     aging: queryValue(q.hardware_aging) === 'true' ? 'true' : null,
     alert: alertQuery(q.alert),
+    assetStatus: assetStatusQuery(q.asset_status),
+    win11: queryValue(q.win11_blocked) === 'true' ? 'true' : null,
   };
 }
 
@@ -463,6 +478,8 @@ export function machineFiltersToQuery(f: MachineFilters): Record<string, string>
   if (f.enrollment) query.enrollment = f.enrollment;
   if (f.aging) query.hardware_aging = 'true';
   if (f.alert) query.alert = f.alert;
+  if (f.assetStatus) query.asset_status = f.assetStatus;
+  if (f.win11) query.win11_blocked = 'true';
   return query;
 }
 
@@ -517,6 +534,8 @@ export function machineFiltersToParams(f: MachineFilters): ListMachinesParams {
   if (f.enrollment) params.enrollment = f.enrollment;
   if (f.aging) params.hardware_aging = true;
   if (f.alert) params.alert = f.alert;
+  if (f.assetStatus) params.asset_status = f.assetStatus;
+  if (f.win11) params.win11_blocked = true;
   // The console sets these five from dropdowns fed by the fleet's exact
   // values, with their counts: matched exactly, « OptiPlex 7010 (12) » lists
   // those 12 postes and not the « OptiPlex 7010 AIO » too. The API keeps the
@@ -560,7 +579,9 @@ export type MachineFilterKey =
   | 'software'
   | 'agent'
   | 'aging'
-  | 'alert';
+  | 'alert'
+  | 'assetStatus'
+  | 'win11';
 
 export interface MachineFilterChip {
   key: MachineFilterKey;
@@ -641,6 +662,16 @@ export function machineFilterChips(
           : t('machines.chips.alert', { rule: alertRuleLabel(f.alert) }),
     });
   }
+  if (f.assetStatus) {
+    chips.push({
+      key: 'assetStatus',
+      label:
+        f.assetStatus === 'none'
+          ? t('machines.chips.assetNone')
+          : t('machines.chips.assetStatus', { status: assetStatusLabel(f.assetStatus) }),
+    });
+  }
+  if (f.win11) chips.push({ key: 'win11', label: t('machines.chips.win11') });
   return chips;
 }
 
@@ -715,6 +746,8 @@ const FIELDS_BY_KEY: Record<
   enrollment: 'enrollment',
   aging: 'aging',
   alert: 'alert',
+  assetStatus: 'assetStatus',
+  win11: 'win11',
 };
 
 /** The filters with one chip's facet off. */

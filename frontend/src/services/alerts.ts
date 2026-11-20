@@ -16,6 +16,7 @@ export const ALERT_RULES = [
   'os_unsupported',
   'forbidden_software',
   'inactive',
+  'warranty_ending',
 ] as const;
 
 export type AlertRule = (typeof ALERT_RULES)[number];
@@ -130,6 +131,8 @@ export function alertDetailText(rule: string, detail: Record<string, unknown> | 
     }
     case 'inactive':
       return t('alerts.detail.inactive', { date: day(d.last_seen) });
+    case 'warranty_ending':
+      return t('alerts.detail.warranty_ending', { date: day(d.warranty_end) });
   }
   return '';
 }

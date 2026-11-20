@@ -1,4 +1,5 @@
 import type { LocationQuery } from 'vue-router';
+import { ASSET_STATUSES } from 'src/services/assets';
 import { isAlertRule } from 'src/services/alerts';
 import { t } from 'src/i18n';
 import type {
@@ -208,6 +209,14 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   if (queryValue(q.hardware_aging) === 'true') params.hardware_aging = true;
   const alert = queryValue(q.alert);
   if (alert && (alert === 'any' || isAlertRule(alert))) params.alert = alert;
+  const assetStatus = queryValue(q.asset_status);
+  if (
+    assetStatus &&
+    (assetStatus === 'none' || (ASSET_STATUSES as readonly string[]).includes(assetStatus))
+  ) {
+    params.asset_status = assetStatus;
+  }
+  if (queryValue(q.win11_blocked) === 'true') params.win11_blocked = true;
   // The five text facets the list sets from its dropdowns: matched exactly,
   // as the list asked (``machineFiltersToParams``).
   const exact = (

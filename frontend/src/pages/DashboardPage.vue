@@ -375,6 +375,18 @@ const alertKpis = computed<AlertKpi[]>(() => {
           },
         ]
       : []),
+    // The renewal plan's other half: postes that will not take Windows 11.
+    ...(s.machines_win11_blocked
+      ? [
+          {
+            label: t('dashboard.kpi.win11Blocked'),
+            value: s.machines_win11_blocked,
+            icon: 'upgrade',
+            color: 'deep-orange',
+            to: { name: 'machines', query: { win11_blocked: 'true' } },
+          },
+        ]
+      : []),
     // Enrolment needing a decision: a reinstalled poste asking back in, or a
     // revoked one. Shown by a server that counts them (older ones do not).
     ...(s.machines_reenroll_pending !== undefined

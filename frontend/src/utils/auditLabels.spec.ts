@@ -78,6 +78,11 @@ describe('auditActionLabel', () => {
       'package.unsign',
       'package.retire',
       'package.restore',
+      'asset.create',
+      'asset.update',
+      'asset.delete',
+      'asset.token_renew',
+      'asset.import',
     ];
     expect(Object.keys(AUDIT_ACTION_LABELS).sort()).toEqual([...slugs].sort());
   });

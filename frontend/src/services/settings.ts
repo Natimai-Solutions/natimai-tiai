@@ -183,10 +183,12 @@ export interface ConsoleSettings {
   alert_rules?: string[];
   alert_enabled_rules?: string[];
   alert_reboot_pending_days?: number;
+  alert_warranty_days?: number;
   alert_unencrypted_scope?: 'laptops' | 'all';
   alert_forbidden_software?: string[];
   alert_auto_check_rules?: string[];
   env_alert_reboot_pending_days?: number;
+  env_alert_warranty_days?: number;
   env_alert_unencrypted_scope?: 'laptops' | 'all';
   /** How mail leaves the console. */
   email: EmailSettings;
@@ -215,6 +217,7 @@ export interface SettingsPayload {
   alert_enabled_rules?: string[];
   alert_auto_check_rules?: string[];
   alert_reboot_pending_days?: number;
+  alert_warranty_days?: number;
   alert_unencrypted_scope?: 'laptops' | 'all';
   alert_forbidden_software?: string[];
   email?: EmailSettingsPayload;

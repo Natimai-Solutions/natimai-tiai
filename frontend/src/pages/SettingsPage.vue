@@ -177,6 +177,22 @@
           :hint="t('settings.alerts.rebootHint', { days: settings.env_alert_reboot_pending_days })"
           :disable="!canWrite"
         />
+        <q-input
+          v-model.number="alertForm.warrantyDays"
+          type="number"
+          min="1"
+          max="365"
+          :suffix="t('settings.units.days')"
+          :label="t('settings.alerts.warrantyDays')"
+          outlined
+          dense
+          :error="alertWarrantyError !== null"
+          :error-message="alertWarrantyError ?? undefined"
+          :hint="
+            t('settings.alerts.warrantyHint', { days: settings.env_alert_warranty_days ?? 30 })
+          "
+          :disable="!canWrite"
+        />
         <q-select
           v-model="alertForm.unencryptedScope"
           :options="unencryptedOptions"
@@ -207,7 +223,7 @@
           color="primary"
           :label="t('settings.save')"
           :loading="savingAlerts"
-          :disable="alertRebootError !== null"
+          :disable="alertRebootError !== null || alertWarrantyError !== null"
           @click="saveAlerts"
         />
       </q-card-actions>
@@ -858,10 +874,12 @@ const alertForm = reactive({
   enabled: [] as string[],
   autoCheck: [] as string[],
   rebootDays: 7 as number | string,
+  warrantyDays: 30 as number | string,
   unencryptedScope: 'laptops',
   forbidden: [] as string[],
 });
 const alertRebootError = computed(() => intFieldError(alertForm.rebootDays, 1, 365));
+const alertWarrantyError = computed(() => intFieldError(alertForm.warrantyDays, 1, 365));
 const unencryptedOptions = computed(() => [
   { label: t('settings.alerts.scopeLaptops'), value: 'laptops' },
   { label: t('settings.alerts.scopeAll'), value: 'all' },
@@ -871,13 +889,14 @@ function fillAlertForm(s: ConsoleSettings) {
   alertForm.enabled = [...(s.alert_enabled_rules ?? [])];
   alertForm.autoCheck = [...(s.alert_auto_check_rules ?? [])];
   alertForm.rebootDays = s.alert_reboot_pending_days ?? 7;
+  alertForm.warrantyDays = s.alert_warranty_days ?? 30;
   alertForm.unencryptedScope = s.alert_unencrypted_scope ?? 'laptops';
   alertForm.forbidden = [...(s.alert_forbidden_software ?? [])];
   saved.alerts = formSnapshot(alertForm);
 }
 
 async function saveAlerts() {
-  if (alertRebootError.value) return;
+  if (alertRebootError.value || alertWarrantyError.value) return;
   savingAlerts.value = true;
   try {
     settings.value = await updateSettings({
@@ -885,6 +904,7 @@ async function saveAlerts() {
       // A rule turned off opens nothing: it is not kept among those that do.
       alert_auto_check_rules: alertForm.autoCheck.filter((r) => alertForm.enabled.includes(r)),
       alert_reboot_pending_days: Number(alertForm.rebootDays),
+      alert_warranty_days: Number(alertForm.warrantyDays),
       alert_unencrypted_scope: alertForm.unencryptedScope as 'laptops' | 'all',
       alert_forbidden_software: alertForm.forbidden
         .map((p) => p.trim())

@@ -51,6 +51,8 @@ function everything(): MachineFilters {
     enrollment: 'pending',
     aging: 'true',
     alert: 'disk_low',
+    assetStatus: 'on_loan',
+    win11: 'true',
   };
 }
 
@@ -93,6 +95,8 @@ describe('machineFiltersToQuery / machineFiltersFromQuery', () => {
       enrollment: 'pending',
       hardware_aging: 'true',
       alert: 'disk_low',
+      asset_status: 'on_loan',
+      win11_blocked: 'true',
     });
     expect(machineFiltersFromQuery(query)).toEqual(everything());
   });
@@ -248,6 +252,8 @@ describe('machineFilterChips', () => {
       'software',
       'aging',
       'alert',
+      'assetStatus',
+      'win11',
     ]);
     const label = (key: string) => chips.find((c) => c.key === key)!.label;
     expect(label('alert')).toBe('Alerte : Disque système presque plein');
