@@ -8,6 +8,7 @@ is a route of its own rather than a PATCH with a date.
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.exceptions import RequestValidationError
@@ -118,6 +119,11 @@ class CheckOut(BaseModel):
     requested_by: str
     assigned_to: AssigneeRef | None
     instructions: str | None
+    # Set when the server opened the request for an alert: the console words
+    # the instructions from the code (« alert.<rule> ») and its parameters,
+    # ``instructions`` keeping the French.
+    instructions_code: str | None = None
+    instructions_params: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
     closed_at: datetime | None
@@ -305,6 +311,8 @@ async def _out(
                 reachable=r.id not in orphaned,
             ),
             instructions=r.instructions,
+            instructions_code=r.instructions_code,
+            instructions_params=r.instructions_params,
             created_at=r.created_at,
             updated_at=r.updated_at,
             closed_at=r.closed_at,

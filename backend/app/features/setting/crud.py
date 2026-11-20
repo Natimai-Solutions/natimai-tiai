@@ -31,6 +31,14 @@ KEY_AGENT_VERSION = "fleet.agent_expected_version"
 KEY_COMMAND_TTL = "commands.default_ttl_minutes"
 KEY_DIGEST_HOUR = "notifications.digest_hour_utc"
 KEY_REMINDER_WEEKDAY = "maintenance.reminder_weekday"
+# Alerts (``app.features.alert``): which rules of the catalogue run, their
+# thresholds, the « logiciels interdits » list and the rules that open a
+# verification by themselves.
+KEY_ALERT_RULES = "alerts.enabled_rules"
+KEY_ALERT_REBOOT_DAYS = "alerts.reboot_pending_days"
+KEY_ALERT_UNENCRYPTED_SCOPE = "alerts.unencrypted_scope"
+KEY_ALERT_FORBIDDEN = "alerts.forbidden_software"
+KEY_ALERT_AUTO_CHECK = "alerts.auto_check_rules"
 
 
 async def get_all(session: AsyncSession) -> dict[str, Any]:
@@ -248,6 +256,61 @@ async def schedule_policy(
         reminder_weekday=_int_or(
             values.get(KEY_REMINDER_WEEKDAY), env.MAINTENANCE_REMINDER_WEEKDAY
         ),
+    )
+
+
+@dataclass(frozen=True)
+class AlertPolicy:
+    """How the alert rules run, as resolved now."""
+
+    # The rules turned on. Every rule of the catalogue by default: a rule
+    # turned off resolves its open alerts at the next evaluation.
+    enabled_rules: frozenset[str]
+    reboot_pending_days: int
+    # « laptops »: the unencrypted-volume rule only looks at laptops and
+    # tablets, the postes that leave the building; « all »: every poste.
+    unencrypted_scope: str
+    # Patterns matched, case-insensitively, inside installed program names.
+    forbidden_software: tuple[str, ...]
+    # Rules whose new alerts open a verification on the poste.
+    auto_check_rules: frozenset[str]
+
+
+def _str_list_or(value: Any, default: list[str]) -> list[str]:
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return value
+    return default
+
+
+async def alert_policy(
+    session: AsyncSession, values: dict[str, Any] | None = None
+) -> AlertPolicy:
+    """The console's rows where they exist, the environment's values (or the
+    catalogue's defaults, for the lists) otherwise."""
+    from app.features.alert.models import ALL_RULES
+
+    if values is None:
+        values = await get_all(session)
+    known = {str(r) for r in ALL_RULES}
+    scope = values.get(KEY_ALERT_UNENCRYPTED_SCOPE)
+    return AlertPolicy(
+        # A rule name the catalogue no longer has is dropped, not an error:
+        # a rule may be retired by a later version of Tia'i.
+        enabled_rules=frozenset(
+            _str_list_or(values.get(KEY_ALERT_RULES), sorted(known))
+        )
+        & known,
+        reboot_pending_days=_int_or(
+            values.get(KEY_ALERT_REBOOT_DAYS), env.ALERT_REBOOT_PENDING_DAYS
+        ),
+        unencrypted_scope=(
+            scope if scope in ("laptops", "all") else env.ALERT_UNENCRYPTED_SCOPE
+        ),
+        forbidden_software=tuple(
+            p for p in _str_list_or(values.get(KEY_ALERT_FORBIDDEN), []) if p.strip()
+        ),
+        auto_check_rules=frozenset(_str_list_or(values.get(KEY_ALERT_AUTO_CHECK), []))
+        & known,
     )
 
 

@@ -24,6 +24,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
+from app.features.alert.models import ALL_RULES, MachineAlert
 from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.machine.status import (
@@ -113,6 +114,9 @@ class Digest:
     threat_lines: list[MachineLine] = field(default_factory=list)
     update_lines: list[MachineLine] = field(default_factory=list)
     outdated_lines: list[MachineLine] = field(default_factory=list)
+    # Postes with an open alert, per rule (``app.features.alert``) — only the
+    # rules with at least one; printed after the running state.
+    alerts_by_rule: dict[str, int] = field(default_factory=dict)
 
     @property
     def has_events(self) -> bool:
@@ -245,7 +249,22 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
         or 0
     )
 
+    # --- open alerts, postes per rule, in the catalogue's order ---
+    alert_rows = await session.exec(
+        restrict(
+            select(col(MachineAlert.rule), func.count()),
+            machine_ids_clause(scope, col(MachineAlert.machine_id)),
+        )
+        .where(col(MachineAlert.resolved_at).is_(None))
+        .group_by(col(MachineAlert.rule))
+    )
+    open_alerts = dict(alert_rows.all())
+    alerts_by_rule = {
+        r.value: open_alerts[r.value] for r in ALL_RULES if open_alerts.get(r.value)
+    }
+
     return Digest(
+        alerts_by_rule=alerts_by_rule,
         generated_at=now,
         total=total,
         online=online,
@@ -347,6 +366,11 @@ def render_digest(
         t.inactive(digest.inactive_after_days, digest.inactive),
         "",
     ]
+
+    if digest.alerts_by_rule:
+        body.append(t.title_alerts)
+        body += [t.alert_line(rule, n) for rule, n in digest.alerts_by_rule.items()]
+        body.append("")
 
     body += _bullet_block(
         t, t.title_threats, digest.threat_lines, digest.with_active_threats

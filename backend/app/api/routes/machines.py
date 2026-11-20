@@ -34,6 +34,8 @@ from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permissi
 from app.api.xlsx_export import xlsx_response
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.features.alert import crud as alert_crud
+from app.features.alert.models import MachineAlert
 from app.features.audit import crud as audit
 from app.features.base import contains, utcnow
 from app.features.check import crud as check_crud
@@ -788,6 +790,8 @@ class MachineFilters:
     # Hardware older than the parc's renewal threshold (``hardware_aging_years``)
     # — the dashboard's « À renouveler » card, as a list.
     hardware_aging: bool | None = None
+    # Postes with an open alert: of one rule, or of any (« any »).
+    alert: str | None = None
     # The text facets matched exactly rather than as a substring. The console
     # asks it for a value picked from its dropdown, so that « OptiPlex 7010
     # (12) » lists those 12 postes and not the « OptiPlex 7010 AIO » too; a
@@ -809,6 +813,18 @@ def _exact_facets(raw: str | None) -> frozenset[ExactFacet]:
             message=f"Unknown facet in exact: {', '.join(unknown)}",
         )
     return frozenset(names)  # type: ignore[arg-type]
+
+
+def _alert_filter(raw: str | None) -> str | None:
+    """``alert=any`` or a rule of the catalogue; another value is a 422
+    rather than a filter that silently matches nothing."""
+    if raw is None or raw == "any" or alert_crud.is_known_rule(raw):
+        return raw
+    raise AppError(
+        code=ErrorCode.REQUEST_VALIDATION_ERROR,
+        status_code=422,
+        message=f"Unknown alert rule: {raw}",
+    )
 
 
 def machine_filters(
@@ -845,6 +861,9 @@ def machine_filters(
     usage_hours_above: float | None = Query(None, ge=0),
     enrollment: Literal["pending", "revoked"] | None = None,
     hardware_aging: bool | None = None,
+    alert: str | None = Query(
+        None, description="An alert rule, or 'any': postes with an open alert"
+    ),
     exact: str | None = Query(
         None,
         description="Comma-separated facets matched exactly: antivirus, "
@@ -890,6 +909,7 @@ def machine_filters(
         usage_hours_above=usage_hours_above,
         enrollment=enrollment,
         hardware_aging=hardware_aging,
+        alert=_alert_filter(alert),
         exact=_exact_facets(exact),
         scope=scope,
     )
@@ -963,6 +983,14 @@ def _filtered_machines(
                 hours_above=filters.usage_hours_above,
             )
         )
+    if filters.alert is not None:
+        open_alert = exists().where(
+            col(MachineAlert.machine_id) == col(Machine.id),
+            col(MachineAlert.resolved_at).is_(None),
+        )
+        if filters.alert != "any":
+            open_alert = open_alert.where(col(MachineAlert.rule) == filters.alert)
+        stmt = stmt.where(open_alert)
     if filters.check_open is not None:
         stmt = stmt.where(
             col(MachineCheck.id).is_not(None)

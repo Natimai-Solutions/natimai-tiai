@@ -163,6 +163,11 @@ class Machine(SQLModel, table=True):
     # not "pending a reboot", and false is the honest default. The console shows
     # nothing for it, so there is no unknown state to represent.
     wu_reboot_required: bool = Field(default=False)
+    # Since when the flag above has been true, as the server first saw it: the
+    # « redémarrage en attente depuis N jours » alert counts from here. Set on
+    # the heartbeat that turns the flag on, cleared on the one that turns it
+    # off; NULL whenever the flag is false.
+    wu_reboot_required_since: datetime | None = utc_field(default=None, nullable=True)
     wu_last_search: datetime | None = utc_field(default=None, nullable=True)
     wu_last_install: datetime | None = utc_field(default=None, nullable=True)
 

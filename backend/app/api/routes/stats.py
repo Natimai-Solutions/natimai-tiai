@@ -10,6 +10,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 
 from app.api.deps import CurrentScope, SessionDep, require_permission
+from app.features.alert.models import ALL_RULES, MachineAlert
 from app.features.base import utcnow
 from app.features.check.models import MachineCheck
 from app.features.inventory.models import MachineSoftware, Volume
@@ -101,6 +102,10 @@ class StatsOverview(BaseModel):
     # and a revoked token (cut off until its re-enrollment is allowed).
     machines_reenroll_pending: int = 0
     machines_token_revoked: int = 0
+    # Postes with at least one open alert, and the postes per rule — the
+    # « Alertes » card and the links it opens (``/machines?alert=…``).
+    machines_with_alerts: int = 0
+    alerts_by_rule: dict[str, int] = {}
 
 
 async def _count(
@@ -268,7 +273,29 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
     )
     usage_low, usage_high = usage_counts.one()
 
+    open_alert = col(MachineAlert.resolved_at).is_(None)
+    machines_with_alerts = (
+        await session.scalar(
+            restrict(
+                select(func.count(func.distinct(col(MachineAlert.machine_id)))),
+                machine_ids_clause(scope, col(MachineAlert.machine_id)),
+            ).where(open_alert)
+        )
+        or 0
+    )
+    by_rule = await session.exec(
+        restrict(
+            select(col(MachineAlert.rule), func.count()),
+            machine_ids_clause(scope, col(MachineAlert.machine_id)),
+        )
+        .where(open_alert)
+        .group_by(col(MachineAlert.rule))
+    )
+    alerts_by_rule = dict(by_rule.all())
+
     return StatsOverview(
+        machines_with_alerts=machines_with_alerts,
+        alerts_by_rule={r.value: alerts_by_rule.get(r.value, 0) for r in ALL_RULES},
         total=total,
         up_to_date=up_to_date,
         outdated=total - up_to_date,

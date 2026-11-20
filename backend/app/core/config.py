@@ -470,6 +470,19 @@ class Settings(BaseSettings):
     # rows a day.
     USAGE_RETENTION_DAYS: int = Field(default=400, ge=1)
 
+    # --- Alerts (``app.features.alert``) ---
+    # A closed catalogue of rules evaluated by the worker over what the postes
+    # already report. These are the initial values; the console's own
+    # (``app_settings``, page Paramètres) win once written.
+    # A restart Windows Update asked for, still not done after this many days.
+    ALERT_REBOOT_PENDING_DAYS: int = Field(default=7, ge=1, le=365)
+    # Which postes the « volume système non chiffré » rule looks at: only the
+    # ones that leave the building (``laptops``: laptops and tablets), or all.
+    ALERT_UNENCRYPTED_SCOPE: Literal["laptops", "all"] = "laptops"
+    # How long a resolved alert is kept, as the poste's history. Open ones
+    # are never purged.
+    ALERT_RETENTION_DAYS: int = Field(default=400, ge=1)
+
     # --- Rooms ---
     # How postes are filed into rooms. ``manual``: from the console, by hand.
     # ``ad_ou``: by the organisational unit the computer object sits in — the

@@ -6,16 +6,17 @@ the administrators hold both implicitly; nobody else does by default.
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from app.api.deps import CurrentUser, SessionDep, require_permission
 from app.api.fields import Email
 from app.core import ratelimit
 from app.core.config import settings as env
 from app.core.errors import AppError, ErrorCode
+from app.features.alert.models import ALL_RULES, AlertRule
 from app.features.audit import crud as audit
 from app.features.machine import crud as machine_crud
 from app.features.maintenance.reach import owner_reach
@@ -168,6 +169,16 @@ class SettingsOut(BaseModel):
     env_digest_hour_utc: int
     env_maintenance_reminder_weekday: int
     room_source: str
+    # Alerts: the catalogue, the rules turned on, their thresholds, the
+    # « logiciels interdits » list, the rules that open a verification.
+    alert_rules: list[str] = Field(default_factory=list)
+    alert_enabled_rules: list[str] = Field(default_factory=list)
+    alert_reboot_pending_days: int = 7
+    alert_unencrypted_scope: str = "laptops"
+    alert_forbidden_software: list[str] = Field(default_factory=list)
+    alert_auto_check_rules: list[str] = Field(default_factory=list)
+    env_alert_reboot_pending_days: int = 7
+    env_alert_unencrypted_scope: str = "laptops"
     # How mail leaves the console: the console's values, the environment's.
     email: EmailSettingsOut
     # The rest of the environment an administrator may want to check without
@@ -267,6 +278,26 @@ class SettingsUpdate(BaseModel):
     digest_hour_utc: int | None = Field(default=None, ge=0, le=23)
     maintenance_reminder_weekday: int | None = Field(default=None, ge=0, le=6)
 
+    # Alerts. Lists are written whole; null hands the setting back to its
+    # default (every rule on, nothing forbidden, no verification opened).
+    alert_enabled_rules: list[AlertRule] | None = Field(
+        default=None, max_length=len(ALL_RULES)
+    )
+    alert_reboot_pending_days: int | None = Field(default=None, ge=1, le=365)
+    alert_unencrypted_scope: Literal["laptops", "all"] | None = None
+    alert_forbidden_software: (
+        list[
+            Annotated[
+                str,
+                StringConstraints(strip_whitespace=True, min_length=2, max_length=100),
+            ]
+        ]
+        | None
+    ) = Field(default=None, max_length=100)
+    alert_auto_check_rules: list[AlertRule] | None = Field(
+        default=None, max_length=len(ALL_RULES)
+    )
+
     # How mail leaves: saved by its own card, so its fields arrive together.
     email: EmailSettingsIn | None = None
 
@@ -338,6 +369,7 @@ async def _out(session: SessionDep) -> SettingsOut:
     usage = await crud.usage_policy(session, values)
     fleet = await crud.fleet_policy(session, values)
     schedule = await crud.schedule_policy(session, values)
+    alerts = await crud.alert_policy(session, values)
     # Also refreshes what this process's ``queue_email`` reads: after a
     # patch, the new mail settings apply to the very next queued mail.
     stored = await mail.load_stored(session, values)
@@ -391,6 +423,18 @@ async def _out(session: SessionDep) -> SettingsOut:
         env_digest_hour_utc=env.DIGEST_HOUR_UTC,
         env_maintenance_reminder_weekday=env.MAINTENANCE_REMINDER_WEEKDAY,
         room_source=env.ROOM_SOURCE,
+        alert_rules=[r.value for r in ALL_RULES],
+        alert_enabled_rules=[
+            r.value for r in ALL_RULES if r.value in alerts.enabled_rules
+        ],
+        alert_reboot_pending_days=alerts.reboot_pending_days,
+        alert_unencrypted_scope=alerts.unencrypted_scope,
+        alert_forbidden_software=list(alerts.forbidden_software),
+        alert_auto_check_rules=[
+            r.value for r in ALL_RULES if r.value in alerts.auto_check_rules
+        ],
+        env_alert_reboot_pending_days=env.ALERT_REBOOT_PENDING_DAYS,
+        env_alert_unencrypted_scope=env.ALERT_UNENCRYPTED_SCOPE,
         email=_email_out(stored),
         environment=[
             EnvGroupOut(
@@ -482,7 +526,25 @@ _SIMPLE_KEYS = {
     "command_default_ttl_minutes": crud.KEY_COMMAND_TTL,
     "digest_hour_utc": crud.KEY_DIGEST_HOUR,
     "maintenance_reminder_weekday": crud.KEY_REMINDER_WEEKDAY,
+    "alert_reboot_pending_days": crud.KEY_ALERT_REBOOT_DAYS,
+    "alert_unencrypted_scope": crud.KEY_ALERT_UNENCRYPTED_SCOPE,
 }
+
+# List settings: written whole, without duplicates, in the order sent.
+_LIST_KEYS = {
+    "alert_enabled_rules": crud.KEY_ALERT_RULES,
+    "alert_forbidden_software": crud.KEY_ALERT_FORBIDDEN,
+    "alert_auto_check_rules": crud.KEY_ALERT_AUTO_CHECK,
+}
+
+
+async def _write_lists(
+    session: SessionDep, payload: SettingsUpdate, *, actor: str
+) -> None:
+    for field in sorted(payload.model_fields_set & _LIST_KEYS.keys()):
+        sent: list[str] | None = getattr(payload, field)
+        value = None if sent is None else list(dict.fromkeys(str(v) for v in sent))
+        await crud.set_value(session, _LIST_KEYS[field], value, actor=actor)
 
 
 async def _write_simple(
@@ -524,6 +586,7 @@ async def update_settings(
     fields = payload.model_dump(exclude_unset=True, exclude={"email"})
     await _write_usage(session, payload, actor=current.email)
     await _write_simple(session, payload, actor=current.email)
+    await _write_lists(session, payload, actor=current.email)
     if "maintenance_default_cycle_days" in fields:
         await crud.set_value(
             session,

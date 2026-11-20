@@ -14,8 +14,10 @@ agent's report and cleared by a merge — a machine finding, not a human task.
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Column, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
@@ -53,6 +55,14 @@ class MachineCheck(SQLModel, table=True):
         sa_column=Column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
     )
     instructions: str | None = Field(default=None, max_length=5000)
+    # Set when the server opened the request itself, for an alert
+    # (``alert.crud``): the console words the instructions from the code and
+    # its parameters, in the reader's language; ``instructions`` keeps the
+    # French for an older console. NULL on instructions typed by someone.
+    instructions_code: str | None = Field(default=None, max_length=64)
+    instructions_params: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
     # NULL = still open.

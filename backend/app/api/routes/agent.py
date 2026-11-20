@@ -911,6 +911,10 @@ async def heartbeat(
 
     if payload.windows_update is not None:
         wu = payload.windows_update
+        if wu.reboot_required and machine.wu_reboot_required_since is None:
+            machine.wu_reboot_required_since = utcnow()
+        elif not wu.reboot_required:
+            machine.wu_reboot_required_since = None
         machine.wu_reboot_required = wu.reboot_required
         machine.wu_last_search = wu.last_search_time
         machine.wu_last_install = wu.last_install_time

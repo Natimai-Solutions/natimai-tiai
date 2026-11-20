@@ -4,6 +4,7 @@ Importing this module guarantees every table is registered on
 ``SQLModel.metadata`` (used by app.core.db and Alembic).
 """
 
+from app.features.alert.models import MachineAlert  # noqa: F401
 from app.features.audit.models import AuditEntry  # noqa: F401
 from app.features.auth_session.models import AuthSession  # noqa: F401
 from app.features.check.models import MachineCheck  # noqa: F401
@@ -64,4 +65,5 @@ __all__ = [
     "MachineCheck",
     "Maintenance",
     "AppSetting",
+    "MachineAlert",
 ]
