@@ -90,6 +90,39 @@ _PURCHASE_FIELDS = (
 )
 
 
+_LOAN_FIELDS = ("borrower", "loan_due")
+
+
+async def dropped_asset(
+    session: AsyncSession, *, source_id: uuid.UUID, target_id: uuid.UUID
+) -> Asset | None:
+    """The duplicate's asset a merge into ``target_id`` will drop: there is
+    one only when both records have their own (``move_to``)."""
+    if await for_machine(session, target_id) is None:
+        return None
+    return await for_machine(session, source_id)
+
+
+def dropped_asset_details(asset: Asset) -> dict[str, str | None]:
+    """The audit line of an asset a merge drops: what it held, the price
+    recorded as set, not its value — like every asset write."""
+
+    def text(value: object) -> str | None:
+        return None if value is None else str(value)
+
+    return {
+        "inventory_number": asset.inventory_number,
+        "status": asset.status,
+        "purchase_date": text(asset.purchase_date),
+        "supplier": asset.supplier,
+        "order_reference": asset.order_reference,
+        "warranty_end": text(asset.warranty_end),
+        "purchase_price": "•" if asset.purchase_price is not None else None,
+        "borrower": asset.borrower,
+        "loan_due": text(asset.loan_due),
+    }
+
+
 async def move_to(
     session: AsyncSession, *, source_id: uuid.UUID, target_id: uuid.UUID
 ) -> None:
@@ -99,14 +132,18 @@ async def move_to(
     on the sticker among them — and is then dropped. Left unbound instead, it
     would be a nameless asset no confined account sees, holding its
     inventory number out of their reach. A label printed from the
-    duplicate's token stops resolving: the kept one's is to be printed."""
+    duplicate's token stops resolving: the kept one's is to be printed. The
+    route records what the dropped asset held (``dropped_asset_details``)."""
     target = await for_machine(session, target_id)
     source = await for_machine(session, source_id)
     if target is not None and source is not None:
         filled = {
             name: getattr(source, name)
             for name in _PURCHASE_FIELDS
-            if getattr(target, name) is None and getattr(source, name) is not None
+            if getattr(target, name) is None
+            and getattr(source, name) is not None
+            # A loan means something only on an asset on loan.
+            and (name not in _LOAN_FIELDS or target.status == AssetStatus.ON_LOAN)
         }
         # The inventory number is unique: the duplicate goes before the kept
         # record takes it.

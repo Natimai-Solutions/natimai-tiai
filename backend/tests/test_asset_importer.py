@@ -40,6 +40,11 @@ def test_french_excel_csv_in_cp1252():
         ("749,90 €", Decimal("749.90")),
         ("749,9", Decimal("749.90")),
         ("125000", Decimal("125000.00")),
+        # Accounting exports: zeros past the cents, not a thousands group.
+        ("1299.9900", Decimal("1299.99")),
+        ("749,9000", Decimal("749.90")),
+        ("0.5000", Decimal("0.50")),
+        ("1 299,00", Decimal("1299.00")),
     ],
 )
 def test_prices_that_read(cell, price):
@@ -54,6 +59,9 @@ def test_prices_that_read(cell, price):
         # A thousands separator read as a decimal point: refused, not 1.30.
         "1,299",
         "125.000",
+        "0,500",
+        # Three decimals that count.
+        "1234.567",
         "-5",
         "1e11",
         "beaucoup",
@@ -145,11 +153,21 @@ def test_too_many_rows():
     )
 
 
-def test_empty_rows_count_towards_a_limit_too():
-    """A sheet formatted far down is refused before it is read whole."""
+def test_empty_rows_count_towards_a_limit_of_their_own():
+    """A sheet formatted far down is refused before it is read whole — as
+    such: its empty rows are to delete, not its postes to split."""
     blanks = ";\n" * (importer.MAX_RAW_ROWS + 1)
-    with pytest.raises(importer.TooManyRows):
+    with pytest.raises(importer.TooManyRows) as exc:
         importer.parse("p.csv", f"Serial;Prix\n{blanks}".encode())
+    assert exc.value.cause == "too_many_blank_rows"
+    assert exc.value.limit == importer.MAX_RAW_ROWS
+
+
+def test_a_template_formatted_a_few_thousand_rows_down_still_reads():
+    rows = "\n".join(f"SN-{i};1" for i in range(300))
+    blanks = ";;;\n" * 11_700
+    parsed = importer.parse("p.csv", f"Serial;Prix\n{rows}\n{blanks}".encode())
+    assert len(parsed) == 300
 
 
 def test_a_workbook_formatted_far_down_is_refused_on_its_size():
@@ -163,5 +181,40 @@ def test_a_workbook_formatted_far_down_is_refused_on_its_size():
     ws.cell(row=importer.MAX_RAW_ROWS + 50, column=1, value="SN-LAST")
     buffer = io.BytesIO()
     wb.save(buffer)
-    with pytest.raises(importer.TooManyRows):
+    with pytest.raises(importer.TooManyRows) as exc:
         importer.parse("parc.xlsx", buffer.getvalue())
+    assert exc.value.cause == "too_many_blank_rows"
+
+
+def test_a_cell_on_two_lines_does_not_trip_the_other_delimiters():
+    """Excel writes a cell with a line break (Alt+Entrée) between quotes: read
+    with « , », its closing quote opens a field that swallows the file —
+    that delimiter is passed over, not the request failed."""
+    # Over 128 KB after the quote: the size at which csv gives up.
+    rows = "\n".join(
+        f"SN-{i};Remarque sans guillemet, ligne {i:04d} du bon;Dell"
+        for i in range(1, 4001)
+    )
+    content = f'Serial;Notes;Fournisseur\nSN-0;"Écran cassé\n";Dell\n{rows}\n'
+    assert len(content) > 131_072
+    parsed = importer.parse("p.csv", content.encode())
+    assert len(parsed) == 4001
+    assert parsed[0].values == {"notes": "Écran cassé", "supplier": "Dell"}
+
+
+def test_a_quote_never_closed_is_unreadable_not_a_crash():
+    content = 'Serial;Notes\nSN-0;"' + "x" * 140_000 + "\n"
+    with pytest.raises(importer.UnreadableFile) as exc:
+        importer.parse("p.csv", content.encode())
+    assert exc.value.args[0] == "csv"
+
+
+@pytest.mark.parametrize(
+    "header",
+    ["N° de série;", "Serial;;", "Serial;", "N° de série;Notes"],
+)
+def test_a_trailing_empty_column_keeps_the_semicolon(header):
+    """« N° de série; » is one cell to « , » and to a tab: « ; » wins the tie,
+    and the serial does not carry the delimiter."""
+    [row] = importer.parse("p.csv", f"{header}\nSN-1;\n".encode())
+    assert row.serial == "SN-1"

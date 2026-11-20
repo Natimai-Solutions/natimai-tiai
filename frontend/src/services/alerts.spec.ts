@@ -66,9 +66,15 @@ describe('alerts wording', () => {
     expect(alertDetailText('warranty_ending', { threshold_days: 30 })).toBe(
       'Garantie terminée dans moins de 30 jours',
     );
+    expect(alertDetailText('warranty_ending', { threshold_days: 1 })).toBe(
+      'Garantie terminée dans moins de 1 jour',
+    );
     setLocale('en');
     expect(alertDetailText('warranty_ending', { threshold_days: 30 })).toBe(
       'Warranty ends within 30 days',
+    );
+    expect(alertDetailText('warranty_ending', { threshold_days: 1 })).toBe(
+      'Warranty ends within 1 day',
     );
   });
 

@@ -25,6 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
+from app.api.fields import not_null
 from app.core.errors import AppError, ErrorCode
 from app.features.asset import crud, importer
 from app.features.asset.models import Asset, AssetKind, AssetStatus, new_public_token
@@ -111,14 +112,9 @@ class AssetFields(BaseModel):
     def _blank_is_null(cls, value: Any) -> Any:
         return _trim(value)
 
-    @field_validator("status")
-    @classmethod
-    def _status_not_null(cls, value: Any) -> Any:
-        # Absent leaves it as it is; null would clear a column that is never
-        # empty (a null kind reads as « autre », below).
-        if value is None:
-            raise ValueError("may be left out, not null")
-        return value
+    # Absent leaves it as it is; null would clear a column that is never
+    # empty (a null kind reads as « autre », below).
+    _not_null = not_null("status")
 
 
 class AssetCreate(AssetFields):
@@ -754,14 +750,12 @@ async def import_assets(
     try:
         # CPU work, off the event loop that answers every heartbeat.
         rows = await asyncio.to_thread(importer.parse, file.filename or "", content)
-    except importer.TooManyRows:
+    except importer.TooManyRows as exc:
         raise AppError(
             code=ErrorCode.ASSET_IMPORT_TOO_LARGE,
             status_code=422,
             message="Too many rows in the import file",
-            details={
-                "cause": {"code": "too_many_rows", "params": {"max": importer.MAX_ROWS}}
-            },
+            details={"cause": {"code": exc.cause, "params": {"max": exc.limit}}},
         ) from None
     except importer.UnreadableFile as exc:
         raise AppError(

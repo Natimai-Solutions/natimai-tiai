@@ -145,7 +145,11 @@ export function alertDetailText(rule: string, detail: Record<string, unknown> | 
       // only that the warranty ends within the threshold.
       return d.warranty_end
         ? t('alerts.detail.warranty_ending', { date: day(d.warranty_end) })
-        : t('alerts.detail.warranty_endingWithin', { days: str(d.threshold_days) });
+        : t(
+            'alerts.detail.warranty_endingWithin',
+            { days: str(d.threshold_days) },
+            typeof d.threshold_days === 'number' ? d.threshold_days : 2,
+          );
   }
   return '';
 }

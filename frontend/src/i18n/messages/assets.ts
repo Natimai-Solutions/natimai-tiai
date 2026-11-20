@@ -171,6 +171,8 @@ const fr = {
     tooLarge: {
       file_too_large: '{max_mb} Mo au plus : découpez le fichier',
       too_many_rows: '{max} lignes au plus : découpez le fichier',
+      too_many_blank_rows:
+        'trop de lignes vides sous les données ({max} lignes lues au plus) : supprimez-les',
     },
   },
   labelsPage: {
@@ -362,6 +364,8 @@ const en: Translation<typeof fr> = {
     tooLarge: {
       file_too_large: '{max_mb} MB at most: split the file',
       too_many_rows: '{max} rows at most: split the file',
+      too_many_blank_rows:
+        'too many empty rows below the data ({max} rows read at most): delete them',
     },
   },
   labelsPage: {

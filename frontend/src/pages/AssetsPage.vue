@@ -119,7 +119,7 @@
           icon="list"
           class="col-auto"
           :label="t('assets.machinesWithStatus')"
-          :to="{ name: 'machines', query: { asset_status: status } }"
+          :to="{ name: 'machines', query: { asset_status: status, ...(room ? { room } : {}) } }"
         />
       </q-card-section>
       <q-card-section v-if="onlyIds" class="q-pt-none">
@@ -353,6 +353,16 @@ function openEdit(asset: Asset): void {
   current.value = asset;
   editing.value = true;
 }
+
+// The address leads: the drawer's « Matériels » after a scanned label, or
+// the back button, change it on the same page — the filters follow.
+watch(
+  () => [route.query.room, route.query.ids],
+  () => {
+    room.value = queryValue(route.query.room) ?? null;
+    onlyIds.value = queryValue(route.query.ids) ?? null;
+  },
+);
 
 watch([search, scope, status, warranty, room, onlyIds], () => {
   pagination.value.page = 1;

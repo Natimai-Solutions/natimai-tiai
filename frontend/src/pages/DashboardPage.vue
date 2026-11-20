@@ -505,13 +505,18 @@ const auth = useAuthStore();
 const canReadThreats = computed(() => auth.can('threat', 'read'));
 
 async function fetchAll() {
+  // The side lists sit beside cards that leave the retired postes out: so
+  // do they (`in_parc`), or a retired poste's frozen badge would show under
+  // a card that does not count it.
   const [s, av, wuBehind, th] = await Promise.allSettled([
     getOverview(),
-    listMachines({ status: 'outdated', page_size: 5 }),
-    listMachines({ wu_status: 'pending', page_size: 5 }),
+    listMachines({ status: 'outdated', page_size: 5, in_parc: true }),
+    listMachines({ wu_status: 'pending', page_size: 5, in_parc: true }),
     // The sample of threats is a side list: its failure leaves the counters
     // and the other list their fresh values — and is reported all the same.
-    canReadThreats.value ? listThreats({ status: 'active', page_size: 5 }) : Promise.resolve(null),
+    canReadThreats.value
+      ? listThreats({ status: 'active', page_size: 5, in_parc: true })
+      : Promise.resolve(null),
   ]);
   // Each list's « loaded » flag follows its *last* load, not its first: after
   // an outage, « Tous les postes sont à jour » left over from the morning

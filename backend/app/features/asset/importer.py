@@ -27,10 +27,15 @@ from app.features.asset.models import AssetStatus
 
 MAX_ROWS = 5000
 # Rows read at most, empty ones included: a sheet formatted down to its
-# millionth row is refused before it is read whole.
-MAX_RAW_ROWS = 2 * MAX_ROWS
+# millionth row is refused before it is read whole — as such, not as a
+# sheet of too many postes. Far above what a template formatted a few
+# thousand rows down holds.
+MAX_RAW_ROWS = 20 * MAX_ROWS
 # Rows looked at for the header, below a title or a blank line or two.
 HEADER_ROWS = 10
+# The CSV delimiters tried, in the order a tie is settled: the French Excel's
+# first.
+DELIMITERS = ";,\t"
 
 # Normalised header → field. Normalised: lower case, no accent, letters and
 # digits only (« N° de série » → « ndeserie »).
@@ -118,7 +123,19 @@ class UnreadableFile(ValueError):
 
 
 class TooManyRows(ValueError):
-    """More than ``MAX_ROWS`` rows: to be split."""
+    """Over a limit: more than ``MAX_ROWS`` postes (« too_many_rows »: to be
+    split), or more than ``MAX_RAW_ROWS`` rows, most of them empty
+    (« too_many_blank_rows »: the empty rows below the data to delete).
+    ``args[0]`` is the cause, ``limit`` the number."""
+
+    def __init__(self, cause: str = "too_many_rows", limit: int = MAX_ROWS) -> None:
+        super().__init__(cause)
+        self.cause = cause
+        self.limit = limit
+
+
+def _too_many_blank_rows() -> TooManyRows:
+    return TooManyRows("too_many_blank_rows", MAX_RAW_ROWS)
 
 
 @dataclass
@@ -166,18 +183,35 @@ def _rows_of_csv(content: bytes) -> Iterator[list[Any]]:
     # The delimiter is the one that splits a header out of the first rows —
     # below a title line too, which names no column. Not ``csv.Sniffer``: an
     # apostrophe in a header (« N° d'inventaire ») makes it take « ' » for
-    # the quote character and swallow whole rows.
-    best: tuple[int, int, str] | None = None
-    for delimiter in ";,\t":
-        header = _header_of(csv.reader(io.StringIO(text), _dialect(delimiter)))
+    # the quote character and swallow whole rows. On a tie, the delimiter
+    # that cuts the header line into the most cells (« N° de série; » is one
+    # cell to « , » and to a tab, two to « ; »), then « ; », « , », tab.
+    best: tuple[int, int, int, int, str] | None = None
+    for order, delimiter in enumerate(DELIMITERS):
+        try:
+            rows = csv.reader(io.StringIO(text), _dialect(delimiter))
+            head = list(islice(rows, HEADER_ROWS))
+        except csv.Error:
+            # A quote this delimiter opens and never closes: not this one.
+            continue
+        header = _header_of(head)
         if header is None:
             continue
         index, columns = header
-        rank = (index, -len(columns), delimiter)
+        rank = (index, -len(columns), -len(head[index]), order, delimiter)
         if best is None or rank < best:
             best = rank
-    delimiter = best[2] if best is not None else ";"
-    return csv.reader(io.StringIO(text), _dialect(delimiter))
+    delimiter = best[4] if best is not None else DELIMITERS[0]
+    return _guarded(csv.reader(io.StringIO(text), _dialect(delimiter)))
+
+
+def _guarded(rows: Iterator[list[Any]]) -> Iterator[list[Any]]:
+    """The rows, a CSV the reader cannot follow (a quote never closed over
+    128 KB) refused as unreadable rather than failing the request."""
+    try:
+        yield from rows
+    except csv.Error as exc:
+        raise UnreadableFile("csv") from exc
 
 
 def _rows_of_xlsx(content: bytes) -> Iterator[list[Any]]:
@@ -189,7 +223,7 @@ def _rows_of_xlsx(content: bytes) -> Iterator[list[Any]]:
         raise UnreadableFile("xlsx") from exc
     sheet = workbook.worksheets[0]
     if sheet.max_row is not None and sheet.max_row > MAX_RAW_ROWS + HEADER_ROWS:
-        raise TooManyRows()
+        raise _too_many_blank_rows()
     return (list(r) for r in sheet.iter_rows(values_only=True))
 
 
@@ -214,6 +248,9 @@ def _blank(value: Any) -> bool:
     return value is None or (isinstance(value, str) and value.strip() == "")
 
 
+_THOUSANDS_OR_DECIMALS = re.compile(r"\d{1,3}[.,]\d{3}")
+
+
 def _price(value: Any) -> Decimal | None:
     if _blank(value):
         return None
@@ -236,9 +273,15 @@ def _price(value: Any) -> Decimal | None:
     # Written with more than two decimals is a thousands separator read as
     # a decimal point (« 1,299 », « 125.000 »): refused, never rounded to
     # 1.30. A number cell of a workbook is a number, and is rounded.
-    exponent = amount.as_tuple().exponent
-    if isinstance(value, str) and isinstance(exponent, int) and exponent < -2:
-        raise InvalidOperation(str(value))
+    if isinstance(value, str):
+        # « 1,299 », « 125.000 »: three digits after a single separator is a
+        # thousands group as much as decimals — refused, never read as 1.30.
+        if _THOUSANDS_OR_DECIMALS.fullmatch(re.sub(r"[\s€$  ]", "", value)):
+            raise InvalidOperation(str(value))
+        # More than two decimals that count (« 749.9000 » is 749.90).
+        exponent = amount.normalize().as_tuple().exponent
+        if isinstance(exponent, int) and exponent < -2:
+            raise InvalidOperation(str(value))
     return amount.quantize(Decimal("0.01"))
 
 
@@ -256,7 +299,10 @@ def parse(filename: str, content: bytes) -> list[ImportRow]:
         table = _rows_of_xlsx(content)
     else:
         table = _rows_of_csv(content)
-    head = list(islice(table, HEADER_ROWS))
+    try:
+        head = list(islice(table, HEADER_ROWS))
+    except csv.Error as exc:
+        raise UnreadableFile("csv") from exc
     header = _header_of(head)
     if header is None:
         raise UnreadableFile("no_serial_column")
@@ -266,7 +312,7 @@ def parse(filename: str, content: bytes) -> list[ImportRow]:
     lines = chain(head[header_index + 1 :], table)
     for offset, raw in enumerate(lines, start=header_index + 2):
         if offset > MAX_RAW_ROWS + header_index + 1:
-            raise TooManyRows()
+            raise _too_many_blank_rows()
         cells = {name: raw[i] if i < len(raw) else None for i, name in columns.items()}
         serial = _text(cells.get("serial"), 200)
         if serial is None:

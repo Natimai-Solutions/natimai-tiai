@@ -26,6 +26,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.features.alert.texts import worded_instructions
+from app.features.asset import crud as asset_crud
 from app.features.base import utcnow
 from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
@@ -146,10 +147,14 @@ class FleetMaintenance:
 
 
 async def fleet_maintenance(session: AsyncSession, now: datetime) -> FleetMaintenance:
+    """The postes of the parc: a retired one is never maintained again, and
+    would stay « en retard » in its owner's mail for ever (decision 5)."""
     policy = await setting_crud.maintenance_policy(session)
     return FleetMaintenance(
         policy=policy,
-        resolved=await maintenance_crud.fleet_resolved(session, policy, now),
+        resolved=await maintenance_crud.fleet_resolved(
+            session, policy, now, where=asset_crud.in_parc_clause()
+        ),
     )
 
 
@@ -194,6 +199,9 @@ async def _personal_block(
         .where(
             col(MachineCheck.assigned_to_id) == user.id,
             col(MachineCheck.closed_at).is_(None),
+            # A verification left open on a poste retired since: out of the
+            # mail, as out of the dashboard.
+            asset_crud.in_parc_ids_clause(col(MachineCheck.machine_id)),
         )
         .order_by(col(MachineCheck.created_at))
     )

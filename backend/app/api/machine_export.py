@@ -70,8 +70,10 @@ class ExportRow:
     # and the fiche do. Unset, the values stored at the last heartbeat.
     signature_max_age_days: int | None = None
     taken_at: datetime | None = None
-    # The language the words of the file are in (``EXPORT_TEXTS``).
+    # The language the words of the file are in (``EXPORT_TEXTS``), and the
+    # zone its instants are written in — the coded instructions' dates too.
     language: Language = Language.FR
+    zone: tzinfo | None = None
     # The poste's asset, when it has one — read only for a caller holding
     # ``asset:read`` (``resolve_columns``).
     asset: Asset | None = None
@@ -185,6 +187,7 @@ def _check_instructions(r: ExportRow) -> object:
         r.check.instructions_code,
         r.check.instructions_params,
         r.language,
+        r.zone,
     )
 
 

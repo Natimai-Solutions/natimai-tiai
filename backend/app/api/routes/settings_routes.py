@@ -591,7 +591,10 @@ def _audit_value(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, (list, tuple, set, frozenset)):
-        return ", ".join(str(v) for v in value)
+        # Each value once, as stored; an empty list (every rule turned off)
+        # is not a null (back to the default, every rule on).
+        values = list(dict.fromkeys(str(v) for v in value))
+        return ", ".join(values) if values else "[]"
     return str(value)
 
 

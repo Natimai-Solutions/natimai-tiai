@@ -131,7 +131,8 @@ async def test_settings_round_trip(client, db_session):
         )
     ).json()["items"]
     details = entries[0]["details"]
-    assert details["alert_enabled_rules"] == "inactive, disk_low, inactive"
+    # Each rule once.
+    assert details["alert_enabled_rules"] == "inactive, disk_low"
     assert details["alert_auto_check_rules"] == "disk_unhealthy"
     assert details["alert_forbidden_software"] == "uTorrent, TeamViewer"
 
@@ -290,6 +291,14 @@ async def test_warranty_check_does_not_carry_the_date(db_session):
     assert (
         worded_instructions(french, code, params, Language.EN)
         == "Alert: The warranty ends within 30 days."
+    )
+    # The count agrees.
+    one = {"threshold_days": 1}
+    assert worded_instructions(None, code, one, Language.EN) == (
+        "Alert: The warranty ends within 1 day."
+    )
+    assert worded_instructions(None, code, one, Language.FR) == (
+        "Alerte : La garantie se termine dans moins de 1 jour."
     )
     # Typed by someone: as typed, whatever the language.
     assert worded_instructions("Changer la souris", None, None, Language.EN) == (
@@ -469,3 +478,117 @@ async def test_disk_mail_follows_scope_and_language(client, db_session, monkeypa
     assert "WD B" not in found["tech-a@test.local"].body
     assert "PC-A" in found["admin@test.local"].subject
     assert "unhealthy" not in found["admin@test.local"].subject
+
+
+async def test_audit_tells_every_rule_off_from_back_to_default(client, db_session):
+    headers, _ = await _admin(client, db_session)
+    await client.patch(
+        "/api/v1/settings", headers=headers, json={"alert_enabled_rules": []}
+    )
+    await client.patch(
+        "/api/v1/settings", headers=headers, json={"alert_enabled_rules": None}
+    )
+    entries = (
+        await client.get(
+            "/api/v1/audit", headers=headers, params={"action": "settings.update"}
+        )
+    ).json()["items"]
+    # Newest first: back to the default, then every rule off.
+    assert entries[0]["details"]["alert_enabled_rules"] is None
+    assert entries[1]["details"]["alert_enabled_rules"] == "[]"
+
+
+async def test_export_dates_an_instant_in_the_files_zone(client, db_session):
+    """The coded instructions' « since » is the day it was where the reader
+    is, as the export's own timestamps are."""
+    from app.features.check.models import MachineCheck
+    from tests.scope_helpers import machine
+
+    headers, _ = await _admin(client, db_session)
+    m = await machine(db_session, "PC-TZ")
+    db_session.add(
+        MachineCheck(
+            machine_id=m.id,
+            requested_by="Tia'i",
+            instructions="Alerte : …",
+            instructions_code="alert.inactive",
+            instructions_params={"last_seen": "2026-10-06T04:00:00+00:00"},
+        )
+    )
+    await db_session.commit()
+    url = "/api/v1/machines/export.csv?columns=hostname,check_instructions&lang=en"
+    resp = await client.get(f"{url}&tz=Pacific/Tahiti", headers=headers)
+    assert "No contact with the computer since 05/10/2026." in resp.text
+    resp = await client.get(url, headers=headers)
+    assert "No contact with the computer since 06/10/2026." in resp.text
+
+
+async def test_personal_block_leaves_retired_postes_out(client, db_session):
+    """The digest's « Vos tâches » and the weekly reminder, like the
+    dashboard: a retired poste is never maintained again, and its open
+    verification is nobody's task."""
+    from app.features.asset.models import Asset, AssetStatus
+    from app.features.check.models import MachineCheck
+    from app.features.notification.tasks import _personal_block
+    from app.features.user.models import User
+    from tests.scope_helpers import machine
+
+    headers, admin_id = await _admin(client, db_session)
+    long_ago = NOW - timedelta(days=400)
+    ids = {}
+    for name in ("KEPT", "GONE"):
+        m = await machine(db_session, name, first_seen=long_ago, last_seen=long_ago)
+        ids[name] = m.id
+        db_session.add(
+            MachineCheck(
+                machine_id=m.id,
+                requested_by="x",
+                assigned_to_id=uuid.UUID(str(admin_id)),
+            )
+        )
+    db_session.add(Asset(machine_id=ids["GONE"], status=AssetStatus.RETIRED))
+    await db_session.commit()
+    resp = await client.patch(
+        "/api/v1/settings",
+        headers=headers,
+        json={
+            "maintenance_default_cycle_days": 30,
+            "maintenance_default_owner_id": str(admin_id),
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    admin = await db_session.get(User, uuid.UUID(str(admin_id)))
+    # What the digest ends with, and whether the weekly reminder is due.
+    lines, due = await _personal_block(db_session, admin)
+    text = "\n".join(lines)
+    assert "KEPT" in text
+    assert "GONE" not in text
+    assert due is True
+
+
+async def test_threats_sample_can_leave_retired_postes_out(client, db_session):
+    from app.features.asset.models import Asset, AssetStatus
+    from app.features.threat.models import Threat
+
+    sites = await two_sites(client, db_session)
+    for m in (sites.a, sites.b):
+        db_session.add(
+            Threat(
+                machine_id=m.id,
+                detection_id=f"D-{m.hostname}",
+                threat_name="Trojan",
+                status="active",
+                detected_at=NOW,
+            )
+        )
+    db_session.add(Asset(machine_id=sites.b.id, status=AssetStatus.RETIRED))
+    await db_session.commit()
+
+    async def hosts(**params):
+        resp = await client.get("/api/v1/threats", headers=sites.admin, params=params)
+        assert resp.status_code == 200, resp.text
+        return sorted(str(t["machine_id"]) for t in resp.json()["items"])
+
+    assert await hosts(status="active") == sorted([str(sites.a.id), str(sites.b.id)])
+    assert await hosts(status="active", in_parc="true") == [str(sites.a.id)]

@@ -288,6 +288,14 @@ describe('DashboardPage — alerts, Windows 11 and the retired postes (C1, C2)',
     );
     // Not the other pages: the software catalogue is no machine list.
     expect(to).toContain(JSON.stringify({ name: 'software' }));
+    // The side lists beside the cards leave them out as well.
+    expect(listMachines).toHaveBeenCalledWith({ status: 'outdated', page_size: 5, in_parc: true });
+    expect(listMachines).toHaveBeenCalledWith({
+      wu_status: 'pending',
+      page_size: 5,
+      in_parc: true,
+    });
+    expect(listThreats).toHaveBeenCalledWith({ status: 'active', page_size: 5, in_parc: true });
     // And none of it without retired postes.
     const none = await links({ machines_retired: 0 });
     expect(none.to).toContain(JSON.stringify({ name: 'machines' }));

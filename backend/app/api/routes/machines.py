@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, tzinfo
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -1925,7 +1925,10 @@ async def list_export_columns(
 
 
 async def _export_rows(
-    session: SessionDep, filters: MachineFilters, language: Language
+    session: SessionDep,
+    filters: MachineFilters,
+    language: Language,
+    zone: tzinfo | None = None,
 ) -> tuple[list[machine_export.ExportRow], UsageWindow]:
     """The filtered fleet, every row, hostname order.
 
@@ -1979,6 +1982,7 @@ async def _export_rows(
             signature_max_age_days=policies.fleet.signature_max_age_days,
             taken_at=now,
             language=language,
+            zone=zone,
             asset=assets.get(m.id),
         )
         for m, room, building, check, seconds in all_rows
@@ -2010,7 +2014,7 @@ async def export_machines_csv(
         columns, with_assets=has_permission(permissions, "asset", "read")
     )
     zone = machine_export.resolve_timezone(tz)
-    machines, usage = await _export_rows(session, filters, lang)
+    machines, usage = await _export_rows(session, filters, lang, zone)
     texts = machine_export.EXPORT_TEXTS[lang]
     return csv_response(
         f"{texts.file_stem}.csv",
@@ -2042,7 +2046,7 @@ async def export_machines_xlsx(
         columns, with_assets=has_permission(permissions, "asset", "read")
     )
     zone = machine_export.resolve_timezone(tz)
-    machines, usage = await _export_rows(session, filters, lang)
+    machines, usage = await _export_rows(session, filters, lang, zone)
     texts = machine_export.EXPORT_TEXTS[lang]
     return await xlsx_response(
         f"{texts.file_stem}.xlsx",
@@ -2849,6 +2853,24 @@ async def merge_machine(
             "source_room_id": str(source.room_id) if source.room_id else None,
         },
     )
+    # Both records had their asset: the duplicate's is dropped, what it held
+    # recorded (``asset.crud.move_to``).
+    dropped = await asset_crud.dropped_asset(
+        session, source_id=source.id, target_id=target.id
+    )
+    if dropped is not None:
+        audit.record(
+            session,
+            actor=user.email,
+            action="asset.delete",
+            resource_type="asset",
+            resource_id=str(dropped.id),
+            details={
+                "machine_id": str(source.id),
+                "merged_into": str(target.id),
+                **asset_crud.dropped_asset_details(dropped),
+            },
+        )
     held_files = await machine_crud.merge_into(session, target=target, source=source)
     await session.commit()
     if held_files:

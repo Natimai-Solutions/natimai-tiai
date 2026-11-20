@@ -117,6 +117,10 @@ describe('an import refused for its size', () => {
     expect(
       apiErrorMessage(refusal({ code: 'file_too_large', params: { max_mb: 8 } })),
     ).not.toContain('illisible');
+    // A template formatted far down: its empty rows to delete, not to split.
+    expect(
+      apiErrorMessage(refusal({ code: 'too_many_blank_rows', params: { max: 100000 } })),
+    ).toContain('supprimez-les');
     setLocale('en');
     expect(apiErrorMessage(refusal({ code: 'too_many_rows', params: { max: 5000 } }))).toContain(
       '5000 rows at most',

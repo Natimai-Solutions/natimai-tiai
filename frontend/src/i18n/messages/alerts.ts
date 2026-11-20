@@ -53,7 +53,8 @@ const fr = {
     forbidden_softwareMore: '{programs} et {count} autre(s)',
     inactive: 'Dernier contact le {date}',
     warranty_ending: 'Garantie jusqu’au {date}',
-    warranty_endingWithin: 'Garantie terminée dans moins de {days} jours',
+    warranty_endingWithin:
+      'Garantie terminée dans moins de {days} jour | Garantie terminée dans moins de {days} jours',
   },
   /** The instructions of a verification the server opened for an alert. */
   instructions: 'Alerte : {rule} — {detail}',
@@ -111,7 +112,7 @@ const en: Translation<typeof fr> = {
     forbidden_softwareMore: '{programs} and {count} more',
     inactive: 'Last contact on {date}',
     warranty_ending: 'Warranty until {date}',
-    warranty_endingWithin: 'Warranty ends within {days} days',
+    warranty_endingWithin: 'Warranty ends within {days} day | Warranty ends within {days} days',
   },
   instructions: 'Alert: {rule} — {detail}',
 };

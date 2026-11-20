@@ -636,11 +636,13 @@ async def test_writes_stay_within_the_scope(client, db_session):
         f"/api/v1/assets/{screen}", headers=scoped, json={"name": "  "}
     )
     assert resp.status_code == 422
-    # A status is left out, never null.
+    # A status is left out, never null — refused in words the console has.
     resp = await client.patch(
         f"/api/v1/assets/{screen}", headers=scoped, json={"status": None}
     )
     assert resp.status_code == 422
+    [item] = resp.json()["error"]["details"]["errors"]
+    assert item["type"] == "tiai_null_refused"
     resp = await client.put(f"/api/v1/machines/{b.id}/asset", headers=scoped, json={})
     assert resp.status_code == 404
 
@@ -946,3 +948,78 @@ async def test_a_rooms_postes_get_their_assets_for_its_labels(client, db_session
     tech, _ = await _tech(client, db_session)
     resp = await client.post(url, headers=tech)
     assert resp.status_code == 403
+
+
+async def test_a_merge_records_the_asset_it_drops(client, db_session):
+    """Both records had their asset: the duplicate's goes, what it held is in
+    the audit (price masked), and its loan is not copied onto an asset in
+    service, where the console would never show it."""
+    from sqlmodel import col, select
+
+    from app.features.asset.models import Asset
+    from app.features.audit.models import AuditEntry
+
+    headers, _ = await _admin(client, db_session)
+    source = await machine(db_session, "DUP")
+    target = await machine(db_session, "KEPT")
+    db_session.add(
+        Asset(
+            machine_id=source.id,
+            inventory_number="I-OLD",
+            status="on_loan",
+            borrower="Jean",
+            loan_due=date(2027, 1, 1),
+            purchase_price=749,
+            supplier="Dell",
+        )
+    )
+    db_session.add(Asset(machine_id=target.id, inventory_number="I-NEW"))
+    await db_session.commit()
+    resp = await client.post(
+        f"/api/v1/machines/{target.id}/merge",
+        headers=headers,
+        json={"source_id": str(source.id)},
+    )
+    assert resp.status_code == 200, resp.text
+
+    db_session.expire_all()
+    [asset] = (await db_session.exec(select(Asset))).all()
+    assert asset.inventory_number == "I-NEW"
+    assert asset.supplier == "Dell"
+    assert asset.status == "in_service"
+    assert asset.borrower is None and asset.loan_due is None
+
+    [entry] = (
+        await db_session.exec(
+            select(AuditEntry).where(col(AuditEntry.action) == "asset.delete")
+        )
+    ).all()
+    assert entry.actor == "admin@test.local"
+    assert entry.details["inventory_number"] == "I-OLD"
+    assert entry.details["status"] == "on_loan"
+    assert entry.details["borrower"] == "Jean"
+    assert entry.details["purchase_price"] == "•"
+    assert entry.details["merged_into"] == str(target.id)
+
+
+async def test_a_merge_onto_an_asset_on_loan_takes_the_loan(db_session):
+    from sqlmodel import select
+
+    from app.features.asset.models import Asset
+    from app.features.machine import crud as machine_crud
+    from app.features.machine.models import Machine
+
+    source = await machine(db_session, "DUP")
+    target = await machine(db_session, "KEPT")
+    db_session.add(Asset(machine_id=source.id, borrower="Jean"))
+    db_session.add(Asset(machine_id=target.id, status="on_loan"))
+    await db_session.commit()
+    await machine_crud.merge_into(
+        db_session,
+        target=await db_session.get(Machine, target.id),
+        source=await db_session.get(Machine, source.id),
+    )
+    await db_session.commit()
+    db_session.expire_all()
+    [asset] = (await db_session.exec(select(Asset))).all()
+    assert asset.borrower == "Jean"

@@ -7,7 +7,7 @@ The mails and the export, which leave without a browser to word them, word
 the code here in their reader's language (``worded_instructions``).
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, tzinfo
 from typing import Any
 
 from app.features.alert.models import AlertRule
@@ -16,12 +16,18 @@ from app.features.user.models import Language
 CODE_PREFIX = "alert."
 
 
-def _day(value: Any) -> str:
+def _day(value: Any, zone: tzinfo | None = None) -> str:
+    """A date as the sentence writes it. An instant (« last seen », « pending
+    since ») is the day it was in ``zone`` — the export's reader's — and in
+    UTC without one (a mail: the server does not know where its reader is)."""
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value).strftime("%d/%m/%Y")
+            parsed = datetime.fromisoformat(value)
         except ValueError:
             return value
+        if zone is not None and parsed.tzinfo is not None:
+            parsed = parsed.astimezone(zone)
+        return parsed.strftime("%d/%m/%Y")
     if isinstance(value, date):
         return value.strftime("%d/%m/%Y")
     return "?"
@@ -32,7 +38,16 @@ def _names(items: list[dict[str, Any]] | None, key: str) -> str:
     return ", ".join(names) if names else "?"
 
 
-def french(rule: str, detail: dict[str, Any]) -> str:
+def _days(value: Any, one: str, many: str) -> str:
+    """« 1 jour », « 30 jours »: the threshold agrees with its count."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return f"{value} {many}"
+    return f"{n} {one if n == 1 else many}"
+
+
+def french(rule: str, detail: dict[str, Any], zone: tzinfo | None = None) -> str:
     """The alert in one French sentence."""
     match rule:
         case AlertRule.DISK_LOW:
@@ -50,7 +65,7 @@ def french(rule: str, detail: dict[str, Any]) -> str:
         case AlertRule.REBOOT_PENDING:
             return (
                 "Un redémarrage demandé par Windows Update attend depuis le "
-                f"{_day(detail.get('since'))}."
+                f"{_day(detail.get('since'), zone)}."
             )
         case AlertRule.OS_UNSUPPORTED:
             end = detail.get("end_of_support")
@@ -69,17 +84,17 @@ def french(rule: str, detail: dict[str, Any]) -> str:
                 return f"La garantie se termine le {_day(detail.get('warranty_end'))}."
             return (
                 "La garantie se termine dans moins de "
-                f"{detail.get('threshold_days')} jours."
+                f"{_days(detail.get('threshold_days'), 'jour', 'jours')}."
             )
         case AlertRule.INACTIVE:
             return (
                 "Aucun contact avec le poste depuis le "
-                f"{_day(detail.get('last_seen'))}."
+                f"{_day(detail.get('last_seen'), zone)}."
             )
     return "Alerte."
 
 
-def english(rule: str, detail: dict[str, Any]) -> str:
+def english(rule: str, detail: dict[str, Any], zone: tzinfo | None = None) -> str:
     """The alert in one English sentence."""
     match rule:
         case AlertRule.DISK_LOW:
@@ -96,7 +111,7 @@ def english(rule: str, detail: dict[str, Any]) -> str:
         case AlertRule.REBOOT_PENDING:
             return (
                 "A restart requested by Windows Update has been pending since "
-                f"{_day(detail.get('since'))}."
+                f"{_day(detail.get('since'), zone)}."
             )
         case AlertRule.OS_UNSUPPORTED:
             end = detail.get("end_of_support")
@@ -113,19 +128,24 @@ def english(rule: str, detail: dict[str, Any]) -> str:
         case AlertRule.WARRANTY_ENDING:
             if detail.get("warranty_end"):
                 return f"The warranty ends on {_day(detail.get('warranty_end'))}."
-            return f"The warranty ends within {detail.get('threshold_days')} days."
+            days = _days(detail.get("threshold_days"), "day", "days")
+            return f"The warranty ends within {days}."
         case AlertRule.INACTIVE:
-            return (
-                f"No contact with the computer since {_day(detail.get('last_seen'))}."
-            )
+            return f"No contact with the computer since {_day(detail.get('last_seen'), zone)}."
     return "Alert."
 
 
 _PREFIX = {Language.FR: "Alerte : ", Language.EN: "Alert: "}
 
 
-def _sentence(rule: str, detail: dict[str, Any], language: Language) -> str:
-    text = english(rule, detail) if language == Language.EN else french(rule, detail)
+def _sentence(
+    rule: str, detail: dict[str, Any], language: Language, zone: tzinfo | None = None
+) -> str:
+    text = (
+        english(rule, detail, zone)
+        if language == Language.EN
+        else french(rule, detail, zone)
+    )
     return f"{_PREFIX[language]}{text}"
 
 
@@ -151,11 +171,13 @@ def worded_instructions(
     code: str | None,
     params: dict[str, Any] | None,
     language: Language,
+    zone: tzinfo | None = None,
 ) -> str | None:
     """A verification's instructions in ``language``: worded from the code when
-    the server opened it for an alert, as typed otherwise."""
+    the server opened it for an alert, as typed otherwise. Its instants are
+    the day they were in ``zone`` (an export's), in UTC without one."""
     if code and code.startswith(CODE_PREFIX):
         rule = code.removeprefix(CODE_PREFIX)
         if rule in {r.value for r in AlertRule}:
-            return _sentence(rule, params or {}, language)
+            return _sentence(rule, params or {}, language, zone)
     return instructions
