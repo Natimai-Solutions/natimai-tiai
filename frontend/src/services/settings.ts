@@ -190,6 +190,11 @@ export interface ConsoleSettings {
   env_alert_reboot_pending_days?: number;
   env_alert_warranty_days?: number;
   env_alert_unencrypted_scope?: 'laptops' | 'all';
+  /** Schedules (C3): the zone the console plans in, and the weekly windows
+   * when nothing at risk runs on several postes. Optional: an older server. */
+  console_timezone?: string;
+  env_console_timezone?: string;
+  forbidden_windows?: { days: number[]; start: string; end: string }[];
   /** How mail leaves the console. */
   email: EmailSettings;
   /** The rest of the environment, read-only and never a secret: what an
@@ -220,6 +225,8 @@ export interface SettingsPayload {
   alert_warranty_days?: number;
   alert_unencrypted_scope?: 'laptops' | 'all';
   alert_forbidden_software?: string[];
+  console_timezone?: string | null;
+  forbidden_windows?: { days: number[]; start: string; end: string }[] | null;
   email?: EmailSettingsPayload;
 }
 

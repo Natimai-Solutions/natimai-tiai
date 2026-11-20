@@ -229,6 +229,109 @@
       </q-card-actions>
     </q-card>
 
+    <!-- Schedules (C3): the zone the console plans in, the forbidden windows.
+         Saved on its own. -->
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md">
+      <q-card-section class="text-subtitle1">
+        {{ t('settings.planning.title') }}
+        <div class="text-caption text-muted">{{ t('settings.planning.caption') }}</div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings" class="q-gutter-md">
+        <q-input
+          v-model="planningForm.timezone"
+          :label="t('settings.planning.timezone')"
+          outlined
+          dense
+          maxlength="64"
+          :hint="
+            t('settings.planning.timezoneHint', { zone: settings.env_console_timezone ?? 'UTC' })
+          "
+          :disable="!canWrite"
+        />
+        <div>
+          <div class="text-caption text-muted">{{ t('settings.planning.windows') }}</div>
+          <div
+            v-for="(w, i) in planningForm.windows"
+            :key="i"
+            class="row items-center q-col-gutter-sm q-mb-xs"
+          >
+            <q-select
+              v-model="w.days"
+              class="col-12 col-sm-6"
+              :options="planningDayOptions"
+              multiple
+              emit-value
+              map-options
+              use-chips
+              outlined
+              dense
+              :label="t('settings.planning.windowDays')"
+              :disable="!canWrite"
+            />
+            <q-input
+              v-model="w.start"
+              class="col-5 col-sm-2"
+              type="time"
+              outlined
+              dense
+              stack-label
+              :label="t('settings.planning.windowStart')"
+              :disable="!canWrite"
+            />
+            <q-input
+              v-model="w.end"
+              class="col-5 col-sm-2"
+              type="time"
+              outlined
+              dense
+              stack-label
+              :label="t('settings.planning.windowEnd')"
+              :disable="!canWrite"
+            />
+            <div class="col-2 col-sm-2">
+              <q-btn
+                v-if="canWrite"
+                flat
+                round
+                dense
+                icon="remove_circle_outline"
+                :aria-label="t('settings.planning.removeWindow')"
+                @click="planningForm.windows.splice(i, 1)"
+              />
+            </div>
+          </div>
+          <q-btn
+            v-if="canWrite"
+            flat
+            dense
+            no-caps
+            color="primary"
+            icon="add"
+            :label="t('settings.planning.addWindow')"
+            @click="
+              planningForm.windows.push({ days: [0, 1, 2, 3, 4], start: '07:30', end: '12:00' })
+            "
+          />
+          <div v-if="planningError" class="text-caption text-negative">
+            {{ t('settings.planning.windowInvalid') }}
+          </div>
+          <div class="text-caption text-muted q-mt-xs">
+            {{ t('settings.planning.windowsHint') }}
+          </div>
+        </div>
+      </q-card-section>
+      <q-card-actions v-if="canWrite && settings" align="right">
+        <q-btn
+          color="primary"
+          :label="t('settings.save')"
+          :loading="savingPlanning"
+          :disable="planningError"
+          @click="savePlanning"
+        />
+      </q-card-actions>
+    </q-card>
+
     <!-- Parc thresholds: what makes the console call a poste « périmé »,
          « inactif », short of disk, due for renewal or behind on its agent,
          and how long a queued command waits for it. The environment gives the
@@ -929,6 +1032,57 @@ async function saveAlerts() {
   }
 }
 
+// The schedules card (C3): the console's zone, the forbidden windows.
+const savingPlanning = ref(false);
+const planningForm = reactive({
+  timezone: '',
+  windows: [] as { days: number[]; start: string; end: string }[],
+});
+const planningDayOptions = computed(() =>
+  WEEKDAY_KEYS.map((_, i) => ({ label: weekdayName(i), value: i })),
+);
+const planningError = computed(() =>
+  planningForm.windows.some((w) => !w.days.length || !w.start || !w.end || w.start >= w.end),
+);
+
+function planningSnapshot(): string {
+  return JSON.stringify({
+    timezone: planningForm.timezone.trim(),
+    windows: planningForm.windows.map((w) => ({
+      days: [...w.days].sort((a, b) => a - b),
+      start: w.start,
+      end: w.end,
+    })),
+  });
+}
+
+function fillPlanningForm(s: ConsoleSettings) {
+  planningForm.timezone = s.console_timezone ?? '';
+  planningForm.windows = (s.forbidden_windows ?? []).map((w) => ({ ...w, days: [...w.days] }));
+  saved.planning = planningSnapshot();
+}
+
+async function savePlanning() {
+  if (planningError.value) return;
+  savingPlanning.value = true;
+  try {
+    settings.value = await updateSettings({
+      console_timezone: planningForm.timezone.trim() || null,
+      forbidden_windows: planningForm.windows.map((w) => ({
+        days: [...w.days].sort((a, b) => a - b),
+        start: w.start,
+        end: w.end,
+      })),
+    });
+    fillPlanningForm(settings.value);
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
+  } catch (e) {
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
+  } finally {
+    savingPlanning.value = false;
+  }
+}
+
 // The parc thresholds card. The agent version is a string: '' = automatic.
 const savingFleet = ref(false);
 const fleetForm = reactive({
@@ -1082,6 +1236,7 @@ const saved = reactive({
   maintenance: '',
   usage: '',
   alerts: '',
+  planning: '',
   fleet: '',
   schedule: '',
   email: '',
@@ -1093,6 +1248,7 @@ const unsavedCards = computed(() => {
   if (formSnapshot(form) !== saved.maintenance) cards.push('maintenance');
   if (formSnapshot(usageForm) !== saved.usage) cards.push('usage');
   if (alertSnapshot() !== saved.alerts) cards.push('alerts');
+  if (planningSnapshot() !== saved.planning) cards.push('planning');
   if (formSnapshot(fleetForm) !== saved.fleet) cards.push('fleet');
   if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('schedule');
   if (formSnapshot(emailForm) !== saved.email) cards.push('email');
@@ -1184,6 +1340,7 @@ async function load() {
     fillMaintenanceForm(settings.value);
     fillUsageForm(settings.value);
     fillAlertForm(settings.value);
+    fillPlanningForm(settings.value);
     fillFleetForm(settings.value);
     fillScheduleForm(settings.value);
     fillEmailForm(settings.value);

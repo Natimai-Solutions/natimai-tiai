@@ -8,7 +8,8 @@ import {
   createCommands,
   type CommandAction,
 } from 'src/services/commands';
-import { apiErrorMessage } from 'src/services/errors';
+import { apiErrorCode, apiErrorMessage } from 'src/services/errors';
+import { windowText, type ForbiddenWindow } from 'src/services/schedules';
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import {
   approveReenroll,
@@ -118,10 +119,12 @@ export function useMachineBulkActions(options: {
         return;
       }
       try {
-        const res = await createCommands({ type: action.type, machine_ids: ids });
-        notify($q, () => bulkSendNotification(res));
-        selected.value = [];
+        await sendCommand(action, ids, false);
       } catch (e) {
+        if (apiErrorCode(e) === 'command.forbidden_window') {
+          confirmForbidden(action, ids, e);
+          return;
+        }
         notify($q, () => ({
           type: 'negative',
           message: apiErrorMessage(e, t('machines.bulk.sendFailed')),
@@ -130,6 +133,45 @@ export function useMachineBulkActions(options: {
     } finally {
       sending.delete(action.type);
     }
+  }
+
+  async function sendCommand(action: CommandAction, ids: string[], confirmed: boolean) {
+    const res = await createCommands({
+      type: action.type,
+      machine_ids: ids,
+      ...(confirmed ? { confirm_forbidden_window: true } : {}),
+    });
+    notify($q, () => bulkSendNotification(res));
+    selected.value = [];
+  }
+
+  /**
+   * Inside a forbidden window (Paramètres): a risky command for several
+   * postes goes only once the person says so — the window named.
+   */
+  function confirmForbidden(action: CommandAction, ids: string[], error: unknown) {
+    const details = (
+      error as { response?: { data?: { error?: { details?: { window?: ForbiddenWindow } } } } }
+    )?.response?.data?.error?.details;
+    const window = details?.window ? windowText(details.window) : '';
+    liveDialog($q, () => ({
+      title: t('schedules.forbiddenConfirm.title'),
+      message: t('schedules.forbiddenConfirm.message', { window, count: ids.length }),
+      cancel: { flat: true, noCaps: true, label: t('schedules.forbiddenConfirm.cancel') },
+      ok: { color: 'negative', noCaps: true, label: t('schedules.forbiddenConfirm.ok') },
+      persistent: true,
+    })).onOk(() => {
+      void (async () => {
+        try {
+          await sendCommand(action, ids, true);
+        } catch (e) {
+          notify($q, () => ({
+            type: 'negative',
+            message: apiErrorMessage(e, t('machines.bulk.sendFailed')),
+          }));
+        }
+      })();
+    });
   }
 
   async function wakeBulk(ids: string[]) {

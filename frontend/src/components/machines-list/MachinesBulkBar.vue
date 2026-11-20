@@ -2,7 +2,10 @@
   <!-- Shown only when there is a selection and something the account may do
        with it: a bar of buttons that all refuse would only be noise. -->
   <div
-    v-if="count && (actionGroups.length || canPlace || canCheck || canDeploy || canReenroll)"
+    v-if="
+      count &&
+      (actionGroups.length || canPlace || canCheck || canDeploy || canReenroll || canSchedule)
+    "
     class="row items-center q-mb-sm"
   >
     <div class="text-caption text-muted q-mr-md">
@@ -49,6 +52,17 @@
       class="q-mr-sm"
       @click="emit('reenroll')"
     />
+    <!-- C3: the same selection, later or every week. -->
+    <q-btn
+      v-if="canSchedule"
+      flat
+      dense
+      color="primary"
+      icon="event_repeat"
+      :label="t('machines.bulk.schedule')"
+      class="q-mr-sm"
+      @click="emit('schedule')"
+    />
     <q-btn-dropdown
       v-if="actionGroups.length"
       color="primary"
@@ -93,6 +107,8 @@ defineProps<{
   canDeploy?: boolean;
   /** Allowing re-enrolment: machine:write. */
   canReenroll?: boolean;
+  /** Planning a command on the selection: schedule:write. */
+  canSchedule?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -100,6 +116,7 @@ const emit = defineEmits<{
   ask: [];
   deploy: [];
   reenroll: [];
+  schedule: [];
   run: [action: CommandAction];
 }>();
 </script>

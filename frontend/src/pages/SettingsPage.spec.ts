@@ -103,6 +103,9 @@ function consoleSettings(): ConsoleSettings {
     alert_warranty_days: 30,
     alert_unencrypted_scope: 'laptops',
     alert_forbidden_software: [],
+    console_timezone: 'Pacific/Tahiti',
+    env_console_timezone: 'Pacific/Tahiti',
+    forbidden_windows: [{ days: [0, 1, 2, 3, 4], start: '07:30', end: '12:00' }],
   };
   return value;
 }
@@ -351,6 +354,53 @@ describe('SettingsPage', () => {
       field(page, 'Fin de garantie signalée').vm.$emit('update:modelValue', 0);
       await flushPromises();
       await saveCard(page, 'Alertes');
+      expect(updateSettings).not.toHaveBeenCalled();
+      page.app.unmount();
+    });
+  });
+
+  describe('the schedules card', () => {
+    beforeEach(() => {
+      vi.mocked(getSettings).mockResolvedValue(consoleSettings());
+      vi.mocked(updateSettings).mockReset();
+    });
+
+    it('saves the zone and the windows, days in order', async () => {
+      vi.mocked(updateSettings).mockResolvedValue(consoleSettings());
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const vm = page.wrapper.vm as unknown as {
+        planningForm: {
+          timezone: string;
+          windows: { days: number[]; start: string; end: string }[];
+        };
+      };
+      expect(vm.planningForm.windows).toEqual([
+        { days: [0, 1, 2, 3, 4], start: '07:30', end: '12:00' },
+      ]);
+      vm.planningForm.timezone = ' Europe/Paris ';
+      vm.planningForm.windows.push({ days: [5, 3], start: '13:00', end: '17:00' });
+      await flushPromises();
+      expect(blocksUnload()).toBe(true);
+      await saveCard(page, 'Planifications');
+      expect(updateSettings).toHaveBeenCalledWith({
+        console_timezone: 'Europe/Paris',
+        forbidden_windows: [
+          { days: [0, 1, 2, 3, 4], start: '07:30', end: '12:00' },
+          { days: [3, 5], start: '13:00', end: '17:00' },
+        ],
+      });
+      page.app.unmount();
+    });
+
+    it('does not save a window that ends before it starts', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const vm = page.wrapper.vm as unknown as {
+        planningForm: { windows: { days: number[]; start: string; end: string }[] };
+      };
+      vm.planningForm.windows[0]!.end = '07:00';
+      await flushPromises();
+      expect(document.body.textContent).toContain('Des jours, et une fin après le début');
+      await saveCard(page, 'Planifications');
       expect(updateSettings).not.toHaveBeenCalled();
       page.app.unmount();
     });

@@ -100,6 +100,14 @@ gère naturellement les postes éteints.
   des compteurs et des alertes, et la fiche dit si le matériel peut passer à
   **Windows 11**. Droit à part (`asset`), pour que le prix d'achat ne soit pas
   lu de tous.
+- **Planifications** — une commande lancée plus tard ou chaque semaine, sur
+  une salle, un bâtiment, une sélection ou tout le parc, à l'heure du fuseau
+  de la console. Option « réveiller d'abord » et « éteindre ensuite » (seuls
+  les postes réveillés, jamais une session ouverte), plages interdites pendant
+  les heures de cours, et **déploiement par étapes** (salle pilote, observation,
+  seuil d'échec) pour les mises à jour et les paquets. Chaque exécution
+  revérifie le compte et les droits de son auteur : planifier ne permet pas de
+  garder un droit perdu.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
@@ -197,7 +205,8 @@ l'exécution est figée dans le binaire de l'agent.
 | Maintenance (cycles, responsables, séances) | 🟢 Livré |
 | Alertes (règles fermées, résumé, e-mail, vérification automatique) | 🟢 Livré |
 | Actifs (achat, garantie, prêts, import, étiquettes QR, Windows 11) | 🟢 Livré |
-| Planification, signalement, conformité… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
+| Planifications (fenêtres, réveil et extinction, déploiement par étapes) | 🟢 Livré |
+| Signalement, conformité… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
 | Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement

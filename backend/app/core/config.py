@@ -485,6 +485,16 @@ class Settings(BaseSettings):
     # are never purged.
     ALERT_RETENTION_DAYS: int = Field(default=400, ge=1)
 
+    # --- Schedules (dev/plan-evolutions-itil.md, C3) ---
+    # The zone the console plans in: an hour in UTC means nothing to whoever
+    # plans « mercredi à 18 h ». Initial value only — changed in Paramètres.
+    CONSOLE_TIMEZONE: str = "Pacific/Tahiti"
+    # How long a command created by a schedule waits for its poste: a poste
+    # woken takes minutes to call in. Initial value of each new schedule.
+    SCHEDULE_COMMAND_TTL_MINUTES: int = Field(default=180, ge=10, le=60 * 24)
+    # How long a schedule's run history is kept.
+    SCHEDULE_RUN_RETENTION_DAYS: int = Field(default=180, ge=1)
+
     # --- Rooms ---
     # How postes are filed into rooms. ``manual``: from the console, by hand.
     # ``ad_ou``: by the organisational unit the computer object sits in — the

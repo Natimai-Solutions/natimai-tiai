@@ -222,6 +222,18 @@ class Command(SQLModel, table=True):
     # a package changed since — by whoever holds package:write — is not what
     # gets run; and the SHA-256 of its files, which stay downloadable (and on
     # disk) while the command is open, whatever happens to the package.
+    # Created by a schedule's run (``features.schedule``), and for a
+    # deployment in rings, at which stage. SET NULL: the run purged, the
+    # command stays history.
+    schedule_run_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("schedule_runs.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    schedule_stage: int | None = None
     package_digest: str | None = Field(default=None, max_length=64)
     package_files: list[str] | None = Field(
         default=None, sa_column=Column(JSONB, nullable=True)

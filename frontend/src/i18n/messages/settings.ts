@@ -76,6 +76,22 @@ const fr = {
     forbiddenHint:
       'Un morceau du nom du programme, deux caractères au moins (Entrée pour ajouter) · insensible à la casse',
   },
+  planning: {
+    title: 'Planifications',
+    caption:
+      'Le fuseau dans lequel la console planifie, et les plages où rien de risqué ne part sur plusieurs postes (les heures de cours).',
+    timezone: 'Fuseau horaire',
+    timezoneHint: "Nom IANA, par exemple Pacific/Tahiti · variable d'environnement : {zone}",
+    windows: 'Plages interdites',
+    windowsHint:
+      'Une planification à risque n’y est pas acceptée ; une commande à risque envoyée à plusieurs postes y demande une confirmation de plus. Une commande sur un seul poste reste libre.',
+    windowDays: 'Jours',
+    windowStart: 'De',
+    windowEnd: 'À',
+    addWindow: 'Ajouter une plage',
+    removeWindow: 'Retirer la plage',
+    windowInvalid: 'Des jours, et une fin après le début',
+  },
   fleet: {
     title: 'Supervision du parc',
     caption:
@@ -275,6 +291,7 @@ const fr = {
       alerts: 'Alertes',
       fleet: 'Seuils du parc',
       schedule: 'Calendrier des e-mails',
+      planning: 'Planifications',
       email: 'Envoi des e-mails',
     },
   },
@@ -362,6 +379,22 @@ const en: Translation<typeof fr> = {
     forbidden: 'Forbidden software',
     forbiddenHint:
       'Part of the program name, two characters at least (Enter to add) · case-insensitive',
+  },
+  planning: {
+    title: 'Schedules',
+    caption:
+      'The zone the console plans in, and the windows when nothing at risk runs on several computers (class hours).',
+    timezone: 'Time zone',
+    timezoneHint: 'IANA name, for instance Pacific/Tahiti · environment variable: {zone}',
+    windows: 'Forbidden windows',
+    windowsHint:
+      'A schedule at risk is not accepted in them; a risky command sent to several computers asks for one more confirmation. A command on one computer stays free.',
+    windowDays: 'Days',
+    windowStart: 'From',
+    windowEnd: 'To',
+    addWindow: 'Add a window',
+    removeWindow: 'Remove the window',
+    windowInvalid: 'Days, and an end after the start',
   },
   fleet: {
     title: 'Fleet monitoring',
@@ -556,6 +589,7 @@ const en: Translation<typeof fr> = {
       alerts: 'Alerts',
       fleet: 'Fleet thresholds',
       schedule: 'E-mail schedule',
+      planning: 'Schedules',
       email: 'Sending e-mails',
     },
   },

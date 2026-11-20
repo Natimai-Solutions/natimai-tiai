@@ -96,6 +96,14 @@ class ErrorCode(enum.StrEnum):
     ASSET_IMPORT_UNREADABLE = "asset.import.unreadable"
     # An import file over the limits — rows or bytes: to be split.
     ASSET_IMPORT_TOO_LARGE = "asset.import.too_large"
+    # A command at risk for several postes, inside a forbidden window: sent
+    # only once confirmed (``schedule.windows``).
+    COMMAND_FORBIDDEN_WINDOW = "command.forbidden_window"
+    SCHEDULE_NOT_FOUND = "schedule.not_found"
+    # A schedule that would run inside a forbidden window.
+    SCHEDULE_FORBIDDEN_WINDOW = "schedule.forbidden_window"
+    # A one-off planned in the past.
+    SCHEDULE_IN_PAST = "schedule.in_past"
     ROOM_NAME_TAKEN = "room.name.taken"
     # ROOM_SOURCE is a directory mode: postes are filed by the directory, and
     # a placement made by hand here would be undone on the next inventory.

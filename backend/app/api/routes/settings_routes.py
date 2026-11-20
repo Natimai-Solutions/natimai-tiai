@@ -9,7 +9,13 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.api.deps import CurrentUser, SessionDep, require_permission
 from app.api.fields import Email
@@ -21,6 +27,7 @@ from app.features.audit import crud as audit
 from app.features.machine import crud as machine_crud
 from app.features.maintenance.reach import owner_reach
 from app.features.notification import probe
+from app.features.schedule import windows
 from app.features.setting import crud
 from app.features.setting import email_policy as mail
 from app.features.setting.environment import environment_overview
@@ -181,6 +188,11 @@ class SettingsOut(BaseModel):
     alert_auto_check_rules: list[str] = Field(default_factory=list)
     env_alert_reboot_pending_days: int = 7
     env_alert_unencrypted_scope: str = "laptops"
+    # Schedules (C3): the zone the console plans in, and the weekly windows
+    # when nothing at risk runs on several postes.
+    console_timezone: str = "UTC"
+    env_console_timezone: str = "UTC"
+    forbidden_windows: list[dict[str, Any]] = Field(default_factory=list)
     # How mail leaves the console: the console's values, the environment's.
     email: EmailSettingsOut
     # The rest of the environment an administrator may want to check without
@@ -250,6 +262,24 @@ class EmailSettingsIn(BaseModel):
         return {name: getattr(self, name) for name in self.model_fields_set}
 
 
+class ForbiddenWindowIn(BaseModel):
+    """A weekly range when nothing at risk runs on several postes: days
+    (0 = Monday), from ``start`` to ``end`` local, within the day."""
+
+    days: list[int] = Field(min_length=1, max_length=7)
+    start: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "ForbiddenWindowIn":
+        if any(d < 0 or d > 6 for d in self.days):
+            raise ValueError("a weekday is 0 (Monday) to 6")
+        if self.start >= self.end:
+            raise ValueError("a window ends after it starts, within the day")
+        self.days = sorted(set(self.days))
+        return self
+
+
 class SettingsUpdate(BaseModel):
     """Partial: only the supplied fields are written. ``owner_id`` set to
     null clears the default owner."""
@@ -300,6 +330,20 @@ class SettingsUpdate(BaseModel):
     alert_auto_check_rules: list[AlertRule] | None = Field(
         default=None, max_length=len(ALL_RULES)
     )
+
+    # Schedules. A zone the server does not know is refused; null hands it
+    # back to CONSOLE_TIMEZONE. Windows are written whole.
+    console_timezone: str | None = Field(default=None, max_length=64)
+    forbidden_windows: list[ForbiddenWindowIn] | None = Field(
+        default=None, max_length=20
+    )
+
+    @field_validator("console_timezone")
+    @classmethod
+    def _zone(cls, value: str | None) -> str | None:
+        if value is not None and not windows.valid_zone(value):
+            raise ValueError("unknown time zone")
+        return value
 
     # How mail leaves: saved by its own card, so its fields arrive together.
     email: EmailSettingsIn | None = None
@@ -373,6 +417,7 @@ async def _out(session: SessionDep) -> SettingsOut:
     fleet = await crud.fleet_policy(session, values)
     schedule = await crud.schedule_policy(session, values)
     alerts = await crud.alert_policy(session, values)
+    planning = await windows.schedule_policy(session, values)
     # Also refreshes what this process's ``queue_email`` reads: after a
     # patch, the new mail settings apply to the very next queued mail.
     stored = await mail.load_stored(session, values)
@@ -440,6 +485,9 @@ async def _out(session: SessionDep) -> SettingsOut:
         ],
         env_alert_reboot_pending_days=env.ALERT_REBOOT_PENDING_DAYS,
         env_alert_unencrypted_scope=env.ALERT_UNENCRYPTED_SCOPE,
+        console_timezone=planning.zone_name,
+        env_console_timezone=env.CONSOLE_TIMEZONE,
+        forbidden_windows=[w.as_json() for w in planning.forbidden],
         email=_email_out(stored),
         environment=[
             EnvGroupOut(
@@ -534,6 +582,7 @@ _SIMPLE_KEYS = {
     "alert_reboot_pending_days": crud.KEY_ALERT_REBOOT_DAYS,
     "alert_warranty_days": crud.KEY_ALERT_WARRANTY_DAYS,
     "alert_unencrypted_scope": crud.KEY_ALERT_UNENCRYPTED_SCOPE,
+    "console_timezone": windows.KEY_TIMEZONE,
 }
 
 # List settings: written whole, without duplicates, in the order sent.
@@ -547,6 +596,14 @@ _LIST_KEYS = {
 async def _write_lists(
     session: SessionDep, payload: SettingsUpdate, *, actor: str
 ) -> None:
+    if "forbidden_windows" in payload.model_fields_set:
+        sent_windows = payload.forbidden_windows
+        await crud.set_value(
+            session,
+            windows.KEY_FORBIDDEN,
+            None if sent_windows is None else [w.model_dump() for w in sent_windows],
+            actor=actor,
+        )
     for field in sorted(payload.model_fields_set & _LIST_KEYS.keys()):
         sent: list[str] | None = getattr(payload, field)
         value = None if sent is None else list(dict.fromkeys(str(v) for v in sent))
@@ -590,6 +647,13 @@ def _audit_value(value: object) -> str | None:
     the codes of the rules, not the Python representation of the enums."""
     if value is None:
         return None
+    if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
+        # Forbidden windows: « 0,1,2,3,4 08:00–12:00 ».
+        return "; ".join(
+            f"{','.join(str(d) for d in v.get('days', []))} "
+            f"{v.get('start')}–{v.get('end')}"
+            for v in value
+        )
     if isinstance(value, (list, tuple, set, frozenset)):
         # Each value once, as stored; an empty list (every rule turned off)
         # is not a null (back to the default, every rule on).

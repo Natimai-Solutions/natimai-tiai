@@ -50,7 +50,6 @@ from app.features.base import contains, utcnow
 from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
 from app.features.command import texts as command_texts
-from app.features.command.models import Command, CommandStatus, CommandType
 from app.features.inventory.models import (
     Disk,
     Gpu,
@@ -96,8 +95,7 @@ from app.features.user.models import Language, User
 from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import Scope, machine_clause, machine_visible, restrict
 from app.features.windows_update.models import WindowsUpdate
-from app.features.wol import relay as wol_relay
-from app.features.wol.sender import wake as emit_wake
+from app.features.wol import dispatch as wol_dispatch
 
 router = APIRouter(
     prefix="/machines",
@@ -2139,19 +2137,15 @@ async def wake_machines(
     )
     # Out of scope reads as unknown: reported like a stale id, below.
     machines = {m.id: m for m in rows.all()}
-    # Relayed: what the whole selection shares is read once — the wakes
-    # already open, then each site's relays the first time it is met — so
-    # that the cost follows the number of sites, not of postes.
-    batch = (
-        await wol_relay.open_batch(session, machines.values())
-        if settings.WOL_RELAY_ENABLED
-        else None
-    )
+    # In the order asked, a poste named twice twice: its second wake finds
+    # the first one waiting, and says so.
+    known = [machines[m] for m in payload.machine_ids if m in machines]
+    outcomes = iter(await wol_dispatch.wake(session, known, created_by=user.email))
 
     results: list[WakeOut] = []
     for machine_id in payload.machine_ids:
-        machine = machines.get(machine_id)
-        if machine is None:
+        outcome = next(outcomes) if machine_id in machines else None
+        if outcome is None:
             # Reported rather than 404'd: one stale id in a selection of thirty
             # must not cost the other twenty-nine their wake. Nothing is
             # recorded — there is no machine left to record it against.
@@ -2167,59 +2161,10 @@ async def wake_machines(
                 )
             )
             continue
-
-        if settings.WOL_RELAY_ENABLED:
-            # Queued for a poste of the site, or refused on the spot; either
-            # way the relay module writes the history row itself.
-            outcome = await wol_relay.queue_relayed_wake(
-                session, machine, created_by=user.email, batch=batch
-            )
-            results.append(
-                WakeOut(
-                    machine_id=machine.id,
-                    hostname=machine.hostname,
-                    ok=outcome.ok,
-                    detail=outcome.detail,
-                    detail_code=outcome.code,
-                    detail_params=outcome.params,
-                )
-            )
-            continue
-
-        outcome = await emit_wake(
-            mac=machine.mac_address,
-            ip=machine.ip_address,
-            prefix_length=machine.ip_prefix_length,
-        )
-        now = utcnow()
-        session.add(
-            Command(
-                machine_id=machine.id,
-                type=CommandType.WAKE_ON_LAN.value,
-                status=(
-                    CommandStatus.SUCCEEDED.value
-                    if outcome.ok
-                    else CommandStatus.FAILED.value
-                ),
-                created_by=user.email,
-                created_at=now,
-                # Already terminal, so it never had a life to expire — the sweep
-                # only ever touches PENDING rows. Set to the creation instant so
-                # the column reads as "was never offered to anyone" rather than
-                # dangling an hour into the future.
-                expires_at=now,
-                started_at=now,
-                finished_at=now,
-                result_output=outcome.detail if outcome.ok else None,
-                error=None if outcome.ok else outcome.detail,
-                result_code=outcome.code,
-                result_params=outcome.params,
-            )
-        )
         results.append(
             WakeOut(
-                machine_id=machine.id,
-                hostname=machine.hostname,
+                machine_id=machine_id,
+                hostname=outcome.machine.hostname,
                 ok=outcome.ok,
                 detail=outcome.detail,
                 detail_code=outcome.code,

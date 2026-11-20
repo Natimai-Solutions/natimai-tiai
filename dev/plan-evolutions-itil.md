@@ -1,6 +1,6 @@
 # Évolutions inspirées d'ITIL et des autres plateformes : document de travail
 
-> **📝 Document de travail — 2026-11-19, révisé le 2026-11-20. ✅ C1 (alertes) et C2 (actifs) livrés le 2026-11-20 ; écarts en §8.** Il porte sur les fonctionnalités propres à la console. Le fonctionnement avec GLPI, décidé le 2026-11-20, est mis de côté dans son propre document, `plan-connecteur-glpi.md`. Il ordonne onze chantiers, donne pour chacun le cadrage, l'esquisse technique et les jalons, et liste en §6 les décisions à prendre avant de coder. Conformément à l'usage du dépôt, chaque chantier retenu aura son propre `plan-*.md` détaillé au moment de l'ouvrir ; celui-ci sert à choisir et à ordonner.
+> **📝 Document de travail — 2026-11-19, révisé le 2026-11-20. ✅ C1 (alertes), C2 (actifs) et C3 (planifications) livrés le 2026-11-20 ; écarts en §8.** Il porte sur les fonctionnalités propres à la console. Le fonctionnement avec GLPI, décidé le 2026-11-20, est mis de côté dans son propre document, `plan-connecteur-glpi.md`. Il ordonne onze chantiers, donne pour chacun le cadrage, l'esquisse technique et les jalons, et liste en §6 les décisions à prendre avant de coder. Conformément à l'usage du dépôt, chaque chantier retenu aura son propre `plan-*.md` détaillé au moment de l'ouvrir ; celui-ci sert à choisir et à ordonner.
 
 > Origine : comparaison avec GLPI, Snipe-IT, Lansweeper, Intune, PDQ Deploy, Action1, NinjaOne et Tactical RMM, relue au travers des pratiques ITIL 4. Les estimations sont des ordres de grandeur en jours de développement, tests et documentation compris, validation sur poste réel non comprise.
 
@@ -247,8 +247,8 @@ Au-delà de N postes, une commande à risque attend l'accord d'un second compte 
 4. ~~Droits sur les actifs.~~ **Tranché le 2026-11-20** : ressource `asset` à part, accordée par défaut aux seuls administrateurs.
 5. ~~Poste réformé.~~ **Tranché le 2026-11-20** : sorti des compteurs et des alertes ; son jeton n'est pas révoqué (la réforme reste réversible).
 6. ~~Chiffrement.~~ **Tranché le 2026-11-20** : portables et tablettes par défaut, tous les postes sur réglage.
-7. **Fuseau de la console.** Un seul fuseau pour tout le serveur, ou un par emplacement ? Un seul suffit tant que le parc est en Polynésie.
-8. **Enchaînements de C3.** « Réveiller, mettre à jour, éteindre » suffit-il, ou faut-il des séquences libres ? Le plan propose de s'en tenir aux deux options.
+7. ~~Fuseau de la console.~~ **Tranché le 2026-11-20** : un seul fuseau pour toute la console, réglage de Paramètres (`CONSOLE_TIMEZONE`, Tahiti par défaut).
+8. ~~Enchaînements de C3.~~ **Tranché le 2026-11-20** : les deux options, « réveiller d'abord » et « éteindre ensuite », pas de séquences libres.
 9. **Administrateurs locaux (C5).** Collecte à arbitrer avec le DPO, comme le nom de session.
 10. ~~Périmètre de la prochaine version.~~ **Tranché le 2026-11-20** : C1 et C2 d'abord.
 
@@ -296,4 +296,20 @@ Au-delà de N postes, une commande à risque attend l'accord d'un second compte 
 - **Âge du matériel** : compté depuis la date d'achat de la fiche matériel, à défaut la date du BIOS (textes de Paramètres et `DEPLOYMENT.md` corrigés).
 - **Page d'arrivée** : un compte qui ne lit que les achats (`asset:read` sans `machine:read`) arrive sur « Matériels ».
 - **Export** : cinq colonnes d'actif (n° d'inventaire, statut, date d'achat, fin de garantie, fournisseur) offertes aux seuls comptes qui détiennent `asset:read` ; pas le prix, un classeur voyageant plus loin que la console.
+
+### C3 — Planifications
+
+- **Agent non modifié, confirmé** : l'agent ne refuse un arrêt ou un redémarrage que dans les dix minutes qui suivent un démarrage ou une autre action d'alimentation (`power.go`). L'extinction du soir passe ; « éteindre ensuite » attend quinze minutes après le réveil.
+- **Mécanisme** : tables `schedules` et `schedule_runs`, `commands.schedule_run_id` et `schedule_stage` (migration `0050_schedules`). La tâche `run_schedules` du worker passe chaque minute ; chaque échéance est réservée sous verrou de ligne (`FOR UPDATE SKIP LOCKED`) et avancée à la suivante dans la même transaction. Les commandes passent par le même chemin que la console (`command.dispatch`, `wol.dispatch`), extrait de la route à cette occasion.
+- **Au nom de qui** : à chaque exécution, le compte de l'auteur doit exister, être actif et détenir `schedule:write`, `command:execute` et, pour une commande à risque ou « éteindre ensuite », `risky_command:execute` ; la cible est résolue dans sa portée du moment. Sinon la planification est **suspendue**, l'exécution le dit, le journal l'inscrit (`schedule.suspend`) et l'auteur reçoit un e-mail. Modifier ou réactiver une planification la reprend au nom de celui qui le fait.
+- **Ressource `schedule`** (lecture, écriture), accordée par défaut aux seuls administrateurs. Un compte restreint voit ses propres planifications et celles qui visent une salle, un bâtiment ou des postes tous dans sa portée ; une planification sur tout le parc, un domaine ou un emplacement, écrite par un autre, ne le regarde pas.
+- **Cibles** : celles de `POST /commands`, plus la salle et le bâtiment (ajoutés aussi à `POST /commands`). Une salle ou un bâtiment disparu suspend la planification.
+- **Retard** : une échéance manquée de plus d'une heure (worker arrêté) n'est pas rattrapée ; l'exécution est notée « non exécutée » et la suivante calculée. Une plage interdite ajoutée après coup fait sauter l'exécution de la même façon.
+- **Arrêt et redémarrage planifiés** : un poste où une session est ouverte est laissé de côté, comme pour « éteindre ensuite ». Une planification peut aussi être un simple réveil (« allumer la salle à 7 h 30 »).
+- **Éteindre ensuite** : seulement les postes que l'exécution a réveillés, une fois leur commande terminée (ou expirée), au moins quinze minutes après le réveil, et jamais un poste où une session est ouverte ; un poste déjà éteint compte comme éteint.
+- **Plages interdites** : plages hebdomadaires dans Paramètres, dans le fuseau de la console. Refus à l'écriture d'une planification à risque (`schedule.forbidden_window`) ; une commande à risque envoyée à la main à plusieurs postes demande une confirmation de plus (`command.forbidden_window`, `confirm_forbidden_window`). Un seul poste reste libre.
+- **Anneaux** : pour `wu_install`, `wu_install_full` et `package_install` ; deux à cinq étapes, chacune une cible ; délai d'observation (1 à 336 h) et seuil d'échec (%, sur les postes qui ont répondu). Une étape dont aucun poste n'a répondu arrête aussi le déploiement (`ring_no_result`) plutôt que de passer au parc à l'aveugle. Arrêt inscrit au journal (`schedule.halt`) et e-mail à l'auteur.
+- **Fusion** : une planification qui vise le poste doublon vise désormais le poste gardé ; l'historique des exécutions est laissé tel quel.
+- **Conservation** : historique des exécutions purgé après `SCHEDULE_RUN_RETENTION_DAYS` (180 jours).
+- **Console** : page Planifications (liste, exécutions, réactivation, suppression), boutons « Planifier » sur la page d'une salle et dans la barre de sélection de la liste des postes, carte « Planifications » des Paramètres (fuseau, plages interdites). Les heures sont envoyées et affichées dans le fuseau de la console, quel que soit celui du navigateur.
 

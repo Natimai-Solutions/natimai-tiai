@@ -22,6 +22,7 @@ const fr = {
     audit: "Journal d'audit",
     package: 'Paquets logiciels',
     asset: 'Actifs (achat, garantie, prêts)',
+    schedule: 'Planifications',
   },
   /** What granting it lets someone do (`label`), and a sentence where the label
    *  alone would be read two ways (`hint`). */
@@ -120,6 +121,16 @@ const fr = {
         hint: 'Saisir et importer les actifs, déclarer un prêt ou une réforme, imprimer les étiquettes.',
       },
     },
+    schedule: {
+      read: {
+        label: 'Consulter',
+        hint: 'Voir les planifications et leurs exécutions.',
+      },
+      write: {
+        label: 'Gérer',
+        hint: 'Planifier une commande, la modifier, la suspendre. Il faut aussi le droit d’exécuter la commande planifiée.',
+      },
+    },
   },
   /** `{resource} — {action}`, for lists that show what a group grants. */
   named: '{resource} — {action}',
@@ -145,6 +156,7 @@ const en: Translation<typeof fr> = {
     audit: 'Audit log',
     package: 'Software packages',
     asset: 'Assets (purchase, warranty, loans)',
+    schedule: 'Schedules',
   },
   entries: {
     machine: {
@@ -239,6 +251,16 @@ const en: Translation<typeof fr> = {
       write: {
         label: 'Manage',
         hint: 'Enter and import assets, record a loan or a retirement, print the labels.',
+      },
+    },
+    schedule: {
+      read: {
+        label: 'View',
+        hint: 'See the schedules and their runs.',
+      },
+      write: {
+        label: 'Manage',
+        hint: 'Schedule a command, change it, suspend it. The right to run the scheduled command is needed too.',
       },
     },
   },

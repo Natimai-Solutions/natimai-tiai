@@ -65,6 +65,15 @@ const fr = {
       token_renew: 'Renouvellement du QR d’un actif',
       import: 'Import d’actifs',
     },
+    schedule: {
+      create: 'Création d’une planification',
+      update: 'Modification d’une planification',
+      delete: 'Suppression d’une planification',
+      enable: 'Réactivation d’une planification',
+      disable: 'Désactivation d’une planification',
+      suspend: 'Planification suspendue par le serveur',
+      halt: 'Déploiement par étapes arrêté',
+    },
     building: {
       create: "Création d'un bâtiment",
       update: "Modification d'un bâtiment",
@@ -142,6 +151,7 @@ const fr = {
     group: 'Groupe',
     package: 'Paquet',
     asset: 'Actif',
+    schedule: 'Planification',
     settings: 'Paramètres',
   },
   /** Detail key → label, for the full view of an entry. */
@@ -313,6 +323,15 @@ const en: Translation<typeof fr> = {
       token_renew: 'Asset QR renewed',
       import: 'Assets imported',
     },
+    schedule: {
+      create: 'Schedule created',
+      update: 'Schedule changed',
+      delete: 'Schedule deleted',
+      enable: 'Schedule turned back on',
+      disable: 'Schedule disabled',
+      suspend: 'Schedule suspended by the server',
+      halt: 'Staged deployment halted',
+    },
     building: {
       create: 'Building created',
       update: 'Building edited',
@@ -389,6 +408,7 @@ const en: Translation<typeof fr> = {
     group: 'Group',
     package: 'Package',
     asset: 'Asset',
+    schedule: 'Schedule',
     settings: 'Settings',
   },
   detailKeys: {

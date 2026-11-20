@@ -1,5 +1,6 @@
 import type { AxiosError } from 'axios';
 import { errorCodeMessage, t } from 'src/i18n';
+import { windowText, type ForbiddenWindow } from 'src/services/schedules';
 import {
   invalidText,
   problemText,
@@ -155,6 +156,13 @@ export function apiErrorMessage(err: unknown, fallback: string = t('errors.gener
     if (code === 'request.validation_error') {
       const detail = validationDetail(body?.error?.details);
       if (detail) return t('errors.withDetail', { label, detail });
+    }
+    // A forbidden window: which one (« lundi, mardi 07:30–12:00 »).
+    if (code === 'schedule.forbidden_window' || code === 'command.forbidden_window') {
+      const window = details?.window as ForbiddenWindow | undefined;
+      if (window && Array.isArray(window.days)) {
+        return t('errors.withDetail', { label, detail: windowText(window) });
+      }
     }
     if (code === 'room.in_group_scope') {
       const groups = body?.error?.details?.groups;

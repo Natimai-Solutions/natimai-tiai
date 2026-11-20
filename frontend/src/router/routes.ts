@@ -68,6 +68,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'layout.pages.assets', requiresPermission: 'asset:read' },
       },
       {
+        path: 'schedules',
+        name: 'schedules',
+        component: () => import('pages/SchedulesPage.vue'),
+        meta: { title: 'layout.pages.schedules', requiresPermission: 'schedule:read' },
+      },
+      {
         // Where a printed label's QR code leads: the poste behind it.
         path: 'a/:token',
         name: 'asset-token',

@@ -20,6 +20,7 @@ from app.api.routes.maintenance import room_router as room_maintenance_router
 from app.api.routes.maintenance import router as maintenance_router
 from app.api.routes.packages import router as packages_router
 from app.api.routes.rooms import buildings_router, rooms_router
+from app.api.routes.schedules import router as schedules_router
 from app.api.routes.settings_routes import router as settings_router
 from app.api.routes.software import router as software_router
 from app.api.routes.stats import router as stats_router
@@ -32,6 +33,7 @@ api_router.include_router(agent_router)
 api_router.include_router(machines_router)
 api_router.include_router(alerts_router)
 api_router.include_router(assets_router)
+api_router.include_router(schedules_router)
 api_router.include_router(machine_assets_router)
 api_router.include_router(buildings_router)
 api_router.include_router(rooms_router)

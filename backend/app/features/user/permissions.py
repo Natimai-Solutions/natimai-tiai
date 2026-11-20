@@ -56,6 +56,9 @@ class Resource(enum.StrEnum):
     # is not read by everyone who reads the parc; granted to no built-in
     # group but the administrators.
     ASSET = "asset"
+    # Schedules (C3). Writing one also asks for the right to run what it
+    # carries (``command:execute``, ``risky_command:execute``).
+    SCHEDULE = "schedule"
 
 
 class Action(enum.StrEnum):
@@ -93,6 +96,8 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.PACKAGE, Action.WRITE),
     (Resource.ASSET, Action.READ),
     (Resource.ASSET, Action.WRITE),
+    (Resource.SCHEDULE, Action.READ),
+    (Resource.SCHEDULE, Action.WRITE),
 )
 
 

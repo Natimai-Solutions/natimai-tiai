@@ -439,6 +439,14 @@ export interface CreateCommandsPayload {
   /** Every poste of a site, as the agents report it (exact). */
   target_location?: string;
   target_status?: string;
+  /** Every poste of a room, or of a building's rooms. */
+  target_room_id?: string;
+  target_building_id?: string;
+  /**
+   * A risky command for several postes inside a forbidden window: refused
+   * (`command.forbidden_window`) unless the person confirmed.
+   */
+  confirm_forbidden_window?: boolean;
 }
 
 export interface CreateCommandsResponse {

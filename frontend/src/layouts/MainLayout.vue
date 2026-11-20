@@ -99,6 +99,10 @@
             </div>
           </q-item-section>
         </q-item>
+        <q-item v-if="auth.can('schedule', 'read')" v-ripple clickable :to="{ name: 'schedules' }">
+          <q-item-section avatar><q-icon name="event_repeat" /></q-item-section>
+          <q-item-section>{{ t('layout.pages.schedules') }}</q-item-section>
+        </q-item>
         <q-item v-if="auth.can('room', 'read')" v-ripple clickable :to="{ name: 'rooms' }">
           <q-item-section avatar><q-icon name="meeting_room" /></q-item-section>
           <q-item-section>{{ t('layout.pages.rooms') }}</q-item-section>

@@ -64,6 +64,10 @@ const fr = {
   'asset.import.unreadable':
     'Fichier illisible : un CSV ou un classeur Excel avec une colonne de numéros de série est attendu',
   'asset.import.too_large': 'Fichier trop volumineux pour un import',
+  'command.forbidden_window': 'Plage interdite : confirmez pour envoyer quand même',
+  'schedule.not_found': 'Planification introuvable',
+  'schedule.forbidden_window': 'Cette planification tomberait dans une plage interdite',
+  'schedule.in_past': 'Cette date et cette heure sont passées',
   'room.name.taken': 'Une salle porte déjà ce nom dans ce bâtiment',
   'intervention.not_found': 'Intervention introuvable',
   'check.not_found': 'Vérification introuvable',
@@ -144,6 +148,10 @@ const en: Record<keyof typeof fr, string> = {
   'asset.import.unreadable':
     'Unreadable file: a CSV or an Excel workbook with a serial number column is expected',
   'asset.import.too_large': 'File too large for an import',
+  'command.forbidden_window': 'Forbidden window: confirm to send it anyway',
+  'schedule.not_found': 'Schedule not found',
+  'schedule.forbidden_window': 'This schedule would run inside a forbidden window',
+  'schedule.in_past': 'This date and time are past',
   'room.name.taken': 'A room already has this name in this building',
   'intervention.not_found': 'Intervention not found',
   'check.not_found': 'Check not found',

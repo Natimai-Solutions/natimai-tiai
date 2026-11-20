@@ -83,6 +83,13 @@ describe('auditActionLabel', () => {
       'asset.delete',
       'asset.token_renew',
       'asset.import',
+      'schedule.create',
+      'schedule.update',
+      'schedule.delete',
+      'schedule.enable',
+      'schedule.disable',
+      'schedule.suspend',
+      'schedule.halt',
     ];
     expect(Object.keys(AUDIT_ACTION_LABELS).sort()).toEqual([...slugs].sort());
   });

@@ -227,6 +227,26 @@ async def evaluate_alerts() -> int:
     return len(result.opened)
 
 
+async def run_schedules() -> int:
+    """Run the schedules come due, then carry the open runs a step further
+    (« éteindre ensuite », rings) — ``features.schedule.runner``."""
+    from app.features.schedule import runner
+
+    async with AsyncSession(engine) as session:
+        ran = await runner.run_due(session, utcnow())
+        await runner.follow_runs(session, utcnow())
+    return ran
+
+
+async def purge_schedule_runs() -> int:
+    """Drop the schedule runs older than ``SCHEDULE_RUN_RETENTION_DAYS``."""
+    from app.features.schedule import runner
+
+    cutoff = utcnow() - timedelta(days=settings.SCHEDULE_RUN_RETENTION_DAYS)
+    async with AsyncSession(engine) as session:
+        return await runner.purge_runs(session, cutoff)
+
+
 async def purge_alerts() -> int:
     """Drop the alerts resolved more than ``ALERT_RETENTION_DAYS`` ago."""
     from app.features.alert import crud as alert_crud
@@ -452,6 +472,8 @@ def build_jobs(
         # Every five minutes: a disk turning unhealthy is mailed within that,
         # and the rules read what the heartbeats and inventories wrote.
         Job("evaluate_alerts", evaluate_alerts, now, every(300)),
+        # Every minute: a schedule set for 18:00 runs by 18:01.
+        Job("run_schedules", run_schedules, now, every(60)),
         Job(
             "daily_digest",
             send_daily_digest,
@@ -480,6 +502,12 @@ def build_jobs(
         ),
         Job("purge_usage", purge_usage, housekeeping(now), housekeeping),
         Job("purge_alerts", purge_alerts, housekeeping(now), housekeeping),
+        Job(
+            "purge_schedule_runs",
+            purge_schedule_runs,
+            housekeeping(now),
+            housekeeping,
+        ),
         Job("purge_sessions", purge_sessions, housekeeping(now), housekeeping),
         Job("purge_audit", purge_audit, housekeeping(now), housekeeping),
         Job("purge_commands", purge_commands, housekeeping(now), housekeeping),
