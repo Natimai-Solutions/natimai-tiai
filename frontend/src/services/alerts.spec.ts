@@ -20,7 +20,7 @@ describe('alerts wording', () => {
       alertDetailText('disk_unhealthy', { disks: [{ model: 'WD Blue', health: 'Warning' }] }),
     ).toBe('WD Blue (Warning)');
     expect(alertDetailText('volume_unencrypted', { letter: 'C:', status: 'FullyDecrypted' })).toBe(
-      'Volume C: : FullyDecrypted',
+      'Volume C: — FullyDecrypted',
     );
     expect(alertDetailText('reboot_pending', { since: '2026-11-02T08:00:00+00:00' })).toBe(
       'Demandé par Windows Update le 02/11/2026',

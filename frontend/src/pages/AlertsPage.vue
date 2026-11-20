@@ -34,10 +34,10 @@
         indicator-color="primary"
       >
         <q-tab name="all" :label="t('alerts.all')">
-          <q-badge v-if="totalOpen" color="negative" floating>{{ totalOpen }}</q-badge>
+          <q-badge v-if="totalOpen" color="negative" class="q-ml-xs">{{ totalOpen }}</q-badge>
         </q-tab>
         <q-tab v-for="r in ALERT_RULES" :key="r" :name="r" :label="alertRuleLabel(r)">
-          <q-badge v-if="counts[r]" color="negative" floating>{{ counts[r] }}</q-badge>
+          <q-badge v-if="counts[r]" color="negative" class="q-ml-xs">{{ counts[r] }}</q-badge>
         </q-tab>
       </q-tabs>
       <q-separator />

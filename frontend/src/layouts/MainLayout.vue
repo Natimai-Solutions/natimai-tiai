@@ -67,7 +67,7 @@
           <q-item-section>{{ t('layout.pages.alerts') }}</q-item-section>
         </q-item>
         <q-item v-if="auth.can('asset', 'read')" v-ripple clickable :to="{ name: 'assets' }">
-          <q-item-section avatar><q-icon name="inventory" /></q-item-section>
+          <q-item-section avatar><q-icon name="devices_other" /></q-item-section>
           <q-item-section>{{ t('layout.pages.assets') }}</q-item-section>
         </q-item>
         <q-item v-if="canReadMachines" v-ripple clickable :to="{ name: 'software' }">

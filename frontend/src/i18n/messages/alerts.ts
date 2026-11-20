@@ -44,7 +44,7 @@ const fr = {
   detail: {
     disk_low: '{percent} % libres (seuil : {threshold} %)',
     disk_unhealthy: '{disks}',
-    volume_unencrypted: 'Volume {letter} : {status}',
+    volume_unencrypted: 'Volume {letter} — {status}',
     reboot_pending: 'Demandé par Windows Update le {date}',
     os_unsupported: '{os}, plus mis à jour depuis le {date}',
     os_unsupportedNoDate: '{os}, plus mis à jour',
@@ -100,7 +100,7 @@ const en: Translation<typeof fr> = {
   detail: {
     disk_low: '{percent} % free (threshold: {threshold} %)',
     disk_unhealthy: '{disks}',
-    volume_unencrypted: 'Volume {letter}: {status}',
+    volume_unencrypted: 'Volume {letter} — {status}',
     reboot_pending: 'Requested by Windows Update on {date}',
     os_unsupported: '{os}, no longer updated since {date}',
     os_unsupportedNoDate: '{os}, no longer updated',
