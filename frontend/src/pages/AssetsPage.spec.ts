@@ -19,12 +19,12 @@ async function mountPage() {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: '/assets', name: 'assets', component: Stub },
-      { path: '/assets/labels', name: 'asset-labels', component: Stub },
+      { path: '/equipment', name: 'assets', component: Stub },
+      { path: '/equipment/labels', name: 'asset-labels', component: Stub },
       { path: '/machines/:id', name: 'machine-detail', component: Stub },
     ],
   });
-  await router.push('/assets');
+  await router.push('/equipment');
   const wrapper = mount(AssetsPage, {
     shallow: true,
     global: { plugins: [router], renderStubDefaultSlot: true },

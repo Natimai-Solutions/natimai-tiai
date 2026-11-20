@@ -18,13 +18,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, true
+from sqlalchemy import and_, func, true
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.features.alert.models import ALL_RULES, MachineAlert
+from app.features.asset import crud as asset_crud
 from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.machine.status import (
@@ -154,8 +155,12 @@ def _name(machine_hostname: str | None, machine_uuid: str) -> str:
 
 async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Digest:
     """Read the current state of the fleet — of the part of it ``scope``
-    covers, for an account confined to some sites (``user/scope.py``)."""
-    in_scope = machine_clause(scope)
+    covers, for an account confined to some sites (``user/scope.py``).
+    A retired poste is out of the parc: out of every figure and every list,
+    as on the dashboard."""
+    scope_clause = machine_clause(scope)
+    in_parc = asset_crud.in_parc_clause()
+    in_scope = in_parc if scope_clause is None else and_(scope_clause, in_parc)
     now = utcnow()
     fleet = await setting_crud.fleet_policy(session)
     days = fleet.inactive_after_days
@@ -244,7 +249,10 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
             restrict(
                 select(func.count()).select_from(Threat),
                 machine_ids_clause(scope, col(Threat.machine_id)),
-            ).where(col(Threat.detected_at) >= since)
+            ).where(
+                col(Threat.detected_at) >= since,
+                asset_crud.in_parc_ids_clause(col(Threat.machine_id)),
+            )
         )
         or 0
     )
@@ -255,7 +263,10 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
             select(col(MachineAlert.rule), func.count()),
             machine_ids_clause(scope, col(MachineAlert.machine_id)),
         )
-        .where(col(MachineAlert.resolved_at).is_(None))
+        .where(
+            col(MachineAlert.resolved_at).is_(None),
+            asset_crud.in_parc_ids_clause(col(MachineAlert.machine_id)),
+        )
         .group_by(col(MachineAlert.rule))
     )
     open_alerts = dict(alert_rows.all())

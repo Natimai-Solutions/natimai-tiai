@@ -12,6 +12,7 @@ the one route of this file read with ``machine:read``, since whoever scans a
 poste's sticker wants its fiche, purchase price or not.
 """
 
+import asyncio
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -19,7 +20,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, exists, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
@@ -32,6 +33,7 @@ from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.room import crud as room_crud
 from app.features.room.models import Room
+from app.features.setting import crud as setting_crud
 from app.features.user.permissions import Action, Resource
 from app.features.user.scope import (
     Scope,
@@ -47,8 +49,21 @@ _READ = Depends(require_permission(Resource.ASSET, Action.READ))
 _WRITE = Depends(require_permission(Resource.ASSET, Action.WRITE))
 _MACHINE_READ = Depends(require_permission(Resource.MACHINE, Action.READ))
 
-# How many days ahead « garantie bientôt finie » looks, on the list.
-WARRANTY_SOON_DAYS = 60
+# An import file read at most: a delivery note or an accounting export.
+MAX_IMPORT_BYTES = 8 * 1024 * 1024
+
+WarrantyState = Literal["none", "active", "soon", "expired"]
+
+
+def warranty_state(end: date | None, today: date, soon_days: int) -> WarrantyState:
+    """Where a warranty stands: « bientôt terminée » over the same days as
+    the alert « Garantie bientôt terminée » (Paramètres), so the fiche, the
+    list's filter and the alert cannot disagree."""
+    if end is None:
+        return "none"
+    if end < today:
+        return "expired"
+    return "soon" if end <= today + timedelta(days=soon_days) else "active"
 
 
 def _trim(value: Any) -> Any:
@@ -96,6 +111,15 @@ class AssetFields(BaseModel):
     def _blank_is_null(cls, value: Any) -> Any:
         return _trim(value)
 
+    @field_validator("status")
+    @classmethod
+    def _status_not_null(cls, value: Any) -> Any:
+        # Absent leaves it as it is; null would clear a column that is never
+        # empty (a null kind reads as « autre », below).
+        if value is None:
+            raise ValueError("may be left out, not null")
+        return value
+
 
 class AssetCreate(AssetFields):
     # A poste's asset is written under the poste (``PUT /machines/{id}/asset``);
@@ -130,6 +154,7 @@ class AssetOut(BaseModel):
     supplier: str | None
     order_reference: str | None
     warranty_end: date | None
+    warranty_state: WarrantyState = "none"
     purchase_price: Decimal | None
     borrower: str | None
     loan_due: date | None
@@ -161,6 +186,8 @@ async def _out(session: SessionDep, rows: list[Asset]) -> list[AssetOut]:
         m = machines.get(a.machine_id) if a.machine_id else None
         room_of[a.id] = m.room_id if m is not None else a.room_id
     placements = await room_crud.placements(session, room_of.values())
+    soon_days = (await setting_crud.alert_policy(session)).warranty_days
+    today = utcnow().date()
     out = []
     for a in rows:
         m = machines.get(a.machine_id) if a.machine_id else None
@@ -189,6 +216,7 @@ async def _out(session: SessionDep, rows: list[Asset]) -> list[AssetOut]:
                 supplier=a.supplier,
                 order_reference=a.order_reference,
                 warranty_end=a.warranty_end,
+                warranty_state=warranty_state(a.warranty_end, today, soon_days),
                 purchase_price=a.purchase_price,
                 borrower=a.borrower,
                 loan_due=a.loan_due,
@@ -352,9 +380,10 @@ async def list_assets(
     if warranty == "active":
         stmt = stmt.where(col(Asset.warranty_end) >= today)
     elif warranty == "soon":
+        soon_days = (await setting_crud.alert_policy(session)).warranty_days
         stmt = stmt.where(
             col(Asset.warranty_end) >= today,
-            col(Asset.warranty_end) <= today + timedelta(days=WARRANTY_SOON_DAYS),
+            col(Asset.warranty_end) <= today + timedelta(days=soon_days),
         )
     elif warranty == "expired":
         stmt = stmt.where(col(Asset.warranty_end) < today)
@@ -418,6 +447,52 @@ async def create_asset(
     await _commit(session)
     await session.refresh(asset)
     return (await _out(session, [asset]))[0]
+
+
+class CompletedOut(BaseModel):
+    created: int
+
+
+@router.post(
+    "/rooms/{room_id}/complete", response_model=CompletedOut, dependencies=[_WRITE]
+)
+async def complete_room(
+    room_id: uuid.UUID,
+    session: SessionDep,
+    current: CurrentUser,
+    scope: CurrentScope,
+) -> CompletedOut:
+    """Give each poste of a room that has none its asset (in service, nothing
+    else known): a label is an asset's, and a room's sheet of labels is to
+    cover the whole room. The postes the caller does not see are left alone."""
+    await _require_room(session, room_id, scope)
+    stmt = select(col(Machine.id)).where(
+        col(Machine.room_id) == room_id,
+        ~exists().where(col(Asset.machine_id) == col(Machine.id)),
+    )
+    clause = machine_clause(scope)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    machine_ids = list((await session.exec(stmt)).all())
+    for machine_id in machine_ids:
+        session.add(
+            Asset(
+                machine_id=machine_id,
+                kind=AssetKind.COMPUTER,
+                updated_by=current.email,
+            )
+        )
+    if machine_ids:
+        audit.record(
+            session,
+            actor=current.email,
+            action="asset.create",
+            resource_type="asset",
+            resource_id="",
+            details={"room_id": str(room_id), "count": str(len(machine_ids))},
+        )
+        await _commit(session)
+    return CompletedOut(created=len(machine_ids))
 
 
 @router.get("/by-token/{token}", dependencies=[_MACHINE_READ])
@@ -663,21 +738,37 @@ async def import_assets(
     caller's scope and every cell of it reads; the others are reported and
     left alone. An inventory number already another asset's fails the row,
     not the import."""
-    content = await file.read(8 * 1024 * 1024 + 1)
-    if len(content) > 8 * 1024 * 1024:
+    content = await file.read(MAX_IMPORT_BYTES + 1)
+    if len(content) > MAX_IMPORT_BYTES:
         raise AppError(
-            code=ErrorCode.ASSET_IMPORT_UNREADABLE,
+            code=ErrorCode.ASSET_IMPORT_TOO_LARGE,
             status_code=422,
-            message="File too large",
+            message="Import file too large",
+            details={
+                "cause": {
+                    "code": "file_too_large",
+                    "params": {"max_mb": MAX_IMPORT_BYTES // (1024 * 1024)},
+                }
+            },
         )
     try:
-        rows = importer.parse(file.filename or "", content)
+        # CPU work, off the event loop that answers every heartbeat.
+        rows = await asyncio.to_thread(importer.parse, file.filename or "", content)
+    except importer.TooManyRows:
+        raise AppError(
+            code=ErrorCode.ASSET_IMPORT_TOO_LARGE,
+            status_code=422,
+            message="Too many rows in the import file",
+            details={
+                "cause": {"code": "too_many_rows", "params": {"max": importer.MAX_ROWS}}
+            },
+        ) from None
     except importer.UnreadableFile as exc:
         raise AppError(
             code=ErrorCode.ASSET_IMPORT_UNREADABLE,
             status_code=422,
             message="Unreadable import file",
-            details={"cause": str(exc)},
+            details={"cause": {"code": str(exc)}},
         ) from None
 
     serials = {r.serial.strip().upper() for r in rows if r.serial}
@@ -709,32 +800,41 @@ async def import_assets(
     )
 
     out: list[ImportRowOut] = []
-    seen_numbers: dict[str, int] = {}
+    # What the rows above already write: an inventory number, a poste. The
+    # preview and the import read them alike, so the preview says what the
+    # import will do.
+    seen_numbers: set[str] = set()
+    seen_machines: set[uuid.UUID] = set()
     for row in rows:
         matches = by_serial.get(row.serial.strip().upper(), []) if row.serial else []
         result = ImportRowOut(line=row.line, serial=row.serial, action="invalid")
-        if len(matches) == 1:
-            result.machine_id = matches[0].id
-            result.hostname = matches[0].hostname
+        target = matches[0] if len(matches) == 1 else None
+        if target is not None:
+            result.machine_id = target.id
+            result.hostname = target.hostname
         errors = list(row.errors)
         number = row.values.get("inventory_number")
         if number:
-            own = existing.get(matches[0].id) if len(matches) == 1 else None
+            own = existing.get(target.id) if target is not None else None
             holder = numbers_taken.get(number)
-            if (holder is not None and (own is None or holder != own.id)) or (
-                number in seen_numbers
-            ):
+            if (
+                holder is not None and (own is None or holder != own.id)
+            ) or number in seen_numbers:
                 errors.append("inventory_number_taken")
-            seen_numbers.setdefault(number, row.line)
+        if target is not None:
+            if target.id in seen_machines:
+                # Two rows for one poste: which one would win is not for the
+                # file's order to decide.
+                errors.append("duplicate_serial")
         result.errors = errors
         if not row.serial or errors:
             result.action = "invalid"
         elif not matches:
             result.action = "unmatched"
-        elif len(matches) > 1:
+        elif target is None:
             result.action = "ambiguous"
         else:
-            asset = existing.get(matches[0].id)
+            asset = existing.get(target.id)
             changes = {
                 k: v
                 for k, v in row.values.items()
@@ -747,10 +847,13 @@ async def import_assets(
                 result.action = "update"
             else:
                 result.action = "unchanged"
+            seen_machines.add(target.id)
+            if number:
+                seen_numbers.add(number)
             if not dry_run and result.action in ("create", "update"):
                 if asset is None:
-                    asset = Asset(machine_id=matches[0].id, kind=AssetKind.COMPUTER)
-                    existing[matches[0].id] = asset
+                    asset = Asset(machine_id=target.id, kind=AssetKind.COMPUTER)
+                    existing[target.id] = asset
                 _apply(asset, changes)
                 asset.updated_at = utcnow()
                 asset.updated_by = current.email

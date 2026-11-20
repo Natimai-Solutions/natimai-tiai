@@ -43,7 +43,7 @@
       {
        "key": "HARDWARE_AGING_YEARS",
        "value": "5",
-       "description": "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "description": "Âge du poste (date d’achat, à défaut date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
        "raw": 5,
        "format": "plain",
        "params": {}
@@ -718,7 +718,7 @@
       {
        "key": "HARDWARE_AGING_YEARS",
        "value": "5",
-       "description": "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "description": "Âge du poste (date d’achat, à défaut date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
        "raw": 5,
        "format": "plain",
        "params": {}
@@ -1388,7 +1388,7 @@
       {
        "key": "HARDWARE_AGING_YEARS",
        "value": "5",
-       "description": "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "description": "Âge du poste (date d’achat, à défaut date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
        "raw": 5,
        "format": "plain",
        "params": {}
@@ -2063,7 +2063,7 @@
       {
        "key": "HARDWARE_AGING_YEARS",
        "value": "5",
-       "description": "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "description": "Âge du poste (date d’achat, à défaut date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
        "raw": 5,
        "format": "plain",
        "params": {}
@@ -2739,7 +2739,7 @@
       {
        "key": "HARDWARE_AGING_YEARS",
        "value": "5",
-       "description": "Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
+       "description": "Âge du poste (date d’achat, à défaut date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
        "raw": 5,
        "format": "plain",
        "params": {}

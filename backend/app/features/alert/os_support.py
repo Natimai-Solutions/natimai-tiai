@@ -3,9 +3,11 @@
 Read off the string the agent composes (``agent/internal/sysinfo``), e.g.
 « Windows 11 Education 23H2 (Build 22631) »: the build says which release it
 is, the product name says which servicing channel applies — the Home and Pro
-editions get 24 months per release of Windows 11, Enterprise and Education 36,
-the LTSC editions their own ten years. The same build can therefore be out of
-support on a Pro poste and still supported on an Education one.
+editions (Pro Education and Pro for Workstations included) get 24 months per
+release of Windows 11, Enterprise and Education 36, the LTSC editions their
+own five years and the IoT Enterprise LTSC ones ten. The same build can
+therefore be out of support on a Pro poste and still supported on an
+Education one.
 
 A table in the code, updated with each version of Tia'i: the server may have
 no Internet access, and Microsoft publishes these dates years ahead. The
@@ -30,6 +32,8 @@ class Channel(StrEnum):
     HOME_PRO = "home_pro"
     ENTERPRISE_EDUCATION = "enterprise_education"
     LTSC = "ltsc"
+    # IoT Enterprise LTSC: the same builds as LTSC, serviced longer since 2021.
+    IOT_LTSC = "iot_ltsc"
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,7 @@ _WINDOWS_10: dict[int, dict[Channel, date]] = {
         Channel.HOME_PRO: date(2023, 6, 13),
         Channel.ENTERPRISE_EDUCATION: date(2024, 6, 11),
         Channel.LTSC: date(2027, 1, 12),
+        Channel.IOT_LTSC: date(2032, 1, 13),
     },
     19045: {  # 22H2, the last release of Windows 10
         Channel.HOME_PRO: date(2025, 10, 14),
@@ -93,6 +98,7 @@ _WINDOWS_11: dict[int, dict[Channel, date]] = {
         Channel.HOME_PRO: date(2026, 10, 13),
         Channel.ENTERPRISE_EDUCATION: date(2027, 10, 12),
         Channel.LTSC: date(2029, 10, 9),
+        Channel.IOT_LTSC: date(2034, 10, 10),
     },
     26200: {  # 25H2
         Channel.HOME_PRO: date(2027, 10, 12),
@@ -113,16 +119,21 @@ _OLDEST_WINDOWS_10_GENERAL = min(
 )
 
 _BUILD = re.compile(r"\(Build (\d+)")
+_WORD = re.compile(r"[a-z]+")
 # The first Windows 11 build: below it, a build is Windows 10 or older.
 _FIRST_WINDOWS_11 = 22000
 
 
 def channel_of(product: str) -> Channel:
     """The servicing channel a product name falls under."""
-    lowered = product.lower()
-    if "ltsc" in lowered or "ltsb" in lowered:
-        return Channel.LTSC
-    if "enterprise" in lowered or "education" in lowered:
+    words = set(_WORD.findall(product.lower()))
+    if words & {"ltsc", "ltsb"}:
+        return Channel.IOT_LTSC if "iot" in words else Channel.LTSC
+    if "pro" in words:
+        # Pro Education and Pro for Workstations: Microsoft services them
+        # with Home and Pro, whatever « Education » says.
+        return Channel.HOME_PRO
+    if words & {"enterprise", "education"}:
         return Channel.ENTERPRISE_EDUCATION
     return Channel.HOME_PRO
 
@@ -146,7 +157,10 @@ def support_of(os_version: str | None) -> Support | None:
     row = table.get(build, {})
     if channel in row:
         return Support(row[channel])
-    if channel is Channel.LTSC:
+    if channel is Channel.IOT_LTSC and Channel.LTSC in row:
+        # Before 2021 an IoT LTSC/LTSB release ended with its Enterprise one.
+        return Support(row[Channel.LTSC])
+    if channel in (Channel.LTSC, Channel.IOT_LTSC):
         # An LTSC product on a build with no LTSC release: mislabelled, or a
         # release this table does not know. Not a guess to alert on.
         return None

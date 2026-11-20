@@ -89,7 +89,7 @@ import {
   assetStatusColor,
   assetStatusLabel,
   getMachineAsset,
-  warrantyState,
+  warrantyClass,
   type Asset,
 } from 'src/services/assets';
 import { useAuthStore } from 'src/stores/auth';
@@ -116,7 +116,8 @@ function price(value: string | null): string {
 const rows = computed(() => {
   const a = asset.value;
   if (!a) return [];
-  const warranty = warrantyState(a.warranty_end);
+  // As the server reads it: the same days as the warranty alert.
+  const warranty = a.warranty_end ? (a.warranty_state ?? 'active') : 'none';
   return [
     { label: t('assets.form.inventory'), value: a.inventory_number ?? '—' },
     { label: t('assets.form.purchaseDate'), value: formatDate(a.purchase_date) },
@@ -126,7 +127,7 @@ const rows = computed(() => {
         warranty === 'none'
           ? t('assets.warranty.none')
           : `${formatDate(a.warranty_end)} — ${t(`assets.warranty.${warranty}`)}`,
-      class: warranty === 'expired' ? 'text-negative' : warranty === 'soon' ? 'text-warn' : '',
+      class: warrantyClass(warranty),
     },
     { label: t('assets.form.supplier'), value: a.supplier ?? '—' },
     { label: t('assets.form.orderReference'), value: a.order_reference ?? '—' },

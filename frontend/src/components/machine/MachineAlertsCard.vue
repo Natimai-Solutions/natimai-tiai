@@ -53,7 +53,9 @@
           <div v-if="a.resolved_at">
             {{ t('alerts.resolvedOn', { date: formatDateTime(a.resolved_at) }) }}
           </div>
-          <q-badge v-else-if="a.check_id" color="primary" outline>{{ t('alerts.check') }}</q-badge>
+          <q-badge v-else-if="a.check_open" color="primary" outline>{{
+            t('alerts.check')
+          }}</q-badge>
         </q-item-section>
       </q-item>
     </q-list>

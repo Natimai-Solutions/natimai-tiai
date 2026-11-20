@@ -47,6 +47,12 @@ export interface Asset {
   supplier: string | null;
   order_reference: string | null;
   warranty_end: string | null;
+  /**
+   * Where the warranty stands, as the server reads it: « soon » over the days
+   * the warranty alert is set to in Paramètres, so the fiche, the filter and
+   * the alert agree. Absent from an older server.
+   */
+  warranty_state?: WarrantyState;
   /** A decimal, as text: « 749.90 ». */
   purchase_price: string | null;
   borrower: string | null;
@@ -57,6 +63,8 @@ export interface Asset {
   updated_by: string | null;
   machine: AssetMachineRef | null;
 }
+
+export type WarrantyState = 'none' | 'active' | 'soon' | 'expired';
 
 export interface AssetList {
   items: Asset[];
@@ -132,6 +140,15 @@ export async function putMachineAsset(machineId: string, payload: AssetPayload):
   return data;
 }
 
+/**
+ * Give each poste of a room that has none its asset — so that it has a label.
+ * Returns how many were created.
+ */
+export async function completeRoomAssets(roomId: string): Promise<number> {
+  const { data } = await api.post<{ created: number }>(`/assets/rooms/${roomId}/complete`);
+  return data.created;
+}
+
 /** What a scanned label names: the poste to open, else the asset. */
 export async function resolveAssetToken(
   token: string,
@@ -195,19 +212,9 @@ export function assetStatusColor(status: string): string {
   }
 }
 
-/** Where a warranty stands today, for a badge: none, over, ending (60 days), running. */
-export function warrantyState(
-  end: string | null,
-  today: Date = new Date(),
-): 'none' | 'expired' | 'soon' | 'active' {
-  if (!end) return 'none';
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(end);
-  if (!match) return 'none';
-  const endDay = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  const todayDay = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-  const days = (endDay - todayDay) / 86_400_000;
-  if (days < 0) return 'expired';
-  return days <= 60 ? 'soon' : 'active';
+/** The colour class of a warranty's state: over in red, ending in orange. */
+export function warrantyClass(state: WarrantyState | undefined): string {
+  return state === 'expired' ? 'text-negative' : state === 'soon' ? 'text-warn' : '';
 }
 
 /** The URL a label's QR code carries: the console's own address and the token. */

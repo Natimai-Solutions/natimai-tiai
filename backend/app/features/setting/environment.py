@@ -367,7 +367,8 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 _item(
                     env,
                     "HARDWARE_AGING_YEARS",
-                    "Âge du poste (date du BIOS) à partir duquel il est compté à "
+                    "Âge du poste (date d’achat, à défaut date du BIOS) à partir duquel il "
+                    "est compté à "
                     "renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
                 ),
                 _item(

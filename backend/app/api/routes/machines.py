@@ -822,6 +822,10 @@ class MachineFilters:
     asset_status: str | None = None
     # Postes the inventory says cannot take Windows 11 (``asset.win11``).
     win11_blocked: bool | None = None
+    # Postes still in the parc (true) or retired (false) — the dashboard's
+    # cards open their lists with it, as their figures leave retired postes
+    # out.
+    in_parc: bool | None = None
     # The text facets matched exactly rather than as a substring. The console
     # asks it for a value picked from its dropdown, so that « OptiPlex 7010
     # (12) » lists those 12 postes and not the « OptiPlex 7010 AIO » too; a
@@ -899,6 +903,7 @@ def machine_filters(
     ]
     | None = None,
     win11_blocked: bool | None = None,
+    in_parc: bool | None = None,
     exact: str | None = Query(
         None,
         description="Comma-separated facets matched exactly: antivirus, "
@@ -947,6 +952,7 @@ def machine_filters(
         alert=_alert_filter(alert),
         asset_status=asset_status,
         win11_blocked=win11_blocked,
+        in_parc=in_parc,
         exact=_exact_facets(exact),
         scope=scope,
     )
@@ -1030,9 +1036,17 @@ def _filtered_machines(
                     col(Asset.status) == filters.asset_status,
                 )
             )
+    if filters.in_parc is not None:
+        stmt = stmt.where(
+            asset_crud.in_parc_clause()
+            if filters.in_parc
+            else asset_crud.retired_clause()
+        )
     if filters.win11_blocked is not None:
         blocked = win11.blocked_clause()
-        stmt = stmt.where(blocked if filters.win11_blocked else ~blocked)
+        # The complement, not the negation: a NULL in the clause (a memory
+        # not read) is « not blocked », not in neither list.
+        stmt = stmt.where(blocked if filters.win11_blocked else blocked.is_not(true()))
     if filters.alert is not None:
         open_alert = exists().where(
             col(MachineAlert.machine_id) == col(Machine.id),
@@ -2336,7 +2350,11 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
     detail.pending_updates = [PendingUpdateOut.model_validate(u) for u in rows.all()]
     await _attach_inventory(session, machine, detail)
     detail.agent_latest_version = (await fleet_versions(session)).latest
-    detail.windows11 = Windows11Out(**asdict(win11.readiness(machine)))
+    readiness = win11.readiness(
+        machine,
+        win11.installed_ram_mb([m.capacity_mb for m in detail.memory_modules]),
+    )
+    detail.windows11 = Windows11Out(**asdict(readiness)) if readiness else None
     return detail
 
 

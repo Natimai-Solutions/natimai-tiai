@@ -63,6 +63,7 @@ const fr = {
   'asset.machine.taken': 'Ce poste a déjà sa fiche d’actif',
   'asset.import.unreadable':
     'Fichier illisible : un CSV ou un classeur Excel avec une colonne de numéros de série est attendu',
+  'asset.import.too_large': 'Fichier trop volumineux pour un import',
   'room.name.taken': 'Une salle porte déjà ce nom dans ce bâtiment',
   'intervention.not_found': 'Intervention introuvable',
   'check.not_found': 'Vérification introuvable',
@@ -142,6 +143,7 @@ const en: Record<keyof typeof fr, string> = {
   'asset.machine.taken': 'This computer already has its asset record',
   'asset.import.unreadable':
     'Unreadable file: a CSV or an Excel workbook with a serial number column is expected',
+  'asset.import.too_large': 'File too large for an import',
   'room.name.taken': 'A room already has this name in this building',
   'intervention.not_found': 'Intervention not found',
   'check.not_found': 'Check not found',

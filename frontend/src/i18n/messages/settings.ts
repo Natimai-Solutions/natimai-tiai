@@ -88,7 +88,8 @@ const fr = {
     lowDisk: 'Disque presque plein en dessous de',
     lowDiskHint: "Sur le volume système · variable d'environnement : {percent} %",
     hardwareAging: 'Poste à renouveler à partir de',
-    hardwareAgingHint: "Âge lu sur la date du BIOS · variable d'environnement : {years} ans",
+    hardwareAgingHint:
+      "Âge compté depuis la date d’achat, à défaut la date du BIOS · variable d'environnement : {years} ans",
     agentVersion: "Version d'agent de référence",
     agentVersionPlaceholder: 'Automatique',
     agentVersionError: 'Une version comme 1.2.0 ou v1.2.0-rc.1, ou vide pour automatique',
@@ -374,7 +375,8 @@ const en: Translation<typeof fr> = {
     lowDisk: 'Disk almost full below',
     lowDiskHint: 'On the system volume · environment variable: {percent}%',
     hardwareAging: 'Computer due for renewal from',
-    hardwareAgingHint: 'Age read from the BIOS date · environment variable: {years} years',
+    hardwareAgingHint:
+      'Age counted from the purchase date, else the BIOS date · environment variable: {years} years',
     agentVersion: 'Reference agent version',
     agentVersionPlaceholder: 'Automatic',
     agentVersionError: 'A version such as 1.2.0 or v1.2.0-rc.1, or empty for automatic',

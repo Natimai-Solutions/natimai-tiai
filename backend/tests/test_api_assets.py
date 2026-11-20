@@ -477,3 +477,472 @@ async def test_export_offers_asset_columns_to_asset_readers_only(client, db_sess
     assert rows[1][3]  # the warranty end, in the file's date format
     resp = await client.get("/api/v1/machines/export.csv", headers=tech, params=params)
     assert resp.status_code == 422
+
+
+# --- Review: the import, the scope, the audit, the labels, the merge ----------
+
+
+async def test_import_stays_within_the_scope(client, db_session):
+    """A site-A account's sheet holding a site-B serial: the row is
+    « unmatched » — no hostname shown, nothing written there."""
+    from app.features.machine.models import Machine
+
+    sites = await two_sites(client, db_session)
+    for m, serial in ((sites.a, "SN-A"), (sites.b, "SN-B")):
+        row = await db_session.get(Machine, m.id)
+        row.hw_serial = serial
+        db_session.add(row)
+    await db_session.commit()
+    content = _csv([["Serial", "Fournisseur"], ["SN-A", "Dell"], ["SN-B", "HP"]])
+    for dry_run in (True, False):
+        resp = await _upload(client, sites.scoped, content, dry_run=dry_run)
+        assert resp.status_code == 200, resp.text
+        by_serial = {r["serial"]: r for r in resp.json()["rows"]}
+        assert by_serial["SN-A"]["hostname"] == "PC-A"
+        assert by_serial["SN-B"]["action"] == "unmatched"
+        assert by_serial["SN-B"]["hostname"] is None
+    resp = await client.get(f"/api/v1/machines/{sites.b.id}/asset", headers=sites.admin)
+    assert resp.json() is None
+    resp = await client.get(f"/api/v1/machines/{sites.a.id}/asset", headers=sites.admin)
+    assert resp.json()["supplier"] == "Dell"
+
+
+async def test_import_preview_says_what_the_import_does(client, db_session):
+    """A row that writes nothing reserves no inventory number; a serial twice
+    in the file is refused on its second row, in the preview as in the
+    import."""
+    headers, _ = await _admin(client, db_session)
+    await machine(db_session, "PC-1", hw_serial="SN-1")
+    await machine(db_session, "PC-2", hw_serial="SN-2")
+    content = _csv(
+        [
+            ["Serial", "Inventaire", "Fournisseur"],
+            ["SN-404", "I-1", ""],
+            ["SN-1", "I-1", ""],
+            ["SN-2", "", "Dell"],
+            ["SN-2", "", "HP"],
+            ["SN-1b", "I-1", ""],
+        ]
+    )
+    preview = await _upload(client, headers, content)
+    assert preview.status_code == 200, preview.text
+    rows = {r["line"]: r for r in preview.json()["rows"]}
+    assert rows[2]["action"] == "unmatched"
+    assert rows[3]["action"] == "create" and rows[3]["errors"] == []
+    assert rows[4]["action"] == "create"
+    assert rows[5]["action"] == "invalid"
+    assert rows[5]["errors"] == ["duplicate_serial"]
+    # Written by a row above: taken.
+    assert "inventory_number_taken" in rows[6]["errors"]
+
+    done = await _upload(client, headers, content, dry_run=False)
+    assert done.json()["counts"] == preview.json()["counts"]
+    resp = await client.get("/api/v1/assets", headers=headers)
+    items = {a["display_name"]: a for a in resp.json()["items"]}
+    assert items["PC-1"]["inventory_number"] == "I-1"
+    assert items["PC-2"]["supplier"] == "Dell"
+
+
+async def test_import_limits_say_what_to_do(client, db_session):
+    from app.api.routes import assets as routes
+    from app.features.asset import importer
+
+    headers, _ = await _admin(client, db_session)
+    resp = await _upload(
+        client, headers, b"Serial;Prix\n" + b"x" * routes.MAX_IMPORT_BYTES
+    )
+    assert resp.status_code == 422
+    error = resp.json()["error"]
+    assert error["code"] == "asset.import.too_large"
+    assert error["details"]["cause"] == {
+        "code": "file_too_large",
+        "params": {"max_mb": 8},
+    }
+
+    rows = "\n".join(f"SN-{i};1" for i in range(importer.MAX_ROWS + 1))
+    resp = await _upload(client, headers, f"Serial;Prix\n{rows}\n".encode())
+    error = resp.json()["error"]
+    assert error["code"] == "asset.import.too_large"
+    assert error["details"]["cause"] == {
+        "code": "too_many_rows",
+        "params": {"max": importer.MAX_ROWS},
+    }
+
+    resp = await _upload(client, headers, b"nom;prix\nPC;1\n")
+    error = resp.json()["error"]
+    assert error["code"] == "asset.import.unreadable"
+    assert error["details"]["cause"] == {"code": "no_serial_column"}
+
+
+async def test_labels_resolve_within_the_scope(client, db_session):
+    """A label out of scope is « introuvable »; equipment resolves to no
+    poste; a technician without asset:read still follows a label."""
+    sites = await two_sites(client, db_session)
+    tokens = {}
+    for m in (sites.a, sites.b):
+        resp = await client.put(
+            f"/api/v1/machines/{m.id}/asset", headers=sites.admin, json={}
+        )
+        tokens[m.hostname] = resp.json()["public_token"]
+    resp = await client.post(
+        "/api/v1/assets", headers=sites.admin, json={"name": "Projecteur"}
+    )
+    loose = resp.json()
+
+    url = "/api/v1/assets/by-token/{}"
+    resp = await client.get(url.format(tokens["PC-B"]), headers=sites.scoped)
+    assert resp.status_code == 404
+    resp = await client.get(url.format(tokens["PC-A"]), headers=sites.scoped)
+    assert resp.status_code == 200 and resp.json()["machine_id"] == str(sites.a.id)
+
+    tech, _ = await _tech(client, db_session)
+    resp = await client.get(url.format(tokens["PC-A"]), headers=tech)
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.get(url.format(loose["public_token"]), headers=sites.admin)
+    body = resp.json()
+    assert body["machine_id"] is None and body["asset_id"] == loose["id"]
+    # In no room: an unrestricted account's alone.
+    resp = await client.get(url.format(loose["public_token"]), headers=sites.scoped)
+    assert resp.status_code == 404
+
+
+async def test_writes_stay_within_the_scope(client, db_session):
+    from app.features.user.permissions import ALL_PERMISSIONS
+    from app.features.user.scope import Scope
+    from tests.scope_helpers import account
+
+    admin, _ = await _admin(client, db_session)
+    inside = await _room(client, admin, "A101", location=SITE_A)
+    outside = await _room(client, admin, "B201", location="Ailleurs")
+    g = await group(
+        db_session, "Site A", ALL_PERMISSIONS, Scope(locations=frozenset({SITE_A}))
+    )
+    scoped = await account(client, db_session, "a@test.local", [g.id])
+    a = await machine(db_session, "PC-A", location=SITE_A, hw_serial="SN-A")
+    b = await machine(db_session, "PC-B", location="Ailleurs")
+
+    resp = await client.post(
+        "/api/v1/assets", headers=scoped, json={"name": "Écran", "room_id": inside}
+    )
+    screen = resp.json()["id"]
+    # Out of its scope, or out of every room: refused.
+    for room in (outside, None):
+        resp = await client.patch(
+            f"/api/v1/assets/{screen}", headers=scoped, json={"room_id": room}
+        )
+        assert resp.status_code == 404, room
+    resp = await client.patch(
+        f"/api/v1/assets/{screen}", headers=scoped, json={"name": "  "}
+    )
+    assert resp.status_code == 422
+    # A status is left out, never null.
+    resp = await client.patch(
+        f"/api/v1/assets/{screen}", headers=scoped, json={"status": None}
+    )
+    assert resp.status_code == 422
+    resp = await client.put(f"/api/v1/machines/{b.id}/asset", headers=scoped, json={})
+    assert resp.status_code == 404
+
+    # A poste's asset keeps its machine's name, room and serial.
+    resp = await client.put(f"/api/v1/machines/{a.id}/asset", headers=scoped, json={})
+    asset_id = resp.json()["id"]
+    resp = await client.put(
+        f"/api/v1/machines/{a.id}/asset", headers=scoped, json={"status": None}
+    )
+    assert resp.status_code == 422
+    resp = await client.patch(
+        f"/api/v1/assets/{asset_id}",
+        headers=scoped,
+        json={
+            "name": "x",
+            "serial_number": "y",
+            "room_id": inside,
+            "status": "in_repair",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["display_name"] == "PC-A"
+    assert body["name"] is None
+    assert body["serial_number"] == "SN-A"
+    assert body["room_id"] is None
+    assert body["status"] == "in_repair"
+
+
+async def test_merge_when_both_records_have_an_asset(db_session):
+    """The kept record's asset wins; the duplicate's fills what it leaves
+    empty — the sticker's inventory number — and is dropped, not left as a
+    nameless asset holding that number."""
+    from sqlmodel import select
+
+    from app.features.asset import crud
+    from app.features.asset.models import Asset
+    from app.features.machine import crud as machine_crud
+    from app.features.machine.models import Machine
+
+    source = await machine(db_session, "DUP")
+    target = await machine(db_session, "KEPT")
+    db_session.add(
+        Asset(
+            machine_id=source.id,
+            inventory_number="I-7",
+            supplier="Dell",
+            purchase_date=date(2020, 1, 1),
+        )
+    )
+    db_session.add(Asset(machine_id=target.id, purchase_date=date(2021, 1, 1)))
+    await db_session.commit()
+    await machine_crud.merge_into(
+        db_session,
+        target=await db_session.get(Machine, target.id),
+        source=await db_session.get(Machine, source.id),
+    )
+    await db_session.commit()
+    db_session.expire_all()
+    [asset] = (await db_session.exec(select(Asset))).all()
+    assert asset.machine_id == target.id
+    assert asset.inventory_number == "I-7"
+    assert asset.supplier == "Dell"
+    assert asset.purchase_date == date(2021, 1, 1)
+    assert (await crud.for_machine(db_session, source.id)) is None
+
+
+async def test_asset_writes_are_audited_without_the_price(client, db_session):
+    from sqlmodel import col, select
+
+    from app.features.audit.models import AuditEntry
+
+    headers, _ = await _admin(client, db_session)
+    m = await machine(db_session, "PC-1", hw_serial="SN-1")
+    resp = await client.put(
+        f"/api/v1/machines/{m.id}/asset",
+        headers=headers,
+        json={"purchase_price": "10", "supplier": "Dell"},
+    )
+    asset_id = resp.json()["id"]
+    await client.post(f"/api/v1/assets/{asset_id}/token", headers=headers)
+    resp = await client.post("/api/v1/assets", headers=headers, json={"name": "Écran"})
+    screen = resp.json()["id"]
+    await client.patch(
+        f"/api/v1/assets/{screen}", headers=headers, json={"purchase_price": "99"}
+    )
+    await client.delete(f"/api/v1/assets/{screen}", headers=headers)
+    await _upload(
+        client,
+        headers,
+        _csv([["Serial", "Fournisseur"], ["SN-1", "HP"]]),
+        dry_run=False,
+    )
+
+    db_session.expire_all()
+    entries = (
+        await db_session.exec(
+            select(AuditEntry)
+            .where(col(AuditEntry.resource_type) == "asset")
+            .order_by(col(AuditEntry.at))
+        )
+    ).all()
+    actions = [e.action for e in entries]
+    for action in (
+        "asset.create",
+        "asset.update",
+        "asset.token_renew",
+        "asset.delete",
+        "asset.import",
+    ):
+        assert action in actions, action
+    assert {e.actor for e in entries} == {"admin@test.local"}
+    priced = [e for e in entries if "purchase_price" in (e.details or {})]
+    assert len(priced) == 2
+    assert all(e.details["purchase_price"] == "•" for e in priced)
+    assert not any("10" == v or "99" == v for e in entries for v in e.details.values())
+
+
+async def test_list_filters_and_warranty_window(client, db_session):
+    """The filters the Matériels page and the labels sheet use; « bientôt
+    terminée » over the warranty alert's days, set in Paramètres."""
+    from app.features.setting.crud import KEY_ALERT_WARRANTY_DAYS, set_value
+
+    headers, _ = await _admin(client, db_session)
+    room = await _room(client, headers, "A101")
+
+    async def equipment(name, **fields):
+        resp = await client.post(
+            "/api/v1/assets", headers=headers, json={"name": name, **fields}
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()["id"]
+
+    soon = await equipment(
+        "SOON", warranty_end=str(TODAY + timedelta(days=10)), kind="printer"
+    )
+    later = await equipment("LATER", warranty_end=str(TODAY + timedelta(days=45)))
+    over = await equipment(
+        "OVER", warranty_end=str(TODAY - timedelta(days=1)), status="in_repair"
+    )
+    none = await equipment("NONE")
+    seated = await machine(db_session, "PC-ROOM", room_id=uuid.UUID(room))
+    await client.put(f"/api/v1/machines/{seated.id}/asset", headers=headers, json={})
+
+    async def names(**params):
+        resp = await client.get("/api/v1/assets", headers=headers, params=params)
+        assert resp.status_code == 200, resp.text
+        return sorted(a["display_name"] for a in resp.json()["items"])
+
+    assert await names(ids=f"{soon},{over}") == ["OVER", "SOON"]
+    resp = await client.get("/api/v1/assets", headers=headers, params={"ids": "nope"})
+    assert resp.status_code == 422
+    assert await names(warranty="soon") == ["SOON"]
+    assert await names(warranty="expired") == ["OVER"]
+    assert await names(warranty="active") == ["LATER", "SOON"]
+    assert await names(warranty="none") == ["NONE", "PC-ROOM"]
+    assert await names(status="in_repair") == ["OVER"]
+    assert await names(kind="printer") == ["SOON"]
+    # A poste's room is its machine's.
+    assert await names(room_id=room) == ["PC-ROOM"]
+
+    resp = await client.get(f"/api/v1/assets/{later}", headers=headers)
+    assert resp.json()["warranty_state"] == "active"
+    await set_value(db_session, KEY_ALERT_WARRANTY_DAYS, 60, actor="test")
+    await db_session.commit()
+    assert await names(warranty="soon") == ["LATER", "SOON"]
+    resp = await client.get(f"/api/v1/assets/{later}", headers=headers)
+    assert resp.json()["warranty_state"] == "soon"
+    states = {
+        a["display_name"]: a["warranty_state"]
+        for a in (await client.get("/api/v1/assets", headers=headers)).json()["items"]
+    }
+    assert states == {
+        "SOON": "soon",
+        "LATER": "soon",
+        "OVER": "expired",
+        "NONE": "none",
+        "PC-ROOM": "none",
+    }
+    assert none
+
+
+async def test_retired_postes_leave_every_figure(client, db_session):
+    """Decision 5: out of the dashboard's figures — threats, verifications,
+    maintenance, usage, alerts — of the digest, and of the lists the cards
+    open with ``in_parc=true``."""
+    from app.features.alert.models import MachineAlert
+    from app.features.asset.models import Asset, AssetStatus
+    from app.features.check.models import MachineCheck
+    from app.features.notification.digest import build_digest
+    from app.features.threat.models import Threat
+
+    headers, _ = await _admin(client, db_session)
+    long_ago = datetime.now(UTC) - timedelta(days=400)
+    now = datetime.now(UTC)
+    ids = {}
+    for name in ("KEPT", "GONE"):
+        m = await machine(
+            db_session,
+            name,
+            first_seen=long_ago,
+            last_seen=long_ago,
+            wu_pending_count=2,
+        )
+        ids[name] = m.id
+        db_session.add(
+            Threat(
+                machine_id=m.id,
+                detection_id=f"D-{name}",
+                threat_name="Trojan",
+                status="active",
+                detected_at=now,
+            )
+        )
+        db_session.add(MachineCheck(machine_id=m.id, requested_by="x"))
+        db_session.add(
+            MachineAlert(machine_id=m.id, rule="inactive", opened_at=now, detail={})
+        )
+    db_session.add(Asset(machine_id=ids["GONE"], status=AssetStatus.RETIRED))
+    await db_session.commit()
+    resp = await client.patch(
+        "/api/v1/settings",
+        headers=headers,
+        json={"maintenance_default_cycle_days": 30},
+    )
+    assert resp.status_code == 200, resp.text
+
+    body = (await client.get("/api/v1/stats/overview", headers=headers)).json()
+    assert body["total"] == 1
+    assert body["machines_retired"] == 1
+    for key in (
+        "with_active_threats",
+        "open_checks",
+        "machines_maintenance_overdue",
+        "machines_usage_low",
+        "machines_with_alerts",
+        "inactive",
+        "machines_wu_pending",
+    ):
+        assert body[key] == 1, key
+    assert body["alerts_by_rule"]["inactive"] == 1
+
+    digest = await build_digest(db_session)
+    assert digest.total == 1
+    assert digest.inactive == 1
+    assert digest.with_active_threats == 1
+    assert digest.new_threats_24h == 1
+    assert digest.alerts_by_rule == {"inactive": 1}
+    assert [line.hostname for line in digest.threat_lines] == ["KEPT"]
+
+    async def hosts(**params):
+        resp = await client.get("/api/v1/machines", headers=headers, params=params)
+        assert resp.status_code == 200, resp.text
+        return sorted(m["hostname"] for m in resp.json()["items"])
+
+    assert await hosts(status="inactive") == ["GONE", "KEPT"]
+    assert await hosts(status="inactive", in_parc="true") == ["KEPT"]
+    assert await hosts(in_parc="false") == ["GONE"]
+
+
+async def test_a_rooms_postes_get_their_assets_for_its_labels(client, db_session):
+    """« Étiquettes » from a room: its postes without an asset get one, those
+    the caller does not see are left alone, nothing twice."""
+    from app.features.user.permissions import ALL_PERMISSIONS
+    from app.features.user.scope import Scope
+    from tests.scope_helpers import account
+
+    admin, _ = await _admin(client, db_session)
+    room = await _room(client, admin, "A101", location=SITE_A)
+    elsewhere = await _room(client, admin, "B201", location="Ailleurs")
+    g = await group(
+        db_session, "Site A", ALL_PERMISSIONS, Scope(locations=frozenset({SITE_A}))
+    )
+    scoped = await account(client, db_session, "a@test.local", [g.id])
+    for name in ("PC-1", "PC-2", "PC-3"):
+        await machine(db_session, name, location=SITE_A, room_id=uuid.UUID(room))
+    await machine(db_session, "PC-OUT", room_id=uuid.UUID(elsewhere))
+    had = await machine(db_session, "PC-HAD", location=SITE_A, room_id=uuid.UUID(room))
+    await client.put(
+        f"/api/v1/machines/{had.id}/asset",
+        headers=admin,
+        json={"inventory_number": "I-1"},
+    )
+
+    url = f"/api/v1/assets/rooms/{room}/complete"
+    resp = await client.post(url, headers=scoped)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"created": 3}
+    resp = await client.post(url, headers=scoped)
+    assert resp.json() == {"created": 0}
+    resp = await client.get("/api/v1/assets", headers=admin, params={"room_id": room})
+    names = sorted(a["display_name"] for a in resp.json()["items"])
+    assert names == ["PC-1", "PC-2", "PC-3", "PC-HAD"]
+    assert all(
+        a["status"] == "in_service" and a["kind"] == "computer"
+        for a in resp.json()["items"]
+    )
+
+    resp = await client.post(
+        f"/api/v1/assets/rooms/{elsewhere}/complete", headers=scoped
+    )
+    assert resp.status_code == 404
+    tech, _ = await _tech(client, db_session)
+    resp = await client.post(url, headers=tech)
+    assert resp.status_code == 403

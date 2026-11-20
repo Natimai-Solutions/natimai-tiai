@@ -12,14 +12,18 @@ const fr = {
   importButton: 'Importer',
   labels: 'Étiquettes',
   labelsSelected: 'Étiquettes ({count})',
+  labelsRoom: 'Étiquettes de la salle',
+  machinesWithStatus: 'Voir ces postes',
+  scanned: 'Matériel de l’étiquette scannée',
   filters: {
     all: 'Tout',
+    room: 'Salle',
     machines: 'Postes',
     equipment: 'Matériel sans agent',
     status: 'Statut',
     warranty: 'Garantie',
     warrantyActive: 'Sous garantie',
-    warrantySoon: 'Se termine dans les 60 jours',
+    warrantySoon: 'Bientôt terminée',
     warrantyExpired: 'Terminée',
     warrantyNone: 'Non renseignée',
   },
@@ -132,12 +136,13 @@ const fr = {
   import: {
     title: 'Importer des actifs',
     intro:
-      'Un CSV ou un classeur Excel, une ligne par poste, rapprochée sur son n° de série. Colonnes reconnues : n° de série (obligatoire), n° d’inventaire, statut, date d’achat, fournisseur, référence de commande, fin de garantie, prix, notes. Une case vide ne change rien.',
+      'Un CSV ou un classeur Excel, une ligne par poste, rapprochée sur son n° de série. Colonnes reconnues : n° de série (obligatoire), n° d’inventaire, statut, date d’achat, fournisseur, référence de commande, fin de garantie, prix, notes. Une case vide ne change rien. Jusqu’à {rows} lignes et {mb} Mo : au-delà, découpez le fichier.',
     file: 'Fichier',
     preview: 'Vérifier',
     apply: 'Importer {count} ligne(s)',
     applied: '{count} actif(s) écrit(s)',
     failed: 'L’import a échoué',
+    change: '{field} : {value}',
     columns: {
       line: 'Ligne',
       serial: 'N° de série',
@@ -160,6 +165,12 @@ const fr = {
       purchase_price: 'prix illisible',
       status: 'statut inconnu',
       inventory_number_taken: 'n° d’inventaire déjà pris',
+      duplicate_serial: 'poste déjà sur une ligne au-dessus',
+    },
+    /** Why a file over the limits was refused (`asset.import.too_large`). */
+    tooLarge: {
+      file_too_large: '{max_mb} Mo au plus : découpez le fichier',
+      too_many_rows: '{max} lignes au plus : découpez le fichier',
     },
   },
   labelsPage: {
@@ -168,10 +179,17 @@ const fr = {
     back: 'Retour',
     none: 'Aucune étiquette à imprimer.',
     hint: 'Une étiquette par actif ; le QR ouvre sa fiche dans la console, après connexion.',
+    roomHint: 'Un poste sans fiche matériel n’a pas encore d’étiquette.',
+    roomComplete: 'Créer les fiches qui manquent',
+    roomCompleted: '{count} fiche(s) créée(s)',
+    roomCompletedNone: 'Tous les postes de la salle ont déjà leur fiche.',
+    roomCompleteFailed: 'Les fiches n’ont pas pu être créées',
   },
   token: {
     resolving: 'Ouverture…',
     notFound: 'Cette étiquette ne mène à aucun matériel que vous pouvez voir.',
+    noAssetRead:
+      'Cette étiquette est celle d’un matériel sans agent : sa fiche est dans « Matériels », que votre compte ne peut pas ouvrir.',
   },
 };
 
@@ -186,14 +204,18 @@ const en: Translation<typeof fr> = {
   importButton: 'Import',
   labels: 'Labels',
   labelsSelected: 'Labels ({count})',
+  labelsRoom: 'Room labels',
+  machinesWithStatus: 'See these computers',
+  scanned: 'Equipment of the scanned label',
   filters: {
     all: 'All',
+    room: 'Room',
     machines: 'Computers',
     equipment: 'Equipment without an agent',
     status: 'Status',
     warranty: 'Warranty',
     warrantyActive: 'Under warranty',
-    warrantySoon: 'Ends within 60 days',
+    warrantySoon: 'Ending soon',
     warrantyExpired: 'Ended',
     warrantyNone: 'Not entered',
   },
@@ -306,12 +328,13 @@ const en: Translation<typeof fr> = {
   import: {
     title: 'Import assets',
     intro:
-      'A CSV or an Excel workbook, one row per computer, matched on its serial number. Columns recognised: serial number (required), inventory number, status, purchase date, supplier, order reference, warranty end, price, notes. An empty cell changes nothing.',
+      'A CSV or an Excel workbook, one row per computer, matched on its serial number. Columns recognised: serial number (required), inventory number, status, purchase date, supplier, order reference, warranty end, price, notes. An empty cell changes nothing. Up to {rows} rows and {mb} MB: split a larger file.',
     file: 'File',
     preview: 'Check',
     apply: 'Import {count} row | Import {count} rows',
     applied: '{count} asset written | {count} assets written',
     failed: 'The import failed',
+    change: '{field}: {value}',
     columns: {
       line: 'Row',
       serial: 'Serial no.',
@@ -334,6 +357,11 @@ const en: Translation<typeof fr> = {
       purchase_price: 'unreadable price',
       status: 'unknown status',
       inventory_number_taken: 'inventory number already used',
+      duplicate_serial: 'computer already on a row above',
+    },
+    tooLarge: {
+      file_too_large: '{max_mb} MB at most: split the file',
+      too_many_rows: '{max} rows at most: split the file',
     },
   },
   labelsPage: {
@@ -342,10 +370,17 @@ const en: Translation<typeof fr> = {
     back: 'Back',
     none: 'No label to print.',
     hint: 'One label per asset; the QR opens its page in the console, once signed in.',
+    roomHint: 'A computer without an asset record has no label yet.',
+    roomComplete: 'Create the missing records',
+    roomCompleted: '{count} record created | {count} records created',
+    roomCompletedNone: 'Every computer of the room already has its record.',
+    roomCompleteFailed: 'The records could not be created',
   },
   token: {
     resolving: 'Opening…',
     notFound: 'This label leads to no equipment you can see.',
+    noAssetRead:
+      'This label is that of equipment without an agent: its record is in « Equipment », which your account cannot open.',
   },
 };
 

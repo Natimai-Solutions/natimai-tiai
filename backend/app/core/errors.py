@@ -94,6 +94,8 @@ class ErrorCode(enum.StrEnum):
     ASSET_MACHINE_TAKEN = "asset.machine.taken"
     # An import file that cannot be read: not CSV or Excel, no serial column.
     ASSET_IMPORT_UNREADABLE = "asset.import.unreadable"
+    # An import file over the limits — rows or bytes: to be split.
+    ASSET_IMPORT_TOO_LARGE = "asset.import.too_large"
     ROOM_NAME_TAKEN = "room.name.taken"
     # ROOM_SOURCE is a directory mode: postes are filed by the directory, and
     # a placement made by hand here would be undone on the next inventory.

@@ -217,6 +217,7 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
     params.asset_status = assetStatus;
   }
   if (queryValue(q.win11_blocked) === 'true') params.win11_blocked = true;
+  if (queryValue(q.in_parc) === 'true') params.in_parc = true;
   // The five text facets the list sets from its dropdowns: matched exactly,
   // as the list asked (``machineFiltersToParams``).
   const exact = (

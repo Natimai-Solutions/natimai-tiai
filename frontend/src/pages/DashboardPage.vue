@@ -234,6 +234,21 @@ interface AlertKpi extends Omit<Kpi, 'to'> {
 }
 
 /**
+ * The figures leave the retired postes out (decision 5): while the parc has
+ * any, the lists the cards open leave them out too (`in_parc=true`), or the
+ * card would read 3 and its list 4. Without retired postes the link stays as
+ * it was, no chip to explain.
+ */
+function inParc<T extends { to?: RouteLocationRaw }>(kpi: T): T {
+  const retired = stats.value?.machines_retired ?? 0;
+  const to = kpi.to;
+  if (!retired || !to || typeof to !== 'object' || !('name' in to) || to.name !== 'machines')
+    return kpi;
+  const query = 'query' in to && to.query ? to.query : {};
+  return { ...kpi, to: { ...to, query: { ...query, in_parc: 'true' } } };
+}
+
+/**
  * « comptage depuis le 12/10 » while the usage counters are younger than the
  * window they are read over — until then a parc reading « peu utilisé » is a
  * parc being counted since Tuesday, not a parc nobody uses. Undefined once the
@@ -297,7 +312,7 @@ const inventoryKpis = computed<Kpi[]>(() => {
       }),
       ...(counting ? { caption: counting } : {}),
     },
-  ];
+  ].map(inParc);
 });
 
 /**
@@ -350,7 +365,7 @@ const priorityKpis = computed<Kpi[]>(() => {
       },
       caption: t('dashboard.kpi.lowDiskCaption', { percent: s.low_disk_free_percent }),
     },
-  ];
+  ].map(inParc);
 });
 
 /**
@@ -470,7 +485,7 @@ const alertKpis = computed<AlertKpi[]>(() => {
       to: { name: 'machines', query: { hardware_aging: 'true' } },
       detail: t('dashboard.kpi.agingDetail', { years: s.hardware_aging_years }),
     },
-  ];
+  ].map(inParc);
 });
 
 /**

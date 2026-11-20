@@ -4,6 +4,19 @@
       <h1 class="text-h5 q-my-none col-auto">{{ t('alerts.title') }}</h1>
       <q-space />
       <div class="col-auto">
+        <!-- The postes of the tab as a list: to select them for a command,
+             a verification, an export. -->
+        <q-btn
+          outline
+          no-caps
+          color="primary"
+          icon="list"
+          :label="t('alerts.machines')"
+          :disable="!(rule === 'all' ? totalOpen : counts[rule])"
+          :to="{ name: 'machines', query: { alert: rule === 'all' ? 'any' : rule } }"
+        />
+      </div>
+      <div class="col-auto">
         <q-btn
           flat
           round
@@ -66,7 +79,7 @@
         <template #body-cell-detail="props">
           <q-td :props="props" style="white-space: normal; min-width: 240px">
             {{ props.value }}
-            <q-badge v-if="props.row.check_id" color="primary" outline class="q-ml-xs">
+            <q-badge v-if="props.row.check_open" color="primary" outline class="q-ml-xs">
               {{ t('alerts.check') }}
             </q-badge>
           </q-td>

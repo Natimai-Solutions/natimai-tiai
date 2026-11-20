@@ -44,6 +44,65 @@ describe('CheckRequestDialog — an assignee deactivated since (item 4)', () => 
   });
 });
 
+describe('CheckRequestDialog — a verification opened for an alert', () => {
+  const check = {
+    id: 'c-1',
+    machine_id: 'm-1',
+    instructions: 'Alerte : Il reste 2 % …',
+    instructions_code: 'alert.disk_low',
+    instructions_params: { free_percent: 2, threshold_percent: 10 },
+    assigned_to: null,
+  } as unknown as Check;
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    setActivePinia(createPinia());
+    vi.mocked(listAssignableUsers).mockResolvedValue([{ id: 'u-1', name: 'Alice' }]);
+  });
+
+  async function open(save: (payload: unknown) => Promise<void>) {
+    const wrapper = mount(CheckRequestDialog, {
+      props: { modelValue: false, check, save },
+      attachTo: document.body,
+    });
+    await wrapper.setProps({ modelValue: true });
+    await flushPromises();
+    const text = wrapper.findAllComponents(QInput).find((i) => i.props('label') === 'Consignes')!;
+    return { wrapper, text };
+  }
+
+  it('opens on the instructions worded from the code', async () => {
+    const { wrapper, text } = await open(vi.fn());
+    expect(text.props('modelValue')).toBe(
+      'Alerte : Disque système presque plein — 2 % libres (seuil : 10 %)',
+    );
+    wrapper.unmount();
+  });
+
+  it('sends no instructions on a reassignment, so they stay coded', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { wrapper } = await open(save);
+    wrapper.findComponent(QSelect).vm.$emit('update:modelValue', 'u-1');
+    await wrapper.findComponent(QForm).trigger('submit');
+    await flushPromises();
+    expect(save).toHaveBeenCalledWith({ assigned_to_id: 'u-1' });
+    wrapper.unmount();
+  });
+
+  it('sends the text once someone changes it', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { wrapper, text } = await open(save);
+    text.vm.$emit('update:modelValue', 'Vider la corbeille');
+    await wrapper.findComponent(QForm).trigger('submit');
+    await flushPromises();
+    expect(save).toHaveBeenCalledWith({
+      assigned_to_id: null,
+      instructions: 'Vider la corbeille',
+    });
+    wrapper.unmount();
+  });
+});
+
 describe('CheckRequestDialog — a session that ends mid-form (solidity item 7)', () => {
   beforeEach(() => {
     window.sessionStorage.clear();

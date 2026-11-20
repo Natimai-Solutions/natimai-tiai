@@ -108,7 +108,8 @@ class StatsOverview(BaseModel):
     machines_with_alerts: int = 0
     alerts_by_rule: dict[str, int] = {}
     # Postes the inventory says cannot take Windows 11, and the retired
-    # ones — left out of every other count here.
+    # ones — left out of every other count here, and out of the lists the
+    # cards open (``in_parc=true`` on their links while there are any).
     machines_win11_blocked: int = 0
     machines_retired: int = 0
 
@@ -217,7 +218,10 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
             restrict(
                 select(func.count(func.distinct(Threat.machine_id))),
                 machine_ids_clause(scope, col(Threat.machine_id)),
-            ).where(col(Threat.status) == "active")
+            ).where(
+                col(Threat.status) == "active",
+                asset_crud.in_parc_ids_clause(col(Threat.machine_id)),
+            )
         )
         or 0
     )
@@ -236,7 +240,10 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
         restrict(
             select(func.count()).select_from(MachineCheck),
             machine_ids_clause(scope, col(MachineCheck.machine_id)),
-        ).where(col(MachineCheck.closed_at).is_(None))
+        ).where(
+            col(MachineCheck.closed_at).is_(None),
+            asset_crud.in_parc_ids_clause(col(MachineCheck.machine_id)),
+        )
     )
     open_checks = open_checks_result.one() or 0
 
@@ -246,7 +253,7 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
         .select_from(Machine)
         .outerjoin(Room, col(Room.id) == col(Machine.room_id)),
         in_scope,
-    )
+    ).where(asset_crud.in_parc_clause())
     overdue_result = await session.exec(
         joined.where(
             maintenance_policy.state_clause(MaintenanceState.OVERDUE, policy, now)
@@ -279,10 +286,16 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
         .select_from(Machine)
         .outerjoin(usage_seconds, usage_crud.join_condition(usage_seconds))
         .where(in_scope if in_scope is not None else true())
+        .where(asset_crud.in_parc_clause())
     )
     usage_low, usage_high = usage_counts.one()
 
-    open_alert = col(MachineAlert.resolved_at).is_(None)
+    # A retired poste's alerts resolve at the next evaluation; until then
+    # they are not counted either.
+    open_alert = and_(
+        col(MachineAlert.resolved_at).is_(None),
+        asset_crud.in_parc_ids_clause(col(MachineAlert.machine_id)),
+    )
     machines_with_alerts = (
         await session.scalar(
             restrict(

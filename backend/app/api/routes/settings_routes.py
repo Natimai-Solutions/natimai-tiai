@@ -585,6 +585,16 @@ async def get_settings(session: SessionDep) -> SettingsOut:
     return await _out(session)
 
 
+def _audit_value(value: object) -> str | None:
+    """A setting as the audit line writes it: a list as its values joined —
+    the codes of the rules, not the Python representation of the enums."""
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
 @router.patch("", response_model=SettingsOut, dependencies=[_WRITE])
 async def update_settings(
     payload: SettingsUpdate, session: SessionDep, current: CurrentUser
@@ -637,9 +647,7 @@ async def update_settings(
             str(owner_id) if owner_id else None,
             actor=current.email,
         )
-    details: dict[str, str | None] = {
-        k: (str(v) if v is not None else None) for k, v in fields.items()
-    }
+    details: dict[str, str | None] = {k: _audit_value(v) for k, v in fields.items()}
     if payload.email is not None:
         _reject_secret_redirect(
             await mail.load_stored(session), payload.email.changes()

@@ -464,6 +464,8 @@ export interface ListMachinesParams {
   asset_status?: string;
   /** Postes the inventory says cannot take Windows 11. */
   win11_blocked?: boolean;
+  /** true: the retired postes left out (the dashboard's links). */
+  in_parc?: boolean;
   /**
    * Comma-separated facets matched exactly rather than as a substring:
    * antivirus, os_version, hw_model, hw_manufacturer, cpu_model.

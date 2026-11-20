@@ -55,6 +55,16 @@ describe('MachineAlertsCard', () => {
     expect(wrapper.text()).toContain('Sans contact');
   });
 
+  it('shows « Vérification demandée » while that verification is open only', async () => {
+    answer([
+      { ...alert('a', 'disk_low'), check_id: 'c-1', check_open: true },
+      { ...alert('b', 'inactive'), check_id: 'c-2', check_open: false },
+    ]);
+    const wrapper = mount(MachineAlertsCard, { props: { machineId: 'm-1' } });
+    await flushPromises();
+    expect(wrapper.text().match(/Vérification demandée/g)).toHaveLength(1);
+  });
+
   it('reads again when the fiche reloads', async () => {
     answer([alert('a', 'disk_low')]);
     const wrapper = mount(MachineAlertsCard, { props: { machineId: 'm-1', refreshKey: 1 } });

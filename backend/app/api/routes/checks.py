@@ -594,10 +594,14 @@ async def update_check(
             )
         row.assigned_to_id = fields["assigned_to_id"]
     if "instructions" in fields:
-        row.instructions = _clean(fields["instructions"])
-        # Typed by someone now: no longer the server's coded text.
-        row.instructions_code = None
-        row.instructions_params = None
+        typed = _clean(fields["instructions"])
+        # The console sends the text back with every edit — a reassignment
+        # too: only a text that changed is someone's own, and no longer the
+        # server's coded one.
+        if typed != row.instructions:
+            row.instructions = typed
+            row.instructions_code = None
+            row.instructions_params = None
     row.updated_at = utcnow()
     session.add(row)
     if new_assignee is not None and new_assignee.id != current.id:
@@ -608,6 +612,8 @@ async def update_check(
             machines=[machine],
             requested_by=current.email,
             instructions=row.instructions,
+            instructions_code=row.instructions_code,
+            instructions_params=row.instructions_params,
         )
     audit.record(
         session,

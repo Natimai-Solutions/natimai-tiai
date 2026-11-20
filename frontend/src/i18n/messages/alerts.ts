@@ -6,6 +6,7 @@ const fr = {
   subtitle:
     'Ce que les règles relèvent sur les postes, ouvert et résolu par le serveur toutes les cinq minutes.',
   refresh: 'Actualiser',
+  machines: 'Voir ces postes',
   all: 'Toutes',
   openSince: 'depuis le {date}',
   resolvedOn: 'résolue le {date}',
@@ -52,6 +53,7 @@ const fr = {
     forbidden_softwareMore: '{programs} et {count} autre(s)',
     inactive: 'Dernier contact le {date}',
     warranty_ending: 'Garantie jusqu’au {date}',
+    warranty_endingWithin: 'Garantie terminée dans moins de {days} jours',
   },
   /** The instructions of a verification the server opened for an alert. */
   instructions: 'Alerte : {rule} — {detail}',
@@ -62,6 +64,7 @@ const en: Translation<typeof fr> = {
   subtitle:
     'What the rules find on the computers, opened and resolved by the server every five minutes.',
   refresh: 'Refresh',
+  machines: 'See these computers',
   all: 'All',
   openSince: 'since {date}',
   resolvedOn: 'resolved on {date}',
@@ -108,6 +111,7 @@ const en: Translation<typeof fr> = {
     forbidden_softwareMore: '{programs} and {count} more',
     inactive: 'Last contact on {date}',
     warranty_ending: 'Warranty until {date}',
+    warranty_endingWithin: 'Warranty ends within {days} days',
   },
   instructions: 'Alert: {rule} — {detail}',
 };

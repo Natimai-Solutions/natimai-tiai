@@ -16,14 +16,21 @@ import csv
 import io
 import re
 import unicodedata
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from itertools import chain, islice
 from typing import Any
 
 from app.features.asset.models import AssetStatus
 
 MAX_ROWS = 5000
+# Rows read at most, empty ones included: a sheet formatted down to its
+# millionth row is refused before it is read whole.
+MAX_RAW_ROWS = 2 * MAX_ROWS
+# Rows looked at for the header, below a title or a blank line or two.
+HEADER_ROWS = 10
 
 # Normalised header → field. Normalised: lower case, no accent, letters and
 # digits only (« N° de série » → « ndeserie »).
@@ -49,8 +56,10 @@ for _field, _names in {
         "ndinventaire",
         "noinventaire",
         "inventaire",
+        # The export's own headers (``machine_export``), read back.
+        "inventoryno",
     ],
-    "status": ["status", "statut", "etat"],
+    "status": ["status", "statut", "etat", "statutdelactif", "assetstatus"],
     "purchase_date": ["purchasedate", "dateachat", "datedachat", "achat"],
     "supplier": ["supplier", "vendor", "fournisseur"],
     "order_reference": [
@@ -105,7 +114,11 @@ def normalise(text: str) -> str:
 
 class UnreadableFile(ValueError):
     """Neither a CSV nor a workbook this importer can read, or no serial
-    column in it."""
+    column in it. ``args[0]`` is the cause's code."""
+
+
+class TooManyRows(ValueError):
+    """More than ``MAX_ROWS`` rows: to be split."""
 
 
 @dataclass
@@ -117,30 +130,57 @@ class ImportRow:
     errors: list[str] = field(default_factory=list)
 
 
-def _rows_of_csv(content: bytes) -> list[list[str]]:
+def _decode(content: bytes) -> str:
     for encoding in ("utf-8-sig", "cp1252"):
         try:
-            text = content.decode(encoding)
-            break
+            return content.decode(encoding)
         except UnicodeDecodeError:
             continue
-    else:
-        raise UnreadableFile("encoding")
-    # The delimiter is the one the header line uses most. Not
-    # ``csv.Sniffer``: an apostrophe in a header (« N° d'inventaire ») makes
-    # it take « ' » for the quote character and swallow whole rows.
-    first_line = text.split("\n", 1)[0]
-    delimiter = max(";,\t", key=first_line.count)
+    raise UnreadableFile("encoding")
 
+
+def _dialect(delimiter: str) -> Any:
     class Dialect(csv.excel):
         pass
 
     Dialect.delimiter = delimiter
-    dialect: Any = Dialect
-    return [list(r) for r in csv.reader(io.StringIO(text), dialect)]
+    return Dialect
 
 
-def _rows_of_xlsx(content: bytes) -> list[list[Any]]:
+def _header_of(rows: Iterable[list[Any]]) -> tuple[int, dict[int, str]] | None:
+    """Where the header is in the first rows — the first naming a serial
+    column — and the field of each column it names."""
+    for index, header_row in enumerate(islice(rows, HEADER_ROWS)):
+        found = {
+            i: HEADERS[normalise(str(cell))]
+            for i, cell in enumerate(header_row)
+            if cell is not None and normalise(str(cell)) in HEADERS
+        }
+        if "serial" in found.values():
+            return index, found
+    return None
+
+
+def _rows_of_csv(content: bytes) -> Iterator[list[Any]]:
+    text = _decode(content)
+    # The delimiter is the one that splits a header out of the first rows —
+    # below a title line too, which names no column. Not ``csv.Sniffer``: an
+    # apostrophe in a header (« N° d'inventaire ») makes it take « ' » for
+    # the quote character and swallow whole rows.
+    best: tuple[int, int, str] | None = None
+    for delimiter in ";,\t":
+        header = _header_of(csv.reader(io.StringIO(text), _dialect(delimiter)))
+        if header is None:
+            continue
+        index, columns = header
+        rank = (index, -len(columns), delimiter)
+        if best is None or rank < best:
+            best = rank
+    delimiter = best[2] if best is not None else ";"
+    return csv.reader(io.StringIO(text), _dialect(delimiter))
+
+
+def _rows_of_xlsx(content: bytes) -> Iterator[list[Any]]:
     from openpyxl import load_workbook
 
     try:
@@ -148,11 +188,13 @@ def _rows_of_xlsx(content: bytes) -> list[list[Any]]:
     except Exception as exc:  # zip, XML: whatever the file is, it is not one
         raise UnreadableFile("xlsx") from exc
     sheet = workbook.worksheets[0]
-    return [list(r) for r in sheet.iter_rows(values_only=True)]
+    if sheet.max_row is not None and sheet.max_row > MAX_RAW_ROWS + HEADER_ROWS:
+        raise TooManyRows()
+    return (list(r) for r in sheet.iter_rows(values_only=True))
 
 
 def _date(value: Any) -> date | None:
-    if value is None or value == "":
+    if _blank(value):
         return None
     if isinstance(value, datetime):
         return value.date()
@@ -167,8 +209,13 @@ def _date(value: Any) -> date | None:
     raise ValueError(text)
 
 
+def _blank(value: Any) -> bool:
+    """An empty cell — a stray space too: it leaves the stored value alone."""
+    return value is None or (isinstance(value, str) and value.strip() == "")
+
+
 def _price(value: Any) -> Decimal | None:
-    if value is None or value == "":
+    if _blank(value):
         return None
     if isinstance(value, (int, float, Decimal)):
         amount = Decimal(str(value))
@@ -186,6 +233,12 @@ def _price(value: Any) -> Decimal | None:
         amount = Decimal(text)
     if amount < 0 or amount >= Decimal("1e10"):
         raise InvalidOperation(str(value))
+    # Written with more than two decimals is a thousands separator read as
+    # a decimal point (« 1,299 », « 125.000 »): refused, never rounded to
+    # 1.30. A number cell of a workbook is a number, and is rounded.
+    exponent = amount.as_tuple().exponent
+    if isinstance(value, str) and isinstance(exponent, int) and exponent < -2:
+        raise InvalidOperation(str(value))
     return amount.quantize(Decimal("0.01"))
 
 
@@ -197,37 +250,32 @@ def _text(value: Any, limit: int) -> str | None:
 
 
 def parse(filename: str, content: bytes) -> list[ImportRow]:
-    """The rows of an import file, read and typed, not yet matched."""
+    """The rows of an import file, read and typed, not yet matched. CPU work:
+    the route runs it off the event loop."""
     if filename.lower().endswith((".xlsx", ".xlsm")):
         table = _rows_of_xlsx(content)
     else:
         table = _rows_of_csv(content)
-    # The header is the first row naming a serial column.
-    header_index = None
-    columns: dict[int, str] = {}
-    for index, header_row in enumerate(table[:10]):
-        found = {
-            i: HEADERS[normalise(str(cell))]
-            for i, cell in enumerate(header_row)
-            if cell is not None and normalise(str(cell)) in HEADERS
-        }
-        if "serial" in found.values():
-            header_index, columns = index, found
-            break
-    if header_index is None:
+    head = list(islice(table, HEADER_ROWS))
+    header = _header_of(head)
+    if header is None:
         raise UnreadableFile("no_serial_column")
+    header_index, columns = header
 
     rows: list[ImportRow] = []
-    for offset, raw in enumerate(table[header_index + 1 :], start=header_index + 2):
+    lines = chain(head[header_index + 1 :], table)
+    for offset, raw in enumerate(lines, start=header_index + 2):
+        if offset > MAX_RAW_ROWS + header_index + 1:
+            raise TooManyRows()
         cells = {name: raw[i] if i < len(raw) else None for i, name in columns.items()}
         serial = _text(cells.get("serial"), 200)
         if serial is None:
-            if any(v not in (None, "") for v in cells.values()):
+            if any(not _blank(v) for v in cells.values()):
                 rows.append(ImportRow(offset, "", errors=["serial"]))
             continue
         row = ImportRow(offset, serial)
         for name, value in cells.items():
-            if name == "serial" or value is None or value == "":
+            if name == "serial" or _blank(value):
                 continue
             try:
                 if name in ("purchase_date", "warranty_end"):
@@ -249,5 +297,5 @@ def parse(filename: str, content: bytes) -> list[ImportRow]:
                 row.errors.append(name)
         rows.append(row)
         if len(rows) > MAX_ROWS:
-            raise UnreadableFile("too_many_rows")
+            raise TooManyRows()
     return rows

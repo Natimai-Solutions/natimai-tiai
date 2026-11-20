@@ -19,11 +19,13 @@ import logging
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import Any
 
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
+from app.features.alert.texts import worded_instructions
 from app.features.base import utcnow
 from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
@@ -87,6 +89,8 @@ def send_checks_assigned(
     machines: list[Machine],
     requested_by: str,
     instructions: str | None,
+    instructions_code: str | None = None,
+    instructions_params: dict[str, Any] | None = None,
 ) -> bool:
     """Tell ``assignee`` that ``requested_by`` asks them to look at these
     postes. One mail for the lot: a request on a whole room is one request.
@@ -104,8 +108,15 @@ def send_checks_assigned(
         subject = t.check_subject_many(project, len(machines))
         intro = t.check_intro_many(requested_by, len(machines))
     body = [intro, ""]
-    if instructions:
-        body += [t.instructions, instructions, ""]
+    # Opened by the server for an alert: worded in the assignee's language.
+    worded = worded_instructions(
+        instructions,
+        instructions_code,
+        instructions_params,
+        mail_language(assignee.language),
+    )
+    if worded:
+        body += [t.instructions, worded, ""]
     if len(machines) > 1:
         cap = settings.NOTIFICATION_MAX_ITEMS
         body += [f"  • {n}" for n in names[:cap]]
@@ -198,7 +209,13 @@ async def _personal_block(
     if check_rows:
         lines.append(t.checks_assigned(len(check_rows)))
         for check, machine in check_rows[:cap]:
-            what = f" — {check.instructions}" if check.instructions else ""
+            worded = worded_instructions(
+                check.instructions,
+                check.instructions_code,
+                check.instructions_params,
+                mail_language(user.language),
+            )
+            what = f" — {worded}" if worded else ""
             lines.append(
                 bullet(f"{machine.hostname or machine.machine_uuid}{what}", indent=4)
             )

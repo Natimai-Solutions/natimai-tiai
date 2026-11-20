@@ -28,7 +28,23 @@ TODAY = NOW.date()
         ("Windows 10 Pro 22H2 (Build 19045)", date(2025, 10, 14), True),
         ("Windows 10 Enterprise LTSC 2021 (Build 19044)", date(2027, 1, 12), False),
         ("Windows 10 Enterprise LTSC 2019 (Build 17763)", date(2029, 1, 9), False),
-        ("Windows 11 IoT Enterprise LTSC 2024 (Build 26100)", date(2029, 10, 9), False),
+        ("Windows 11 Enterprise LTSC 2024 (Build 26100)", date(2029, 10, 9), False),
+        # IoT Enterprise LTSC: ten years since 2021, the Enterprise date before.
+        (
+            "Windows 11 IoT Enterprise LTSC 2024 (Build 26100)",
+            date(2034, 10, 10),
+            False,
+        ),
+        ("Windows 10 IoT Enterprise LTSC 2021 (Build 19044)", date(2032, 1, 13), False),
+        ("Windows 10 IoT Enterprise LTSC 2019 (Build 17763)", date(2029, 1, 9), False),
+        # Pro Education goes with Home and Pro, not with Education.
+        ("Windows 11 Pro Education 24H2 (Build 26100)", date(2026, 10, 13), True),
+        ("Windows 11 Pro Education 23H2 (Build 22631)", date(2025, 11, 11), True),
+        (
+            "Windows 11 Pro for Workstations 25H2 (Build 26200)",
+            date(2027, 10, 12),
+            False,
+        ),
         ("Windows 7 Professional (Build 7601)", date(2020, 1, 14), True),
     ],
 )
@@ -62,7 +78,10 @@ def test_unknown_is_never_unsupported(os_version):
 
 
 def test_channels():
-    assert channel_of("Windows 11 Pro Education") is Channel.ENTERPRISE_EDUCATION
+    assert channel_of("Windows 11 Pro Education") is Channel.HOME_PRO
+    assert channel_of("Windows 11 Pro for Workstations") is Channel.HOME_PRO
+    assert channel_of("Windows 11 Education") is Channel.ENTERPRISE_EDUCATION
+    assert channel_of("Windows 10 IoT Enterprise LTSC 2021") is Channel.IOT_LTSC
     assert channel_of("Windows 10 Enterprise LTSB 2016") is Channel.LTSC
     assert channel_of("Windows 11 Famille") is Channel.HOME_PRO
 
@@ -337,6 +356,31 @@ async def test_auto_check_opens_one_verification(db_session):
     # The poste already asked about keeps its one request.
     [kept] = await _alerts(db_session, asked)
     assert kept.check_id is None
+
+
+async def test_large_evaluation_is_inserted_in_chunks(db_session, monkeypatch):
+    """Every row opened and every verification bound, across several INSERTs
+    (PostgreSQL refuses a statement past 65,535 parameters)."""
+    from app.features.alert import crud
+    from app.features.check.models import MachineCheck
+    from app.features.setting.crud import KEY_ALERT_AUTO_CHECK
+
+    monkeypatch.setattr(crud, "CHUNK", 2)
+    await _set(db_session, KEY_ALERT_AUTO_CHECK, ["inactive"])
+    ids = [
+        await _machine(db_session, f"GONE-{i}", last_seen=NOW - timedelta(days=45))
+        for i in range(5)
+    ]
+    result = await _evaluate(db_session)
+    assert len(result.opened) == 5
+    assert result.checks_opened == 5
+    alerts = await _alerts(db_session, open_only=True)
+    assert {a.machine_id for a in alerts} == set(ids)
+    checks = (await db_session.exec(select(MachineCheck))).all()
+    assert {a.check_id for a in alerts} == {c.id for c in checks}
+    # Run again: nothing new.
+    again = await _evaluate(db_session)
+    assert again.opened == [] and again.checks_opened == 0
 
 
 async def test_merge_moves_history_and_drops_open(db_session):

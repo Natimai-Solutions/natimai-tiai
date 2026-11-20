@@ -17,6 +17,21 @@
       />
     </div>
     <LoadErrorBanner v-if="loadError" :error="loadError" :loading="loading" @retry="load" />
+    <!-- A room's sheet: its postes without an asset have no label yet. -->
+    <div v-if="roomId" class="labels-toolbar row items-center q-gutter-sm q-px-md">
+      <div class="text-caption text-muted">{{ t('assets.labelsPage.roomHint') }}</div>
+      <q-btn
+        v-if="canWrite"
+        flat
+        dense
+        no-caps
+        color="primary"
+        icon="playlist_add"
+        :label="t('assets.labelsPage.roomComplete')"
+        :loading="completing"
+        @click="complete"
+      />
+    </div>
     <div v-if="!loading && !labels.length && !loadError" class="q-pa-md text-muted">
       {{ t('assets.labelsPage.none') }}
     </div>
@@ -45,13 +60,23 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useQuasar } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { t } from 'src/i18n';
-import { labelUrl, listAssets, qrPath, type Asset } from 'src/services/assets';
+import { completeRoomAssets, labelUrl, listAssets, qrPath, type Asset } from 'src/services/assets';
+import { apiErrorMessage } from 'src/services/errors';
+import { useAuthStore } from 'src/stores/auth';
 import { queryValue } from 'src/utils/machineQuery';
+import { notify } from 'src/utils/notify';
 
+const $q = useQuasar();
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
+const canWrite = computed(() => auth.can('asset', 'write'));
+// The labels of a selection (« ?ids= »), or of a room (« ?room_id= »).
+const roomId = queryValue(route.query.room_id) ?? null;
+const completing = ref(false);
 const assets = ref<Asset[]>([]);
 const loading = ref(false);
 const loadError = ref<unknown>(null);
@@ -68,16 +93,40 @@ const labels = computed(() =>
 
 async function load(): Promise<void> {
   const ids = queryValue(route.query.ids);
-  if (!ids) return;
+  if (!ids && !roomId) return;
   loading.value = true;
   try {
-    const res = await listAssets({ ids, page_size: 500 });
+    const res = await listAssets(
+      ids ? { ids, page_size: 500 } : { room_id: roomId ?? '', page_size: 500 },
+    );
     assets.value = res.items;
     loadError.value = null;
   } catch (e) {
     loadError.value = e;
   } finally {
     loading.value = false;
+  }
+}
+
+async function complete(): Promise<void> {
+  if (!roomId) return;
+  completing.value = true;
+  try {
+    const created = await completeRoomAssets(roomId);
+    notify($q, () => ({
+      type: created ? 'positive' : 'info',
+      message: created
+        ? t('assets.labelsPage.roomCompleted', { count: created }, created)
+        : t('assets.labelsPage.roomCompletedNone'),
+    }));
+    if (created) await load();
+  } catch (e) {
+    notify($q, () => ({
+      type: 'negative',
+      message: apiErrorMessage(e, t('assets.labelsPage.roomCompleteFailed')),
+    }));
+  } finally {
+    completing.value = false;
   }
 }
 

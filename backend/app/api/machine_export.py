@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.features.alert.texts import worded_instructions
 from app.features.asset.models import Asset
 from app.features.base import utcnow
 from app.features.check.models import MachineCheck
@@ -176,7 +177,15 @@ def _check_assigned_to(r: ExportRow) -> object:
 
 
 def _check_instructions(r: ExportRow) -> object:
-    return r.check.instructions if r.check is not None else None
+    if r.check is None:
+        return None
+    # Opened by the server for an alert: worded in the file's language.
+    return worded_instructions(
+        r.check.instructions,
+        r.check.instructions_code,
+        r.check.instructions_params,
+        r.language,
+    )
 
 
 MAINTENANCE_LABELS = {

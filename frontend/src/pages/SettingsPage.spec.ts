@@ -20,7 +20,7 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
 
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { listAssignableOwners } from 'src/services/maintenance';
-import { QInput } from 'quasar';
+import { QInput, QToggle } from 'quasar';
 import { resetFleetThresholds, useFleetThresholds } from 'src/composables/useFleetThresholds';
 import { getSettings, updateSettings, type ConsoleSettings } from 'src/services/settings';
 import { useAuthStore } from 'src/stores/auth';
@@ -96,6 +96,13 @@ function consoleSettings(): ConsoleSettings {
     },
     environment: [],
     updated_at: null,
+    alert_rules: ['disk_low', 'disk_unhealthy', 'inactive'],
+    alert_enabled_rules: ['disk_low', 'disk_unhealthy', 'inactive'],
+    alert_auto_check_rules: ['disk_low', 'inactive'],
+    alert_reboot_pending_days: 7,
+    alert_warranty_days: 30,
+    alert_unencrypted_scope: 'laptops',
+    alert_forbidden_software: [],
   };
   return value;
 }
@@ -288,6 +295,63 @@ describe('SettingsPage', () => {
       await flushPromises();
       expect(blocksUnload()).toBe(false);
       expect(await asksBeforeLeaving(page)).toBeNull();
+      page.app.unmount();
+    });
+  });
+
+  describe('the alerts card', () => {
+    beforeEach(() => {
+      vi.mocked(getSettings).mockResolvedValue(consoleSettings());
+      vi.mocked(updateSettings).mockReset();
+    });
+
+    function toggle(page: Page, label: string) {
+      return page.wrapper.findAllComponents(QToggle).find((c) => c.props('label') === label)!;
+    }
+
+    it('is silent after a rule is turned off and on again', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const disk = toggle(page, 'Disque système presque plein');
+      await disk.trigger('click');
+      await flushPromises();
+      expect(blocksUnload()).toBe(true);
+      await disk.trigger('click');
+      await flushPromises();
+      // Back on, last in the list now: the same rules all the same.
+      expect(blocksUnload()).toBe(false);
+      expect(await asksBeforeLeaving(page)).toBeNull();
+      page.app.unmount();
+    });
+
+    it('saves only the auto-checks of rules turned on, and the patterns that read', async () => {
+      vi.mocked(updateSettings).mockResolvedValue(consoleSettings());
+      const page = await mountPage(['settings:read', 'settings:write']);
+      await toggle(page, 'Sans contact').trigger('click');
+      const vm = page.wrapper.vm as unknown as {
+        alertForm: { forbidden: string[]; warrantyDays: number | string };
+      };
+      vm.alertForm.forbidden = [' x ', ' uTorrent '];
+      vm.alertForm.warrantyDays = '45';
+      await flushPromises();
+      await saveCard(page, 'Alertes');
+      expect(updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          alert_enabled_rules: ['disk_low', 'disk_unhealthy'],
+          alert_auto_check_rules: ['disk_low'],
+          alert_forbidden_software: ['uTorrent'],
+          alert_warranty_days: 45,
+          alert_reboot_pending_days: 7,
+        }),
+      );
+      page.app.unmount();
+    });
+
+    it('does not save a number of days out of range', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      field(page, 'Fin de garantie signalée').vm.$emit('update:modelValue', 0);
+      await flushPromises();
+      await saveCard(page, 'Alertes');
+      expect(updateSettings).not.toHaveBeenCalled();
       page.app.unmount();
     });
   });

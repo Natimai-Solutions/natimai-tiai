@@ -52,6 +52,7 @@
 import { computed, reactive, ref, toRefs, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { listAssignableUsers, type Check, type CheckPayload } from 'src/services/checks';
+import { checkInstructionsText } from 'src/services/alerts';
 import { apiErrorMessage } from 'src/services/errors';
 import { t } from 'src/i18n';
 import { useDraft } from 'src/composables/useDraft';
@@ -74,6 +75,11 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>();
 const $q = useQuasar();
 const saving = ref(false);
 const form = reactive({ assigned_to_id: null as string | null, instructions: '' });
+// The instructions as the dialog opened on them: the server's coded ones
+// (a verification opened for an alert) worded in the reader's language.
+// Sent back only when changed — a reassignment keeps them coded, readable in
+// every language, rather than freezing the words of whoever reassigned.
+const initialInstructions = ref('');
 // Who can be given the task, as the server lists them.
 const assignable = ref<{ label: string; value: string }[]>([]);
 // The current assignee, deactivated since (or out of reach), is not among
@@ -125,7 +131,8 @@ watch(
     }
     draftSlot.value = slotNow();
     form.assigned_to_id = props.check?.assigned_to?.id ?? null;
-    form.instructions = props.check?.instructions ?? '';
+    initialInstructions.value = (props.check ? checkInstructionsText(props.check) : null) ?? '';
+    form.instructions = initialInstructions.value;
     draft.restore();
     void loadUsers();
   },
@@ -147,10 +154,12 @@ async function loadUsers() {
 async function submit() {
   saving.value = true;
   try {
-    await props.save({
-      assigned_to_id: form.assigned_to_id,
-      instructions: form.instructions.trim() || null,
-    });
+    const instructions = form.instructions.trim();
+    const payload: CheckPayload = { assigned_to_id: form.assigned_to_id };
+    if (!props.check || instructions !== initialInstructions.value.trim()) {
+      payload.instructions = instructions || null;
+    }
+    await props.save(payload);
     emit('update:modelValue', false);
   } catch (e) {
     notify($q, () => ({

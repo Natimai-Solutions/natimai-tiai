@@ -1,6 +1,6 @@
 import { api } from 'boot/axios';
 import { t } from 'src/i18n';
-import { formatDate } from 'src/utils/format';
+import { formatDate, formatInstantDate } from 'src/utils/format';
 
 /**
  * Alerts: a closed catalogue of rules the server evaluates every five
@@ -38,6 +38,9 @@ export interface Alert {
   /** The values worded by `alertDetailText`. */
   detail: Record<string, unknown> | null;
   check_id: string | null;
+  /** The verification opened for it is still open: the badge « Vérification
+   * demandée » only then. Absent from an older server. */
+  check_open?: boolean;
   machine: AlertMachineRef | null;
 }
 
@@ -78,8 +81,14 @@ function str(value: unknown): string {
   return '?';
 }
 
+/** A calendar date (a warranty's end, a support's end), as written. */
 function day(value: unknown): string {
   return typeof value === 'string' ? formatDate(value) : '?';
+}
+
+/** The local day of an instant (a last contact, a pending restart). */
+function dayOf(value: unknown): string {
+  return typeof value === 'string' ? formatInstantDate(value) : '?';
 }
 
 function names(value: unknown, key: string): string[] {
@@ -116,7 +125,7 @@ export function alertDetailText(rule: string, detail: Record<string, unknown> | 
         status: str(d.status),
       });
     case 'reboot_pending':
-      return t('alerts.detail.reboot_pending', { date: day(d.since) });
+      return t('alerts.detail.reboot_pending', { date: dayOf(d.since) });
     case 'os_unsupported':
       return d.end_of_support
         ? t('alerts.detail.os_unsupported', { os: str(d.os_version), date: day(d.end_of_support) })
@@ -130,9 +139,13 @@ export function alertDetailText(rule: string, detail: Record<string, unknown> | 
         : t('alerts.detail.forbidden_software', { programs: programs.join(', ') || '?' });
     }
     case 'inactive':
-      return t('alerts.detail.inactive', { date: day(d.last_seen) });
+      return t('alerts.detail.inactive', { date: dayOf(d.last_seen) });
     case 'warranty_ending':
-      return t('alerts.detail.warranty_ending', { date: day(d.warranty_end) });
+      // Without asset:read — and on a verification — the date is not sent:
+      // only that the warranty ends within the threshold.
+      return d.warranty_end
+        ? t('alerts.detail.warranty_ending', { date: day(d.warranty_end) })
+        : t('alerts.detail.warranty_endingWithin', { days: str(d.threshold_days) });
   }
   return '';
 }

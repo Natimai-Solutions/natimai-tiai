@@ -1,18 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { setLocale } from 'src/i18n';
-import { assetKindLabel, assetStatusLabel, labelUrl, qrPath, warrantyState } from './assets';
+import { assetKindLabel, assetStatusLabel, labelUrl, qrPath, warrantyClass } from './assets';
 
 describe('assets helpers', () => {
   afterEach(() => setLocale('fr'));
 
-  it('reads where a warranty stands', () => {
-    const today = new Date(2026, 10, 20);
-    expect(warrantyState(null, today)).toBe('none');
-    expect(warrantyState('2026-11-19', today)).toBe('expired');
-    expect(warrantyState('2026-11-20', today)).toBe('soon');
-    expect(warrantyState('2027-01-19', today)).toBe('soon');
-    expect(warrantyState('2027-06-01', today)).toBe('active');
-    expect(warrantyState('garbage', today)).toBe('none');
+  it('colours a warranty by the state the server read', () => {
+    expect(warrantyClass('expired')).toBe('text-negative');
+    expect(warrantyClass('soon')).toBe('text-warn');
+    expect(warrantyClass('active')).toBe('');
+    expect(warrantyClass(undefined)).toBe('');
   });
 
   it('names statuses and kinds in both languages, and the unknown as they are', () => {

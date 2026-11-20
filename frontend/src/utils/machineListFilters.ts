@@ -143,12 +143,19 @@ export interface MachineFilters {
    */
   aging: 'true' | null;
   /** Postes with an open alert: of one rule, or of any (`any`). From the
-   * dashboard's card and the alerts page; cleared from its chip. */
+   * alerts page's « Voir ces postes »; cleared from its chip. */
   alert: string | null;
-  /** The status of a poste's asset (`none`: no asset); from the asset pages. */
+  /** The status of a poste's asset (`none`: no asset); from the Matériels
+   * page's « Voir ces postes ». */
   assetStatus: string | null;
   /** Postes the inventory says cannot take Windows 11; from the dashboard. */
   win11: 'true' | null;
+  /**
+   * Postes in the parc only, the retired ones left out: the dashboard's
+   * links carry it while the parc has retired postes, as its figures leave
+   * them out. Cleared from its chip.
+   */
+  inParc: 'true' | null;
 }
 
 /** `alert=any` or a rule of the catalogue; anything else is dropped. */
@@ -198,6 +205,7 @@ export function emptyMachineFilters(): MachineFilters {
     alert: null,
     assetStatus: null,
     win11: null,
+    inParc: null,
   };
 }
 
@@ -429,6 +437,7 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
     alert: alertQuery(q.alert),
     assetStatus: assetStatusQuery(q.asset_status),
     win11: queryValue(q.win11_blocked) === 'true' ? 'true' : null,
+    inParc: queryValue(q.in_parc) === 'true' ? 'true' : null,
   };
 }
 
@@ -480,6 +489,7 @@ export function machineFiltersToQuery(f: MachineFilters): Record<string, string>
   if (f.alert) query.alert = f.alert;
   if (f.assetStatus) query.asset_status = f.assetStatus;
   if (f.win11) query.win11_blocked = 'true';
+  if (f.inParc) query.in_parc = 'true';
   return query;
 }
 
@@ -536,6 +546,7 @@ export function machineFiltersToParams(f: MachineFilters): ListMachinesParams {
   if (f.alert) params.alert = f.alert;
   if (f.assetStatus) params.asset_status = f.assetStatus;
   if (f.win11) params.win11_blocked = true;
+  if (f.inParc) params.in_parc = true;
   // The console sets these five from dropdowns fed by the fleet's exact
   // values, with their counts: matched exactly, « OptiPlex 7010 (12) » lists
   // those 12 postes and not the « OptiPlex 7010 AIO » too. The API keeps the
@@ -581,7 +592,8 @@ export type MachineFilterKey =
   | 'aging'
   | 'alert'
   | 'assetStatus'
-  | 'win11';
+  | 'win11'
+  | 'inParc';
 
 export interface MachineFilterChip {
   key: MachineFilterKey;
@@ -672,6 +684,7 @@ export function machineFilterChips(
     });
   }
   if (f.win11) chips.push({ key: 'win11', label: t('machines.chips.win11') });
+  if (f.inParc) chips.push({ key: 'inParc', label: t('machines.chips.inParc') });
   return chips;
 }
 
@@ -748,6 +761,7 @@ const FIELDS_BY_KEY: Record<
   alert: 'alert',
   assetStatus: 'assetStatus',
   win11: 'win11',
+  inParc: 'inParc',
 };
 
 /** The filters with one chip's facet off. */

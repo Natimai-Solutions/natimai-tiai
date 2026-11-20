@@ -25,6 +25,15 @@ from app.features.asset.models import Asset, AssetStatus
 from app.features.check.models import MachineCheck
 from app.features.setting import crud as setting_crud
 
+# Rows per INSERT: PostgreSQL takes at most 65,535 parameters in a statement,
+# and the first evaluation on a large parc — every rule on, every Windows 10
+# poste out of support — opens thousands of alerts at once.
+CHUNK = 1000
+
+
+def _chunks(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    return [rows[i : i + CHUNK] for i in range(0, len(rows), CHUNK)]
+
 
 @dataclass(frozen=True)
 class OpenedAlert:
@@ -109,16 +118,21 @@ async def evaluate(session: AsyncSession, now: datetime) -> Evaluation:
         if (machine_id, rule) not in open_keys
     ]
     if new_rows:
-        inserted = await session.exec(
-            pg_insert(MachineAlert)
-            .values(new_rows)
-            .on_conflict_do_nothing(
-                index_elements=[col(MachineAlert.machine_id), col(MachineAlert.rule)],
-                index_where=col(MachineAlert.resolved_at).is_(None),
+        kept: set[uuid.UUID] = set()
+        for chunk in _chunks(new_rows):
+            inserted = await session.exec(
+                pg_insert(MachineAlert)
+                .values(chunk)
+                .on_conflict_do_nothing(
+                    index_elements=[
+                        col(MachineAlert.machine_id),
+                        col(MachineAlert.rule),
+                    ],
+                    index_where=col(MachineAlert.resolved_at).is_(None),
+                )
+                .returning(col(MachineAlert.id))
             )
-            .returning(col(MachineAlert.id))
-        )
-        kept = set(inserted.scalars().all())
+            kept.update(inserted.scalars().all())
         result.opened = [
             OpenedAlert(r["id"], r["machine_id"], r["rule"], r["detail"])
             for r in new_rows
@@ -156,24 +170,25 @@ async def _open_checks(session: AsyncSession, opened: list[OpenedAlert]) -> int:
                 instructions_params=params,
             ).model_dump()
         )
-    created = await session.exec(
-        pg_insert(MachineCheck)
-        .values(rows)
-        .on_conflict_do_nothing(
-            index_elements=[col(MachineCheck.machine_id)],
-            index_where=col(MachineCheck.closed_at).is_(None),
+    created: list[tuple[uuid.UUID, uuid.UUID]] = []
+    for chunk in _chunks(rows):
+        result = await session.exec(
+            pg_insert(MachineCheck)
+            .values(chunk)
+            .on_conflict_do_nothing(
+                index_elements=[col(MachineCheck.machine_id)],
+                index_where=col(MachineCheck.closed_at).is_(None),
+            )
+            .returning(col(MachineCheck.id), col(MachineCheck.machine_id))
         )
-        .returning(col(MachineCheck.id), col(MachineCheck.machine_id))
-    )
-    count = 0
-    for check_id, machine_id in created.all():
+        created.extend((check_id, machine_id) for check_id, machine_id in result.all())
+    for check_id, machine_id in created:
         await session.exec(
             update(MachineAlert)
             .where(col(MachineAlert.id) == wanted[machine_id].id)
             .values(check_id=check_id)
         )
-        count += 1
-    return count
+    return len(created)
 
 
 async def move_to(

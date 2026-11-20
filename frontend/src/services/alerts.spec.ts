@@ -22,7 +22,7 @@ describe('alerts wording', () => {
     expect(alertDetailText('volume_unencrypted', { letter: 'C:', status: 'FullyDecrypted' })).toBe(
       'Volume C: — FullyDecrypted',
     );
-    expect(alertDetailText('reboot_pending', { since: '2026-11-02T08:00:00+00:00' })).toBe(
+    expect(alertDetailText('reboot_pending', { since: '2026-11-02T20:00:00+00:00' })).toBe(
       'Demandé par Windows Update le 02/11/2026',
     );
     expect(
@@ -45,6 +45,31 @@ describe('alerts wording', () => {
     );
     // A missing detail does not throw.
     expect(alertDetailText('disk_low', null)).toBe('? % libres (seuil : ? %)');
+  });
+
+  it('dates an instant by the reader’s day, a calendar date as written', () => {
+    // 04:00 UTC on the 20th is 18:00 on the 19th in Papeete (the suite's
+    // zone): the reader last saw the poste on the 19th.
+    expect(alertDetailText('inactive', { last_seen: '2026-11-20T04:00:00+00:00' })).toBe(
+      'Dernier contact le 19/11/2026',
+    );
+    expect(alertDetailText('reboot_pending', { since: '2026-11-20T04:00:00+00:00' })).toBe(
+      'Demandé par Windows Update le 19/11/2026',
+    );
+    expect(alertDetailText('warranty_ending', { warranty_end: '2026-12-01' })).toBe(
+      'Garantie jusqu’au 01/12/2026',
+    );
+  });
+
+  it('says the warranty ends within the threshold when the date is not sent', () => {
+    // A reader without asset:read, or a verification.
+    expect(alertDetailText('warranty_ending', { threshold_days: 30 })).toBe(
+      'Garantie terminée dans moins de 30 jours',
+    );
+    setLocale('en');
+    expect(alertDetailText('warranty_ending', { threshold_days: 30 })).toBe(
+      'Warranty ends within 30 days',
+    );
   });
 
   it('words in English', () => {

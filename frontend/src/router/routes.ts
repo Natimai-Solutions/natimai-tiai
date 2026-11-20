@@ -24,9 +24,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('pages/ResetPasswordPage.vue'),
     meta: { title: 'layout.pages.resetPassword' },
   },
-  // A sheet of labels to print: outside the console's frame.
+  // A sheet of labels to print: outside the console's frame. Not under
+  // /assets: nginx serves the build's hashed files there, with no way back
+  // to the console on a reload (`nginx.conf`).
   {
-    path: '/assets/labels',
+    path: '/equipment/labels',
     name: 'asset-labels',
     component: () => import('pages/AssetLabelsPage.vue'),
     meta: {
@@ -59,7 +61,8 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'layout.pages.alerts', requiresPermission: 'machine:read' },
       },
       {
-        path: 'assets',
+        // « equipment », not « assets »: the build's own directory (above).
+        path: 'equipment',
         name: 'assets',
         component: () => import('pages/AssetsPage.vue'),
         meta: { title: 'layout.pages.assets', requiresPermission: 'asset:read' },

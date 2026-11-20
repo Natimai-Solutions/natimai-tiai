@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { QTable, QTabs } from 'quasar';
+import { QBtn, QTable, QTabs } from 'quasar';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
@@ -72,6 +72,21 @@ describe('AlertsPage', () => {
     await flushPromises();
     expect(router.currentRoute.value.query.rule).toBe('inactive');
     expect(listAlerts).toHaveBeenLastCalledWith(expect.objectContaining({ rule: 'inactive' }));
+  });
+
+  it('opens the postes of the tab in the machine list', async () => {
+    const { wrapper } = await mountAt('/alerts');
+    const link = () =>
+      wrapper.findAllComponents(QBtn).find((b) => b.props('label') === 'Voir ces postes')!;
+    expect(link().props('to')).toEqual({ name: 'machines', query: { alert: 'any' } });
+    expect(link().props('disable')).toBe(false);
+    wrapper.findComponent(QTabs).vm.$emit('update:modelValue', 'disk_low');
+    await flushPromises();
+    expect(link().props('to')).toEqual({ name: 'machines', query: { alert: 'disk_low' } });
+    // A rule with nothing open: nothing to list.
+    wrapper.findComponent(QTabs).vm.$emit('update:modelValue', 'inactive');
+    await flushPromises();
+    expect(link().props('disable')).toBe(true);
   });
 
   it('ignores an unknown rule in the URL', async () => {

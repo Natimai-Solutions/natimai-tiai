@@ -16,12 +16,18 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlmodel import col, select
 
-from app.api.deps import CurrentScope, SessionDep, require_permission
+from app.api.deps import (
+    CurrentPermissions,
+    CurrentScope,
+    SessionDep,
+    require_permission,
+)
 from app.core.errors import AppError, ErrorCode
 from app.features.alert.models import ALL_RULES, AlertRule, MachineAlert
+from app.features.check.models import MachineCheck
 from app.features.machine.models import Machine
 from app.features.room import crud as room_crud
-from app.features.user.permissions import Action, Resource
+from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import machine_ids_clause, machine_visible, restrict
 
 router = APIRouter(
@@ -47,6 +53,9 @@ class AlertOut(BaseModel):
     # The values the console words: a percentage, a letter, program names.
     detail: dict[str, Any] | None
     check_id: uuid.UUID | None
+    # The verification opened for it is still open: closed — the user
+    # warned, a part ordered — the alert can hold on without one.
+    check_open: bool = False
     machine: AlertMachineRef | None = None
 
 
@@ -82,15 +91,31 @@ async def _machines(
     return refs
 
 
-def _out(row: MachineAlert, machine: AlertMachineRef | None = None) -> AlertOut:
+def _detail(row: MachineAlert, purchase_data: bool) -> dict[str, Any] | None:
+    """The detail as the caller may read it: the warranty's end date is
+    purchase data, read with ``asset:read`` like the export's column — without
+    it, the alert only says the warranty ends within the threshold."""
+    if row.detail is None or purchase_data or row.rule != AlertRule.WARRANTY_ENDING:
+        return row.detail
+    return {k: v for k, v in row.detail.items() if k != "warranty_end"}
+
+
+def _out(
+    row: MachineAlert,
+    machine: AlertMachineRef | None,
+    *,
+    purchase_data: bool,
+    open_checks: set[uuid.UUID],
+) -> AlertOut:
     return AlertOut(
         id=row.id,
         machine_id=row.machine_id,
         rule=row.rule,
         opened_at=row.opened_at,
         resolved_at=row.resolved_at,
-        detail=row.detail,
+        detail=_detail(row, purchase_data),
         check_id=row.check_id,
+        check_open=row.check_id in open_checks,
         machine=machine,
     )
 
@@ -99,6 +124,7 @@ def _out(row: MachineAlert, machine: AlertMachineRef | None = None) -> AlertOut:
 async def list_alerts(
     session: SessionDep,
     scope: CurrentScope,
+    permissions: CurrentPermissions,
     rule: AlertRule | None = None,
     state: Literal["open", "resolved", "all"] = "open",
     machine_id: uuid.UUID | None = None,
@@ -139,6 +165,22 @@ async def list_alerts(
         ).all()
     )
     machines = await _machines(session, {r.machine_id for r in rows})
+    check_ids = {r.check_id for r in rows if r.check_id is not None}
+    open_checks = (
+        set(
+            (
+                await session.exec(
+                    select(col(MachineCheck.id)).where(
+                        col(MachineCheck.id).in_(check_ids),
+                        col(MachineCheck.closed_at).is_(None),
+                    )
+                )
+            ).all()
+        )
+        if check_ids
+        else set()
+    )
+    purchase_data = has_permission(permissions, Resource.ASSET.value, Action.READ.value)
 
     counts_stmt = restrict(
         select(col(MachineAlert.rule), func.count()).where(
@@ -151,7 +193,15 @@ async def list_alerts(
     counts = dict((await session.exec(counts_stmt)).all())
 
     return AlertList(
-        items=[_out(r, machines.get(r.machine_id)) for r in rows],
+        items=[
+            _out(
+                r,
+                machines.get(r.machine_id),
+                purchase_data=purchase_data,
+                open_checks=open_checks,
+            )
+            for r in rows
+        ],
         total=total,
         page=page,
         page_size=page_size,

@@ -95,8 +95,8 @@ gère naturellement les postes éteints.
   **importés** d'un CSV ou d'un classeur Excel rapproché sur les numéros de
   série, avec un aperçu avant écriture. Le matériel sans agent —
   vidéoprojecteurs, imprimantes, écrans — a sa place dans les salles. Des
-  **étiquettes QR** s'impriment par lot ; scannées, elles ouvrent la fiche du
-  poste. L'âge du parc se compte depuis la date d'achat, un poste réformé sort
+  **étiquettes QR** s'impriment par lot ou par salle ; scannées, elles ouvrent
+  la fiche du poste ou du matériel. L'âge du parc se compte depuis la date d'achat, un poste réformé sort
   des compteurs et des alertes, et la fiche dit si le matériel peut passer à
   **Windows 11**. Droit à part (`asset`), pour que le prix d'achat ne soit pas
   lu de tous.

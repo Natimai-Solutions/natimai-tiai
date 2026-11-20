@@ -885,6 +885,16 @@ const unencryptedOptions = computed(() => [
   { label: t('settings.alerts.scopeAll'), value: 'all' },
 ]);
 
+// The rules as sets: a toggle turned off and on again puts its rule last,
+// which is no change (Quasar splices the value out and pushes it back).
+function alertSnapshot(): string {
+  return formSnapshot({
+    ...alertForm,
+    enabled: [...alertForm.enabled].sort(),
+    autoCheck: [...alertForm.autoCheck].sort(),
+  });
+}
+
 function fillAlertForm(s: ConsoleSettings) {
   alertForm.enabled = [...(s.alert_enabled_rules ?? [])];
   alertForm.autoCheck = [...(s.alert_auto_check_rules ?? [])];
@@ -892,7 +902,7 @@ function fillAlertForm(s: ConsoleSettings) {
   alertForm.warrantyDays = s.alert_warranty_days ?? 30;
   alertForm.unencryptedScope = s.alert_unencrypted_scope ?? 'laptops';
   alertForm.forbidden = [...(s.alert_forbidden_software ?? [])];
-  saved.alerts = formSnapshot(alertForm);
+  saved.alerts = alertSnapshot();
 }
 
 async function saveAlerts() {
@@ -1082,7 +1092,7 @@ const unsavedCards = computed(() => {
   const cards: string[] = [];
   if (formSnapshot(form) !== saved.maintenance) cards.push('maintenance');
   if (formSnapshot(usageForm) !== saved.usage) cards.push('usage');
-  if (formSnapshot(alertForm) !== saved.alerts) cards.push('alerts');
+  if (alertSnapshot() !== saved.alerts) cards.push('alerts');
   if (formSnapshot(fleetForm) !== saved.fleet) cards.push('fleet');
   if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('schedule');
   if (formSnapshot(emailForm) !== saved.email) cards.push('email');

@@ -252,3 +252,45 @@ describe('DashboardPage — enrolment and hardware age (C2, item 9)', () => {
     expect(w.text()).not.toContain('Ré-enrôlements');
   });
 });
+
+describe('DashboardPage — alerts, Windows 11 and the retired postes (C1, C2)', () => {
+  beforeEach(() => {
+    vi.mocked(getOverview).mockReset();
+    vi.mocked(listMachines).mockResolvedValue(empty as never);
+    vi.mocked(listThreats).mockResolvedValue(empty);
+  });
+
+  async function links(stats: Partial<StatsOverview>) {
+    vi.mocked(getOverview).mockResolvedValue({ ...overview, ...stats });
+    const w = await mountPage();
+    return {
+      w,
+      to: w.findAllComponents(RouterLink).map((l) => JSON.stringify(l.props('to') as unknown)),
+    };
+  }
+
+  it('opens the alerts page and the postes blocked for Windows 11', async () => {
+    const { w, to } = await links({ machines_with_alerts: 2, machines_win11_blocked: 3 });
+    expect(w.text()).toContain('Postes en alerte');
+    expect(w.text()).toContain('Bloqués pour Windows 11');
+    expect(to).toContain(JSON.stringify({ name: 'alerts' }));
+    expect(to).toContain(JSON.stringify({ name: 'machines', query: { win11_blocked: 'true' } }));
+  });
+
+  it('leaves the retired postes out of the lists the cards open, while there are any', async () => {
+    const { to } = await links({ machines_retired: 2, machines_win11_blocked: 3 });
+    expect(to).toContain(JSON.stringify({ name: 'machines', query: { in_parc: 'true' } }));
+    expect(to).toContain(
+      JSON.stringify({ name: 'machines', query: { win11_blocked: 'true', in_parc: 'true' } }),
+    );
+    expect(to).toContain(
+      JSON.stringify({ name: 'machines', query: { status: 'inactive', in_parc: 'true' } }),
+    );
+    // Not the other pages: the software catalogue is no machine list.
+    expect(to).toContain(JSON.stringify({ name: 'software' }));
+    // And none of it without retired postes.
+    const none = await links({ machines_retired: 0 });
+    expect(none.to).toContain(JSON.stringify({ name: 'machines' }));
+    expect(none.to.some((l) => l.includes('in_parc'))).toBe(false);
+  });
+});
