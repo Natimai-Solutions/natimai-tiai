@@ -53,6 +53,9 @@ function everything(): MachineFilters {
     alert: 'disk_low',
     assetStatus: 'on_loan',
     win11: 'true',
+    compliance: 'failing',
+    complianceCheck: 'firewall',
+    wingetOutdated: 'Mozilla.Firefox',
     inParc: 'true',
   };
 }
@@ -98,6 +101,9 @@ describe('machineFiltersToQuery / machineFiltersFromQuery', () => {
       alert: 'disk_low',
       asset_status: 'on_loan',
       win11_blocked: 'true',
+      compliance: 'failing',
+      compliance_check: 'firewall',
+      winget_outdated: 'Mozilla.Firefox',
       in_parc: 'true',
     });
     expect(machineFiltersFromQuery(query)).toEqual(everything());
@@ -256,9 +262,15 @@ describe('machineFilterChips', () => {
       'alert',
       'assetStatus',
       'win11',
+      'compliance',
+      'complianceCheck',
+      'wingetOutdated',
       'inParc',
     ]);
     const label = (key: string) => chips.find((c) => c.key === key)!.label;
+    expect(label('compliance')).toBe('Non conformes');
+    expect(label('complianceCheck')).toBe('En échec : Pare-feu actif (3 profils)');
+    expect(label('wingetOutdated')).toBe('Mise à jour winget en attente : Mozilla.Firefox');
     expect(label('alert')).toBe('Alerte : Disque système presque plein');
     expect(label('location')).toBe('Papeete (40)');
     expect(label('agent')).toBe('Agent obsolète (3)');
@@ -412,5 +424,36 @@ describe('unmatchedExactFilters', () => {
   it('says nothing while a dropdown has not been filled — nobody knows yet', () => {
     const f = { ...emptyMachineFilters(), model: 'OptiPlex', os: 'Windows 11' };
     expect(unmatchedExactFilters(f, initialFleetOptions())).toEqual([]);
+  });
+});
+
+describe('compliance filters (C5)', () => {
+  it('drops a state, a check or a winget id no link could have written', () => {
+    const f = machineFiltersFromQuery({
+      compliance: 'red',
+      compliance_check: 'nope',
+      winget_outdated: 'bad id;',
+    });
+    expect([f.compliance, f.complianceCheck, f.wingetOutdated]).toEqual([null, null, null]);
+    expect(
+      machineListParamsFromQuery({
+        compliance: 'red',
+        compliance_check: 'nope',
+        winget_outdated: ' x',
+      }),
+    ).not.toHaveProperty('compliance');
+  });
+
+  it('carries them to the API', () => {
+    const params = machineListParamsFromQuery({
+      compliance: 'passing',
+      compliance_check: 'tpm',
+      winget_outdated: '7zip.7zip',
+    });
+    expect(params).toMatchObject({
+      compliance: 'passing',
+      compliance_check: 'tpm',
+      winget_outdated: '7zip.7zip',
+    });
   });
 });

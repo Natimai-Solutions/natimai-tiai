@@ -40,6 +40,8 @@ KEY_ALERT_UNENCRYPTED_SCOPE = "alerts.unencrypted_scope"
 KEY_ALERT_FORBIDDEN = "alerts.forbidden_software"
 KEY_ALERT_AUTO_CHECK = "alerts.auto_check_rules"
 KEY_ALERT_WARRANTY_DAYS = "alerts.warranty_days"
+KEY_COMPLIANCE_PATCH_GRACE = "compliance.patch_grace_days"
+KEY_COMPLIANCE_ADMINS = "compliance.admins_allowed"
 
 
 async def get_all(session: AsyncSession) -> dict[str, Any]:
@@ -317,6 +319,42 @@ async def alert_policy(
         warranty_days=_int_or(
             values.get(KEY_ALERT_WARRANTY_DAYS), env.ALERT_WARRANTY_DAYS
         ),
+    )
+
+
+@dataclass(frozen=True)
+class CompliancePolicy:
+    """How the compliance checks (``features/compliance``) judge, as resolved
+    now. The reboot delay and the encryption scope are the alerts'."""
+
+    patch_grace_days: int
+    # Members of the local Administrators accepted beyond the built-in ones:
+    # names, matched case-insensitively, as « DOMAINE\nom » or « nom ».
+    admins_allowed: tuple[str, ...]
+    reboot_pending_days: int
+    unencrypted_scope: str
+    signature_max_age_days: int
+
+
+async def compliance_policy(
+    session: AsyncSession, values: dict[str, Any] | None = None
+) -> CompliancePolicy:
+    if values is None:
+        values = await get_all(session)
+    alerts = await alert_policy(session, values)
+    fleet = await fleet_policy(session, values)
+    return CompliancePolicy(
+        patch_grace_days=_int_or(
+            values.get(KEY_COMPLIANCE_PATCH_GRACE), env.COMPLIANCE_PATCH_GRACE_DAYS
+        ),
+        admins_allowed=tuple(
+            a.strip()
+            for a in _str_list_or(values.get(KEY_COMPLIANCE_ADMINS), [])
+            if a.strip()
+        ),
+        reboot_pending_days=alerts.reboot_pending_days,
+        unencrypted_scope=alerts.unencrypted_scope,
+        signature_max_age_days=fleet.signature_max_age_days,
     )
 
 

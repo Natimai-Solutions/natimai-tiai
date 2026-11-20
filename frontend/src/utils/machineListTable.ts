@@ -54,6 +54,7 @@ export const SORT_FIELD_BY_COLUMN: Record<string, MachineSortField> = {
   last_seen: 'last_seen',
   agent: 'agent_version',
   usage: 'usage_hours',
+  compliance: 'compliance_failed',
 };
 
 export const COLUMN_BY_SORT_FIELD = Object.fromEntries(
@@ -238,6 +239,13 @@ export const MACHINE_TABLE_COLUMNS: QTableColumn<Machine>[] = [
     name: 'disk',
     field: 'system_volume_free_mb',
     align: 'left',
+    sortable: true,
+  }),
+  // « 7 sur 9 » (C5), sorted by the checks failed: the least compliant first.
+  col({
+    name: 'compliance',
+    field: 'compliance_passed',
+    align: 'center',
     sortable: true,
   }),
   col({ name: 'last_seen', field: 'last_seen', align: 'left', sortable: true }),

@@ -144,6 +144,16 @@ type Config struct {
 	// sitting in the database. The hardware inventory is unaffected.
 	ReportSoftware *bool `yaml:"report_software"`
 
+	// Whether the inventory lists the members of the local Administrators
+	// group (C5). Account names, so off unless switched on — by YAML or by the
+	// GPO registry value ReportLocalAdmins — once the DPO has agreed to it.
+	ReportLocalAdmins *bool `yaml:"report_local_admins"`
+
+	// Whether the inventory runs `winget list` to report which programs have a
+	// newer version (C5). Off unless switched on (ReportWingetPackages): its
+	// behaviour under LocalSystem is to be validated on the parc first.
+	ReportWingetPackages *bool `yaml:"report_winget_packages"`
+
 	// AuthToken is never serialized to YAML — it is stored encrypted (DPAPI) in
 	// token.dat and loaded into this field at runtime.
 	AuthToken string `yaml:"-"`
@@ -206,6 +216,17 @@ func (c *Config) applyDefaults() {
 // Absent from the YAML means yes, like ReportsUsername.
 func (c *Config) ReportsSoftware() bool {
 	return c.ReportSoftware == nil || *c.ReportSoftware
+}
+
+// ReportsLocalAdmins reports whether the local Administrators are collected.
+// Absent from the YAML means no, unlike the two above.
+func (c *Config) ReportsLocalAdmins() bool {
+	return c.ReportLocalAdmins != nil && *c.ReportLocalAdmins
+}
+
+// ReportsWingetPackages reports whether `winget list` is run. Absent means no.
+func (c *Config) ReportsWingetPackages() bool {
+	return c.ReportWingetPackages != nil && *c.ReportWingetPackages
 }
 
 func (c *Config) ReportsUsername() bool {

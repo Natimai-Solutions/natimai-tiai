@@ -15,6 +15,7 @@ from app.features.asset import crud as asset_crud
 from app.features.asset import win11
 from app.features.base import utcnow
 from app.features.check.models import MachineCheck
+from app.features.compliance import crud as compliance_crud
 from app.features.inventory.models import MachineSoftware, Volume
 from app.features.machine.agent_version import fleet_versions
 from app.features.machine.models import Machine
@@ -111,6 +112,11 @@ class StatsOverview(BaseModel):
     # ones — left out of every other count here, and out of the lists the
     # cards open (``in_parc=true`` on their links while there are any).
     machines_win11_blocked: int = 0
+    # Compliance (C5), from the summary the worker keeps: postes passing
+    # every known check, postes failing one, and the failures by check.
+    machines_compliant: int = 0
+    machines_noncompliant: int = 0
+    compliance_by_check: dict[str, int] = {}
     machines_retired: int = 0
 
 
@@ -316,6 +322,29 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
     alerts_by_rule = dict(by_rule.all())
 
     machines_win11_blocked = await _count(session, in_scope, win11.blocked_clause())
+    machines_compliant = await _count(
+        session, in_scope, compliance_crud.filter_clause("passing")
+    )
+    machines_noncompliant = await _count(
+        session, in_scope, compliance_crud.filter_clause("failing")
+    )
+    failed_check = func.jsonb_array_elements_text(
+        col(Machine.compliance_failed)
+    ).table_valued("value")
+    by_check = await session.exec(
+        restrict(
+            select(failed_check.c.value, func.count())
+            .select_from(Machine)
+            .join(failed_check, true()),
+            in_scope,
+        )
+        .where(
+            asset_crud.in_parc_clause(),
+            func.jsonb_typeof(col(Machine.compliance_failed)) == "array",
+        )
+        .group_by(failed_check.c.value)
+    )
+    compliance_by_check = {str(k): int(v) for k, v in by_check.all()}
     machines_retired = (
         await session.scalar(
             restrict(select(func.count()).select_from(Machine), in_scope).where(
@@ -327,6 +356,9 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
 
     return StatsOverview(
         machines_win11_blocked=machines_win11_blocked,
+        machines_compliant=machines_compliant,
+        machines_noncompliant=machines_noncompliant,
+        compliance_by_check=compliance_by_check,
         machines_retired=machines_retired,
         machines_with_alerts=machines_with_alerts,
         alerts_by_rule={r.value: alerts_by_rule.get(r.value, 0) for r in ALL_RULES},

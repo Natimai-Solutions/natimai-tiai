@@ -25,11 +25,14 @@ from app.api.csv_export import csv_response
 from app.api.deps import CurrentScope, SessionDep, require_permission
 from app.api.xlsx_export import xlsx_response
 from app.core.errors import AppError, ErrorCode
+from app.features.asset import crud as asset_crud
 from app.features.base import contains
-from app.features.inventory.models import MachineSoftware, Software
+from app.features.inventory.models import MachineSoftware, Software, WingetPackage
+from app.features.machine.agent_version import latest_version
+from app.features.machine.models import Machine
 from app.features.user.models import Language
 from app.features.user.permissions import Action, Resource
-from app.features.user.scope import Scope, machine_ids_clause
+from app.features.user.scope import Scope, machine_clause, machine_ids_clause, restrict
 
 router = APIRouter(
     prefix="/software",
@@ -210,6 +213,119 @@ async def _export_rows(
 # Kept next to the listing it mirrors: the two exports are the same rows, and
 # differ only in what lands in the cells — text for the CSV, a real date for
 # Excel, which is what makes the column sortable there.
+class WingetUpdateOut(BaseModel):
+    """One program winget knows, across the postes that report it (C5)."""
+
+    winget_id: str
+    name: str | None
+    # Postes that have it, and those of them winget would upgrade.
+    installed: int
+    outdated: int
+    # The newest version winget offers anywhere in the parc.
+    available: str | None
+    # Share of the postes having it that are up to date, in percent.
+    up_to_date_percent: float
+
+
+class WingetUpdateList(BaseModel):
+    items: list[WingetUpdateOut]
+    # Postes reporting their winget packages, in scope: what the figures are
+    # out of — the collection is a switch of the agent.
+    reporting: int
+
+
+# Distinct programs listed at most: a parc has a few hundred.
+MAX_WINGET_ROWS = 1000
+
+
+@router.get("/updates", response_model=WingetUpdateList)
+async def list_winget_updates(
+    session: SessionDep,
+    scope: CurrentScope,
+    search: str | None = None,
+    outdated_only: bool = False,
+) -> WingetUpdateList:
+    """Third-party updates: per program, how many postes winget would
+    upgrade, most behind first. Retired postes left out, like every count."""
+    in_scope = (
+        machine_ids_clause(scope, col(WingetPackage.machine_id))
+        if scope is not None
+        else true()
+    )
+    in_parc = asset_crud.in_parc_ids_clause(col(WingetPackage.machine_id))
+    is_outdated = and_(
+        col(WingetPackage.available).is_not(None), col(WingetPackage.available) != ""
+    )
+    outdated = func.count().filter(is_outdated)
+    stmt = (
+        select(
+            col(WingetPackage.winget_id),
+            func.max(col(WingetPackage.name)),
+            func.count(),
+            outdated,
+        )
+        .where(in_scope, in_parc)
+        .group_by(col(WingetPackage.winget_id))
+    )
+    if search:
+        stmt = stmt.where(
+            or_(
+                contains(col(WingetPackage.winget_id), search),
+                contains(col(WingetPackage.name), search),
+            )
+        )
+    if outdated_only:
+        stmt = stmt.having(outdated > 0)
+    stmt = stmt.order_by(
+        outdated.desc(), func.lower(func.max(col(WingetPackage.name)))
+    ).limit(MAX_WINGET_ROWS)
+    rows = (await session.exec(stmt)).all()
+
+    # The newest version offered, by a human's reading of version numbers.
+    ids = [r[0] for r in rows]
+    offered: dict[str, list[str]] = {}
+    if ids:
+        avail = await session.exec(
+            select(col(WingetPackage.winget_id), col(WingetPackage.available))
+            .where(
+                col(WingetPackage.winget_id).in_(ids), is_outdated, in_scope, in_parc
+            )
+            .distinct()
+        )
+        for winget_id, version in avail.all():
+            if version:
+                offered.setdefault(winget_id, []).append(version)
+
+    reporting = (
+        await session.scalar(
+            restrict(
+                select(func.count()).select_from(Machine),
+                machine_clause(scope),
+            ).where(
+                col(Machine.winget_reported_at).is_not(None),
+                asset_crud.in_parc_clause(),
+            )
+        )
+        or 0
+    )
+    return WingetUpdateList(
+        items=[
+            WingetUpdateOut(
+                winget_id=winget_id,
+                name=name,
+                installed=installed,
+                outdated=behind,
+                available=latest_version(offered.get(winget_id, [])),
+                up_to_date_percent=round(100 * (installed - behind) / installed, 1)
+                if installed
+                else 100.0,
+            )
+            for winget_id, name, installed, behind in rows
+        ],
+        reporting=reporting,
+    )
+
+
 @router.get("/export.csv")
 async def export_software(
     session: SessionDep,

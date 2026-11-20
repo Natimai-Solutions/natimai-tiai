@@ -1,6 +1,11 @@
 import type { LocationQuery } from 'vue-router';
 import { ASSET_STATUSES, assetStatusLabel } from 'src/services/assets';
 import { alertRuleLabel, isAlertRule } from 'src/services/alerts';
+import {
+  COMPLIANCE_STATES,
+  complianceCheckLabel,
+  isComplianceCheck,
+} from 'src/services/compliance';
 import { t } from 'src/i18n';
 import type {
   ListMachinesParams,
@@ -150,6 +155,13 @@ export interface MachineFilters {
   assetStatus: string | null;
   /** Postes the inventory says cannot take Windows 11; from the dashboard. */
   win11: 'true' | null;
+  /** Compliance (C5): failing / passing / unknown, from the dashboard. */
+  compliance: string | null;
+  /** Postes failing one compliance check; from the dashboard's card. */
+  complianceCheck: string | null;
+  /** Postes winget would upgrade a program on (its winget id); from the
+   * « Mises à jour tierces » view. */
+  wingetOutdated: string | null;
   /**
    * Postes in the parc only, the retired ones left out: the dashboard's
    * links carry it while the parc has retired postes, as its figures leave
@@ -162,6 +174,18 @@ export interface MachineFilters {
 function alertQuery(value: unknown): string | null {
   const v = queryValue(value);
   return v && (v === 'any' || isAlertRule(v)) ? v : null;
+}
+
+/** A compliance state of the list's filter; anything else is dropped. */
+function complianceQuery(value: unknown): string | null {
+  const v = queryValue(value);
+  return v && (COMPLIANCE_STATES as readonly string[]).includes(v) ? v : null;
+}
+
+/** A winget id, as the agent reports them; anything else is dropped. */
+function wingetQuery(value: unknown): string | null {
+  const v = queryValue(value);
+  return v && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(v) ? v : null;
 }
 
 /** An asset status, or `none`; anything else is dropped. */
@@ -205,6 +229,9 @@ export function emptyMachineFilters(): MachineFilters {
     alert: null,
     assetStatus: null,
     win11: null,
+    compliance: null,
+    complianceCheck: null,
+    wingetOutdated: null,
     inParc: null,
   };
 }
@@ -437,6 +464,12 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
     alert: alertQuery(q.alert),
     assetStatus: assetStatusQuery(q.asset_status),
     win11: queryValue(q.win11_blocked) === 'true' ? 'true' : null,
+    compliance: complianceQuery(q.compliance),
+    complianceCheck: (() => {
+      const v = queryValue(q.compliance_check);
+      return v && isComplianceCheck(v) ? v : null;
+    })(),
+    wingetOutdated: wingetQuery(q.winget_outdated),
     inParc: queryValue(q.in_parc) === 'true' ? 'true' : null,
   };
 }
@@ -489,6 +522,9 @@ export function machineFiltersToQuery(f: MachineFilters): Record<string, string>
   if (f.alert) query.alert = f.alert;
   if (f.assetStatus) query.asset_status = f.assetStatus;
   if (f.win11) query.win11_blocked = 'true';
+  if (f.compliance) query.compliance = f.compliance;
+  if (f.complianceCheck) query.compliance_check = f.complianceCheck;
+  if (f.wingetOutdated) query.winget_outdated = f.wingetOutdated;
   if (f.inParc) query.in_parc = 'true';
   return query;
 }
@@ -546,6 +582,9 @@ export function machineFiltersToParams(f: MachineFilters): ListMachinesParams {
   if (f.alert) params.alert = f.alert;
   if (f.assetStatus) params.asset_status = f.assetStatus;
   if (f.win11) params.win11_blocked = true;
+  if (f.compliance) params.compliance = f.compliance;
+  if (f.complianceCheck) params.compliance_check = f.complianceCheck;
+  if (f.wingetOutdated) params.winget_outdated = f.wingetOutdated;
   if (f.inParc) params.in_parc = true;
   // The console sets these five from dropdowns fed by the fleet's exact
   // values, with their counts: matched exactly, « OptiPlex 7010 (12) » lists
@@ -593,6 +632,9 @@ export type MachineFilterKey =
   | 'alert'
   | 'assetStatus'
   | 'win11'
+  | 'compliance'
+  | 'complianceCheck'
+  | 'wingetOutdated'
   | 'inParc';
 
 export interface MachineFilterChip {
@@ -684,6 +726,21 @@ export function machineFilterChips(
     });
   }
   if (f.win11) chips.push({ key: 'win11', label: t('machines.chips.win11') });
+  if (f.compliance) {
+    chips.push({ key: 'compliance', label: t(`compliance.chips.${f.compliance}`) });
+  }
+  if (f.complianceCheck) {
+    chips.push({
+      key: 'complianceCheck',
+      label: t('compliance.chips.check', { check: complianceCheckLabel(f.complianceCheck) }),
+    });
+  }
+  if (f.wingetOutdated) {
+    chips.push({
+      key: 'wingetOutdated',
+      label: t('compliance.chips.winget', { id: f.wingetOutdated }),
+    });
+  }
   if (f.inParc) chips.push({ key: 'inParc', label: t('machines.chips.inParc') });
   return chips;
 }
@@ -761,6 +818,9 @@ const FIELDS_BY_KEY: Record<
   alert: 'alert',
   assetStatus: 'assetStatus',
   win11: 'win11',
+  compliance: 'compliance',
+  complianceCheck: 'complianceCheck',
+  wingetOutdated: 'wingetOutdated',
   inParc: 'inParc',
 };
 

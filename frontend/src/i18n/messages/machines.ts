@@ -210,6 +210,7 @@ const fr = {
     usageWindow: 'Allumé ({days} j)',
     model: 'Modèle',
     disk: 'Disque',
+    compliance: 'Conformité',
     last_seen: 'Vu le',
   },
   table: {
@@ -493,6 +494,7 @@ const en: Translation<typeof fr> = {
     usageWindow: 'Hours on ({days} d)',
     model: 'Model',
     disk: 'Disk',
+    compliance: 'Compliance',
     last_seen: 'Last seen',
   },
   table: {

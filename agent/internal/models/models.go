@@ -282,6 +282,49 @@ type InventoryState struct {
 	// (ROOM_SOURCE). nil on a poste that is not domain-joined, or whose
 	// directory could not be read; the server then keeps what it had.
 	Directory *DirectoryState `json:"directory,omitempty"`
+
+	// Firewall is the effective state of Windows Firewall's three profiles —
+	// a GPO's setting where one is pushed, the local one otherwise. nil when
+	// none could be read. Feeds the server's compliance checks (C5).
+	Firewall *FirewallState `json:"firewall,omitempty"`
+
+	// LocalAdmins lists the members of the local Administrators group. Account
+	// names are personal data, so this is read only when ReportLocalAdmins
+	// allows it (off by default); nil otherwise, and the server then forgets
+	// what an earlier cycle stored — the block is applied as a whole.
+	LocalAdmins *[]LocalAdmin `json:"local_admins,omitempty"`
+
+	// WingetPackages are the installed programs winget knows, with the version
+	// it would upgrade each to. Read only when ReportWingetPackages allows it
+	// (off by default: `winget list` costs seconds and a network round trip
+	// to the winget source); nil when off or when winget could not be run.
+	WingetPackages *[]WingetPackage `json:"winget_packages,omitempty"`
+}
+
+// FirewallState is one flag per profile; nil where the profile's setting
+// could not be read.
+type FirewallState struct {
+	Domain  *bool `json:"domain,omitempty"`
+	Private *bool `json:"private,omitempty"`
+	Public  *bool `json:"public,omitempty"`
+}
+
+// LocalAdmin is one member of the local Administrators group: its name as
+// DOMAIN\name, and its SID — which is what tells the server the built-in
+// accounts (RID 500, Domain Admins 512, Enterprise Admins 519) from the rest,
+// whatever language the names are in.
+type LocalAdmin struct {
+	Name string `json:"name"`
+	SID  string `json:"sid,omitempty"`
+}
+
+// WingetPackage is one row of `winget list --source winget`. Available is
+// empty when winget offers no newer version.
+type WingetPackage struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Version   string `json:"version,omitempty"`
+	Available string `json:"available,omitempty"`
 }
 
 // DirectoryState is the computer object as Active Directory holds it, the two

@@ -304,6 +304,48 @@ describe('SettingsPage', () => {
     });
   });
 
+  describe('the compliance card (C5)', () => {
+    beforeEach(() => {
+      vi.mocked(getSettings).mockResolvedValue({
+        ...consoleSettings(),
+        compliance_patch_grace_days: 14,
+        env_compliance_patch_grace_days: 14,
+        compliance_admins_allowed: ['GG-Techs'],
+      });
+      vi.mocked(updateSettings).mockReset();
+    });
+
+    it('saves the grace and the accepted administrators, trimmed', async () => {
+      vi.mocked(updateSettings).mockResolvedValue(consoleSettings());
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const vm = page.wrapper.vm as unknown as {
+        complianceForm: { patchGraceDays: number | string; admins: string[] };
+      };
+      vm.complianceForm.patchGraceDays = '21';
+      vm.complianceForm.admins = ['GG-Techs', ' LYCEE\\Tech ', ' '];
+      await flushPromises();
+      expect(blocksUnload()).toBe(true);
+      await saveCard(page, 'Conformité des postes');
+      expect(updateSettings).toHaveBeenCalledWith({
+        compliance_patch_grace_days: 21,
+        compliance_admins_allowed: ['GG-Techs', 'LYCEE\\Tech'],
+      });
+      page.app.unmount();
+    });
+
+    it('does not save a delay out of range', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      field(
+        page,
+        'Délai avant qu’un correctif critique en attente soit non conforme (jours)',
+      ).vm.$emit('update:modelValue', 400);
+      await flushPromises();
+      await saveCard(page, 'Conformité des postes');
+      expect(updateSettings).not.toHaveBeenCalled();
+      page.app.unmount();
+    });
+  });
+
   describe('the alerts card', () => {
     beforeEach(() => {
       vi.mocked(getSettings).mockResolvedValue(consoleSettings());

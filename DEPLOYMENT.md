@@ -350,6 +350,7 @@ Il n'est jamais committé.
 | `ALERT_UNENCRYPTED_SCOPE` | `laptops` | Alerte « volume système non chiffré » : `laptops` ne regarde que les portables et tablettes, `all` tous les postes. Valeur initiale, modifiable dans Paramètres |
 | `ALERT_WARRANTY_DAYS` | `30` | Alerte « garantie bientôt terminée » : ce nombre de jours avant la fin de garantie saisie sur la fiche d'actif d'un poste (1 à 365). Valeur initiale, modifiable dans Paramètres |
 | `ALERT_RETENTION_DAYS` | `400` | Conservation des alertes **résolues**, purgées chaque matin par le worker. Une alerte ouverte n'est jamais purgée |
+| `COMPLIANCE_PATCH_GRACE_DAYS` | `14` | Conformité des postes : une mise à jour Windows **critique ou importante** en attente depuis plus de ce nombre de jours (0 à 365) fait échouer le contrôle « correctifs ». Évite qu'un mardi de correctifs fasse passer tout le parc au rouge. **Valeur initiale seulement**, modifiable dans Paramètres, comme la liste des administrateurs locaux acceptés |
 | `CONSOLE_TIMEZONE` | `Pacific/Tahiti` | Fuseau (nom IANA) dans lequel la console **planifie** : « mercredi à 18 h » est 18 h dans ce fuseau, pas en UTC. Les plages interdites s'y lisent aussi. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `SCHEDULE_COMMAND_TTL_MINUTES` | `180` | Durée d'attente par défaut d'une commande créée par une planification (10 à 1 440 min) : un poste réveillé met quelques minutes à contacter le serveur. Réglable par planification |
 | `REPORTS_ENABLED` | `false` | Le QR de l'étiquette d'un poste ouvre, à qui le scanne **sans compte**, un formulaire de signalement (catégorie, texte, contact facultatif). Désactivé par défaut : c'est le premier point d'entrée non authentifié qui ne soit pas l'agent ; borné par adresse et par étiquette, il ne renvoie rien sur le poste. Joignable seulement depuis le réseau de l'établissement si la console l'est. Le contact laissé est une donnée personnelle, à porter au registre des traitements. **Valeur initiale seulement** : modifiable dans Paramètres |
@@ -1437,6 +1438,8 @@ le secret d'enrôlement, plutôt qu'en clair dans le YAML.
 | `InventoryCollectIntervalSeconds` | `REG_DWORD` | `inventory_collect_interval_seconds` |
 | `ReportSessionUsername` | `REG_DWORD` | `report_session_username` |
 | `ReportSoftware` | `REG_DWORD` | `report_software` |
+| `ReportLocalAdmins` | `REG_DWORD` | `report_local_admins` (désactivé si absent) |
+| `ReportWingetPackages` | `REG_DWORD` | `report_winget_packages` (désactivé si absent) |
 | `Location` | `REG_SZ` | `location` |
 | `DeployWinget` | `REG_DWORD` | — (registre seulement) |
 | `DeployWingetAllow` | `REG_MULTI_SZ` | — (registre seulement) |
@@ -1462,6 +1465,19 @@ matériel continue de remonter, et la liste déjà stockée côté serveur est
 que déclarative. Les deux réglages sont à arbitrer avec le DPO / le CSE : croiser
 « quels logiciels sont installés » et « qui est connecté » porte sur une personne
 nommée.
+
+`ReportLocalAdmins` et `ReportWingetPackages` (conformité, C5) sont au contraire
+**désactivés tant que la clé est absente** : `1` les active, `0` les coupe à
+nouveau. Le premier remonte les membres du groupe Administrateurs local (noms de
+comptes et SID) — à arbitrer avec le DPO comme le nom de session ; coupé, la
+liste stockée côté serveur est effacée au cycle suivant. Le second lance
+`winget list --source winget` une fois par cycle d'inventaire (quelques
+secondes, et une mise à jour de l'index winget, donc un accès à
+`cdn.winget.microsoft.com`) pour remonter les logiciels connus de winget et la
+version disponible : **à valider sur un poste réel** avant de l'activer sur le
+parc — le comportement de winget sous `LocalSystem` varie selon la version
+d'App Installer. Le pare-feu (état des trois profils, réglage GPO prioritaire)
+remonte toujours : ce n'est pas une donnée personnelle.
 
 ```powershell
 New-Item -Path 'HKLM:\SOFTWARE\Tiai' -Force | Out-Null

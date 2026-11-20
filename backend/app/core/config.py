@@ -503,6 +503,12 @@ class Settings(BaseSettings):
     # How long a report — its contact with it — is kept once handled.
     REPORT_RETENTION_DAYS: int = Field(default=90, ge=1)
 
+    # --- Compliance of the postes (C5) ---
+    # How many days a critical or important Windows update may stay pending
+    # before the « correctifs » check fails: a Patch Tuesday must not turn
+    # the whole parc red overnight. Initial value — changed in Paramètres.
+    COMPLIANCE_PATCH_GRACE_DAYS: int = Field(default=14, ge=0, le=365)
+
     # --- Rooms ---
     # How postes are filed into rooms. ``manual``: from the console, by hand.
     # ``ad_ou``: by the organisational unit the computer object sits in — the

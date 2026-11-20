@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"tiai/agent/internal/api"
+	"tiai/agent/internal/collector"
 	"tiai/agent/internal/config"
 	"tiai/agent/internal/models"
 	"tiai/agent/internal/queue"
@@ -167,7 +168,8 @@ func stubInventory(t *testing.T) func() []bool {
 	var asked []bool
 	orig := readInventory
 	t.Cleanup(func() { readInventory = orig })
-	readInventory = func(_ context.Context, includeSoftware bool) (*models.InventoryState, error) {
+	readInventory = func(_ context.Context, opts collector.InventoryOptions) (*models.InventoryState, error) {
+		includeSoftware := opts.Software
 		mu.Lock()
 		asked = append(asked, includeSoftware)
 		mu.Unlock()
@@ -315,5 +317,21 @@ func TestResendInventoryRespectsReportSoftware(t *testing.T) {
 		if withSoftware {
 			t.Error("the software list was read on a poste told not to report it")
 		}
+	}
+}
+
+// The configuration's three switches reach the collection as they are set.
+func TestInventoryOptionsFollowTheSwitches(t *testing.T) {
+	a := &Agent{cfg: config.DefaultConfig()}
+	if got := a.inventoryOptions(); got != (collector.InventoryOptions{Software: true}) {
+		t.Fatalf("defaults: got %+v", got)
+	}
+	on, off := true, false
+	a.cfg.ReportSoftware = &off
+	a.cfg.ReportLocalAdmins = &on
+	a.cfg.ReportWingetPackages = &on
+	want := collector.InventoryOptions{Software: false, LocalAdmins: true, WingetPackages: true}
+	if got := a.inventoryOptions(); got != want {
+		t.Fatalf("switched: got %+v, want %+v", got, want)
 	}
 }

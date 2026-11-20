@@ -82,6 +82,11 @@
          des logiciels installés n'est ni lue ni remontée (et celle déjà stockée
          côté serveur est effacée au prochain cycle). -->
     <Property Id="REPORTSOFTWARE" Secure="yes" />
+    <!-- Conformité (C5), 1 ou 0 en DWORD, absents = désactivés. Membres du
+         groupe Administrateurs local (noms de comptes : à arbitrer avec le
+         DPO) ; paquets winget et versions disponibles (winget list). -->
+    <Property Id="REPORTLOCALADMINS" Secure="yes" />
+    <Property Id="REPORTWINGETPACKAGES" Secure="yes" />
     <Property Id="INVENTORYCOLLECTINTERVALSECONDS" Secure="yes" />
     <!-- Emplacement du poste, texte libre ("Lycée de Taravao") : ce par quoi la
          console filtre le parc, et ce qui désigne un relais Wake-on-LAN. -->
@@ -215,6 +220,18 @@
                  Permanent="yes" Condition="REPORTSOFTWARE">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="ReportSoftware"
                        Type="integer" Value="[REPORTSOFTWARE]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegReportLocalAdmins" Guid="1FB078C3-00A0-454C-B179-68FD938E78E4"
+                 Permanent="yes" Condition="REPORTLOCALADMINS">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="ReportLocalAdmins"
+                       Type="integer" Value="[REPORTLOCALADMINS]" KeyPath="yes" />
+      </Component>
+
+      <Component Id="RegReportWingetPackages" Guid="426B53BA-F73B-46A4-8775-932692FF982C"
+                 Permanent="yes" Condition="REPORTWINGETPACKAGES">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tiai" Name="ReportWingetPackages"
+                       Type="integer" Value="[REPORTWINGETPACKAGES]" KeyPath="yes" />
       </Component>
 
       <Component Id="RegInventoryCollectInterval" Guid="1B7F5A64-9D02-4F35-8C77-30B6A9D6C412"

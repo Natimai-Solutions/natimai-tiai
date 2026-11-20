@@ -227,6 +227,16 @@ async def evaluate_alerts() -> int:
     return len(result.opened)
 
 
+async def refresh_compliance() -> int:
+    """Recompute each poste's compliance summary (``features.compliance``):
+    what the list filters on and the dashboard counts. The fiche computes
+    its own, live."""
+    from app.features.compliance import crud as compliance_crud
+
+    async with AsyncSession(engine) as session:
+        return await compliance_crud.refresh(session, utcnow())
+
+
 async def run_schedules() -> int:
     """Run the schedules come due, then carry the open runs a step further
     (« éteindre ensuite », rings) — ``features.schedule.runner``."""
@@ -482,6 +492,7 @@ def build_jobs(
         # Every five minutes: a disk turning unhealthy is mailed within that,
         # and the rules read what the heartbeats and inventories wrote.
         Job("evaluate_alerts", evaluate_alerts, now, every(300)),
+        Job("refresh_compliance", refresh_compliance, now, every(600)),
         # Every minute: a schedule set for 18:00 runs by 18:01.
         Job("run_schedules", run_schedules, now, every(60)),
         Job(

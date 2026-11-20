@@ -189,6 +189,11 @@ class SettingsOut(BaseModel):
     alert_auto_check_rules: list[str] = Field(default_factory=list)
     env_alert_reboot_pending_days: int = 7
     env_alert_unencrypted_scope: str = "laptops"
+    # Compliance (C5): the grace of a critical update, and the members of
+    # the local Administrators accepted beyond the built-in ones.
+    compliance_patch_grace_days: int = 14
+    env_compliance_patch_grace_days: int = 14
+    compliance_admins_allowed: list[str] = Field(default_factory=list)
     # Schedules (C3): the zone the console plans in, and the weekly windows
     # when nothing at risk runs on several postes.
     console_timezone: str = "UTC"
@@ -334,6 +339,16 @@ class SettingsUpdate(BaseModel):
     alert_auto_check_rules: list[AlertRule] | None = Field(
         default=None, max_length=len(ALL_RULES)
     )
+    compliance_patch_grace_days: int | None = Field(default=None, ge=0, le=365)
+    compliance_admins_allowed: (
+        list[
+            Annotated[
+                str,
+                StringConstraints(strip_whitespace=True, min_length=1, max_length=200),
+            ]
+        ]
+        | None
+    ) = Field(default=None, max_length=100)
 
     # Schedules. A zone the server does not know is refused; null hands it
     # back to CONSOLE_TIMEZONE. Windows are written whole.
@@ -422,6 +437,7 @@ async def _out(session: SessionDep) -> SettingsOut:
     fleet = await crud.fleet_policy(session, values)
     schedule = await crud.schedule_policy(session, values)
     alerts = await crud.alert_policy(session, values)
+    compliance = await crud.compliance_policy(session, values)
     planning = await windows.schedule_policy(session, values)
     # Also refreshes what this process's ``queue_email`` reads: after a
     # patch, the new mail settings apply to the very next queued mail.
@@ -490,6 +506,9 @@ async def _out(session: SessionDep) -> SettingsOut:
         ],
         env_alert_reboot_pending_days=env.ALERT_REBOOT_PENDING_DAYS,
         env_alert_unencrypted_scope=env.ALERT_UNENCRYPTED_SCOPE,
+        compliance_patch_grace_days=compliance.patch_grace_days,
+        env_compliance_patch_grace_days=env.COMPLIANCE_PATCH_GRACE_DAYS,
+        compliance_admins_allowed=list(compliance.admins_allowed),
         console_timezone=planning.zone_name,
         env_console_timezone=env.CONSOLE_TIMEZONE,
         forbidden_windows=[w.as_json() for w in planning.forbidden],
@@ -591,6 +610,7 @@ _SIMPLE_KEYS = {
     "alert_unencrypted_scope": crud.KEY_ALERT_UNENCRYPTED_SCOPE,
     "console_timezone": windows.KEY_TIMEZONE,
     "reports_enabled": report_crud.KEY_ENABLED,
+    "compliance_patch_grace_days": crud.KEY_COMPLIANCE_PATCH_GRACE,
 }
 
 # List settings: written whole, without duplicates, in the order sent.
@@ -598,6 +618,7 @@ _LIST_KEYS = {
     "alert_enabled_rules": crud.KEY_ALERT_RULES,
     "alert_forbidden_software": crud.KEY_ALERT_FORBIDDEN,
     "alert_auto_check_rules": crud.KEY_ALERT_AUTO_CHECK,
+    "compliance_admins_allowed": crud.KEY_COMPLIANCE_ADMINS,
 }
 
 

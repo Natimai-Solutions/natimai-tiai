@@ -32,6 +32,7 @@ from app.features.inventory.models import (
     Nic,
     Software,
     Volume,
+    WingetPackage,
 )
 from app.features.inventory.schemas import InventoryReport
 from app.features.machine.models import Machine
@@ -396,6 +397,44 @@ async def apply_inventory(
         # Said on the poste, not only in a log: a list cut short reads like
         # any other in the console, and nothing else would complete it.
         machine.software_truncated_at = None if complete else now
+
+    # Compliance readings (C5): applied with the block, absent means none.
+    fw = report.firewall
+    machine.firewall_domain = fw.domain if fw else None
+    machine.firewall_private = fw.private if fw else None
+    machine.firewall_public = fw.public if fw else None
+    machine.local_admins = (
+        [a.model_dump() for a in report.local_admins]
+        if report.local_admins is not None
+        else None
+    )
+    if report.winget_packages is not None:
+        await _replace_set(
+            session,
+            WingetPackage,
+            constraint="uq_inv_winget_machine_id",
+            key="winget_id",
+            machine_id=machine.id,
+            rows=[
+                _stamped(
+                    {
+                        "winget_id": p.id,
+                        "name": p.name,
+                        "version": p.version,
+                        "available": p.available,
+                    },
+                    machine.id,
+                    now,
+                )
+                for p in report.winget_packages
+            ],
+        )
+        machine.winget_reported_at = now
+    elif machine.winget_reported_at is not None:
+        await session.exec(
+            delete(WingetPackage).where(col(WingetPackage.machine_id) == machine.id)
+        )
+        machine.winget_reported_at = None
 
     # Written last, and only once everything above landed: the pair is what says
     # "the console's picture of this machine is this inventory, taken then". A

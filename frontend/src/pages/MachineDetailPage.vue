@@ -434,6 +434,16 @@
             {{ machine.software.length }}{{ machine.software_truncated ? '+' : '' }}
           </q-badge>
         </q-tab>
+        <q-tab name="compliance" icon="verified_user" :label="t('compliance.card.title')">
+          <q-badge
+            v-if="complianceFailed"
+            color="negative"
+            floating
+            :aria-label="t('compliance.state.fail')"
+          >
+            {{ complianceFailed }}
+          </q-badge>
+        </q-tab>
         <q-tab
           v-if="canReadCommands"
           name="commands"
@@ -497,6 +507,10 @@
 
         <q-tab-panel name="software" class="q-px-none">
           <MachineSoftwareCard :machine="machine" :loading="loading" />
+        </q-tab-panel>
+
+        <q-tab-panel name="compliance" class="q-px-none">
+          <MachineComplianceCard :machine="machine" />
         </q-tab-panel>
 
         <!-- Each card under its own right, and the tab only when one of them
@@ -565,6 +579,7 @@ import CommandOutputDialog from 'src/components/machine/CommandOutputDialog.vue'
 import MachineAlertsCard from 'src/components/machine/MachineAlertsCard.vue';
 import MachineAssetCard from 'src/components/machine/MachineAssetCard.vue';
 import MachineWindows11Card from 'src/components/machine/MachineWindows11Card.vue';
+import MachineComplianceCard from 'src/components/machine/MachineComplianceCard.vue';
 import MachineAntivirusCard from 'src/components/machine/MachineAntivirusCard.vue';
 import MachineCommandsCard from 'src/components/machine/MachineCommandsCard.vue';
 import MachineDefenderCard from 'src/components/machine/MachineDefenderCard.vue';
@@ -653,6 +668,10 @@ const threats = ref<Threat[]>([]);
 // shown below: the badge and the alert must say "3" when there are three,
 // whichever page the history table is on.
 const activeThreats = ref(0);
+// The compliance tab's badge: the checks failed, live.
+const complianceFailed = computed(
+  () => machine.value?.compliance?.filter((c) => c.state === 'fail').length ?? 0,
+);
 
 // The poste needs machine:read alone; its threats and its commands each ask
 // for their own permission, and a group may grant machine:read without them

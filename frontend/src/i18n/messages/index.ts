@@ -6,6 +6,7 @@ import auth from './auth';
 import checks from './checks';
 import commands from './commands';
 import common from './common';
+import compliance from './compliance';
 import dashboard from './dashboard';
 import errors from './errors';
 import exports from './exports';
@@ -40,6 +41,7 @@ export const fr = {
   schedules: schedules.fr,
   reports: reports.fr,
   common: common.fr,
+  compliance: compliance.fr,
   errors: errors.fr,
   packages: packages.fr,
   machine: machine.fr,
@@ -72,6 +74,7 @@ export const en = {
   schedules: schedules.en,
   reports: reports.en,
   common: common.en,
+  compliance: compliance.en,
   errors: errors.en,
   packages: packages.en,
   machine: machine.en,

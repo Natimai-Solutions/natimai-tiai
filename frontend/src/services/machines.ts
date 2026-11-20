@@ -46,6 +46,9 @@ export interface Machine {
   /** A verification somebody asked for is open on this poste, and for whom. */
   check_open: boolean;
   check_assigned_to: string | null;
+  /** The compliance summary the worker keeps (C5): « 7 sur 9 ». */
+  compliance_passed?: number | null;
+  compliance_total?: number | null;
   /**
    * Maintenance as it resolves for this poste (`services/maintenance`): when
    * it is due, where it stands, who owns it. null due = excluded.
@@ -224,6 +227,24 @@ export interface InstalledSoftware {
 }
 
 /** Whether the hardware can take Windows 11, from the inventory. */
+export interface ComplianceCheckResult {
+  check: string;
+  state: 'pass' | 'fail' | 'unknown' | 'not_applicable';
+  detail: Record<string, unknown>;
+}
+
+export interface LocalAdmin {
+  name: string;
+  sid?: string | null;
+}
+
+export interface WingetPackage {
+  winget_id: string;
+  name: string | null;
+  version: string | null;
+  available: string | null;
+}
+
 export interface Windows11Readiness {
   verdict: 'already' | 'ready' | 'check' | 'blocked' | 'unknown';
   tpm: 'ok' | 'fail' | 'check' | 'unknown';
@@ -237,6 +258,14 @@ export interface Windows11Readiness {
 export interface MachineDetail extends Machine {
   /** Absent from an older server. */
   windows11?: Windows11Readiness | null;
+  /** C5: the compliance checks, live, and the readings behind the new ones. */
+  compliance?: ComplianceCheckResult[];
+  firewall_domain?: boolean | null;
+  firewall_private?: boolean | null;
+  firewall_public?: boolean | null;
+  local_admins?: LocalAdmin[] | null;
+  winget_reported_at?: string | null;
+  winget_packages?: WingetPackage[];
   /** The window `usage_hours` covers on the fiche: the console's setting. */
   usage_days: number;
   /**
@@ -389,7 +418,9 @@ export type MachineSortField =
   /** Ordered as a version, not a string: "0.10.0" after "0.9.0". */
   | 'agent_version'
   /** Hours on over the usage window; postes enrolled inside it last. */
-  | 'usage_hours';
+  | 'usage_hours'
+  /** Compliance checks failed (C5); postes not evaluated last. */
+  | 'compliance_failed';
 
 export interface ListMachinesParams {
   /** Free search: hostname, UUID, IP, antivirus name — and MAC in any notation. */
@@ -464,6 +495,10 @@ export interface ListMachinesParams {
   asset_status?: string;
   /** Postes the inventory says cannot take Windows 11. */
   win11_blocked?: boolean;
+  /** C5: failing / passing / unknown, one failed check, a winget update. */
+  compliance?: string;
+  compliance_check?: string;
+  winget_outdated?: string;
   /** true: the retired postes left out (the dashboard's links). */
   in_parc?: boolean;
   /**

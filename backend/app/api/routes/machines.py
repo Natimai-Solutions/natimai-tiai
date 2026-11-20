@@ -50,6 +50,8 @@ from app.features.base import contains, utcnow
 from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
 from app.features.command import texts as command_texts
+from app.features.compliance import crud as compliance_crud
+from app.features.compliance.checks import Check
 from app.features.inventory.models import (
     Disk,
     Gpu,
@@ -58,6 +60,7 @@ from app.features.inventory.models import (
     Nic,
     Software,
     Volume,
+    WingetPackage,
 )
 from app.features.machine import crud as machine_crud
 from app.features.machine import token_rotation
@@ -133,6 +136,9 @@ class MachineOut(BaseModel):
     # because it is what the list is filtered by to see what is waiting.
     check_open: bool = False
     check_assigned_to: str | None = None
+    # The compliance summary the worker keeps (C5): « 7 sur 9 ».
+    compliance_passed: int | None = None
+    compliance_total: int | None = None
     # Maintenance, as it resolves for this poste (``maintenance/policy.py``):
     # when it is due, where it stands, who owns it. Null due = excluded.
     last_maintenance_at: datetime | None = None
@@ -443,10 +449,35 @@ class Windows11Out(BaseModel):
     processor: str
 
 
+class ComplianceCheckOut(BaseModel):
+    """One compliance check of the fiche, computed live (C5)."""
+
+    check: str
+    state: str
+    detail: dict[str, Any] = {}
+
+
+class WingetPackageOut(BaseModel):
+    winget_id: str
+    name: str | None
+    version: str | None
+    available: str | None
+
+    model_config = {"from_attributes": True}
+
+
 class MachineDetailOut(MachineOut):
     """Full machine detail (Defender state, session type, fingerprint, times)."""
 
     windows11: Windows11Out | None = None
+    # C5: the checks, live, and the readings behind the two new ones.
+    compliance: list[ComplianceCheckOut] = []
+    firewall_domain: bool | None = None
+    firewall_private: bool | None = None
+    firewall_public: bool | None = None
+    local_admins: list[dict[str, Any]] | None = None
+    winget_reported_at: datetime | None = None
+    winget_packages: list[WingetPackageOut] = []
 
     # The window ``usage_hours`` covers on the fiche: the console's setting.
     usage_days: int | None = None
@@ -599,6 +630,8 @@ MachineSortField = Literal[
     # Hours on over the usage window: « les moins utilisés d'abord ». Needs
     # the window, so ``_sort_key`` takes it.
     "usage_hours",
+    # The compliance checks failed (C5): « les moins conformes d'abord ».
+    "compliance_failed",
 ]
 
 # Sorted case-folded: under a C collation "ZEUS" would otherwise come before
@@ -672,6 +705,8 @@ def _sort_key(
     """
     if field == "disk_free_percent":
         return disk_free_percent()
+    if field == "compliance_failed":
+        return col(Machine.compliance_total) - col(Machine.compliance_passed)
     if field == "agent_version":
         return _agent_version_rank(versions)
     if field == "usage_hours" and usage is not None:
@@ -820,6 +855,11 @@ class MachineFilters:
     asset_status: str | None = None
     # Postes the inventory says cannot take Windows 11 (``asset.win11``).
     win11_blocked: bool | None = None
+    # Compliance (C5): failing / passing / unknown, and one failed check.
+    compliance: Literal["failing", "passing", "unknown"] | None = None
+    compliance_check: Check | None = None
+    # Postes winget would upgrade this program on (a winget id, C5).
+    winget_outdated: str | None = None
     # Postes still in the parc (true) or retired (false) — the dashboard's
     # cards open their lists with it, as their figures leave retired postes
     # out.
@@ -901,6 +941,9 @@ def machine_filters(
     ]
     | None = None,
     win11_blocked: bool | None = None,
+    compliance: Literal["failing", "passing", "unknown"] | None = None,
+    compliance_check: Check | None = None,
+    winget_outdated: str | None = Query(None, max_length=200),
     in_parc: bool | None = None,
     exact: str | None = Query(
         None,
@@ -950,6 +993,9 @@ def machine_filters(
         alert=_alert_filter(alert),
         asset_status=asset_status,
         win11_blocked=win11_blocked,
+        compliance=compliance,
+        compliance_check=compliance_check,
+        winget_outdated=winget_outdated,
         in_parc=in_parc,
         exact=_exact_facets(exact),
         scope=scope,
@@ -1045,6 +1091,19 @@ def _filtered_machines(
         # The complement, not the negation: a NULL in the clause (a memory
         # not read) is « not blocked », not in neither list.
         stmt = stmt.where(blocked if filters.win11_blocked else blocked.is_not(true()))
+    if filters.compliance is not None:
+        stmt = stmt.where(compliance_crud.filter_clause(filters.compliance))
+    if filters.compliance_check is not None:
+        stmt = stmt.where(compliance_crud.check_clause(filters.compliance_check))
+    if filters.winget_outdated is not None:
+        stmt = stmt.where(
+            exists().where(
+                col(WingetPackage.machine_id) == col(Machine.id),
+                col(WingetPackage.winget_id) == filters.winget_outdated,
+                col(WingetPackage.available).is_not(None),
+                col(WingetPackage.available) != "",
+            )
+        )
     if filters.alert is not None:
         open_alert = exists().where(
             col(MachineAlert.machine_id) == col(Machine.id),
@@ -2304,6 +2363,16 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
         win11.installed_ram_mb([m.capacity_mb for m in detail.memory_modules]),
     )
     detail.windows11 = Windows11Out(**asdict(readiness)) if readiness else None
+    detail.compliance = [
+        ComplianceCheckOut(check=r.check.value, state=r.state.value, detail=r.detail)
+        for r in await compliance_crud.for_machine(session, machine, now)
+    ]
+    winget = await session.exec(
+        select(WingetPackage)
+        .where(col(WingetPackage.machine_id) == machine.id)
+        .order_by(func.lower(col(WingetPackage.name)), col(WingetPackage.winget_id))
+    )
+    detail.winget_packages = [WingetPackageOut.model_validate(p) for p in winget.all()]
     return detail
 
 

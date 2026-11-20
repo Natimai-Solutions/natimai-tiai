@@ -25,6 +25,7 @@ export const MACHINE_COLUMN_KEYS = [
   'usage',
   'model',
   'disk',
+  'compliance',
   'last_seen',
 ] as const;
 

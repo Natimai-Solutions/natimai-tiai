@@ -1,7 +1,9 @@
 import uuid
 from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import Column, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
@@ -234,6 +236,30 @@ class Machine(SQLModel, table=True):
     # a complete one is. The console says the list is partial, and the
     # heartbeat asks the agent for it again once the budget has room.
     software_truncated_at: datetime | None = utc_field(default=None, nullable=True)
+
+    # --- Compliance readings (C5), from the same inventory block. The three
+    # firewall profiles as Windows applies them (NULL = not read). The local
+    # Administrators as [{name, sid}], NULL when the agent does not report
+    # them (``ReportLocalAdmins`` off, or an older agent) — the block is
+    # applied as a whole, so switching the collection off clears them.
+    firewall_domain: bool | None = None
+    firewall_private: bool | None = None
+    firewall_public: bool | None = None
+    local_admins: list[dict[str, Any]] | None = Field(
+        default=None, sa_column=Column(JSONB(none_as_null=True), nullable=True)
+    )
+    # When the poste last reported its winget packages
+    # (``inventory_winget_packages``); NULL when it does not.
+    winget_reported_at: datetime | None = utc_field(default=None, nullable=True)
+
+    # The compliance summary (``features/compliance``), refreshed by the
+    # worker: checks passed out of checks known, and the codes that failed.
+    # NULL until the first evaluation. The fiche computes its own, live.
+    compliance_passed: int | None = None
+    compliance_total: int | None = None
+    compliance_failed: list[str] | None = Field(
+        default=None, sa_column=Column(JSONB(none_as_null=True), nullable=True)
+    )
 
     # Interactive session (WTS), refreshed on each heartbeat. NULL means "never
     # reported" — an agent older than the feature, or a failed read — which is

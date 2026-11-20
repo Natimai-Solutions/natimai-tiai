@@ -44,6 +44,8 @@ défaut ou ce que la GPO a déjà posé dans le registre.
 | `DEFENDERFULLSCANTIMEOUTSECONDS` | `DefenderFullScanTimeoutSeconds` | entier > 0 (défaut 28800 = 8 h) |
 | `REPORTSESSIONUSERNAME` | `ReportSessionUsername` | `1` ou `0` (pas `true`/`false`) |
 | `REPORTSOFTWARE` | `ReportSoftware` | `1` ou `0` (`0` = inventaire matériel seul) |
+| `REPORTLOCALADMINS` | `ReportLocalAdmins` | `1` ou `0` — membres du groupe Administrateurs local (désactivé si absent ; noms de comptes, à arbitrer avec le DPO) |
+| `REPORTWINGETPACKAGES` | `ReportWingetPackages` | `1` ou `0` — paquets winget et version disponible (désactivé si absent) |
 | `INVENTORYCOLLECTINTERVALSECONDS` | `InventoryCollectIntervalSeconds` | entier > 0 |
 | `LOCATION` | `Location` | texte libre, ex. `"Lycée de Taravao"` — l'emplacement du poste, par lequel la console filtre le parc et le réveil relayé choisit un poste voisin |
 | `ALLOWINSECUREHTTP` | `AllowInsecureHTTP` | `1` ou `0` (pas `true`/`false`, que prend le script GPO) — `1` accepte une `APIBASEURL` en `http://` (port HTTP direct d'un réseau de test) ; absent, l'agent refuse une URL `http://` : le service reste « En cours d'exécution » mais ne contacte pas le serveur, et l'écrit dans `agent.log` |

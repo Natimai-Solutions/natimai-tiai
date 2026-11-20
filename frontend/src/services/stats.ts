@@ -64,6 +64,11 @@ export interface StatsOverview {
    * (left out of every other count). Optional: an older server. */
   machines_win11_blocked?: number;
   machines_retired?: number;
+  /** Compliance (C5): postes passing every known check, postes failing one,
+   * and the failures by check. Optional: an older server. */
+  machines_compliant?: number;
+  machines_noncompliant?: number;
+  compliance_by_check?: Record<string, number>;
 }
 
 export async function getOverview(): Promise<StatsOverview> {

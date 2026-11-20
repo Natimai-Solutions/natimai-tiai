@@ -69,6 +69,16 @@ func applyRegistryOverrides(cfg *Config) {
 		on := v != 0
 		cfg.ReportSoftware = &on
 	}
+	// Presence wins, both ways: these two are off by default, so a GPO pushes 1
+	// to switch one on, and 0 to switch off what a YAML switched on.
+	if v, _, err := k.GetIntegerValue("ReportLocalAdmins"); err == nil {
+		on := v != 0
+		cfg.ReportLocalAdmins = &on
+	}
+	if v, _, err := k.GetIntegerValue("ReportWingetPackages"); err == nil {
+		on := v != 0
+		cfg.ReportWingetPackages = &on
+	}
 	if v, _, err := k.GetIntegerValue("WUInstallTimeoutSeconds"); err == nil && v > 0 {
 		cfg.WUInstallTimeoutSeconds = int(v)
 	}

@@ -229,6 +229,59 @@
       </q-card-actions>
     </q-card>
 
+    <!-- Compliance (C5): the grace of a critical update, and the members of
+         the local Administrators accepted beyond the built-in ones. -->
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md" data-test="compliance-card">
+      <q-card-section class="text-subtitle1">
+        {{ t('compliance.settings.title') }}
+        <div class="text-caption text-muted">{{ t('compliance.settings.caption') }}</div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings" class="q-gutter-md">
+        <q-input
+          v-model.number="complianceForm.patchGraceDays"
+          type="number"
+          min="0"
+          max="365"
+          :suffix="t('settings.units.days')"
+          :label="t('compliance.settings.patchGrace')"
+          outlined
+          dense
+          :error="complianceGraceError !== null"
+          :error-message="complianceGraceError ?? undefined"
+          :hint="
+            t('compliance.settings.patchGraceHint', {
+              days: settings.env_compliance_patch_grace_days ?? 14,
+            })
+          "
+          :disable="!canWrite"
+        />
+        <q-select
+          v-model="complianceForm.admins"
+          :label="t('compliance.settings.admins')"
+          :hint="t('compliance.settings.adminsHint')"
+          outlined
+          dense
+          multiple
+          use-chips
+          use-input
+          hide-dropdown-icon
+          new-value-mode="add-unique"
+          input-debounce="0"
+          :disable="!canWrite"
+        />
+      </q-card-section>
+      <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
+        <q-btn
+          color="primary"
+          :label="t('settings.save')"
+          :loading="savingCompliance"
+          :disable="complianceGraceError !== null"
+          @click="saveCompliance"
+        />
+      </q-card-actions>
+    </q-card>
+
     <!-- Reports (C4): the form a label's QR code opens without an account.
          Saved as it is switched. -->
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
@@ -1060,6 +1113,34 @@ async function saveAlerts() {
   }
 }
 
+// The compliance card (C5).
+const complianceForm = reactive({ patchGraceDays: 14 as number | string, admins: [] as string[] });
+const complianceGraceError = computed(() => intFieldError(complianceForm.patchGraceDays, 0, 365));
+const savingCompliance = ref(false);
+
+function fillComplianceForm(s: ConsoleSettings) {
+  complianceForm.patchGraceDays = s.compliance_patch_grace_days ?? 14;
+  complianceForm.admins = [...(s.compliance_admins_allowed ?? [])];
+  saved.compliance = formSnapshot(complianceForm);
+}
+
+async function saveCompliance() {
+  if (complianceGraceError.value) return;
+  savingCompliance.value = true;
+  try {
+    settings.value = await updateSettings({
+      compliance_patch_grace_days: Number(complianceForm.patchGraceDays),
+      compliance_admins_allowed: complianceForm.admins.map((a) => a.trim()).filter(Boolean),
+    });
+    fillComplianceForm(settings.value);
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
+  } catch (e) {
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
+  } finally {
+    savingCompliance.value = false;
+  }
+}
+
 // The reports card (C4): one switch, saved as it is switched.
 const savingReports = ref(false);
 async function saveReports(enabled: boolean) {
@@ -1278,6 +1359,7 @@ const saved = reactive({
   maintenance: '',
   usage: '',
   alerts: '',
+  compliance: '',
   planning: '',
   fleet: '',
   schedule: '',
@@ -1290,6 +1372,7 @@ const unsavedCards = computed(() => {
   if (formSnapshot(form) !== saved.maintenance) cards.push('maintenance');
   if (formSnapshot(usageForm) !== saved.usage) cards.push('usage');
   if (alertSnapshot() !== saved.alerts) cards.push('alerts');
+  if (formSnapshot(complianceForm) !== saved.compliance) cards.push('compliance');
   if (planningSnapshot() !== saved.planning) cards.push('planning');
   if (formSnapshot(fleetForm) !== saved.fleet) cards.push('fleet');
   if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('schedule');
@@ -1382,6 +1465,7 @@ async function load() {
     fillMaintenanceForm(settings.value);
     fillUsageForm(settings.value);
     fillAlertForm(settings.value);
+    fillComplianceForm(settings.value);
     fillPlanningForm(settings.value);
     fillFleetForm(settings.value);
     fillScheduleForm(settings.value);

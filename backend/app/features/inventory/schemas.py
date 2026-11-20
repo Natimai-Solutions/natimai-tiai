@@ -329,6 +329,63 @@ class DirectoryReport(BaseModel):
         return _bounded(value if isinstance(value, str) else None, TEXT_MAX)
 
 
+# C5: a local Administrators group of more than this is not a poste's; the
+# winget list is the software list's size.
+MAX_LOCAL_ADMINS = 200
+MAX_WINGET_PACKAGES = 2000
+SID_MAX = 200
+
+
+class FirewallReport(BaseModel):
+    """The firewall's three profiles as Windows applies them (C5)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    domain: bool | None = None
+    private: bool | None = None
+    public: bool | None = None
+
+
+class LocalAdminReport(BaseModel):
+    """One member of the local Administrators group (C5)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = ""
+    sid: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _bound_name(cls, value: str) -> str:
+        return value.strip()[:TEXT_MAX]
+
+    @field_validator("sid")
+    @classmethod
+    def _bound_sid(cls, value: str | None) -> str | None:
+        return _bounded(value, SID_MAX)
+
+
+class WingetPackageReport(BaseModel):
+    """One row of ``winget list --source winget`` (C5)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = ""
+    name: str | None = None
+    version: str | None = None
+    available: str | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _bound_id(cls, value: str) -> str:
+        return value.strip()[:TEXT_MAX]
+
+    @field_validator("name", "version", "available")
+    @classmethod
+    def _bound_text(cls, value: str | None) -> str | None:
+        return _bounded(value)
+
+
 class InventoryReport(BaseModel):
     """Hardware and software inventory, reported on the agent's own daily cycle.
 
@@ -404,6 +461,36 @@ class InventoryReport(BaseModel):
     # rather than leave it lying in the database. ``None`` is reserved for "the
     # registry could not be read", which must not wipe a good list.
     software: list[SoftwareReport] | None = None
+
+    # --- Compliance readings (C5). Applied as part of the block: None clears
+    # what an earlier cycle stored, which is what makes switching the agent's
+    # ``ReportLocalAdmins`` off a guarantee and not a promise.
+    firewall: FirewallReport | None = None
+    local_admins: list[LocalAdminReport] | None = None
+    winget_packages: list[WingetPackageReport] | None = None
+
+    @field_validator("local_admins")
+    @classmethod
+    def _cap_admins(
+        cls, value: list[LocalAdminReport] | None
+    ) -> list[LocalAdminReport] | None:
+        return (
+            None if value is None else [a for a in value if a.name][:MAX_LOCAL_ADMINS]
+        )
+
+    @field_validator("winget_packages")
+    @classmethod
+    def _cap_winget(
+        cls, value: list[WingetPackageReport] | None
+    ) -> list[WingetPackageReport] | None:
+        if value is None:
+            return None
+        # One row per id: the table's key.
+        seen: dict[str, WingetPackageReport] = {}
+        for p in value:
+            if p.id and p.id not in seen:
+                seen[p.id] = p
+        return list(seen.values())[:MAX_WINGET_PACKAGES]
 
     @field_validator("hash")
     @classmethod

@@ -14,7 +14,7 @@ import (
 // nil with no error, mirroring the ReadAVProduct stub. An empty inventory would
 // be a claim about the machine ("no disks, no memory, no software"), and the
 // daily cycle logging an error on every dev-machine tick would be noise.
-func ReadInventory(ctx context.Context, includeSoftware bool) (*models.InventoryState, error) {
+func ReadInventory(ctx context.Context, opts InventoryOptions) (*models.InventoryState, error) {
 	return nil, nil
 }
 

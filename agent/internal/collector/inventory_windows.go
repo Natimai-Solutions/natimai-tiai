@@ -45,7 +45,7 @@ type rawTpm struct {
 //
 // The only hard failure is the first query: if Win32_ComputerSystem cannot be
 // read, WMI itself is broken and nothing below would answer either.
-func ReadInventory(ctx context.Context, includeSoftware bool) (*models.InventoryState, error) {
+func ReadInventory(ctx context.Context, opts InventoryOptions) (*models.InventoryState, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func ReadInventory(ctx context.Context, includeSoftware bool) (*models.Inventory
 		inv.Nics = buildNics(nics, readPhysicalAdapterMACs())
 	}
 
-	if includeSoftware {
+	if opts.Software {
 		inv.Software = readInstalledSoftware()
 	} else {
 		// Empty and not nil, which is the whole point of the switch: nil tells
@@ -206,6 +206,15 @@ func ReadInventory(ctx context.Context, includeSoftware bool) (*models.Inventory
 	// for the server to file the poste by. Part of the hash like everything
 	// else, so a poste moved to another OU reports on the day it moves.
 	inv.Directory = readDirectory(ctx)
+
+	// The compliance readings (C5). The two lists only where a switch allows.
+	inv.Firewall = readFirewall()
+	if opts.LocalAdmins {
+		inv.LocalAdmins = readLocalAdmins()
+	}
+	if opts.WingetPackages && ctx.Err() == nil {
+		inv.WingetPackages = readWingetPackages(ctx)
+	}
 
 	InventoryHash(inv)
 	return inv, nil

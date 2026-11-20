@@ -1,3 +1,4 @@
+import { QItem } from 'quasar';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -275,6 +276,32 @@ describe('DashboardPage — alerts, Windows 11 and the retired postes (C1, C2)',
     expect(w.text()).toContain('Bloqués pour Windows 11');
     expect(to).toContain(JSON.stringify({ name: 'alerts' }));
     expect(to).toContain(JSON.stringify({ name: 'machines', query: { win11_blocked: 'true' } }));
+  });
+
+  it('counts the postes not compliant and lists the failed checks (C5)', async () => {
+    const { w, to } = await links({
+      machines_compliant: 7,
+      machines_noncompliant: 3,
+      compliance_by_check: { tpm: 1, firewall: 3 },
+    });
+    expect(w.text()).toContain('Postes non conformes');
+    expect(w.text()).toContain('7 conforme(s)');
+    expect(to).toContain(JSON.stringify({ name: 'machines', query: { compliance: 'failing' } }));
+    const card = w.find('[data-test="compliance-by-check"]');
+    // Most failed first, each opening the list of its postes.
+    expect(card.text()).toMatch(/Pare-feu actif.*3.*TPM 2\.0.*1/s);
+    const targets = card
+      .findAllComponents(QItem)
+      .map((i: { props: (name: string) => unknown }) => JSON.stringify(i.props('to') as unknown));
+    expect(targets).toContain(
+      JSON.stringify({ name: 'machines', query: { compliance_check: 'firewall' } }),
+    );
+  });
+
+  it('shows no compliance card for an older server', async () => {
+    const { w } = await links({});
+    expect(w.find('[data-test="compliance-by-check"]').exists()).toBe(false);
+    expect(w.text()).not.toContain('Postes non conformes');
   });
 
   it('leaves the retired postes out of the lists the cards open, while there are any', async () => {

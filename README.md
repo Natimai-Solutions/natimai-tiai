@@ -114,6 +114,14 @@ gère naturellement les postes éteints.
   seuil d'échec) pour les mises à jour et les paquets. Chaque exécution
   revérifie le compte et les droits de son auteur : planifier ne permet pas de
   garder un droit perdu.
+- **Conformité** — dix contrôles fermés par poste, lus « 7 sur 9 » plutôt
+  qu'en note : chiffrement, Secure Boot, TPM 2.0, antivirus, correctifs
+  critiques, redémarrage, Windows pris en charge, agent à jour, pare-feu,
+  administrateurs locaux. Colonne et filtre de la liste, carte du tableau de
+  bord, détail sur la fiche. Les **mises à jour tierces** connues de winget
+  ont leur onglet sur la page Logiciels, avec la part des postes à jour. Les
+  administrateurs locaux et winget ne sont relevés que si l'agent y est
+  autorisé (désactivés par défaut).
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
@@ -213,7 +221,8 @@ l'exécution est figée dans le binaire de l'agent.
 | Actifs (achat, garantie, prêts, import, étiquettes QR, Windows 11) | 🟢 Livré |
 | Planifications (fenêtres, réveil et extinction, déploiement par étapes) | 🟢 Livré |
 | Signalement par l'utilisateur (QR sans compte, file de tri), priorités des vérifications | 🟢 Livré |
-| Conformité, licences… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
+| Conformité des postes, mises à jour tierces (winget) | 🟢 Livré |
+| Licences, second facteur, webhooks… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
 | Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement

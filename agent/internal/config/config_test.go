@@ -495,3 +495,35 @@ func TestDeployMethodAMaxGBSaysWhenAValueIsUnusable(t *testing.T) {
 		}
 	}
 }
+
+// The two C5 switches are off unless switched on — the opposite of the
+// username's default: account names and a winget run are opted into.
+func TestComplianceSwitchesDefaultOffAndCanBeSwitchedOn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("api_base_url: https://tiai.example.local\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ReportsLocalAdmins() || cfg.ReportsWingetPackages() {
+		t.Error("local admins and winget packages must default to off")
+	}
+	if (&Config{}).ReportsLocalAdmins() || (&Config{}).ReportsWingetPackages() {
+		t.Error("a zero-value Config must not report them either")
+	}
+
+	body := "api_base_url: https://tiai.example.local\nreport_local_admins: true\nreport_winget_packages: true\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.ReportsLocalAdmins() || !cfg.ReportsWingetPackages() {
+		t.Error("explicit true must be honoured")
+	}
+}
