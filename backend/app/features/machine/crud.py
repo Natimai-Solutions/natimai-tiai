@@ -7,6 +7,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.alert import crud as alert_crud
+from app.features.asset import crud as asset_crud
 from app.features.base import utcnow
 from app.features.check import crud as check_crud
 from app.features.command import texts
@@ -107,6 +108,8 @@ async def merge_into(
     # Resolved alerts are history and follow; open ones are dropped, the next
     # evaluation finds again on the kept record whatever still holds.
     await alert_crud.move_to(session, source_id=source.id, target_id=target.id)
+    # The asset follows the poste: what was paid for it, its warranty.
+    await asset_crud.move_to(session, source_id=source.id, target_id=target.id)
 
     # Keep the freshest last-seen; the merge resolves the verification. The
     # room follows too, when the kept record has none: a duplicate was often

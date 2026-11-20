@@ -45,6 +45,8 @@ class AlertRule(enum.StrEnum):
     FORBIDDEN_SOFTWARE = "forbidden_software"
     # No contact for longer than the inactivity window.
     INACTIVE = "inactive"
+    # The warranty of a poste's asset ends within N days (``assets``).
+    WARRANTY_ENDING = "warranty_ending"
 
 
 ALL_RULES: tuple[AlertRule, ...] = tuple(AlertRule)

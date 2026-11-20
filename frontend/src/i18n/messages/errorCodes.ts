@@ -58,6 +58,11 @@ const fr = {
   'building.not_found': 'Bâtiment introuvable',
   'building.name.taken': 'Un bâtiment porte déjà ce nom sur cet emplacement',
   'room.not_found': 'Salle introuvable',
+  'asset.not_found': 'Actif introuvable',
+  'asset.inventory_number.taken': 'Ce numéro d’inventaire est déjà celui d’un autre actif',
+  'asset.machine.taken': 'Ce poste a déjà sa fiche d’actif',
+  'asset.import.unreadable':
+    'Fichier illisible : un CSV ou un classeur Excel avec une colonne de numéros de série est attendu',
   'room.name.taken': 'Une salle porte déjà ce nom dans ce bâtiment',
   'intervention.not_found': 'Intervention introuvable',
   'check.not_found': 'Vérification introuvable',
@@ -132,6 +137,11 @@ const en: Record<keyof typeof fr, string> = {
   'building.not_found': 'Building not found',
   'building.name.taken': 'A building already has this name at this location',
   'room.not_found': 'Room not found',
+  'asset.not_found': 'Asset not found',
+  'asset.inventory_number.taken': 'This inventory number already belongs to another asset',
+  'asset.machine.taken': 'This computer already has its asset record',
+  'asset.import.unreadable':
+    'Unreadable file: a CSV or an Excel workbook with a serial number column is expected',
   'room.name.taken': 'A room already has this name in this building',
   'intervention.not_found': 'Intervention not found',
   'check.not_found': 'Check not found',

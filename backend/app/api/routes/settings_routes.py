@@ -174,6 +174,8 @@ class SettingsOut(BaseModel):
     alert_rules: list[str] = Field(default_factory=list)
     alert_enabled_rules: list[str] = Field(default_factory=list)
     alert_reboot_pending_days: int = 7
+    alert_warranty_days: int = 30
+    env_alert_warranty_days: int = 30
     alert_unencrypted_scope: str = "laptops"
     alert_forbidden_software: list[str] = Field(default_factory=list)
     alert_auto_check_rules: list[str] = Field(default_factory=list)
@@ -284,6 +286,7 @@ class SettingsUpdate(BaseModel):
         default=None, max_length=len(ALL_RULES)
     )
     alert_reboot_pending_days: int | None = Field(default=None, ge=1, le=365)
+    alert_warranty_days: int | None = Field(default=None, ge=1, le=365)
     alert_unencrypted_scope: Literal["laptops", "all"] | None = None
     alert_forbidden_software: (
         list[
@@ -428,6 +431,8 @@ async def _out(session: SessionDep) -> SettingsOut:
             r.value for r in ALL_RULES if r.value in alerts.enabled_rules
         ],
         alert_reboot_pending_days=alerts.reboot_pending_days,
+        alert_warranty_days=alerts.warranty_days,
+        env_alert_warranty_days=env.ALERT_WARRANTY_DAYS,
         alert_unencrypted_scope=alerts.unencrypted_scope,
         alert_forbidden_software=list(alerts.forbidden_software),
         alert_auto_check_rules=[
@@ -527,6 +532,7 @@ _SIMPLE_KEYS = {
     "digest_hour_utc": crud.KEY_DIGEST_HOUR,
     "maintenance_reminder_weekday": crud.KEY_REMINDER_WEEKDAY,
     "alert_reboot_pending_days": crud.KEY_ALERT_REBOOT_DAYS,
+    "alert_warranty_days": crud.KEY_ALERT_WARRANTY_DAYS,
     "alert_unencrypted_scope": crud.KEY_ALERT_UNENCRYPTED_SCOPE,
 }
 

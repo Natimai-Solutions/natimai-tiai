@@ -11,6 +11,8 @@ from sqlmodel import col, select
 
 from app.api.deps import CurrentScope, SessionDep, require_permission
 from app.features.alert.models import ALL_RULES, MachineAlert
+from app.features.asset import crud as asset_crud
+from app.features.asset import win11
 from app.features.base import utcnow
 from app.features.check.models import MachineCheck
 from app.features.inventory.models import MachineSoftware, Volume
@@ -19,7 +21,6 @@ from app.features.machine.models import Machine
 from app.features.machine.status import (
     MachineStatus,
     agent_outdated_clause,
-    aging_hardware_clause,
     low_disk_clause,
     reenroll_pending_clause,
     status_clause,
@@ -106,13 +107,19 @@ class StatsOverview(BaseModel):
     # « Alertes » card and the links it opens (``/machines?alert=…``).
     machines_with_alerts: int = 0
     alerts_by_rule: dict[str, int] = {}
+    # Postes the inventory says cannot take Windows 11, and the retired
+    # ones — left out of every other count here.
+    machines_win11_blocked: int = 0
+    machines_retired: int = 0
 
 
 async def _count(
     session: SessionDep, scope: Any, clause: ColumnElement[bool] | None = None
 ) -> int:
     """Machines matching ``clause`` within ``scope`` (a ``machine_clause``)."""
-    stmt = restrict(select(func.count()).select_from(Machine), scope)
+    stmt = restrict(select(func.count()).select_from(Machine), scope).where(
+        asset_crud.in_parc_clause()
+    )
     if clause is not None:
         stmt = stmt.where(clause)
     return await session.scalar(stmt) or 0
@@ -165,7 +172,9 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
         session, in_scope, low_disk_clause(fleet_policy.low_disk_free_percent)
     )
     machines_aging = await _count(
-        session, in_scope, aging_hardware_clause(now, fleet_policy.hardware_aging_years)
+        session,
+        in_scope,
+        asset_crud.aging_clause(now, fleet_policy.hardware_aging_years),
     )
     # Machines whose *system* volume is not fully encrypted. Read off the volume
     # rows and not off a machine column, unlike the disk figure above: this is
@@ -293,7 +302,19 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
     )
     alerts_by_rule = dict(by_rule.all())
 
+    machines_win11_blocked = await _count(session, in_scope, win11.blocked_clause())
+    machines_retired = (
+        await session.scalar(
+            restrict(select(func.count()).select_from(Machine), in_scope).where(
+                asset_crud.retired_clause()
+            )
+        )
+        or 0
+    )
+
     return StatsOverview(
+        machines_win11_blocked=machines_win11_blocked,
+        machines_retired=machines_retired,
         machines_with_alerts=machines_with_alerts,
         alerts_by_rule={r.value: alerts_by_rule.get(r.value, 0) for r in ALL_RULES},
         total=total,

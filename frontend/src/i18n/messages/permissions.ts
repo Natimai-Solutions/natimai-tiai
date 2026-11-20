@@ -21,6 +21,7 @@ const fr = {
     user: 'Comptes et groupes',
     audit: "Journal d'audit",
     package: 'Paquets logiciels',
+    asset: 'Actifs (achat, garantie, prêts)',
   },
   /** What granting it lets someone do (`label`), and a sentence where the label
    *  alone would be read two ways (`hint`). */
@@ -109,6 +110,16 @@ const fr = {
         hint: 'Créer des paquets, déposer leurs fichiers, joindre la signature, les retirer.',
       },
     },
+    asset: {
+      read: {
+        label: 'Consulter',
+        hint: 'Voir les dates d’achat, garanties, prix, statuts et prêts, et le matériel sans agent.',
+      },
+      write: {
+        label: 'Gérer',
+        hint: 'Saisir et importer les actifs, déclarer un prêt ou une réforme, imprimer les étiquettes.',
+      },
+    },
   },
   /** `{resource} — {action}`, for lists that show what a group grants. */
   named: '{resource} — {action}',
@@ -133,6 +144,7 @@ const en: Translation<typeof fr> = {
     user: 'Accounts and groups',
     audit: 'Audit log',
     package: 'Software packages',
+    asset: 'Assets (purchase, warranty, loans)',
   },
   entries: {
     machine: {
@@ -217,6 +229,16 @@ const en: Translation<typeof fr> = {
       write: {
         label: 'Manage',
         hint: 'Create packages, upload their files, attach the signature, retire them.',
+      },
+    },
+    asset: {
+      read: {
+        label: 'View',
+        hint: 'See purchase dates, warranties, prices, statuses and loans, and the equipment without an agent.',
+      },
+      write: {
+        label: 'Manage',
+        hint: 'Enter and import assets, record a loan or a retirement, print the labels.',
       },
     },
   },

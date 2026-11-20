@@ -25,6 +25,7 @@ RULE_LABELS_FR = {
     "os_unsupported": "Windows hors support",
     "forbidden_software": "Logiciel interdit installé",
     "inactive": "Sans contact",
+    "warranty_ending": "Garantie bientôt terminée",
 }
 RULE_LABELS_EN = {
     "disk_low": "System disk nearly full",
@@ -34,6 +35,7 @@ RULE_LABELS_EN = {
     "os_unsupported": "Windows out of support",
     "forbidden_software": "Forbidden software installed",
     "inactive": "No contact",
+    "warranty_ending": "Warranty ending soon",
 }
 
 

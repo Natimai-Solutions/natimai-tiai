@@ -5,6 +5,7 @@ Importing this module guarantees every table is registered on
 """
 
 from app.features.alert.models import MachineAlert  # noqa: F401
+from app.features.asset.models import Asset  # noqa: F401
 from app.features.audit.models import AuditEntry  # noqa: F401
 from app.features.auth_session.models import AuthSession  # noqa: F401
 from app.features.check.models import MachineCheck  # noqa: F401
@@ -66,4 +67,5 @@ __all__ = [
     "Maintenance",
     "AppSetting",
     "MachineAlert",
+    "Asset",
 ]

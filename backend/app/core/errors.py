@@ -87,6 +87,13 @@ class ErrorCode(enum.StrEnum):
     BUILDING_NOT_FOUND = "building.not_found"
     BUILDING_NAME_TAKEN = "building.name.taken"
     ROOM_NOT_FOUND = "room.not_found"
+    ASSET_NOT_FOUND = "asset.not_found"
+    # The number on the sticker is already another asset's.
+    ASSET_INVENTORY_NUMBER_TAKEN = "asset.inventory_number.taken"
+    # A poste has one asset; a second would say two purchase dates.
+    ASSET_MACHINE_TAKEN = "asset.machine.taken"
+    # An import file that cannot be read: not CSV or Excel, no serial column.
+    ASSET_IMPORT_UNREADABLE = "asset.import.unreadable"
     ROOM_NAME_TAKEN = "room.name.taken"
     # ROOM_SOURCE is a directory mode: postes are filed by the directory, and
     # a placement made by hand here would be undone on the next inventory.

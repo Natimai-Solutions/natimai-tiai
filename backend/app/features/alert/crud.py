@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.features.alert.models import AlertRule, MachineAlert
 from app.features.alert.rules import RULES
 from app.features.alert.texts import check_instructions
+from app.features.asset.models import Asset, AssetStatus
 from app.features.check.models import MachineCheck
 from app.features.setting import crud as setting_crud
 
@@ -49,12 +50,25 @@ async def current_matches(
     values = await setting_crud.get_all(session)
     fleet = await setting_crud.fleet_policy(session, values)
     policy = await setting_crud.alert_policy(session, values)
+    # A retired poste is out of the parc: nothing is raised about it, and
+    # what was open resolves.
+    retired = set(
+        (
+            await session.exec(
+                select(col(Asset.machine_id)).where(
+                    col(Asset.machine_id).is_not(None),
+                    col(Asset.status) == AssetStatus.RETIRED,
+                )
+            )
+        ).all()
+    )
     current: dict[tuple[uuid.UUID, str], dict[str, Any]] = {}
     for rule, run in RULES.items():
         if rule.value not in policy.enabled_rules:
             continue
         for machine_id, detail in (await run(session, fleet, policy, now)).items():
-            current[(machine_id, rule.value)] = detail
+            if machine_id not in retired:
+                current[(machine_id, rule.value)] = detail
     return current
 
 

@@ -39,6 +39,7 @@ KEY_ALERT_REBOOT_DAYS = "alerts.reboot_pending_days"
 KEY_ALERT_UNENCRYPTED_SCOPE = "alerts.unencrypted_scope"
 KEY_ALERT_FORBIDDEN = "alerts.forbidden_software"
 KEY_ALERT_AUTO_CHECK = "alerts.auto_check_rules"
+KEY_ALERT_WARRANTY_DAYS = "alerts.warranty_days"
 
 
 async def get_all(session: AsyncSession) -> dict[str, Any]:
@@ -274,6 +275,8 @@ class AlertPolicy:
     forbidden_software: tuple[str, ...]
     # Rules whose new alerts open a verification on the poste.
     auto_check_rules: frozenset[str]
+    # How many days before a warranty ends the warranty rule holds.
+    warranty_days: int = 30
 
 
 def _str_list_or(value: Any, default: list[str]) -> list[str]:
@@ -311,6 +314,9 @@ async def alert_policy(
         ),
         auto_check_rules=frozenset(_str_list_or(values.get(KEY_ALERT_AUTO_CHECK), []))
         & known,
+        warranty_days=_int_or(
+            values.get(KEY_ALERT_WARRANTY_DAYS), env.ALERT_WARRANTY_DAYS
+        ),
     )
 
 

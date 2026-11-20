@@ -479,6 +479,8 @@ class Settings(BaseSettings):
     # Which postes the « volume système non chiffré » rule looks at: only the
     # ones that leave the building (``laptops``: laptops and tablets), or all.
     ALERT_UNENCRYPTED_SCOPE: Literal["laptops", "all"] = "laptops"
+    # How many days before a poste's warranty ends (``assets``) it is raised.
+    ALERT_WARRANTY_DAYS: int = Field(default=30, ge=1, le=365)
     # How long a resolved alert is kept, as the poste's history. Open ones
     # are never purged.
     ALERT_RETENTION_DAYS: int = Field(default=400, ge=1)

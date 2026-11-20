@@ -57,6 +57,8 @@ def french(rule: str, detail: dict[str, Any]) -> str:
                 "Logiciel interdit installé : "
                 f"{_names(detail.get('programs'), 'name')}."
             )
+        case AlertRule.WARRANTY_ENDING:
+            return f"La garantie se termine le {_day(detail.get('warranty_end'))}."
         case AlertRule.INACTIVE:
             return (
                 "Aucun contact avec le poste depuis le "

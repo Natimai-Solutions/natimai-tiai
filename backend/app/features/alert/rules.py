@@ -17,6 +17,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.alert.models import AlertRule
 from app.features.alert.os_support import support_of
+from app.features.asset.models import Asset
 from app.features.inventory.models import Disk, MachineSoftware, Software, Volume
 from app.features.machine.models import Machine
 from app.features.machine.status import (
@@ -205,6 +206,29 @@ async def inactive(
     }
 
 
+async def warranty_ending(
+    session: AsyncSession, fleet: FleetPolicy, alerts: AlertPolicy, now: datetime
+) -> Matches:
+    # Holds from N days before the end to the end itself: a warranty already
+    # over is a fact on the fiche, not something left to act on.
+    today = now.date()
+    rows = await session.exec(
+        select(col(Asset.machine_id), col(Asset.warranty_end)).where(
+            col(Asset.machine_id).is_not(None),
+            col(Asset.warranty_end) >= today,
+            col(Asset.warranty_end) <= today + timedelta(days=alerts.warranty_days),
+        )
+    )
+    return {
+        machine_id: {
+            "warranty_end": end.isoformat(),
+            "threshold_days": alerts.warranty_days,
+        }
+        for machine_id, end in rows.all()
+        if machine_id is not None and end is not None
+    }
+
+
 Rule = Callable[[AsyncSession, FleetPolicy, AlertPolicy, datetime], Awaitable[Matches]]
 
 RULES: dict[AlertRule, Rule] = {
@@ -215,4 +239,5 @@ RULES: dict[AlertRule, Rule] = {
     AlertRule.OS_UNSUPPORTED: os_unsupported,
     AlertRule.FORBIDDEN_SOFTWARE: forbidden_software,
     AlertRule.INACTIVE: inactive,
+    AlertRule.WARRANTY_ENDING: warranty_ending,
 }

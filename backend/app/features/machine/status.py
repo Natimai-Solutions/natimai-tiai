@@ -397,15 +397,3 @@ def low_disk_clause(percent: int) -> ColumnElement[bool]:
     free = col(Machine.system_volume_free_mb)
     total = col(Machine.system_volume_total_mb)
     return and_(free.is_not(None), total > 0, free * 100 < total * percent)
-
-
-def aging_hardware_clause(now: datetime, years: int) -> ColumnElement[bool]:
-    """Machines whose BIOS predates ``years`` ago — the renewal plan's figure.
-
-    The BIOS date is the closest thing to a machine's age the poste knows: a
-    purchase date lives in an accounting system this product does not talk to,
-    and a reimaged Windows resets its own install date. NULL is excluded: never
-    reported is not old.
-    """
-    cutoff = (now - timedelta(days=365 * years)).date()
-    return col(Machine.bios_date) < cutoff

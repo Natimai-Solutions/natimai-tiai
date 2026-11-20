@@ -7,7 +7,7 @@ import re
 import uuid
 from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
@@ -36,6 +36,9 @@ from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.alert import crud as alert_crud
 from app.features.alert.models import MachineAlert
+from app.features.asset import crud as asset_crud
+from app.features.asset import win11
+from app.features.asset.models import Asset
 from app.features.audit import crud as audit
 from app.features.base import contains, utcnow
 from app.features.check import crud as check_crud
@@ -61,7 +64,6 @@ from app.features.machine.status import (
     ScanFilter,
     WindowsUpdateFilter,
     agent_outdated_clause,
-    aging_hardware_clause,
     disk_free_percent,
     effective_signature_age,
     effective_up_to_date,
@@ -424,8 +426,23 @@ class OpenCheckOut(BaseModel):
     created_at: datetime
 
 
+class Windows11Out(BaseModel):
+    """Whether the hardware can take Windows 11 (``asset.win11.readiness``):
+    a verdict and each part — ok, fail, check, unknown."""
+
+    verdict: str
+    tpm: str
+    ram: str
+    disk: str
+    architecture: str
+    secure_boot: str
+    processor: str
+
+
 class MachineDetailOut(MachineOut):
     """Full machine detail (Defender state, session type, fingerprint, times)."""
+
+    windows11: Windows11Out | None = None
 
     # The window ``usage_hours`` covers on the fiche: the console's setting.
     usage_days: int | None = None
@@ -795,6 +812,10 @@ class MachineFilters:
     hardware_aging: bool | None = None
     # Postes with an open alert: of one rule, or of any (« any »).
     alert: str | None = None
+    # The status of a poste's asset; « none » for a poste without one.
+    asset_status: str | None = None
+    # Postes the inventory says cannot take Windows 11 (``asset.win11``).
+    win11_blocked: bool | None = None
     # The text facets matched exactly rather than as a substring. The console
     # asks it for a value picked from its dropdown, so that « OptiPlex 7010
     # (12) » lists those 12 postes and not the « OptiPlex 7010 AIO » too; a
@@ -867,6 +888,11 @@ def machine_filters(
     alert: str | None = Query(
         None, description="An alert rule, or 'any': postes with an open alert"
     ),
+    asset_status: Literal[
+        "in_stock", "in_service", "in_repair", "on_loan", "retired", "none"
+    ]
+    | None = None,
+    win11_blocked: bool | None = None,
     exact: str | None = Query(
         None,
         description="Comma-separated facets matched exactly: antivirus, "
@@ -913,6 +939,8 @@ def machine_filters(
         enrollment=enrollment,
         hardware_aging=hardware_aging,
         alert=_alert_filter(alert),
+        asset_status=asset_status,
+        win11_blocked=win11_blocked,
         exact=_exact_facets(exact),
         scope=scope,
     )
@@ -986,6 +1014,19 @@ def _filtered_machines(
                 hours_above=filters.usage_hours_above,
             )
         )
+    if filters.asset_status is not None:
+        if filters.asset_status == "none":
+            stmt = stmt.where(~exists().where(col(Asset.machine_id) == col(Machine.id)))
+        else:
+            stmt = stmt.where(
+                exists().where(
+                    col(Asset.machine_id) == col(Machine.id),
+                    col(Asset.status) == filters.asset_status,
+                )
+            )
+    if filters.win11_blocked is not None:
+        blocked = win11.blocked_clause()
+        stmt = stmt.where(blocked if filters.win11_blocked else ~blocked)
     if filters.alert is not None:
         open_alert = exists().where(
             col(MachineAlert.machine_id) == col(Machine.id),
@@ -1095,7 +1136,7 @@ def _filtered_machines(
             )
         )
     if filters.hardware_aging is not None:
-        aging = aging_hardware_clause(utcnow(), fleet.hardware_aging_years)
+        aging = asset_crud.aging_clause(utcnow(), fleet.hardware_aging_years)
         # « Not aging » is the complement, not the negation: a poste whose
         # BIOS date was never reported is not known to be old, and NOT of a
         # NULL comparison left it out of both lists.
@@ -2267,6 +2308,7 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
     detail.pending_updates = [PendingUpdateOut.model_validate(u) for u in rows.all()]
     await _attach_inventory(session, machine, detail)
     detail.agent_latest_version = (await fleet_versions(session)).latest
+    detail.windows11 = Windows11Out(**asdict(win11.readiness(machine)))
     return detail
 
 
