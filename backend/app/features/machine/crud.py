@@ -16,6 +16,7 @@ from app.features.intervention import crud as intervention_crud
 from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
 from app.features.maintenance.reach import owner_reach
+from app.features.report import crud as report_crud
 from app.features.schedule import crud as schedule_crud
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
@@ -112,6 +113,7 @@ async def merge_into(
     # The asset follows the poste: what was paid for it, its warranty.
     await asset_crud.move_to(session, source_id=source.id, target_id=target.id)
     await schedule_crud.move_to(session, source_id=source.id, target_id=target.id)
+    await report_crud.move_to(session, source_id=source.id, target_id=target.id)
 
     # Keep the freshest last-seen; the merge resolves the verification. The
     # room follows too, when the kept record has none: a duplicate was often

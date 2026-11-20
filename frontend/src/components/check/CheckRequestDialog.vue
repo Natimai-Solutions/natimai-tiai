@@ -22,6 +22,40 @@
             clearable
             :hint="t('checks.request.assignHint')"
           />
+          <div class="row q-col-gutter-sm">
+            <q-select
+              v-model="form.priority"
+              class="col-12 col-sm-4"
+              :options="priorityOptions"
+              emit-value
+              map-options
+              outlined
+              dense
+              :label="t('checks.request.priority')"
+            />
+            <q-select
+              v-model="form.category"
+              class="col-12 col-sm-4"
+              :options="categoryOptions"
+              emit-value
+              map-options
+              clearable
+              outlined
+              dense
+              :label="t('checks.request.category')"
+            />
+            <q-input
+              v-model="form.due_date"
+              class="col-12 col-sm-4"
+              type="date"
+              outlined
+              dense
+              stack-label
+              clearable
+              :label="t('checks.request.dueDate')"
+              :hint="t('checks.request.dueHint')"
+            />
+          </div>
           <q-input
             v-model="form.instructions"
             :label="t('checks.request.instructions')"
@@ -51,7 +85,14 @@
 <script setup lang="ts">
 import { computed, reactive, ref, toRefs, watch } from 'vue';
 import { useQuasar } from 'quasar';
-import { listAssignableUsers, type Check, type CheckPayload } from 'src/services/checks';
+import {
+  CHECK_CATEGORIES,
+  CHECK_PRIORITIES,
+  listAssignableUsers,
+  type Check,
+  type CheckPayload,
+  type CheckPriority,
+} from 'src/services/checks';
 import { checkInstructionsText } from 'src/services/alerts';
 import { apiErrorMessage } from 'src/services/errors';
 import { t } from 'src/i18n';
@@ -74,7 +115,19 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>();
 
 const $q = useQuasar();
 const saving = ref(false);
-const form = reactive({ assigned_to_id: null as string | null, instructions: '' });
+const form = reactive({
+  assigned_to_id: null as string | null,
+  instructions: '',
+  priority: 'normal' as CheckPriority,
+  category: null as string | null,
+  due_date: '' as string | null,
+});
+const priorityOptions = computed(() =>
+  CHECK_PRIORITIES.map((p) => ({ label: t(`checks.priority.${p}`), value: p })),
+);
+const categoryOptions = computed(() =>
+  CHECK_CATEGORIES.map((c) => ({ label: t(`checks.category.${c}`), value: c })),
+);
 // The instructions as the dialog opened on them: the server's coded ones
 // (a verification opened for an alert) worded in the reader's language.
 // Sent back only when changed — a reassignment keeps them coded, readable in
@@ -131,6 +184,9 @@ watch(
     }
     draftSlot.value = slotNow();
     form.assigned_to_id = props.check?.assigned_to?.id ?? null;
+    form.priority = props.check?.priority ?? 'normal';
+    form.category = props.check?.category ?? null;
+    form.due_date = props.check?.due_date ?? '';
     initialInstructions.value = (props.check ? checkInstructionsText(props.check) : null) ?? '';
     form.instructions = initialInstructions.value;
     draft.restore();
@@ -155,7 +211,12 @@ async function submit() {
   saving.value = true;
   try {
     const instructions = form.instructions.trim();
-    const payload: CheckPayload = { assigned_to_id: form.assigned_to_id };
+    const payload: CheckPayload = {
+      assigned_to_id: form.assigned_to_id,
+      priority: form.priority,
+      category: form.category || null,
+      due_date: form.due_date || null,
+    };
     if (!props.check || instructions !== initialInstructions.value.trim()) {
       payload.instructions = instructions || null;
     }

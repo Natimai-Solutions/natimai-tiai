@@ -1,6 +1,6 @@
 # Évolutions inspirées d'ITIL et des autres plateformes : document de travail
 
-> **📝 Document de travail — 2026-11-19, révisé le 2026-11-20. ✅ C1 (alertes), C2 (actifs) et C3 (planifications) livrés le 2026-11-20 ; écarts en §8.** Il porte sur les fonctionnalités propres à la console. Le fonctionnement avec GLPI, décidé le 2026-11-20, est mis de côté dans son propre document, `plan-connecteur-glpi.md`. Il ordonne onze chantiers, donne pour chacun le cadrage, l'esquisse technique et les jalons, et liste en §6 les décisions à prendre avant de coder. Conformément à l'usage du dépôt, chaque chantier retenu aura son propre `plan-*.md` détaillé au moment de l'ouvrir ; celui-ci sert à choisir et à ordonner.
+> **📝 Document de travail — 2026-11-19, révisé le 2026-11-20. ✅ C1 (alertes), C2 (actifs), C3 (planifications) et C4 (signalements) livrés le 2026-11-20 ; écarts en §8.** Il porte sur les fonctionnalités propres à la console. Le fonctionnement avec GLPI, décidé le 2026-11-20, est mis de côté dans son propre document, `plan-connecteur-glpi.md`. Il ordonne onze chantiers, donne pour chacun le cadrage, l'esquisse technique et les jalons, et liste en §6 les décisions à prendre avant de coder. Conformément à l'usage du dépôt, chaque chantier retenu aura son propre `plan-*.md` détaillé au moment de l'ouvrir ; celui-ci sert à choisir et à ordonner.
 
 > Origine : comparaison avec GLPI, Snipe-IT, Lansweeper, Intune, PDQ Deploy, Action1, NinjaOne et Tactical RMM, relue au travers des pratiques ITIL 4. Les estimations sont des ordres de grandeur en jours de développement, tests et documentation compris, validation sur poste réel non comprise.
 
@@ -312,4 +312,15 @@ Au-delà de N postes, une commande à risque attend l'accord d'un second compte 
 - **Fusion** : une planification qui vise le poste doublon vise désormais le poste gardé ; l'historique des exécutions est laissé tel quel.
 - **Conservation** : historique des exécutions purgé après `SCHEDULE_RUN_RETENTION_DAYS` (180 jours).
 - **Console** : page Planifications (liste, exécutions, réactivation, suppression), boutons « Planifier » sur la page d'une salle et dans la barre de sélection de la liste des postes, carte « Planifications » des Paramètres (fuseau, plages interdites). Les heures sont envoyées et affichées dans le fuseau de la console, quel que soit celui du navigateur.
+
+### C4 — Signalements
+
+- **Vérifications enrichies** (`0051_reports`) : priorité (basse, normale, haute ; les existantes « normale »), catégorie (matériel, logiciel, réseau, impression, compte, autre — liste fermée partagée avec les signalements) et échéance facultative. « Mes tâches » trie les ouvertes par priorité, puis échéance, puis ancienneté ; une échéance passée est signalée.
+- **Canal** : le QR des étiquettes déjà imprimées (`/a/<jeton>`) devient une page publique. Un membre du personnel connecté va à la fiche, comme avant (la page connectée est désormais `/a/<jeton>/open`) ; un visiteur voit le formulaire si la console l'a ouvert, la connexion sinon. Formulaire en français et en anglais, sur téléphone.
+- **Surface d'attaque** : désactivé par défaut (`REPORTS_ENABLED`, puis Paramètres) ; 10 envois par heure et par adresse, 20 par jour et par étiquette, 60 lectures du formulaire par heure ; texte de 3 à 2 000 caractères, contact de 200 au plus ; la réponse ne dit rien du poste (« reçu », ou étiquette invalide) et, formulaire fermé, la même chose quel que soit le jeton. Renouveler le QR d'un actif (C2) retire l'étiquette imprimée. Chaque envoi est inscrit au journal (`report.create`, acteur `report:<adresse>`).
+- **File de tri** : page Signalements (droit `report`, lecture et tri, accordé par défaut aux seuls administrateurs), badge du nombre à trier dans le menu. Ouvrir en vérification (le texte devient les consignes, la catégorie suit ; priorité, échéance, affectation choisies au tri) ou rattacher à la vérification ouverte demande aussi `check:write` ; clore ou rejeter, avec une note, `report:write` seul. Un signalement sur du matériel sans agent ne peut que se clore. Portée : un compte restreint voit les signalements de ses postes et du matériel de ses salles.
+- **GLPI plus tard** : un signalement devient une vérification par une seule fonction (`report.crud.open_check_from`), que le connecteur pourra rediriger.
+- **Données personnelles** : le contact est facultatif, le formulaire le dit ; il est purgé avec le signalement, `REPORT_RETENTION_DAYS` (90 jours) après son traitement. Un signalement à trier n'est jamais purgé.
+- **Fusion** : les signalements du doublon passent au poste gardé.
+- **Non fait** : pas d'e-mail ni de section du résumé quotidien pour un nouveau signalement ; le badge du menu en tient lieu.
 

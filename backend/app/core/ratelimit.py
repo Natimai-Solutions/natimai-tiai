@@ -100,6 +100,14 @@ heartbeat_limiter = RateLimiter(
     max_attempts=settings.AGENT_HEARTBEAT_MAX_PER_MINUTE, window_seconds=60
 )
 
+# Reports (C4): the form a label's QR code opens without an account. Per
+# address — a pupil hammering the button — and per label, whatever the
+# address: one poste cannot fill the queue.
+report_ip_limiter = RateLimiter(max_attempts=10, window_seconds=3600)
+report_label_limiter = RateLimiter(max_attempts=20, window_seconds=86400)
+# Reading the form: sends nothing, roomier.
+report_form_limiter = RateLimiter(max_attempts=60, window_seconds=3600)
+
 _ALL = (
     login_limiter,
     password_reset_limiter,
@@ -107,6 +115,9 @@ _ALL = (
     enroll_limiter,
     password_change_limiter,
     heartbeat_limiter,
+    report_ip_limiter,
+    report_label_limiter,
+    report_form_limiter,
 )
 
 

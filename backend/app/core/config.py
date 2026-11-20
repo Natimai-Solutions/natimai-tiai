@@ -495,6 +495,14 @@ class Settings(BaseSettings):
     # How long a schedule's run history is kept.
     SCHEDULE_RUN_RETENTION_DAYS: int = Field(default=180, ge=1)
 
+    # --- Reports from the postes' users (C4) ---
+    # Whether a label's QR code opens the report form to whoever scans it,
+    # without an account. Off by default: the first unauthenticated entry
+    # point that is not the agent. Initial value only — changed in Paramètres.
+    REPORTS_ENABLED: bool = False
+    # How long a report — its contact with it — is kept once handled.
+    REPORT_RETENTION_DAYS: int = Field(default=90, ge=1)
+
     # --- Rooms ---
     # How postes are filed into rooms. ``manual``: from the console, by hand.
     # ``ad_ou``: by the organisational unit the computer object sits in — the

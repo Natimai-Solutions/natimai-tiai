@@ -20,6 +20,7 @@ export const LANDING_PAGES: readonly {
   { name: 'software', permission: 'machine:read' },
   { name: 'packages', permission: 'package:read' },
   { name: 'tasks', permission: ['check:read', 'maintenance:read'] },
+  { name: 'reports', permission: 'report:read' },
   { name: 'schedules', permission: 'schedule:read' },
   { name: 'rooms', permission: 'room:read' },
   { name: 'users', permission: 'user:read' },

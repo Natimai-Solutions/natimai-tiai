@@ -121,6 +121,31 @@
       </template>
       <template #body-cell-instructions="props">
         <q-td :props="props" style="white-space: pre-line; min-width: 280px; max-width: 420px">
+          <div class="q-gutter-xs q-mb-xs">
+            <q-badge
+              v-if="props.row.priority && props.row.priority !== 'normal'"
+              :color="priorityColor(props.row.priority)"
+            >
+              {{ t(`checks.priority.${props.row.priority}`) }}
+            </q-badge>
+            <q-badge v-if="props.row.category" outline color="primary">
+              {{ t(`checks.category.${props.row.category}`) }}
+            </q-badge>
+            <q-badge
+              v-if="props.row.due_date"
+              outline
+              :color="isOverdue(props.row.due_date) ? 'negative' : 'grey-7'"
+            >
+              {{
+                isOverdue(props.row.due_date)
+                  ? t('checks.overdue', { date: formatDate(props.row.due_date) })
+                  : t('checks.due', { date: formatDate(props.row.due_date) })
+              }}
+            </q-badge>
+            <q-badge v-if="props.row.report_id" outline color="orange-8">
+              {{ t('checks.fromReport') }}
+            </q-badge>
+          </div>
           {{ props.value || '—' }}
         </q-td>
       </template>
@@ -375,6 +400,7 @@ import {
   effectiveAssignee,
   formerAssigneeNote,
   listAllChecks,
+  priorityColor,
   updateCheck,
   type Check,
   type CheckMachineRef,
@@ -383,7 +409,7 @@ import {
 import { checkInstructionsText } from 'src/services/alerts';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
-import { timeAgoLabel } from 'src/utils/format';
+import { formatDate, timeAgoLabel } from 'src/utils/format';
 import { t } from 'src/i18n';
 import { notify } from 'src/utils/notify';
 
@@ -427,6 +453,13 @@ const columns = computed<QTableColumn<Check>[]>(() => [
   },
   { name: 'actions', label: '', field: 'id', align: 'right' },
 ]);
+
+/** A due date before today, in the reader's day. */
+function isOverdue(due: string): boolean {
+  const today = new Date();
+  const local = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  return due < local;
+}
 
 function placeLabel(m: CheckMachineRef | null): string {
   if (!m) return '';

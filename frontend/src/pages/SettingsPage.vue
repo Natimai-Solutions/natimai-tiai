@@ -229,6 +229,34 @@
       </q-card-actions>
     </q-card>
 
+    <!-- Reports (C4): the form a label's QR code opens without an account.
+         Saved as it is switched. -->
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md">
+      <q-card-section class="text-subtitle1">
+        {{ t('settings.reports.title') }}
+        <div class="text-caption text-muted">{{ t('settings.reports.caption') }}</div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings">
+        <q-toggle
+          :model-value="settings.reports_enabled ?? false"
+          :label="t('settings.reports.enabled')"
+          :disable="!canWrite || savingReports"
+          @update:model-value="saveReports"
+        />
+        <div class="text-caption text-muted">
+          {{
+            t('settings.reports.hint', {
+              value: settings.env_reports_enabled
+                ? t('settings.reports.on')
+                : t('settings.reports.off'),
+            })
+          }}
+        </div>
+        <div class="text-caption text-muted q-mt-xs">{{ t('settings.reports.privacy') }}</div>
+      </q-card-section>
+    </q-card>
+
     <!-- Schedules (C3): the zone the console plans in, the forbidden windows.
          Saved on its own. -->
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
@@ -1029,6 +1057,20 @@ async function saveAlerts() {
     notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
   } finally {
     savingAlerts.value = false;
+  }
+}
+
+// The reports card (C4): one switch, saved as it is switched.
+const savingReports = ref(false);
+async function saveReports(enabled: boolean) {
+  savingReports.value = true;
+  try {
+    settings.value = await updateSettings({ reports_enabled: enabled });
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
+  } catch (e) {
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
+  } finally {
+    savingReports.value = false;
   }
 }
 

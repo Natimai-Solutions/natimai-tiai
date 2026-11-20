@@ -195,6 +195,9 @@ export interface ConsoleSettings {
   console_timezone?: string;
   env_console_timezone?: string;
   forbidden_windows?: { days: number[]; start: string; end: string }[];
+  /** C4: whether a label's QR code opens the report form without an account. */
+  reports_enabled?: boolean;
+  env_reports_enabled?: boolean;
   /** How mail leaves the console. */
   email: EmailSettings;
   /** The rest of the environment, read-only and never a secret: what an
@@ -227,6 +230,7 @@ export interface SettingsPayload {
   alert_forbidden_software?: string[];
   console_timezone?: string | null;
   forbidden_windows?: { days: number[]; start: string; end: string }[] | null;
+  reports_enabled?: boolean | null;
   email?: EmailSettingsPayload;
 }
 

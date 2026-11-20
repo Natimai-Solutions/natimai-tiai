@@ -247,6 +247,16 @@ async def purge_schedule_runs() -> int:
         return await runner.purge_runs(session, cutoff)
 
 
+async def purge_reports() -> int:
+    """Drop the reports handled more than ``REPORT_RETENTION_DAYS`` ago —
+    their contact with them (C4)."""
+    from app.features.report import crud as report_crud
+
+    cutoff = utcnow() - timedelta(days=settings.REPORT_RETENTION_DAYS)
+    async with AsyncSession(engine) as session:
+        return await report_crud.purge_before(session, cutoff)
+
+
 async def purge_alerts() -> int:
     """Drop the alerts resolved more than ``ALERT_RETENTION_DAYS`` ago."""
     from app.features.alert import crud as alert_crud
@@ -502,6 +512,7 @@ def build_jobs(
         ),
         Job("purge_usage", purge_usage, housekeeping(now), housekeeping),
         Job("purge_alerts", purge_alerts, housekeeping(now), housekeeping),
+        Job("purge_reports", purge_reports, housekeeping(now), housekeeping),
         Job(
             "purge_schedule_runs",
             purge_schedule_runs,

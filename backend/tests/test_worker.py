@@ -125,6 +125,7 @@ def test_build_jobs_registers_the_whole_schedule():
         "purge_shared_counters",
         "purge_usage",
         "purge_alerts",
+        "purge_reports",
         "purge_schedule_runs",
         "purge_sessions",
         "purge_audit",

@@ -100,6 +100,12 @@ gère naturellement les postes éteints.
   des compteurs et des alertes, et la fiche dit si le matériel peut passer à
   **Windows 11**. Droit à part (`asset`), pour que le prix d'achat ne soit pas
   lu de tous.
+- **Signalements** — l'étiquette QR d'un poste ouvre, à qui la scanne sans
+  compte, un formulaire en deux langues pour signaler une panne (catégorie,
+  texte, contact facultatif). Les signalements arrivent dans une file : un
+  technicien les ouvre en vérification, les rattache à celle en cours ou les
+  clôt. Désactivé par défaut, borné, sans rien dire du poste. Les vérifications
+  ont désormais une priorité, une catégorie et une échéance.
 - **Planifications** — une commande lancée plus tard ou chaque semaine, sur
   une salle, un bâtiment, une sélection ou tout le parc, à l'heure du fuseau
   de la console. Option « réveiller d'abord » et « éteindre ensuite » (seuls
@@ -206,7 +212,8 @@ l'exécution est figée dans le binaire de l'agent.
 | Alertes (règles fermées, résumé, e-mail, vérification automatique) | 🟢 Livré |
 | Actifs (achat, garantie, prêts, import, étiquettes QR, Windows 11) | 🟢 Livré |
 | Planifications (fenêtres, réveil et extinction, déploiement par étapes) | 🟢 Livré |
-| Signalement, conformité… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
+| Signalement par l'utilisateur (QR sans compte, file de tri), priorités des vérifications | 🟢 Livré |
+| Conformité, licences… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
 | Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement

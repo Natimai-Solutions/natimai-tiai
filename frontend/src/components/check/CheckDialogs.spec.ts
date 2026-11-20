@@ -85,7 +85,12 @@ describe('CheckRequestDialog — a verification opened for an alert', () => {
     wrapper.findComponent(QSelect).vm.$emit('update:modelValue', 'u-1');
     await wrapper.findComponent(QForm).trigger('submit');
     await flushPromises();
-    expect(save).toHaveBeenCalledWith({ assigned_to_id: 'u-1' });
+    expect(save).toHaveBeenCalledWith({
+      assigned_to_id: 'u-1',
+      priority: 'normal',
+      category: null,
+      due_date: null,
+    });
     wrapper.unmount();
   });
 
@@ -97,7 +102,56 @@ describe('CheckRequestDialog — a verification opened for an alert', () => {
     await flushPromises();
     expect(save).toHaveBeenCalledWith({
       assigned_to_id: null,
+      priority: 'normal',
+      category: null,
+      due_date: null,
       instructions: 'Vider la corbeille',
+    });
+    wrapper.unmount();
+  });
+});
+
+describe('CheckRequestDialog — priority, category, due date (C4)', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    setActivePinia(createPinia());
+    vi.mocked(listAssignableUsers).mockResolvedValue([]);
+  });
+
+  it('opens on what the request holds, and sends what was chosen', async () => {
+    const check = {
+      id: 'c-2',
+      machine_id: 'm-1',
+      instructions: 'Écran',
+      assigned_to: null,
+      priority: 'high',
+      category: 'hardware',
+      due_date: '2026-12-01',
+    } as unknown as Check;
+    const save = vi.fn().mockResolvedValue(undefined);
+    const wrapper = mount(CheckRequestDialog, {
+      props: { modelValue: false, check, save },
+      attachTo: document.body,
+    });
+    await wrapper.setProps({ modelValue: true });
+    await flushPromises();
+    const select = (label: string) =>
+      wrapper.findAllComponents(QSelect).find((s) => s.props('label') === label)!;
+    expect(select('Priorité').props('modelValue')).toBe('high');
+    expect(select('Catégorie').props('modelValue')).toBe('hardware');
+    select('Catégorie').vm.$emit('update:modelValue', 'network');
+    wrapper
+      .findAllComponents(QInput)
+      .find((i) => i.props('label') === 'Échéance')!
+      .vm.$emit('update:modelValue', null);
+    await flushPromises();
+    await wrapper.findComponent(QForm).trigger('submit');
+    await flushPromises();
+    expect(save).toHaveBeenCalledWith({
+      assigned_to_id: null,
+      priority: 'high',
+      category: 'network',
+      due_date: null,
     });
     wrapper.unmount();
   });

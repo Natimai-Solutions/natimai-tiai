@@ -74,6 +74,13 @@ const fr = {
       suspend: 'Planification suspendue par le serveur',
       halt: 'Déploiement par étapes arrêté',
     },
+    report: {
+      create: 'Signalement reçu',
+      convert: 'Signalement ouvert en vérification',
+      attach: 'Signalement rattaché à une vérification',
+      close: 'Signalement clos',
+      reject: 'Signalement rejeté',
+    },
     building: {
       create: "Création d'un bâtiment",
       update: "Modification d'un bâtiment",
@@ -152,6 +159,7 @@ const fr = {
     package: 'Paquet',
     asset: 'Actif',
     schedule: 'Planification',
+    report: 'Signalement',
     settings: 'Paramètres',
   },
   /** Detail key → label, for the full view of an entry. */
@@ -332,6 +340,13 @@ const en: Translation<typeof fr> = {
       suspend: 'Schedule suspended by the server',
       halt: 'Staged deployment halted',
     },
+    report: {
+      create: 'Report received',
+      convert: 'Report opened as a check',
+      attach: 'Report attached to a check',
+      close: 'Report closed',
+      reject: 'Report rejected',
+    },
     building: {
       create: 'Building created',
       update: 'Building edited',
@@ -409,6 +424,7 @@ const en: Translation<typeof fr> = {
     package: 'Package',
     asset: 'Asset',
     schedule: 'Schedule',
+    report: 'Report',
     settings: 'Settings',
   },
   detailKeys: {

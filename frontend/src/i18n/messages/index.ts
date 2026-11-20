@@ -19,6 +19,7 @@ import maintenance from './maintenance';
 import packagePages from './packagePages';
 import packages from './packages';
 import permissions from './permissions';
+import reports from './reports';
 import rooms from './rooms';
 import schedules from './schedules';
 import settings from './settings';
@@ -37,6 +38,7 @@ export const fr = {
   alerts: alerts.fr,
   assets: assets.fr,
   schedules: schedules.fr,
+  reports: reports.fr,
   common: common.fr,
   errors: errors.fr,
   packages: packages.fr,
@@ -68,6 +70,7 @@ export const en = {
   alerts: alerts.en,
   assets: assets.en,
   schedules: schedules.en,
+  reports: reports.en,
   common: common.en,
   errors: errors.en,
   packages: packages.en,

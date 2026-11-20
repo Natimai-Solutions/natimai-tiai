@@ -106,6 +106,8 @@ function consoleSettings(): ConsoleSettings {
     console_timezone: 'Pacific/Tahiti',
     env_console_timezone: 'Pacific/Tahiti',
     forbidden_windows: [{ days: [0, 1, 2, 3, 4], start: '07:30', end: '12:00' }],
+    reports_enabled: false,
+    env_reports_enabled: false,
   };
   return value;
 }
@@ -357,6 +359,22 @@ describe('SettingsPage', () => {
       expect(updateSettings).not.toHaveBeenCalled();
       page.app.unmount();
     });
+  });
+
+  it('opens the report form as it is switched (C4)', async () => {
+    vi.mocked(getSettings).mockResolvedValue(consoleSettings());
+    vi.mocked(updateSettings).mockReset();
+    vi.mocked(updateSettings).mockResolvedValue({ ...consoleSettings(), reports_enabled: true });
+    const page = await mountPage(['settings:read', 'settings:write']);
+    const toggle = page.wrapper
+      .findAllComponents(QToggle)
+      .find((c) => c.props('label') === 'Ouvrir le formulaire de signalement')!;
+    expect(toggle.props('modelValue')).toBe(false);
+    toggle.vm.$emit('update:modelValue', true);
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith({ reports_enabled: true });
+    expect(toggle.props('modelValue')).toBe(true);
+    page.app.unmount();
   });
 
   describe('the schedules card', () => {

@@ -76,6 +76,17 @@ const fr = {
     forbiddenHint:
       'Un morceau du nom du programme, deux caractères au moins (Entrée pour ajouter) · insensible à la casse',
   },
+  reports: {
+    title: 'Signalements des utilisateurs',
+    caption:
+      'Le QR de l’étiquette d’un poste ouvre, à qui le scanne sans compte, un formulaire pour signaler un problème. Les signalements arrivent dans une file à trier.',
+    enabled: 'Ouvrir le formulaire de signalement',
+    hint: "Fermé, le QR mène à la connexion, comme avant · variable d'environnement : {value}",
+    on: 'ouvert',
+    off: 'fermé',
+    privacy:
+      'Le contact laissé est facultatif et supprimé avec le signalement : à porter au registre des traitements.',
+  },
   planning: {
     title: 'Planifications',
     caption:
@@ -379,6 +390,17 @@ const en: Translation<typeof fr> = {
     forbidden: 'Forbidden software',
     forbiddenHint:
       'Part of the program name, two characters at least (Enter to add) · case-insensitive',
+  },
+  reports: {
+    title: 'Users’ reports',
+    caption:
+      'A computer’s label QR code opens, to whoever scans it without an account, a form to report a problem. The reports land in a queue to sort.',
+    enabled: 'Open the report form',
+    hint: 'Closed, the QR leads to the sign-in, as before · environment variable: {value}',
+    on: 'open',
+    off: 'closed',
+    privacy:
+      'The contact left is optional and deleted with the report: to be listed in the record of processing.',
   },
   planning: {
     title: 'Schedules',

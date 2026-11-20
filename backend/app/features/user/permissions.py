@@ -59,6 +59,9 @@ class Resource(enum.StrEnum):
     # Schedules (C3). Writing one also asks for the right to run what it
     # carries (``command:execute``, ``risky_command:execute``).
     SCHEDULE = "schedule"
+    # Reports of the postes' users (C4): the queue, read and triaged.
+    # Turning one into a verification also asks for ``check:write``.
+    REPORT = "report"
 
 
 class Action(enum.StrEnum):
@@ -98,6 +101,8 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.ASSET, Action.WRITE),
     (Resource.SCHEDULE, Action.READ),
     (Resource.SCHEDULE, Action.WRITE),
+    (Resource.REPORT, Action.READ),
+    (Resource.REPORT, Action.WRITE),
 )
 
 

@@ -37,6 +37,15 @@ const routes: RouteRecordRaw[] = [
       requiresPermission: 'asset:read',
     },
   },
+  // Where every printed label's QR code leads, without an account: the
+  // staff go on to the fiche, anybody else to the report form when it is
+  // open (C4), the login page otherwise.
+  {
+    path: '/a/:token',
+    name: 'label',
+    component: () => import('pages/LabelPage.vue'),
+    meta: { title: 'layout.pages.assetToken' },
+  },
   {
     path: '/',
     component: () => import('layouts/MainLayout.vue'),
@@ -68,14 +77,21 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'layout.pages.assets', requiresPermission: 'asset:read' },
       },
       {
+        path: 'reports',
+        name: 'reports',
+        component: () => import('pages/ReportsPage.vue'),
+        meta: { title: 'layout.pages.reports', requiresPermission: 'report:read' },
+      },
+      {
         path: 'schedules',
         name: 'schedules',
         component: () => import('pages/SchedulesPage.vue'),
         meta: { title: 'layout.pages.schedules', requiresPermission: 'schedule:read' },
       },
       {
-        // Where a printed label's QR code leads: the poste behind it.
-        path: 'a/:token',
+        // Where a staff member's scan lands, signed in: the poste behind the
+        // label. Reached from the public `/a/:token` (LabelPage).
+        path: 'a/:token/open',
         name: 'asset-token',
         component: () => import('pages/AssetTokenPage.vue'),
         meta: { title: 'layout.pages.assetToken', requiresPermission: 'machine:read' },

@@ -23,7 +23,8 @@ export type Resource =
   | 'audit'
   | 'package'
   | 'asset'
-  | 'schedule';
+  | 'schedule'
+  | 'report';
 
 export type Action = 'read' | 'write' | 'execute';
 
@@ -78,6 +79,8 @@ export const PERMISSION_CATALOGUE: PermissionKey[] = [
   entry('asset', 'write'),
   entry('schedule', 'read'),
   entry('schedule', 'write'),
+  entry('report', 'read'),
+  entry('report', 'write'),
 ];
 
 /** Whether the catalogue has a hint for a permission (the same in both languages). */

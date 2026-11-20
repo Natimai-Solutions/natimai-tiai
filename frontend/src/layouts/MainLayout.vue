@@ -99,6 +99,13 @@
             </div>
           </q-item-section>
         </q-item>
+        <q-item v-if="auth.can('report', 'read')" v-ripple clickable :to="{ name: 'reports' }">
+          <q-item-section avatar><q-icon name="campaign" /></q-item-section>
+          <q-item-section>{{ t('layout.pages.reports') }}</q-item-section>
+          <q-item-section v-if="newReports" side>
+            <q-badge color="orange-8" :label="newReports" />
+          </q-item-section>
+        </q-item>
         <q-item v-if="auth.can('schedule', 'read')" v-ripple clickable :to="{ name: 'schedules' }">
           <q-item-section avatar><q-icon name="event_repeat" /></q-item-section>
           <q-item-section>{{ t('layout.pages.schedules') }}</q-item-section>
@@ -161,6 +168,8 @@ import { apiErrorMessage } from 'src/services/errors';
 import { getDue } from 'src/services/maintenance';
 import { useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { tasksVersion } from 'src/composables/useTasksBadge';
+import { reportsVersion } from 'src/composables/useReportsBadge';
+import { listReports } from 'src/services/reports';
 
 const drawer = ref(false);
 const auth = useAuthStore();
@@ -205,8 +214,21 @@ async function countMyOverdue() {
     if (isForbidden(e)) myOverdue.value = 0;
   }
 }
+// C4: the reports still to sort, within the reader's scope.
+const newReports = ref(0);
+async function countReports() {
+  if (!auth.can('report', 'read')) {
+    newReports.value = 0;
+    return;
+  }
+  try {
+    newReports.value = (await listReports({ state: 'new', page_size: 1 })).new;
+  } catch (e) {
+    if (isForbidden(e)) newReports.value = 0;
+  }
+}
 async function countMyTasks() {
-  await Promise.all([countMyChecks(), countMyOverdue()]);
+  await Promise.all([countMyChecks(), countMyOverdue(), countReports()]);
 }
 
 const canReadMachines = computed(() => auth.can('machine', 'read'));
@@ -270,7 +292,12 @@ function skipToContent() {
 // The account, and its two rights: one withdrawn or given during the session
 // (the profile read again) recounts at once, not at the next navigation.
 watch(
-  [() => auth.user?.id, () => auth.can('check', 'read'), () => auth.can('maintenance', 'read')],
+  [
+    () => auth.user?.id,
+    () => auth.can('check', 'read'),
+    () => auth.can('maintenance', 'read'),
+    () => auth.can('report', 'read'),
+  ],
   () => void countMyTasks(),
   { immediate: true },
 );
@@ -280,6 +307,7 @@ watch(
 );
 // A check closed or a visit recorded where the route does not change.
 watch(tasksVersion, () => void countMyTasks());
+watch(reportsVersion, () => void countReports());
 
 // Logging out is a server call — the session is revoked there, not just
 // forgotten here — so the button waits for it rather than racing the router.

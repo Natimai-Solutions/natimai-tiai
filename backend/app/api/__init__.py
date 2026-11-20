@@ -19,6 +19,8 @@ from app.api.routes.maintenance import owners_router as maintenance_owners_route
 from app.api.routes.maintenance import room_router as room_maintenance_router
 from app.api.routes.maintenance import router as maintenance_router
 from app.api.routes.packages import router as packages_router
+from app.api.routes.reports import public_router as public_reports_router
+from app.api.routes.reports import router as reports_router
 from app.api.routes.rooms import buildings_router, rooms_router
 from app.api.routes.schedules import router as schedules_router
 from app.api.routes.settings_routes import router as settings_router
@@ -34,6 +36,8 @@ api_router.include_router(machines_router)
 api_router.include_router(alerts_router)
 api_router.include_router(assets_router)
 api_router.include_router(schedules_router)
+api_router.include_router(reports_router)
+api_router.include_router(public_reports_router)
 api_router.include_router(machine_assets_router)
 api_router.include_router(buildings_router)
 api_router.include_router(rooms_router)

@@ -12,8 +12,9 @@ doubt about a poste's *identity* (a fingerprint that moved), raised by the
 agent's report and cleared by a merge — a machine finding, not a human task.
 """
 
+import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import Column, ForeignKey, Index
@@ -21,6 +22,24 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
+
+
+class CheckPriority(enum.StrEnum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+
+
+class CheckCategory(enum.StrEnum):
+    """What a request is about — a closed list, shared with the reports of
+    the postes' users (``features.report``)."""
+
+    HARDWARE = "hardware"
+    SOFTWARE = "software"
+    NETWORK = "network"
+    PRINTING = "printing"
+    ACCOUNT = "account"
+    OTHER = "other"
 
 
 class MachineCheck(SQLModel, table=True):
@@ -63,6 +82,11 @@ class MachineCheck(SQLModel, table=True):
     instructions_params: dict[str, Any] | None = Field(
         default=None, sa_column=Column(JSONB, nullable=True)
     )
+    # How urgent, what about, and by when (C4): « Mes tâches » sorts on them,
+    # and the time from opening to closing becomes measurable.
+    priority: str = Field(default=CheckPriority.NORMAL, max_length=10)
+    category: str | None = Field(default=None, max_length=20)
+    due_date: date | None = None
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
     # NULL = still open.

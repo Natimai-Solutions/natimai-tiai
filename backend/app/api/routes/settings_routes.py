@@ -27,6 +27,7 @@ from app.features.audit import crud as audit
 from app.features.machine import crud as machine_crud
 from app.features.maintenance.reach import owner_reach
 from app.features.notification import probe
+from app.features.report import crud as report_crud
 from app.features.schedule import windows
 from app.features.setting import crud
 from app.features.setting import email_policy as mail
@@ -193,6 +194,9 @@ class SettingsOut(BaseModel):
     console_timezone: str = "UTC"
     env_console_timezone: str = "UTC"
     forbidden_windows: list[dict[str, Any]] = Field(default_factory=list)
+    # Reports (C4): whether a label's QR code opens the form without an account.
+    reports_enabled: bool = False
+    env_reports_enabled: bool = False
     # How mail leaves the console: the console's values, the environment's.
     email: EmailSettingsOut
     # The rest of the environment an administrator may want to check without
@@ -334,6 +338,7 @@ class SettingsUpdate(BaseModel):
     # Schedules. A zone the server does not know is refused; null hands it
     # back to CONSOLE_TIMEZONE. Windows are written whole.
     console_timezone: str | None = Field(default=None, max_length=64)
+    reports_enabled: bool | None = None
     forbidden_windows: list[ForbiddenWindowIn] | None = Field(
         default=None, max_length=20
     )
@@ -488,6 +493,8 @@ async def _out(session: SessionDep) -> SettingsOut:
         console_timezone=planning.zone_name,
         env_console_timezone=env.CONSOLE_TIMEZONE,
         forbidden_windows=[w.as_json() for w in planning.forbidden],
+        reports_enabled=await report_crud.enabled(session, values),
+        env_reports_enabled=env.REPORTS_ENABLED,
         email=_email_out(stored),
         environment=[
             EnvGroupOut(
@@ -583,6 +590,7 @@ _SIMPLE_KEYS = {
     "alert_warranty_days": crud.KEY_ALERT_WARRANTY_DAYS,
     "alert_unencrypted_scope": crud.KEY_ALERT_UNENCRYPTED_SCOPE,
     "console_timezone": windows.KEY_TIMEZONE,
+    "reports_enabled": report_crud.KEY_ENABLED,
 }
 
 # List settings: written whole, without duplicates, in the order sent.

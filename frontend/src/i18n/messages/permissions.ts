@@ -23,6 +23,7 @@ const fr = {
     package: 'Paquets logiciels',
     asset: 'Actifs (achat, garantie, prêts)',
     schedule: 'Planifications',
+    report: 'Signalements des utilisateurs',
   },
   /** What granting it lets someone do (`label`), and a sentence where the label
    *  alone would be read two ways (`hint`). */
@@ -131,6 +132,16 @@ const fr = {
         hint: 'Planifier une commande, la modifier, la suspendre. Il faut aussi le droit d’exécuter la commande planifiée.',
       },
     },
+    report: {
+      read: {
+        label: 'Consulter',
+        hint: 'Voir les signalements laissés par l’étiquette des postes, avec le contact donné.',
+      },
+      write: {
+        label: 'Trier',
+        hint: 'Clore ou rejeter un signalement ; l’ouvrir en vérification demande aussi « Vérifications demandées : gérer ».',
+      },
+    },
   },
   /** `{resource} — {action}`, for lists that show what a group grants. */
   named: '{resource} — {action}',
@@ -157,6 +168,7 @@ const en: Translation<typeof fr> = {
     package: 'Software packages',
     asset: 'Assets (purchase, warranty, loans)',
     schedule: 'Schedules',
+    report: 'Users’ reports',
   },
   entries: {
     machine: {
@@ -261,6 +273,16 @@ const en: Translation<typeof fr> = {
       write: {
         label: 'Manage',
         hint: 'Schedule a command, change it, suspend it. The right to run the scheduled command is needed too.',
+      },
+    },
+    report: {
+      read: {
+        label: 'View',
+        hint: 'See the reports left through the computers’ labels, with the contact given.',
+      },
+      write: {
+        label: 'Sort',
+        hint: 'Close or reject a report; opening it as a check also needs “Requested checks: manage”.',
       },
     },
   },

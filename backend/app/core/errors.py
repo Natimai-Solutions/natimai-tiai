@@ -99,6 +99,14 @@ class ErrorCode(enum.StrEnum):
     # A command at risk for several postes, inside a forbidden window: sent
     # only once confirmed (``schedule.windows``).
     COMMAND_FORBIDDEN_WINDOW = "command.forbidden_window"
+    # Reports (C4): the form is off, the label names no asset, the report
+    # is gone, already handled, or names no poste to open a verification on.
+    REPORT_DISABLED = "report.disabled"
+    REPORT_LABEL_INVALID = "report.label.invalid"
+    REPORT_NOT_FOUND = "report.not_found"
+    REPORT_ALREADY_HANDLED = "report.already_handled"
+    REPORT_NO_MACHINE = "report.no_machine"
+    REPORT_NO_OPEN_CHECK = "report.no_open_check"
     SCHEDULE_NOT_FOUND = "schedule.not_found"
     # A schedule that would run inside a forbidden window.
     SCHEDULE_FORBIDDEN_WINDOW = "schedule.forbidden_window"

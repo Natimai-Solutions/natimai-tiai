@@ -33,6 +33,7 @@ describe('the permission grid', () => {
       'Paquets logiciels',
       'Actifs (achat, garantie, prêts)',
       'Planifications',
+      'Signalements des utilisateurs',
     ]);
     const machine = rows[0]!.entries;
     expect(machine.map((e) => [e.key, e.label, e.hint])).toEqual([

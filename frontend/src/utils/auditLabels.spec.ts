@@ -90,6 +90,11 @@ describe('auditActionLabel', () => {
       'schedule.disable',
       'schedule.suspend',
       'schedule.halt',
+      'report.create',
+      'report.convert',
+      'report.attach',
+      'report.close',
+      'report.reject',
     ];
     expect(Object.keys(AUDIT_ACTION_LABELS).sort()).toEqual([...slugs].sort());
   });

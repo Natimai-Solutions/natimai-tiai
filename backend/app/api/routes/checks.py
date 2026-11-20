@@ -7,7 +7,7 @@ is a route of its own rather than a PATCH with a date.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -25,16 +25,18 @@ from app.api.deps import (
     require_any_permission,
     require_permission,
 )
+from app.api.fields import not_null
 from app.core.errors import AppError, ErrorCode
 from app.core.validation import refusal
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.check import crud
-from app.features.check.models import MachineCheck
+from app.features.check.models import CheckCategory, CheckPriority, MachineCheck
 from app.features.intervention import crud as intervention_crud
 from app.features.intervention.models import Intervention, InterventionKind
 from app.features.machine.models import Machine
 from app.features.notification import tasks as task_mail
+from app.features.report.models import Report
 from app.features.room import crud as room_crud
 from app.features.user.models import User
 from app.features.user.permissions import Action, Resource
@@ -124,6 +126,11 @@ class CheckOut(BaseModel):
     # ``instructions`` keeping the French.
     instructions_code: str | None = None
     instructions_params: dict[str, Any] | None = None
+    priority: str = CheckPriority.NORMAL
+    category: str | None = None
+    due_date: date | None = None
+    # The report this request came from, when it did (C4).
+    report_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
     closed_at: datetime | None
@@ -146,6 +153,9 @@ class CheckList(BaseModel):
 class CheckCreate(BaseModel):
     assigned_to_id: uuid.UUID | None = None
     instructions: str | None = Field(default=None, max_length=5000)
+    priority: CheckPriority = CheckPriority.NORMAL
+    category: CheckCategory | None = None
+    due_date: date | None = None
 
 
 class CheckBulkCreate(CheckCreate):
@@ -165,6 +175,11 @@ class CheckUpdate(BaseModel):
 
     assigned_to_id: uuid.UUID | None = None
     instructions: str | None = Field(default=None, max_length=5000)
+    priority: CheckPriority | None = None
+    category: CheckCategory | None = None
+    due_date: date | None = None
+
+    _not_null = not_null("priority")
 
 
 class CheckClose(BaseModel):
@@ -295,6 +310,17 @@ async def _out(
                     else None
                 ),
             )
+    # The report each request came from (C4).
+    reports: dict[uuid.UUID, uuid.UUID] = {}
+    check_ids = [r.id for r in rows]
+    if check_ids:
+        linked = await session.exec(
+            select(Report.check_id, Report.id).where(
+                col(Report.check_id).in_(check_ids),
+                col(Report.status) == "converted",
+            )
+        )
+        reports = {c: r for c, r in linked.all() if c is not None}
     orphaned = await crud.orphaned_open_checks(
         session,
         check_ids=[
@@ -313,6 +339,10 @@ async def _out(
             instructions=r.instructions,
             instructions_code=r.instructions_code,
             instructions_params=r.instructions_params,
+            priority=r.priority,
+            category=r.category,
+            due_date=r.due_date,
+            report_id=reports.get(r.id),
             created_at=r.created_at,
             updated_at=r.updated_at,
             closed_at=r.closed_at,
@@ -359,6 +389,9 @@ async def create_check(
         requested_by=current.email,
         assigned_to_id=payload.assigned_to_id,
         instructions=_clean(payload.instructions),
+        priority=payload.priority.value,
+        category=payload.category.value if payload.category else None,
+        due_date=payload.due_date,
     )
     session.add(row)
     try:
@@ -483,6 +516,9 @@ async def create_checks_bulk(
             requested_by=current.email,
             assigned_to_id=payload.assigned_to_id,
             instructions=_clean(payload.instructions),
+            priority=payload.priority.value,
+            category=payload.category.value if payload.category else None,
+            due_date=payload.due_date,
         ).model_dump()
         for machine_id in machine_ids
         if machine_id not in open_ids
@@ -602,6 +638,10 @@ async def update_check(
             row.instructions = typed
             row.instructions_code = None
             row.instructions_params = None
+    for name in ("priority", "category", "due_date"):
+        if name in fields:
+            value = fields[name]
+            setattr(row, name, value.value if hasattr(value, "value") else value)
     row.updated_at = utcnow()
     session.add(row)
     if new_assignee is not None and new_assignee.id != current.id:
