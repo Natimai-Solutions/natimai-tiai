@@ -1,6 +1,6 @@
 # Évolutions inspirées d'ITIL et des autres plateformes : document de travail
 
-> **📝 Document de travail — 2026-11-19. Rien n'est livré, rien n'est décidé.** Il ordonne onze chantiers, donne pour chacun le cadrage, l'esquisse technique et les jalons, et liste en §6 les décisions à prendre avant de coder. Conformément à l'usage du dépôt, chaque chantier retenu aura son propre `plan-*.md` détaillé au moment de l'ouvrir ; celui-ci sert à choisir et à ordonner.
+> **📝 Document de travail — 2026-11-19, révisé le 2026-11-20. Rien n'est livré.** Décision du 2026-11-20 : **Tia'i fonctionne seul ou avec GLPI** (§2.1). Il ordonne douze chantiers, donne pour chacun le cadrage, l'esquisse technique et les jalons, et liste en §6 les décisions à prendre avant de coder. Conformément à l'usage du dépôt, chaque chantier retenu aura son propre `plan-*.md` détaillé au moment de l'ouvrir ; celui-ci sert à choisir et à ordonner.
 
 > Origine : comparaison avec GLPI, Snipe-IT, Lansweeper, Intune, PDQ Deploy, Action1, NinjaOne et Tactical RMM, relue au travers des pratiques ITIL 4. Les estimations sont des ordres de grandeur en jours de développement, tests et documentation compris, validation sur poste réel non comprise.
 
@@ -14,21 +14,24 @@ Trois critères, dans cet ordre : la valeur immédiate pour un technicien de ter
 |---|---|---|---|---|---|
 | 1 | **C1 — Règles d'alerte** sur les données déjà collectées | Surveillance et gestion des événements | Non | 5 j | — |
 | 2 | **C2 — Cycle de vie des actifs** (achat, garantie, statut, étiquette QR) | Gestion des actifs informatiques | Non | 8 j | — |
-| 3 | **C3 — Planification, fenêtres et anneaux** | Gestion des déploiements, habilitation des changements | Non (à confirmer, §3.3) | 11 j | — |
-| 4 | **C4 — Signalement par l'utilisateur** | Gestion des incidents, centre de services | Non | 6 j | C2 (QR) |
-| 5 | **C5 — Conformité des postes et mises à jour tierces** | Sécurité de l'information, gestion des déploiements | **Oui** | 9 j | C1 |
-| 6 | **C6 — Licences logicielles** | Gestion des actifs logiciels | Non | 4 j | C1 (logiciels interdits) |
-| 7 | **C7 — Second facteur et connexion par l'annuaire** | Sécurité de l'information | Non | 6 j | — |
-| 8 | **C8 — Webhooks et jetons d'API** | Intégration | Non | 5 j | C1 |
-| 9 | **C9 — Tendances, indicateurs et pannes récurrentes** | Mesure et rapports, gestion des problèmes | Non | 6 j | C1, C4 |
-| 10 | **C10 — Approbation à deux des actions de masse** | Habilitation des changements | Non | 3 j | C3 |
-| 11 | **C11 — Procédures et pièces jointes** | Gestion des connaissances | Non | 4 j | — |
+| 3 | **CG — Connecteur GLPI** (lien, rapprochement, inventaire, actifs, tickets) | Gestion des actifs, gestion des incidents | Non | 9 j | C2 (G3), C4 (G4) |
+| 4 | **C3 — Planification, fenêtres et anneaux** | Gestion des déploiements, habilitation des changements | Non (à confirmer, §3.4) | 11 j | — |
+| 5 | **C4 — Signalement par l'utilisateur** | Gestion des incidents, centre de services | Non | 6 j | C2 (QR) |
+| 6 | **C5 — Conformité des postes et mises à jour tierces** | Sécurité de l'information, gestion des déploiements | **Oui** | 9 j | C1 |
+| 7 | **C6 — Licences logicielles** | Gestion des actifs logiciels | Non | 4 j | C1 (logiciels interdits) |
+| 8 | **C7 — Second facteur et connexion par l'annuaire** | Sécurité de l'information | Non | 6 j | — |
+| 9 | **C8 — Webhooks et jetons d'API** | Intégration | Non | 5 j | C1 |
+| 10 | **C9 — Tendances, indicateurs et pannes récurrentes** | Mesure et rapports, gestion des problèmes | Non | 6 j | C1, C4 |
+| 11 | **C10 — Approbation à deux des actions de masse** | Habilitation des changements | Non | 3 j | C3 |
+| 12 | **C11 — Procédures et pièces jointes** | Gestion des connaissances | Non | 4 j | — |
 
-Total : environ 67 jours. Les quatre premiers (30 j) forment un lot cohérent et suffisent à une version mineure ; le reste se prend à l'unité.
+Total : environ 76 jours. Les cinq premiers (39 j) forment le lot prioritaire ; le reste se prend à l'unité.
 
 **Pourquoi C1 d'abord, alors que le cycle de vie des actifs est le manque le plus visible** : C1 n'ajoute aucune donnée à saisir et aucune collecte — tout est déjà en base — et il crée la table d'alertes que C2 (fin de garantie), C5 (contrôle non conforme), C6 (logiciel interdit) et C8 (événements à émettre) réutilisent.
 
-**C7 peut remonter** : si la console devient joignable depuis Internet, ou si C4 est ouvert au-delà du réseau de l'établissement, le second facteur passe avant C4.
+**Pourquoi le connecteur GLPI juste après C2** : les actifs et les signalements doivent savoir dès leur conception qu'ils peuvent être tenus par GLPI (§2.1). Construire C2 seul puis y greffer GLPI obligerait à reprendre l'écran et l'import.
+
+**C7 peut remonter** : si la console devient joignable depuis Internet (voir « interne » en §6), ou si C4 est ouvert au-delà du réseau de l'établissement, le second facteur passe avant C4.
 
 ---
 
@@ -48,6 +51,27 @@ Rien de nouveau ici : ce sont les invariants du produit, rappelés parce que cha
 | Fusion de postes | Toute table qui référence `machines.id` dit ce que `merge_into` en fait (réattribuer ou abandonner), avec un test. |
 | Agent | Un champ nouveau est facultatif des deux côtés : un vieil agent doit continuer à fonctionner avec un serveur récent, et inversement. |
 | Migrations | La dernière est `0047_room_texts` ; les numéros ci-dessous sont indicatifs. |
+| Seul ou avec GLPI | Chaque chantier dit ce qu'il devient quand GLPI est branché (§2.1). |
+
+### 2.1 Seul ou avec GLPI
+
+Tia'i doit rester **complet sans GLPI** : un établissement sans GLPI ne doit rien perdre. Et un établissement qui a déjà GLPI ne doit **rien saisir deux fois**. Les deux à la fois tiennent à une règle : pour chaque donnée, **une seule source de vérité**, choisie dans les réglages.
+
+| Domaine | Tia'i seul | Tia'i avec GLPI |
+|---|---|---|
+| État technique : Defender, mises à jour, utilisation, alertes, commandes | Tia'i | **Tia'i** — GLPI n'en a pas l'équivalent |
+| Inventaire matériel et logiciel | Tia'i | Tia'i le collecte et peut le **pousser** dans GLPI (G2), sauf si l'agent GLPI est déjà déployé |
+| Achat, garantie, statut, numéro d'inventaire | Tia'i (C2) | **GLPI**, lu par Tia'i et affiché en lecture seule (G3) |
+| Signalements et incidents | Tia'i (C4, vérifications) | **GLPI** : un signalement ou une alerte devient un ticket lié à l'ordinateur (G4) |
+| Vérifications et maintenance | Tia'i | Tia'i — ce sont des tâches de technicien courtes, pas des tickets |
+| Licences | Tia'i (C6) | GLPI ; C6 n'est pas activé |
+| Pannes récurrentes, délais de traitement | Tia'i (C9) | GLPI pour les tickets, Tia'i pour les commandes et la maintenance |
+
+Trois principes de conception :
+
+- **C'est toujours Tia'i qui appelle GLPI**, jamais l'inverse : le même principe que l'agent qui interroge le serveur. GLPI peut donc être hébergé ailleurs (y compris en nuage) sans que le serveur Tia'i soit joignable depuis lui. Seul le navigateur de l'utilisateur suit les liens d'un outil à l'autre.
+- **Les écritures vers GLPI passent par une file en base**, réessayée, comme les e-mails (`notification/outbox.py`) : GLPI indisponible ne bloque ni la console ni un battement d'agent.
+- **Un seul interrupteur par domaine** (`ASSET_SOURCE=tiai|glpi`, `TICKET_TARGET=tiai|glpi`, `GLPI_INVENTORY_PUSH=off|on`), réglable dans la console. Le code de chaque chantier lit l'interrupteur au lieu de supposer GLPI absent.
 
 ---
 
@@ -116,6 +140,8 @@ Plus une colonne `machines.wu_reboot_required_since` : `wu_reboot_required` est 
 | Windows 11 | Un indicateur « prêt matériellement » calculé depuis l'inventaire : TPM 2.0, mémoire, taille du disque, architecture. Deux limites à afficher : `secure_boot` dit s'il est *activé*, pas si le poste en est capable, et la liste des processeurs pris en charge n'est pas dans le produit — le processeur sort en « à vérifier ». |
 | Matériels sans agent | Dernier jalon : type (imprimante, vidéoprojecteur, écran, autre), salle, et les mêmes champs de cycle de vie. Ni commandes, ni inventaire, ni battement. |
 
+**Avec GLPI** (`ASSET_SOURCE=glpi`) : la table `assets` reste, alimentée par G3 au lieu de la saisie ; seuls les matériels sans agent (B5) demeurent saisissables, et encore, seulement si GLPI ne les tient pas déjà.
+
 **Console.** Onglet « Actif » sur la fiche d'un poste, filtres par statut et par fin de garantie sur la liste, colonnes ajoutées à l'export (`api/fields.py`), page « Matériels » au dernier jalon. La fin de garantie à N jours devient une règle de C1.
 
 **Jalons.**
@@ -128,7 +154,33 @@ Plus une colonne `machines.wu_reboot_required_since` : `wu_reboot_required` est 
 | B4 | Indicateur Windows 11, âge par date d'achat, vue « à renouveler ». | 1 j |
 | B5 | Matériels sans agent. | 2 j |
 
-### 3.3 C3 — Planification, fenêtres et anneaux
+### 3.3 CG — Connecteur GLPI
+
+**Constat.** Beaucoup d'établissements ont déjà GLPI pour les tickets et les actifs, souvent alimenté par l'agent GLPI. Tia'i à côté ferait double emploi sur l'inventaire et double saisie sur les actifs.
+
+**Cadrage proposé.**
+
+| Sujet | Proposition |
+|---|---|
+| Version de GLPI | La 10 et les suivantes. L'API « historique » (`apirest.php`, jetons d'application et d'utilisateur) existe encore ; les versions récentes ajoutent une API v2 authentifiée en OAuth2 (`/api.php/token`), avec une portée `inventory` accessible en *client credentials*. **À valider sur la version réellement déployée** avant de choisir : le connecteur doit en viser une seule au départ. |
+| Rapprochement | Par **numéro de série** (`hw_serial`) puis **UUID SMBIOS** (`smbios_uuid`), que GLPI conserve aussi. Tia'i garde `glpi_computer_id` sur le poste. Un poste trouvé deux fois, ou pas du tout, est listé à part pour décision : jamais de rattachement deviné. |
+| Liens croisés | De Tia'i vers GLPI : un bouton sur la fiche. De GLPI vers Tia'i : un « lien externe » GLPI configuré avec le numéro de série, qui ouvre une route Tia'i `/machines/by-serial/{serial}` (redirection, droits et portée inchangés). |
+| Inventaire poussé | Tia'i convertit son inventaire au **format d'inventaire natif de GLPI** (celui de l'agent GLPI) et l'envoie au point d'entrée d'inventaire, seulement quand il a changé (`inventory_hash`). Désactivé par défaut, et **refusé** pour un poste que l'agent GLPI inventorie déjà : deux sources sur la même fiche se contrediraient à chaque passage. |
+| Actifs lus | Numéro d'inventaire, statut, date d'achat, fin de garantie, fournisseur (fiche et informations financières GLPI), lus périodiquement par le worker. Avec `ASSET_SOURCE=glpi`, l'onglet « Actif » de C2 les affiche en lecture seule avec un lien « modifier dans GLPI », et l'import de C2 est masqué. |
+| Tickets | Avec `TICKET_TARGET=glpi`, un signalement trié (C4) ou une alerte (C1, au choix par règle) crée un ticket GLPI lié à l'ordinateur. Tia'i garde le numéro, relit l'état et l'affiche sur la fiche ; la clôture se fait dans GLPI. |
+| Identifiants | Compte de service GLPI à droits minimaux, secrets chiffrés en base (`core/secretbox.py`) comme ceux de l'envoi d'e-mails, bouton « Tester la connexion », jamais renvoyés à la console ni journalisés. Certificat de GLPI vérifié. |
+| Droits | `settings:write` pour configurer. Aucun droit nouveau pour lire ce qui vient de GLPI : c'est une donnée du poste. |
+
+**Jalons.**
+
+| Jalon | Contenu | Durée |
+|---|---|---|
+| G1 | Réglages, test de connexion, rapprochement par série et UUID, liens croisés. | 1,5 j |
+| G2 | Inventaire poussé au format natif, file réessayée, garde contre l'agent GLPI déjà présent. | 3 j |
+| G3 | Lecture des actifs, onglet « Actif » en lecture seule (après C2). | 1,5 j |
+| G4 | Tickets depuis les signalements et les alertes, relecture de l'état (après C4). | 3 j |
+
+### 3.4 C3 — Planification, fenêtres et anneaux
 
 **Constat.** Une commande est en file dès sa création et expire au bout d'une heure (`Command.expires_at`). On ne peut ni dire « mercredi à 18 h », ni interdire les heures de cours, ni déployer une salle pilote avant le parc. C'est le chantier le plus délicat du lot : il touche au cycle de vie des commandes.
 
@@ -160,7 +212,7 @@ Plus une colonne `machines.wu_reboot_required_since` : `wu_reboot_required` est 
 | P4 | Plages interdites. | 1 j |
 | P5 | Anneaux de déploiement. | 3 j |
 
-### 3.4 C4 — Signalement par l'utilisateur
+### 3.5 C4 — Signalement par l'utilisateur
 
 **Constat.** Seul un compte de la console peut ouvrir une vérification. Un enseignant devant un poste en panne n'a aucun canal.
 
@@ -175,7 +227,7 @@ Plus une colonne `machines.wu_reboot_required_since` : `wu_reboot_required` est 
 | Données personnelles | Le contact est facultatif, purgé avec le signalement, et mentionné sur le formulaire. À porter au registre des traitements. |
 | Vérifications enrichies | Priorité (basse, normale, haute), catégorie, échéance facultative. Le délai entre ouverture et clôture devient mesurable (C9). |
 
-**Alternative à trancher (§6).** Si un GLPI ou un autre outil de tickets existe déjà, ce chantier se réduit à un lien depuis la fiche et à un webhook (C8). Refaire un centre de services n'est pas le but.
+**Avec GLPI** (`TICKET_TARGET=glpi`) : le formulaire et la file de tri restent dans Tia'i — c'est lui qui connaît le poste derrière le QR — mais « transformer en ticket » crée un ticket GLPI (G4) au lieu d'une vérification. S1 reste utile dans les deux cas.
 
 **Jalons.**
 
@@ -199,7 +251,7 @@ Cadrage plus court : chacun sera détaillé au moment de l'ouvrir.
 
 ### 4.2 C6 — Licences logicielles *(4 j)*
 
-Une table `licenses` : logiciel (lié à une ou plusieurs entrées du catalogue `Software`), nombre de postes couverts, échéance, fournisseur, référence. **Jamais la clé elle-même.** La page Logiciels affiche « 32 installations pour 30 licences » ; le dépassement et l'échéance proche deviennent des règles de C1. La liste des logiciels interdits est celle de C1.
+Une table `licenses` : logiciel (lié à une ou plusieurs entrées du catalogue `Software`), nombre de postes couverts, échéance, fournisseur, référence. **Jamais la clé elle-même.** La page Logiciels affiche « 32 installations pour 30 licences » ; le dépassement et l'échéance proche deviennent des règles de C1. La liste des logiciels interdits est celle de C1. **Avec GLPI**, qui gère les licences, ce chantier ne s'active pas.
 
 ### 4.3 C7 — Second facteur et connexion par l'annuaire *(6 j)*
 
@@ -218,6 +270,7 @@ Une table `licenses` : logiciel (lié à une ou plusieurs entrées du catalogue 
 - **Tendances** : le tableau de bord est un instantané. Une tâche quotidienne enregistre les compteurs de `/stats/overview` ; une courbe montre le parc sur douze mois. Question ouverte : un instantané global ne respecte pas la portée d'un groupe limité — il faut le tenir par bâtiment, ou réserver la vue aux comptes sans limite.
 - **Indicateurs** : délai de clôture des vérifications, part des maintenances faites à l'heure, taux de réussite des commandes et des déploiements.
 - **Pannes récurrentes** : les interventions de type `incident` regroupées par modèle (`hw_model`) et par salle. « Douze pannes en un an sur le même modèle » est une information d'achat.
+- **Avec GLPI**, les indicateurs sur les tickets sont ceux de GLPI ; Tia'i garde ceux des commandes, de la maintenance et des vérifications.
 - Rapport périodique en Excel d'abord (le générateur existe, `api/xlsx_export.py`), PDF seulement si demandé.
 
 ### 4.6 C10 — Approbation à deux des actions de masse *(3 j)*
@@ -244,22 +297,24 @@ Au-delà de N postes, une commande à risque attend l'accord d'un second compte 
 
 ## 6. Décisions à prendre
 
-1. **Outil de tickets existant ?** S'il y en a un, C4 se réduit à S1 et à un webhook, et C8 remonte au rang 4.
-2. **Exposition de la console.** Interne seulement, ou joignable de l'extérieur à terme ? La réponse fixe le rang de C7.
-3. **Actifs : table distincte ou colonnes sur `machines` ?** Le plan propose la table (§3.2). Les colonnes seraient plus rapides (−1 j) mais ferment la porte aux matériels sans agent.
-4. **Droits sur les actifs.** Réutiliser `machine:write`, ou une ressource `asset` à part pour que le prix d'achat ne soit pas lisible de tous ?
-5. **Poste réformé.** Faut-il révoquer son jeton d'agent en même temps, ou seulement le sortir des compteurs ?
-6. **Chiffrement.** L'alerte « volume non chiffré » doit-elle viser tous les postes ou seulement les portables ?
-7. **Fuseau de la console.** Un seul fuseau pour tout le serveur, ou un par emplacement ? Un seul suffit tant que le parc est en Polynésie.
-8. **Enchaînements de C3.** « Réveiller, mettre à jour, éteindre » suffit-il, ou faut-il des séquences libres ? Le plan propose de s'en tenir aux deux options.
-9. **Administrateurs locaux (C5).** Collecte à arbitrer avec le DPO, comme le nom de session.
-10. **Périmètre de la prochaine version.** Le lot prioritaire entier (30 j), ou C1 et C2 seulement (13 j) ?
+1. ~~Outil de tickets existant ?~~ **Tranché le 2026-11-20** : Tia'i fonctionne seul ou avec GLPI (§2.1, chantier CG).
+2. **Exposition de la console.** « Interne » veut dire que l'adresse de la console n'est joignable que depuis le réseau de l'établissement — son réseau local, ou un réseau qui y est relié par VPN —, même si le serveur est hébergé ailleurs. « Exposée » veut dire joignable depuis n'importe quelle connexion Internet. La documentation actuelle suppose la première (`plan-projet-tiai.md` §8). Si la console doit devenir joignable de l'extérieur, C7 passe avant C4.
+3. **Version de GLPI visée** par le connecteur, et l'agent GLPI est-il déjà déployé sur les postes ? La seconde réponse décide si G2 sert.
+4. **Actifs : table distincte ou colonnes sur `machines` ?** Le plan propose la table (§3.2). Les colonnes seraient plus rapides (−1 j) mais ferment la porte aux matériels sans agent.
+5. **Droits sur les actifs.** Réutiliser `machine:write`, ou une ressource `asset` à part pour que le prix d'achat ne soit pas lisible de tous ?
+6. **Poste réformé.** Faut-il révoquer son jeton d'agent en même temps, ou seulement le sortir des compteurs ?
+7. **Chiffrement.** L'alerte « volume non chiffré » doit-elle viser tous les postes ou seulement les portables ?
+8. **Fuseau de la console.** Un seul fuseau pour tout le serveur, ou un par emplacement ? Un seul suffit tant que le parc est en Polynésie.
+9. **Enchaînements de C3.** « Réveiller, mettre à jour, éteindre » suffit-il, ou faut-il des séquences libres ? Le plan propose de s'en tenir aux deux options.
+10. **Administrateurs locaux (C5).** Collecte à arbitrer avec le DPO, comme le nom de session.
+11. **Périmètre de la prochaine version.** Le lot prioritaire entier (39 j), ou C1, C2 et G1 à G3 seulement (19 j) ?
 
 ---
 
 ## 7. Séquencement
 
 - **C1 et C2 sont indépendants** et peuvent avancer en parallèle ; ils ne touchent pas les mêmes fichiers, sauf `machine/crud.py` (`merge_into`) et la fiche d'un poste.
+- **CG se mène par morceaux** : G1 et G2 dès qu'on veut, G3 après B1, G4 après S3.
 - **C3 se mène seul** : il modifie le chemin de création des commandes, que le déploiement de paquets emprunte aussi.
 - **C4 attend B3** (jeton public et étiquettes).
 - **C5 impose une version d'agent** : le grouper avec toute autre évolution de l'agent en attente (lecture de l'annuaire en mode relais, `plan-lecture-annuaire.md`) pour ne redéployer qu'une fois.
