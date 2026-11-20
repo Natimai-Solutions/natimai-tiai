@@ -56,6 +56,10 @@ export interface StatsOverview {
    */
   machines_reenroll_pending?: number;
   machines_token_revoked?: number;
+  /** Postes with at least one open alert, and the postes per rule.
+   * Optional: an older server does not send them. */
+  machines_with_alerts?: number;
+  alerts_by_rule?: Record<string, number>;
 }
 
 export async function getOverview(): Promise<StatsOverview> {

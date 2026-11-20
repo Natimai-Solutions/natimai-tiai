@@ -418,6 +418,9 @@ class OpenCheckOut(BaseModel):
     # « à prendre », and the fiche says who had it and why it is free again.
     assignee_reachable: bool = True
     instructions: str | None
+    # Coded instructions of a request the server opened for an alert.
+    instructions_code: str | None = None
+    instructions_params: dict[str, Any] | None = None
     created_at: datetime
 
 
@@ -2257,6 +2260,8 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
             assigned_to_name=assignee_name,
             assignee_reachable=reachable,
             instructions=open_check.instructions,
+            instructions_code=open_check.instructions_code,
+            instructions_params=open_check.instructions_params,
             created_at=open_check.created_at,
         )
     detail.pending_updates = [PendingUpdateOut.model_validate(u) for u in rows.all()]

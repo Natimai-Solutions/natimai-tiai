@@ -177,6 +177,17 @@ export interface ConsoleSettings {
   env_digest_hour_utc: number;
   env_maintenance_reminder_weekday: number;
   room_source: string;
+  /** Alerts: the catalogue, the rules turned on, their thresholds, the
+   * forbidden programs, the rules that open a verification. Optional: an
+   * older server does not send them. */
+  alert_rules?: string[];
+  alert_enabled_rules?: string[];
+  alert_reboot_pending_days?: number;
+  alert_unencrypted_scope?: 'laptops' | 'all';
+  alert_forbidden_software?: string[];
+  alert_auto_check_rules?: string[];
+  env_alert_reboot_pending_days?: number;
+  env_alert_unencrypted_scope?: 'laptops' | 'all';
   /** How mail leaves the console. */
   email: EmailSettings;
   /** The rest of the environment, read-only and never a secret: what an
@@ -201,6 +212,11 @@ export interface SettingsPayload {
   command_default_ttl_minutes?: number;
   digest_hour_utc?: number;
   maintenance_reminder_weekday?: number;
+  alert_enabled_rules?: string[];
+  alert_auto_check_rules?: string[];
+  alert_reboot_pending_days?: number;
+  alert_unencrypted_scope?: 'laptops' | 'all';
+  alert_forbidden_software?: string[];
   email?: EmailSettingsPayload;
 }
 

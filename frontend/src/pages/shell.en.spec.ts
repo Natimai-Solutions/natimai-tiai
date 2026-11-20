@@ -126,6 +126,7 @@ describe('MainLayout in English', () => {
     expect(menu).toEqual([
       'Dashboard',
       'Computers',
+      'Alerts',
       'Software',
       'Packages',
       'My tasks',

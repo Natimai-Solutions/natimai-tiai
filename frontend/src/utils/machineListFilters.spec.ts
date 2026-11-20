@@ -50,6 +50,7 @@ function everything(): MachineFilters {
     softwareId: 42,
     enrollment: 'pending',
     aging: 'true',
+    alert: 'disk_low',
   };
 }
 
@@ -91,6 +92,7 @@ describe('machineFiltersToQuery / machineFiltersFromQuery', () => {
       software_id: '42',
       enrollment: 'pending',
       hardware_aging: 'true',
+      alert: 'disk_low',
     });
     expect(machineFiltersFromQuery(query)).toEqual(everything());
   });
@@ -245,8 +247,10 @@ describe('machineFilterChips', () => {
       'usage',
       'software',
       'aging',
+      'alert',
     ]);
     const label = (key: string) => chips.find((c) => c.key === key)!.label;
+    expect(label('alert')).toBe('Alerte : Disque système presque plein');
     expect(label('location')).toBe('Papeete (40)');
     expect(label('agent')).toBe('Agent obsolète (3)');
     // A value its list does not (yet) hold reads as itself rather than blank.

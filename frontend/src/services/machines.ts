@@ -271,6 +271,8 @@ export interface MachineDetail extends Machine {
     /** false when the assignee no longer reaches the poste: « à prendre » again. */
     assignee_reachable?: boolean;
     instructions: string | null;
+    instructions_code?: string | null;
+    instructions_params?: Record<string, unknown> | null;
     created_at: string;
   } | null;
   machine_guid: string | null;
@@ -443,6 +445,8 @@ export interface ListMachinesParams {
   enrollment?: 'pending' | 'revoked';
   /** Hardware past the parc's renewal age (`hardware_aging_years`). */
   hardware_aging?: boolean;
+  /** Postes with an open alert: a rule of the catalogue, or `any`. */
+  alert?: string;
   /**
    * Comma-separated facets matched exactly rather than as a substring:
    * antivirus, os_version, hw_model, hw_manufacturer, cpu_model.

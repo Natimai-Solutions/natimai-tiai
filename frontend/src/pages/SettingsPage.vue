@@ -131,6 +131,88 @@
       </q-card-actions>
     </q-card>
 
+    <!-- Alerts: which rules of the closed catalogue run, their thresholds,
+         the « logiciels interdits » list and the rules that open a
+         verification by themselves. Saved on its own. -->
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md">
+      <q-card-section class="text-subtitle1">
+        {{ t('settings.alerts.title') }}
+        <div class="text-caption text-muted">{{ t('settings.alerts.caption') }}</div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings" class="q-gutter-md">
+        <div>
+          <div class="text-caption text-muted q-mb-xs">{{ t('settings.alerts.rules') }}</div>
+          <div v-for="rule in settings.alert_rules ?? []" :key="rule" class="row items-center">
+            <q-toggle
+              v-model="alertForm.enabled"
+              :val="rule"
+              :label="alertRuleLabel(rule)"
+              :disable="!canWrite"
+              class="col"
+            />
+            <q-checkbox
+              v-model="alertForm.autoCheck"
+              :val="rule"
+              dense
+              :label="t('settings.alerts.autoCheck')"
+              :disable="!canWrite || !alertForm.enabled.includes(rule)"
+            />
+          </div>
+          <div class="text-caption text-muted q-mt-xs">
+            {{ t('settings.alerts.autoCheckHint') }}
+          </div>
+        </div>
+        <q-input
+          v-model.number="alertForm.rebootDays"
+          type="number"
+          min="1"
+          max="365"
+          :suffix="t('settings.units.days')"
+          :label="t('settings.alerts.rebootDays')"
+          outlined
+          dense
+          :error="alertRebootError !== null"
+          :error-message="alertRebootError ?? undefined"
+          :hint="t('settings.alerts.rebootHint', { days: settings.env_alert_reboot_pending_days })"
+          :disable="!canWrite"
+        />
+        <q-select
+          v-model="alertForm.unencryptedScope"
+          :options="unencryptedOptions"
+          emit-value
+          map-options
+          :label="t('settings.alerts.unencryptedScope')"
+          outlined
+          dense
+          :disable="!canWrite"
+        />
+        <q-select
+          v-model="alertForm.forbidden"
+          :label="t('settings.alerts.forbidden')"
+          :hint="t('settings.alerts.forbiddenHint')"
+          outlined
+          dense
+          multiple
+          use-chips
+          use-input
+          hide-dropdown-icon
+          new-value-mode="add-unique"
+          input-debounce="0"
+          :disable="!canWrite"
+        />
+      </q-card-section>
+      <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
+        <q-btn
+          color="primary"
+          :label="t('settings.save')"
+          :loading="savingAlerts"
+          :disable="alertRebootError !== null"
+          @click="saveAlerts"
+        />
+      </q-card-actions>
+    </q-card>
+
     <!-- Parc thresholds: what makes the console call a poste « périmé »,
          « inactif », short of disk, due for renewal or behind on its agent,
          and how long a queued command waits for it. The environment gives the
@@ -697,6 +779,7 @@ import {
   type ConsoleSettings,
   type EmailTestResult,
 } from 'src/services/settings';
+import { alertRuleLabel } from 'src/services/alerts';
 import { useAuthStore } from 'src/stores/auth';
 import {
   SECURITY_OPTIONS,
@@ -767,6 +850,53 @@ function fillUsageForm(s: ConsoleSettings) {
   usageForm.lowHours = s.usage_low_hours;
   usageForm.highHours = s.usage_high_hours;
   saved.usage = formSnapshot(usageForm);
+}
+
+// The alerts card. Lists as the server returns them, in the catalogue's order.
+const savingAlerts = ref(false);
+const alertForm = reactive({
+  enabled: [] as string[],
+  autoCheck: [] as string[],
+  rebootDays: 7 as number | string,
+  unencryptedScope: 'laptops',
+  forbidden: [] as string[],
+});
+const alertRebootError = computed(() => intFieldError(alertForm.rebootDays, 1, 365));
+const unencryptedOptions = computed(() => [
+  { label: t('settings.alerts.scopeLaptops'), value: 'laptops' },
+  { label: t('settings.alerts.scopeAll'), value: 'all' },
+]);
+
+function fillAlertForm(s: ConsoleSettings) {
+  alertForm.enabled = [...(s.alert_enabled_rules ?? [])];
+  alertForm.autoCheck = [...(s.alert_auto_check_rules ?? [])];
+  alertForm.rebootDays = s.alert_reboot_pending_days ?? 7;
+  alertForm.unencryptedScope = s.alert_unencrypted_scope ?? 'laptops';
+  alertForm.forbidden = [...(s.alert_forbidden_software ?? [])];
+  saved.alerts = formSnapshot(alertForm);
+}
+
+async function saveAlerts() {
+  if (alertRebootError.value) return;
+  savingAlerts.value = true;
+  try {
+    settings.value = await updateSettings({
+      alert_enabled_rules: alertForm.enabled,
+      // A rule turned off opens nothing: it is not kept among those that do.
+      alert_auto_check_rules: alertForm.autoCheck.filter((r) => alertForm.enabled.includes(r)),
+      alert_reboot_pending_days: Number(alertForm.rebootDays),
+      alert_unencrypted_scope: alertForm.unencryptedScope as 'laptops' | 'all',
+      alert_forbidden_software: alertForm.forbidden
+        .map((p) => p.trim())
+        .filter((p) => p.length >= 2),
+    });
+    fillAlertForm(settings.value);
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
+  } catch (e) {
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
+  } finally {
+    savingAlerts.value = false;
+  }
 }
 
 // The parc thresholds card. The agent version is a string: '' = automatic.
@@ -918,13 +1048,21 @@ function fillEmailForm(s: ConsoleSettings) {
 // server; a card whose form differs holds changes « Enregistrer » has not
 // sent. All five cards: a cycle retyped and left unsaved is lost like any
 // other field.
-const saved = reactive({ maintenance: '', usage: '', fleet: '', schedule: '', email: '' });
+const saved = reactive({
+  maintenance: '',
+  usage: '',
+  alerts: '',
+  fleet: '',
+  schedule: '',
+  email: '',
+});
 // The cards by their key in the catalogue (`settings.unsaved.cards`).
 const unsavedCards = computed(() => {
   if (!settings.value || !canWrite.value) return [];
   const cards: string[] = [];
   if (formSnapshot(form) !== saved.maintenance) cards.push('maintenance');
   if (formSnapshot(usageForm) !== saved.usage) cards.push('usage');
+  if (formSnapshot(alertForm) !== saved.alerts) cards.push('alerts');
   if (formSnapshot(fleetForm) !== saved.fleet) cards.push('fleet');
   if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('schedule');
   if (formSnapshot(emailForm) !== saved.email) cards.push('email');
@@ -1015,6 +1153,7 @@ async function load() {
     const unavailable = settings.value.maintenance_default_owner_unavailable ?? null;
     fillMaintenanceForm(settings.value);
     fillUsageForm(settings.value);
+    fillAlertForm(settings.value);
     fillFleetForm(settings.value);
     fillScheduleForm(settings.value);
     fillEmailForm(settings.value);

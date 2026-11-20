@@ -363,6 +363,18 @@ const alertKpis = computed<AlertKpi[]>(() => {
   const s = stats.value;
   if (!s) return [];
   return [
+    // The rules the server evaluates: the page that lists them by rule.
+    ...(s.machines_with_alerts !== undefined
+      ? [
+          {
+            label: t('dashboard.kpi.alerts'),
+            value: s.machines_with_alerts,
+            icon: 'notifications_active',
+            color: s.machines_with_alerts ? 'negative' : 'grey',
+            to: { name: 'alerts' },
+          },
+        ]
+      : []),
     // Enrolment needing a decision: a reinstalled poste asking back in, or a
     // revoked one. Shown by a server that counts them (older ones do not).
     ...(s.machines_reenroll_pending !== undefined

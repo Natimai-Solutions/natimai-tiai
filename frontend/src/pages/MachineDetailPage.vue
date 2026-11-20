@@ -321,7 +321,7 @@
         <template v-else>{{ t('machine.check.open') }}</template>
       </div>
       <div v-if="machine.open_check.instructions" class="q-mt-xs" style="white-space: pre-line">
-        {{ machine.open_check.instructions }}
+        {{ checkInstructionsText(machine.open_check) }}
       </div>
       <template v-if="auth.can('check', 'write')" #action>
         <q-btn flat dense :label="t('machine.check.edit')" @click="editCheckOpen = true" />
@@ -406,6 +406,7 @@
       @open-tab="tab = $event"
       @retry="load"
     />
+    <MachineAlertsCard v-if="machine" :machine-id="machine.id" :refresh-key="machine.last_seen" />
 
     <template v-if="machine">
       <q-tabs
@@ -559,6 +560,7 @@ import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAut
 import { useMachineNavigation } from 'src/composables/useMachineNavigation';
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import CommandOutputDialog from 'src/components/machine/CommandOutputDialog.vue';
+import MachineAlertsCard from 'src/components/machine/MachineAlertsCard.vue';
 import MachineAntivirusCard from 'src/components/machine/MachineAntivirusCard.vue';
 import MachineCommandsCard from 'src/components/machine/MachineCommandsCard.vue';
 import MachineDefenderCard from 'src/components/machine/MachineDefenderCard.vue';
@@ -569,6 +571,7 @@ import MachineMaintenanceCard from 'src/components/machine/MachineMaintenanceCar
 import CheckCloseDialog from 'src/components/check/CheckCloseDialog.vue';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
 import { createCheck, updateCheck, type Check, type CheckPayload } from 'src/services/checks';
+import { checkInstructionsText } from 'src/services/alerts';
 import MachineIdentityCard from 'src/components/machine/MachineIdentityCard.vue';
 import MachineMemoryCard from 'src/components/machine/MachineMemoryCard.vue';
 import MachineMergeDialog from 'src/components/machine/MachineMergeDialog.vue';
@@ -756,6 +759,8 @@ const openCheckAsCheck = computed<Check | null>(() => {
           }
         : null,
     instructions: c.instructions,
+    instructions_code: c.instructions_code ?? null,
+    instructions_params: c.instructions_params ?? null,
     created_at: c.created_at,
     updated_at: c.created_at,
     closed_at: null,

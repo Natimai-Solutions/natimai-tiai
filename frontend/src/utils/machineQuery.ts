@@ -1,4 +1,5 @@
 import type { LocationQuery } from 'vue-router';
+import { isAlertRule } from 'src/services/alerts';
 import { t } from 'src/i18n';
 import type {
   ListMachinesParams,
@@ -205,6 +206,8 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   const enrollment = queryValue(q.enrollment);
   if (enrollment === 'pending' || enrollment === 'revoked') params.enrollment = enrollment;
   if (queryValue(q.hardware_aging) === 'true') params.hardware_aging = true;
+  const alert = queryValue(q.alert);
+  if (alert && (alert === 'any' || isAlertRule(alert))) params.alert = alert;
   // The five text facets the list sets from its dropdowns: matched exactly,
   // as the list asked (``machineFiltersToParams``).
   const exact = (

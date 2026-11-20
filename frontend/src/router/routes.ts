@@ -42,6 +42,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'layout.pages.machines', requiresPermission: 'machine:read' },
       },
       {
+        path: 'alerts',
+        name: 'alerts',
+        component: () => import('pages/AlertsPage.vue'),
+        meta: { title: 'layout.pages.alerts', requiresPermission: 'machine:read' },
+      },
+      {
         path: 'software',
         name: 'software',
         component: () => import('pages/SoftwarePage.vue'),

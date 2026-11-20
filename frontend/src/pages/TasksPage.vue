@@ -59,7 +59,7 @@
               </router-link>
               <div class="text-caption text-muted">{{ placeLabel(props.row.machine) }}</div>
               <div class="q-mt-xs" style="white-space: pre-line">
-                {{ props.row.instructions || '—' }}
+                {{ checkInstructionsText(props.row) || '—' }}
               </div>
               <div class="text-caption text-muted q-mt-xs">
                 {{
@@ -380,6 +380,7 @@ import {
   type CheckMachineRef,
   type CheckPayload,
 } from 'src/services/checks';
+import { checkInstructionsText } from 'src/services/alerts';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { timeAgoLabel } from 'src/utils/format';
@@ -409,7 +410,7 @@ const columns = computed<QTableColumn<Check>[]>(() => [
   {
     name: 'instructions',
     label: t('tasks.checks.columns.instructions'),
-    field: 'instructions',
+    field: (row: Check) => checkInstructionsText(row),
     align: 'left',
   },
   {

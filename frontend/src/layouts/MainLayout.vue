@@ -62,6 +62,10 @@
           <q-item-section avatar><q-icon name="devices" /></q-item-section>
           <q-item-section>{{ t('layout.pages.machines') }}</q-item-section>
         </q-item>
+        <q-item v-if="canReadMachines" v-ripple clickable :to="{ name: 'alerts' }">
+          <q-item-section avatar><q-icon name="notifications_active" /></q-item-section>
+          <q-item-section>{{ t('layout.pages.alerts') }}</q-item-section>
+        </q-item>
         <q-item v-if="canReadMachines" v-ripple clickable :to="{ name: 'software' }">
           <q-item-section avatar><q-icon name="inventory_2" /></q-item-section>
           <q-item-section>{{ t('layout.pages.software') }}</q-item-section>

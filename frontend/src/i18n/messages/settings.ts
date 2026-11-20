@@ -56,6 +56,23 @@ const fr = {
     highHours: 'Poste toujours allumé au-dessus de',
     highHint: "variable d'environnement : {hours} heures",
   },
+  alerts: {
+    title: 'Alertes',
+    caption:
+      'Les règles que le serveur vérifie toutes les cinq minutes sur ce que les postes remontent. Une alerte s’ouvre et se résout toute seule.',
+    rules: 'Règles actives',
+    autoCheck: 'Ouvrir une vérification',
+    autoCheckHint:
+      'Une nouvelle alerte de ces règles ouvre une vérification sur le poste, s’il n’en a pas déjà une.',
+    rebootDays: 'Redémarrage en attente au-delà de',
+    rebootHint: "variable d'environnement : {days} jours",
+    unencryptedScope: 'Volume système non chiffré : postes concernés',
+    scopeLaptops: 'Portables et tablettes seulement',
+    scopeAll: 'Tous les postes',
+    forbidden: 'Logiciels interdits',
+    forbiddenHint:
+      'Un morceau du nom du programme, deux caractères au moins (Entrée pour ajouter) · insensible à la casse',
+  },
   fleet: {
     title: 'Supervision du parc',
     caption:
@@ -251,6 +268,7 @@ const fr = {
     cards: {
       maintenance: 'Maintenance',
       usage: 'Utilisation',
+      alerts: 'Alertes',
       fleet: 'Seuils du parc',
       schedule: 'Calendrier des e-mails',
       email: 'Envoi des e-mails',
@@ -321,6 +339,23 @@ const en: Translation<typeof fr> = {
       'A computer enrolled during the window is never counted as rarely used · environment variable: {hours} hours',
     highHours: 'Computer always on above',
     highHint: 'environment variable: {hours} hours',
+  },
+  alerts: {
+    title: 'Alerts',
+    caption:
+      'The rules the server checks every five minutes over what the computers report. An alert opens and resolves by itself.',
+    rules: 'Active rules',
+    autoCheck: 'Open a check',
+    autoCheckHint:
+      'A new alert of these rules opens a check on the computer, unless it already has one.',
+    rebootDays: 'Restart pending for more than',
+    rebootHint: 'environment variable: {days} days',
+    unencryptedScope: 'System volume not encrypted: computers covered',
+    scopeLaptops: 'Laptops and tablets only',
+    scopeAll: 'All computers',
+    forbidden: 'Forbidden software',
+    forbiddenHint:
+      'Part of the program name, two characters at least (Enter to add) · case-insensitive',
   },
   fleet: {
     title: 'Fleet monitoring',
@@ -511,6 +546,7 @@ const en: Translation<typeof fr> = {
     cards: {
       maintenance: 'Maintenance',
       usage: 'Usage',
+      alerts: 'Alerts',
       fleet: 'Fleet thresholds',
       schedule: 'E-mail schedule',
       email: 'Sending e-mails',

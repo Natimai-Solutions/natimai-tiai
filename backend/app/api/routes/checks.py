@@ -595,6 +595,9 @@ async def update_check(
         row.assigned_to_id = fields["assigned_to_id"]
     if "instructions" in fields:
         row.instructions = _clean(fields["instructions"])
+        # Typed by someone now: no longer the server's coded text.
+        row.instructions_code = None
+        row.instructions_params = None
     row.updated_at = utcnow()
     session.add(row)
     if new_assignee is not None and new_assignee.id != current.id:

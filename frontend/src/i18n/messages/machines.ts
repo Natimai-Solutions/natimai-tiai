@@ -159,6 +159,8 @@ const fr = {
     ram: 'Mémoire {op} {gb} Gio',
     software: 'Postes portant un logiciel',
     aging: 'Matériel à renouveler',
+    alert: 'Alerte : {rule}',
+    alertAny: 'En alerte',
   },
   facets: {
     location: 'Emplacement',
@@ -436,6 +438,8 @@ const en: Translation<typeof fr> = {
     ram: 'Memory {op} {gb} GiB',
     software: 'Computers with a given program',
     aging: 'Hardware due for renewal',
+    alert: 'Alert: {rule}',
+    alertAny: 'With an alert',
   },
   facets: {
     location: 'Location',

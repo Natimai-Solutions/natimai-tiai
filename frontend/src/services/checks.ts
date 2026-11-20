@@ -59,6 +59,10 @@ export interface Check {
    * older server, null on a note typed by someone.
    */
   closing_note_code?: string | null;
+  /** Set when the server opened the request for an alert (« alert.<rule> »):
+   * the console words the instructions (`checkInstructionsText`). */
+  instructions_code?: string | null;
+  instructions_params?: Record<string, unknown> | null;
   /** Filled on the task lists, where no fiche is open. */
   machine: CheckMachineRef | null;
 }
