@@ -282,6 +282,8 @@
       </q-card-actions>
     </q-card>
 
+    <SettingsDirectoryCard />
+
     <!-- Reports (C4): the form a label's QR code opens without an account.
          Saved as it is switched. -->
     <q-card flat bordered style="max-width: 640px" class="q-mb-md">
@@ -967,6 +969,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import { useQuasar } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
+import SettingsDirectoryCard from 'src/components/settings/SettingsDirectoryCard.vue';
 import { t } from 'src/i18n';
 import { rememberFleetThresholds } from 'src/composables/useFleetThresholds';
 import { formSnapshot } from 'src/utils/formSnapshot';

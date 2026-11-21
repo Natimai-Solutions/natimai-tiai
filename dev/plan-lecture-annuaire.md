@@ -1,7 +1,9 @@
 # Lecture de l'annuaire par le serveur — plan de travail
 
-> **Statut : cadré, non codé** (rédigé le 2026-11-16, décisions du 2026-11-18
-> au §9). Répond aux constats S19 et S20 de l'audit 2026-11, acceptés en limite
+> **Statut : mode `relay` livré avec C5** (L1 pour le modèle, L2, L3 ; le
+> 2026-11-21, §10). Restent le mode `ldap` (client LDAP du serveur) et L4
+> (relais Wake-on-LAN vérifiés), côté serveur seulement. Rédigé le 2026-11-16,
+> décisions du 2026-11-18 au §9. Répond aux constats S19 et S20 de l'audit 2026-11, acceptés en limite
 > au §6.4 de `plan-audit-2026-11.md` (« Emplacement et annuaire déclaratifs »).
 >
 > Objectif : que l'emplacement d'un poste, son OU et l'attribut *Emplacement*
@@ -302,3 +304,46 @@ ailleurs, et L4 dépend de L3 pour ce cas.
    perdre ses réveils pour autant. Le risque qui reste est celui de S19 : un
    poste forgé apprend l'adresse MAC de la cible et ne la réveille pas.
    `WOL_RELAY_VERIFIED_ONLY=true` permet de les écarter.
+
+## 10. Livré le 2026-11-21 (mode `relay`, avec C5)
+
+Livré avec la version d'agent de C5, comme le demandait
+`plan-evolutions-itil.md` §7, pour ne redéployer qu'une fois.
+
+- **Modèle** (`0053_directory`) : `directory_domains` (clé : SID ; nom DNS et
+  **nom NetBIOS**, ajouté au plan : c'est ce que les agents déclarent comme
+  domaine, `NetGetJoinInformation`, donc ce par quoi un poste est rattaché à
+  un domaine), `directory_records` (clé : lecteur × `objectGUID`, pour
+  comparer deux lecteurs), et sur `machines` l'objet rapproché, le statut, la
+  lecture (`dir_*`) et la désignation.
+- **Lecteurs** : désignation et retrait depuis la fiche (onglet Identité),
+  journalisés ; la désignation tombe au ré-enrôlement, à la révocation du
+  jeton ou au passage en « Identité à confirmer » (vérifié par le worker, et
+  à l'enrôlement).
+- **Commande `directory_read`** : mise en file par la tâche `sync_directory`
+  du worker (une à la fois par lecteur, toutes les `DIRECTORY_SYNC_MINUTES`),
+  refusée par `POST /commands` et par les planifications. Les noms à lire
+  sont calculés à la remise, pas stockés. La lecture revient sur
+  `POST /agent/directory/{commande}`, puis le résultat de la commande comme
+  pour toute autre.
+- **Agent** : PowerShell `System.DirectoryServices` (ce qu'est
+  `[adsisearcher]`), plutôt qu'ADSI par COM comme pour l'attribut `location` :
+  une recherche paginée de quelques milliers d'objets s'écrit en quelques
+  lignes et passe par le même lanceur que Windows Update. Filtres par lots de
+  200 noms, noms limités à `[A-Za-z0-9-]` avant d'entrer dans un filtre LDAP,
+  5 minutes au plus. **À valider sur un domaine réel**, comme le bind ADSI de J3.
+- **Comparaison de deux lecteurs** : un désaccord sur un seul objet gèle
+  tout le domaine (pas seulement l'objet), un lecteur menteur pouvant choisir
+  ses objets.
+- **Salles** : en mode `relay`, la clé d'une salle est `SID|DN de l'OU` (ou
+  `SID|emplacement`), hachée au-delà de 500 caractères ; une salle de
+  l'ancienne clé est reprise à la première lecture. Le heartbeat ne range plus
+  rien d'après la déclaration de l'agent : il ne fait que réévaluer le statut.
+- **Déplacements en masse** : retenus au-delà de `DIRECTORY_CONFIRM_MOVES`,
+  appliqués ou écartés depuis Paramètres → Annuaire. Écarter ne les annule
+  que jusqu'à la lecture suivante, qui les retient de nouveau si l'annuaire
+  le dit toujours.
+- **Non fait** : mode `ldap` et « Tester la connexion » (L1, serveur seul),
+  relais Wake-on-LAN vérifiés et adresse source gardée par poste (L4, serveur
+  seul), proposition de révocation du jeton en un clic depuis le filtre
+  « périmé » (le filtre existe, la révocation reste sur la fiche).

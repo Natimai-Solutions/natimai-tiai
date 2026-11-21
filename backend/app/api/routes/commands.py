@@ -91,6 +91,8 @@ class CreateCommands(BaseModel):
         """
         if value == CommandType.WAKE_ON_LAN:
             raise ValueError("wake_on_lan is not queued here: use POST /machines/wake")
+        if value == CommandType.DIRECTORY_READ:
+            raise ValueError("directory_read is queued by the server alone")
         return value
 
     def target(self) -> Target:

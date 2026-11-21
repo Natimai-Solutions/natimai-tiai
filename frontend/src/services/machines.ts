@@ -47,6 +47,9 @@ export interface Machine {
   check_open: boolean;
   check_assigned_to: string | null;
   /** The compliance summary the worker keeps (C5): « 7 sur 9 ». */
+  /** What the directory read says of the agent's word: verified, mismatch,
+   * unknown, stale; null when not read. */
+  directory_status?: string | null;
   compliance_passed?: number | null;
   compliance_total?: number | null;
   /**
@@ -266,6 +269,13 @@ export interface MachineDetail extends Machine {
   local_admins?: LocalAdmin[] | null;
   winget_reported_at?: string | null;
   winget_packages?: WingetPackage[];
+  /** The directory as a reader read it (plan-lecture-annuaire.md). */
+  dir_distinguished_name?: string | null;
+  dir_ou?: string | null;
+  dir_location?: string | null;
+  directory_reader?: boolean;
+  directory_reader_since?: string | null;
+  directory_mode?: 'off' | 'relay';
   /** The window `usage_hours` covers on the fiche: the console's setting. */
   usage_days: number;
   /**
@@ -499,6 +509,7 @@ export interface ListMachinesParams {
   compliance?: string;
   compliance_check?: string;
   winget_outdated?: string;
+  directory_status?: string;
   /** true: the retired postes left out (the dashboard's links). */
   in_parc?: boolean;
   /**

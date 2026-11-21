@@ -87,6 +87,7 @@ const fr = {
     net_config: { label: 'Configuration réseau (ipconfig)' },
     package_install: { label: 'Installation de logiciel' },
     package_uninstall: { label: 'Désinstallation de logiciel' },
+    directory_read: { label: "Lecture de l'annuaire" },
   },
   rowLabel: '{label} — {package}',
   status: {
@@ -245,6 +246,17 @@ const fr = {
       scan_without_software:
         '{disks}, {volumes}, {nics}, inventaire logiciel désactivé sur ce poste.',
       unavailable: 'inventaire indisponible sur cette plateforme',
+    },
+    directory: {
+      not_reader: "Lecture d'annuaire annulée : ce poste n'est plus lecteur d'annuaire",
+      read: {
+        done: '{objects} objet(s) lu(s) sur {asked} demandé(s) dans le domaine {domain}.',
+        no_names: "aucun nom de poste à lire dans l'annuaire",
+        unsupported: "lecture de l'annuaire indisponible sur cette plateforme",
+        timeout: "l'annuaire n'a pas répondu en {budget}",
+        failed: "lecture de l'annuaire : {detail}",
+        refused: 'lecture refusée par le serveur : {detail}',
+      },
     },
     defender: {
       quick_scan: {
@@ -569,6 +581,7 @@ const en: Translation<typeof fr> = {
     net_config: { label: 'Network configuration (ipconfig)' },
     package_install: { label: 'Software installation' },
     package_uninstall: { label: 'Software uninstallation' },
+    directory_read: { label: 'Directory reading' },
   },
   rowLabel: '{label} — {package}',
   status: {
@@ -722,6 +735,17 @@ const en: Translation<typeof fr> = {
       scan_without_software:
         '{disks}, {volumes}, {nics}, software inventory switched off on this computer.',
       unavailable: 'inventory unavailable on this platform',
+    },
+    directory: {
+      not_reader: 'Directory reading cancelled: this computer is no longer a directory reader',
+      read: {
+        done: '{objects} object(s) read out of {asked} asked in the domain {domain}.',
+        no_names: 'no computer name to read in the directory',
+        unsupported: 'directory reading unavailable on this platform',
+        timeout: 'the directory did not answer within {budget}',
+        failed: 'directory reading: {detail}',
+        refused: 'reading refused by the server: {detail}',
+      },
     },
     defender: {
       quick_scan: {

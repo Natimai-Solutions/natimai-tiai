@@ -122,6 +122,10 @@ gère naturellement les postes éteints.
   ont leur onglet sur la page Logiciels, avec la part des postes à jour. Les
   administrateurs locaux et winget ne sont relevés que si l'agent y est
   autorisé (désactivés par défaut).
+- **Annuaire vérifié** — en option, des postes désignés lisent les objets
+  ordinateurs de leur domaine avec leur compte machine ; les salles suivent
+  cette lecture et non plus la déclaration des agents, et un poste qui déclare
+  autre chose que l'annuaire est signalé.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
@@ -222,6 +226,7 @@ l'exécution est figée dans le binaire de l'agent.
 | Planifications (fenêtres, réveil et extinction, déploiement par étapes) | 🟢 Livré |
 | Signalement par l'utilisateur (QR sans compte, file de tri), priorités des vérifications | 🟢 Livré |
 | Conformité des postes, mises à jour tierces (winget) | 🟢 Livré |
+| Lecture de l'annuaire par des postes désignés (salles vérifiées) | 🟢 Livré — mode `ldap` prévu |
 | Licences, second facteur, webhooks… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
 | Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 

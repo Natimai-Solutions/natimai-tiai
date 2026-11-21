@@ -237,6 +237,22 @@ async def refresh_compliance() -> int:
         return await compliance_crud.refresh(session, utcnow())
 
 
+async def sync_directory() -> int:
+    """Ask the directory readers for their reading every
+    ``DIRECTORY_SYNC_MINUTES``, drop the designations that fell, and mark
+    stale the postes of a domain no longer read (plan-lecture-annuaire)."""
+    from app.features.directory import crud as directory_crud
+
+    if not directory_crud.enabled():
+        return 0
+    async with AsyncSession(engine) as session:
+        now = utcnow()
+        queued = await directory_crud.queue_reads(session, now)
+        await directory_crud.mark_stale(session, now)
+        await session.commit()
+    return queued
+
+
 async def run_schedules() -> int:
     """Run the schedules come due, then carry the open runs a step further
     (« éteindre ensuite », rings) — ``features.schedule.runner``."""
@@ -493,6 +509,7 @@ def build_jobs(
         # and the rules read what the heartbeats and inventories wrote.
         Job("evaluate_alerts", evaluate_alerts, now, every(300)),
         Job("refresh_compliance", refresh_compliance, now, every(600)),
+        Job("sync_directory", sync_directory, now, every(60)),
         # Every minute: a schedule set for 18:00 runs by 18:01.
         Job("run_schedules", run_schedules, now, every(60)),
         Job(

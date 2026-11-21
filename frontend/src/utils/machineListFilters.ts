@@ -1,6 +1,7 @@
 import type { LocationQuery } from 'vue-router';
 import { ASSET_STATUSES, assetStatusLabel } from 'src/services/assets';
 import { alertRuleLabel, isAlertRule } from 'src/services/alerts';
+import { isDirectoryStatus } from 'src/services/directory';
 import {
   COMPLIANCE_STATES,
   complianceCheckLabel,
@@ -162,6 +163,8 @@ export interface MachineFilters {
   /** Postes winget would upgrade a program on (its winget id); from the
    * « Mises à jour tierces » view. */
   wingetOutdated: string | null;
+  /** The directory's verdict (plan-lecture-annuaire); from Paramètres. */
+  directoryStatus: string | null;
   /**
    * Postes in the parc only, the retired ones left out: the dashboard's
    * links carry it while the parc has retired postes, as its figures leave
@@ -232,6 +235,7 @@ export function emptyMachineFilters(): MachineFilters {
     compliance: null,
     complianceCheck: null,
     wingetOutdated: null,
+    directoryStatus: null,
     inParc: null,
   };
 }
@@ -470,6 +474,10 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
       return v && isComplianceCheck(v) ? v : null;
     })(),
     wingetOutdated: wingetQuery(q.winget_outdated),
+    directoryStatus: (() => {
+      const v = queryValue(q.directory_status);
+      return v && isDirectoryStatus(v) ? v : null;
+    })(),
     inParc: queryValue(q.in_parc) === 'true' ? 'true' : null,
   };
 }
@@ -525,6 +533,7 @@ export function machineFiltersToQuery(f: MachineFilters): Record<string, string>
   if (f.compliance) query.compliance = f.compliance;
   if (f.complianceCheck) query.compliance_check = f.complianceCheck;
   if (f.wingetOutdated) query.winget_outdated = f.wingetOutdated;
+  if (f.directoryStatus) query.directory_status = f.directoryStatus;
   if (f.inParc) query.in_parc = 'true';
   return query;
 }
@@ -585,6 +594,7 @@ export function machineFiltersToParams(f: MachineFilters): ListMachinesParams {
   if (f.compliance) params.compliance = f.compliance;
   if (f.complianceCheck) params.compliance_check = f.complianceCheck;
   if (f.wingetOutdated) params.winget_outdated = f.wingetOutdated;
+  if (f.directoryStatus) params.directory_status = f.directoryStatus;
   if (f.inParc) params.in_parc = true;
   // The console sets these five from dropdowns fed by the fleet's exact
   // values, with their counts: matched exactly, « OptiPlex 7010 (12) » lists
@@ -635,6 +645,7 @@ export type MachineFilterKey =
   | 'compliance'
   | 'complianceCheck'
   | 'wingetOutdated'
+  | 'directoryStatus'
   | 'inParc';
 
 export interface MachineFilterChip {
@@ -741,6 +752,12 @@ export function machineFilterChips(
       label: t('compliance.chips.winget', { id: f.wingetOutdated }),
     });
   }
+  if (f.directoryStatus) {
+    chips.push({
+      key: 'directoryStatus',
+      label: t('directory.chip', { status: t(`directory.status.${f.directoryStatus}`) }),
+    });
+  }
   if (f.inParc) chips.push({ key: 'inParc', label: t('machines.chips.inParc') });
   return chips;
 }
@@ -821,6 +838,7 @@ const FIELDS_BY_KEY: Record<
   compliance: 'compliance',
   complianceCheck: 'complianceCheck',
   wingetOutdated: 'wingetOutdated',
+  directoryStatus: 'directoryStatus',
   inParc: 'inParc',
 };
 

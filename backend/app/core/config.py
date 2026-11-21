@@ -522,6 +522,22 @@ class Settings(BaseSettings):
     # settings editable — only the membership is the directory's.
     ROOM_SOURCE: Literal["manual", "ad_ou", "ad_location"] = "manual"
 
+    # --- Reading the directory (dev/plan-lecture-annuaire.md) ---
+    # ``off``: the DN, OU and location the agents report are taken as they
+    # are. ``relay``: postes designated in the console (« lecteurs
+    # d'annuaire ») read the computer objects of their domain through ADSI,
+    # and the server files and checks the postes by that reading instead.
+    # (``ldap``, the server binding to a DC itself, is planned and refused
+    # until it exists.)
+    DIRECTORY_VERIFY: Literal["off", "relay"] = "off"
+    # How often each reader is asked for a full reading, in minutes.
+    DIRECTORY_SYNC_MINUTES: int = Field(default=60, ge=5, le=24 * 60)
+    # Past this, a reading not renewed is « périmée » and verifies nothing.
+    DIRECTORY_STALE_HOURS: int = Field(default=72, ge=1, le=24 * 30)
+    # A reading that would move more postes than this at once waits for an
+    # administrator's confirmation.
+    DIRECTORY_CONFIRM_MOVES: int = Field(default=20, ge=1, le=100_000)
+
     # --- Wake-on-LAN ---
     # The magic packet is emitted by the server, not by an agent: the machine it
     # targets is off, and the whole point is to reach it anyway. What it needs is

@@ -8,6 +8,7 @@ import commands from './commands';
 import common from './common';
 import compliance from './compliance';
 import dashboard from './dashboard';
+import directory from './directory';
 import errors from './errors';
 import exports from './exports';
 import format from './format';
@@ -61,6 +62,7 @@ export const fr = {
   layout: layout.fr,
   auth: auth.fr,
   dashboard: dashboard.fr,
+  directory: directory.fr,
   software: software.fr,
   format: format.fr,
   packagePages: packagePages.fr,
@@ -94,6 +96,7 @@ export const en = {
   layout: layout.en,
   auth: auth.en,
   dashboard: dashboard.en,
+  directory: directory.en,
   software: software.en,
   format: format.en,
   packagePages: packagePages.en,

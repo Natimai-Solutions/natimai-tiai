@@ -46,6 +46,7 @@ def cases() -> list[dict[str, Any]]:
         texts.unanswered(6),
         texts.unanswered(48),
         texts.merged(),
+        texts.directory_not_reader(),
         texts.package_deleted(),
         texts.package_retired_after_queue(),
         texts.package_changed_after_queue(),

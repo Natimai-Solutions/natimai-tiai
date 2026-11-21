@@ -418,6 +418,47 @@ type Command struct {
 	// may run is decided here, from trust anchors the GPO set — never from
 	// anything in this struct alone (internal/deploy).
 	Package *PackageDelivery `json:"package,omitempty"`
+	// Directory is the third, on directory_read only: the computer names a
+	// designated reader is to read in its domain (dev/plan-lecture-annuaire.md).
+	Directory *DirectoryRequest `json:"directory,omitempty"`
+}
+
+// DirectoryRequest names the computers a reader reads.
+type DirectoryRequest struct {
+	Names []string `json:"names"`
+}
+
+// DirectoryReading is what a reader read of its own domain, posted to
+// /api/v1/agent/directory/{command id} before the command's result.
+type DirectoryReading struct {
+	Domain  DirectoryDomain   `json:"domain"`
+	Objects []DirectoryObject `json:"objects"`
+	Subnets []DirectorySubnet `json:"subnets"`
+}
+
+// DirectoryDomain is the reader's domain: its DNS name, its NetBIOS name
+// (what the agents declare as their domain) and its SID (what identifies it:
+// two schools may both be « ecole.local »).
+type DirectoryDomain struct {
+	Name        string `json:"name"`
+	NetBIOSName string `json:"netbios_name"`
+	SID         string `json:"sid"`
+}
+
+// DirectoryObject is one computer object as the directory holds it.
+type DirectoryObject struct {
+	ObjectGUID        string `json:"object_guid"`
+	SAMAccountName    string `json:"sam_account_name"`
+	DNSHostName       string `json:"dns_host_name,omitempty"`
+	DistinguishedName string `json:"distinguished_name,omitempty"`
+	Location          string `json:"location,omitempty"`
+	Disabled          bool   `json:"disabled"`
+}
+
+// DirectorySubnet is one AD subnet and the site it belongs to.
+type DirectorySubnet struct {
+	Subnet string `json:"subnet"`
+	Site   string `json:"site"`
 }
 
 // PackageDelivery is a package as the server hands it over. Manifest,

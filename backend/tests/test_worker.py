@@ -118,6 +118,7 @@ def test_build_jobs_registers_the_whole_schedule():
         "close_unanswered_commands",
         "evaluate_alerts",
         "refresh_compliance",
+        "sync_directory",
         "run_schedules",
         "daily_digest",
         "maintenance_reminders",

@@ -260,6 +260,46 @@
   "message": "inventaire indisponible sur cette plateforme"
  },
  {
+  "code": "directory.read.done",
+  "params": {
+   "asked": 415,
+   "domain": "lycee.local",
+   "objects": 412
+  },
+  "message": "412 objet(s) lu(s) sur 415 demandé(s) dans le domaine lycee.local."
+ },
+ {
+  "code": "directory.read.no_names",
+  "params": {},
+  "message": "aucun nom de poste à lire dans l'annuaire"
+ },
+ {
+  "code": "directory.read.unsupported",
+  "params": {},
+  "message": "lecture de l'annuaire indisponible sur cette plateforme"
+ },
+ {
+  "code": "directory.read.timeout",
+  "params": {
+   "budget": "5 min"
+  },
+  "message": "l'annuaire n'a pas répondu en 5 min"
+ },
+ {
+  "code": "directory.read.failed",
+  "params": {
+   "detail": "Le serveur n'est pas opérationnel."
+  },
+  "message": "lecture de l'annuaire : Le serveur n'est pas opérationnel."
+ },
+ {
+  "code": "directory.read.refused",
+  "params": {
+   "detail": "409 directory.reading_refused"
+  },
+  "message": "lecture refusée par le serveur : 409 directory.reading_refused"
+ },
+ {
   "code": "defender.quick_scan.timeout",
   "params": {
    "budget": "1 h"

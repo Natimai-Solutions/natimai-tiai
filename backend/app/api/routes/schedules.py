@@ -150,6 +150,8 @@ class ScheduleIn(BaseModel):
             raise ValueError("package_id only goes with package_install/uninstall")
         if self.command_type in PACKAGE_COMMAND_TYPES and self.package_id is None:
             raise ValueError("a deployment names its package")
+        if self.command_type == CommandType.DIRECTORY_READ:
+            raise ValueError("directory_read is queued by the server alone")
         if self.command_type == CommandType.WAKE_ON_LAN and (
             self.wake_first or self.shutdown_after or self.rings
         ):

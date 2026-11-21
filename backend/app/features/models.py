@@ -11,6 +11,7 @@ from app.features.auth_session.models import AuthSession  # noqa: F401
 from app.features.check.models import MachineCheck  # noqa: F401
 from app.features.command.models import Command  # noqa: F401
 from app.features.counter.models import SharedCounter  # noqa: F401
+from app.features.directory.models import DirectoryDomain, DirectoryRecord  # noqa: F401
 from app.features.intervention.models import Intervention  # noqa: F401
 from app.features.inventory.models import (  # noqa: F401
     Disk,

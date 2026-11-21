@@ -136,6 +136,9 @@ class MachineOut(BaseModel):
     # because it is what the list is filtered by to see what is waiting.
     check_open: bool = False
     check_assigned_to: str | None = None
+    # What the directory read says of the agent's word
+    # (plan-lecture-annuaire): verified / mismatch / unknown / stale.
+    directory_status: str | None = None
     # The compliance summary the worker keeps (C5): « 7 sur 9 ».
     compliance_passed: int | None = None
     compliance_total: int | None = None
@@ -478,6 +481,15 @@ class MachineDetailOut(MachineOut):
     local_admins: list[dict[str, Any]] | None = None
     winget_reported_at: datetime | None = None
     winget_packages: list[WingetPackageOut] = []
+    # The directory, as a reader read it, beside what the agent declares.
+    dir_distinguished_name: str | None = None
+    dir_ou: str | None = None
+    dir_location: str | None = None
+    directory_domain_sid: str | None = None
+    directory_reader: bool = False
+    directory_reader_since: datetime | None = None
+    # DIRECTORY_VERIFY, for the fiche to offer the designation or not.
+    directory_mode: str = "off"
 
     # The window ``usage_hours`` covers on the fiche: the console's setting.
     usage_days: int | None = None
@@ -860,6 +872,10 @@ class MachineFilters:
     compliance_check: Check | None = None
     # Postes winget would upgrade this program on (a winget id, C5).
     winget_outdated: str | None = None
+    # The directory's verdict (plan-lecture-annuaire); « none »: not read.
+    directory_status: (
+        Literal["verified", "mismatch", "unknown", "stale", "none"] | None
+    ) = None
     # Postes still in the parc (true) or retired (false) — the dashboard's
     # cards open their lists with it, as their figures leave retired postes
     # out.
@@ -944,6 +960,8 @@ def machine_filters(
     compliance: Literal["failing", "passing", "unknown"] | None = None,
     compliance_check: Check | None = None,
     winget_outdated: str | None = Query(None, max_length=200),
+    directory_status: Literal["verified", "mismatch", "unknown", "stale", "none"]
+    | None = None,
     in_parc: bool | None = None,
     exact: str | None = Query(
         None,
@@ -996,6 +1014,7 @@ def machine_filters(
         compliance=compliance,
         compliance_check=compliance_check,
         winget_outdated=winget_outdated,
+        directory_status=directory_status,
         in_parc=in_parc,
         exact=_exact_facets(exact),
         scope=scope,
@@ -1095,6 +1114,12 @@ def _filtered_machines(
         stmt = stmt.where(compliance_crud.filter_clause(filters.compliance))
     if filters.compliance_check is not None:
         stmt = stmt.where(compliance_crud.check_clause(filters.compliance_check))
+    if filters.directory_status is not None:
+        stmt = stmt.where(
+            col(Machine.directory_status).is_(None)
+            if filters.directory_status == "none"
+            else col(Machine.directory_status) == filters.directory_status
+        )
     if filters.winget_outdated is not None:
         stmt = stmt.where(
             exists().where(
@@ -2373,6 +2398,7 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
         .order_by(func.lower(col(WingetPackage.name)), col(WingetPackage.winget_id))
     )
     detail.winget_packages = [WingetPackageOut.model_validate(p) for p in winget.all()]
+    detail.directory_mode = settings.DIRECTORY_VERIFY
     return detail
 
 

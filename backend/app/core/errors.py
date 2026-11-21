@@ -106,6 +106,12 @@ class ErrorCode(enum.StrEnum):
     REPORT_NOT_FOUND = "report.not_found"
     REPORT_ALREADY_HANDLED = "report.already_handled"
     REPORT_NO_MACHINE = "report.no_machine"
+    # Reading the directory (plan-lecture-annuaire.md).
+    DIRECTORY_READING_REFUSED = "directory.reading_refused"
+    DIRECTORY_OFF = "directory.off"
+    DIRECTORY_NOT_ELIGIBLE = "directory.not_eligible"
+    DIRECTORY_DOMAIN_NOT_FOUND = "directory.domain_not_found"
+    DIRECTORY_NOTHING_PENDING = "directory.nothing_pending"
     REPORT_NO_OPEN_CHECK = "report.no_open_check"
     SCHEDULE_NOT_FOUND = "schedule.not_found"
     # A schedule that would run inside a forbidden window.

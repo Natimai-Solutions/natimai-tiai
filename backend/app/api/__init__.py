@@ -10,6 +10,7 @@ from app.api.routes.checks import assignable_router as checks_assignable_router
 from app.api.routes.checks import machine_router as machine_checks_router
 from app.api.routes.checks import router as checks_router
 from app.api.routes.commands import router as commands_router
+from app.api.routes.directory import router as directory_router
 from app.api.routes.groups import router as groups_router
 from app.api.routes.interventions import machine_router as machine_interventions_router
 from app.api.routes.interventions import router as interventions_router
@@ -37,6 +38,7 @@ api_router.include_router(alerts_router)
 api_router.include_router(assets_router)
 api_router.include_router(schedules_router)
 api_router.include_router(reports_router)
+api_router.include_router(directory_router)
 api_router.include_router(public_reports_router)
 api_router.include_router(machine_assets_router)
 api_router.include_router(buildings_router)

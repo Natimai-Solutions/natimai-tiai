@@ -34,7 +34,10 @@ export type CommandType =
   // Software deployment: the two types that carry a package. Not in the
   // generic menu — they need a package chosen — but listed in histories.
   | 'package_install'
-  | 'package_uninstall';
+  | 'package_uninstall'
+  // Reading the directory: queued by the server alone on a designated
+  // reader, never offered in a menu — listed in that poste's history.
+  | 'directory_read';
 
 export type CommandStatus =
   'pending' | 'delivered' | 'running' | 'succeeded' | 'failed' | 'expired';

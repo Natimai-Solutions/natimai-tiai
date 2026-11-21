@@ -340,3 +340,4 @@ Au-delà de N postes, une commande à risque attend l'accord d'un second compte 
 - **Taux par logiciel** : `GET /software/updates` et l'onglet « Mises à jour tierces » de la page Logiciels. Pour chaque identifiant winget : postes qui l'ont, postes à mettre à jour (lien vers la liste, filtre `winget_outdated`), dernière version proposée, part des postes à jour. Le taux ne porte que sur les postes qui remontent leurs paquets winget, et la page dit combien ils sont.
 - **Fusion** : les paquets winget du doublon disparaissent avec lui, comme le reste de l'inventaire ; le poste gardé les remonte à son cycle suivant.
 - **Non fait** : déployer une mise à jour depuis l'onglet (il faut toujours créer un paquet winget) ; historique de la conformité dans le temps (C9).
+- **Livré avec C5** (§7) : la lecture de l'annuaire en mode relais, seule autre évolution d'agent en attente — voir `plan-lecture-annuaire.md` §10.

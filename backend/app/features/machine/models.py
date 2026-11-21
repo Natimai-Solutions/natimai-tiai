@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Column, ForeignKey, Index
+from sqlalchemy import Column, ForeignKey, Index, false
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -75,6 +75,27 @@ class Machine(SQLModel, table=True):
     ad_ou: str | None = None
     ad_ou_dn: str | None = None
     ad_location: str | None = None
+    # --- What the directory itself says (``features/directory``,
+    # ``DIRECTORY_VERIFY``): the computer object matched to this poste, the
+    # verdict on the agent's word, and the reading the rooms are filed by in
+    # that mode. NULL = not read.
+    directory_object_guid: str | None = Field(default=None, max_length=64)
+    # verified / mismatch / unknown / stale.
+    directory_status: str | None = Field(default=None, max_length=16)
+    directory_domain_sid: str | None = Field(default=None, max_length=100)
+    dir_distinguished_name: str | None = None
+    dir_ou: str | None = None
+    dir_ou_dn: str | None = None
+    dir_location: str | None = None
+    # Designated in the console to read its domain for the others (mode
+    # ``relay``). Falls by itself when the poste is re-enrolled, its token
+    # revoked or its identity to be confirmed (``directory.crud``).
+    # A server default too: a row written by raw SQL (a data migration) is
+    # not a reader.
+    directory_reader: bool = Field(
+        default=False, sa_column_kwargs={"server_default": false()}
+    )
+    directory_reader_since: datetime | None = utc_field(default=None, nullable=True)
     # Maintenance: the poste's own cycle and owner, overriding its room's and
     # the parc's (``maintenance/policy.py``); NULL = inherit, 0 = excluded.
     # ``last_maintenance_at`` is denormalised from the journal — it is what

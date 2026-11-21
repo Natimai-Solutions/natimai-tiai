@@ -1062,6 +1062,14 @@ func (a *Agent) resolve(cmd models.Command) (run func(context.Context) (msg.Mess
 		return func(ctx context.Context) (msg.Message, error) {
 			return a.runPackage(ctx, cmdType, pkg)
 		}, true, true
+	case "directory_read":
+		// Only on a poste the console designated to read its domain for the
+		// others (dev/plan-lecture-annuaire.md): the server checks that, the
+		// agent reads what it is asked, as its machine account, read-only.
+		id, request := cmd.ID, cmd.Directory
+		return func(ctx context.Context) (msg.Message, error) {
+			return a.runDirectoryRead(ctx, id, request)
+		}, false, true
 	case "wake_on_lan":
 		// Handed to *this* poste as a relay for another one that is off: the
 		// server is not on the target's segment, this poste is. The MAC rides

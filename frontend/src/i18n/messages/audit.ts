@@ -81,6 +81,17 @@ const fr = {
       close: 'Signalement clos',
       reject: 'Signalement rejeté',
     },
+    directory: {
+      reader_designate: 'Poste désigné lecteur d’annuaire',
+      reader_revoke: 'Désignation de lecteur d’annuaire retirée',
+      reader_drop:
+        'Désignation de lecteur d’annuaire tombée (ré-enrôlement, jeton révoqué ou identité à confirmer)',
+      mismatch: 'Écart entre l’agent et l’annuaire',
+      disagreement: 'Désaccord entre lecteurs d’annuaire',
+      moves: 'Postes rangés d’après l’annuaire',
+      confirm_moves: 'Déplacements d’après l’annuaire confirmés',
+      discard_moves: 'Déplacements d’après l’annuaire écartés',
+    },
     building: {
       create: "Création d'un bâtiment",
       update: "Modification d'un bâtiment",
@@ -160,6 +171,7 @@ const fr = {
     asset: 'Actif',
     schedule: 'Planification',
     report: 'Signalement',
+    directory_domain: 'Domaine',
     settings: 'Paramètres',
   },
   /** Detail key → label, for the full view of an entry. */
@@ -347,6 +359,17 @@ const en: Translation<typeof fr> = {
       close: 'Report closed',
       reject: 'Report rejected',
     },
+    directory: {
+      reader_designate: 'Computer designated as directory reader',
+      reader_revoke: 'Directory reader designation removed',
+      reader_drop:
+        'Directory reader designation fell (re-enrolment, revoked token or identity to confirm)',
+      mismatch: 'Agent and directory disagree',
+      disagreement: 'Directory readers disagree',
+      moves: 'Computers filed by the directory',
+      confirm_moves: 'Moves from the directory confirmed',
+      discard_moves: 'Moves from the directory discarded',
+    },
     building: {
       create: 'Building created',
       update: 'Building edited',
@@ -425,6 +448,7 @@ const en: Translation<typeof fr> = {
     asset: 'Asset',
     schedule: 'Schedule',
     report: 'Report',
+    directory_domain: 'Domain',
     settings: 'Settings',
   },
   detailKeys: {

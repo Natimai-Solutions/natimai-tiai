@@ -95,6 +95,14 @@ describe('auditActionLabel', () => {
       'report.attach',
       'report.close',
       'report.reject',
+      'directory.reader_designate',
+      'directory.reader_revoke',
+      'directory.reader_drop',
+      'directory.mismatch',
+      'directory.disagreement',
+      'directory.moves',
+      'directory.confirm_moves',
+      'directory.discard_moves',
     ];
     expect(Object.keys(AUDIT_ACTION_LABELS).sort()).toEqual([...slugs].sort());
   });

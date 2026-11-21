@@ -356,6 +356,10 @@ Il n'est jamais committé.
 | `REPORTS_ENABLED` | `false` | Le QR de l'étiquette d'un poste ouvre, à qui le scanne **sans compte**, un formulaire de signalement (catégorie, texte, contact facultatif). Désactivé par défaut : c'est le premier point d'entrée non authentifié qui ne soit pas l'agent ; borné par adresse et par étiquette, il ne renvoie rien sur le poste. Joignable seulement depuis le réseau de l'établissement si la console l'est. Le contact laissé est une donnée personnelle, à porter au registre des traitements. **Valeur initiale seulement** : modifiable dans Paramètres |
 | `REPORT_RETENTION_DAYS` | `90` | Conservation d'un signalement traité — et du contact qu'il porte — avant sa purge du matin. Un signalement à trier n'est jamais purgé |
 | `SCHEDULE_RUN_RETENTION_DAYS` | `180` | Conservation de l'historique des exécutions de planifications, purgé chaque matin. Les commandes créées restent dans l'historique des postes |
+| `DIRECTORY_VERIFY` | `off` | `relay` : des postes désignés lisent l'annuaire de leur domaine avec leur compte machine, et le serveur range les salles et vérifie la déclaration des agents d'après cette lecture (voir « Lire l'annuaire au lieu de croire les agents »). `off` : la déclaration des agents est crue. `ldap` n'existe pas encore |
+| `DIRECTORY_SYNC_MINUTES` | `60` | Intervalle entre deux lectures demandées à chaque lecteur (5 à 1 440) |
+| `DIRECTORY_STALE_HOURS` | `72` | Au-delà, un domaine non relu ne vérifie plus rien : ses postes passent « périmés » |
+| `DIRECTORY_CONFIRM_MOVES` | `20` | Une lecture qui déplacerait plus de postes que ce seuil attend la confirmation d'un administrateur (Paramètres → Annuaire) |
 | `ROOM_SOURCE` | `manual` | Comment les postes sont rangés en salles. `manual` : depuis la console, à la main. `ad_ou` : par l'**unité d'organisation** qui contient l'objet ordinateur — l'agent lit son propre DN dans le registre, sans interroger l'annuaire — une salle par OU, nommée comme elle. `ad_location` : par l'attribut **Emplacement** de l'objet ordinateur (onglet Emplacement d'ADUC), que l'agent lit via ADSI. Dans les deux modes annuaire, le rattachement manuel est verrouillé ; les salles créées gardent nom, bâtiment et notes modifiables. Après un changement de ce réglage, « Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc d'un coup |
 | `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 
@@ -1746,6 +1750,53 @@ inventaire. Elle ne s'exécute pas d'un clic : la console calcule d'abord, sans
 rien écrire, combien de postes changeront de salle et combien de salles seront
 créées, et demande confirmation avant de lancer le reclassement (tracé dans le
 journal d'audit).
+
+**Lire l'annuaire au lieu de croire les agents** (`DIRECTORY_VERIFY=relay`).
+Par défaut, l'OU, le DN et l'emplacement qui rangent un poste sont ceux que son
+agent déclare : un poste forgé avec le secret du parc peut donc se ranger dans
+la salle d'un autre. En mode `relay`, des postes **désignés** dans la console
+(fiche du poste, onglet Identité, « Désigner comme lecteur d'annuaire » ; droit
+`settings:write`) lisent les objets ordinateurs de leur domaine, avec leur
+**compte machine** (aucun compte de service ni mot de passe à fournir), et le
+serveur range les salles d'après cette lecture.
+
+- **Qui désigner** : un serveur membre ou un poste d'administration toujours
+  allumé, jamais un poste élève. Un lecteur par domaine au moins ; deux, et leurs
+  lectures sont comparées (un désaccord gèle les déplacements du domaine et est
+  signalé dans Paramètres → Annuaire). La désignation tombe d'elle-même si le
+  poste est ré-enrôlé, si son jeton est révoqué ou s'il passe en « Identité à
+  confirmer ». Seuls les lecteurs ont besoin d'un agent récent.
+- **Ce que le lecteur lit** : toutes les `DIRECTORY_SYNC_MINUTES` (60 min par
+  défaut), le serveur lui envoie la commande « Lecture de l'annuaire » avec la
+  liste des noms des postes de son domaine ; le lecteur lit, en lecture seule
+  (`System.DirectoryServices` par PowerShell), `sAMAccountName`,
+  `dNSHostName`, `objectGUID`, `distinguishedName`, `location` et l'état
+  désactivé de chaque objet, plus l'identité du domaine (nom DNS, nom NetBIOS,
+  SID) et la table sous-réseaux → sites. Le serveur refuse une lecture d'un poste
+  non désigné ou d'un autre domaine que le sien. Le compte machine lit ces
+  attributs avec les droits par défaut d'Active Directory ; rien n'est à
+  déléguer.
+- **Ce qui change** : chaque poste reçoit un statut — **vérifié** (sa
+  déclaration est ce que dit l'annuaire), **écart** (il déclare autre chose :
+  signalé, pas bloquant ; un poste déplacé dans AD et pas encore redémarré est
+  dans ce cas), **inconnu** (aucun objet de ce nom ; il reste où il est et ne
+  crée pas de salle) ou **périmé** (objet désactivé ou supprimé, ou domaine non
+  relu depuis `DIRECTORY_STALE_HOURS`). Avec `ROOM_SOURCE=ad_ou` ou
+  `ad_location`, la salle suit la lecture ; sa clé porte désormais le SID du
+  domaine, pour que deux établissements aient chacun leur « Salle 101 », et les
+  salles existantes sont reprises à la première lecture. Une lecture qui
+  déplacerait plus de `DIRECTORY_CONFIRM_MOVES` postes attend une confirmation
+  dans Paramètres → Annuaire. La liste des postes se filtre par statut
+  (« Annuaire : écart » depuis Paramètres) et la fiche montre côte à côte ce que
+  l'agent déclare et ce que l'annuaire dit.
+- **Limite** : lire l'annuaire prouve ce qu'il dit d'un nom, pas que le poste
+  *est* ce nom. Un poste forgé qui prend le nom d'un poste réel pas encore
+  enrôlé est rangé à sa place ; un lecteur compromis ment pour tout son domaine.
+- **Dépannage** : le résultat de la commande « Lecture de l'annuaire » dans
+  l'historique du lecteur donne le nombre d'objets lus, ou l'erreur (contrôleur
+  de domaine injoignable, délai de 5 minutes dépassé, lecture refusée par le
+  serveur). Le mode `ldap` (le serveur interroge lui-même un contrôleur de
+  domaine) n'existe pas encore.
 
 **Vérifications et maintenance.** « Mes tâches » réunit, pour chaque compte, les
 vérifications qu'on lui a affectées et les salles et postes dont il est

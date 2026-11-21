@@ -2,6 +2,7 @@ import type { LocationQuery } from 'vue-router';
 import { ASSET_STATUSES } from 'src/services/assets';
 import { isAlertRule } from 'src/services/alerts';
 import { COMPLIANCE_STATES, isComplianceCheck } from 'src/services/compliance';
+import { isDirectoryStatus } from 'src/services/directory';
 import { t } from 'src/i18n';
 import type {
   ListMachinesParams,
@@ -226,6 +227,10 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   const complianceCheck = queryValue(q.compliance_check);
   if (complianceCheck && isComplianceCheck(complianceCheck)) {
     params.compliance_check = complianceCheck;
+  }
+  const directoryStatus = queryValue(q.directory_status);
+  if (directoryStatus && isDirectoryStatus(directoryStatus)) {
+    params.directory_status = directoryStatus;
   }
   const winget = queryValue(q.winget_outdated);
   if (winget && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(winget)) {

@@ -470,6 +470,7 @@
             <MachineNetworkCard :machine="machine" />
             <MachineUsageCard :machine="machine" />
             <MachineAssetCard v-if="auth.can('asset', 'read')" :machine-id="machine.id" />
+            <MachineDirectoryCard :machine="machine" @changed="load" />
           </div>
         </q-tab-panel>
 
@@ -580,6 +581,7 @@ import MachineAlertsCard from 'src/components/machine/MachineAlertsCard.vue';
 import MachineAssetCard from 'src/components/machine/MachineAssetCard.vue';
 import MachineWindows11Card from 'src/components/machine/MachineWindows11Card.vue';
 import MachineComplianceCard from 'src/components/machine/MachineComplianceCard.vue';
+import MachineDirectoryCard from 'src/components/machine/MachineDirectoryCard.vue';
 import MachineAntivirusCard from 'src/components/machine/MachineAntivirusCard.vue';
 import MachineCommandsCard from 'src/components/machine/MachineCommandsCard.vue';
 import MachineDefenderCard from 'src/components/machine/MachineDefenderCard.vue';

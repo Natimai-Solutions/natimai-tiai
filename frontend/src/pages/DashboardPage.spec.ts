@@ -292,7 +292,7 @@ describe('DashboardPage — alerts, Windows 11 and the retired postes (C1, C2)',
     expect(card.text()).toMatch(/Pare-feu actif.*3.*TPM 2\.0.*1/s);
     const targets = card
       .findAllComponents(QItem)
-      .map((i: { props: (name: string) => unknown }) => JSON.stringify(i.props('to') as unknown));
+      .map((i: { props: (name: string) => unknown }) => JSON.stringify(i.props('to')));
     expect(targets).toContain(
       JSON.stringify({ name: 'machines', query: { compliance_check: 'firewall' } }),
     );

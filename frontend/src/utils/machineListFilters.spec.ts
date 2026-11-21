@@ -56,6 +56,7 @@ function everything(): MachineFilters {
     compliance: 'failing',
     complianceCheck: 'firewall',
     wingetOutdated: 'Mozilla.Firefox',
+    directoryStatus: 'mismatch',
     inParc: 'true',
   };
 }
@@ -104,6 +105,7 @@ describe('machineFiltersToQuery / machineFiltersFromQuery', () => {
       compliance: 'failing',
       compliance_check: 'firewall',
       winget_outdated: 'Mozilla.Firefox',
+      directory_status: 'mismatch',
       in_parc: 'true',
     });
     expect(machineFiltersFromQuery(query)).toEqual(everything());
@@ -265,8 +267,10 @@ describe('machineFilterChips', () => {
       'compliance',
       'complianceCheck',
       'wingetOutdated',
+      'directoryStatus',
       'inParc',
     ]);
+    expect(chips.find((c) => c.key === 'directoryStatus')!.label).toBe('Annuaire : Écart');
     const label = (key: string) => chips.find((c) => c.key === key)!.label;
     expect(label('compliance')).toBe('Non conformes');
     expect(label('complianceCheck')).toBe('En échec : Pare-feu actif (3 profils)');
