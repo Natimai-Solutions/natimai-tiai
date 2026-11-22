@@ -20,7 +20,10 @@ jobs:
   backend:
     name: Backend (lint · types · tests · coverage)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Pytest seul prenait 27 min 24 s sur main au 18/11 (~1 650 tests) ; la
+    # suite en compte ~1 810 depuis C1 à C5 et l'annuaire. 45 min laissent la
+    # marge qu'il faut sans laisser tourner une suite bloquée une heure.
+    timeout-minutes: 45
     permissions:
       contents: read
       pull-requests: write # coverage comment on the PR
