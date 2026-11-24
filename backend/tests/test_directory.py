@@ -317,6 +317,18 @@ async def test_many_moves_wait_for_a_confirmation(
     assert domain["pending_count"] == 3
     assert {m["to_room"] for m in domain["pending_moves"]} == {"Salle B12"}
 
+    # A heartbeat carrying the poste's directory block does not apply a move
+    # that waits for the confirmation.
+    await _heartbeat(
+        client,
+        pcs[0]["token"],
+        inventory={
+            "hash": "h",
+            "directory": {"distinguished_name": f"CN=PC-0,{OU_DN}"},
+        },
+    )
+    assert (await _machine(db_session, pcs[0])).room_id is None
+
     resp = await client.post(f"/api/v1/directory/domains/{SID}/discard", headers=admin)
     assert resp.status_code == 204
     resp = await client.post(f"/api/v1/directory/domains/{SID}/confirm", headers=admin)
@@ -446,3 +458,29 @@ def test_parent_ou_matches_the_agent():
     assert key.startswith(f"{SID}|sha256:") and name == "B"
     assert legacy_key(key) is None
     assert legacy_key(f"{SID}|OU=B") == "OU=B"
+
+
+async def test_a_reading_never_answered_does_not_block_the_next(
+    client, db_session, monkeypatch, relay
+):
+    from app.core import worker
+    from app.features.command.models import Command, CommandType
+
+    admin = await _admin_headers(client, db_session)
+    reader = await _reader_with_command(client, db_session, admin)
+    command = await _deliver(client, db_session, monkeypatch, reader)
+    # Delivered a minute ago: still open, nothing more is asked.
+    assert await worker.sync_directory() == 0
+    # Delivered long ago and never answered (the agent was stopped): the
+    # reader is asked again at the next interval.
+    cmd = await db_session.get(Command, uuid.UUID(command["id"]))
+    await db_session.refresh(cmd)
+    cmd.created_at = datetime.now(UTC) - timedelta(hours=2)
+    cmd.delivered_at = datetime.now(UTC) - timedelta(hours=2)
+    db_session.add(cmd)
+    await db_session.commit()
+    assert await worker.sync_directory() == 1
+    rows = await db_session.exec(
+        select(Command).where(col(Command.type) == CommandType.DIRECTORY_READ)
+    )
+    assert len(rows.all()) == 2

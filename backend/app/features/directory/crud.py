@@ -148,10 +148,13 @@ async def queue_reads(session: AsyncSession, now: datetime) -> int:
             )
         ).first()
         if last is not None:
-            open_ = last.status in (
-                CommandStatus.PENDING,
-                CommandStatus.DELIVERED,
-                CommandStatus.RUNNING,
+            # Open: waiting for the reader, or handed to it less than
+            # READ_TTL ago. One delivered and never answered (the agent was
+            # stopped mid-reading) is closed by the server a day later; it
+            # must not keep the domain unread until then.
+            open_ = last.status == CommandStatus.PENDING or (
+                last.status in (CommandStatus.DELIVERED, CommandStatus.RUNNING)
+                and (last.delivered_at or last.created_at) > now - READ_TTL
             )
             if open_ or last.created_at > now - timedelta(
                 minutes=env.DIRECTORY_SYNC_MINUTES

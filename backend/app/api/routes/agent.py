@@ -963,24 +963,31 @@ async def heartbeat(
             machine.ad_ou = directory.ou
             machine.ad_ou_dn = directory.ou_dn
             machine.ad_location = directory.ad_location
-            # With the directory read by the server, the agent's word files
-            # nothing: it is checked against the reading instead.
-            await directory_crud.refresh_heartbeat_verdict(session, machine)
-            # In a savepoint: whatever the directory says, a placement that
-            # fails must not fail the heartbeat — the Defender state, the
-            # threats and the commands ride the same request (audit S07).
-            try:
-                async with session.begin_nested():
-                    await room_crud.place_from_directory(
-                        session, machine, settings.ROOM_SOURCE, from_agent=True
+            if directory_crud.enabled():
+                # With the directory read by the server, the agent's word
+                # files nothing: it is checked against the reading, and the
+                # rooms move when a reading is taken (``directory.reconcile``)
+                # — never here, where a move held for an administrator's
+                # confirmation would be applied behind their back.
+                await directory_crud.refresh_heartbeat_verdict(session, machine)
+            else:
+                # In a savepoint: whatever the directory says, a placement
+                # that fails must not fail the heartbeat — the Defender
+                # state, the threats and the commands ride the same request
+                # (audit S07).
+                try:
+                    async with session.begin_nested():
+                        await room_crud.place_from_directory(
+                            session, machine, settings.ROOM_SOURCE, from_agent=True
+                        )
+                except SQLAlchemyError:
+                    logger.exception(
+                        "directory placement failed for machine %s", machine.id
                     )
-            except SQLAlchemyError:
-                logger.exception(
-                    "directory placement failed for machine %s", machine.id
-                )
-                # The rollback of the savepoint may have expired the row: read
-                # it again now, not lazily later (no implicit I/O in async).
-                await session.refresh(machine)
+                    # The rollback of the savepoint may have expired the row:
+                    # read it again now, not lazily later (no implicit I/O in
+                    # async).
+                    await session.refresh(machine)
 
     if payload.fingerprint is not None:
         fp = payload.fingerprint
