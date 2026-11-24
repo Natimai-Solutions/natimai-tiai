@@ -359,7 +359,8 @@ du §3.2 se contournaient. Corrigé, avec un test par point
   lecteur qui se met à déclarer un autre domaine perd sa désignation ; une
   lecture sous un autre SID est refusée.
 - **Un nom NetBIOS désigne un seul domaine** (index unique). **Écart au
-  §3.2** : deux domaines de même nom NetBIOS sur un même serveur ne sont
+  §3.2, validé le 2026-11-24** (« un seul domaine par nom NetBIOS pour
+  l'instant ») : deux domaines de même nom NetBIOS sur un même serveur ne sont
   plus pris en charge. Les agents ne déclarent que ce nom ; rien ne permet
   de dire à quel domaine appartient un poste, et un lecteur qui inventait
   un second SID faisait repasser « inconnus » les postes du premier. Un
