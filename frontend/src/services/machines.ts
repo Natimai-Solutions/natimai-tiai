@@ -509,6 +509,8 @@ export interface ListMachinesParams {
   compliance?: string;
   compliance_check?: string;
   winget_outdated?: string;
+  /** C6: postes carrying a program a licence covers. */
+  license_id?: string;
   directory_status?: string;
   /** true: the retired postes left out (the dashboard's links). */
   in_parc?: boolean;

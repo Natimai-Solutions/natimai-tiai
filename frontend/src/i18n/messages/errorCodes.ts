@@ -80,6 +80,8 @@ const fr = {
   'directory.pending_changed':
     'Une nouvelle lecture a changé les déplacements en attente : relisez-les avant de confirmer',
   'report.no_open_check': 'Aucune vérification n’est ouverte sur ce poste',
+  'license.not_found': 'Cette licence n’existe plus',
+  'license.too_many': 'Le nombre maximal de licences est atteint',
   'schedule.forbidden_window': 'Cette planification tomberait dans une plage interdite',
   'schedule.in_past': 'Cette date et cette heure sont passées',
   'room.name.taken': 'Une salle porte déjà ce nom dans ce bâtiment',
@@ -178,6 +180,8 @@ const en: Record<keyof typeof fr, string> = {
   'directory.pending_changed':
     'A new reading changed the pending moves: read them again before confirming',
   'report.no_open_check': 'No check is open on this computer',
+  'license.not_found': 'This licence no longer exists',
+  'license.too_many': 'The maximum number of licences has been reached',
   'schedule.forbidden_window': 'This schedule would run inside a forbidden window',
   'schedule.in_past': 'This date and time are past',
   'room.name.taken': 'A room already has this name in this building',

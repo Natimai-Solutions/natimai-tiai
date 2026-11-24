@@ -236,6 +236,12 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   if (winget && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(winget)) {
     params.winget_outdated = winget;
   }
+  const licenseId = queryValue(q.license_id);
+  if (
+    licenseId &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(licenseId)
+  )
+    params.license_id = licenseId;
   if (queryValue(q.in_parc) === 'true') params.in_parc = true;
   // The five text facets the list sets from its dropdowns: matched exactly,
   // as the list asked (``machineFiltersToParams``).

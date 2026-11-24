@@ -24,6 +24,7 @@ const fr = {
     asset: 'Actifs (achat, garantie, prêts)',
     schedule: 'Planifications',
     report: 'Signalements des utilisateurs',
+    license: 'Licences logicielles',
   },
   /** What granting it lets someone do (`label`), and a sentence where the label
    *  alone would be read two ways (`hint`). */
@@ -142,6 +143,16 @@ const fr = {
         hint: 'Clore ou rejeter un signalement ; l’ouvrir en vérification demande aussi « Vérifications demandées : gérer ».',
       },
     },
+    license: {
+      read: {
+        label: 'Consulter',
+        hint: 'Voir les licences, leur fournisseur et leur référence de commande, et combien de postes ont ce qu’elles couvrent.',
+      },
+      write: {
+        label: 'Gérer',
+        hint: 'Créer, modifier et supprimer une licence. Réservé aux comptes sans limite de lieux.',
+      },
+    },
   },
   /** `{resource} — {action}`, for lists that show what a group grants. */
   named: '{resource} — {action}',
@@ -169,6 +180,7 @@ const en: Translation<typeof fr> = {
     asset: 'Assets (purchase, warranty, loans)',
     schedule: 'Schedules',
     report: 'Users’ reports',
+    license: 'Software licences',
   },
   entries: {
     machine: {
@@ -283,6 +295,16 @@ const en: Translation<typeof fr> = {
       write: {
         label: 'Sort',
         hint: 'Close or reject a report; opening it as a check also needs “Requested checks: manage”.',
+      },
+    },
+    license: {
+      read: {
+        label: 'View',
+        hint: 'See the licences, their supplier and order reference, and how many computers have what they cover.',
+      },
+      write: {
+        label: 'Manage',
+        hint: 'Create, change and delete a licence. Only for accounts not limited to some places.',
       },
     },
   },

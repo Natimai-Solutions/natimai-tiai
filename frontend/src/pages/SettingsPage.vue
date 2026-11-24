@@ -282,6 +282,48 @@
       </q-card-actions>
     </q-card>
 
+    <!-- Licences (C6): how many days before its end a licence is flagged. -->
+    <q-card
+      flat
+      bordered
+      style="max-width: 640px"
+      class="q-mb-md"
+      data-test="license-settings-card"
+    >
+      <q-card-section class="text-subtitle1">
+        {{ t('licenses.settings.title') }}
+        <div class="text-caption text-muted">{{ t('licenses.settings.caption') }}</div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings">
+        <q-input
+          v-model.number="licenseForm.expiryDays"
+          type="number"
+          min="1"
+          max="365"
+          :suffix="t('settings.units.days')"
+          :label="t('licenses.settings.expiryDays')"
+          outlined
+          dense
+          :error="licenseExpiryError !== null"
+          :error-message="licenseExpiryError ?? undefined"
+          :hint="
+            t('licenses.settings.envDefault', { days: settings.env_license_expiry_days ?? 60 })
+          "
+          :disable="!canWrite"
+        />
+      </q-card-section>
+      <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
+        <q-btn
+          color="primary"
+          :label="t('settings.save')"
+          :loading="savingLicenses"
+          :disable="licenseExpiryError !== null"
+          @click="saveLicenses"
+        />
+      </q-card-actions>
+    </q-card>
+
     <SettingsDirectoryCard />
 
     <!-- Reports (C4): the form a label's QR code opens without an account.
@@ -1144,6 +1186,32 @@ async function saveCompliance() {
   }
 }
 
+// The licences card (C6).
+const licenseForm = reactive({ expiryDays: 60 as number | string });
+const licenseExpiryError = computed(() => intFieldError(licenseForm.expiryDays, 1, 365));
+const savingLicenses = ref(false);
+
+function fillLicenseForm(s: ConsoleSettings) {
+  licenseForm.expiryDays = s.license_expiry_days ?? 60;
+  saved.licenses = formSnapshot(licenseForm);
+}
+
+async function saveLicenses() {
+  if (licenseExpiryError.value) return;
+  savingLicenses.value = true;
+  try {
+    settings.value = await updateSettings({
+      license_expiry_days: Number(licenseForm.expiryDays),
+    });
+    fillLicenseForm(settings.value);
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
+  } catch (e) {
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
+  } finally {
+    savingLicenses.value = false;
+  }
+}
+
 // The reports card (C4): one switch, saved as it is switched.
 const savingReports = ref(false);
 async function saveReports(enabled: boolean) {
@@ -1363,6 +1431,7 @@ const saved = reactive({
   usage: '',
   alerts: '',
   compliance: '',
+  licenses: '',
   planning: '',
   fleet: '',
   schedule: '',
@@ -1376,6 +1445,7 @@ const unsavedCards = computed(() => {
   if (formSnapshot(usageForm) !== saved.usage) cards.push('usage');
   if (alertSnapshot() !== saved.alerts) cards.push('alerts');
   if (formSnapshot(complianceForm) !== saved.compliance) cards.push('compliance');
+  if (formSnapshot(licenseForm) !== saved.licenses) cards.push('licenses');
   if (planningSnapshot() !== saved.planning) cards.push('planning');
   if (formSnapshot(fleetForm) !== saved.fleet) cards.push('fleet');
   if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('schedule');
@@ -1469,6 +1539,7 @@ async function load() {
     fillUsageForm(settings.value);
     fillAlertForm(settings.value);
     fillComplianceForm(settings.value);
+    fillLicenseForm(settings.value);
     fillPlanningForm(settings.value);
     fillFleetForm(settings.value);
     fillScheduleForm(settings.value);

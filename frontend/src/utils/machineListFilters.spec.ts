@@ -56,6 +56,7 @@ function everything(): MachineFilters {
     compliance: 'failing',
     complianceCheck: 'firewall',
     wingetOutdated: 'Mozilla.Firefox',
+    licenseId: '0b1c2d3e-4f50-4617-8899-aabbccddeeff',
     directoryStatus: 'mismatch',
     inParc: 'true',
   };
@@ -105,6 +106,7 @@ describe('machineFiltersToQuery / machineFiltersFromQuery', () => {
       compliance: 'failing',
       compliance_check: 'firewall',
       winget_outdated: 'Mozilla.Firefox',
+      license_id: '0b1c2d3e-4f50-4617-8899-aabbccddeeff',
       directory_status: 'mismatch',
       in_parc: 'true',
     });
@@ -267,6 +269,7 @@ describe('machineFilterChips', () => {
       'compliance',
       'complianceCheck',
       'wingetOutdated',
+      'licenseId',
       'directoryStatus',
       'inParc',
     ]);
@@ -275,6 +278,7 @@ describe('machineFilterChips', () => {
     expect(label('compliance')).toBe('Non conformes');
     expect(label('complianceCheck')).toBe('En échec : Pare-feu actif (3 profils)');
     expect(label('wingetOutdated')).toBe('Mise à jour winget en attente : Mozilla.Firefox');
+    expect(label('licenseId')).toBe('Logiciels d’une licence');
     expect(label('alert')).toBe('Alerte : Disque système presque plein');
     expect(label('location')).toBe('Papeete (40)');
     expect(label('agent')).toBe('Agent obsolète (3)');
@@ -459,5 +463,20 @@ describe('compliance filters (C5)', () => {
       compliance_check: 'tpm',
       winget_outdated: '7zip.7zip',
     });
+  });
+});
+
+describe('licence filter (C6)', () => {
+  it('keeps a licence id and drops anything else', () => {
+    expect(
+      machineFiltersFromQuery({ license_id: '0B1C2D3E-4F50-4617-8899-AABBCCDDEEFF' }).licenseId,
+    ).toBe('0b1c2d3e-4f50-4617-8899-aabbccddeeff');
+    expect(machineFiltersFromQuery({ license_id: 'nope' }).licenseId).toBeNull();
+    expect(
+      machineListParamsFromQuery({ license_id: '0b1c2d3e-4f50-4617-8899-aabbccddeeff' }),
+    ).toMatchObject({
+      license_id: '0b1c2d3e-4f50-4617-8899-aabbccddeeff',
+    });
+    expect(machineListParamsFromQuery({ license_id: '1 OR 1=1' })).not.toHaveProperty('license_id');
   });
 });

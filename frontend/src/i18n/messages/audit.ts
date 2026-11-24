@@ -81,6 +81,11 @@ const fr = {
       close: 'Signalement clos',
       reject: 'Signalement rejeté',
     },
+    license: {
+      create: 'Création d’une licence',
+      update: 'Modification d’une licence',
+      delete: 'Suppression d’une licence',
+    },
     directory: {
       reader_designate: 'Poste désigné lecteur d’annuaire',
       reader_revoke: 'Désignation de lecteur d’annuaire retirée',
@@ -173,6 +178,7 @@ const fr = {
     asset: 'Actif',
     schedule: 'Planification',
     report: 'Signalement',
+    license: 'Licence',
     directory_domain: 'Domaine',
     settings: 'Paramètres',
   },
@@ -233,6 +239,12 @@ const fr = {
     note: 'Note',
     hostnames: 'Postes',
     lines: 'Lignes de visite',
+    patterns: 'Logiciels couverts',
+    publisher: 'Éditeur',
+    seats: 'Postes couverts',
+    expires_on: 'Échéance',
+    vendor: 'Fournisseur',
+    reference: 'Référence de commande',
   },
   /** Detail values that have words of their own. */
   values: {
@@ -361,6 +373,11 @@ const en: Translation<typeof fr> = {
       close: 'Report closed',
       reject: 'Report rejected',
     },
+    license: {
+      create: 'Licence created',
+      update: 'Licence changed',
+      delete: 'Licence deleted',
+    },
     directory: {
       reader_designate: 'Computer designated as directory reader',
       reader_revoke: 'Directory reader designation removed',
@@ -452,6 +469,7 @@ const en: Translation<typeof fr> = {
     asset: 'Asset',
     schedule: 'Schedule',
     report: 'Report',
+    license: 'Licence',
     directory_domain: 'Domain',
     settings: 'Settings',
   },
@@ -511,6 +529,12 @@ const en: Translation<typeof fr> = {
     note: 'Note',
     hostnames: 'Computers',
     lines: 'Visit lines',
+    patterns: 'Programs covered',
+    publisher: 'Publisher',
+    seats: 'Computers covered',
+    expires_on: 'End',
+    vendor: 'Supplier',
+    reference: 'Order reference',
   },
   values: {
     yes: 'Yes',

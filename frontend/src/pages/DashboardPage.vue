@@ -164,6 +164,8 @@
         </q-card>
       </div>
 
+      <LicensesAttentionCard v-if="canReadLicenses" class="col-12 col-md-6" />
+
       <div v-if="canReadThreats" class="col-12 col-md-6">
         <q-card flat bordered>
           <q-card-section class="text-subtitle1 row items-center">
@@ -206,6 +208,7 @@
 <script setup lang="ts">
 import { intlTag, t } from 'src/i18n';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
+import LicensesAttentionCard from 'src/components/software/LicensesAttentionCard.vue';
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, type RouteLocationRaw } from 'vue-router';
 import { rememberFleetThresholds } from 'src/composables/useFleetThresholds';
@@ -553,6 +556,7 @@ function mergeOutdated(av: Machine[], wuBehind: Machine[]): Machine[] {
 // permission, which a group may not grant (audit B02).
 const auth = useAuthStore();
 const canReadThreats = computed(() => auth.can('threat', 'read'));
+const canReadLicenses = computed(() => auth.can('license', 'read'));
 
 async function fetchAll() {
   // The side lists sit beside cards that leave the retired postes out: so

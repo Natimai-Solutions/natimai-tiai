@@ -194,6 +194,9 @@ export interface ConsoleSettings {
   compliance_patch_grace_days?: number;
   env_compliance_patch_grace_days?: number;
   compliance_admins_allowed?: string[];
+  /** Licences (C6). Optional: an older server. */
+  license_expiry_days?: number;
+  env_license_expiry_days?: number;
   /** Schedules (C3): the zone the console plans in, and the weekly windows
    * when nothing at risk runs on several postes. Optional: an older server. */
   console_timezone?: string;
@@ -234,6 +237,7 @@ export interface SettingsPayload {
   alert_forbidden_software?: string[];
   compliance_patch_grace_days?: number;
   compliance_admins_allowed?: string[];
+  license_expiry_days?: number;
   console_timezone?: string | null;
   forbidden_windows?: { days: number[]; start: string; end: string }[] | null;
   reports_enabled?: boolean | null;
