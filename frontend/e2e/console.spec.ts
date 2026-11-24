@@ -56,7 +56,10 @@ test("le journal d'audit montre une action d'administration", async ({ page, req
   await page.getByRole('button', { name: 'Révoquer le token' }).click();
   // The confirmation names its action (audit U12), not a bare « OK ».
   await page.getByRole('dialog').getByRole('button', { name: 'Révoquer', exact: true }).click();
-  await expect(page.getByText('Token révoqué')).toBeVisible();
+  // The notification, by its exact words: the fiche then reloads and shows
+  // a banner that starts with the same two — « Token révoqué : le poste est
+  // coupé… » — and a loose match found one or two of them, as it came.
+  await expect(page.getByText('Token révoqué', { exact: true })).toBeVisible();
 
   await page.goto('/audit?action=machine.revoke_token');
   await expect(page.getByRole('cell', { name: /Révocation du token/ }).first()).toBeVisible();
