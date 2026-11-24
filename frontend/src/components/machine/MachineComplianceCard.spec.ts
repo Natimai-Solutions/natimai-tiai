@@ -29,11 +29,22 @@ describe('MachineComplianceCard', () => {
     expect(w.find('[data-test="compliance-summary"]').text()).toBe('1 sur 4');
     expect(w.find('[data-test="check-firewall"]').text()).toContain('Désactivé : public, domaine');
     expect(w.find('[data-test="check-patches"]').text()).toContain(
-      '2 en attente depuis plus de 14 j : KB1, KB2',
+      '2 en attente, en retard depuis plus de 14 j : KB1, KB2',
     );
     expect(w.find('[data-test="check-local_admins"]').text()).toContain('En trop : PC\\eleve');
     expect(w.find('[data-test="check-encryption"]').text()).toContain('Non requis');
     expect(w.find('[data-test="check-tpm"]').text()).toContain('Non relevé');
+  });
+
+  it('says a poste has no TPM, rather than nothing', () => {
+    const w = mount(MachineComplianceCard, {
+      props: {
+        machine: machine({
+          compliance: [{ check: 'tpm', state: 'fail', detail: { absent: true } }],
+        }),
+      },
+    });
+    expect(w.find('[data-test="check-tpm"]').text()).toContain('Aucun TPM relevé sur ce poste');
   });
 
   it('says so when nothing was read, and shows no summary', () => {

@@ -191,6 +191,13 @@ class Machine(SQLModel, table=True):
     # the heartbeat that turns the flag on, cleared on the one that turns it
     # off; NULL whenever the flag is false.
     wu_reboot_required_since: datetime | None = utc_field(default=None, nullable=True)
+    # Since when the poste has had a critical or important update pending,
+    # without a break: the compliance check « correctifs » counts its grace
+    # from here. Not from an update's own ``first_seen``: each monthly
+    # cumulative update replaces the previous one, and a poste that never
+    # patches would look freshly behind every Patch Tuesday. Set on the
+    # report that first lists one, cleared on the one that lists none.
+    wu_critical_pending_since: datetime | None = utc_field(default=None, nullable=True)
     wu_last_search: datetime | None = utc_field(default=None, nullable=True)
     wu_last_install: datetime | None = utc_field(default=None, nullable=True)
 

@@ -118,3 +118,49 @@ func TestInventoryHashIgnoresComplianceOrder(t *testing.T) {
 		t.Fatal("lists absent and present hash the same")
 	}
 }
+
+// winget pads by display cell: a wide character takes two, and the columns
+// after it must not be cut one too far left.
+func TestParseWingetListWithWideCharacters(t *testing.T) {
+	out := "Name          Id               Version   Available  Source\n" +
+		"-----------------------------------------------------------\n" +
+		"微信          Tencent.WeChat   3.9.8     3.9.10     winget\n" +
+		"App 🚀        Vendor.Rocket    1.0                  winget\n" +
+		"7-Zip         7zip.7zip        24.08                winget\n"
+	got := ParseWingetList(out)
+	want := []models.WingetPackage{
+		{ID: "Tencent.WeChat", Name: "微信", Version: "3.9.8", Available: "3.9.10"},
+		{ID: "Vendor.Rocket", Name: "App 🚀", Version: "1.0"},
+		{ID: "7zip.7zip", Name: "7-Zip", Version: "24.08"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d: got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// A header in a wide script moves every column start.
+func TestParseWingetListWithAWideHeader(t *testing.T) {
+	out := "名前          ID               バージョン  利用可能  ソース\n" +
+		"------------------------------------------------------------\n" +
+		"Firefox       Mozilla.Firefox  128.0       131.0     winget\n"
+	got := ParseWingetList(out)
+	if len(got) != 1 || got[0].ID != "Mozilla.Firefox" || got[0].Version != "128.0" || got[0].Available != "131.0" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+// A version is not an id: a cell without a dot-separated publisher is a row
+// cut in the wrong place.
+func TestParseWingetListRefusesAnIdWithoutAPublisher(t *testing.T) {
+	out := "Name          Id        Version   Source\n" +
+		"-----------------------------------------\n" +
+		"Something     nodot     1.0       winget\n"
+	if got := ParseWingetList(out); len(got) != 0 {
+		t.Fatalf("got %+v", got)
+	}
+}

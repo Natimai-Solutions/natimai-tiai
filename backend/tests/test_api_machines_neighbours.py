@@ -20,23 +20,18 @@ from sqlalchemy import event, insert, update
 
 from tests.scope_helpers import SITE_A, SITE_B, machine, two_sites
 
-SORT_FIELDS = [
-    "hostname",
-    "domain",
-    "location",
-    "building",
-    "room",
-    "maintenance_due_at",
-    "av_product_name",
-    "wu_pending_count",
-    "session_user_present",
-    "last_seen",
-    "hw_model",
-    "ram_total_mb",
-    "disk_free_percent",
-    "agent_version",
-    "usage_hours",
-]
+
+def _sort_fields() -> list[str]:
+    """Every sort the API offers, read off its own type: a field added to
+    the list and forgotten here would never be walked."""
+    from typing import get_args
+
+    from app.api.routes.machines import MachineSortField
+
+    return list(get_args(MachineSortField))
+
+
+SORT_FIELDS = _sort_fields()
 
 
 async def _admin(client, db_session) -> dict[str, str]:
@@ -97,6 +92,8 @@ async def _fleet(db_session) -> dict[str, object]:
             room_id=cycle([rooms[0].id, rooms[1].id, None, rooms[2].id], i),
             av_product_name=cycle(["ESET", "Defender", None], i),
             wu_pending_count=cycle([0, 3, None, 3, 12], i),
+            compliance_total=cycle([9, 9, None, 8, 9], i),
+            compliance_passed=cycle([9, 7, None, 8, 7], i),
             session_user_present=cycle([True, False, None], i),
             hw_model=cycle(["OptiPlex 7010", "OptiPlex 7010 AIO", None, "Latitude"], i),
             ram_total_mb=cycle([8192, 16384, None, 8192, 4096], i),

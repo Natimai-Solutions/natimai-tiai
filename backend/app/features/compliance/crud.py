@@ -4,7 +4,7 @@ filter and the dashboard."""
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import and_, func, or_
@@ -49,7 +49,6 @@ async def load_facts(
     for machine_id, status in rows.all():
         encryption[machine_id] = status
 
-    cutoff = now - timedelta(days=policy.patch_grace_days)
     overdue: dict[uuid.UUID, list[str]] = {}
     updates = await session.exec(
         select(
@@ -61,7 +60,6 @@ async def load_facts(
             col(WindowsUpdate.machine_id).in_(ids),
             col(WindowsUpdate.type) == "software",
             func.lower(col(WindowsUpdate.severity)).in_(COUNTED_SEVERITIES),
-            col(WindowsUpdate.first_seen) <= cutoff,
         )
         .order_by(col(WindowsUpdate.machine_id), col(WindowsUpdate.first_seen))
     )

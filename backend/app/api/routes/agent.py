@@ -937,6 +937,15 @@ async def heartbeat(
         machine.wu_pending_count = await replace_pending(
             session, machine.id, wu.pending
         )
+        behind = any(
+            (u.type or "software") == "software"
+            and (u.severity or "").lower() in ("critical", "important")
+            for u in wu.pending
+        )
+        if not behind:
+            machine.wu_critical_pending_since = None
+        elif machine.wu_critical_pending_since is None:
+            machine.wu_critical_pending_since = utcnow()
 
     if payload.inventory is not None:
         inv = payload.inventory

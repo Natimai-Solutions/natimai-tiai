@@ -67,6 +67,7 @@ def test_a_poste_failing_and_passing():
         wu_pending_count=2,
         wu_reboot_required=True,
         wu_reboot_required_since=NOW - timedelta(days=10),
+        wu_critical_pending_since=NOW - timedelta(days=30),
         os_version="Microsoft Windows 11 Pro 25H2 (Build 26200)",
         agent_version="0.9.0",
         firewall_domain=True,
@@ -144,7 +145,7 @@ async def test_inventory_stores_and_clears_the_readings(client, db_session):
         firewall={"domain": True, "private": True, "public": False},
         local_admins=[
             {"name": "PC\\Administrateur", "sid": f"{DOMAIN_SID}-500"},
-            {"name": "", "sid": "S-1-5-21-9"},
+            {"name": "", "sid": None},
         ],
         winget_packages=[
             {
@@ -273,27 +274,31 @@ async def test_a_retired_poste_has_no_summary(client, db_session, monkeypatch):
 
 async def test_patch_grace_follows_the_setting(client, db_session):
     from app.features.compliance import crud
+    from app.features.machine.models import Machine
     from app.features.windows_update.models import WindowsUpdate
 
     sites = await two_sites(client, db_session)
-    await _set(db_session, sites.a.id, wu_pending_count=2)
-    for kb, severity, age in (
-        ("KB1", "Critical", 20),
-        ("KB2", "moderate", 30),
-        ("KB3", "important", 3),
-    ):
+    # Behind for 20 days without a break — whatever the age of the update
+    # pending today: a cumulative update replaced by the next month's is a
+    # new row, and must not restart the grace.
+    await _set(
+        db_session,
+        sites.a.id,
+        wu_pending_count=2,
+        wu_critical_pending_since=NOW - timedelta(days=20),
+    )
+    for kb, severity, age in (("KB1", "critical", 1), ("KB2", "moderate", 30)):
         db_session.add(
             WindowsUpdate(
                 machine_id=sites.a.id,
                 update_id=kb,
                 kb=kb,
                 title=kb,
-                severity=severity.lower(),
+                severity=severity,
                 first_seen=NOW - timedelta(days=age),
             )
         )
     await db_session.commit()
-    from app.features.machine.models import Machine
 
     m = await db_session.get(Machine, sites.a.id)
     results = {r.check.value: r for r in await crud.for_machine(db_session, m, NOW)}
@@ -315,6 +320,87 @@ async def test_patch_grace_follows_the_setting(client, db_session):
     assert body["env_compliance_patch_grace_days"] == 14
     results = {r.check.value: r for r in await crud.for_machine(db_session, m, NOW)}
     assert results["patches"].state.value == "pass"
+
+
+async def test_the_heartbeat_dates_how_long_a_poste_has_been_behind(client, db_session):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, str(uuid.uuid4()), hostname="PC-WU")
+
+    def wu(*updates):
+        return {
+            "reboot_required": False,
+            "pending": [
+                {"update_id": u, "title": u, "severity": s, "type": "software"}
+                for u, s in updates
+            ],
+        }
+
+    async def since():
+        from app.features.machine.models import Machine
+
+        m = await db_session.get(Machine, uuid.UUID(enrolled["machine_id"]))
+        await db_session.refresh(m)
+        return m.wu_critical_pending_since
+
+    await _heartbeat(client, enrolled["token"], windows_update=wu(("u1", "Moderate")))
+    assert await since() is None
+    await _heartbeat(client, enrolled["token"], windows_update=wu(("u1", "Critical")))
+    first = await since()
+    assert first is not None
+    # Next month's cumulative update replaces this one: the date stays.
+    await _heartbeat(client, enrolled["token"], windows_update=wu(("u2", "Important")))
+    assert await since() == first
+    await _heartbeat(client, enrolled["token"], windows_update=wu())
+    assert await since() is None
+    assert headers
+
+
+def test_no_tpm_on_an_inventoried_poste_fails_and_an_unnamed_admin_counts():
+    from app.features.compliance.checks import Facts, evaluate, extra_admins
+    from app.features.inventory.schemas import InventoryReport
+    from app.features.machine.models import Machine
+
+    never = Machine(machine_uuid="u")
+    assert _states(evaluate(never, Facts(), _policy(), NOW))["tpm"] == "unknown"
+    inventoried = Machine(machine_uuid="u", inventory_last_seen=NOW)
+    assert _states(evaluate(inventoried, Facts(), _policy(), NOW))["tpm"] == "fail"
+
+    # A member Windows could not name is kept under its SID, and is extra.
+    report = InventoryReport(
+        local_admins=[
+            {"name": "", "sid": "S-1-12-1-1-2-3-4"},
+            {"name": "", "sid": None},
+            {"name": "PC\\Administrateur", "sid": f"{DOMAIN_SID}-500"},
+        ]
+    )
+    kept = [a.model_dump() for a in report.local_admins]
+    assert [a["name"] for a in kept] == ["S-1-12-1-1-2-3-4", "PC\\Administrateur"]
+    assert extra_admins(kept, ()) == ["S-1-12-1-1-2-3-4"]
+
+
+async def test_a_winget_failure_keeps_the_rows_and_switching_off_clears_them(
+    client, db_session
+):
+    headers = await _admin_headers(client, db_session)
+    enrolled = await _enroll(client, str(uuid.uuid4()), hostname="PC-WG")
+    packages = [{"id": "7zip.7zip", "name": "7-Zip", "version": "24.08"}]
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        inventory=_inventory(winget_packages=packages, winget_reporting=True),
+    )
+    # Switched on, and winget could not be run this once.
+    await _heartbeat(
+        client,
+        enrolled["token"],
+        inventory=_inventory(hash="h2", winget_reporting=True),
+    )
+    detail = await _detail(client, headers, enrolled)
+    assert [p["winget_id"] for p in detail["winget_packages"]] == ["7zip.7zip"]
+    # Switched off.
+    await _heartbeat(client, enrolled["token"], inventory=_inventory(hash="h3"))
+    detail = await _detail(client, headers, enrolled)
+    assert detail["winget_packages"] == [] and detail["winget_reported_at"] is None
 
 
 # --- Third-party updates -----------------------------------------------------------

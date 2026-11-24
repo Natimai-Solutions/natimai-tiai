@@ -1526,6 +1526,7 @@ _KEY_KINDS: dict[str, tuple[type, ...]] = {
     "maintenance_due_at": (datetime,),
     "last_seen": (datetime,),
     "wu_pending_count": (int,),
+    "compliance_failed": (int,),
     "ram_total_mb": (int,),
     "session_user_present": (bool,),
     "disk_free_percent": (int, float, Decimal),

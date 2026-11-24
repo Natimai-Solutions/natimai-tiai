@@ -147,6 +147,7 @@ function detailText(c: ComplianceCheckResult): string {
     case 'encryption':
       return d.status ? t('compliance.detail.encryption', { status: str(d.status) }) : '';
     case 'tpm':
+      if (d.absent) return t('compliance.detail.tpmAbsent');
       return d.version ? t('compliance.detail.tpm', { version: str(d.version) }) : '';
     case 'patches':
       return d.count

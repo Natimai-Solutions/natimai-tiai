@@ -299,6 +299,10 @@ type InventoryState struct {
 	// (off by default: `winget list` costs seconds and a network round trip
 	// to the winget source); nil when off or when winget could not be run.
 	WingetPackages *[]WingetPackage `json:"winget_packages,omitempty"`
+	// WingetReporting says the winget collection is switched on, whether or
+	// not it produced a list this time: with it, the server keeps what it
+	// held when winget failed once; without it, it clears it.
+	WingetReporting bool `json:"winget_reporting,omitempty"`
 }
 
 // FirewallState is one flag per profile; nil where the profile's setting

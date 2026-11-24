@@ -14,7 +14,7 @@ const fr = {
     secure_boot: 'Démarrage sécurisé',
     tpm: 'TPM 2.0',
     antivirus: 'Antivirus actif et à jour',
-    patches: 'Correctifs critiques installés',
+    patches: 'Correctifs critiques et importants installés',
     reboot: 'Pas de redémarrage en retard',
     os_supported: 'Windows encore pris en charge',
     agent_current: 'Agent à jour',
@@ -30,7 +30,8 @@ const fr = {
   detail: {
     encryption: 'État BitLocker : {status}',
     tpm: 'Version {version}',
-    patches: '{count} en attente depuis plus de {days} j : {updates}',
+    tpmAbsent: 'Aucun TPM relevé sur ce poste',
+    patches: '{count} en attente, en retard depuis plus de {days} j : {updates}',
     reboot: 'Demandé le {since}',
     os_supported: 'Fin de support : {date}',
     agent_current: 'Version {version}',
@@ -90,11 +91,12 @@ const fr = {
     title: 'Conformité des postes',
     caption:
       'Les contrôles « redémarrage » et « chiffrement » reprennent les réglages des alertes. Le résumé de la liste et du tableau de bord est recalculé toutes les 10 minutes.',
-    patchGrace: 'Délai avant qu’un correctif critique en attente soit non conforme (jours)',
+    patchGrace:
+      'Délai avant qu’un poste en retard d’un correctif critique ou important soit non conforme (jours)',
     patchGraceHint: 'Valeur initiale du serveur : {days} j',
     admins: 'Administrateurs locaux acceptés',
     adminsHint:
-      'Comptes ou groupes acceptés en plus de l’Administrateur intégré et des Admins du domaine : « DOMAINE\\nom » ou « nom ». Entrée pour ajouter.',
+      'Comptes ou groupes acceptés en plus de l’Administrateur intégré, des Admins du domaine et des Administrateurs de l’entreprise : « DOMAINE\\nom » ou « nom ». Entrée pour ajouter.',
   },
 };
 
@@ -111,7 +113,7 @@ const en: Translation<typeof fr> = {
     secure_boot: 'Secure Boot',
     tpm: 'TPM 2.0',
     antivirus: 'Antivirus on and up to date',
-    patches: 'Critical updates installed',
+    patches: 'Critical and important updates installed',
     reboot: 'No overdue restart',
     os_supported: 'Windows still supported',
     agent_current: 'Agent up to date',
@@ -127,7 +129,8 @@ const en: Translation<typeof fr> = {
   detail: {
     encryption: 'BitLocker status: {status}',
     tpm: 'Version {version}',
-    patches: '{count} pending for more than {days} days: {updates}',
+    tpmAbsent: 'No TPM found on this computer',
+    patches: '{count} pending, behind for more than {days} days: {updates}',
     reboot: 'Requested on {since}',
     os_supported: 'End of support: {date}',
     agent_current: 'Version {version}',
@@ -187,11 +190,12 @@ const en: Translation<typeof fr> = {
     title: 'Computer compliance',
     caption:
       'The “restart” and “encryption” checks use the alerts’ settings. The list’s and the dashboard’s summary is recomputed every 10 minutes.',
-    patchGrace: 'Delay before a pending critical update fails the check (days)',
+    patchGrace:
+      'Delay before a computer behind on a critical or important update fails the check (days)',
     patchGraceHint: 'Server’s initial value: {days} days',
     admins: 'Accepted local administrators',
     adminsHint:
-      'Accounts or groups accepted besides the built-in Administrator and Domain Admins: “DOMAIN\\name” or “name”. Enter to add.',
+      'Accounts or groups accepted besides the built-in Administrator, Domain Admins and Enterprise Admins: “DOMAIN\\name” or “name”. Enter to add.',
   },
 };
 

@@ -16,7 +16,7 @@ genuinely reports no software — both are findings, not gaps.
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 # Bounds on what one reported string can write to the database and pour into the
 # console. Generous: a GPU name ("NVIDIA GeForce RTX 4060 Laptop GPU") and a
@@ -364,6 +364,14 @@ class LocalAdminReport(BaseModel):
     def _bound_sid(cls, value: str | None) -> str | None:
         return _bounded(value, SID_MAX)
 
+    @model_validator(mode="after")
+    def _named_by_its_sid(self) -> "LocalAdminReport":
+        # A member Windows could not name is still a member: kept under its
+        # SID, or the check would pass on an account nobody can see.
+        if not self.name and self.sid:
+            self.name = self.sid
+        return self
+
 
 class WingetPackageReport(BaseModel):
     """One row of ``winget list --source winget`` (C5)."""
@@ -468,6 +476,10 @@ class InventoryReport(BaseModel):
     firewall: FirewallReport | None = None
     local_admins: list[LocalAdminReport] | None = None
     winget_packages: list[WingetPackageReport] | None = None
+    # The agent has the winget collection switched on. With it, an absent
+    # list is « winget could not be run this time » and keeps what was
+    # stored; without it — switched off, or an older agent — it clears it.
+    winget_reporting: bool = False
 
     @field_validator("local_admins")
     @classmethod

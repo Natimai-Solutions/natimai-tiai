@@ -22,11 +22,15 @@ import (
 // --- Firewall ------------------------------------------------------------------
 
 // The three profiles, as the local store and the GPO store name them: the
-// local store still calls the private profile "Standard".
-var firewallProfiles = [3]struct{ local, policy string }{
-	{`DomainProfile`, `DomainProfile`},
-	{`StandardProfile`, `PrivateProfile`},
-	{`PublicProfile`, `PublicProfile`},
+// local store still calls the private profile "Standard". legacy is where
+// the older administrative template (« Pare-feu Windows : profil standard »)
+// writes for the private and public profiles alike; read when the profile's
+// own policy key is absent, or a parc that turns the firewall off that way
+// would report the local value.
+var firewallProfiles = [3]struct{ local, policy, legacy string }{
+	{`DomainProfile`, `DomainProfile`, ``},
+	{`StandardProfile`, `PrivateProfile`, `StandardProfile`},
+	{`PublicProfile`, `PublicProfile`, `StandardProfile`},
 }
 
 const (
@@ -42,8 +46,12 @@ func readFirewall() *models.FirewallState {
 	var got [3]*bool
 	found := false
 	for i, p := range firewallProfiles {
+		policy := readDWORD(firewallPolicyKey+p.policy, "EnableFirewall")
+		if policy == nil && p.legacy != "" {
+			policy = readDWORD(firewallPolicyKey+p.legacy, "EnableFirewall")
+		}
 		got[i] = EffectiveFirewall(
-			readDWORD(firewallPolicyKey+p.policy, "EnableFirewall"),
+			policy,
 			readDWORD(firewallLocalKey+p.local, "EnableFirewall"),
 		)
 		found = found || got[i] != nil
@@ -115,20 +123,34 @@ func readLocalAdmins() *[]models.LocalAdmin {
 		uintptr(unsafe.Pointer(&total)),
 		uintptr(unsafe.Pointer(&resume)),
 	)
+	if buf != nil {
+		// Whatever the return code: ERROR_MORE_DATA hands a buffer over too.
+		defer windows.NetApiBufferFree(buf) //nolint:errcheck
+	}
 	if rc != 0 {
 		logging.Debugf("agent: inventory: NetLocalGroupGetMembers: %d", rc)
 		return nil
 	}
-	defer windows.NetApiBufferFree(buf)
 	members := []models.LocalAdmin{}
 	if read == 0 || buf == nil {
 		return &members
 	}
 	rows := unsafe.Slice((*localGroupMembersInfo2)(unsafe.Pointer(buf)), read)
 	for _, r := range rows {
-		m := models.LocalAdmin{Name: windows.UTF16PtrToString(r.domainAndName)}
+		m := models.LocalAdmin{}
+		if r.domainAndName != nil {
+			m.Name = windows.UTF16PtrToString(r.domainAndName)
+		}
 		if r.sid != nil {
 			m.SID = r.sid.String()
+		}
+		// A member Windows cannot name (an orphaned account, a domain account
+		// read off the network) is reported under its SID: it is a member.
+		if m.Name == "" {
+			m.Name = m.SID
+		}
+		if m.Name == "" {
+			continue
 		}
 		members = append(members, m)
 	}
@@ -155,6 +177,9 @@ func readWingetPackages(ctx context.Context) *[]models.WingetPackage {
 		"--accept-source-agreements", "--disable-interactivity")
 	cmd.Dir = filepath.Dir(exe)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	// Run waits for the pipe to close: a descendant of a winget killed at the
+	// deadline could hold it open, and the inventory lock with it.
+	cmd.WaitDelay = 5 * time.Second
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {

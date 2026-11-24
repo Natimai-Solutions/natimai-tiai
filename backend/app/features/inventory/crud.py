@@ -430,6 +430,10 @@ async def apply_inventory(
             ],
         )
         machine.winget_reported_at = now
+    elif report.winget_reporting:
+        # Switched on, and winget failed or timed out this once: yesterday's
+        # reading is worth more than none.
+        pass
     elif machine.winget_reported_at is not None:
         await session.exec(
             delete(WingetPackage).where(col(WingetPackage.machine_id) == machine.id)

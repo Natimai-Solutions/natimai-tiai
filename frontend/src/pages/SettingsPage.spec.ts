@@ -337,7 +337,7 @@ describe('SettingsPage', () => {
       const page = await mountPage(['settings:read', 'settings:write']);
       field(
         page,
-        'Délai avant qu’un correctif critique en attente soit non conforme (jours)',
+        'Délai avant qu’un poste en retard d’un correctif critique ou important soit non conforme (jours)',
       ).vm.$emit('update:modelValue', 400);
       await flushPromises();
       await saveCard(page, 'Conformité des postes');

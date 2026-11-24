@@ -56,6 +56,10 @@ var wingetSources = map[string]bool{"winget": true, "msstore": true}
 // language, so only their positions are used; the columns come in a fixed
 // order — name, id, version, then available and source when shown.
 //
+// Positions are counted in display cells, as winget pads them: a CJK
+// character or an emoji takes two (cellWidth), and a row holding one would
+// otherwise be cut one column too far left for each.
+//
 // Defensive throughout, since this is another program's display: a progress
 // spinner rewritten with carriage returns is reduced to what it left last, a
 // row whose id is not an id (cut by winget with an ellipsis on a narrow
@@ -77,7 +81,7 @@ func ParseWingetList(out string) []models.WingetPackage {
 	if header < 0 {
 		return nil
 	}
-	starts := columnStarts([]rune(lines[header]))
+	starts := columnStarts(lines[header])
 	if len(starts) < 3 {
 		return nil
 	}
@@ -86,9 +90,11 @@ func ParseWingetList(out string) []models.WingetPackage {
 		if strings.TrimSpace(line) == "" {
 			break
 		}
-		cells := cutColumns([]rune(line), starts)
+		cells := cutColumns(line, starts)
 		id := cells[1]
-		if !wingetIDShape.MatchString(id) {
+		// A winget id is « Publisher.Package »: a cell without a dot is a
+		// row cut in the wrong place, not a package.
+		if !wingetIDShape.MatchString(id) || !strings.Contains(id, ".") {
 			continue
 		}
 		p := models.WingetPackage{ID: id, Name: cells[0], Version: cells[2]}
@@ -107,28 +113,56 @@ func ParseWingetList(out string) []models.WingetPackage {
 	return packages
 }
 
-// columnStarts is where each word of the header begins.
-func columnStarts(header []rune) []int {
+// cellWidth is how many terminal cells a character takes: two for the East
+// Asian wide and fullwidth ranges and for emoji, one otherwise. The ranges
+// winget's own padding uses, near enough for a table of program names.
+func cellWidth(r rune) int {
+	switch {
+	case r >= 0x1100 && r <= 0x115F,
+		r >= 0x2E80 && r <= 0xA4CF,
+		r >= 0xAC00 && r <= 0xD7A3,
+		r >= 0xF900 && r <= 0xFAFF,
+		r >= 0xFE30 && r <= 0xFE4F,
+		r >= 0xFF00 && r <= 0xFF60,
+		r >= 0xFFE0 && r <= 0xFFE6,
+		r >= 0x1F300 && r <= 0x1FAFF,
+		r >= 0x20000 && r <= 0x3FFFD:
+		return 2
+	}
+	return 1
+}
+
+// columnStarts is the display cell where each word of the header begins.
+func columnStarts(header string) []int {
 	var starts []int
-	for i, r := range header {
-		if r != ' ' && (i == 0 || header[i-1] == ' ') {
-			starts = append(starts, i)
+	cell := 0
+	prev := ' '
+	for _, r := range header {
+		if r != ' ' && prev == ' ' {
+			starts = append(starts, cell)
 		}
+		cell += cellWidth(r)
+		prev = r
 	}
 	return starts
 }
 
-// cutColumns splits a row at the header's positions, trimming each cell.
-func cutColumns(row []rune, starts []int) []string {
+// cutColumns splits a row at the header's display cells, trimming each cell.
+func cutColumns(row string, starts []int) []string {
+	parts := make([]strings.Builder, len(starts))
+	cell, k := 0, 0
+	for _, r := range row {
+		for k+1 < len(starts) && cell >= starts[k+1] {
+			k++
+		}
+		if cell >= starts[0] {
+			parts[k].WriteRune(r)
+		}
+		cell += cellWidth(r)
+	}
 	cells := make([]string, len(starts))
-	for k, from := range starts {
-		to := len(row)
-		if k+1 < len(starts) && starts[k+1] < to {
-			to = starts[k+1]
-		}
-		if from < len(row) {
-			cells[k] = strings.TrimSpace(string(row[from:to]))
-		}
+	for i := range parts {
+		cells[i] = strings.TrimSpace(parts[i].String())
 	}
 	return cells
 }

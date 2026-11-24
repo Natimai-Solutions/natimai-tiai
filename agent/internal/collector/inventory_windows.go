@@ -212,8 +212,11 @@ func ReadInventory(ctx context.Context, opts InventoryOptions) (*models.Inventor
 	if opts.LocalAdmins {
 		inv.LocalAdmins = readLocalAdmins()
 	}
-	if opts.WingetPackages && ctx.Err() == nil {
-		inv.WingetPackages = readWingetPackages(ctx)
+	if opts.WingetPackages {
+		inv.WingetReporting = true
+		if ctx.Err() == nil {
+			inv.WingetPackages = readWingetPackages(ctx)
+		}
 	}
 
 	InventoryHash(inv)

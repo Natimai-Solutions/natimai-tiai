@@ -55,8 +55,8 @@ class Facts:
 
     # The system volume's BitLocker status; None when not read.
     system_encryption: str | None = None
-    # Critical or important updates pending past the grace period; None when
-    # the poste never reported its Windows Update state.
+    # The critical or important updates pending now; None when the poste
+    # never reported its Windows Update state.
     overdue_patches: list[str] | None = None
     # Agent versions behind the parc's reference.
     outdated_agents: frozenset[str] = frozenset()
@@ -92,7 +92,11 @@ def extra_admins(members: list[dict[str, Any]], allowed: tuple[str, ...]) -> lis
     accepted = {a.lower() for a in allowed}
     extra = []
     for m in members:
-        name = str(m.get("name") or "")
+        # A member Windows could not name (an orphaned account, a domain
+        # account read off the network) is known by its SID alone.
+        name = str(m.get("name") or m.get("sid") or "")
+        if not name:
+            continue
         bare = name.rsplit("\\", 1)[-1]
         if _builtin(m.get("sid")):
             continue
@@ -127,14 +131,16 @@ def evaluate(
 
     results.append(Result(Check.SECURE_BOOT, _state(machine.secure_boot)))
 
+    # No version on a poste that was inventoried is « no TPM » — the agent
+    # leaves it empty when Windows lists none — as the Windows 11 card reads
+    # it (``asset.win11``). Unknown only for a poste never inventoried.
     tpm = machine.tpm_version
-    results.append(
-        Result(
-            Check.TPM,
-            _state(tpm.startswith("2") if tpm else None),
-            {"version": tpm} if tpm else {},
-        )
-    )
+    if tpm:
+        results.append(Result(Check.TPM, _state(tpm.startswith("2")), {"version": tpm}))
+    elif machine.inventory_last_seen is not None:
+        results.append(Result(Check.TPM, State.FAIL, {"absent": True}))
+    else:
+        results.append(Result(Check.TPM, State.UNKNOWN))
 
     results.append(
         Result(
@@ -143,19 +149,29 @@ def evaluate(
         )
     )
 
+    # Aged on how long the poste has been behind without a break
+    # (``wu_critical_pending_since``), not on each update's own age: a
+    # cumulative update replaced by the next month's would restart the clock.
     if facts.overdue_patches is None:
         results.append(Result(Check.PATCHES, State.UNKNOWN))
     else:
+        since = machine.wu_critical_pending_since
+        overdue_patches = bool(
+            facts.overdue_patches
+            and since is not None
+            and since <= now - timedelta(days=policy.patch_grace_days)
+        )
         results.append(
             Result(
                 Check.PATCHES,
-                _state(not facts.overdue_patches),
+                _state(not overdue_patches),
                 {
                     "count": len(facts.overdue_patches),
                     "updates": facts.overdue_patches[:MAX_NAMES],
                     "grace_days": policy.patch_grace_days,
+                    "since": since.isoformat() if since else None,
                 }
-                if facts.overdue_patches
+                if overdue_patches
                 else {},
             )
         )
