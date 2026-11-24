@@ -42,6 +42,7 @@ KEY_ALERT_AUTO_CHECK = "alerts.auto_check_rules"
 KEY_ALERT_WARRANTY_DAYS = "alerts.warranty_days"
 KEY_COMPLIANCE_PATCH_GRACE = "compliance.patch_grace_days"
 KEY_COMPLIANCE_ADMINS = "compliance.admins_allowed"
+KEY_LICENSE_EXPIRY_DAYS = "licenses.expiry_days"
 
 
 async def get_all(session: AsyncSession) -> dict[str, Any]:
@@ -389,3 +390,12 @@ async def user_names(
         return {}
     rows = await session.exec(select(User).where(col(User.id).in_(ids)))
     return {u.id: u.full_name or u.email for u in rows.all()}
+
+
+async def license_expiry_days(
+    session: AsyncSession, values: dict[str, Any] | None = None
+) -> int:
+    """How many days before its end a licence is « bientôt échue »."""
+    if values is None:
+        values = await get_all(session)
+    return _int_or(values.get(KEY_LICENSE_EXPIRY_DAYS), env.LICENSE_EXPIRY_DAYS)

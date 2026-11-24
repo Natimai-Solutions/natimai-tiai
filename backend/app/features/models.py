@@ -22,6 +22,7 @@ from app.features.inventory.models import (  # noqa: F401
     Software,
     Volume,
 )
+from app.features.license.models import License  # noqa: F401
 from app.features.machine.models import Machine  # noqa: F401
 from app.features.maintenance.models import Maintenance  # noqa: F401
 from app.features.notification.models import EmailOutbox  # noqa: F401

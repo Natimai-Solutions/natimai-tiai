@@ -509,6 +509,12 @@ class Settings(BaseSettings):
     # the whole parc red overnight. Initial value — changed in Paramètres.
     COMPLIANCE_PATCH_GRACE_DAYS: int = Field(default=14, ge=0, le=365)
 
+    # --- Software licences (C6) ---
+    # How many days before a licence's end it is shown « bientôt échue », on
+    # the Logiciels page, the dashboard and in the daily digest. Initial
+    # value — changed in Paramètres.
+    LICENSE_EXPIRY_DAYS: int = Field(default=60, ge=1, le=365)
+
     # --- Rooms ---
     # How postes are filed into rooms. ``manual``: from the console, by hand.
     # ``ad_ou``: by the organisational unit the computer object sits in — the

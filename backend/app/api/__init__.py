@@ -14,6 +14,7 @@ from app.api.routes.directory import router as directory_router
 from app.api.routes.groups import router as groups_router
 from app.api.routes.interventions import machine_router as machine_interventions_router
 from app.api.routes.interventions import router as interventions_router
+from app.api.routes.licenses import router as licenses_router
 from app.api.routes.machines import router as machines_router
 from app.api.routes.maintenance import machine_router as machine_maintenance_router
 from app.api.routes.maintenance import owners_router as maintenance_owners_router
@@ -38,6 +39,7 @@ api_router.include_router(alerts_router)
 api_router.include_router(assets_router)
 api_router.include_router(schedules_router)
 api_router.include_router(reports_router)
+api_router.include_router(licenses_router)
 api_router.include_router(directory_router)
 api_router.include_router(public_reports_router)
 api_router.include_router(machine_assets_router)

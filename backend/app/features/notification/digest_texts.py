@@ -72,6 +72,11 @@ class DigestTexts:
     title_antivirus: str
     title_alerts: str
     alert_line: Callable[[str, int], str]
+    # Licences to look at (C6): over their count, ending, or ended.
+    title_licenses: str
+    license_over: Callable[[str, int, int], str]
+    license_soon: Callable[[str, str], str]
+    license_expired: Callable[[str, str], str]
     open_console: Callable[[str], str]
     footer: str
     # --- the digest of an account that reads no poste
@@ -117,6 +122,12 @@ FR = DigestTexts(
     title_antivirus="ANTIVIRUS À REPRENDRE",
     title_alerts="ALERTES OUVERTES",
     alert_line=lambda rule, n: f"  {RULE_LABELS_FR.get(rule, rule)} : {n} poste(s)",
+    title_licenses="LICENCES À REVOIR",
+    license_over=lambda name, n, seats: (
+        f"  {name} : {n} installation(s) pour {seats} licence(s)"
+    ),
+    license_soon=lambda name, day: f"  {name} : échéance le {day}",
+    license_expired=lambda name, day: f"  {name} : échue depuis le {day}",
     open_console=lambda url: f"Ouvrir la console : {url}",
     footer=(
         "Vous recevez ce message parce que votre compte est réglé sur un résumé "
@@ -168,6 +179,13 @@ EN = DigestTexts(
     title_antivirus="ANTIVIRUS TO FIX",
     title_alerts="OPEN ALERTS",
     alert_line=lambda rule, n: f"  {RULE_LABELS_EN.get(rule, rule)}: {_computers(n)}",
+    title_licenses="LICENCES TO REVIEW",
+    license_over=lambda name, n, seats: (
+        f"  {name}: {plural(n, 'installation', 'installations')} "
+        f"for {plural(seats, 'licence', 'licences')}"
+    ),
+    license_soon=lambda name, day: f"  {name}: ends on {day}",
+    license_expired=lambda name, day: f"  {name}: ended on {day}",
     open_console=lambda url: f"Open the console: {url}",
     footer=(
         "You receive this message because your account is set to a daily "
