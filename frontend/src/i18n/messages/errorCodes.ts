@@ -77,6 +77,8 @@ const fr = {
     'Ce poste ne peut pas lire l’annuaire : il doit être dans un domaine, avec un jeton valide et une identité confirmée',
   'directory.domain_not_found': 'Domaine inconnu',
   'directory.nothing_pending': 'Aucun déplacement en attente pour ce domaine',
+  'directory.pending_changed':
+    'Une nouvelle lecture a changé les déplacements en attente : relisez-les avant de confirmer',
   'report.no_open_check': 'Aucune vérification n’est ouverte sur ce poste',
   'schedule.forbidden_window': 'Cette planification tomberait dans une plage interdite',
   'schedule.in_past': 'Cette date et cette heure sont passées',
@@ -173,6 +175,8 @@ const en: Record<keyof typeof fr, string> = {
     'This computer cannot read the directory: it must be in a domain, with a valid token and a confirmed identity',
   'directory.domain_not_found': 'Unknown domain',
   'directory.nothing_pending': 'No pending move for this domain',
+  'directory.pending_changed':
+    'A new reading changed the pending moves: read them again before confirming',
   'report.no_open_check': 'No check is open on this computer',
   'schedule.forbidden_window': 'This schedule would run inside a forbidden window',
   'schedule.in_past': 'This date and time are past',

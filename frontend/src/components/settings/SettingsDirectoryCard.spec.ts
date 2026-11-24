@@ -100,7 +100,12 @@ describe('SettingsDirectoryCard', () => {
       .find((b) => b.text() === 'Appliquer les déplacements')!;
     await confirm.trigger('click');
     await flushPromises();
-    expect(confirmMoves).toHaveBeenCalledWith('S-1-5-21-1-2-3');
+    // With what was shown: a reading taken since must ask again.
+    expect(vi.mocked(confirmMoves).mock.calls[0]![0]).toBe('S-1-5-21-1-2-3');
+    expect(vi.mocked(confirmMoves).mock.calls[0]![1]).toMatchObject({
+      pending_since: '2026-11-21T08:00:00Z',
+      pending_count: 25,
+    });
     expect(getDirectoryState).toHaveBeenCalledTimes(2);
   });
 
@@ -108,6 +113,13 @@ describe('SettingsDirectoryCard', () => {
     vi.mocked(getDirectoryState).mockResolvedValue(state());
     const w = await mountCard(['settings:read']);
     expect(w.text()).not.toContain('Appliquer les déplacements');
+  });
+
+  it('shows nothing of the parc to an account confined to some places', async () => {
+    vi.mocked(getDirectoryState).mockResolvedValue(state({ restricted: true, domains: [] }));
+    const w = await mountCard(['settings:read', 'settings:write']);
+    expect(w.text()).toContain('n’est pas affiché à un compte limité');
+    expect(w.find('[data-test="directory-mode"]').exists()).toBe(false);
   });
 
   it('says so when the state cannot be read', async () => {

@@ -25,18 +25,25 @@ const fr = {
     noRoom: 'aucune salle',
     confirm: 'Appliquer les déplacements',
     discard: 'Laisser les postes en place',
+    forget: 'Oublier ce domaine',
+    forgetConfirm:
+      'Oublier le domaine {name} ? Ses lectures sont effacées et ses postes seront rapprochés de nouveau à la prochaine lecture. À faire quand le domaine a été reconstruit sous un autre identifiant.',
+    cancel: 'Annuler',
     done: 'Fait',
     failed: 'L’opération a échoué',
   },
   waiting: 'Lecteurs en attente de leur première lecture : {names}',
   withoutReader: 'Domaines déclarés par des postes sans lecteur : {names}',
   counts:
-    'Postes vérifiés : {verified} · écarts : {mismatch} · inconnus : {unknown} · périmés : {stale}',
+    'Postes vérifiés : {verified} · écarts : {mismatch} · inconnus : {unknown} · périmés : {stale} · contestés : {contested}',
+  restricted:
+    'L’état de l’annuaire porte sur tout le parc : il n’est pas affiché à un compte limité à certains lieux.',
   status: {
     verified: 'Vérifié',
     mismatch: 'Écart',
     unknown: 'Inconnu',
     stale: 'Périmé',
+    contested: 'Contesté',
   },
   statusHint: {
     verified: 'Ce que l’agent déclare est ce que l’annuaire dit.',
@@ -44,6 +51,8 @@ const fr = {
       'L’agent déclare autre chose que l’annuaire : poste déplacé dans AD et pas encore redémarré, ou déclaration à vérifier.',
     unknown: 'Aucun objet ordinateur de ce nom lu dans l’annuaire.',
     stale: 'Objet désactivé ou supprimé de l’annuaire, ou lecture trop ancienne.',
+    contested:
+      'Deux postes enrôlés portent ce nom dans ce domaine : aucun n’est rapproché de l’objet tant que l’un des deux n’est pas fusionné, supprimé ou révoqué.',
   },
   card: {
     title: 'Annuaire',
@@ -88,18 +97,25 @@ const en: Translation<typeof fr> = {
     noRoom: 'no room',
     confirm: 'Apply the moves',
     discard: 'Leave the computers where they are',
+    forget: 'Forget this domain',
+    forgetConfirm:
+      'Forget the domain {name}? Its readings are erased and its computers will be matched again at the next reading. For a domain rebuilt under another identifier.',
+    cancel: 'Cancel',
     done: 'Done',
     failed: 'The operation failed',
   },
   waiting: 'Readers waiting for their first reading: {names}',
   withoutReader: 'Domains declared by computers without a reader: {names}',
   counts:
-    'Computers verified: {verified} · mismatches: {mismatch} · unknown: {unknown} · stale: {stale}',
+    'Computers verified: {verified} · mismatches: {mismatch} · unknown: {unknown} · stale: {stale} · contested: {contested}',
+  restricted:
+    'The directory state covers the whole fleet: it is not shown to an account confined to some places.',
   status: {
     verified: 'Verified',
     mismatch: 'Mismatch',
     unknown: 'Unknown',
     stale: 'Stale',
+    contested: 'Contested',
   },
   statusHint: {
     verified: 'What the agent declares is what the directory says.',
@@ -107,6 +123,8 @@ const en: Translation<typeof fr> = {
       'The agent declares something else than the directory: computer moved in AD and not restarted yet, or a declaration to check.',
     unknown: 'No computer object of that name read in the directory.',
     stale: 'Object disabled or deleted in the directory, or reading too old.',
+    contested:
+      'Two enrolled computers bear this name in this domain: neither is matched to the object until one of them is merged, deleted or revoked.',
   },
   card: {
     title: 'Directory',

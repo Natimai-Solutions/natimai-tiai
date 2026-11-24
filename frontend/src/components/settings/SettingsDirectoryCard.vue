@@ -10,6 +10,9 @@
     <q-card-section v-if="loadError" class="text-negative">
       {{ t('directory.loadFailed') }}
     </q-card-section>
+    <q-card-section v-else-if="state?.restricted" class="text-muted">
+      {{ t('directory.restricted') }}
+    </q-card-section>
     <q-card-section v-else-if="state" class="q-gutter-sm">
       <div data-test="directory-mode">
         {{
@@ -29,6 +32,7 @@
               mismatch: state.status_counts.mismatch ?? 0,
               unknown: state.status_counts.unknown ?? 0,
               stale: state.status_counts.stale ?? 0,
+              contested: state.status_counts.contested ?? 0,
             })
           }}
           <router-link
@@ -98,7 +102,7 @@
                     dense
                     :label="t('directory.domain.confirm')"
                     :loading="busy"
-                    @click="act(() => confirmMoves(d.sid))"
+                    @click="act(() => confirmMoves(d.sid, d))"
                   />
                   <q-btn
                     flat
@@ -106,10 +110,22 @@
                     dense
                     :label="t('directory.domain.discard')"
                     :loading="busy"
-                    @click="act(() => discardMoves(d.sid))"
+                    @click="act(() => discardMoves(d.sid, d))"
                   />
                 </div>
               </div>
+            </q-item-section>
+            <q-item-section v-if="canWrite" side top>
+              <q-btn
+                flat
+                round
+                dense
+                icon="delete_outline"
+                :aria-label="t('directory.domain.forget')"
+                @click="forget(d)"
+              >
+                <q-tooltip>{{ t('directory.domain.forget') }}</q-tooltip>
+              </q-btn>
             </q-item-section>
           </q-item>
         </q-list>
@@ -131,13 +147,16 @@ import { t } from 'src/i18n';
 import {
   confirmMoves,
   discardMoves,
+  forgetDomain,
   getDirectoryState,
+  type DirectoryDomain,
   type DirectoryReader,
   type DirectoryState,
 } from 'src/services/directory';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime } from 'src/utils/format';
+import { liveDialog } from 'src/utils/liveDialog';
 import { notify } from 'src/utils/notify';
 
 const $q = useQuasar();
@@ -174,6 +193,16 @@ async function act(run: () => Promise<unknown>): Promise<void> {
   } finally {
     busy.value = false;
   }
+}
+
+function forget(domain: DirectoryDomain): void {
+  liveDialog($q, () => ({
+    title: t('directory.domain.forget'),
+    message: t('directory.domain.forgetConfirm', { name: domain.name }),
+    cancel: { flat: true, noCaps: true, label: t('directory.domain.cancel') },
+    ok: { color: 'negative', noCaps: true, label: t('directory.domain.forget') },
+    persistent: true,
+  })).onOk(() => void act(() => forgetDomain(domain.sid)));
 }
 
 onMounted(load);

@@ -25,7 +25,7 @@ func ReadDirectoryObjects(ctx context.Context, names []string) (*models.Director
 	}
 	ctx, cancel := context.WithTimeout(ctx, directoryReadBudget)
 	defer cancel()
-	raw, err := runPowerShellJSON(ctx, directoryScript(filters))
+	raw, err := runPowerShellJSONInput(ctx, directoryScript(), directoryInput(filters))
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, msg.Err("directory.read.timeout", msg.Params{"budget": "5 min"})

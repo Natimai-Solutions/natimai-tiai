@@ -99,6 +99,8 @@ describe('auditActionLabel', () => {
       'directory.reader_revoke',
       'directory.reader_drop',
       'directory.mismatch',
+      'directory.contested',
+      'directory.forget_domain',
       'directory.disagreement',
       'directory.moves',
       'directory.confirm_moves',

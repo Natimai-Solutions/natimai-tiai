@@ -783,9 +783,21 @@ async def enroll(
     machine.token_hash = security.hash_token(token)
     machine.token_issued_at = utcnow()
     # A re-enrolled poste is no longer the one designated to read the
-    # directory (plan-lecture-annuaire §3.2).
+    # directory (plan-lecture-annuaire §3.2), nor the one an object was
+    # matched to: it is matched again at the next reading.
     if machine.directory_reader:
-        directory_crud.undesignate(machine)
+        await directory_crud.undesignate(session, machine)
+        audit.record(
+            session,
+            actor=directory_crud.ACTOR,
+            action="directory.reader_drop",
+            resource_type="machine",
+            resource_id=str(machine.id),
+            details={"hostname": machine.hostname, "cause": "reenrolled"},
+        )
+    if machine.directory_object_guid is not None:
+        directory_crud.clear_match(machine)
+        machine.directory_status = None
     # Until the agent's first authenticated request proves the answer below
     # reached it (``_unused_enrollment_retry``).
     machine.enrollment_token_unused = True
@@ -1353,6 +1365,8 @@ async def directory_reading(
         "mismatch": result.mismatch,
         "unknown": result.unknown,
         "stale": result.stale,
+        "contested": result.contested,
+        "undecided": result.undecided,
         "moved": result.moved,
         "held": result.held,
         "disagreement": result.disagreement,

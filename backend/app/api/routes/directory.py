@@ -73,6 +73,9 @@ class DirectoryOut(BaseModel):
     domains_without_reader: list[str]
     # Postes by verdict.
     status_counts: dict[str, int]
+    # The account is confined to some places: the parc's directory state is
+    # not its to read.
+    restricted: bool = False
 
 
 def _reader(m: Machine) -> ReaderOut:
@@ -86,7 +89,22 @@ def _reader(m: Machine) -> ReaderOut:
 
 
 @router.get("", response_model=DirectoryOut)
-async def directory_state(session: SessionDep) -> DirectoryOut:
+async def directory_state(session: SessionDep, scope: CurrentScope) -> DirectoryOut:
+    # Domains, readers and pending moves of the whole parc: not shown to an
+    # account confined to some places.
+    if scope is not None:
+        return DirectoryOut(
+            mode=env.DIRECTORY_VERIFY,
+            sync_minutes=env.DIRECTORY_SYNC_MINUTES,
+            stale_hours=env.DIRECTORY_STALE_HOURS,
+            confirm_moves=env.DIRECTORY_CONFIRM_MOVES,
+            room_source=env.ROOM_SOURCE,
+            domains=[],
+            readers_waiting=[],
+            domains_without_reader=[],
+            status_counts={},
+            restricted=True,
+        )
     domains = await directory_crud.domains_overview(session)
     readers = (
         await session.exec(
@@ -171,6 +189,18 @@ async def directory_state(session: SessionDep) -> DirectoryOut:
     )
 
 
+def _whole_parc(scope: object) -> None:
+    """The directory is the parc's: designating a reader, or confirming what
+    a reading moves, reaches every poste of a domain. An account confined to
+    some places does neither, as it does not re-sync the rooms."""
+    if scope is not None:
+        raise AppError(
+            code=ErrorCode.AUTH_SCOPE_RESTRICTED,
+            status_code=403,
+            message="This reaches beyond the places your account is confined to",
+        )
+
+
 @router.post("/readers/{machine_id}", response_model=ReaderOut, dependencies=[_WRITE])
 async def designate_reader(
     machine_id: uuid.UUID,
@@ -180,6 +210,7 @@ async def designate_reader(
 ) -> ReaderOut:
     """Designate a poste to read its domain for the others: a member server
     or an administration poste always on, never a pupil's poste."""
+    _whole_parc(scope)
     if not directory_crud.enabled():
         raise AppError(code=ErrorCode.DIRECTORY_OFF, status_code=409)
     machine = await _require_machine(session, machine_id, scope)
@@ -207,37 +238,64 @@ async def revoke_reader(
     scope: CurrentScope,
     current: CurrentUser,
 ) -> None:
+    """Withdraw a designation. What the reader read goes with it."""
+    _whole_parc(scope)
     machine = await _require_machine(session, machine_id, scope)
     if not machine.directory_reader:
         return
-    directory_crud.undesignate(machine)
-    session.add(machine)
+    hostname = machine.hostname
+    await directory_crud.undesignate(session, machine)
     audit.record(
         session,
         actor=current.email,
         action="directory.reader_revoke",
         resource_type="machine",
         resource_id=str(machine.id),
-        details={"hostname": machine.hostname},
+        details={"hostname": hostname},
     )
     await session.commit()
 
 
-async def _domain_with_pending(session: SessionDep, sid: str) -> DirectoryDomain:
-    domain = await session.get(DirectoryDomain, sid)
+async def _locked_domain(session: SessionDep, sid: str) -> DirectoryDomain:
+    domain = await directory_crud.lock_domain(session, sid)
     if domain is None:
         raise AppError(code=ErrorCode.DIRECTORY_DOMAIN_NOT_FOUND, status_code=404)
+    return domain
+
+
+class PendingRef(BaseModel):
+    """The pending moves the person saw: confirmed or discarded only while
+    they are still those."""
+
+    pending_since: datetime
+    pending_count: int
+
+
+def _same_pending(domain: DirectoryDomain, seen: PendingRef) -> None:
     if not domain.pending_moves:
         raise AppError(code=ErrorCode.DIRECTORY_NOTHING_PENDING, status_code=409)
-    return domain
+    if (
+        domain.pending_since != seen.pending_since
+        or domain.pending_count != seen.pending_count
+    ):
+        raise AppError(code=ErrorCode.DIRECTORY_PENDING_CHANGED, status_code=409)
 
 
 @router.post("/domains/{sid}/confirm", dependencies=[_WRITE])
 async def confirm_moves(
-    sid: str, session: SessionDep, current: CurrentUser
+    sid: str,
+    payload: PendingRef,
+    session: SessionDep,
+    scope: CurrentScope,
+    current: CurrentUser,
 ) -> dict[str, int]:
-    """Apply the moves a reading held back (more than DIRECTORY_CONFIRM_MOVES)."""
-    domain = await _domain_with_pending(session, sid)
+    """Apply the moves a reading held back (more than DIRECTORY_CONFIRM_MOVES)
+    — those the person was shown: a reading taken since asks again."""
+    _whole_parc(scope)
+    if not directory_crud.enabled():
+        raise AppError(code=ErrorCode.DIRECTORY_OFF, status_code=409)
+    domain = await _locked_domain(session, sid)
+    _same_pending(domain, payload)
     result = await directory_crud.apply_pending(
         session, domain, utcnow(), actor=current.email
     )
@@ -246,10 +304,18 @@ async def confirm_moves(
 
 
 @router.post("/domains/{sid}/discard", status_code=204, dependencies=[_WRITE])
-async def discard_moves(sid: str, session: SessionDep, current: CurrentUser) -> None:
+async def discard_moves(
+    sid: str,
+    payload: PendingRef,
+    session: SessionDep,
+    scope: CurrentScope,
+    current: CurrentUser,
+) -> None:
     """Leave the postes where they are. The next reading holds the same moves
     again if the directory still says so."""
-    domain = await _domain_with_pending(session, sid)
+    _whole_parc(scope)
+    domain = await _locked_domain(session, sid)
+    _same_pending(domain, payload)
     count = domain.pending_count
     domain.pending_moves = None
     domain.pending_since = None
@@ -262,5 +328,26 @@ async def discard_moves(sid: str, session: SessionDep, current: CurrentUser) -> 
         resource_type="directory_domain",
         resource_id=domain.sid,
         details={"domain": domain.name, "count": count},
+    )
+    await session.commit()
+
+
+@router.delete("/domains/{sid}", status_code=204, dependencies=[_WRITE])
+async def forget_domain(
+    sid: str, session: SessionDep, scope: CurrentScope, current: CurrentUser
+) -> None:
+    """Forget a domain the server read — rebuilt under another SID, or read
+    by mistake. Its postes are matched again at the next reading."""
+    _whole_parc(scope)
+    domain = await _locked_domain(session, sid)
+    name = domain.name
+    await directory_crud.forget_domain(session, domain)
+    audit.record(
+        session,
+        actor=current.email,
+        action="directory.forget_domain",
+        resource_type="directory_domain",
+        resource_id=sid,
+        details={"domain": name},
     )
     await session.commit()

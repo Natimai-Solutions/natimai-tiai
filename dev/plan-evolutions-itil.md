@@ -341,3 +341,13 @@ Au-delà de N postes, une commande à risque attend l'accord d'un second compte 
 - **Fusion** : les paquets winget du doublon disparaissent avec lui, comme le reste de l'inventaire ; le poste gardé les remonte à son cycle suivant.
 - **Non fait** : déployer une mise à jour depuis l'onglet (il faut toujours créer un paquet winget) ; historique de la conformité dans le temps (C9).
 - **Livré avec C5** (§7) : la lecture de l'annuaire en mode relais, seule autre évolution d'agent en attente — voir `plan-lecture-annuaire.md` §10.
+
+### Relecture du 2026-11-24 (C3, C4, C5, annuaire)
+
+Quatre relectures indépendantes, une par chantier. Corrections livrées dans la même PR, chacune avec son test.
+
+- **C3** : « éteindre ensuite » n'éteint plus un poste dont la commande tourne encore après son délai, ni ceux d'une étape ultérieure ; désactiver une planification arrête les étapes suivantes ; le paquet est vérifié avant le réveil ; une étape qui n'a atteint aucun poste n'ouvre pas la suivante, et une étape attend la fin d'une plage interdite ; une planification qui lève une exception est close en échec sans bloquer les autres ; changer le fuseau garde l'heure planifiée ; l'historique se lit dans le fuseau de la console ; le déploiement d'un paquet propose la confirmation en plage interdite.
+- **C4** : le tri d'un signalement se fait sous verrou (trois comptes au même instant obtenaient trois succès) ; la page publique ne dit « étiquette invalide » que si le serveur le dit ; l'entrée d'audit de réception porte l'identifiant du signalement. Les bornes par adresse supposent le proxy déclaré dans `TRUSTED_PROXIES` (DEPLOYMENT.md).
+- **C5** : le tri par conformité ne fait plus échouer le passage à la fiche suivante ; un poste inventorié sans TPM est non conforme ; le délai des correctifs se compte depuis que le poste est en retard sans interruption (`wu_critical_pending_since`, migration `0054`) ; un administrateur local sans nom lisible est gardé sous son SID ; winget : largeur d'affichage, échec ponctuel sans perte, attente bornée ; pare-feu : stratégie de l'ancien modèle lue.
+- **Annuaire** : voir `plan-lecture-annuaire.md` §11.
+- **Non repris** : budgets de signalement réglables ; cumul des déplacements d'annuaire sur plusieurs lectures ; versions tronquées par winget laissées telles quelles, avec leur ellipse.

@@ -375,18 +375,15 @@ async def room_for_key(
     if room is not None:
         return room, False
     # A room filed by the agents' word before its domain was read: its key
-    # gains the domain's SID, the room stays the same (plan-lecture-annuaire §4.1).
-    from app.features.directory import crud as directory_crud
-
-    legacy = directory_crud.legacy_key(key) if directory_crud.enabled() else None
-    if legacy is not None:
-        old = (await session.exec(select(Room).where(Room.ad_key == legacy))).first()
-        if old is not None:
-            old.ad_key = key
-            old.updated_at = utcnow()
-            session.add(old)
-            await session.flush()
-            return old, False
+    # gains the domain's SID, the room stays the same (plan-lecture-annuaire
+    # §4.1) — when it is that domain's room (``_legacy_room``).
+    old = await _legacy_room(session, key)
+    if old is not None:
+        old.ad_key = key
+        old.updated_at = utcnow()
+        session.add(old)
+        await session.flush()
+        return old, False
     hand_made = await hand_made_rooms(session, name)
     if hand_made:
         if not adopt or len(hand_made) > 1:
@@ -438,6 +435,46 @@ async def room_for_key(
     return room, True
 
 
+async def _legacy_room(session: AsyncSession, key: str) -> Room | None:
+    """The room that bore ``key`` before its domain was read — the same key
+    without the SID — when it is this domain's to take: empty, or holding
+    mostly postes read in that domain. A reading must not, by naming an OU or
+    a location, capture the room of another domain's postes and the scopes
+    attached to it."""
+    from app.features.directory import crud as directory_crud
+
+    if not directory_crud.enabled():
+        return None
+    legacy = directory_crud.legacy_key(key)
+    sid = directory_crud.key_sid(key)
+    if legacy is None or sid is None:
+        return None
+    old = (await session.exec(select(Room).where(Room.ad_key == legacy))).first()
+    if old is None:
+        return None
+    rows = (
+        await session.exec(
+            select(col(Machine.directory_domain_sid)).where(
+                col(Machine.room_id) == old.id
+            )
+        )
+    ).all()
+    ours = sum(1 for s in rows if s == sid)
+    return old if not rows or ours * 2 > len(rows) else None
+
+
+async def settles(session: AsyncSession, key: str, name: str, *, sid: str) -> bool:
+    """Whether a reading's key names a room without taking one made by hand:
+    the room of the key exists, or its legacy one is the domain's, or no
+    room made by hand bears the name (one is then created)."""
+    del sid  # carried by the key; named for the reader of the call
+    if (await session.exec(select(Room.id).where(Room.ad_key == key))).first():
+        return True
+    if await _legacy_room(session, key) is not None:
+        return True
+    return not await hand_made_rooms(session, name)
+
+
 def reported_dn_consistent(machine: Machine) -> bool:
     """Whether the OU an agent reports is the one its own DN sits in — the
     least the server can check of what it is told (audit S20)."""
@@ -485,10 +522,7 @@ async def _place(
     from app.features.directory import crud as directory_crud
 
     verifying = directory_crud.enabled()
-    if verifying and machine.directory_status not in (
-        directory_crud.VERIFIED,
-        directory_crud.MISMATCH,
-    ):
+    if verifying and machine.directory_status not in directory_crud.READ:
         # Not read, or no longer: the poste stays where it is, and creates
         # no room (plan-lecture-annuaire §4.1).
         return False, False

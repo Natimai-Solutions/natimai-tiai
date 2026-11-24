@@ -71,6 +71,13 @@ func RunWUInstall(ctx context.Context, includeDrivers bool, timeout time.Duratio
 // objects → array of strings) with room to spare; the default of 2 would
 // silently render the nested arrays as type names.
 func runPowerShellJSON(ctx context.Context, script string) ([]byte, error) {
+	return runPowerShellJSONInput(ctx, script, "")
+}
+
+// runPowerShellJSONInput is runPowerShellJSON with text handed to the script
+// on its standard input — for what does not fit a command line, which
+// Windows caps at 32,767 characters (the names of a directory reading).
+func runPowerShellJSONInput(ctx context.Context, script, input string) ([]byte, error) {
 	wrapped := "$ErrorActionPreference = 'Stop'; " +
 		"$ProgressPreference = 'SilentlyContinue'; " +
 		"try { " +
@@ -91,6 +98,9 @@ func runPowerShellJSON(ctx context.Context, script string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 
 	err := cmd.Run()
 	if err != nil {

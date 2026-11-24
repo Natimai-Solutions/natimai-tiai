@@ -874,7 +874,7 @@ class MachineFilters:
     winget_outdated: str | None = None
     # The directory's verdict (plan-lecture-annuaire); « none »: not read.
     directory_status: (
-        Literal["verified", "mismatch", "unknown", "stale", "none"] | None
+        Literal["verified", "mismatch", "unknown", "stale", "contested", "none"] | None
     ) = None
     # Postes still in the parc (true) or retired (false) — the dashboard's
     # cards open their lists with it, as their figures leave retired postes
@@ -960,7 +960,9 @@ def machine_filters(
     compliance: Literal["failing", "passing", "unknown"] | None = None,
     compliance_check: Check | None = None,
     winget_outdated: str | None = Query(None, max_length=200),
-    directory_status: Literal["verified", "mismatch", "unknown", "stale", "none"]
+    directory_status: Literal[
+        "verified", "mismatch", "unknown", "stale", "contested", "none"
+    ]
     | None = None,
     in_parc: bool | None = None,
     exact: str | None = Query(

@@ -25,8 +25,9 @@ var directoryName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,62}$`)
 // filter well under the size a domain controller accepts.
 const directoryBatch = 200
 
-// maxDirectoryNames bounds what one reading asks the directory for.
-const maxDirectoryNames = 20000
+// maxDirectoryNames bounds what one reading asks the directory for — the
+// server's own bound (directory.crud.MAX_NAMES).
+const maxDirectoryNames = 10000
 
 // DirectoryFilters turns the names into LDAP filters on sAMAccountName, the
 // names the server should not have sent dropped, duplicates collapsed.
@@ -64,11 +65,11 @@ func DirectoryFilters(names []string) []string {
 // name and SID, the computer objects the filters name, the subnets and their
 // sites. Read only, through System.DirectoryServices — what [adsisearcher]
 // is — paged, its result one object for ConvertTo-Json.
-func directoryScript(filters []string) string {
-	quoted := make([]string, len(filters))
-	for i, f := range filters {
-		quoted[i] = "'" + f + "'"
-	}
+//
+// The filters are not in the script: they arrive on its standard input, one
+// per line (directoryInput). A few thousand names would not fit the 32,767
+// characters Windows allows a command line.
+func directoryScript() string {
 	return `
 $root = [ADSI]'LDAP://RootDSE'
 $nc = [string]$root.defaultNamingContext
@@ -80,7 +81,8 @@ $part = New-Object System.DirectoryServices.DirectorySearcher ([ADSI]('LDAP://CN
 [void]$part.PropertiesToLoad.Add('netbiosname')
 $netbios = [string]$part.FindOne().Properties['netbiosname'][0]
 $objects = New-Object System.Collections.ArrayList
-foreach ($f in @(` + strings.Join(quoted, ",") + `)) {
+$filters = @([Console]::In.ReadToEnd() -split "\r?\n" | Where-Object { $_ })
+foreach ($f in $filters) {
   $s = New-Object System.DirectoryServices.DirectorySearcher $dom, $f
   $s.PageSize = 500
   foreach ($a in 'samaccountname','dnshostname','objectguid','distinguishedname','location','useraccountcontrol') { [void]$s.PropertiesToLoad.Add($a) }
@@ -112,6 +114,11 @@ try {
   objects = @($objects)
   subnets = @($subnets)
 }`
+}
+
+// directoryInput is what the script reads on its standard input.
+func directoryInput(filters []string) string {
+	return strings.Join(filters, "\n")
 }
 
 // ParseDirectoryReading reads the script's JSON. A reading without its

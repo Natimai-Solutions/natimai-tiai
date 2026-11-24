@@ -33,16 +33,38 @@ func itoa(i int) string {
 	return itoa(i/10) + digits[i%10:i%10+1]
 }
 
-// The filters reach the script single-quoted, and the script only reads.
-func TestDirectoryScriptCarriesTheFiltersAndOnlyReads(t *testing.T) {
-	script := directoryScript(DirectoryFilters([]string{"PC-01"}))
-	if !strings.Contains(script, "@('(&(objectCategory=computer)(|(sAMAccountName=PC-01$)))')") {
-		t.Fatalf("filter not in the script:\n%s", script)
+// The filters reach the script on its standard input, never in its text: a
+// few thousand names would not fit a Windows command line. And the script
+// only reads.
+func TestDirectoryScriptTakesTheFiltersOnStdinAndOnlyReads(t *testing.T) {
+	script := directoryScript()
+	if strings.Contains(script, "sAMAccountName=") {
+		t.Fatal("a filter is written in the script")
+	}
+	if !strings.Contains(script, "[Console]::In.ReadToEnd()") {
+		t.Fatal("the script does not read its standard input")
+	}
+	// The wrapper adds a few hundred characters; the whole stays far under
+	// the 32,767 of a command line whatever the number of names.
+	if len(script) > 8000 {
+		t.Fatalf("script of %d characters", len(script))
 	}
 	for _, verb := range []string{"CommitChanges", "Put(", "SetInfo", "DeleteTree", "Remove-"} {
 		if strings.Contains(script, verb) {
 			t.Errorf("the script writes (%s)", verb)
 		}
+	}
+
+	names := make([]string, 5000)
+	for i := range names {
+		names[i] = "PC-" + itoa(i)
+	}
+	input := directoryInput(DirectoryFilters(names))
+	if got := strings.Count(input, "\n") + 1; got != 25 {
+		t.Fatalf("5000 names: %d filters on stdin, want 25", got)
+	}
+	if !strings.Contains(input, "(sAMAccountName=PC-4999$)") {
+		t.Fatal("a name is missing from the input")
 	}
 }
 

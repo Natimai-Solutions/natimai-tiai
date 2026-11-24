@@ -112,6 +112,7 @@ class ErrorCode(enum.StrEnum):
     DIRECTORY_NOT_ELIGIBLE = "directory.not_eligible"
     DIRECTORY_DOMAIN_NOT_FOUND = "directory.domain_not_found"
     DIRECTORY_NOTHING_PENDING = "directory.nothing_pending"
+    DIRECTORY_PENDING_CHANGED = "directory.pending_changed"
     REPORT_NO_OPEN_CHECK = "report.no_open_check"
     SCHEDULE_NOT_FOUND = "schedule.not_found"
     # A schedule that would run inside a forbidden window.

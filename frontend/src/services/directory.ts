@@ -1,7 +1,13 @@
 import { api } from 'boot/axios';
 
 /** The verdicts on a poste (plan-lecture-annuaire.md). */
-export const DIRECTORY_STATUSES = ['verified', 'mismatch', 'unknown', 'stale'] as const;
+export const DIRECTORY_STATUSES = [
+  'verified',
+  'mismatch',
+  'unknown',
+  'stale',
+  'contested',
+] as const;
 export type DirectoryStatus = (typeof DIRECTORY_STATUSES)[number];
 
 export function isDirectoryStatus(value: string): value is DirectoryStatus {
@@ -48,7 +54,13 @@ export interface DirectoryState {
   readers_waiting: DirectoryReader[];
   domains_without_reader: string[];
   status_counts: Record<string, number>;
+  /** The account is confined to some places: the parc's state is not shown. */
+  restricted?: boolean;
 }
+
+/** The pending moves as they were shown: confirmed or discarded only while
+ * they are still those. */
+export type PendingRef = Pick<DirectoryDomain, 'pending_since' | 'pending_count'>;
 
 export async function getDirectoryState(): Promise<DirectoryState> {
   const { data } = await api.get<DirectoryState>('/directory');
@@ -64,13 +76,23 @@ export async function revokeReader(machineId: string): Promise<void> {
   await api.delete(`/directory/readers/${machineId}`);
 }
 
-export async function confirmMoves(sid: string): Promise<{ moved: number }> {
+function pendingRef(seen: PendingRef) {
+  return { pending_since: seen.pending_since, pending_count: seen.pending_count };
+}
+
+export async function confirmMoves(sid: string, seen: PendingRef): Promise<{ moved: number }> {
   const { data } = await api.post<{ moved: number }>(
     `/directory/domains/${encodeURIComponent(sid)}/confirm`,
+    pendingRef(seen),
   );
   return data;
 }
 
-export async function discardMoves(sid: string): Promise<void> {
-  await api.post(`/directory/domains/${encodeURIComponent(sid)}/discard`);
+export async function discardMoves(sid: string, seen: PendingRef): Promise<void> {
+  await api.post(`/directory/domains/${encodeURIComponent(sid)}/discard`, pendingRef(seen));
+}
+
+/** Forget a domain the server read (rebuilt under another SID). */
+export async function forgetDomain(sid: string): Promise<void> {
+  await api.delete(`/directory/domains/${encodeURIComponent(sid)}`);
 }

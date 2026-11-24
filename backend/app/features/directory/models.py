@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Column, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import Column, ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -19,6 +19,17 @@ from app.features.base import utc_field, utcnow
 
 class DirectoryDomain(SQLModel, table=True):
     __tablename__ = "directory_domains"
+    __table_args__ = (
+        # One domain per NetBIOS name: the agents declare their domain by
+        # that name alone, so two domains bearing it could not be told apart
+        # — and a reader inventing a second SID for a name must not be able
+        # to unsettle the postes of the first.
+        Index(
+            "uq_directory_domains_netbios",
+            text("lower(netbios_name)"),
+            unique=True,
+        ),
+    )
 
     sid: str = Field(primary_key=True, max_length=100)
     # Its DNS name, as the reader reports it: for display.

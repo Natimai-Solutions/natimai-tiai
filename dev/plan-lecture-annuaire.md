@@ -347,3 +347,67 @@ Livré avec la version d'agent de C5, comme le demandait
   relais Wake-on-LAN vérifiés et adresse source gardée par poste (L4, serveur
   seul), proposition de révocation du jeton en un clic depuis le filtre
   « périmé » (le filtre existe, la révocation reste sur la fiche).
+
+## 11. Durcissement après relecture (2026-11-24)
+
+Une relecture indépendante a montré, tests à l'appui, que plusieurs garde-fous
+du §3.2 se contournaient. Corrigé, avec un test par point
+(`backend/tests/test_directory.py`) :
+
+- **Un lecteur est lié à son domaine et à son SID.** La désignation retient
+  le domaine déclaré à ce moment-là et le SID de la première lecture. Un
+  lecteur qui se met à déclarer un autre domaine perd sa désignation ; une
+  lecture sous un autre SID est refusée.
+- **Un nom NetBIOS désigne un seul domaine** (index unique). **Écart au
+  §3.2** : deux domaines de même nom NetBIOS sur un même serveur ne sont
+  plus pris en charge. Les agents ne déclarent que ce nom ; rien ne permet
+  de dire à quel domaine appartient un poste, et un lecteur qui inventait
+  un second SID faisait repasser « inconnus » les postes du premier. Un
+  domaine reconstruit sous un autre SID se retire depuis Paramètres →
+  Annuaire (« Oublier ce domaine »).
+- **Un nom réclamé par deux postes** : statut « contesté » pour les deux,
+  journalisé, sans les passer en « Identité à confirmer ». Un poste forgé
+  qui prenait le nom d'un lecteur lui faisait perdre sa désignation, et
+  bloquait n'importe quel poste pas encore rapproché. Un poste au jeton
+  révoqué ne réclame plus rien. Le rapprochement se fait par le nom, le
+  GUID ne servant qu'à un poste renommé : le premier arrivé ne garde plus
+  un objet contre un second réclamant.
+- **Une commande, une lecture.** La lecture fait passer la commande « en
+  cours » ; une seconde réponse à la même commande est refusée, comme une
+  réponse à une commande remise depuis plus de 30 minutes. Le seuil
+  `DIRECTORY_CONFIRM_MOVES` ne se franchit plus par petites lectures.
+- **Comparaison de deux lecteurs** : désaccord aussi quand un même nom est
+  lu sous deux GUID, ou trouvé par l'un et pas par l'autre. Seuls les
+  lecteurs désignés comptent, et, quand plusieurs ont lu dans les deux
+  derniers intervalles, seulement ceux-là : un lecteur éteint le week-end ne
+  gèle plus le domaine sur sa lecture du vendredi. Conséquence acceptée : un
+  poste enrôlé entre les lectures de deux lecteurs gèle le domaine jusqu'à
+  la lecture suivante.
+- **Lecteur retiré** : ses enregistrements sont supprimés avec sa
+  désignation (retrait, chute, ré-enrôlement), et ceux d'un lecteur fusionné
+  ou supprimé à la passe suivante du worker.
+- **Salles** : une lecture n'adopte plus une salle créée à la main (elle
+  reste à la resynchronisation, qui demande confirmation) ; l'ancienne clé
+  d'une salle n'est reprise que si la salle est vide ou tient en majorité
+  des postes lus dans ce domaine. Les postes laissés en place pour cette
+  raison sont comptés « indécis », plus « déplacés ».
+- **Confirmation** : elle porte sur les déplacements affichés (date et
+  nombre) ; une lecture arrivée entre-temps la fait redemander. Refusée
+  quand la lecture de l'annuaire est désactivée.
+- **Portée** : désigner un lecteur, confirmer, écarter ou oublier un domaine
+  est réservé aux comptes sans limite de lieu, comme la resynchronisation
+  des salles ; un compte limité ne voit pas l'état de l'annuaire.
+- **Verrous** : la ligne du domaine est verrouillée en premier par la
+  lecture comme par la confirmation.
+- **Ré-enrôlement** : le rapprochement du poste est oublié.
+- **Agent** : les filtres LDAP passent par l'entrée standard de PowerShell
+  et non par la ligne de commande, plafonnée à 32 767 caractères (une
+  lecture échouait au-delà d'environ mille postes). Dix mille noms au plus
+  par lecture, côté agent comme côté serveur.
+- **Heartbeat** : il ne range plus de poste en mode relais (un déplacement
+  retenu était appliqué par le heartbeat suivant) ; une lecture restée sans
+  réponse ne bloque plus les suivantes au-delà de 30 minutes.
+
+Limites qui restent, inchangées : un lecteur compromis ment pour son
+domaine ; un poste forgé qui prend le nom d'un poste réel pas encore enrôlé
+est rangé à sa place.

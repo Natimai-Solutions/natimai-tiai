@@ -1789,6 +1789,16 @@ serveur range les salles d'après cette lecture.
   dans Paramètres → Annuaire. La liste des postes se filtre par statut
   (« Annuaire : écart » depuis Paramètres) et la fiche montre côte à côte ce que
   l'agent déclare et ce que l'annuaire dit.
+- **Ce qui borne un lecteur** : sa désignation est liée au domaine qu'il
+  déclarait quand il a été désigné et au SID de sa première lecture ; un nom
+  NetBIOS ne désigne qu'**un seul domaine** sur le serveur (deux domaines de
+  même nom NetBIOS ne sont pas pris en charge ; un domaine reconstruit sous un
+  autre SID se retire par « Oublier ce domaine »). Deux postes qui portent le
+  même nom dans un domaine sont « contestés » jusqu'à ce que l'un soit
+  fusionné, supprimé ou révoqué. Désigner un lecteur et confirmer des
+  déplacements sont réservés aux comptes sans limite de lieu. Une lecture ne
+  reprend pas une salle créée à la main : c'est « Resynchroniser depuis
+  l'annuaire », page Salles, qui le fait, après confirmation.
 - **Limite** : lire l'annuaire prouve ce qu'il dit d'un nom, pas que le poste
   *est* ce nom. Un poste forgé qui prend le nom d'un poste réel pas encore
   enrôlé est rangé à sa place ; un lecteur compromis ment pour tout son domaine.

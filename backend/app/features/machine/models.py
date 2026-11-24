@@ -80,7 +80,7 @@ class Machine(SQLModel, table=True):
     # verdict on the agent's word, and the reading the rooms are filed by in
     # that mode. NULL = not read.
     directory_object_guid: str | None = Field(default=None, max_length=64)
-    # verified / mismatch / unknown / stale.
+    # verified / mismatch / unknown / stale / contested.
     directory_status: str | None = Field(default=None, max_length=16)
     directory_domain_sid: str | None = Field(default=None, max_length=100)
     dir_distinguished_name: str | None = None
@@ -96,6 +96,12 @@ class Machine(SQLModel, table=True):
         default=False, sa_column_kwargs={"server_default": false()}
     )
     directory_reader_since: datetime | None = utc_field(default=None, nullable=True)
+    # What the designation is tied to: the domain the poste declared when it
+    # was designated, and the SID of the domain it then read. A reader that
+    # declares another domain, or answers with another SID, is no longer the
+    # one an administrator designated.
+    directory_reader_domain: str | None = Field(default=None, max_length=64)
+    directory_reader_sid: str | None = Field(default=None, max_length=100)
     # Maintenance: the poste's own cycle and owner, overriding its room's and
     # the parc's (``maintenance/policy.py``); NULL = inherit, 0 = excluded.
     # ``last_maintenance_at`` is denormalised from the journal — it is what

@@ -5,18 +5,23 @@ and how a reading is matched to the postes and files them into rooms.
 The agents' own word — the ``directory`` block of their inventory — stays
 stored and shown; with ``DIRECTORY_VERIFY=relay`` it is checked against what
 a reader read (``directory_status``), and the rooms follow the reading.
+
+What bounds a reader (it is trusted for its own domain, and for nothing
+else): its designation is tied to the domain it declared when designated and
+to the SID it first read; a NetBIOS name names one domain; a reading answers
+one command, once; its records leave with its designation.
 """
 
 import hashlib
 import logging
 import re
 import uuid
-from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, func, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -34,7 +39,12 @@ VERIFIED = "verified"
 MISMATCH = "mismatch"
 UNKNOWN = "unknown"
 STALE = "stale"
-STATUSES = (VERIFIED, MISMATCH, UNKNOWN, STALE)
+# Two enrolled postes claim the same computer object: neither gets it until
+# an administrator merges or deletes one (plan §3.3).
+CONTESTED = "contested"
+STATUSES = (VERIFIED, MISMATCH, UNKNOWN, STALE, CONTESTED)
+# The verdicts under which a poste has a reading the rooms may follow.
+READ = (VERIFIED, MISMATCH)
 
 # The actor the audit entries of a reading name, beside the reader.
 ACTOR = "directory"
@@ -42,8 +52,9 @@ ACTOR = "directory"
 # A NetBIOS computer name as a reader may be asked for it: what an LDAP
 # filter can carry without escaping, and nothing longer than a DNS label.
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
-# Names asked of one reader at most: a parc is a few thousand postes.
-MAX_NAMES = 20_000
+# Names asked of one reader at most: what one reading carries back in a
+# request the proxy accepts. A larger domain is cut, and says so in the log.
+MAX_NAMES = 10_000
 # Moves named in an audit entry or kept pending at most, by name.
 MAX_LISTED = 200
 # How long a reader has to answer a reading before it is asked again.
@@ -58,12 +69,18 @@ def source_of(reader_id: uuid.UUID) -> str:
     return f"relay:{reader_id}"
 
 
+def _same(a: str | None, b: str | None) -> bool:
+    return (a or "").strip().lower() == (b or "").strip().lower()
+
+
 # --- Readers -----------------------------------------------------------------
 
 
 def reader_ok(machine: Machine) -> bool:
     """A designation holds while the poste is the one that was designated:
-    not re-enrolled, its token not revoked, its identity not in doubt."""
+    not re-enrolled, its token not revoked, its identity not in doubt — and
+    still declaring the domain it was designated in. A reader that starts
+    declaring another domain does not become that domain's reader."""
     return (
         machine.directory_reader
         and not machine.token_revoked
@@ -71,31 +88,47 @@ def reader_ok(machine: Machine) -> bool:
         and machine.reenroll_requested_at is None
         and machine.token_hash is not None
         and bool(machine.domain)
+        and _same(machine.domain, machine.directory_reader_domain)
     )
 
 
 def designate(machine: Machine, now: datetime) -> None:
     machine.directory_reader = True
     machine.directory_reader_since = now
+    machine.directory_reader_domain = machine.domain
+    machine.directory_reader_sid = None
 
 
-def undesignate(machine: Machine) -> None:
+async def undesignate(session: AsyncSession, machine: Machine) -> None:
+    """End a designation, and drop what the reader read: a reader removed
+    because its word is in doubt must not keep verifying postes, nor keep a
+    disagreement alive. Does not commit."""
     machine.directory_reader = False
     machine.directory_reader_since = None
+    machine.directory_reader_domain = None
+    machine.directory_reader_sid = None
+    session.add(machine)
+    await session.exec(
+        delete(DirectoryRecord).where(
+            col(DirectoryRecord.source) == source_of(machine.id)
+        )
+    )
 
 
 async def drop_ineligible_readers(session: AsyncSession) -> list[Machine]:
     """Undesignate the readers whose designation fell (``reader_ok``), with an
-    audit entry each. Does not commit."""
+    audit entry each, and drop the records no designated reader stands
+    behind (a reader merged away or deleted). Does not commit."""
     rows = await session.exec(
         select(Machine).where(col(Machine.directory_reader).is_(True))
     )
     dropped = []
+    kept: list[str] = []
     for machine in rows.all():
         if reader_ok(machine):
+            kept.append(source_of(machine.id))
             continue
-        undesignate(machine)
-        session.add(machine)
+        await undesignate(session, machine)
         audit.record(
             session,
             actor=ACTOR,
@@ -105,6 +138,10 @@ async def drop_ineligible_readers(session: AsyncSession) -> list[Machine]:
             details={"hostname": machine.hostname},
         )
         dropped.append(machine)
+    orphans = delete(DirectoryRecord)
+    if kept:
+        orphans = orphans.where(col(DirectoryRecord.source).not_in(kept))
+    await session.exec(orphans)
     return dropped
 
 
@@ -120,6 +157,13 @@ async def names_for(session: AsyncSession, reader: Machine) -> list[str]:
     names = sorted(
         {h.upper() for h in rows.all() if h and _NAME.fullmatch(h)},
     )
+    if len(names) > MAX_NAMES:
+        logger.warning(
+            "directory: %d names in the domain of reader %s, %d asked",
+            len(names),
+            reader.id,
+            MAX_NAMES,
+        )
     return names[:MAX_NAMES]
 
 
@@ -254,9 +298,26 @@ class ReconcileResult:
     mismatch: int = 0
     unknown: int = 0
     stale: int = 0
+    contested: int = 0
     moved: int = 0
     held: int = 0
+    # Postes whose reading names a room the server cannot settle (a name
+    # borne by rooms made by hand): left where they are.
+    undecided: int = 0
     disagreement: bool = False
+
+
+async def lock_domain(session: AsyncSession, sid: str) -> DirectoryDomain | None:
+    """The domain's row, locked: a reading and a confirmation of the same
+    domain queue here, before either touches the postes."""
+    return (
+        await session.exec(
+            select(DirectoryDomain)
+            .where(col(DirectoryDomain.sid) == sid)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).first()
 
 
 async def ingest(
@@ -272,30 +333,53 @@ async def ingest(
         raise ReadingRefused("directory.off")
     if not reader_ok(reader):
         raise ReadingRefused("directory.not_reader")
+    # One command, answered once, while it is fresh: DELIVERED, never
+    # RUNNING — the state this function leaves it in.
     if (
         command.machine_id != reader.id
         or command.type != CommandType.DIRECTORY_READ
-        or command.status not in (CommandStatus.DELIVERED, CommandStatus.RUNNING)
+        or command.status != CommandStatus.DELIVERED
+        or (command.delivered_at or command.created_at) <= now - READ_TTL
     ):
         raise ReadingRefused("directory.command")
     # Its own domain only: a reader answers for nobody else's (plan §3.2).
-    if reading.netbios_name.lower() != (reader.domain or "").lower():
+    if not _same(reading.netbios_name, reader.domain):
         raise ReadingRefused("directory.other_domain")
+    # And always the same one: the SID it first read.
+    if reader.directory_reader_sid not in (None, reading.domain_sid):
+        raise ReadingRefused("directory.other_sid")
 
-    domain = await session.get(DirectoryDomain, reading.domain_sid)
-    if domain is None:
-        domain = DirectoryDomain(
+    # The domain row first, locked, whoever writes it (``lock_domain``).
+    await session.exec(
+        pg_insert(DirectoryDomain)
+        .values(
             sid=reading.domain_sid,
             name=reading.domain_name,
             netbios_name=reading.netbios_name,
+            objects_read=0,
+            pending_count=0,
+            created_at=now,
         )
+        .on_conflict_do_nothing()
+    )
+    domain = await lock_domain(session, reading.domain_sid)
+    if domain is None:
+        # Another SID already bears this NetBIOS name: one name, one domain.
+        # A second domain of the name is not read (an administrator removes
+        # the first from Paramètres if the domain was rebuilt).
+        raise ReadingRefused("directory.name_taken")
+    if not _same(domain.netbios_name, reading.netbios_name):
+        # A known SID reported under another name: not this reader's.
+        raise ReadingRefused("directory.other_domain")
+    command.status = CommandStatus.RUNNING
+    command.started_at = now
+    session.add(command)
+    reader.directory_reader_sid = reading.domain_sid
+    session.add(reader)
     domain.name = reading.domain_name
-    domain.netbios_name = reading.netbios_name
     domain.subnets = reading.subnets or None
     domain.last_read_at = now
     domain.last_reader_id = reader.id
-    session.add(domain)
-    await session.flush()
 
     # Only the names it was asked for: a reader does not volunteer objects.
     asked = {f"{n}$" for n in await names_for(session, reader)}
@@ -304,12 +388,15 @@ async def ingest(
         delete(DirectoryRecord).where(col(DirectoryRecord.source) == source)
     )
     seen: set[str] = set()
-    kept = 0
+    names: set[str] = set()
     for obj in reading.objects:
         sam = obj.sam_account_name.upper()
-        if sam not in asked or obj.object_guid in seen:
+        # One object per name, one name per object: a directory holds no
+        # two computers of the same sAMAccountName.
+        if sam not in asked or obj.object_guid in seen or sam in names:
             continue
         seen.add(obj.object_guid)
+        names.add(sam)
         ou, ou_dn = parent_ou(obj.distinguished_name)
         session.add(
             DirectoryRecord(
@@ -326,28 +413,25 @@ async def ingest(
                 read_at=now,
             )
         )
-        kept += 1
-    domain.objects_read = kept
+    domain.objects_read = len(seen)
+    session.add(domain)
     await session.flush()
     return await reconcile(session, domain, now, reader=reader)
-
-
-def _same(a: str | None, b: str | None) -> bool:
-    return (a or "").strip().lower() == (b or "").strip().lower()
 
 
 def verdict(machine: Machine) -> str:
     """``verified`` when what the agent declares agrees with what was read,
     ``mismatch`` otherwise. Signalled, never blocking (plan §9.5): a poste
-    moved in AD and not yet restarted has a local DN behind."""
-    declared = (machine.ad_distinguished_name, machine.ad_location)
-    if declared == (None, None):
-        return VERIFIED
+    moved in AD and not yet restarted has a local DN behind. An agent that
+    declares nothing on a point (it could not read its location) has no
+    opinion to disagree with."""
     if machine.ad_distinguished_name is not None and not _same(
         machine.ad_distinguished_name, machine.dir_distinguished_name
     ):
         return MISMATCH
-    if not _same(machine.ad_location, machine.dir_location):
+    if machine.ad_location is not None and not _same(
+        machine.ad_location, machine.dir_location
+    ):
         return MISMATCH
     return VERIFIED
 
@@ -355,11 +439,11 @@ def verdict(machine: Machine) -> str:
 def _set_status(session: AsyncSession, machine: Machine, status: str) -> None:
     if machine.directory_status == status:
         return
-    if status == MISMATCH:
+    if status in (MISMATCH, CONTESTED):
         audit.record(
             session,
             actor=ACTOR,
-            action="directory.mismatch",
+            action=f"directory.{status}",
             resource_type="machine",
             resource_id=str(machine.id),
             details={
@@ -372,13 +456,79 @@ def _set_status(session: AsyncSession, machine: Machine, status: str) -> None:
     session.add(machine)
 
 
+def clear_match(m: Machine) -> None:
+    """Forget what was read for a poste (it was re-enrolled, or its object
+    is contested): it is matched again from scratch."""
+    m.directory_object_guid = None
+    m.dir_distinguished_name = None
+    m.dir_ou = None
+    m.dir_ou_dn = None
+    m.dir_location = None
+    m.directory_domain_sid = None
+
+
 def _record_key(r: DirectoryRecord) -> tuple[Any, ...]:
     return (
-        r.sam_account_name,
+        r.object_guid,
         (r.distinguished_name or "").lower(),
         (r.location or "").strip(),
         r.disabled,
     )
+
+
+async def _current_records(
+    session: AsyncSession, domain: DirectoryDomain, now: datetime
+) -> dict[str, list[DirectoryRecord]]:
+    """The fresh records of the domain, by reader — of the readers
+    designated now. When several read recently (within two intervals), only
+    those are compared: a reader off for the weekend must not freeze the
+    domain on what it read on Friday."""
+    readers = (
+        await session.exec(
+            select(Machine).where(col(Machine.directory_reader).is_(True))
+        )
+    ).all()
+    sources = {source_of(r.id) for r in readers if reader_ok(r)}
+    if not sources:
+        return {}
+    fresh_after = now - timedelta(hours=env.DIRECTORY_STALE_HOURS)
+    rows = (
+        await session.exec(
+            select(DirectoryRecord).where(
+                col(DirectoryRecord.domain_sid) == domain.sid,
+                col(DirectoryRecord.read_at) > fresh_after,
+                col(DirectoryRecord.source).in_(sources),
+            )
+        )
+    ).all()
+    by_source: dict[str, list[DirectoryRecord]] = {}
+    for r in rows:
+        by_source.setdefault(r.source, []).append(r)
+    recent_after = now - 2 * timedelta(minutes=env.DIRECTORY_SYNC_MINUTES) - READ_TTL
+    recent = {
+        s: rs
+        for s, rs in by_source.items()
+        if max(r.read_at for r in rs) > recent_after
+    }
+    return recent or by_source
+
+
+def _disagreements(
+    by_source: dict[str, list[DirectoryRecord]],
+) -> list[dict[str, str]]:
+    """Names on which the readers do not say the same thing: another object,
+    another place, or an object one of them did not find."""
+    if len(by_source) < 2:
+        return []
+    per_name: dict[str, dict[str, tuple[Any, ...]]] = {}
+    for source, records in by_source.items():
+        for r in records:
+            per_name.setdefault(r.sam_account_name.upper(), {})[source] = _record_key(r)
+    out = []
+    for sam, seen in sorted(per_name.items()):
+        if len(seen) < len(by_source) or len(set(seen.values())) > 1:
+            out.append({"sam": sam})
+    return out
 
 
 async def reconcile(
@@ -390,29 +540,15 @@ async def reconcile(
     confirmed: bool = False,
 ) -> ReconcileResult:
     """Match the domain's fresh records to its postes, give each its verdict,
-    and file them into rooms. Does not commit."""
+    and file them into rooms. The domain's row is locked by the caller.
+    Does not commit."""
     from app.features.room import crud as room_crud
 
     result = ReconcileResult()
-    fresh_after = now - timedelta(hours=env.DIRECTORY_STALE_HOURS)
-    records = (
-        await session.exec(
-            select(DirectoryRecord).where(
-                col(DirectoryRecord.domain_sid) == domain.sid,
-                col(DirectoryRecord.read_at) > fresh_after,
-            )
-        )
-    ).all()
+    by_source = await _current_records(session, domain, now)
 
-    # Two readers that disagree on an object: nothing moves (plan §3.2).
-    by_guid: dict[str, list[DirectoryRecord]] = {}
-    for r in records:
-        by_guid.setdefault(r.object_guid, []).append(r)
-    disagreeing = [
-        {"object_guid": guid, "sam": rs[0].sam_account_name}
-        for guid, rs in by_guid.items()
-        if len({_record_key(r) for r in rs}) > 1
-    ]
+    # Readers that disagree: nothing moves (plan §3.2).
+    disagreeing = _disagreements(by_source)
     if disagreeing:
         if domain.disagreement_at is None:
             audit.record(
@@ -431,27 +567,12 @@ async def reconcile(
     domain.disagreement_at = None
     domain.disagreement = None
 
-    objects = {guid: rs[0] for guid, rs in by_guid.items()}
-    by_sam: dict[str, list[DirectoryRecord]] = {}
-    for r in objects.values():
-        by_sam.setdefault(r.sam_account_name.upper(), []).append(r)
-    # Domains of the same NetBIOS name: an object of the name in another of
-    # them leaves the poste undecided (plan §3.2).
-    twins = (
-        await session.exec(
-            select(DirectoryRecord.sam_account_name, DirectoryRecord.domain_sid).where(
-                col(DirectoryRecord.domain_sid) != domain.sid,
-                col(DirectoryRecord.read_at) > fresh_after,
-                col(DirectoryRecord.domain_sid).in_(
-                    select(DirectoryDomain.sid).where(
-                        func.lower(col(DirectoryDomain.netbios_name))
-                        == domain.netbios_name.lower()
-                    )
-                ),
-            )
-        )
-    ).all()
-    twin_names = {sam.upper() for sam, _ in twins}
+    by_sam: dict[str, DirectoryRecord] = {}
+    by_guid: dict[str, DirectoryRecord] = {}
+    for records in by_source.values():
+        for r in records:
+            by_sam.setdefault(r.sam_account_name.upper(), r)
+            by_guid.setdefault(r.object_guid, r)
 
     machines = (
         await session.exec(
@@ -466,45 +587,42 @@ async def reconcile(
             .with_for_update()
         )
     ).all()
-    claims = Counter(
-        f"{(m.hostname or '').upper()}$"
-        for m in machines
-        if _same(m.domain, domain.netbios_name)
-    )
-
-    matched: dict[uuid.UUID, DirectoryRecord | None] = {}
+    # Who claims each name: the postes in good standing only — a revoked
+    # record (a PC replaced that kept its name) claims nothing.
+    claimants: dict[str, list[Machine]] = {}
     for m in machines:
+        if m.hostname and _same(m.domain, domain.netbios_name) and not m.token_revoked:
+            claimants.setdefault(f"{m.hostname.upper()}$", []).append(m)
+
+    for m in machines:
+        in_domain = _same(m.domain, domain.netbios_name)
+        sam = f"{m.hostname.upper()}$" if m.hostname else ""
+        if in_domain and len(claimants.get(sam, [])) > 1 and sam in by_sam:
+            # Claimed by two postes: neither gets the object, whichever
+            # came first — and neither is knocked out of anything else. An
+            # administrator decides (merge, delete, revoke).
+            clear_match(m)
+            _set_status(session, m, CONTESTED)
+            result.contested += 1
+            continue
         record: DirectoryRecord | None = None
-        if m.directory_object_guid and m.directory_object_guid in objects:
-            record = objects[m.directory_object_guid]
-        elif _same(m.domain, domain.netbios_name) and m.hostname:
-            sam = f"{m.hostname.upper()}$"
-            candidates = by_sam.get(sam, [])
-            if claims[sam] > 1 and candidates:
-                # Claimed by two postes: neither gets it, both are to be
-                # confirmed, as for a suspicious fingerprint.
-                m.needs_verification = True
-                _clear(m)
-                _set_status(session, m, UNKNOWN)
-                result.unknown += 1
-                matched[m.id] = None
-                continue
-            if sam in twin_names:
-                _clear(m)
-                _set_status(session, m, UNKNOWN)
-                result.unknown += 1
-                matched[m.id] = None
-                continue
-            record = candidates[0] if len(candidates) == 1 else None
+        if in_domain and not m.token_revoked:
+            # By name first: the object of the name the poste bears now.
+            # By GUID only for a poste whose name has no object any more
+            # (renamed in AD, the agent not restarted yet).
+            record = by_sam.get(sam)
+            if record is None and m.directory_object_guid:
+                kept = by_guid.get(m.directory_object_guid)
+                if kept is not None and not claimants.get(kept.sam_account_name):
+                    record = kept
         if record is None:
             if m.directory_domain_sid == domain.sid and m.directory_object_guid:
                 # Read before, gone now: deleted from the directory.
                 _set_status(session, m, STALE)
                 result.stale += 1
-            elif _same(m.domain, domain.netbios_name):
+            elif in_domain:
                 _set_status(session, m, UNKNOWN)
                 result.unknown += 1
-            matched[m.id] = None
             continue
         m.directory_object_guid = record.object_guid
         m.directory_domain_sid = domain.sid
@@ -523,68 +641,81 @@ async def reconcile(
                 result.verified += 1
             else:
                 result.mismatch += 1
-        matched[m.id] = record
 
     # The rooms, by the reading (plan §4.1).
     source = env.ROOM_SOURCE
-    if source != "manual":
-        moves: list[tuple[Machine, Room | None, tuple[str, str] | None]] = []
-        for m in machines:
-            if m.directory_status not in (VERIFIED, MISMATCH):
-                continue
-            key = room_crud.directory_key(m, source)
-            current = await session.get(Room, m.room_id) if m.room_id else None
-            if key is None:
-                if current is not None:
-                    moves.append((m, current, None))
-                continue
-            if current is None or current.ad_key != key[0]:
-                moves.append((m, current, key))
-        if len(moves) > env.DIRECTORY_CONFIRM_MOVES and not confirmed:
-            domain.pending_moves = [
-                {
-                    "machine_id": str(m.id),
-                    "hostname": m.hostname,
-                    "from": cur.name if cur else None,
-                    "to": key[1] if key else None,
-                }
-                for m, cur, key in moves[:MAX_LISTED]
-            ]
+    if source == "manual":
+        domain.pending_moves = None
+        domain.pending_since = None
+        domain.pending_count = 0
+        session.add(domain)
+        return result
+    moves: list[tuple[Machine, Room | None, tuple[str, str] | None]] = []
+    for m in machines:
+        if m.directory_status not in READ:
+            continue
+        key = room_crud.directory_key(m, source)
+        current = await session.get(Room, m.room_id) if m.room_id else None
+        if key is None:
+            if current is not None:
+                moves.append((m, current, None))
+            continue
+        if current is not None and current.ad_key == key[0]:
+            continue
+        if not await room_crud.settles(session, *key, sid=domain.sid):
+            # A room made by hand bears the name: a reading does not take
+            # it over. Left for « Resynchroniser depuis l'annuaire », which
+            # asks first.
+            result.undecided += 1
+            continue
+        moves.append((m, current, key))
+    if len(moves) > env.DIRECTORY_CONFIRM_MOVES and not confirmed:
+        domain.pending_moves = [
+            {
+                "machine_id": str(m.id),
+                "hostname": m.hostname,
+                "from": cur.name if cur else None,
+                "to": key[1] if key else None,
+            }
+            for m, cur, key in moves[:MAX_LISTED]
+        ]
+        if domain.pending_count != len(moves) or domain.pending_since is None:
             domain.pending_since = now
-            domain.pending_count = len(moves)
-            result.held = len(moves)
-        else:
-            for m, _cur, _key in moves:
-                await room_crud.place_from_directory(session, m, source, adopt=True)
-            result.moved = len(moves)
-            domain.pending_moves = None
-            domain.pending_since = None
-            domain.pending_count = 0
-            if moves:
-                audit.record(
-                    session,
-                    actor=ACTOR,
-                    action="directory.moves",
-                    resource_type="directory_domain",
-                    resource_id=domain.sid,
-                    details={
-                        "domain": domain.name,
-                        "reader": reader.hostname if reader else None,
-                        "count": len(moves),
-                        "hostnames": [m.hostname for m, _, _ in moves][:MAX_LISTED],
-                    },
-                )
+        domain.pending_count = len(moves)
+        result.held = len(moves)
+    else:
+        moved: list[str | None] = []
+        for m, _cur, _key in moves:
+            before = m.room_id
+            # Never adopting a room made by hand: ``settles`` kept those out.
+            await room_crud.place_from_directory(session, m, source, adopt=False)
+            if m.room_id != before:
+                moved.append(m.hostname)
+        result.moved = len(moved)
+        domain.pending_moves = None
+        domain.pending_since = None
+        domain.pending_count = 0
+        if moved:
+            last_reader = reader or (
+                await session.get(Machine, domain.last_reader_id)
+                if domain.last_reader_id
+                else None
+            )
+            audit.record(
+                session,
+                actor=ACTOR,
+                action="directory.moves",
+                resource_type="directory_domain",
+                resource_id=domain.sid,
+                details={
+                    "domain": domain.name,
+                    "reader": last_reader.hostname if last_reader else None,
+                    "count": len(moved),
+                    "hostnames": moved[:MAX_LISTED],
+                },
+            )
     session.add(domain)
     return result
-
-
-def _clear(m: Machine) -> None:
-    m.directory_object_guid = None
-    m.dir_distinguished_name = None
-    m.dir_ou = None
-    m.dir_ou_dn = None
-    m.dir_location = None
-    m.directory_domain_sid = None
 
 
 async def mark_stale(session: AsyncSession, now: datetime) -> int:
@@ -600,7 +731,7 @@ async def mark_stale(session: AsyncSession, now: datetime) -> int:
     rows = await session.exec(
         select(Machine).where(
             col(Machine.directory_domain_sid).in_(old),
-            col(Machine.directory_status).in_((VERIFIED, MISMATCH)),
+            col(Machine.directory_status).in_(READ),
         )
     )
     count = 0
@@ -615,7 +746,7 @@ async def refresh_heartbeat_verdict(session: AsyncSession, machine: Machine) -> 
     what was read, when something was. Does not commit."""
     if not enabled() or machine.directory_object_guid is None:
         return
-    if machine.directory_status in (VERIFIED, MISMATCH):
+    if machine.directory_status in READ:
         _set_status(session, machine, verdict(machine))
 
 
@@ -646,6 +777,11 @@ def legacy_key(key: str) -> str | None:
     return raw if sep and not raw.startswith("sha256:") else None
 
 
+def key_sid(key: str) -> str | None:
+    sid, sep, _ = key.partition("|")
+    return sid if sep else None
+
+
 async def domains_overview(session: AsyncSession) -> list[DirectoryDomain]:
     return list(
         (
@@ -659,7 +795,8 @@ async def domains_overview(session: AsyncSession) -> list[DirectoryDomain]:
 async def apply_pending(
     session: AsyncSession, domain: DirectoryDomain, now: datetime, *, actor: str
 ) -> ReconcileResult:
-    """An administrator confirms the moves a reading held. Does not commit."""
+    """An administrator confirms the moves a reading held. The domain's row
+    is locked by the caller. Does not commit."""
     result = await reconcile(session, domain, now, confirmed=True)
     audit.record(
         session,
@@ -670,3 +807,25 @@ async def apply_pending(
         details={"domain": domain.name, "count": result.moved},
     )
     return result
+
+
+async def forget_domain(session: AsyncSession, domain: DirectoryDomain) -> None:
+    """Remove a domain the server read (rebuilt under another SID, or read
+    by mistake): its records go with it, its postes are matched again from
+    scratch, its readers are tied to no SID. Does not commit."""
+    rows = await session.exec(
+        select(Machine).where(
+            or_(
+                col(Machine.directory_domain_sid) == domain.sid,
+                col(Machine.directory_reader_sid) == domain.sid,
+            )
+        )
+    )
+    for m in rows.all():
+        if m.directory_domain_sid == domain.sid:
+            clear_match(m)
+            m.directory_status = None
+        if m.directory_reader_sid == domain.sid:
+            m.directory_reader_sid = None
+        session.add(m)
+    await session.delete(domain)

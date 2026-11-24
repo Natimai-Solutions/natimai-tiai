@@ -87,6 +87,8 @@ const fr = {
       reader_drop:
         'Désignation de lecteur d’annuaire tombée (ré-enrôlement, jeton révoqué ou identité à confirmer)',
       mismatch: 'Écart entre l’agent et l’annuaire',
+      contested: 'Objet d’annuaire réclamé par deux postes',
+      forget_domain: 'Domaine d’annuaire oublié',
       disagreement: 'Désaccord entre lecteurs d’annuaire',
       moves: 'Postes rangés d’après l’annuaire',
       confirm_moves: 'Déplacements d’après l’annuaire confirmés',
@@ -365,6 +367,8 @@ const en: Translation<typeof fr> = {
       reader_drop:
         'Directory reader designation fell (re-enrolment, revoked token or identity to confirm)',
       mismatch: 'Agent and directory disagree',
+      contested: 'Directory object claimed by two computers',
+      forget_domain: 'Directory domain forgotten',
       disagreement: 'Directory readers disagree',
       moves: 'Computers filed by the directory',
       confirm_moves: 'Moves from the directory confirmed',
