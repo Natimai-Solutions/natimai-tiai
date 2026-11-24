@@ -184,6 +184,11 @@ class TargetOut(BaseModel):
 class RunOut(BaseModel):
     id: uuid.UUID
     started_at: datetime
+    # The same instant in the console's zone, as ``next_run_local``: the
+    # history reads in the zone the schedules are planned in, whatever the
+    # browser's. ``due_local``: the planned hour of a missed occurrence.
+    started_local: str | None = None
+    due_local: str | None = None
     finished_at: datetime | None
     status: str
     result_code: str | None
@@ -254,10 +259,22 @@ def _local(instant: datetime | None, policy: windows.SchedulePolicy) -> str | No
     return instant.astimezone(policy.zone).strftime("%Y-%m-%dT%H:%M")
 
 
-def _run_out(run: ScheduleRun) -> RunOut:
+def _due(run: ScheduleRun) -> datetime | None:
+    raw = (run.result_params or {}).get("due")
+    if not isinstance(raw, str):
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _run_out(run: ScheduleRun, policy: windows.SchedulePolicy) -> RunOut:
     return RunOut(
         id=run.id,
         started_at=run.started_at,
+        started_local=_local(run.started_at, policy),
+        due_local=_local(_due(run), policy),
         finished_at=run.finished_at,
         status=run.status,
         result_code=run.result_code,
@@ -348,7 +365,7 @@ async def _out(
         next_run_at=schedule.next_run_at,
         next_run_local=_local(schedule.next_run_at, policy),
         last_run_at=schedule.last_run_at,
-        last_run=_run_out(last) if last is not None else None,
+        last_run=_run_out(last, policy) if last is not None else None,
         created_by=schedule.created_by,
         created_at=schedule.created_at,
         updated_at=schedule.updated_at,
@@ -756,6 +773,10 @@ async def list_runs(
             .limit(page_size)
         )
     ).all()
+    policy = await windows.schedule_policy(session)
     return RunList(
-        items=[_run_out(r) for r in rows], total=total, page=page, page_size=page_size
+        items=[_run_out(r, policy) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
     )

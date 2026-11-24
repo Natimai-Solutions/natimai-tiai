@@ -142,7 +142,12 @@ const fr = {
       forbidden_window: 'Tombée dans une plage interdite ajoutée depuis : exécution sautée.',
       ring_failed:
         'Étape {stage} : {failed} échec(s) sur {finished} ({percent} %), au-delà du seuil de {threshold} %.',
-      ring_no_result: 'Étape {stage} : aucun des {created} poste(s) n’a répondu.',
+      ring_no_result:
+        'Étape {stage} : aucun poste n’a répondu ({created} commande(s) envoyée(s)) ; l’étape suivante n’est pas lancée.',
+      schedule_disabled:
+        'Planification désactivée pendant l’observation de l’étape {stage} : les étapes suivantes ne sont pas lancées.',
+      internal_error:
+        'Erreur du serveur pendant l’exécution (voir ses journaux) : exécution sautée.',
     },
   },
   window: '{days} {start}–{end}',
@@ -152,6 +157,8 @@ const fr = {
     title: 'Plage interdite',
     message:
       'Nous sommes dans une plage interdite ({window}). Envoyer quand même cette commande à risque à {count} poste(s) ?',
+    deploy:
+      'Nous sommes dans une plage interdite ({window}). Lancer quand même ce déploiement sur plusieurs postes ?',
     ok: 'Envoyer quand même',
     cancel: 'Annuler',
   },
@@ -298,7 +305,11 @@ const en: Translation<typeof fr> = {
       forbidden_window: 'Fell in a forbidden window added since: run skipped.',
       ring_failed:
         'Stage {stage}: {failed} failure(s) out of {finished} ({percent} %), above the {threshold} % threshold.',
-      ring_no_result: 'Stage {stage}: none of the {created} computer(s) answered.',
+      ring_no_result:
+        'Stage {stage}: no computer answered ({created} command(s) sent); the next stage is not started.',
+      schedule_disabled:
+        'Schedule disabled while stage {stage} was under observation: the later stages are not started.',
+      internal_error: 'Server error during the run (see its logs): run skipped.',
     },
   },
   window: '{days} {start}–{end}',
@@ -307,6 +318,8 @@ const en: Translation<typeof fr> = {
     title: 'Forbidden window',
     message:
       'We are inside a forbidden window ({window}). Send this risky command to {count} computer(s) anyway?',
+    deploy:
+      'We are inside a forbidden window ({window}). Start this deployment on several computers anyway?',
     ok: 'Send anyway',
     cancel: 'Cancel',
   },

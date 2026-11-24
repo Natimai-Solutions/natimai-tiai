@@ -1,5 +1,5 @@
 import { api } from 'boot/axios';
-import { t } from 'src/i18n';
+import { errorCodeMessage, t } from 'src/i18n';
 import { formatDate } from 'src/utils/format';
 import { weekdayName } from 'src/utils/settingsSchedule';
 
@@ -32,6 +32,10 @@ export interface ScheduleTarget {
 export interface ScheduleRun {
   id: string;
   started_at: string;
+  /** The same instant, and a missed occurrence's planned hour, in the
+   * console's zone (`AAAA-MM-JJTHH:MM`). Optional: an older server. */
+  started_local?: string | null;
+  due_local?: string | null;
   finished_at: string | null;
   /** running, done, suspended, failed, halted. */
   status: string;
@@ -237,12 +241,16 @@ export function runStatusLabel(status: string): string {
 }
 
 /** Why a run stopped or was skipped, in the reader's language. */
-export function runCauseText(run: Pick<ScheduleRun, 'result_code' | 'result_params'>): string {
+export function runCauseText(
+  run: Pick<ScheduleRun, 'result_code' | 'result_params'> & Pick<Partial<ScheduleRun>, 'due_local'>,
+): string {
   const code = run.result_code;
   if (!code) return '';
   const params = { ...(run.result_params ?? {}) };
   if (code === 'missed' && typeof params.due === 'string') {
-    params.due = new Date(params.due).toLocaleString();
+    // In the console's zone, as the schedule was planned; the browser's only
+    // for a server that does not send it.
+    params.due = run.due_local ? localText(run.due_local) : new Date(params.due).toLocaleString();
   }
   if (code === 'forbidden_window') return t('schedules.runs.cause.forbidden_window');
   for (const prefix of ['schedules.runs.cause', 'schedules.suspended']) {
@@ -250,6 +258,9 @@ export function runCauseText(run: Pick<ScheduleRun, 'result_code' | 'result_para
     const text = t(key, params);
     if (text !== key) return text;
   }
+  // A refusal of the API (a package retired, deleted…): its own wording.
+  const known = errorCodeMessage(code);
+  if (known) return known;
   return code;
 }
 

@@ -457,11 +457,14 @@ export async function deployPackage(
   id: string,
   action: DeployAction,
   target: DeployTarget,
+  /** The person confirmed sending inside a forbidden window. */
+  confirmForbiddenWindow = false,
 ): Promise<CreateCommandsResponse> {
   const { data } = await api.post<CreateCommandsResponse>('/commands', {
     type: action === 'install' ? 'package_install' : 'package_uninstall',
     package_id: id,
     ...target,
+    ...(confirmForbiddenWindow ? { confirm_forbidden_window: true } : {}),
   });
   return data;
 }

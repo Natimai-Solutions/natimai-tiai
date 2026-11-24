@@ -73,7 +73,7 @@
                 {{ runStatusLabel(props.row.last_run.status) }}
               </q-badge>
               <span class="q-ml-xs text-caption">
-                {{ formatDateTime(props.row.last_run.started_at) }}
+                {{ runStarted(props.row.last_run) }}
               </span>
               <div class="text-caption text-muted">
                 {{ runCauseText(props.row.last_run) || runSummary(props.row.last_run) }}
@@ -167,7 +167,7 @@
                 <q-badge outline :color="runColor(run.status)">{{
                   runStatusLabel(run.status)
                 }}</q-badge>
-                <span class="q-ml-sm">{{ formatDateTime(run.started_at) }}</span>
+                <span class="q-ml-sm">{{ runStarted(run) }}</span>
                 <span v-if="current?.rings" class="q-ml-sm text-caption text-muted">
                   {{ t('schedules.runs.stage', { n: run.stage + 1 }) }}
                 </span>
@@ -225,6 +225,12 @@ const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const canWrite = computed(() => auth.can('schedule', 'write'));
+
+/** When a run started, in the console's zone as the schedules are planned;
+ * the browser's only for a server that does not send it. */
+function runStarted(run: { started_at: string; started_local?: string | null }): string {
+  return run.started_local ? localText(run.started_local) : formatDateTime(run.started_at);
+}
 
 const items = ref<Schedule[]>([]);
 const timezone = ref('UTC');

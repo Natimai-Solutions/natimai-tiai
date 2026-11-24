@@ -24,6 +24,7 @@ from app.core.config import settings as env
 from app.core.errors import AppError, ErrorCode
 from app.features.alert.models import ALL_RULES, AlertRule
 from app.features.audit import crud as audit
+from app.features.base import utcnow
 from app.features.machine import crud as machine_crud
 from app.features.maintenance.reach import owner_reach
 from app.features.notification import probe
@@ -654,6 +655,7 @@ async def _write_simple(
     if not sent:
         return
     before = (await crud.fleet_policy(session)).signature_max_age_days
+    zone_before = (await windows.schedule_policy(session)).zone
     for field in sorted(sent):
         value = getattr(payload, field)
         if field == "agent_expected_version" and value is not None:
@@ -664,6 +666,15 @@ async def _write_simple(
         after = (await crud.fleet_policy(session)).signature_max_age_days
         if after != before:
             await machine_crud.recompute_up_to_date(session, max_age_days=after)
+    if "console_timezone" in sent:
+        # The schedules are planned in the console's zone: they keep their
+        # hour in the new one (``schedule.runner.rezone``).
+        from app.features.schedule import runner as schedule_runner
+
+        await session.flush()
+        planning = await windows.schedule_policy(session)
+        if planning.zone != zone_before:
+            await schedule_runner.rezone(session, zone_before, planning, utcnow())
 
 
 @router.get("", response_model=SettingsOut)

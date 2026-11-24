@@ -112,7 +112,21 @@ describe('schedules wording', () => {
     setLocale('en');
     expect(
       runCauseText(run({ result_code: 'ring_no_result', result_params: { stage: 1, created: 3 } })),
-    ).toBe('Stage 1: none of the 3 computer(s) answered.');
+    ).toBe('Stage 1: no computer answered (3 command(s) sent); the next stage is not started.');
+    setLocale('fr');
+    // A missed occurrence reads at the hour it was planned for, in the
+    // console's zone — not in the browser's.
+    expect(
+      runCauseText({
+        ...run({ result_code: 'missed', result_params: { due: '2026-11-18T04:00:00+00:00' } }),
+        due_local: '2026-11-17T18:00',
+      }),
+    ).toContain('17/11/2026 18:00');
+    // A refusal of the API is worded by its own catalogue, not shown raw.
+    expect(runCauseText(run({ result_code: 'package.not_found' }))).not.toBe('package.not_found');
+    expect(
+      runCauseText(run({ result_code: 'schedule_disabled', result_params: { stage: 1 } })),
+    ).toContain('désactivée pendant l’observation de l’étape 1');
   });
 
   it('names a forbidden window, and a refusal that falls in one', () => {

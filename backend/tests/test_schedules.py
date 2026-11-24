@@ -799,3 +799,220 @@ def test_today_is_a_date():
 @pytest.fixture(autouse=True)
 def _tahiti(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.CONSOLE_TIMEZONE", "Pacific/Tahiti")
+
+
+# --- Relecture de C3 -----------------------------------------------------------
+
+
+def _wake_sent(monkeypatch):
+    from app.features.wol import dispatch as wol_dispatch
+    from app.features.wol.sender import WakeOutcome
+
+    async def sent(**_kw):
+        return WakeOutcome(True, "ok", "wake.sent", {})
+
+    monkeypatch.setattr(wol_dispatch, "emit_wake", sent)
+
+
+async def test_shutdown_after_waits_for_a_command_still_running_past_its_ttl(
+    client, db_session, monkeypatch
+):
+    """``expires_at`` governs a command still waiting, not one at work: an
+    installation running after the TTL is not cut by the shutdown."""
+    from app.features.command.models import CommandStatus
+    from app.features.machine.models import Machine
+
+    _wake_sent(monkeypatch)
+    headers, _ = await _admin(client, db_session)
+    now = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=2)
+    m = await machine(
+        db_session,
+        "ASLEEP",
+        last_seen=now - timedelta(days=1),
+        mac_address="aa:bb:cc:dd:ee:01",
+    )
+    await _create(
+        client,
+        headers,
+        _once(
+            now,
+            command_type="wu_install_full",
+            wake_first=True,
+            shutdown_after=True,
+            ttl_minutes=10,
+            target={"kind": "machines", "machine_ids": [str(m.id)]},
+        ),
+    )
+    await _run(db_session, now)
+    [c] = await _commands(db_session, type="wu_install_full")
+    c.status = CommandStatus.RUNNING.value
+    db_session.add(c)
+    row = await db_session.get(Machine, m.id)
+    row.last_seen = now + timedelta(minutes=20)
+    row.session_user_present = False
+    db_session.add(row)
+    await db_session.commit()
+    await _run(db_session, now + timedelta(minutes=20))
+    assert await _commands(db_session, type="shutdown") == []
+
+    # Done: the poste is shut down at the next pass.
+    [c] = await _commands(db_session, type="wu_install_full")
+    c.status = CommandStatus.SUCCEEDED.value
+    db_session.add(c)
+    row = await db_session.get(Machine, m.id)
+    row.last_seen = now + timedelta(minutes=25)
+    db_session.add(row)
+    await db_session.commit()
+    await _run(db_session, now + timedelta(minutes=25))
+    assert len(await _commands(db_session, type="shutdown")) == 1
+
+
+async def test_a_later_ring_is_not_shut_down_under_its_running_command(
+    client, db_session, monkeypatch
+):
+    """The patience for a stage counts from its own wake, not from the start
+    of the run, hours earlier."""
+    from app.features.command.models import Command, CommandStatus
+    from app.features.machine.models import Machine
+
+    _wake_sent(monkeypatch)
+    headers, _ = await _admin(client, db_session)
+    rooms = []
+    for name in ("PILOTE", "PARC"):
+        resp = await client.post("/api/v1/rooms", headers=headers, json={"name": name})
+        rooms.append(resp.json()["id"])
+    now = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=2)
+    await machine(db_session, "P0", room_id=uuid.UUID(rooms[0]), last_seen=now)
+    late = await machine(
+        db_session,
+        "F0",
+        room_id=uuid.UUID(rooms[1]),
+        last_seen=now - timedelta(days=1),
+        mac_address="aa:bb:cc:dd:ee:09",
+    )
+    payload = _ringed(now, rooms, wake_first=True, shutdown_after=True)
+    payload["ring_observe_hours"] = 5
+    created = await _create(client, headers, payload)
+    await _run(db_session, now)
+    [run] = await _runs(db_session, created["id"])
+    await _finish(db_session, run.id, ["succeeded"])
+    t2 = now + timedelta(hours=5)
+    await _run(db_session, t2)
+    [run] = await _runs(db_session, created["id"])
+    assert run.stage == 1 and run.woken_ids == [str(late.id)]
+    rows = (
+        await db_session.exec(select(Command).where(col(Command.schedule_stage) == 1))
+    ).all()
+    for r in rows:
+        r.status = CommandStatus.RUNNING.value
+        db_session.add(r)
+    row = await db_session.get(Machine, late.id)
+    row.last_seen = t2 + timedelta(minutes=20)
+    row.session_user_present = False
+    db_session.add(row)
+    await db_session.commit()
+    await _run(db_session, t2 + timedelta(minutes=20))
+    assert await _commands(db_session, type="shutdown") == []
+
+
+async def test_disabling_a_schedule_stops_its_rings(client, db_session):
+    headers, _ = await _admin(client, db_session)
+    rooms = await _two_rooms(client, headers, db_session)
+    now = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(hours=1)
+    created = await _create(client, headers, _ringed(now, rooms))
+    await _run(db_session, now)
+    [run] = await _runs(db_session, created["id"])
+    run_id = run.id
+    first = len(await _commands(db_session, type="wu_install"))
+    await _finish(db_session, run_id, ["succeeded"] * first)
+    resp = await client.post(
+        f"/api/v1/schedules/{created['id']}/state",
+        headers=headers,
+        json={"enabled": False},
+    )
+    assert resp.status_code == 200, resp.text
+    await _run(db_session, now + timedelta(hours=30))
+    assert len(await _commands(db_session, type="wu_install")) == first
+    [run] = await _runs(db_session, created["id"])
+    assert (run.status, run.result_code) == ("halted", "schedule_disabled")
+
+
+async def test_a_stage_that_reached_no_poste_does_not_open_the_next(client, db_session):
+    """An empty pilot room observed nothing: the parc is not next."""
+    headers, _ = await _admin(client, db_session)
+    rooms = []
+    for name in ("VIDE", "PARC"):
+        resp = await client.post("/api/v1/rooms", headers=headers, json={"name": name})
+        rooms.append(resp.json()["id"])
+    now = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(hours=1)
+    await machine(db_session, "F0", room_id=uuid.UUID(rooms[1]), last_seen=now)
+    created = await _create(client, headers, _ringed(now, rooms))
+    await _run(db_session, now)
+    await _run(db_session, now + timedelta(hours=30))
+    assert await _commands(db_session, type="wu_install") == []
+    [run] = await _runs(db_session, created["id"])
+    assert (run.status, run.result_code) == ("halted", "ring_no_result")
+
+
+async def test_one_schedule_that_raises_does_not_block_the_others(
+    client, db_session, monkeypatch
+):
+    from app.features.schedule import runner
+
+    headers, _ = await _admin(client, db_session)
+    m = await machine(db_session, "PC-1")
+    now = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=2)
+    target = {"kind": "machines", "machine_ids": [str(m.id)]}
+    bad = await _create(client, headers, _once(now, name="casse", target=target))
+    good = await _create(
+        client,
+        headers,
+        _once(now + timedelta(seconds=30), name="saine", target=target),
+    )
+    real = runner.run_stage
+
+    async def boom(session, schedule, *args, **kwargs):
+        if str(schedule.id) == bad["id"]:
+            raise RuntimeError("boom")
+        return await real(session, schedule, *args, **kwargs)
+
+    monkeypatch.setattr(runner, "run_stage", boom)
+    await _run(db_session, now + timedelta(minutes=1))
+    [failed] = await _runs(db_session, bad["id"])
+    assert (failed.status, failed.result_code) == ("failed", "internal_error")
+    [ran] = await _runs(db_session, good["id"])
+    assert ran.status == "done"
+    # Not picked again at the next pass.
+    await _run(db_session, now + timedelta(minutes=2))
+    assert len(await _runs(db_session, bad["id"])) == 1
+
+
+async def test_a_zone_change_keeps_the_planned_hour(client, db_session):
+    headers, _ = await _admin(client, db_session)
+    m = await machine(db_session, "PC-1")
+    target = {"kind": "machines", "machine_ids": [str(m.id)]}
+    created = await _create(
+        client,
+        headers,
+        {
+            "name": "hebdo",
+            "command_type": "quick_scan",
+            "target": target,
+            "recurrence": "weekly",
+            "weekdays": [0, 1, 2, 3, 4, 5, 6],
+            "time_of_day": "18:00",
+        },
+    )
+    before = (await _schedule(db_session, created["id"])).next_run_at
+    assert before.astimezone(TAHITI).strftime("%H:%M") == "18:00"
+    resp = await client.patch(
+        "/api/v1/settings", headers=headers, json={"console_timezone": "Europe/Paris"}
+    )
+    assert resp.status_code == 200, resp.text
+    row = await _schedule(db_session, created["id"])
+    await db_session.refresh(row)
+    assert row.next_run_at.astimezone(ZoneInfo("Europe/Paris")).strftime("%H:%M") == (
+        "18:00"
+    )
+    listed = (await client.get("/api/v1/schedules", headers=headers)).json()
+    assert listed["items"][0]["next_run_local"].endswith("T18:00")

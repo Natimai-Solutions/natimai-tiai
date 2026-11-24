@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -65,6 +65,9 @@ MAX_LATENESS = timedelta(minutes=60)
 # The agent refuses a shutdown in the ten minutes after a boot; a margin on
 # top for the time the poste takes to start its agent.
 AFTER_WAKE = timedelta(minutes=15)
+# How late an occurrence may be picked up and still be judged, for the
+# forbidden windows, at the hour it was planned for.
+WINDOW_TOLERANCE = timedelta(minutes=5)
 # How long a shutdown queued after a run waits for its poste.
 SHUTDOWN_TTL_MINUTES = 30
 # The types that take a poste down: a schedule leaves alone a poste with a
@@ -130,6 +133,39 @@ def next_occurrence(
     return windows.next_weekly(
         schedule.weekdays or [], schedule.time_of_day or "", policy.zone, after
     )
+
+
+async def rezone(
+    session: AsyncSession,
+    old_zone: Any,
+    policy: windows.SchedulePolicy,
+    now: datetime,
+) -> int:
+    """The console's zone changed: every active schedule keeps the hour it
+    was planned at — « mercredi à 18 h » is 18:00 in the new zone, as the
+    list shows it — rather than the instant computed under the old one. A
+    one-off that falls in the past by it runs at the next pass, late by less
+    than the zones differ. Does not commit. Returns the schedules moved."""
+    rows = await session.exec(
+        select(Schedule)
+        .where(col(Schedule.state) == ScheduleState.ACTIVE)
+        .with_for_update()
+    )
+    moved = 0
+    for schedule in rows.all():
+        if schedule.recurrence == Recurrence.WEEKLY:
+            schedule.next_run_at = next_occurrence(schedule, policy, now)
+        elif schedule.run_at is not None:
+            local = schedule.run_at.astimezone(old_zone)
+            schedule.run_at = windows.local_to_utc(
+                local.date(), local.time().replace(tzinfo=None), policy.zone
+            )
+            if schedule.next_run_at is not None:
+                schedule.next_run_at = schedule.run_at
+        schedule.updated_at = now
+        session.add(schedule)
+        moved += 1
+    return moved
 
 
 def stage_target(schedule: Schedule, stage: int) -> Target:
@@ -205,6 +241,18 @@ async def run_stage(
     author_email = authority.user.email
 
     command_type = CommandType(schedule.command_type)
+    # The package first: one retired or deleted since must not have the room
+    # woken every week for an installation that will not happen.
+    package: Package | None = None
+    if schedule.package_id is not None or command_type.value in (
+        CommandType.PACKAGE_INSTALL.value,
+        CommandType.PACKAGE_UNINSTALL.value,
+    ):
+        if schedule.package_id is None:
+            return Refusal("package_gone", {})
+        package = await dispatch.deployable_package(
+            session, command_type, schedule.package_id
+        )
     if schedule.wake_first or command_type == CommandType.WAKE_ON_LAN:
         asleep = [m for m in machines if not _online(m, now)]
         if asleep:
@@ -225,16 +273,6 @@ async def run_stage(
         run.kept_on_ids = [*(run.kept_on_ids or []), *(str(i) for i in busy)]
         ids = [i for i in ids if i not in busy]
 
-    package: Package | None = None
-    if schedule.package_id is not None or command_type.value in (
-        CommandType.PACKAGE_INSTALL.value,
-        CommandType.PACKAGE_UNINSTALL.value,
-    ):
-        if schedule.package_id is None:
-            return Refusal("package_gone", {})
-        package = await dispatch.deployable_package(
-            session, command_type, schedule.package_id
-        )
     queued = await dispatch.queue(
         session,
         command_type=command_type,
@@ -276,7 +314,12 @@ async def run_one(
     if now - due > MAX_LATENESS:
         _stop_run(run, RunStatus.FAILED, "missed", {"due": due.isoformat()}, now)
         return run
-    window = policy.forbidden_at(now)
+    # Judged at the hour it was planned for: an occurrence at 07:59 picked up
+    # at 08:00:20 is not inside the window that opens at 08:00. One run
+    # noticeably late is judged where it actually lands.
+    window = policy.forbidden_at(due)
+    if window is None and now - due > WINDOW_TOLERANCE:
+        window = policy.forbidden_at(now)
     if window is not None and (
         schedule.command_type in RISKY_COMMAND_TYPES or schedule.shutdown_after
     ):
@@ -327,13 +370,50 @@ async def run_due(session: AsyncSession, now: datetime, *, limit: int = 50) -> i
         ).first()
         if schedule is None:
             break
-        run = await run_one(session, schedule, now)
-        # Read before the commit expires them.
-        schedule_id, status = schedule.id, run.status
-        await session.commit()
+        schedule_id = schedule.id
+        try:
+            run = await run_one(session, schedule, now)
+            # Read before the commit expires it.
+            status = run.status
+            await session.commit()
+        except Exception:
+            # One schedule that cannot run must not be picked first again
+            # every minute, holding back all the others and the open runs:
+            # its occurrence is closed as failed, and it moves to the next.
+            logger.exception("Schedule %s failed to run", schedule_id)
+            await session.rollback()
+            await _fail_occurrence(session, schedule_id, now)
+            status = RunStatus.FAILED
         logger.info("Schedule %s ran: %s", schedule_id, status)
         count += 1
     return count
+
+
+async def _fail_occurrence(
+    session: AsyncSession, schedule_id: uuid.UUID, now: datetime
+) -> None:
+    """Close the occurrence that raised as failed and move the schedule to
+    its next one, in a transaction of its own. Commits."""
+    schedule = (
+        await session.exec(
+            select(Schedule)
+            .where(col(Schedule.id) == schedule_id)
+            .with_for_update(skip_locked=True)
+        )
+    ).first()
+    if schedule is None:
+        return
+    policy = await windows.schedule_policy(session)
+    schedule.last_run_at = now
+    schedule.next_run_at = next_occurrence(
+        schedule, policy, max(now, schedule.next_run_at or now)
+    )
+    if schedule.recurrence == Recurrence.ONCE:
+        schedule.state = ScheduleState.DONE
+    run = ScheduleRun(schedule_id=schedule.id, started_at=now)
+    _stop_run(run, RunStatus.FAILED, "internal_error", {}, now)
+    session.add(run)
+    await session.commit()
 
 
 # --- Following the open runs --------------------------------------------------
@@ -355,7 +435,10 @@ async def _shutdown_after(
         return True
     if run.woken_at is not None and now - run.woken_at < AFTER_WAKE:
         return False
-    deadline = run.started_at + timedelta(minutes=schedule.ttl_minutes + 60)
+    # Counted from the wake of the stage, not from the start of the run: a
+    # later ring starts hours after it.
+    since = run.woken_at or run.stage_started_at or run.started_at
+    deadline = since + timedelta(minutes=schedule.ttl_minutes + 60)
     # Their command for this run: finished (or given up) means done with.
     open_rows = await session.exec(
         select(Command.machine_id).where(
@@ -363,14 +446,18 @@ async def _shutdown_after(
             col(Command.machine_id).in_(pending),
             col(Command.type) != CommandType.WAKE_ON_LAN.value,
             col(Command.type) != CommandType.SHUTDOWN.value,
-            col(Command.status).in_(
-                [
-                    CommandStatus.PENDING.value,
-                    CommandStatus.DELIVERED.value,
-                    CommandStatus.RUNNING.value,
-                ]
+            # ``expires_at`` only governs a command still waiting: one handed
+            # to its poste is at work until it answers, whatever its TTL —
+            # an installation must not be cut by the shutdown.
+            or_(
+                and_(
+                    col(Command.status) == CommandStatus.PENDING.value,
+                    col(Command.expires_at) > now,
+                ),
+                col(Command.status).in_(
+                    [CommandStatus.DELIVERED.value, CommandStatus.RUNNING.value]
+                ),
             ),
-            col(Command.expires_at) > now,
         )
     )
     busy = set(open_rows.all())
@@ -448,14 +535,24 @@ async def _advance_rings(
     observed = timedelta(hours=schedule.ring_observe_hours or 0)
     if run.stage_started_at is None or now - run.stage_started_at < observed:
         return False
+    if schedule.command_type in RISKY_COMMAND_TYPES:
+        # The next stage waits for the end of a forbidden window, as the
+        # first one would have been refused in it.
+        policy = await windows.schedule_policy(session)
+        if policy.forbidden_at(now) is not None:
+            return False
     created, finished, failed = await _stage_outcome(session, run)
     threshold = schedule.ring_failure_percent or 0
     stage_number = run.stage + 1
-    if created and not finished:
+    if not finished:
+        # No poste answered — or the stage reached none at all (an empty
+        # pilot room, every poste skipped): nothing was observed, the parc
+        # is not next.
         params: dict[str, Any] = {"stage": stage_number, "created": created}
         code = "ring_no_result"
     else:
-        percent = round(100 * failed / finished) if finished else 0
+        # Rounded up: 2.5 % is over a threshold of 2.
+        percent = -(-100 * failed // finished)
         params = {
             "stage": stage_number,
             "failed": failed,
@@ -504,14 +601,27 @@ async def follow_one(session: AsyncSession, run: ScheduleRun, now: datetime) -> 
         )
         await _suspend(session, schedule, run, checked, now, author)
         return
-    rings_done = await _advance_rings(session, schedule, run, checked, now)
+    if (
+        schedule.state == ScheduleState.DISABLED
+        and schedule.rings
+        and run.stage < len(schedule.rings) - 1
+    ):
+        # Turned off while a staged deployment was under observation: the
+        # next stage does not start. What was woken is still shut down.
+        run.result_code = "schedule_disabled"
+        run.result_params = {"stage": run.stage + 1}
+        rings_done = True
+        halted = True
+    else:
+        halted = False
+        rings_done = await _advance_rings(session, schedule, run, checked, now)
     if run.status != RunStatus.RUNNING:
         return
     shutdown_done = True
     if schedule.shutdown_after and run.woken_ids:
         shutdown_done = await _shutdown_after(session, schedule, run, checked, now)
     if rings_done and shutdown_done:
-        run.status = RunStatus.DONE
+        run.status = RunStatus.HALTED if halted else RunStatus.DONE
         run.finished_at = now
 
 
@@ -540,8 +650,14 @@ async def follow_runs(session: AsyncSession, now: datetime, *, limit: int = 100)
         ).first()
         if run is None:
             continue
-        await follow_one(session, run, now)
-        await session.commit()
+        try:
+            await follow_one(session, run, now)
+            await session.commit()
+        except Exception:
+            # The others are still followed; this one is tried again at the
+            # next pass.
+            logger.exception("Schedule run %s could not be followed", run_id)
+            await session.rollback()
     return len(ids)
 
 
