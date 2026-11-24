@@ -24,6 +24,28 @@ const routes: RouteRecordRaw[] = [
     component: () => import('pages/ResetPasswordPage.vue'),
     meta: { title: 'layout.pages.resetPassword' },
   },
+  // A sheet of labels to print: outside the console's frame. Not under
+  // /assets: nginx serves the build's hashed files there, with no way back
+  // to the console on a reload (`nginx.conf`).
+  {
+    path: '/equipment/labels',
+    name: 'asset-labels',
+    component: () => import('pages/AssetLabelsPage.vue'),
+    meta: {
+      title: 'layout.pages.assetLabels',
+      requiresAuth: true,
+      requiresPermission: 'asset:read',
+    },
+  },
+  // Where every printed label's QR code leads, without an account: the
+  // staff go on to the fiche, anybody else to the report form when it is
+  // open (C4), the login page otherwise.
+  {
+    path: '/a/:token',
+    name: 'label',
+    component: () => import('pages/LabelPage.vue'),
+    meta: { title: 'layout.pages.assetToken' },
+  },
   {
     path: '/',
     component: () => import('layouts/MainLayout.vue'),
@@ -40,6 +62,39 @@ const routes: RouteRecordRaw[] = [
         name: 'machines',
         component: () => import('pages/MachinesPage.vue'),
         meta: { title: 'layout.pages.machines', requiresPermission: 'machine:read' },
+      },
+      {
+        path: 'alerts',
+        name: 'alerts',
+        component: () => import('pages/AlertsPage.vue'),
+        meta: { title: 'layout.pages.alerts', requiresPermission: 'machine:read' },
+      },
+      {
+        // « equipment », not « assets »: the build's own directory (above).
+        path: 'equipment',
+        name: 'assets',
+        component: () => import('pages/AssetsPage.vue'),
+        meta: { title: 'layout.pages.assets', requiresPermission: 'asset:read' },
+      },
+      {
+        path: 'reports',
+        name: 'reports',
+        component: () => import('pages/ReportsPage.vue'),
+        meta: { title: 'layout.pages.reports', requiresPermission: 'report:read' },
+      },
+      {
+        path: 'schedules',
+        name: 'schedules',
+        component: () => import('pages/SchedulesPage.vue'),
+        meta: { title: 'layout.pages.schedules', requiresPermission: 'schedule:read' },
+      },
+      {
+        // Where a staff member's scan lands, signed in: the poste behind the
+        // label. Reached from the public `/a/:token` (LabelPage).
+        path: 'a/:token/open',
+        name: 'asset-token',
+        component: () => import('pages/AssetTokenPage.vue'),
+        meta: { title: 'layout.pages.assetToken', requiresPermission: 'machine:read' },
       },
       {
         path: 'software',

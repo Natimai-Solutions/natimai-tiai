@@ -109,7 +109,7 @@ import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { t } from 'src/i18n';
 import { bulkSendNotification } from 'src/services/commands';
-import { apiErrorMessage } from 'src/services/errors';
+import { apiErrorCode, apiErrorMessage } from 'src/services/errors';
 import { listLocations, listMachines } from 'src/services/machines';
 import {
   blockingProblems,
@@ -127,6 +127,7 @@ import {
   type Package,
 } from 'src/services/packages';
 import { liveDialog } from 'src/utils/liveDialog';
+import { windowText, type ForbiddenWindow } from 'src/services/schedules';
 import { notify } from 'src/utils/notify';
 
 const props = defineProps<{
@@ -324,6 +325,25 @@ async function confirmed(mine: number): Promise<boolean> {
   });
 }
 
+/** The forbidden window named, and the question asked once. */
+function confirmedForbidden(error: unknown): Promise<boolean> {
+  const details = (
+    error as { response?: { data?: { error?: { details?: { window?: ForbiddenWindow } } } } }
+  )?.response?.data?.error?.details;
+  const window = details?.window ? windowText(details.window) : '';
+  return new Promise((resolve) => {
+    liveDialog($q, () => ({
+      title: t('schedules.forbiddenConfirm.title'),
+      message: t('schedules.forbiddenConfirm.deploy', { window }),
+      cancel: { flat: true, noCaps: true, label: t('schedules.forbiddenConfirm.cancel') },
+      ok: { color: 'negative', noCaps: true, label: t('schedules.forbiddenConfirm.ok') },
+      persistent: true,
+    }))
+      .onOk(() => resolve(true))
+      .onCancel(() => resolve(false));
+  });
+}
+
 async function send() {
   if (!chosen.value || busy.value) return;
   const mine = showing;
@@ -336,7 +356,16 @@ async function send() {
         : { target_location: location.value ?? '' };
     if (!(await confirmed(mine))) return;
     sending.value = true;
-    const res = await deployPackage(chosen.value.id, action.value, target);
+    let res;
+    try {
+      res = await deployPackage(chosen.value.id, action.value, target);
+    } catch (e) {
+      // Inside a forbidden window (Paramètres): a deployment to several
+      // postes goes once the person says so, as from the machine list.
+      if (apiErrorCode(e) !== 'command.forbidden_window') throw e;
+      if (!(await confirmedForbidden(e)) || mine !== showing) return;
+      res = await deployPackage(chosen.value.id, action.value, target, true);
+    }
     notify($q, () => bulkSendNotification(res));
     emit('update:modelValue', false);
     emit('sent');

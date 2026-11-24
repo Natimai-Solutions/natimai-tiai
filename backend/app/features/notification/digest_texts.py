@@ -16,6 +16,29 @@ def _computers(n: int) -> str:
     return plural(n, "computer", "computers")
 
 
+# The alert rules, as the digest names them (``alert.models.AlertRule``).
+RULE_LABELS_FR = {
+    "disk_low": "Disque système presque plein",
+    "disk_unhealthy": "Disque en mauvaise santé",
+    "volume_unencrypted": "Volume système non chiffré",
+    "reboot_pending": "Redémarrage en attente depuis trop longtemps",
+    "os_unsupported": "Windows hors support",
+    "forbidden_software": "Logiciel interdit installé",
+    "inactive": "Sans contact",
+    "warranty_ending": "Garantie bientôt terminée",
+}
+RULE_LABELS_EN = {
+    "disk_low": "System disk nearly full",
+    "disk_unhealthy": "Unhealthy disk",
+    "volume_unencrypted": "System volume not encrypted",
+    "reboot_pending": "Restart pending for too long",
+    "os_unsupported": "Windows out of support",
+    "forbidden_software": "Forbidden software installed",
+    "inactive": "No contact",
+    "warranty_ending": "Warranty ending soon",
+}
+
+
 @dataclass(frozen=True)
 class DigestTexts:
     # --- why a poste is named in a section
@@ -47,6 +70,8 @@ class DigestTexts:
     title_threats: str
     title_updates: str
     title_antivirus: str
+    title_alerts: str
+    alert_line: Callable[[str, int], str]
     open_console: Callable[[str], str]
     footer: str
     # --- the digest of an account that reads no poste
@@ -90,6 +115,8 @@ FR = DigestTexts(
     title_threats="MENACES ACTIVES",
     title_updates="MISES À JOUR CRITIQUES OU IMPORTANTES",
     title_antivirus="ANTIVIRUS À REPRENDRE",
+    title_alerts="ALERTES OUVERTES",
+    alert_line=lambda rule, n: f"  {RULE_LABELS_FR.get(rule, rule)} : {n} poste(s)",
     open_console=lambda url: f"Ouvrir la console : {url}",
     footer=(
         "Vous recevez ce message parce que votre compte est réglé sur un résumé "
@@ -139,6 +166,8 @@ EN = DigestTexts(
     title_threats="ACTIVE THREATS",
     title_updates="CRITICAL OR IMPORTANT UPDATES",
     title_antivirus="ANTIVIRUS TO FIX",
+    title_alerts="OPEN ALERTS",
+    alert_line=lambda rule, n: f"  {RULE_LABELS_EN.get(rule, rule)}: {_computers(n)}",
     open_console=lambda url: f"Open the console: {url}",
     footer=(
         "You receive this message because your account is set to a daily "

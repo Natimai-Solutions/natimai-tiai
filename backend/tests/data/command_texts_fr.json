@@ -19,6 +19,11 @@
   "message": "Poste fusionné : commande annulée"
  },
  {
+  "code": "directory.not_reader",
+  "params": {},
+  "message": "Lecture d'annuaire annulée : ce poste n'est plus lecteur d'annuaire"
+ },
+ {
   "code": "package.deleted",
   "params": {},
   "message": "Paquet supprimé avant l'exécution"

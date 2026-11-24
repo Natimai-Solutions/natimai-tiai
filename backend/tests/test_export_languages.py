@@ -41,7 +41,8 @@ ALL_FR = (
     "Secure Boot;TPM;Processeur;Processeur (fabricant);Cœurs;Threads;"
     "Fréquence (MHz);Processeurs;RAM (Gio);RAM (Mio);Barrettes utilisées;"
     "Emplacements mémoire;Disque système (Mio);Libre (Mio);Libre (%);"
-    "Windows installé le;Dernier démarrage;Inventaire du"
+    "Windows installé le;Dernier démarrage;Inventaire du;"
+    "N° d'inventaire;Statut de l'actif;Date d'achat;Fin de garantie;Fournisseur"
 )
 ALL_EN = (
     "Name;Domain;Location;Building;Room;Location mismatch;Check requested;"
@@ -57,7 +58,8 @@ ALL_EN = (
     "Secure Boot;TPM;Processor;Processor (manufacturer);Cores;Threads;"
     "Frequency (MHz);Processors;RAM (GiB);RAM (MiB);Memory sticks used;"
     "Memory slots;System disk (MiB);Free (MiB);Free (%);Windows installed on;"
-    "Last boot;Inventory date"
+    "Last boot;Inventory date;"
+    "Inventory no.;Asset status;Purchase date;Warranty end;Supplier"
 )
 
 
@@ -261,6 +263,7 @@ def test_the_french_words_are_the_ones_they_always_were():
         "antivirus": "Antivirus",
         "windows_update": "Windows Update",
         "hardware": "Matériel",
+        "asset": "Actif",
     }
     assert (fr.no_user, fr.user_present, fr.no_antivirus) == (
         "Aucun utilisateur",

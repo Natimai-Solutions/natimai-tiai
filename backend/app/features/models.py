@@ -4,11 +4,14 @@ Importing this module guarantees every table is registered on
 ``SQLModel.metadata`` (used by app.core.db and Alembic).
 """
 
+from app.features.alert.models import MachineAlert  # noqa: F401
+from app.features.asset.models import Asset  # noqa: F401
 from app.features.audit.models import AuditEntry  # noqa: F401
 from app.features.auth_session.models import AuthSession  # noqa: F401
 from app.features.check.models import MachineCheck  # noqa: F401
 from app.features.command.models import Command  # noqa: F401
 from app.features.counter.models import SharedCounter  # noqa: F401
+from app.features.directory.models import DirectoryDomain, DirectoryRecord  # noqa: F401
 from app.features.intervention.models import Intervention  # noqa: F401
 from app.features.inventory.models import (  # noqa: F401
     Disk,
@@ -23,7 +26,9 @@ from app.features.machine.models import Machine  # noqa: F401
 from app.features.maintenance.models import Maintenance  # noqa: F401
 from app.features.notification.models import EmailOutbox  # noqa: F401
 from app.features.package.models import Package, PackageFile  # noqa: F401
+from app.features.report.models import Report  # noqa: F401
 from app.features.room.models import Building, Room  # noqa: F401
+from app.features.schedule.models import Schedule, ScheduleRun  # noqa: F401
 from app.features.setting.models import AppSetting  # noqa: F401
 from app.features.threat.models import Threat  # noqa: F401
 from app.features.usage.models import MachineUptime  # noqa: F401
@@ -64,4 +69,6 @@ __all__ = [
     "MachineCheck",
     "Maintenance",
     "AppSetting",
+    "MachineAlert",
+    "Asset",
 ]

@@ -1,7 +1,9 @@
 import uuid
 from datetime import date, datetime
+from typing import Any
 
-from sqlalchemy import Column, ForeignKey, Index
+from sqlalchemy import Column, ForeignKey, Index, false
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
@@ -73,6 +75,33 @@ class Machine(SQLModel, table=True):
     ad_ou: str | None = None
     ad_ou_dn: str | None = None
     ad_location: str | None = None
+    # --- What the directory itself says (``features/directory``,
+    # ``DIRECTORY_VERIFY``): the computer object matched to this poste, the
+    # verdict on the agent's word, and the reading the rooms are filed by in
+    # that mode. NULL = not read.
+    directory_object_guid: str | None = Field(default=None, max_length=64)
+    # verified / mismatch / unknown / stale / contested.
+    directory_status: str | None = Field(default=None, max_length=16)
+    directory_domain_sid: str | None = Field(default=None, max_length=100)
+    dir_distinguished_name: str | None = None
+    dir_ou: str | None = None
+    dir_ou_dn: str | None = None
+    dir_location: str | None = None
+    # Designated in the console to read its domain for the others (mode
+    # ``relay``). Falls by itself when the poste is re-enrolled, its token
+    # revoked or its identity to be confirmed (``directory.crud``).
+    # A server default too: a row written by raw SQL (a data migration) is
+    # not a reader.
+    directory_reader: bool = Field(
+        default=False, sa_column_kwargs={"server_default": false()}
+    )
+    directory_reader_since: datetime | None = utc_field(default=None, nullable=True)
+    # What the designation is tied to: the domain the poste declared when it
+    # was designated, and the SID of the domain it then read. A reader that
+    # declares another domain, or answers with another SID, is no longer the
+    # one an administrator designated.
+    directory_reader_domain: str | None = Field(default=None, max_length=64)
+    directory_reader_sid: str | None = Field(default=None, max_length=100)
     # Maintenance: the poste's own cycle and owner, overriding its room's and
     # the parc's (``maintenance/policy.py``); NULL = inherit, 0 = excluded.
     # ``last_maintenance_at`` is denormalised from the journal — it is what
@@ -163,6 +192,18 @@ class Machine(SQLModel, table=True):
     # not "pending a reboot", and false is the honest default. The console shows
     # nothing for it, so there is no unknown state to represent.
     wu_reboot_required: bool = Field(default=False)
+    # Since when the flag above has been true, as the server first saw it: the
+    # « redémarrage en attente depuis N jours » alert counts from here. Set on
+    # the heartbeat that turns the flag on, cleared on the one that turns it
+    # off; NULL whenever the flag is false.
+    wu_reboot_required_since: datetime | None = utc_field(default=None, nullable=True)
+    # Since when the poste has had a critical or important update pending,
+    # without a break: the compliance check « correctifs » counts its grace
+    # from here. Not from an update's own ``first_seen``: each monthly
+    # cumulative update replaces the previous one, and a poste that never
+    # patches would look freshly behind every Patch Tuesday. Set on the
+    # report that first lists one, cleared on the one that lists none.
+    wu_critical_pending_since: datetime | None = utc_field(default=None, nullable=True)
     wu_last_search: datetime | None = utc_field(default=None, nullable=True)
     wu_last_install: datetime | None = utc_field(default=None, nullable=True)
 
@@ -229,6 +270,30 @@ class Machine(SQLModel, table=True):
     # a complete one is. The console says the list is partial, and the
     # heartbeat asks the agent for it again once the budget has room.
     software_truncated_at: datetime | None = utc_field(default=None, nullable=True)
+
+    # --- Compliance readings (C5), from the same inventory block. The three
+    # firewall profiles as Windows applies them (NULL = not read). The local
+    # Administrators as [{name, sid}], NULL when the agent does not report
+    # them (``ReportLocalAdmins`` off, or an older agent) — the block is
+    # applied as a whole, so switching the collection off clears them.
+    firewall_domain: bool | None = None
+    firewall_private: bool | None = None
+    firewall_public: bool | None = None
+    local_admins: list[dict[str, Any]] | None = Field(
+        default=None, sa_column=Column(JSONB(none_as_null=True), nullable=True)
+    )
+    # When the poste last reported its winget packages
+    # (``inventory_winget_packages``); NULL when it does not.
+    winget_reported_at: datetime | None = utc_field(default=None, nullable=True)
+
+    # The compliance summary (``features/compliance``), refreshed by the
+    # worker: checks passed out of checks known, and the codes that failed.
+    # NULL until the first evaluation. The fiche computes its own, live.
+    compliance_passed: int | None = None
+    compliance_total: int | None = None
+    compliance_failed: list[str] | None = Field(
+        default=None, sa_column=Column(JSONB(none_as_null=True), nullable=True)
+    )
 
     # Interactive session (WTS), refreshed on each heartbeat. NULL means "never
     # reported" — an agent older than the feature, or a failed read — which is

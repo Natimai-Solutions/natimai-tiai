@@ -87,6 +87,38 @@ class ErrorCode(enum.StrEnum):
     BUILDING_NOT_FOUND = "building.not_found"
     BUILDING_NAME_TAKEN = "building.name.taken"
     ROOM_NOT_FOUND = "room.not_found"
+    ASSET_NOT_FOUND = "asset.not_found"
+    # The number on the sticker is already another asset's.
+    ASSET_INVENTORY_NUMBER_TAKEN = "asset.inventory_number.taken"
+    # A poste has one asset; a second would say two purchase dates.
+    ASSET_MACHINE_TAKEN = "asset.machine.taken"
+    # An import file that cannot be read: not CSV or Excel, no serial column.
+    ASSET_IMPORT_UNREADABLE = "asset.import.unreadable"
+    # An import file over the limits — rows or bytes: to be split.
+    ASSET_IMPORT_TOO_LARGE = "asset.import.too_large"
+    # A command at risk for several postes, inside a forbidden window: sent
+    # only once confirmed (``schedule.windows``).
+    COMMAND_FORBIDDEN_WINDOW = "command.forbidden_window"
+    # Reports (C4): the form is off, the label names no asset, the report
+    # is gone, already handled, or names no poste to open a verification on.
+    REPORT_DISABLED = "report.disabled"
+    REPORT_LABEL_INVALID = "report.label.invalid"
+    REPORT_NOT_FOUND = "report.not_found"
+    REPORT_ALREADY_HANDLED = "report.already_handled"
+    REPORT_NO_MACHINE = "report.no_machine"
+    # Reading the directory (plan-lecture-annuaire.md).
+    DIRECTORY_READING_REFUSED = "directory.reading_refused"
+    DIRECTORY_OFF = "directory.off"
+    DIRECTORY_NOT_ELIGIBLE = "directory.not_eligible"
+    DIRECTORY_DOMAIN_NOT_FOUND = "directory.domain_not_found"
+    DIRECTORY_NOTHING_PENDING = "directory.nothing_pending"
+    DIRECTORY_PENDING_CHANGED = "directory.pending_changed"
+    REPORT_NO_OPEN_CHECK = "report.no_open_check"
+    SCHEDULE_NOT_FOUND = "schedule.not_found"
+    # A schedule that would run inside a forbidden window.
+    SCHEDULE_FORBIDDEN_WINDOW = "schedule.forbidden_window"
+    # A one-off planned in the past.
+    SCHEDULE_IN_PAST = "schedule.in_past"
     ROOM_NAME_TAKEN = "room.name.taken"
     # ROOM_SOURCE is a directory mode: postes are filed by the directory, and
     # a placement made by hand here would be undone on the next inventory.

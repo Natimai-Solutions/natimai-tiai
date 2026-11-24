@@ -131,6 +131,290 @@
       </q-card-actions>
     </q-card>
 
+    <!-- Alerts: which rules of the closed catalogue run, their thresholds,
+         the « logiciels interdits » list and the rules that open a
+         verification by themselves. Saved on its own. -->
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md">
+      <q-card-section class="text-subtitle1">
+        {{ t('settings.alerts.title') }}
+        <div class="text-caption text-muted">{{ t('settings.alerts.caption') }}</div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings" class="q-gutter-md">
+        <div>
+          <div class="text-caption text-muted q-mb-xs">{{ t('settings.alerts.rules') }}</div>
+          <div v-for="rule in settings.alert_rules ?? []" :key="rule" class="row items-center">
+            <q-toggle
+              v-model="alertForm.enabled"
+              :val="rule"
+              :label="alertRuleLabel(rule)"
+              :disable="!canWrite"
+              class="col"
+            />
+            <q-checkbox
+              v-model="alertForm.autoCheck"
+              :val="rule"
+              dense
+              :label="t('settings.alerts.autoCheck')"
+              :disable="!canWrite || !alertForm.enabled.includes(rule)"
+            />
+          </div>
+          <div class="text-caption text-muted q-mt-xs">
+            {{ t('settings.alerts.autoCheckHint') }}
+          </div>
+        </div>
+        <q-input
+          v-model.number="alertForm.rebootDays"
+          type="number"
+          min="1"
+          max="365"
+          :suffix="t('settings.units.days')"
+          :label="t('settings.alerts.rebootDays')"
+          outlined
+          dense
+          :error="alertRebootError !== null"
+          :error-message="alertRebootError ?? undefined"
+          :hint="t('settings.alerts.rebootHint', { days: settings.env_alert_reboot_pending_days })"
+          :disable="!canWrite"
+        />
+        <q-input
+          v-model.number="alertForm.warrantyDays"
+          type="number"
+          min="1"
+          max="365"
+          :suffix="t('settings.units.days')"
+          :label="t('settings.alerts.warrantyDays')"
+          outlined
+          dense
+          :error="alertWarrantyError !== null"
+          :error-message="alertWarrantyError ?? undefined"
+          :hint="
+            t('settings.alerts.warrantyHint', { days: settings.env_alert_warranty_days ?? 30 })
+          "
+          :disable="!canWrite"
+        />
+        <q-select
+          v-model="alertForm.unencryptedScope"
+          :options="unencryptedOptions"
+          emit-value
+          map-options
+          :label="t('settings.alerts.unencryptedScope')"
+          outlined
+          dense
+          :disable="!canWrite"
+        />
+        <q-select
+          v-model="alertForm.forbidden"
+          :label="t('settings.alerts.forbidden')"
+          :hint="t('settings.alerts.forbiddenHint')"
+          outlined
+          dense
+          multiple
+          use-chips
+          use-input
+          hide-dropdown-icon
+          new-value-mode="add-unique"
+          input-debounce="0"
+          :disable="!canWrite"
+        />
+      </q-card-section>
+      <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
+        <q-btn
+          color="primary"
+          :label="t('settings.save')"
+          :loading="savingAlerts"
+          :disable="alertRebootError !== null || alertWarrantyError !== null"
+          @click="saveAlerts"
+        />
+      </q-card-actions>
+    </q-card>
+
+    <!-- Compliance (C5): the grace of a critical update, and the members of
+         the local Administrators accepted beyond the built-in ones. -->
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md" data-test="compliance-card">
+      <q-card-section class="text-subtitle1">
+        {{ t('compliance.settings.title') }}
+        <div class="text-caption text-muted">{{ t('compliance.settings.caption') }}</div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings" class="q-gutter-md">
+        <q-input
+          v-model.number="complianceForm.patchGraceDays"
+          type="number"
+          min="0"
+          max="365"
+          :suffix="t('settings.units.days')"
+          :label="t('compliance.settings.patchGrace')"
+          outlined
+          dense
+          :error="complianceGraceError !== null"
+          :error-message="complianceGraceError ?? undefined"
+          :hint="
+            t('compliance.settings.patchGraceHint', {
+              days: settings.env_compliance_patch_grace_days ?? 14,
+            })
+          "
+          :disable="!canWrite"
+        />
+        <q-select
+          v-model="complianceForm.admins"
+          :label="t('compliance.settings.admins')"
+          :hint="t('compliance.settings.adminsHint')"
+          outlined
+          dense
+          multiple
+          use-chips
+          use-input
+          hide-dropdown-icon
+          new-value-mode="add-unique"
+          input-debounce="0"
+          :disable="!canWrite"
+        />
+      </q-card-section>
+      <q-card-actions v-if="canWrite && settings" align="right" class="q-px-md q-pb-md">
+        <q-btn
+          color="primary"
+          :label="t('settings.save')"
+          :loading="savingCompliance"
+          :disable="complianceGraceError !== null"
+          @click="saveCompliance"
+        />
+      </q-card-actions>
+    </q-card>
+
+    <SettingsDirectoryCard />
+
+    <!-- Reports (C4): the form a label's QR code opens without an account.
+         Saved as it is switched. -->
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md">
+      <q-card-section class="text-subtitle1">
+        {{ t('settings.reports.title') }}
+        <div class="text-caption text-muted">{{ t('settings.reports.caption') }}</div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings">
+        <q-toggle
+          :model-value="settings.reports_enabled ?? false"
+          :label="t('settings.reports.enabled')"
+          :disable="!canWrite || savingReports"
+          @update:model-value="saveReports"
+        />
+        <div class="text-caption text-muted">
+          {{
+            t('settings.reports.hint', {
+              value: settings.env_reports_enabled
+                ? t('settings.reports.on')
+                : t('settings.reports.off'),
+            })
+          }}
+        </div>
+        <div class="text-caption text-muted q-mt-xs">{{ t('settings.reports.privacy') }}</div>
+      </q-card-section>
+    </q-card>
+
+    <!-- Schedules (C3): the zone the console plans in, the forbidden windows.
+         Saved on its own. -->
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md">
+      <q-card-section class="text-subtitle1">
+        {{ t('settings.planning.title') }}
+        <div class="text-caption text-muted">{{ t('settings.planning.caption') }}</div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section v-if="settings" class="q-gutter-md">
+        <q-input
+          v-model="planningForm.timezone"
+          :label="t('settings.planning.timezone')"
+          outlined
+          dense
+          maxlength="64"
+          :hint="
+            t('settings.planning.timezoneHint', { zone: settings.env_console_timezone ?? 'UTC' })
+          "
+          :disable="!canWrite"
+        />
+        <div>
+          <div class="text-caption text-muted">{{ t('settings.planning.windows') }}</div>
+          <div
+            v-for="(w, i) in planningForm.windows"
+            :key="i"
+            class="row items-center q-col-gutter-sm q-mb-xs"
+          >
+            <q-select
+              v-model="w.days"
+              class="col-12 col-sm-6"
+              :options="planningDayOptions"
+              multiple
+              emit-value
+              map-options
+              use-chips
+              outlined
+              dense
+              :label="t('settings.planning.windowDays')"
+              :disable="!canWrite"
+            />
+            <q-input
+              v-model="w.start"
+              class="col-5 col-sm-2"
+              type="time"
+              outlined
+              dense
+              stack-label
+              :label="t('settings.planning.windowStart')"
+              :disable="!canWrite"
+            />
+            <q-input
+              v-model="w.end"
+              class="col-5 col-sm-2"
+              type="time"
+              outlined
+              dense
+              stack-label
+              :label="t('settings.planning.windowEnd')"
+              :disable="!canWrite"
+            />
+            <div class="col-2 col-sm-2">
+              <q-btn
+                v-if="canWrite"
+                flat
+                round
+                dense
+                icon="remove_circle_outline"
+                :aria-label="t('settings.planning.removeWindow')"
+                @click="planningForm.windows.splice(i, 1)"
+              />
+            </div>
+          </div>
+          <q-btn
+            v-if="canWrite"
+            flat
+            dense
+            no-caps
+            color="primary"
+            icon="add"
+            :label="t('settings.planning.addWindow')"
+            @click="
+              planningForm.windows.push({ days: [0, 1, 2, 3, 4], start: '07:30', end: '12:00' })
+            "
+          />
+          <div v-if="planningError" class="text-caption text-negative">
+            {{ t('settings.planning.windowInvalid') }}
+          </div>
+          <div class="text-caption text-muted q-mt-xs">
+            {{ t('settings.planning.windowsHint') }}
+          </div>
+        </div>
+      </q-card-section>
+      <q-card-actions v-if="canWrite && settings" align="right">
+        <q-btn
+          color="primary"
+          :label="t('settings.save')"
+          :loading="savingPlanning"
+          :disable="planningError"
+          @click="savePlanning"
+        />
+      </q-card-actions>
+    </q-card>
+
     <!-- Parc thresholds: what makes the console call a poste « périmé »,
          « inactif », short of disk, due for renewal or behind on its agent,
          and how long a queued command waits for it. The environment gives the
@@ -685,6 +969,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import { useQuasar } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
+import SettingsDirectoryCard from 'src/components/settings/SettingsDirectoryCard.vue';
 import { t } from 'src/i18n';
 import { rememberFleetThresholds } from 'src/composables/useFleetThresholds';
 import { formSnapshot } from 'src/utils/formSnapshot';
@@ -697,6 +982,7 @@ import {
   type ConsoleSettings,
   type EmailTestResult,
 } from 'src/services/settings';
+import { alertRuleLabel } from 'src/services/alerts';
 import { useAuthStore } from 'src/stores/auth';
 import {
   SECURITY_OPTIONS,
@@ -767,6 +1053,160 @@ function fillUsageForm(s: ConsoleSettings) {
   usageForm.lowHours = s.usage_low_hours;
   usageForm.highHours = s.usage_high_hours;
   saved.usage = formSnapshot(usageForm);
+}
+
+// The alerts card. Lists as the server returns them, in the catalogue's order.
+const savingAlerts = ref(false);
+const alertForm = reactive({
+  enabled: [] as string[],
+  autoCheck: [] as string[],
+  rebootDays: 7 as number | string,
+  warrantyDays: 30 as number | string,
+  unencryptedScope: 'laptops',
+  forbidden: [] as string[],
+});
+const alertRebootError = computed(() => intFieldError(alertForm.rebootDays, 1, 365));
+const alertWarrantyError = computed(() => intFieldError(alertForm.warrantyDays, 1, 365));
+const unencryptedOptions = computed(() => [
+  { label: t('settings.alerts.scopeLaptops'), value: 'laptops' },
+  { label: t('settings.alerts.scopeAll'), value: 'all' },
+]);
+
+// The rules as sets: a toggle turned off and on again puts its rule last,
+// which is no change (Quasar splices the value out and pushes it back).
+function alertSnapshot(): string {
+  return formSnapshot({
+    ...alertForm,
+    enabled: [...alertForm.enabled].sort(),
+    autoCheck: [...alertForm.autoCheck].sort(),
+  });
+}
+
+function fillAlertForm(s: ConsoleSettings) {
+  alertForm.enabled = [...(s.alert_enabled_rules ?? [])];
+  alertForm.autoCheck = [...(s.alert_auto_check_rules ?? [])];
+  alertForm.rebootDays = s.alert_reboot_pending_days ?? 7;
+  alertForm.warrantyDays = s.alert_warranty_days ?? 30;
+  alertForm.unencryptedScope = s.alert_unencrypted_scope ?? 'laptops';
+  alertForm.forbidden = [...(s.alert_forbidden_software ?? [])];
+  saved.alerts = alertSnapshot();
+}
+
+async function saveAlerts() {
+  if (alertRebootError.value || alertWarrantyError.value) return;
+  savingAlerts.value = true;
+  try {
+    settings.value = await updateSettings({
+      alert_enabled_rules: alertForm.enabled,
+      // A rule turned off opens nothing: it is not kept among those that do.
+      alert_auto_check_rules: alertForm.autoCheck.filter((r) => alertForm.enabled.includes(r)),
+      alert_reboot_pending_days: Number(alertForm.rebootDays),
+      alert_warranty_days: Number(alertForm.warrantyDays),
+      alert_unencrypted_scope: alertForm.unencryptedScope as 'laptops' | 'all',
+      alert_forbidden_software: alertForm.forbidden
+        .map((p) => p.trim())
+        .filter((p) => p.length >= 2),
+    });
+    fillAlertForm(settings.value);
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
+  } catch (e) {
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
+  } finally {
+    savingAlerts.value = false;
+  }
+}
+
+// The compliance card (C5).
+const complianceForm = reactive({ patchGraceDays: 14 as number | string, admins: [] as string[] });
+const complianceGraceError = computed(() => intFieldError(complianceForm.patchGraceDays, 0, 365));
+const savingCompliance = ref(false);
+
+function fillComplianceForm(s: ConsoleSettings) {
+  complianceForm.patchGraceDays = s.compliance_patch_grace_days ?? 14;
+  complianceForm.admins = [...(s.compliance_admins_allowed ?? [])];
+  saved.compliance = formSnapshot(complianceForm);
+}
+
+async function saveCompliance() {
+  if (complianceGraceError.value) return;
+  savingCompliance.value = true;
+  try {
+    settings.value = await updateSettings({
+      compliance_patch_grace_days: Number(complianceForm.patchGraceDays),
+      compliance_admins_allowed: complianceForm.admins.map((a) => a.trim()).filter(Boolean),
+    });
+    fillComplianceForm(settings.value);
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
+  } catch (e) {
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
+  } finally {
+    savingCompliance.value = false;
+  }
+}
+
+// The reports card (C4): one switch, saved as it is switched.
+const savingReports = ref(false);
+async function saveReports(enabled: boolean) {
+  savingReports.value = true;
+  try {
+    settings.value = await updateSettings({ reports_enabled: enabled });
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
+  } catch (e) {
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
+  } finally {
+    savingReports.value = false;
+  }
+}
+
+// The schedules card (C3): the console's zone, the forbidden windows.
+const savingPlanning = ref(false);
+const planningForm = reactive({
+  timezone: '',
+  windows: [] as { days: number[]; start: string; end: string }[],
+});
+const planningDayOptions = computed(() =>
+  WEEKDAY_KEYS.map((_, i) => ({ label: weekdayName(i), value: i })),
+);
+const planningError = computed(() =>
+  planningForm.windows.some((w) => !w.days.length || !w.start || !w.end || w.start >= w.end),
+);
+
+function planningSnapshot(): string {
+  return JSON.stringify({
+    timezone: planningForm.timezone.trim(),
+    windows: planningForm.windows.map((w) => ({
+      days: [...w.days].sort((a, b) => a - b),
+      start: w.start,
+      end: w.end,
+    })),
+  });
+}
+
+function fillPlanningForm(s: ConsoleSettings) {
+  planningForm.timezone = s.console_timezone ?? '';
+  planningForm.windows = (s.forbidden_windows ?? []).map((w) => ({ ...w, days: [...w.days] }));
+  saved.planning = planningSnapshot();
+}
+
+async function savePlanning() {
+  if (planningError.value) return;
+  savingPlanning.value = true;
+  try {
+    settings.value = await updateSettings({
+      console_timezone: planningForm.timezone.trim() || null,
+      forbidden_windows: planningForm.windows.map((w) => ({
+        days: [...w.days].sort((a, b) => a - b),
+        start: w.start,
+        end: w.end,
+      })),
+    });
+    fillPlanningForm(settings.value);
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
+  } catch (e) {
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
+  } finally {
+    savingPlanning.value = false;
+  }
 }
 
 // The parc thresholds card. The agent version is a string: '' = automatic.
@@ -918,13 +1358,25 @@ function fillEmailForm(s: ConsoleSettings) {
 // server; a card whose form differs holds changes « Enregistrer » has not
 // sent. All five cards: a cycle retyped and left unsaved is lost like any
 // other field.
-const saved = reactive({ maintenance: '', usage: '', fleet: '', schedule: '', email: '' });
+const saved = reactive({
+  maintenance: '',
+  usage: '',
+  alerts: '',
+  compliance: '',
+  planning: '',
+  fleet: '',
+  schedule: '',
+  email: '',
+});
 // The cards by their key in the catalogue (`settings.unsaved.cards`).
 const unsavedCards = computed(() => {
   if (!settings.value || !canWrite.value) return [];
   const cards: string[] = [];
   if (formSnapshot(form) !== saved.maintenance) cards.push('maintenance');
   if (formSnapshot(usageForm) !== saved.usage) cards.push('usage');
+  if (alertSnapshot() !== saved.alerts) cards.push('alerts');
+  if (formSnapshot(complianceForm) !== saved.compliance) cards.push('compliance');
+  if (planningSnapshot() !== saved.planning) cards.push('planning');
   if (formSnapshot(fleetForm) !== saved.fleet) cards.push('fleet');
   if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('schedule');
   if (formSnapshot(emailForm) !== saved.email) cards.push('email');
@@ -1015,6 +1467,9 @@ async function load() {
     const unavailable = settings.value.maintenance_default_owner_unavailable ?? null;
     fillMaintenanceForm(settings.value);
     fillUsageForm(settings.value);
+    fillAlertForm(settings.value);
+    fillComplianceForm(settings.value);
+    fillPlanningForm(settings.value);
     fillFleetForm(settings.value);
     fillScheduleForm(settings.value);
     fillEmailForm(settings.value);

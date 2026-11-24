@@ -1,4 +1,8 @@
 import type { LocationQuery } from 'vue-router';
+import { ASSET_STATUSES } from 'src/services/assets';
+import { isAlertRule } from 'src/services/alerts';
+import { COMPLIANCE_STATES, isComplianceCheck } from 'src/services/compliance';
+import { isDirectoryStatus } from 'src/services/directory';
 import { t } from 'src/i18n';
 import type {
   ListMachinesParams,
@@ -63,6 +67,7 @@ export const MACHINE_SORT_FIELDS = [
   'disk_free_percent',
   'agent_version',
   'usage_hours',
+  'compliance_failed',
 ] as const satisfies readonly MachineSortField[];
 
 /**
@@ -205,6 +210,33 @@ export function machineListParamsFromQuery(q: LocationQuery): ListMachinesParams
   const enrollment = queryValue(q.enrollment);
   if (enrollment === 'pending' || enrollment === 'revoked') params.enrollment = enrollment;
   if (queryValue(q.hardware_aging) === 'true') params.hardware_aging = true;
+  const alert = queryValue(q.alert);
+  if (alert && (alert === 'any' || isAlertRule(alert))) params.alert = alert;
+  const assetStatus = queryValue(q.asset_status);
+  if (
+    assetStatus &&
+    (assetStatus === 'none' || (ASSET_STATUSES as readonly string[]).includes(assetStatus))
+  ) {
+    params.asset_status = assetStatus;
+  }
+  if (queryValue(q.win11_blocked) === 'true') params.win11_blocked = true;
+  const compliance = queryValue(q.compliance);
+  if (compliance && (COMPLIANCE_STATES as readonly string[]).includes(compliance)) {
+    params.compliance = compliance;
+  }
+  const complianceCheck = queryValue(q.compliance_check);
+  if (complianceCheck && isComplianceCheck(complianceCheck)) {
+    params.compliance_check = complianceCheck;
+  }
+  const directoryStatus = queryValue(q.directory_status);
+  if (directoryStatus && isDirectoryStatus(directoryStatus)) {
+    params.directory_status = directoryStatus;
+  }
+  const winget = queryValue(q.winget_outdated);
+  if (winget && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(winget)) {
+    params.winget_outdated = winget;
+  }
+  if (queryValue(q.in_parc) === 'true') params.in_parc = true;
   // The five text facets the list sets from its dropdowns: matched exactly,
   // as the list asked (``machineFiltersToParams``).
   const exact = (

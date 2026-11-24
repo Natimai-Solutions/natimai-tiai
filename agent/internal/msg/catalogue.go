@@ -102,6 +102,28 @@ var french = map[string]func(Params) string{
 		return "inventaire indisponible sur cette plateforme"
 	},
 
+	// --- Reading the directory for the others (collector/directoryread*.go,
+	// agent/directory.go).
+	"directory.read.done": func(p Params) string {
+		return fmt.Sprintf("%v objet(s) lu(s) sur %v demandé(s) dans le domaine %s.",
+			p["objects"], p["asked"], str(p, "domain"))
+	},
+	"directory.read.no_names": func(Params) string {
+		return "aucun nom de poste à lire dans l'annuaire"
+	},
+	"directory.read.unsupported": func(Params) string {
+		return "lecture de l'annuaire indisponible sur cette plateforme"
+	},
+	"directory.read.timeout": func(p Params) string {
+		return "l'annuaire n'a pas répondu en " + str(p, "budget")
+	},
+	"directory.read.failed": func(p Params) string {
+		return "lecture de l'annuaire : " + str(p, "detail")
+	},
+	"directory.read.refused": func(p Params) string {
+		return "lecture refusée par le serveur : " + str(p, "detail")
+	},
+
 	// --- Defender (collector/defender.go).
 	"defender.quick_scan.timeout": func(p Params) string {
 		return defenderTimeout("l'analyse rapide Defender", p,

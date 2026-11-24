@@ -7,8 +7,8 @@ import re
 import uuid
 from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from dataclasses import asdict, dataclass
+from datetime import date, datetime, timedelta, tzinfo
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -30,16 +30,28 @@ from sqlmodel import col, select
 
 from app.api import machine_export
 from app.api.csv_export import csv_response
-from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
+from app.api.deps import (
+    CurrentPermissions,
+    CurrentScope,
+    CurrentUser,
+    SessionDep,
+    require_permission,
+)
 from app.api.xlsx_export import xlsx_response
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.features.alert import crud as alert_crud
+from app.features.alert.models import MachineAlert
+from app.features.asset import crud as asset_crud
+from app.features.asset import win11
+from app.features.asset.models import Asset
 from app.features.audit import crud as audit
 from app.features.base import contains, utcnow
 from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
 from app.features.command import texts as command_texts
-from app.features.command.models import Command, CommandStatus, CommandType
+from app.features.compliance import crud as compliance_crud
+from app.features.compliance.checks import Check
 from app.features.inventory.models import (
     Disk,
     Gpu,
@@ -48,6 +60,7 @@ from app.features.inventory.models import (
     Nic,
     Software,
     Volume,
+    WingetPackage,
 )
 from app.features.machine import crud as machine_crud
 from app.features.machine import token_rotation
@@ -59,7 +72,6 @@ from app.features.machine.status import (
     ScanFilter,
     WindowsUpdateFilter,
     agent_outdated_clause,
-    aging_hardware_clause,
     disk_free_percent,
     effective_signature_age,
     effective_up_to_date,
@@ -83,11 +95,10 @@ from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 from app.features.usage.models import SECONDS_PER_HOUR
 from app.features.user.models import Language, User
-from app.features.user.permissions import Action, Resource
+from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import Scope, machine_clause, machine_visible, restrict
 from app.features.windows_update.models import WindowsUpdate
-from app.features.wol import relay as wol_relay
-from app.features.wol.sender import wake as emit_wake
+from app.features.wol import dispatch as wol_dispatch
 
 router = APIRouter(
     prefix="/machines",
@@ -125,6 +136,12 @@ class MachineOut(BaseModel):
     # because it is what the list is filtered by to see what is waiting.
     check_open: bool = False
     check_assigned_to: str | None = None
+    # What the directory read says of the agent's word
+    # (plan-lecture-annuaire): verified / mismatch / unknown / stale.
+    directory_status: str | None = None
+    # The compliance summary the worker keeps (C5): « 7 sur 9 ».
+    compliance_passed: int | None = None
+    compliance_total: int | None = None
     # Maintenance, as it resolves for this poste (``maintenance/policy.py``):
     # when it is due, where it stands, who owns it. Null due = excluded.
     last_maintenance_at: datetime | None = None
@@ -416,11 +433,63 @@ class OpenCheckOut(BaseModel):
     # « à prendre », and the fiche says who had it and why it is free again.
     assignee_reachable: bool = True
     instructions: str | None
+    # Coded instructions of a request the server opened for an alert.
+    instructions_code: str | None = None
+    instructions_params: dict[str, Any] | None = None
     created_at: datetime
+
+
+class Windows11Out(BaseModel):
+    """Whether the hardware can take Windows 11 (``asset.win11.readiness``):
+    a verdict and each part — ok, fail, check, unknown."""
+
+    verdict: str
+    tpm: str
+    ram: str
+    disk: str
+    architecture: str
+    secure_boot: str
+    processor: str
+
+
+class ComplianceCheckOut(BaseModel):
+    """One compliance check of the fiche, computed live (C5)."""
+
+    check: str
+    state: str
+    detail: dict[str, Any] = {}
+
+
+class WingetPackageOut(BaseModel):
+    winget_id: str
+    name: str | None
+    version: str | None
+    available: str | None
+
+    model_config = {"from_attributes": True}
 
 
 class MachineDetailOut(MachineOut):
     """Full machine detail (Defender state, session type, fingerprint, times)."""
+
+    windows11: Windows11Out | None = None
+    # C5: the checks, live, and the readings behind the two new ones.
+    compliance: list[ComplianceCheckOut] = []
+    firewall_domain: bool | None = None
+    firewall_private: bool | None = None
+    firewall_public: bool | None = None
+    local_admins: list[dict[str, Any]] | None = None
+    winget_reported_at: datetime | None = None
+    winget_packages: list[WingetPackageOut] = []
+    # The directory, as a reader read it, beside what the agent declares.
+    dir_distinguished_name: str | None = None
+    dir_ou: str | None = None
+    dir_location: str | None = None
+    directory_domain_sid: str | None = None
+    directory_reader: bool = False
+    directory_reader_since: datetime | None = None
+    # DIRECTORY_VERIFY, for the fiche to offer the designation or not.
+    directory_mode: str = "off"
 
     # The window ``usage_hours`` covers on the fiche: the console's setting.
     usage_days: int | None = None
@@ -573,6 +642,8 @@ MachineSortField = Literal[
     # Hours on over the usage window: « les moins utilisés d'abord ». Needs
     # the window, so ``_sort_key`` takes it.
     "usage_hours",
+    # The compliance checks failed (C5): « les moins conformes d'abord ».
+    "compliance_failed",
 ]
 
 # Sorted case-folded: under a C collation "ZEUS" would otherwise come before
@@ -646,6 +717,8 @@ def _sort_key(
     """
     if field == "disk_free_percent":
         return disk_free_percent()
+    if field == "compliance_failed":
+        return col(Machine.compliance_total) - col(Machine.compliance_passed)
     if field == "agent_version":
         return _agent_version_rank(versions)
     if field == "usage_hours" and usage is not None:
@@ -788,6 +861,25 @@ class MachineFilters:
     # Hardware older than the parc's renewal threshold (``hardware_aging_years``)
     # — the dashboard's « À renouveler » card, as a list.
     hardware_aging: bool | None = None
+    # Postes with an open alert: of one rule, or of any (« any »).
+    alert: str | None = None
+    # The status of a poste's asset; « none » for a poste without one.
+    asset_status: str | None = None
+    # Postes the inventory says cannot take Windows 11 (``asset.win11``).
+    win11_blocked: bool | None = None
+    # Compliance (C5): failing / passing / unknown, and one failed check.
+    compliance: Literal["failing", "passing", "unknown"] | None = None
+    compliance_check: Check | None = None
+    # Postes winget would upgrade this program on (a winget id, C5).
+    winget_outdated: str | None = None
+    # The directory's verdict (plan-lecture-annuaire); « none »: not read.
+    directory_status: (
+        Literal["verified", "mismatch", "unknown", "stale", "contested", "none"] | None
+    ) = None
+    # Postes still in the parc (true) or retired (false) — the dashboard's
+    # cards open their lists with it, as their figures leave retired postes
+    # out.
+    in_parc: bool | None = None
     # The text facets matched exactly rather than as a substring. The console
     # asks it for a value picked from its dropdown, so that « OptiPlex 7010
     # (12) » lists those 12 postes and not the « OptiPlex 7010 AIO » too; a
@@ -809,6 +901,18 @@ def _exact_facets(raw: str | None) -> frozenset[ExactFacet]:
             message=f"Unknown facet in exact: {', '.join(unknown)}",
         )
     return frozenset(names)  # type: ignore[arg-type]
+
+
+def _alert_filter(raw: str | None) -> str | None:
+    """``alert=any`` or a rule of the catalogue; another value is a 422
+    rather than a filter that silently matches nothing."""
+    if raw is None or raw == "any" or alert_crud.is_known_rule(raw):
+        return raw
+    raise AppError(
+        code=ErrorCode.REQUEST_VALIDATION_ERROR,
+        status_code=422,
+        message=f"Unknown alert rule: {raw}",
+    )
 
 
 def machine_filters(
@@ -845,6 +949,22 @@ def machine_filters(
     usage_hours_above: float | None = Query(None, ge=0),
     enrollment: Literal["pending", "revoked"] | None = None,
     hardware_aging: bool | None = None,
+    alert: str | None = Query(
+        None, description="An alert rule, or 'any': postes with an open alert"
+    ),
+    asset_status: Literal[
+        "in_stock", "in_service", "in_repair", "on_loan", "retired", "none"
+    ]
+    | None = None,
+    win11_blocked: bool | None = None,
+    compliance: Literal["failing", "passing", "unknown"] | None = None,
+    compliance_check: Check | None = None,
+    winget_outdated: str | None = Query(None, max_length=200),
+    directory_status: Literal[
+        "verified", "mismatch", "unknown", "stale", "contested", "none"
+    ]
+    | None = None,
+    in_parc: bool | None = None,
     exact: str | None = Query(
         None,
         description="Comma-separated facets matched exactly: antivirus, "
@@ -890,6 +1010,14 @@ def machine_filters(
         usage_hours_above=usage_hours_above,
         enrollment=enrollment,
         hardware_aging=hardware_aging,
+        alert=_alert_filter(alert),
+        asset_status=asset_status,
+        win11_blocked=win11_blocked,
+        compliance=compliance,
+        compliance_check=compliance_check,
+        winget_outdated=winget_outdated,
+        directory_status=directory_status,
+        in_parc=in_parc,
         exact=_exact_facets(exact),
         scope=scope,
     )
@@ -963,6 +1091,54 @@ def _filtered_machines(
                 hours_above=filters.usage_hours_above,
             )
         )
+    if filters.asset_status is not None:
+        if filters.asset_status == "none":
+            stmt = stmt.where(~exists().where(col(Asset.machine_id) == col(Machine.id)))
+        else:
+            stmt = stmt.where(
+                exists().where(
+                    col(Asset.machine_id) == col(Machine.id),
+                    col(Asset.status) == filters.asset_status,
+                )
+            )
+    if filters.in_parc is not None:
+        stmt = stmt.where(
+            asset_crud.in_parc_clause()
+            if filters.in_parc
+            else asset_crud.retired_clause()
+        )
+    if filters.win11_blocked is not None:
+        blocked = win11.blocked_clause()
+        # The complement, not the negation: a NULL in the clause (a memory
+        # not read) is « not blocked », not in neither list.
+        stmt = stmt.where(blocked if filters.win11_blocked else blocked.is_not(true()))
+    if filters.compliance is not None:
+        stmt = stmt.where(compliance_crud.filter_clause(filters.compliance))
+    if filters.compliance_check is not None:
+        stmt = stmt.where(compliance_crud.check_clause(filters.compliance_check))
+    if filters.directory_status is not None:
+        stmt = stmt.where(
+            col(Machine.directory_status).is_(None)
+            if filters.directory_status == "none"
+            else col(Machine.directory_status) == filters.directory_status
+        )
+    if filters.winget_outdated is not None:
+        stmt = stmt.where(
+            exists().where(
+                col(WingetPackage.machine_id) == col(Machine.id),
+                col(WingetPackage.winget_id) == filters.winget_outdated,
+                col(WingetPackage.available).is_not(None),
+                col(WingetPackage.available) != "",
+            )
+        )
+    if filters.alert is not None:
+        open_alert = exists().where(
+            col(MachineAlert.machine_id) == col(Machine.id),
+            col(MachineAlert.resolved_at).is_(None),
+        )
+        if filters.alert != "any":
+            open_alert = open_alert.where(col(MachineAlert.rule) == filters.alert)
+        stmt = stmt.where(open_alert)
     if filters.check_open is not None:
         stmt = stmt.where(
             col(MachineCheck.id).is_not(None)
@@ -1064,7 +1240,7 @@ def _filtered_machines(
             )
         )
     if filters.hardware_aging is not None:
-        aging = aging_hardware_clause(utcnow(), fleet.hardware_aging_years)
+        aging = asset_crud.aging_clause(utcnow(), fleet.hardware_aging_years)
         # « Not aging » is the complement, not the negation: a poste whose
         # BIOS date was never reported is not known to be old, and NOT of a
         # NULL comparison left it out of both lists.
@@ -1352,6 +1528,7 @@ _KEY_KINDS: dict[str, tuple[type, ...]] = {
     "maintenance_due_at": (datetime,),
     "last_seen": (datetime,),
     "wu_pending_count": (int,),
+    "compliance_failed": (int,),
     "ram_total_mb": (int,),
     "session_user_present": (bool,),
     "disk_free_percent": (int, float, Decimal),
@@ -1808,6 +1985,7 @@ ExportLanguage = Annotated[Language, Query(description="fr or en; fr when absent
 
 @router.get("/export-columns", response_model=list[ExportColumnOut])
 async def list_export_columns(
+    permissions: CurrentPermissions,
     lang: ExportLanguage = Language.FR,
 ) -> list[ExportColumnOut]:
     """The export's column catalogue, in the order the picker shows it.
@@ -1827,11 +2005,15 @@ async def list_export_columns(
             default=c.default,
         )
         for c in machine_export.COLUMNS
+        if c.group != "asset" or has_permission(permissions, "asset", "read")
     ]
 
 
 async def _export_rows(
-    session: SessionDep, filters: MachineFilters, language: Language
+    session: SessionDep,
+    filters: MachineFilters,
+    language: Language,
+    zone: tzinfo | None = None,
 ) -> tuple[list[machine_export.ExportRow], UsageWindow]:
     """The filtered fleet, every row, hostname order.
 
@@ -1851,6 +2033,19 @@ async def _export_rows(
     names = await setting_crud.user_names(session, _owner_ids(all_rows, policy))
     orphaned = await _orphaned_checks(session, all_rows)
     now = utcnow()
+    machine_ids = [row[0].id for row in all_rows]
+    assets = (
+        {
+            a.machine_id: a
+            for a in (
+                await session.exec(
+                    select(Asset).where(col(Asset.machine_id).in_(machine_ids))
+                )
+            ).all()
+        }
+        if machine_ids
+        else {}
+    )
     return [
         machine_export.ExportRow(
             machine=m,
@@ -1872,6 +2067,8 @@ async def _export_rows(
             signature_max_age_days=policies.fleet.signature_max_age_days,
             taken_at=now,
             language=language,
+            zone=zone,
+            asset=assets.get(m.id),
         )
         for m, room, building, check, seconds in all_rows
     ], usage
@@ -1886,6 +2083,7 @@ async def _export_rows(
 @router.get("/export.csv")
 async def export_machines_csv(
     session: SessionDep,
+    permissions: CurrentPermissions,
     filters: FiltersDep,
     columns: str | None = None,
     tz: str | None = None,
@@ -1897,9 +2095,11 @@ async def export_machines_csv(
     absent); ``tz`` the IANA zone timestamps are written in (UTC when absent);
     ``lang`` the language of the file's words (French when absent).
     """
-    chosen = machine_export.resolve_columns(columns)
+    chosen = machine_export.resolve_columns(
+        columns, with_assets=has_permission(permissions, "asset", "read")
+    )
     zone = machine_export.resolve_timezone(tz)
-    machines, usage = await _export_rows(session, filters, lang)
+    machines, usage = await _export_rows(session, filters, lang, zone)
     texts = machine_export.EXPORT_TEXTS[lang]
     return csv_response(
         f"{texts.file_stem}.csv",
@@ -1915,6 +2115,7 @@ async def export_machines_csv(
 @router.get("/export.xlsx")
 async def export_machines_xlsx(
     session: SessionDep,
+    permissions: CurrentPermissions,
     filters: FiltersDep,
     columns: str | None = None,
     tz: str | None = None,
@@ -1926,9 +2127,11 @@ async def export_machines_xlsx(
     CSV; the difference is what lands in the cells — values Excel can sort,
     filter and sum without a conversion step.
     """
-    chosen = machine_export.resolve_columns(columns)
+    chosen = machine_export.resolve_columns(
+        columns, with_assets=has_permission(permissions, "asset", "read")
+    )
     zone = machine_export.resolve_timezone(tz)
-    machines, usage = await _export_rows(session, filters, lang)
+    machines, usage = await _export_rows(session, filters, lang, zone)
     texts = machine_export.EXPORT_TEXTS[lang]
     return await xlsx_response(
         f"{texts.file_stem}.xlsx",
@@ -2021,19 +2224,15 @@ async def wake_machines(
     )
     # Out of scope reads as unknown: reported like a stale id, below.
     machines = {m.id: m for m in rows.all()}
-    # Relayed: what the whole selection shares is read once — the wakes
-    # already open, then each site's relays the first time it is met — so
-    # that the cost follows the number of sites, not of postes.
-    batch = (
-        await wol_relay.open_batch(session, machines.values())
-        if settings.WOL_RELAY_ENABLED
-        else None
-    )
+    # In the order asked, a poste named twice twice: its second wake finds
+    # the first one waiting, and says so.
+    known = [machines[m] for m in payload.machine_ids if m in machines]
+    outcomes = iter(await wol_dispatch.wake(session, known, created_by=user.email))
 
     results: list[WakeOut] = []
     for machine_id in payload.machine_ids:
-        machine = machines.get(machine_id)
-        if machine is None:
+        outcome = next(outcomes) if machine_id in machines else None
+        if outcome is None:
             # Reported rather than 404'd: one stale id in a selection of thirty
             # must not cost the other twenty-nine their wake. Nothing is
             # recorded — there is no machine left to record it against.
@@ -2049,59 +2248,10 @@ async def wake_machines(
                 )
             )
             continue
-
-        if settings.WOL_RELAY_ENABLED:
-            # Queued for a poste of the site, or refused on the spot; either
-            # way the relay module writes the history row itself.
-            outcome = await wol_relay.queue_relayed_wake(
-                session, machine, created_by=user.email, batch=batch
-            )
-            results.append(
-                WakeOut(
-                    machine_id=machine.id,
-                    hostname=machine.hostname,
-                    ok=outcome.ok,
-                    detail=outcome.detail,
-                    detail_code=outcome.code,
-                    detail_params=outcome.params,
-                )
-            )
-            continue
-
-        outcome = await emit_wake(
-            mac=machine.mac_address,
-            ip=machine.ip_address,
-            prefix_length=machine.ip_prefix_length,
-        )
-        now = utcnow()
-        session.add(
-            Command(
-                machine_id=machine.id,
-                type=CommandType.WAKE_ON_LAN.value,
-                status=(
-                    CommandStatus.SUCCEEDED.value
-                    if outcome.ok
-                    else CommandStatus.FAILED.value
-                ),
-                created_by=user.email,
-                created_at=now,
-                # Already terminal, so it never had a life to expire — the sweep
-                # only ever touches PENDING rows. Set to the creation instant so
-                # the column reads as "was never offered to anyone" rather than
-                # dangling an hour into the future.
-                expires_at=now,
-                started_at=now,
-                finished_at=now,
-                result_output=outcome.detail if outcome.ok else None,
-                error=None if outcome.ok else outcome.detail,
-                result_code=outcome.code,
-                result_params=outcome.params,
-            )
-        )
         results.append(
             WakeOut(
-                machine_id=machine.id,
-                hostname=machine.hostname,
+                machine_id=machine_id,
+                hostname=outcome.machine.hostname,
                 ok=outcome.ok,
                 detail=outcome.detail,
                 detail_code=outcome.code,
@@ -2229,11 +2379,29 @@ async def _machine_detail(session: SessionDep, machine: Machine) -> MachineDetai
             assigned_to_name=assignee_name,
             assignee_reachable=reachable,
             instructions=open_check.instructions,
+            instructions_code=open_check.instructions_code,
+            instructions_params=open_check.instructions_params,
             created_at=open_check.created_at,
         )
     detail.pending_updates = [PendingUpdateOut.model_validate(u) for u in rows.all()]
     await _attach_inventory(session, machine, detail)
     detail.agent_latest_version = (await fleet_versions(session)).latest
+    readiness = win11.readiness(
+        machine,
+        win11.installed_ram_mb([m.capacity_mb for m in detail.memory_modules]),
+    )
+    detail.windows11 = Windows11Out(**asdict(readiness)) if readiness else None
+    detail.compliance = [
+        ComplianceCheckOut(check=r.check.value, state=r.state.value, detail=r.detail)
+        for r in await compliance_crud.for_machine(session, machine, now)
+    ]
+    winget = await session.exec(
+        select(WingetPackage)
+        .where(col(WingetPackage.machine_id) == machine.id)
+        .order_by(func.lower(col(WingetPackage.name)), col(WingetPackage.winget_id))
+    )
+    detail.winget_packages = [WingetPackageOut.model_validate(p) for p in winget.all()]
+    detail.directory_mode = settings.DIRECTORY_VERIFY
     return detail
 
 
@@ -2728,6 +2896,24 @@ async def merge_machine(
             "source_room_id": str(source.room_id) if source.room_id else None,
         },
     )
+    # Both records had their asset: the duplicate's is dropped, what it held
+    # recorded (``asset.crud.move_to``).
+    dropped = await asset_crud.dropped_asset(
+        session, source_id=source.id, target_id=target.id
+    )
+    if dropped is not None:
+        audit.record(
+            session,
+            actor=user.email,
+            action="asset.delete",
+            resource_type="asset",
+            resource_id=str(dropped.id),
+            details={
+                "machine_id": str(source.id),
+                "merged_into": str(target.id),
+                **asset_crud.dropped_asset_details(dropped),
+            },
+        )
     held_files = await machine_crud.merge_into(session, target=target, source=source)
     await session.commit()
     if held_files:

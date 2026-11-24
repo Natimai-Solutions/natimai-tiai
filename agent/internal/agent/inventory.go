@@ -41,6 +41,15 @@ type inventoryCache = stateCache[models.InventoryState]
 // stand in for WMI and the registry — and see whether software was asked for.
 var readInventory = collector.ReadInventory
 
+// inventoryOptions are the switches the inventory is read under.
+func (a *Agent) inventoryOptions() collector.InventoryOptions {
+	return collector.InventoryOptions{
+		Software:       a.cfg.ReportsSoftware(),
+		LocalAdmins:    a.cfg.ReportsLocalAdmins(),
+		WingetPackages: a.cfg.ReportsWingetPackages(),
+	}
+}
+
 // inventoryLoop collects the hardware and software inventory once a day.
 //
 // Its own goroutine for the same reason as the Windows Update cycle: a dozen WMI
@@ -92,7 +101,7 @@ func (a *Agent) collectInventory(ctx context.Context) {
 	}
 
 	start := time.Now()
-	inv, err := readInventory(ctx, a.cfg.ReportsSoftware())
+	inv, err := readInventory(ctx, a.inventoryOptions())
 	if err != nil {
 		log.Printf("agent: inventory: %v", err)
 		return
@@ -165,7 +174,7 @@ func (a *Agent) runInventoryScan(ctx context.Context) (msg.Message, error) {
 	a.inventoryOp.Lock()
 	defer a.inventoryOp.Unlock()
 
-	inv, err := readInventory(ctx, a.cfg.ReportsSoftware())
+	inv, err := readInventory(ctx, a.inventoryOptions())
 	if err != nil {
 		return msg.Message{}, err
 	}

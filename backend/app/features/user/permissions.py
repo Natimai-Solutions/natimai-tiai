@@ -51,6 +51,17 @@ class Resource(enum.StrEnum):
     # Software packages: reading the catalogue, and composing it (uploading
     # files, signing, retiring). *Deploying* one is a risky command.
     PACKAGE = "package"
+    # Assets: purchase, warranty, status and loans of the postes and of the
+    # equipment without an agent. Its own resource, so that a purchase price
+    # is not read by everyone who reads the parc; granted to no built-in
+    # group but the administrators.
+    ASSET = "asset"
+    # Schedules (C3). Writing one also asks for the right to run what it
+    # carries (``command:execute``, ``risky_command:execute``).
+    SCHEDULE = "schedule"
+    # Reports of the postes' users (C4): the queue, read and triaged.
+    # Turning one into a verification also asks for ``check:write``.
+    REPORT = "report"
 
 
 class Action(enum.StrEnum):
@@ -86,6 +97,12 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.AUDIT, Action.READ),
     (Resource.PACKAGE, Action.READ),
     (Resource.PACKAGE, Action.WRITE),
+    (Resource.ASSET, Action.READ),
+    (Resource.ASSET, Action.WRITE),
+    (Resource.SCHEDULE, Action.READ),
+    (Resource.SCHEDULE, Action.WRITE),
+    (Resource.REPORT, Action.READ),
+    (Resource.REPORT, Action.WRITE),
 )
 
 

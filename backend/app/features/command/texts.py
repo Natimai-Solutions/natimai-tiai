@@ -58,6 +58,15 @@ def merged() -> Verdict:
 # --- Deployments refused or cancelled ----------------------------------------
 
 
+def directory_not_reader() -> Verdict:
+    """A directory reading whose poste is no longer a reader: its designation
+    fell between the queue and the delivery."""
+    return Verdict(
+        "directory.not_reader",
+        "Lecture d'annuaire annulée : ce poste n'est plus lecteur d'annuaire",
+    )
+
+
 def package_deleted() -> Verdict:
     """A deployment whose package was deleted before delivery."""
     return Verdict("package.deleted", "Paquet supprimé avant l'exécution")

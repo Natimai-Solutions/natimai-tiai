@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta
 from ipaddress import ip_address
@@ -33,6 +34,7 @@ from app.features.command.models import (
     CommandStatus,
     CommandType,
 )
+from app.features.directory import crud as directory_crud
 from app.features.inventory import budget as software_budget
 from app.features.inventory.crud import apply_inventory
 from app.features.inventory.schemas import InventoryReport
@@ -409,6 +411,13 @@ class CommandOut(BaseModel):
     # only: the package, whole. What the agent may do with it is decided on
     # the poste, from trust anchors its GPO set (plan-deploiement-logiciel §4).
     package: "PackageDelivery | None" = None
+    # The third, on ``directory_read`` only: the computer names to read
+    # (plan-lecture-annuaire §3.2).
+    directory: "DirectoryRequest | None" = None
+
+
+class DirectoryRequest(BaseModel):
+    names: list[str]
 
 
 class PackageFileDelivery(BaseModel):
@@ -773,6 +782,22 @@ async def enroll(
         machine.needs_verification = True
     machine.token_hash = security.hash_token(token)
     machine.token_issued_at = utcnow()
+    # A re-enrolled poste is no longer the one designated to read the
+    # directory (plan-lecture-annuaire §3.2), nor the one an object was
+    # matched to: it is matched again at the next reading.
+    if machine.directory_reader:
+        await directory_crud.undesignate(session, machine)
+        audit.record(
+            session,
+            actor=directory_crud.ACTOR,
+            action="directory.reader_drop",
+            resource_type="machine",
+            resource_id=str(machine.id),
+            details={"hostname": machine.hostname, "cause": "reenrolled"},
+        )
+    if machine.directory_object_guid is not None:
+        directory_crud.clear_match(machine)
+        machine.directory_status = None
     # Until the agent's first authenticated request proves the answer below
     # reached it (``_unused_enrollment_retry``).
     machine.enrollment_token_unused = True
@@ -911,6 +936,10 @@ async def heartbeat(
 
     if payload.windows_update is not None:
         wu = payload.windows_update
+        if wu.reboot_required and machine.wu_reboot_required_since is None:
+            machine.wu_reboot_required_since = utcnow()
+        elif not wu.reboot_required:
+            machine.wu_reboot_required_since = None
         machine.wu_reboot_required = wu.reboot_required
         machine.wu_last_search = wu.last_search_time
         machine.wu_last_install = wu.last_install_time
@@ -920,6 +949,15 @@ async def heartbeat(
         machine.wu_pending_count = await replace_pending(
             session, machine.id, wu.pending
         )
+        behind = any(
+            (u.type or "software") == "software"
+            and (u.severity or "").lower() in ("critical", "important")
+            for u in wu.pending
+        )
+        if not behind:
+            machine.wu_critical_pending_since = None
+        elif machine.wu_critical_pending_since is None:
+            machine.wu_critical_pending_since = utcnow()
 
     if payload.inventory is not None:
         inv = payload.inventory
@@ -946,21 +984,31 @@ async def heartbeat(
             machine.ad_ou = directory.ou
             machine.ad_ou_dn = directory.ou_dn
             machine.ad_location = directory.ad_location
-            # In a savepoint: whatever the directory says, a placement that
-            # fails must not fail the heartbeat — the Defender state, the
-            # threats and the commands ride the same request (audit S07).
-            try:
-                async with session.begin_nested():
-                    await room_crud.place_from_directory(
-                        session, machine, settings.ROOM_SOURCE, from_agent=True
+            if directory_crud.enabled():
+                # With the directory read by the server, the agent's word
+                # files nothing: it is checked against the reading, and the
+                # rooms move when a reading is taken (``directory.reconcile``)
+                # — never here, where a move held for an administrator's
+                # confirmation would be applied behind their back.
+                await directory_crud.refresh_heartbeat_verdict(session, machine)
+            else:
+                # In a savepoint: whatever the directory says, a placement
+                # that fails must not fail the heartbeat — the Defender
+                # state, the threats and the commands ride the same request
+                # (audit S07).
+                try:
+                    async with session.begin_nested():
+                        await room_crud.place_from_directory(
+                            session, machine, settings.ROOM_SOURCE, from_agent=True
+                        )
+                except SQLAlchemyError:
+                    logger.exception(
+                        "directory placement failed for machine %s", machine.id
                     )
-            except SQLAlchemyError:
-                logger.exception(
-                    "directory placement failed for machine %s", machine.id
-                )
-                # The rollback of the savepoint may have expired the row: read
-                # it again now, not lazily later (no implicit I/O in async).
-                await session.refresh(machine)
+                    # The rollback of the savepoint may have expired the row:
+                    # read it again now, not lazily later (no implicit I/O in
+                    # async).
+                    await session.refresh(machine)
 
     if payload.fingerprint is not None:
         fp = payload.fingerprint
@@ -1033,6 +1081,12 @@ async def heartbeat(
         what would run (audit S08) — or, for an installation, it was retired
         meanwhile: retiring says "install this nowhere any more". An
         uninstall of a retired package still goes, as it may be queued."""
+        if c.type == CommandType.DIRECTORY_READ:
+            return (
+                None
+                if directory_crud.enabled() and directory_crud.reader_ok(machine)
+                else command_texts.directory_not_reader()
+            )
         if c.type not in PACKAGE_COMMAND_TYPES:
             return None
         if c.package_id not in deliveries:
@@ -1062,6 +1116,13 @@ async def heartbeat(
                 id=c.id,
                 type=c.type,
                 package=deliveries.get(c.package_id) if c.package_id else None,
+                directory=(
+                    DirectoryRequest(
+                        names=await directory_crud.names_for(session, machine)
+                    )
+                    if c.type == CommandType.DIRECTORY_READ
+                    else None
+                ),
             )
         )
 
@@ -1195,6 +1256,121 @@ async def command_result(
         # once the last deployment using them is over, they go (audit S09).
         await package_crud.sweep_store(session)
     return {"status": "ok"}
+
+
+# --- Directory readings (plan-lecture-annuaire.md, mode relay) ---------------
+
+_SID = re.compile(r"^S-1-5-21(-\d{1,10}){3}$")
+_GUID = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+_SAM = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}\$$")
+
+
+class DirectoryDomainIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    netbios_name: str = Field(min_length=1, max_length=64)
+    sid: str = Field(max_length=100)
+
+    @field_validator("sid")
+    @classmethod
+    def _sid(cls, value: str) -> str:
+        if not _SID.fullmatch(value):
+            raise ValueError("not a domain SID")
+        return value
+
+
+class DirectoryObjectIn(BaseModel):
+    object_guid: str
+    sam_account_name: str
+    dns_host_name: str | None = None
+    distinguished_name: str | None = None
+    location: str | None = None
+    disabled: bool = False
+
+    @field_validator("dns_host_name", "location")
+    @classmethod
+    def _short(cls, value: str | None) -> str | None:
+        return bound_text(value)
+
+    @field_validator("distinguished_name")
+    @classmethod
+    def _dn(cls, value: str | None) -> str | None:
+        return bound_text(value, 500)
+
+
+class DirectorySubnetIn(BaseModel):
+    subnet: str = Field(max_length=64)
+    site: str = Field(max_length=255)
+
+
+class DirectoryReadingIn(BaseModel):
+    """What a designated reader read of its own domain."""
+
+    domain: DirectoryDomainIn
+    objects: list[DirectoryObjectIn] = Field(default_factory=list, max_length=20_000)
+    subnets: list[DirectorySubnetIn] = Field(default_factory=list, max_length=5_000)
+
+
+@router.post("/directory/{command_id}")
+async def directory_reading(
+    command_id: uuid.UUID,
+    payload: DirectoryReadingIn,
+    machine: CurrentMachine,
+    session: SessionDep,
+) -> dict[str, Any]:
+    """Take a reader's reading of its domain. The reader then posts its
+    command's result as for any command. Refused (409) from a poste that is
+    not a reader, for another domain, or for a command not its own."""
+    cmd = await session.get(Command, command_id, with_for_update=True)
+    if cmd is None:
+        raise AppError(code=ErrorCode.DIRECTORY_READING_REFUSED, status_code=409)
+    # Objects of a shape no directory hands out are dropped, not a refusal.
+    objects = [
+        directory_crud.ReadObject(
+            object_guid=o.object_guid.lower(),
+            sam_account_name=o.sam_account_name.upper(),
+            dns_host_name=o.dns_host_name,
+            distinguished_name=o.distinguished_name,
+            location=o.location,
+            disabled=o.disabled,
+        )
+        for o in payload.objects
+        if _GUID.fullmatch(o.object_guid) and _SAM.fullmatch(o.sam_account_name)
+    ]
+    reading = directory_crud.Reading(
+        domain_name=payload.domain.name.strip(),
+        netbios_name=payload.domain.netbios_name.strip(),
+        domain_sid=payload.domain.sid,
+        objects=objects,
+        subnets=[s.model_dump() for s in payload.subnets],
+    )
+    try:
+        result = await directory_crud.ingest(session, machine, cmd, reading, utcnow())
+    except directory_crud.ReadingRefused as refused:
+        security_log.warning(
+            "directory reading refused from machine %s: %s",
+            machine.machine_uuid,
+            refused.code,
+        )
+        raise AppError(
+            code=ErrorCode.DIRECTORY_READING_REFUSED,
+            status_code=409,
+            details={"reason": refused.code},
+        ) from refused
+    await session.commit()
+    return {
+        "status": "ok",
+        "verified": result.verified,
+        "mismatch": result.mismatch,
+        "unknown": result.unknown,
+        "stale": result.stale,
+        "contested": result.contested,
+        "undecided": result.undecided,
+        "moved": result.moved,
+        "held": result.held,
+        "disagreement": result.disagreement,
+    }
 
 
 # --- Package files ----------------------------------------------------------

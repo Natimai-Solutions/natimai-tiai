@@ -14,9 +14,14 @@ export const LANDING_PAGES: readonly {
 }[] = [
   { name: 'dashboard', permission: 'machine:read' },
   { name: 'machines', permission: 'machine:read' },
+  { name: 'alerts', permission: 'machine:read' },
+  // An intendance account may read the purchases and not the parc.
+  { name: 'assets', permission: 'asset:read' },
   { name: 'software', permission: 'machine:read' },
   { name: 'packages', permission: 'package:read' },
   { name: 'tasks', permission: ['check:read', 'maintenance:read'] },
+  { name: 'reports', permission: 'report:read' },
+  { name: 'schedules', permission: 'schedule:read' },
   { name: 'rooms', permission: 'room:read' },
   { name: 'users', permission: 'user:read' },
   { name: 'groups', permission: 'user:read' },

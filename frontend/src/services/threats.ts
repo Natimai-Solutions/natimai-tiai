@@ -23,6 +23,8 @@ export interface ListThreatsParams {
   machine_id?: string;
   status?: string;
   severity?: string;
+  /** true: the retired postes' threats left out (the dashboard's sample). */
+  in_parc?: boolean;
   page?: number;
   page_size?: number;
 }

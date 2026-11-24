@@ -282,6 +282,53 @@ type InventoryState struct {
 	// (ROOM_SOURCE). nil on a poste that is not domain-joined, or whose
 	// directory could not be read; the server then keeps what it had.
 	Directory *DirectoryState `json:"directory,omitempty"`
+
+	// Firewall is the effective state of Windows Firewall's three profiles —
+	// a GPO's setting where one is pushed, the local one otherwise. nil when
+	// none could be read. Feeds the server's compliance checks (C5).
+	Firewall *FirewallState `json:"firewall,omitempty"`
+
+	// LocalAdmins lists the members of the local Administrators group. Account
+	// names are personal data, so this is read only when ReportLocalAdmins
+	// allows it (off by default); nil otherwise, and the server then forgets
+	// what an earlier cycle stored — the block is applied as a whole.
+	LocalAdmins *[]LocalAdmin `json:"local_admins,omitempty"`
+
+	// WingetPackages are the installed programs winget knows, with the version
+	// it would upgrade each to. Read only when ReportWingetPackages allows it
+	// (off by default: `winget list` costs seconds and a network round trip
+	// to the winget source); nil when off or when winget could not be run.
+	WingetPackages *[]WingetPackage `json:"winget_packages,omitempty"`
+	// WingetReporting says the winget collection is switched on, whether or
+	// not it produced a list this time: with it, the server keeps what it
+	// held when winget failed once; without it, it clears it.
+	WingetReporting bool `json:"winget_reporting,omitempty"`
+}
+
+// FirewallState is one flag per profile; nil where the profile's setting
+// could not be read.
+type FirewallState struct {
+	Domain  *bool `json:"domain,omitempty"`
+	Private *bool `json:"private,omitempty"`
+	Public  *bool `json:"public,omitempty"`
+}
+
+// LocalAdmin is one member of the local Administrators group: its name as
+// DOMAIN\name, and its SID — which is what tells the server the built-in
+// accounts (RID 500, Domain Admins 512, Enterprise Admins 519) from the rest,
+// whatever language the names are in.
+type LocalAdmin struct {
+	Name string `json:"name"`
+	SID  string `json:"sid,omitempty"`
+}
+
+// WingetPackage is one row of `winget list --source winget`. Available is
+// empty when winget offers no newer version.
+type WingetPackage struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Version   string `json:"version,omitempty"`
+	Available string `json:"available,omitempty"`
 }
 
 // DirectoryState is the computer object as Active Directory holds it, the two
@@ -375,6 +422,47 @@ type Command struct {
 	// may run is decided here, from trust anchors the GPO set — never from
 	// anything in this struct alone (internal/deploy).
 	Package *PackageDelivery `json:"package,omitempty"`
+	// Directory is the third, on directory_read only: the computer names a
+	// designated reader is to read in its domain (dev/plan-lecture-annuaire.md).
+	Directory *DirectoryRequest `json:"directory,omitempty"`
+}
+
+// DirectoryRequest names the computers a reader reads.
+type DirectoryRequest struct {
+	Names []string `json:"names"`
+}
+
+// DirectoryReading is what a reader read of its own domain, posted to
+// /api/v1/agent/directory/{command id} before the command's result.
+type DirectoryReading struct {
+	Domain  DirectoryDomain   `json:"domain"`
+	Objects []DirectoryObject `json:"objects"`
+	Subnets []DirectorySubnet `json:"subnets"`
+}
+
+// DirectoryDomain is the reader's domain: its DNS name, its NetBIOS name
+// (what the agents declare as their domain) and its SID (what identifies it:
+// two schools may both be « ecole.local »).
+type DirectoryDomain struct {
+	Name        string `json:"name"`
+	NetBIOSName string `json:"netbios_name"`
+	SID         string `json:"sid"`
+}
+
+// DirectoryObject is one computer object as the directory holds it.
+type DirectoryObject struct {
+	ObjectGUID        string `json:"object_guid"`
+	SAMAccountName    string `json:"sam_account_name"`
+	DNSHostName       string `json:"dns_host_name,omitempty"`
+	DistinguishedName string `json:"distinguished_name,omitempty"`
+	Location          string `json:"location,omitempty"`
+	Disabled          bool   `json:"disabled"`
+}
+
+// DirectorySubnet is one AD subnet and the site it belongs to.
+type DirectorySubnet struct {
+	Subnet string `json:"subnet"`
+	Site   string `json:"site"`
 }
 
 // PackageDelivery is a package as the server hands it over. Manifest,

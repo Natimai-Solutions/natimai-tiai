@@ -1,5 +1,6 @@
 import type { AxiosError } from 'axios';
 import { errorCodeMessage, t } from 'src/i18n';
+import { windowText, type ForbiddenWindow } from 'src/services/schedules';
 import {
   invalidText,
   problemText,
@@ -41,6 +42,12 @@ const CAUSE_WORDING: Record<string, (cause: Cause) => string | null> = {
   // Why a signature was refused — a manifest changed since, another
   // certificate, an algorithm that does not fit the key…
   'package.signature.invalid': signatureText,
+  // An import over the limits: which one, and that the file is to be split.
+  'asset.import.too_large': (cause) => {
+    const key = `assets.import.tooLarge.${cause.code}`;
+    const text = t(key, cause.params ?? {});
+    return text === key ? null : text;
+  },
 };
 
 function causeOf(details: Record<string, unknown> | undefined): Cause | null {
@@ -149,6 +156,13 @@ export function apiErrorMessage(err: unknown, fallback: string = t('errors.gener
     if (code === 'request.validation_error') {
       const detail = validationDetail(body?.error?.details);
       if (detail) return t('errors.withDetail', { label, detail });
+    }
+    // A forbidden window: which one (« lundi, mardi 07:30–12:00 »).
+    if (code === 'schedule.forbidden_window' || code === 'command.forbidden_window') {
+      const window = details?.window as ForbiddenWindow | undefined;
+      if (window && Array.isArray(window.days)) {
+        return t('errors.withDetail', { label, detail: windowText(window) });
+      }
     }
     if (code === 'room.in_group_scope') {
       const groups = body?.error?.details?.groups;

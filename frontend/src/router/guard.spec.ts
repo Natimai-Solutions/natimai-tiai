@@ -51,6 +51,12 @@ vi.mock('./routes', () => {
         component: page,
         meta: { requiresAuth: true, requiresPermission: 'room:read', title: 'Salles' },
       },
+      {
+        path: '/equipment',
+        name: 'assets',
+        component: page,
+        meta: { requiresAuth: true, requiresPermission: 'asset:read', title: 'Matériels' },
+      },
       { path: '/account', name: 'account', component: page, meta: { requiresAuth: true } },
       { path: '/no-access', name: 'no-access', component: page, meta: { requiresAuth: true } },
     ],
@@ -77,6 +83,12 @@ describe('landing page (permissions)', () => {
     state.permissions = ['room:read'];
     await router.push('/');
     expect(router.currentRoute.value.name).toBe('rooms');
+  });
+
+  it('opens Matériels for an account that reads the purchases and not the parc', async () => {
+    state.permissions = ['asset:read', 'room:read'];
+    await router.push('/');
+    expect(router.currentRoute.value.name).toBe('assets');
   });
 
   it('sends an account that can read nothing to « Aucune page accessible »', async () => {

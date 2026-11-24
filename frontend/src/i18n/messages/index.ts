@@ -1,10 +1,14 @@
 import account from './account';
+import alerts from './alerts';
+import assets from './assets';
 import audit from './audit';
 import auth from './auth';
 import checks from './checks';
 import commands from './commands';
 import common from './common';
+import compliance from './compliance';
 import dashboard from './dashboard';
+import directory from './directory';
 import errors from './errors';
 import exports from './exports';
 import format from './format';
@@ -17,7 +21,9 @@ import maintenance from './maintenance';
 import packagePages from './packagePages';
 import packages from './packages';
 import permissions from './permissions';
+import reports from './reports';
 import rooms from './rooms';
+import schedules from './schedules';
 import settings from './settings';
 import settingsEnv from './settingsEnv';
 import software from './software';
@@ -31,7 +37,12 @@ import users from './users';
  * their own table (`errorCodes.ts`).
  */
 export const fr = {
+  alerts: alerts.fr,
+  assets: assets.fr,
+  schedules: schedules.fr,
+  reports: reports.fr,
   common: common.fr,
+  compliance: compliance.fr,
   errors: errors.fr,
   packages: packages.fr,
   machine: machine.fr,
@@ -51,6 +62,7 @@ export const fr = {
   layout: layout.fr,
   auth: auth.fr,
   dashboard: dashboard.fr,
+  directory: directory.fr,
   software: software.fr,
   format: format.fr,
   packagePages: packagePages.fr,
@@ -59,7 +71,12 @@ export const fr = {
 };
 
 export const en = {
+  alerts: alerts.en,
+  assets: assets.en,
+  schedules: schedules.en,
+  reports: reports.en,
   common: common.en,
+  compliance: compliance.en,
   errors: errors.en,
   packages: packages.en,
   machine: machine.en,
@@ -79,6 +96,7 @@ export const en = {
   layout: layout.en,
   auth: auth.en,
   dashboard: dashboard.en,
+  directory: directory.en,
   software: software.en,
   format: format.en,
   packagePages: packagePages.en,

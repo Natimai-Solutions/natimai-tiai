@@ -1,4 +1,12 @@
 import type { LocationQuery } from 'vue-router';
+import { ASSET_STATUSES, assetStatusLabel } from 'src/services/assets';
+import { alertRuleLabel, isAlertRule } from 'src/services/alerts';
+import { isDirectoryStatus } from 'src/services/directory';
+import {
+  COMPLIANCE_STATES,
+  complianceCheckLabel,
+  isComplianceCheck,
+} from 'src/services/compliance';
 import { t } from 'src/i18n';
 import type {
   ListMachinesParams,
@@ -140,6 +148,53 @@ export interface MachineFilters {
    * card, opened as a list. Set by that link, cleared from its chip.
    */
   aging: 'true' | null;
+  /** Postes with an open alert: of one rule, or of any (`any`). From the
+   * alerts page's « Voir ces postes »; cleared from its chip. */
+  alert: string | null;
+  /** The status of a poste's asset (`none`: no asset); from the Matériels
+   * page's « Voir ces postes ». */
+  assetStatus: string | null;
+  /** Postes the inventory says cannot take Windows 11; from the dashboard. */
+  win11: 'true' | null;
+  /** Compliance (C5): failing / passing / unknown, from the dashboard. */
+  compliance: string | null;
+  /** Postes failing one compliance check; from the dashboard's card. */
+  complianceCheck: string | null;
+  /** Postes winget would upgrade a program on (its winget id); from the
+   * « Mises à jour tierces » view. */
+  wingetOutdated: string | null;
+  /** The directory's verdict (plan-lecture-annuaire); from Paramètres. */
+  directoryStatus: string | null;
+  /**
+   * Postes in the parc only, the retired ones left out: the dashboard's
+   * links carry it while the parc has retired postes, as its figures leave
+   * them out. Cleared from its chip.
+   */
+  inParc: 'true' | null;
+}
+
+/** `alert=any` or a rule of the catalogue; anything else is dropped. */
+function alertQuery(value: unknown): string | null {
+  const v = queryValue(value);
+  return v && (v === 'any' || isAlertRule(v)) ? v : null;
+}
+
+/** A compliance state of the list's filter; anything else is dropped. */
+function complianceQuery(value: unknown): string | null {
+  const v = queryValue(value);
+  return v && (COMPLIANCE_STATES as readonly string[]).includes(v) ? v : null;
+}
+
+/** A winget id, as the agent reports them; anything else is dropped. */
+function wingetQuery(value: unknown): string | null {
+  const v = queryValue(value);
+  return v && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(v) ? v : null;
+}
+
+/** An asset status, or `none`; anything else is dropped. */
+function assetStatusQuery(value: unknown): string | null {
+  const v = queryValue(value);
+  return v && (v === 'none' || (ASSET_STATUSES as readonly string[]).includes(v)) ? v : null;
 }
 
 /** The whole parc: no search, no facet, both toggles off. */
@@ -174,6 +229,14 @@ export function emptyMachineFilters(): MachineFilters {
     softwareId: null,
     enrollment: null,
     aging: null,
+    alert: null,
+    assetStatus: null,
+    win11: null,
+    compliance: null,
+    complianceCheck: null,
+    wingetOutdated: null,
+    directoryStatus: null,
+    inParc: null,
   };
 }
 
@@ -402,6 +465,20 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
     softwareId: Number.isInteger(software) && software > 0 ? software : null,
     enrollment: enrollment === 'pending' || enrollment === 'revoked' ? enrollment : null,
     aging: queryValue(q.hardware_aging) === 'true' ? 'true' : null,
+    alert: alertQuery(q.alert),
+    assetStatus: assetStatusQuery(q.asset_status),
+    win11: queryValue(q.win11_blocked) === 'true' ? 'true' : null,
+    compliance: complianceQuery(q.compliance),
+    complianceCheck: (() => {
+      const v = queryValue(q.compliance_check);
+      return v && isComplianceCheck(v) ? v : null;
+    })(),
+    wingetOutdated: wingetQuery(q.winget_outdated),
+    directoryStatus: (() => {
+      const v = queryValue(q.directory_status);
+      return v && isDirectoryStatus(v) ? v : null;
+    })(),
+    inParc: queryValue(q.in_parc) === 'true' ? 'true' : null,
   };
 }
 
@@ -450,6 +527,14 @@ export function machineFiltersToQuery(f: MachineFilters): Record<string, string>
   if (f.softwareId != null) query.software_id = String(f.softwareId);
   if (f.enrollment) query.enrollment = f.enrollment;
   if (f.aging) query.hardware_aging = 'true';
+  if (f.alert) query.alert = f.alert;
+  if (f.assetStatus) query.asset_status = f.assetStatus;
+  if (f.win11) query.win11_blocked = 'true';
+  if (f.compliance) query.compliance = f.compliance;
+  if (f.complianceCheck) query.compliance_check = f.complianceCheck;
+  if (f.wingetOutdated) query.winget_outdated = f.wingetOutdated;
+  if (f.directoryStatus) query.directory_status = f.directoryStatus;
+  if (f.inParc) query.in_parc = 'true';
   return query;
 }
 
@@ -503,6 +588,14 @@ export function machineFiltersToParams(f: MachineFilters): ListMachinesParams {
   if (f.softwareId != null) params.software_id = f.softwareId;
   if (f.enrollment) params.enrollment = f.enrollment;
   if (f.aging) params.hardware_aging = true;
+  if (f.alert) params.alert = f.alert;
+  if (f.assetStatus) params.asset_status = f.assetStatus;
+  if (f.win11) params.win11_blocked = true;
+  if (f.compliance) params.compliance = f.compliance;
+  if (f.complianceCheck) params.compliance_check = f.complianceCheck;
+  if (f.wingetOutdated) params.winget_outdated = f.wingetOutdated;
+  if (f.directoryStatus) params.directory_status = f.directoryStatus;
+  if (f.inParc) params.in_parc = true;
   // The console sets these five from dropdowns fed by the fleet's exact
   // values, with their counts: matched exactly, « OptiPlex 7010 (12) » lists
   // those 12 postes and not the « OptiPlex 7010 AIO » too. The API keeps the
@@ -545,7 +638,15 @@ export type MachineFilterKey =
   | 'usage'
   | 'software'
   | 'agent'
-  | 'aging';
+  | 'aging'
+  | 'alert'
+  | 'assetStatus'
+  | 'win11'
+  | 'compliance'
+  | 'complianceCheck'
+  | 'wingetOutdated'
+  | 'directoryStatus'
+  | 'inParc';
 
 export interface MachineFilterChip {
   key: MachineFilterKey;
@@ -617,6 +718,47 @@ export function machineFilterChips(
   }
   // From the dashboard's card, like the software one: the chip says why.
   if (f.aging) chips.push({ key: 'aging', label: t('machines.chips.aging') });
+  if (f.alert) {
+    chips.push({
+      key: 'alert',
+      label:
+        f.alert === 'any'
+          ? t('machines.chips.alertAny')
+          : t('machines.chips.alert', { rule: alertRuleLabel(f.alert) }),
+    });
+  }
+  if (f.assetStatus) {
+    chips.push({
+      key: 'assetStatus',
+      label:
+        f.assetStatus === 'none'
+          ? t('machines.chips.assetNone')
+          : t('machines.chips.assetStatus', { status: assetStatusLabel(f.assetStatus) }),
+    });
+  }
+  if (f.win11) chips.push({ key: 'win11', label: t('machines.chips.win11') });
+  if (f.compliance) {
+    chips.push({ key: 'compliance', label: t(`compliance.chips.${f.compliance}`) });
+  }
+  if (f.complianceCheck) {
+    chips.push({
+      key: 'complianceCheck',
+      label: t('compliance.chips.check', { check: complianceCheckLabel(f.complianceCheck) }),
+    });
+  }
+  if (f.wingetOutdated) {
+    chips.push({
+      key: 'wingetOutdated',
+      label: t('compliance.chips.winget', { id: f.wingetOutdated }),
+    });
+  }
+  if (f.directoryStatus) {
+    chips.push({
+      key: 'directoryStatus',
+      label: t('directory.chip', { status: t(`directory.status.${f.directoryStatus}`) }),
+    });
+  }
+  if (f.inParc) chips.push({ key: 'inParc', label: t('machines.chips.inParc') });
   return chips;
 }
 
@@ -690,6 +832,14 @@ const FIELDS_BY_KEY: Record<
   agent: 'agent',
   enrollment: 'enrollment',
   aging: 'aging',
+  alert: 'alert',
+  assetStatus: 'assetStatus',
+  win11: 'win11',
+  compliance: 'compliance',
+  complianceCheck: 'complianceCheck',
+  wingetOutdated: 'wingetOutdated',
+  directoryStatus: 'directoryStatus',
+  inParc: 'inParc',
 };
 
 /** The filters with one chip's facet off. */

@@ -534,6 +534,7 @@ func InventoryHash(inv *models.InventoryState) {
 		return
 	}
 	sortInventory(inv)
+	sortCompliance(inv)
 	inv.Hash = ""
 	encoded, err := json.Marshal(inv)
 	if err != nil {

@@ -93,6 +93,18 @@ class CommandType(enum.StrEnum):
     PACKAGE_INSTALL = "package_install"
     PACKAGE_UNINSTALL = "package_uninstall"
 
+    # Reading the directory (plan-lecture-annuaire.md, mode ``relay``): queued
+    # by the server alone, on a poste an administrator designated as a reader,
+    # never from the console's command menu. Its delivery carries the computer
+    # names to read; the reading comes back on ``POST /agent/directory``.
+    DIRECTORY_READ = "directory_read"
+
+
+# The types the server queues itself and the console never offers.
+SERVER_ONLY_COMMAND_TYPES = frozenset(
+    {CommandType.WAKE_ON_LAN, CommandType.DIRECTORY_READ}
+)
+
 
 # The half of the catalogue that can cost somebody their work or change the
 # poste for good: a group granted ``command:execute`` alone runs everything
@@ -222,6 +234,18 @@ class Command(SQLModel, table=True):
     # a package changed since — by whoever holds package:write — is not what
     # gets run; and the SHA-256 of its files, which stay downloadable (and on
     # disk) while the command is open, whatever happens to the package.
+    # Created by a schedule's run (``features.schedule``), and for a
+    # deployment in rings, at which stage. SET NULL: the run purged, the
+    # command stays history.
+    schedule_run_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("schedule_runs.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    schedule_stage: int | None = None
     package_digest: str | None = Field(default=None, max_length=64)
     package_files: list[str] | None = Field(
         default=None, sa_column=Column(JSONB, nullable=True)

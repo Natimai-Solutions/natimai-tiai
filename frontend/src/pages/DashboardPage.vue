@@ -146,6 +146,24 @@
         </q-card>
       </div>
 
+      <div v-if="complianceRows.length" class="col-12 col-md-6">
+        <q-card flat bordered data-test="compliance-by-check">
+          <q-card-section class="text-subtitle1 row items-center">
+            <q-icon name="verified_user" color="negative" class="q-mr-sm" />
+            {{ t('compliance.dashboard.byCheck') }}
+          </q-card-section>
+          <q-separator />
+          <q-list separator>
+            <q-item v-for="row in complianceRows" :key="row.check" clickable :to="row.to">
+              <q-item-section>{{ complianceCheckLabel(row.check) }}</q-item-section>
+              <q-item-section side>
+                <q-badge color="negative">{{ row.count }}</q-badge>
+              </q-item-section>
+            </q-item>
+          </q-list>
+        </q-card>
+      </div>
+
       <div v-if="canReadThreats" class="col-12 col-md-6">
         <q-card flat bordered>
           <q-card-section class="text-subtitle1 row items-center">
@@ -194,6 +212,7 @@ import { rememberFleetThresholds } from 'src/composables/useFleetThresholds';
 import { useQuasar } from 'quasar';
 import { AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { getOverview, type StatsOverview } from 'src/services/stats';
+import { complianceCheckLabel } from 'src/services/compliance';
 import { listMachines, type Machine } from 'src/services/machines';
 import { listThreats, type Threat } from 'src/services/threats';
 import { apiErrorMessage } from 'src/services/errors';
@@ -231,6 +250,36 @@ interface Kpi {
 /** A card of the last row: a list to open where the list can show it, else a figure. */
 interface AlertKpi extends Omit<Kpi, 'to'> {
   to?: RouteLocationRaw;
+}
+
+/**
+ * The figures leave the retired postes out (decision 5): while the parc has
+ * any, the lists the cards open leave them out too (`in_parc=true`), or the
+ * card would read 3 and its list 4. Without retired postes the link stays as
+ * it was, no chip to explain.
+ */
+/** The failed compliance checks, most failed first, each opening its list. */
+const complianceRows = computed(() => {
+  const by = stats.value?.compliance_by_check ?? {};
+  return Object.entries(by)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([check, count]) =>
+      inParc({
+        check,
+        count,
+        to: { name: 'machines', query: { compliance_check: check } } as RouteLocationRaw,
+      }),
+    );
+});
+
+function inParc<T extends { to?: RouteLocationRaw }>(kpi: T): T {
+  const retired = stats.value?.machines_retired ?? 0;
+  const to = kpi.to;
+  if (!retired || !to || typeof to !== 'object' || !('name' in to) || to.name !== 'machines')
+    return kpi;
+  const query = 'query' in to && to.query ? to.query : {};
+  return { ...kpi, to: { ...to, query: { ...query, in_parc: 'true' } } };
 }
 
 /**
@@ -297,7 +346,7 @@ const inventoryKpis = computed<Kpi[]>(() => {
       }),
       ...(counting ? { caption: counting } : {}),
     },
-  ];
+  ].map(inParc);
 });
 
 /**
@@ -350,7 +399,7 @@ const priorityKpis = computed<Kpi[]>(() => {
       },
       caption: t('dashboard.kpi.lowDiskCaption', { percent: s.low_disk_free_percent }),
     },
-  ];
+  ].map(inParc);
 });
 
 /**
@@ -363,6 +412,46 @@ const alertKpis = computed<AlertKpi[]>(() => {
   const s = stats.value;
   if (!s) return [];
   return [
+    // The rules the server evaluates: the page that lists them by rule.
+    ...(s.machines_with_alerts !== undefined
+      ? [
+          {
+            label: t('dashboard.kpi.alerts'),
+            value: s.machines_with_alerts,
+            icon: 'notifications_active',
+            color: s.machines_with_alerts ? 'negative' : 'grey',
+            to: { name: 'alerts' },
+          },
+        ]
+      : []),
+    // Compliance (C5): the postes failing a check of the closed list, the
+    // compliant ones in the caption. Shown by a server that counts them.
+    ...(s.machines_noncompliant !== undefined
+      ? [
+          {
+            label: t('compliance.dashboard.noncompliant'),
+            value: s.machines_noncompliant,
+            icon: 'verified_user',
+            color: s.machines_noncompliant ? 'negative' : 'grey',
+            to: { name: 'machines', query: { compliance: 'failing' } },
+            caption: t('compliance.dashboard.compliantCaption', {
+              count: s.machines_compliant ?? 0,
+            }),
+          },
+        ]
+      : []),
+    // The renewal plan's other half: postes that will not take Windows 11.
+    ...(s.machines_win11_blocked
+      ? [
+          {
+            label: t('dashboard.kpi.win11Blocked'),
+            value: s.machines_win11_blocked,
+            icon: 'upgrade',
+            color: 'deep-orange',
+            to: { name: 'machines', query: { win11_blocked: 'true' } },
+          },
+        ]
+      : []),
     // Enrolment needing a decision: a reinstalled poste asking back in, or a
     // revoked one. Shown by a server that counts them (older ones do not).
     ...(s.machines_reenroll_pending !== undefined
@@ -446,7 +535,7 @@ const alertKpis = computed<AlertKpi[]>(() => {
       to: { name: 'machines', query: { hardware_aging: 'true' } },
       detail: t('dashboard.kpi.agingDetail', { years: s.hardware_aging_years }),
     },
-  ];
+  ].map(inParc);
 });
 
 /**
@@ -466,13 +555,18 @@ const auth = useAuthStore();
 const canReadThreats = computed(() => auth.can('threat', 'read'));
 
 async function fetchAll() {
+  // The side lists sit beside cards that leave the retired postes out: so
+  // do they (`in_parc`), or a retired poste's frozen badge would show under
+  // a card that does not count it.
   const [s, av, wuBehind, th] = await Promise.allSettled([
     getOverview(),
-    listMachines({ status: 'outdated', page_size: 5 }),
-    listMachines({ wu_status: 'pending', page_size: 5 }),
+    listMachines({ status: 'outdated', page_size: 5, in_parc: true }),
+    listMachines({ wu_status: 'pending', page_size: 5, in_parc: true }),
     // The sample of threats is a side list: its failure leaves the counters
     // and the other list their fresh values — and is reported all the same.
-    canReadThreats.value ? listThreats({ status: 'active', page_size: 5 }) : Promise.resolve(null),
+    canReadThreats.value
+      ? listThreats({ status: 'active', page_size: 5, in_parc: true })
+      : Promise.resolve(null),
   ]);
   // Each list's « loaded » flag follows its *last* load, not its first: after
   // an outage, « Tous les postes sont à jour » left over from the morning

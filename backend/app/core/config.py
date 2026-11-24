@@ -470,6 +470,45 @@ class Settings(BaseSettings):
     # rows a day.
     USAGE_RETENTION_DAYS: int = Field(default=400, ge=1)
 
+    # --- Alerts (``app.features.alert``) ---
+    # A closed catalogue of rules evaluated by the worker over what the postes
+    # already report. These are the initial values; the console's own
+    # (``app_settings``, page Paramètres) win once written.
+    # A restart Windows Update asked for, still not done after this many days.
+    ALERT_REBOOT_PENDING_DAYS: int = Field(default=7, ge=1, le=365)
+    # Which postes the « volume système non chiffré » rule looks at: only the
+    # ones that leave the building (``laptops``: laptops and tablets), or all.
+    ALERT_UNENCRYPTED_SCOPE: Literal["laptops", "all"] = "laptops"
+    # How many days before a poste's warranty ends (``assets``) it is raised.
+    ALERT_WARRANTY_DAYS: int = Field(default=30, ge=1, le=365)
+    # How long a resolved alert is kept, as the poste's history. Open ones
+    # are never purged.
+    ALERT_RETENTION_DAYS: int = Field(default=400, ge=1)
+
+    # --- Schedules (dev/plan-evolutions-itil.md, C3) ---
+    # The zone the console plans in: an hour in UTC means nothing to whoever
+    # plans « mercredi à 18 h ». Initial value only — changed in Paramètres.
+    CONSOLE_TIMEZONE: str = "Pacific/Tahiti"
+    # How long a command created by a schedule waits for its poste: a poste
+    # woken takes minutes to call in. Initial value of each new schedule.
+    SCHEDULE_COMMAND_TTL_MINUTES: int = Field(default=180, ge=10, le=60 * 24)
+    # How long a schedule's run history is kept.
+    SCHEDULE_RUN_RETENTION_DAYS: int = Field(default=180, ge=1)
+
+    # --- Reports from the postes' users (C4) ---
+    # Whether a label's QR code opens the report form to whoever scans it,
+    # without an account. Off by default: the first unauthenticated entry
+    # point that is not the agent. Initial value only — changed in Paramètres.
+    REPORTS_ENABLED: bool = False
+    # How long a report — its contact with it — is kept once handled.
+    REPORT_RETENTION_DAYS: int = Field(default=90, ge=1)
+
+    # --- Compliance of the postes (C5) ---
+    # How many days a critical or important Windows update may stay pending
+    # before the « correctifs » check fails: a Patch Tuesday must not turn
+    # the whole parc red overnight. Initial value — changed in Paramètres.
+    COMPLIANCE_PATCH_GRACE_DAYS: int = Field(default=14, ge=0, le=365)
+
     # --- Rooms ---
     # How postes are filed into rooms. ``manual``: from the console, by hand.
     # ``ad_ou``: by the organisational unit the computer object sits in — the
@@ -482,6 +521,22 @@ class Settings(BaseSettings):
     # nobody can rely on. Rooms created this way keep their name, building and
     # settings editable — only the membership is the directory's.
     ROOM_SOURCE: Literal["manual", "ad_ou", "ad_location"] = "manual"
+
+    # --- Reading the directory (dev/plan-lecture-annuaire.md) ---
+    # ``off``: the DN, OU and location the agents report are taken as they
+    # are. ``relay``: postes designated in the console (« lecteurs
+    # d'annuaire ») read the computer objects of their domain through ADSI,
+    # and the server files and checks the postes by that reading instead.
+    # (``ldap``, the server binding to a DC itself, is planned and refused
+    # until it exists.)
+    DIRECTORY_VERIFY: Literal["off", "relay"] = "off"
+    # How often each reader is asked for a full reading, in minutes.
+    DIRECTORY_SYNC_MINUTES: int = Field(default=60, ge=5, le=24 * 60)
+    # Past this, a reading not renewed is « périmée » and verifies nothing.
+    DIRECTORY_STALE_HOURS: int = Field(default=72, ge=1, le=24 * 30)
+    # A reading that would move more postes than this at once waits for an
+    # administrator's confirmation.
+    DIRECTORY_CONFIRM_MOVES: int = Field(default=20, ge=1, le=100_000)
 
     # --- Wake-on-LAN ---
     # The magic packet is emitted by the server, not by an agent: the machine it

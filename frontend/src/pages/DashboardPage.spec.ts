@@ -1,3 +1,4 @@
+import { QItem } from 'quasar';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -250,5 +251,81 @@ describe('DashboardPage — enrolment and hardware age (C2, item 9)', () => {
     vi.mocked(getOverview).mockResolvedValue(overview);
     const w = await mountPage();
     expect(w.text()).not.toContain('Ré-enrôlements');
+  });
+});
+
+describe('DashboardPage — alerts, Windows 11 and the retired postes (C1, C2)', () => {
+  beforeEach(() => {
+    vi.mocked(getOverview).mockReset();
+    vi.mocked(listMachines).mockResolvedValue(empty as never);
+    vi.mocked(listThreats).mockResolvedValue(empty);
+  });
+
+  async function links(stats: Partial<StatsOverview>) {
+    vi.mocked(getOverview).mockResolvedValue({ ...overview, ...stats });
+    const w = await mountPage();
+    return {
+      w,
+      to: w.findAllComponents(RouterLink).map((l) => JSON.stringify(l.props('to') as unknown)),
+    };
+  }
+
+  it('opens the alerts page and the postes blocked for Windows 11', async () => {
+    const { w, to } = await links({ machines_with_alerts: 2, machines_win11_blocked: 3 });
+    expect(w.text()).toContain('Postes en alerte');
+    expect(w.text()).toContain('Bloqués pour Windows 11');
+    expect(to).toContain(JSON.stringify({ name: 'alerts' }));
+    expect(to).toContain(JSON.stringify({ name: 'machines', query: { win11_blocked: 'true' } }));
+  });
+
+  it('counts the postes not compliant and lists the failed checks (C5)', async () => {
+    const { w, to } = await links({
+      machines_compliant: 7,
+      machines_noncompliant: 3,
+      compliance_by_check: { tpm: 1, firewall: 3 },
+    });
+    expect(w.text()).toContain('Postes non conformes');
+    expect(w.text()).toContain('7 conforme(s)');
+    expect(to).toContain(JSON.stringify({ name: 'machines', query: { compliance: 'failing' } }));
+    const card = w.find('[data-test="compliance-by-check"]');
+    // Most failed first, each opening the list of its postes.
+    expect(card.text()).toMatch(/Pare-feu actif.*3.*TPM 2\.0.*1/s);
+    const targets = card
+      .findAllComponents(QItem)
+      .map((i: { props: (name: string) => unknown }) => JSON.stringify(i.props('to')));
+    expect(targets).toContain(
+      JSON.stringify({ name: 'machines', query: { compliance_check: 'firewall' } }),
+    );
+  });
+
+  it('shows no compliance card for an older server', async () => {
+    const { w } = await links({});
+    expect(w.find('[data-test="compliance-by-check"]').exists()).toBe(false);
+    expect(w.text()).not.toContain('Postes non conformes');
+  });
+
+  it('leaves the retired postes out of the lists the cards open, while there are any', async () => {
+    const { to } = await links({ machines_retired: 2, machines_win11_blocked: 3 });
+    expect(to).toContain(JSON.stringify({ name: 'machines', query: { in_parc: 'true' } }));
+    expect(to).toContain(
+      JSON.stringify({ name: 'machines', query: { win11_blocked: 'true', in_parc: 'true' } }),
+    );
+    expect(to).toContain(
+      JSON.stringify({ name: 'machines', query: { status: 'inactive', in_parc: 'true' } }),
+    );
+    // Not the other pages: the software catalogue is no machine list.
+    expect(to).toContain(JSON.stringify({ name: 'software' }));
+    // The side lists beside the cards leave them out as well.
+    expect(listMachines).toHaveBeenCalledWith({ status: 'outdated', page_size: 5, in_parc: true });
+    expect(listMachines).toHaveBeenCalledWith({
+      wu_status: 'pending',
+      page_size: 5,
+      in_parc: true,
+    });
+    expect(listThreats).toHaveBeenCalledWith({ status: 'active', page_size: 5, in_parc: true });
+    // And none of it without retired postes.
+    const none = await links({ machines_retired: 0 });
+    expect(none.to).toContain(JSON.stringify({ name: 'machines' }));
+    expect(none.to.some((l) => l.includes('in_parc'))).toBe(false);
   });
 });

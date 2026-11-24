@@ -37,7 +37,9 @@
       :can-check="auth.can('check', 'write')"
       :action-groups="actionGroups"
       :can-deploy="canDeploy"
+      :can-schedule="auth.can('schedule', 'write')"
       @place="placeOpen = true"
+      @schedule="scheduleSelection"
       @ask="askOpen = true"
       @deploy="deployOpen = true"
       @reenroll="reenrollSelection"
@@ -388,6 +390,14 @@ const listEmpty = computed(
     lastError.value === null &&
     pagination.value.rowsNumber === 0,
 );
+
+/** C3: the selection, planned — the page Planifications opens its form on it. */
+function scheduleSelection(): void {
+  void router.push({
+    name: 'schedules',
+    query: { machines: selected.value.map((m) => m.id).join(',') },
+  });
+}
 
 const { askOpen, placeOpen, askSelection, placeSelection, runBulk, reenrollSelection } =
   useMachineBulkActions({

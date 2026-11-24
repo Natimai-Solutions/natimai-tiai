@@ -3,7 +3,7 @@
     <div class="row items-center q-col-gutter-md q-mb-md">
       <h1 class="text-h5 q-my-none col-auto">{{ t('software.title') }}</h1>
       <q-space />
-      <div class="col-auto">
+      <div v-if="view === 'catalogue'" class="col-auto">
         <!-- Excel or CSV, as the fleet export offers: the same catalogue, and
              a real date in the last column when Excel is the destination. -->
         <q-btn-dropdown
@@ -27,7 +27,7 @@
           <q-tooltip>{{ t('software.exportHint') }}</q-tooltip>
         </q-btn-dropdown>
       </div>
-      <div class="col-auto">
+      <div v-if="view === 'catalogue'" class="col-auto">
         <q-btn
           flat
           round
@@ -40,9 +40,30 @@
       </div>
     </div>
 
-    <LoadErrorBanner v-if="loadError" :error="loadError" :loading="loading" @retry="load" />
+    <!-- The catalogue, and what winget would upgrade (C5). -->
+    <q-btn-toggle
+      :model-value="view"
+      no-caps
+      unelevated
+      toggle-color="primary"
+      class="q-mb-md"
+      :options="[
+        { label: t('software.title'), value: 'catalogue', icon: 'apps' },
+        { label: t('compliance.updates.tab'), value: 'updates', icon: 'update' },
+      ]"
+      @update:model-value="setView"
+    />
 
-    <q-card flat bordered>
+    <WingetUpdatesCard v-if="view === 'updates'" />
+
+    <LoadErrorBanner
+      v-if="view === 'catalogue' && loadError"
+      :error="loadError"
+      :loading="loading"
+      @retry="load"
+    />
+
+    <q-card v-if="view === 'catalogue'" flat bordered>
       <q-card-section>
         <q-input
           v-model="search"
@@ -98,6 +119,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, type QTableColumn } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
+import WingetUpdatesCard from 'src/components/software/WingetUpdatesCard.vue';
 import {
   exportSoftware,
   listSoftware,
@@ -200,7 +222,20 @@ function buildQuery(): Record<string, string> {
   if (!p.descending) query.desc = 'false';
   if (p.page > 1) query.page = String(p.page);
   if (p.rowsPerPage !== 25) query.page_size = String(p.rowsPerPage);
+  if (view.value === 'updates') query.view = 'updates';
   return query;
+}
+
+/** The tab shown, in the URL too: « Voir ces postes » and Back return to it. */
+const view = computed<'catalogue' | 'updates'>(() =>
+  queryValue(route.query.view) === 'updates' ? 'updates' : 'catalogue',
+);
+
+function setView(value: 'catalogue' | 'updates'): void {
+  const query = buildQuery();
+  delete query.view;
+  if (value === 'updates') query.view = 'updates';
+  void router.replace({ query });
 }
 
 function pushQuery() {

@@ -19,11 +19,14 @@ import logging
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import Any
 
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
+from app.features.alert.texts import worded_instructions
+from app.features.asset import crud as asset_crud
 from app.features.base import utcnow
 from app.features.check import crud as check_crud
 from app.features.check.models import MachineCheck
@@ -87,6 +90,8 @@ def send_checks_assigned(
     machines: list[Machine],
     requested_by: str,
     instructions: str | None,
+    instructions_code: str | None = None,
+    instructions_params: dict[str, Any] | None = None,
 ) -> bool:
     """Tell ``assignee`` that ``requested_by`` asks them to look at these
     postes. One mail for the lot: a request on a whole room is one request.
@@ -104,8 +109,15 @@ def send_checks_assigned(
         subject = t.check_subject_many(project, len(machines))
         intro = t.check_intro_many(requested_by, len(machines))
     body = [intro, ""]
-    if instructions:
-        body += [t.instructions, instructions, ""]
+    # Opened by the server for an alert: worded in the assignee's language.
+    worded = worded_instructions(
+        instructions,
+        instructions_code,
+        instructions_params,
+        mail_language(assignee.language),
+    )
+    if worded:
+        body += [t.instructions, worded, ""]
     if len(machines) > 1:
         cap = settings.NOTIFICATION_MAX_ITEMS
         body += [f"  • {n}" for n in names[:cap]]
@@ -135,10 +147,14 @@ class FleetMaintenance:
 
 
 async def fleet_maintenance(session: AsyncSession, now: datetime) -> FleetMaintenance:
+    """The postes of the parc: a retired one is never maintained again, and
+    would stay « en retard » in its owner's mail for ever (decision 5)."""
     policy = await setting_crud.maintenance_policy(session)
     return FleetMaintenance(
         policy=policy,
-        resolved=await maintenance_crud.fleet_resolved(session, policy, now),
+        resolved=await maintenance_crud.fleet_resolved(
+            session, policy, now, where=asset_crud.in_parc_clause()
+        ),
     )
 
 
@@ -183,6 +199,9 @@ async def _personal_block(
         .where(
             col(MachineCheck.assigned_to_id) == user.id,
             col(MachineCheck.closed_at).is_(None),
+            # A verification left open on a poste retired since: out of the
+            # mail, as out of the dashboard.
+            asset_crud.in_parc_ids_clause(col(MachineCheck.machine_id)),
         )
         .order_by(col(MachineCheck.created_at))
     )
@@ -198,7 +217,13 @@ async def _personal_block(
     if check_rows:
         lines.append(t.checks_assigned(len(check_rows)))
         for check, machine in check_rows[:cap]:
-            what = f" — {check.instructions}" if check.instructions else ""
+            worded = worded_instructions(
+                check.instructions,
+                check.instructions_code,
+                check.instructions_params,
+                mail_language(user.language),
+            )
+            what = f" — {worded}" if worded else ""
             lines.append(
                 bullet(f"{machine.hostname or machine.machine_uuid}{what}", indent=4)
             )

@@ -56,6 +56,19 @@ export interface StatsOverview {
    */
   machines_reenroll_pending?: number;
   machines_token_revoked?: number;
+  /** Postes with at least one open alert, and the postes per rule.
+   * Optional: an older server does not send them. */
+  machines_with_alerts?: number;
+  alerts_by_rule?: Record<string, number>;
+  /** Postes the inventory says cannot take Windows 11, and the retired ones
+   * (left out of every other count). Optional: an older server. */
+  machines_win11_blocked?: number;
+  machines_retired?: number;
+  /** Compliance (C5): postes passing every known check, postes failing one,
+   * and the failures by check. Optional: an older server. */
+  machines_compliant?: number;
+  machines_noncompliant?: number;
+  compliance_by_check?: Record<string, number>;
 }
 
 export async function getOverview(): Promise<StatsOverview> {

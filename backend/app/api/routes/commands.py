@@ -7,7 +7,7 @@ machine (plan §4).
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -26,7 +26,8 @@ from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.command import crud as command_crud
-from app.features.command.bulk import describe_command_target
+from app.features.command import dispatch
+from app.features.command import target as target_crud
 from app.features.command.models import (
     PACKAGE_COMMAND_TYPES,
     RISKY_COMMAND_TYPES,
@@ -34,14 +35,14 @@ from app.features.command.models import (
     CommandStatus,
     CommandType,
 )
+from app.features.command.target import Target
 from app.features.machine.models import Machine
-from app.features.machine.status import MachineStatus, status_clause
+from app.features.machine.status import MachineStatus
 from app.features.package import crud as package_crud
-from app.features.package import manifest
 from app.features.package.models import Package
-from app.features.setting import crud as setting_crud
+from app.features.schedule import windows
 from app.features.user.permissions import Action, Resource, has_permission
-from app.features.user.scope import Scope, machine_clause, machine_ids_clause, restrict
+from app.features.user.scope import machine_ids_clause, restrict
 
 router = APIRouter(prefix="/commands", tags=["commands"])
 
@@ -50,7 +51,8 @@ class CreateCommands(BaseModel):
     """Queue a command for an explicit machine list or a broadcast filter.
 
     Exactly one target must be given: ``machine_ids``, ``target_all``,
-    ``target_domain``, ``target_location``, or ``target_status``.
+    ``target_domain``, ``target_location``, ``target_status``,
+    ``target_room_id`` or ``target_building_id``.
     """
 
     type: CommandType
@@ -66,6 +68,13 @@ class CreateCommands(BaseModel):
     # the domain.
     target_location: str | None = None
     target_status: MachineStatus | None = None
+    # Every poste of a room, or of a building's rooms.
+    target_room_id: uuid.UUID | None = None
+    target_building_id: uuid.UUID | None = None
+    # A command at risk sent to several postes inside a forbidden window
+    # (Paramètres, « Plages interdites ») is refused unless this says the
+    # person saw the warning and goes on (``command.forbidden_window``).
+    confirm_forbidden_window: bool = False
     # The package to install or remove: required by the two deployment types,
     # refused on every other.
     package_id: uuid.UUID | None = None
@@ -82,7 +91,24 @@ class CreateCommands(BaseModel):
         """
         if value == CommandType.WAKE_ON_LAN:
             raise ValueError("wake_on_lan is not queued here: use POST /machines/wake")
+        if value == CommandType.DIRECTORY_READ:
+            raise ValueError("directory_read is queued by the server alone")
         return value
+
+    def target(self) -> Target:
+        if self.machine_ids:
+            return Target("machines", machine_ids=tuple(self.machine_ids))
+        if self.target_all:
+            return Target("all")
+        if self.target_domain is not None:
+            return Target("domain", value=self.target_domain)
+        if self.target_location is not None:
+            return Target("location", value=self.target_location)
+        if self.target_status is not None:
+            return Target("status", value=self.target_status.value)
+        if self.target_room_id is not None:
+            return Target("room", value=str(self.target_room_id))
+        return Target("building", value=str(self.target_building_id))
 
     @model_validator(mode="after")
     def _exactly_one_target(self) -> "CreateCommands":
@@ -92,11 +118,14 @@ class CreateCommands(BaseModel):
             self.target_domain is not None,
             self.target_location is not None,
             self.target_status is not None,
+            self.target_room_id is not None,
+            self.target_building_id is not None,
         ]
         if sum(provided) != 1:
             raise ValueError(
                 "provide exactly one target: machine_ids, target_all, "
-                "target_domain, target_location, or target_status"
+                "target_domain, target_location, target_status, "
+                "target_room_id or target_building_id"
             )
         if self.package_id is not None and self.type not in PACKAGE_COMMAND_TYPES:
             raise ValueError("package_id only goes with package_install/uninstall")
@@ -170,103 +199,6 @@ class CommandList(BaseModel):
     page_size: int
 
 
-async def _resolve_targets(
-    session: SessionDep, payload: CreateCommands, scope: Scope | None
-) -> list[tuple[uuid.UUID, bool]]:
-    """Resolve the payload's target into existing machine ids, within the
-    caller's scope: "the whole parc" from an account confined to a site is
-    that site, and a listed poste outside it is dropped like an unknown id.
-    Each with whether its token is revoked."""
-    stmt = restrict(select(Machine.id, Machine.token_revoked), machine_clause(scope))
-    if payload.machine_ids:
-        # Restrict to ids that actually exist (avoids FK violations on insert).
-        stmt = stmt.where(col(Machine.id).in_(payload.machine_ids))
-    elif payload.target_domain is not None:
-        stmt = stmt.where(col(Machine.domain) == payload.target_domain)
-    elif payload.target_location is not None:
-        stmt = stmt.where(col(Machine.location) == payload.target_location)
-    elif payload.target_status is not None:
-        fleet = await setting_crud.fleet_policy(session)
-        stmt = stmt.where(
-            status_clause(
-                payload.target_status,
-                utcnow(),
-                fleet.inactive_after_days,
-                fleet.signature_max_age_days,
-            )
-        )
-    # target_all → no predicate.
-    rows = await session.exec(stmt)
-    return [(machine_id, revoked) for machine_id, revoked in rows.all()]
-
-
-async def _deployable_package(
-    session: SessionDep, payload: CreateCommands
-) -> Package | None:
-    """The package a deployment command names, if it can be deployed.
-
-    Retired packages are refused for an install and accepted for an
-    uninstall — taking a program off the parc is exactly what one does with a
-    package nobody should install any more. An incomplete ``files`` package is
-    refused outright: no poste could run it.
-
-    An uninstallation is refused for what the agent would refuse it for, no
-    more (``manifest.Problem.blocks_uninstall``, which the console reads from
-    the package payload): a package without an install step is uninstalled
-    all the same, as the agent would.
-
-    The package row is locked (``package_crud.locked``) until the commands
-    are committed: a change of the package or its retirement waits for them,
-    and so sees them — the fingerprint taken here is the package's, and a
-    retirement cancels these installations too — and so does another
-    deployment of the same package, which then finds them open.
-    """
-    if payload.type not in PACKAGE_COMMAND_TYPES:
-        return None
-    if payload.package_id is None:
-        raise AppError(
-            code=ErrorCode.PACKAGE_REQUIRED,
-            status_code=422,
-            message="A deployment command names its package",
-        )
-    # Locked exclusively, not shared: two deployments of one package queued
-    # at once would otherwise both find no open command on the postes and
-    # both queue one (audit: six identical requests, six installations per
-    # poste). Behind the lock the second one sees what the first committed.
-    package = await package_crud.locked(session, payload.package_id)
-    if package is None:
-        raise AppError(
-            code=ErrorCode.PACKAGE_NOT_FOUND,
-            status_code=404,
-            message="Package not found",
-        )
-    if package.retired_at is not None and payload.type == CommandType.PACKAGE_INSTALL:
-        raise AppError(
-            code=ErrorCode.PACKAGE_RETIRED,
-            status_code=409,
-            message="This package is retired",
-        )
-    # The agent's rule for the step it would run (audit B30, U04): what no
-    # poste would accept is refused here rather than queued to fail — the
-    # same list the package payload gives as ``install_blockers``.
-    step = "uninstall" if payload.type == CommandType.PACKAGE_UNINSTALL else "install"
-    problems = manifest.step_blockers(
-        package, await package_crud.files_of(session, package.id), step
-    )
-    if problems:
-        raise AppError(
-            code=ErrorCode.PACKAGE_NOT_READY,
-            status_code=409,
-            message="This package cannot be deployed yet",
-            details={
-                "problems": [p.message for p in problems],
-                # What the console words them from (plan console bilingue).
-                "causes": [{"code": p.code, "params": p.params} for p in problems],
-            },
-        )
-    return package
-
-
 @router.post(
     "",
     response_model=CreateCommandsResponse,
@@ -304,8 +236,19 @@ async def create_commands(
                 "action": Action.EXECUTE.value,
             },
         )
-    package = await _deployable_package(session, payload)
-    targets = await _resolve_targets(session, payload, scope)
+    target = payload.target()
+    if not await target_crud.place_visible(session, target, scope):
+        raise AppError(
+            code=ErrorCode.ROOM_NOT_FOUND
+            if target.kind == "room"
+            else ErrorCode.BUILDING_NOT_FOUND,
+            status_code=404,
+            message="Room or building not found",
+        )
+    package = await dispatch.deployable_package(
+        session, payload.type, payload.package_id
+    )
+    targets = await target_crud.resolve(session, target, scope)
     # One poste named alone: the console's button on a fiche or a row. What
     # stops it is said as an error rather than as an empty success — the
     # poste is gone (deleted, merged away), or cut off.
@@ -324,53 +267,22 @@ async def create_commands(
         )
     machine_ids = [machine_id for machine_id, revoked in targets if not revoked]
     revoked_count = len(targets) - len(machine_ids)
-    # Same sweep the tracking endpoint runs: a command left pending past its TTL
-    # must not block the one an administrator is queueing now, on a poste that
-    # was simply off the whole time.
-    await command_crud.mark_expired(session)
-    ttl_minutes = payload.ttl_minutes
-    if ttl_minutes is None:
-        ttl_minutes = (
-            await setting_crud.fleet_policy(session)
-        ).command_default_ttl_minutes
-    expires_at = utcnow() + timedelta(minutes=ttl_minutes)
-    # The package as approved now: what the postes will run, or nothing
-    # (audit T08); and its files, kept for them meanwhile (T09).
-    digest: str | None = None
-    package_shas: list[str] | None = None
-    superseded = 0
-    if package is not None:
-        package_files = await package_crud.files_of(session, package.id)
-        digest = package_crud.fingerprint(package, package_files)
-        package_shas = sorted({f.sha256 for f in package_files})
-        # A deployment still waiting for an older version of the package is
-        # replaced by this one, not counted as already pending.
-        superseded = await package_crud.supersede_stale_pending(
-            session,
-            package_id=package.id,
-            command_type=payload.type.value,
-            digest=digest,
-            machine_ids=machine_ids,
-            now=utcnow(),
+    if len(machine_ids) > 1 and payload.type in RISKY_COMMAND_TYPES:
+        await windows.require_outside_forbidden(
+            session, utcnow(), confirmed=payload.confirm_forbidden_window
         )
-    created, skipped = await command_crud.create_for_machines(
+    queued = await dispatch.queue(
         session,
-        machine_ids=machine_ids,
         command_type=payload.type,
+        machine_ids=machine_ids,
         created_by=user.email,
-        expires_at=expires_at,
-        package_id=package.id if package is not None else None,
-        package_digest=digest,
-        package_files=package_shas,
+        package=package,
+        ttl_minutes=payload.ttl_minutes,
     )
-    target = describe_command_target(
-        machine_ids=payload.machine_ids,
-        target_all=payload.target_all,
-        target_domain=payload.target_domain,
-        target_location=payload.target_location,
-        target_status=payload.target_status,
-    )
-    if target is not None:
+    created, skipped = queued.created, queued.skipped
+    superseded, ttl_minutes = queued.superseded, queued.ttl_minutes
+    described = target.audit()
+    if described is not None:
         audit.record(
             session,
             actor=user.email,
@@ -386,7 +298,7 @@ async def create_commands(
                     if package is not None
                     else {}
                 ),
-                **target,
+                **described,
                 "created": len(created),
                 "skipped": len(skipped),
                 # Postes cut off by a revoked token, left out of the request.

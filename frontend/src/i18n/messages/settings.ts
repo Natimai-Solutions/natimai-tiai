@@ -56,6 +56,53 @@ const fr = {
     highHours: 'Poste toujours allumé au-dessus de',
     highHint: "variable d'environnement : {hours} heures",
   },
+  alerts: {
+    title: 'Alertes',
+    caption:
+      'Les règles que le serveur vérifie toutes les cinq minutes sur ce que les postes remontent. Une alerte s’ouvre et se résout toute seule.',
+    rules: 'Règles actives',
+    autoCheck: 'Ouvrir une vérification',
+    autoCheckHint:
+      'Une nouvelle alerte de ces règles ouvre une vérification sur le poste, s’il n’en a pas déjà une.',
+    rebootDays: 'Redémarrage en attente au-delà de',
+    rebootHint: "variable d'environnement : {days} jours",
+    warrantyDays: 'Fin de garantie signalée',
+    warrantyHint:
+      "Jours avant la fin de garantie d'un poste · variable d'environnement : {days} jours",
+    unencryptedScope: 'Volume système non chiffré : postes concernés',
+    scopeLaptops: 'Portables et tablettes seulement',
+    scopeAll: 'Tous les postes',
+    forbidden: 'Logiciels interdits',
+    forbiddenHint:
+      'Un morceau du nom du programme, deux caractères au moins (Entrée pour ajouter) · insensible à la casse',
+  },
+  reports: {
+    title: 'Signalements des utilisateurs',
+    caption:
+      'Le QR de l’étiquette d’un poste ouvre, à qui le scanne sans compte, un formulaire pour signaler un problème. Les signalements arrivent dans une file à trier.',
+    enabled: 'Ouvrir le formulaire de signalement',
+    hint: "Fermé, le QR mène à la connexion, comme avant · variable d'environnement : {value}",
+    on: 'ouvert',
+    off: 'fermé',
+    privacy:
+      'Le contact laissé est facultatif et supprimé avec le signalement : à porter au registre des traitements.',
+  },
+  planning: {
+    title: 'Planifications',
+    caption:
+      'Le fuseau dans lequel la console planifie, et les plages où rien de risqué ne part sur plusieurs postes (les heures de cours).',
+    timezone: 'Fuseau horaire',
+    timezoneHint: "Nom IANA, par exemple Pacific/Tahiti · variable d'environnement : {zone}",
+    windows: 'Plages interdites',
+    windowsHint:
+      'Une planification à risque n’y est pas acceptée ; une commande à risque envoyée à plusieurs postes y demande une confirmation de plus. Une commande sur un seul poste reste libre.',
+    windowDays: 'Jours',
+    windowStart: 'De',
+    windowEnd: 'À',
+    addWindow: 'Ajouter une plage',
+    removeWindow: 'Retirer la plage',
+    windowInvalid: 'Des jours, et une fin après le début',
+  },
   fleet: {
     title: 'Supervision du parc',
     caption:
@@ -68,7 +115,8 @@ const fr = {
     lowDisk: 'Disque presque plein en dessous de',
     lowDiskHint: "Sur le volume système · variable d'environnement : {percent} %",
     hardwareAging: 'Poste à renouveler à partir de',
-    hardwareAgingHint: "Âge lu sur la date du BIOS · variable d'environnement : {years} ans",
+    hardwareAgingHint:
+      "Âge compté depuis la date d’achat, à défaut la date du BIOS · variable d'environnement : {years} ans",
     agentVersion: "Version d'agent de référence",
     agentVersionPlaceholder: 'Automatique',
     agentVersionError: 'Une version comme 1.2.0 ou v1.2.0-rc.1, ou vide pour automatique',
@@ -251,8 +299,11 @@ const fr = {
     cards: {
       maintenance: 'Maintenance',
       usage: 'Utilisation',
+      alerts: 'Alertes',
+      compliance: 'Conformité des postes',
       fleet: 'Seuils du parc',
       schedule: 'Calendrier des e-mails',
+      planning: 'Planifications',
       email: 'Envoi des e-mails',
     },
   },
@@ -322,6 +373,52 @@ const en: Translation<typeof fr> = {
     highHours: 'Computer always on above',
     highHint: 'environment variable: {hours} hours',
   },
+  alerts: {
+    title: 'Alerts',
+    caption:
+      'The rules the server checks every five minutes over what the computers report. An alert opens and resolves by itself.',
+    rules: 'Active rules',
+    autoCheck: 'Open a check',
+    autoCheckHint:
+      'A new alert of these rules opens a check on the computer, unless it already has one.',
+    rebootDays: 'Restart pending for more than',
+    rebootHint: 'environment variable: {days} days',
+    warrantyDays: 'Warranty end raised',
+    warrantyHint: "Days before a computer's warranty ends · environment variable: {days} days",
+    unencryptedScope: 'System volume not encrypted: computers covered',
+    scopeLaptops: 'Laptops and tablets only',
+    scopeAll: 'All computers',
+    forbidden: 'Forbidden software',
+    forbiddenHint:
+      'Part of the program name, two characters at least (Enter to add) · case-insensitive',
+  },
+  reports: {
+    title: 'Users’ reports',
+    caption:
+      'A computer’s label QR code opens, to whoever scans it without an account, a form to report a problem. The reports land in a queue to sort.',
+    enabled: 'Open the report form',
+    hint: 'Closed, the QR leads to the sign-in, as before · environment variable: {value}',
+    on: 'open',
+    off: 'closed',
+    privacy:
+      'The contact left is optional and deleted with the report: to be listed in the record of processing.',
+  },
+  planning: {
+    title: 'Schedules',
+    caption:
+      'The zone the console plans in, and the windows when nothing at risk runs on several computers (class hours).',
+    timezone: 'Time zone',
+    timezoneHint: 'IANA name, for instance Pacific/Tahiti · environment variable: {zone}',
+    windows: 'Forbidden windows',
+    windowsHint:
+      'A schedule at risk is not accepted in them; a risky command sent to several computers asks for one more confirmation. A command on one computer stays free.',
+    windowDays: 'Days',
+    windowStart: 'From',
+    windowEnd: 'To',
+    addWindow: 'Add a window',
+    removeWindow: 'Remove the window',
+    windowInvalid: 'Days, and an end after the start',
+  },
   fleet: {
     title: 'Fleet monitoring',
     caption:
@@ -334,7 +431,8 @@ const en: Translation<typeof fr> = {
     lowDisk: 'Disk almost full below',
     lowDiskHint: 'On the system volume · environment variable: {percent}%',
     hardwareAging: 'Computer due for renewal from',
-    hardwareAgingHint: 'Age read from the BIOS date · environment variable: {years} years',
+    hardwareAgingHint:
+      'Age counted from the purchase date, else the BIOS date · environment variable: {years} years',
     agentVersion: 'Reference agent version',
     agentVersionPlaceholder: 'Automatic',
     agentVersionError: 'A version such as 1.2.0 or v1.2.0-rc.1, or empty for automatic',
@@ -511,8 +609,11 @@ const en: Translation<typeof fr> = {
     cards: {
       maintenance: 'Maintenance',
       usage: 'Usage',
+      alerts: 'Alerts',
+      compliance: 'Computer compliance',
       fleet: 'Fleet thresholds',
       schedule: 'E-mail schedule',
+      planning: 'Schedules',
       email: 'Sending e-mails',
     },
   },

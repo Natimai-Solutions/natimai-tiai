@@ -150,6 +150,12 @@ func (c *Client) PostResult(ctx context.Context, commandID string, res models.Co
 	return c.do(ctx, http.MethodPost, path, c.authHeader(), res, nil)
 }
 
+// PostDirectory sends a directory reading, before the command's result.
+func (c *Client) PostDirectory(ctx context.Context, commandID string, reading models.DirectoryReading) error {
+	path := fmt.Sprintf("/api/v1/agent/directory/%s", commandID)
+	return c.do(ctx, http.MethodPost, path, c.authHeader(), reading, nil)
+}
+
 func (c *Client) authHeader() map[string]string {
 	return map[string]string{"Authorization": "Bearer " + c.Token()}
 }

@@ -206,6 +206,92 @@ async def send_daily_digest(now: datetime | None = None) -> int:
     )
 
 
+async def evaluate_alerts() -> int:
+    """Open, refresh and resolve the alerts (``app.features.alert``), queue
+    the immediate mails of the new ones, in one transaction. Returns how many
+    alerts were opened."""
+    from app.features.alert import crud as alert_crud
+    from app.features.notification import alert_mail
+
+    async with AsyncSession(engine) as session:
+        result = await alert_crud.evaluate(session, utcnow())
+        await alert_mail.queue_alert_mails(session, result.opened)
+        await session.commit()
+    if result.opened or result.resolved:
+        logger.info(
+            "Alerts: %d opened, %d resolved, %d verification(s) opened",
+            len(result.opened),
+            result.resolved,
+            result.checks_opened,
+        )
+    return len(result.opened)
+
+
+async def refresh_compliance() -> int:
+    """Recompute each poste's compliance summary (``features.compliance``):
+    what the list filters on and the dashboard counts. The fiche computes
+    its own, live."""
+    from app.features.compliance import crud as compliance_crud
+
+    async with AsyncSession(engine) as session:
+        return await compliance_crud.refresh(session, utcnow())
+
+
+async def sync_directory() -> int:
+    """Ask the directory readers for their reading every
+    ``DIRECTORY_SYNC_MINUTES``, drop the designations that fell, and mark
+    stale the postes of a domain no longer read (plan-lecture-annuaire)."""
+    from app.features.directory import crud as directory_crud
+
+    if not directory_crud.enabled():
+        return 0
+    async with AsyncSession(engine) as session:
+        now = utcnow()
+        queued = await directory_crud.queue_reads(session, now)
+        await directory_crud.mark_stale(session, now)
+        await session.commit()
+    return queued
+
+
+async def run_schedules() -> int:
+    """Run the schedules come due, then carry the open runs a step further
+    (« éteindre ensuite », rings) — ``features.schedule.runner``."""
+    from app.features.schedule import runner
+
+    async with AsyncSession(engine) as session:
+        ran = await runner.run_due(session, utcnow())
+        await runner.follow_runs(session, utcnow())
+    return ran
+
+
+async def purge_schedule_runs() -> int:
+    """Drop the schedule runs older than ``SCHEDULE_RUN_RETENTION_DAYS``."""
+    from app.features.schedule import runner
+
+    cutoff = utcnow() - timedelta(days=settings.SCHEDULE_RUN_RETENTION_DAYS)
+    async with AsyncSession(engine) as session:
+        return await runner.purge_runs(session, cutoff)
+
+
+async def purge_reports() -> int:
+    """Drop the reports handled more than ``REPORT_RETENTION_DAYS`` ago —
+    their contact with them (C4)."""
+    from app.features.report import crud as report_crud
+
+    cutoff = utcnow() - timedelta(days=settings.REPORT_RETENTION_DAYS)
+    async with AsyncSession(engine) as session:
+        return await report_crud.purge_before(session, cutoff)
+
+
+async def purge_alerts() -> int:
+    """Drop the alerts resolved more than ``ALERT_RETENTION_DAYS`` ago."""
+    from app.features.alert import crud as alert_crud
+
+    cutoff = utcnow() - timedelta(days=settings.ALERT_RETENTION_DAYS)
+    async with AsyncSession(engine) as session:
+        return await alert_crud.purge_before(session, cutoff)
+
+
 async def purge_outbox() -> int:
     """Drop sent/abandoned outbox rows older than the retention window."""
     async with AsyncSession(engine) as session:
@@ -419,6 +505,13 @@ def build_jobs(
         ),
         Job("expire_stale_commands", expire_stale_commands, now, every(300)),
         Job("close_unanswered_commands", close_unanswered_commands, now, every(300)),
+        # Every five minutes: a disk turning unhealthy is mailed within that,
+        # and the rules read what the heartbeats and inventories wrote.
+        Job("evaluate_alerts", evaluate_alerts, now, every(300)),
+        Job("refresh_compliance", refresh_compliance, now, every(600)),
+        Job("sync_directory", sync_directory, now, every(60)),
+        # Every minute: a schedule set for 18:00 runs by 18:01.
+        Job("run_schedules", run_schedules, now, every(60)),
         Job(
             "daily_digest",
             send_daily_digest,
@@ -446,6 +539,14 @@ def build_jobs(
             housekeeping,
         ),
         Job("purge_usage", purge_usage, housekeeping(now), housekeeping),
+        Job("purge_alerts", purge_alerts, housekeeping(now), housekeeping),
+        Job("purge_reports", purge_reports, housekeeping(now), housekeeping),
+        Job(
+            "purge_schedule_runs",
+            purge_schedule_runs,
+            housekeeping(now),
+            housekeeping,
+        ),
         Job("purge_sessions", purge_sessions, housekeeping(now), housekeeping),
         Job("purge_audit", purge_audit, housekeeping(now), housekeeping),
         Job("purge_commands", purge_commands, housekeeping(now), housekeeping),

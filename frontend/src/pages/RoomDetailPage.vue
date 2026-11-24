@@ -37,6 +37,28 @@
           @click="formOpen = true"
         />
       </template>
+      <!-- C3: a command on the room, later or every week. -->
+      <q-btn
+        v-if="room && canSchedule"
+        flat
+        dense
+        color="primary"
+        icon="event_repeat"
+        :label="t('rooms.detail.schedule')"
+        class="q-mr-sm"
+        :to="{ name: 'schedules', query: { room: room.id } }"
+      />
+      <!-- The room's labels: its equipment and postes, to stick on them. -->
+      <q-btn
+        v-if="room && canReadAssets"
+        flat
+        dense
+        color="primary"
+        icon="qr_code_2"
+        :label="t('rooms.detail.labels')"
+        class="q-mr-sm"
+        :to="{ name: 'asset-labels', query: { room_id: room.id } }"
+      />
       <q-btn
         v-if="room && canMaintain && machines.length"
         dense
@@ -537,6 +559,8 @@ const columns = computed<QTableColumn<Machine>[]>(() => [
 
 // Maintenance of the room: its settings, its last visits, the postes done.
 const canMaintain = computed(() => auth.can('maintenance', 'write'));
+const canReadAssets = computed(() => auth.can('asset', 'read'));
+const canSchedule = computed(() => auth.can('schedule', 'write'));
 const maintenance = ref<RoomMaintenance | null>(null);
 const sessions = ref<MaintenanceSession[]>([]);
 const sessionsTotal = ref(0);

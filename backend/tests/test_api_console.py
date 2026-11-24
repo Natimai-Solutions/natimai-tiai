@@ -1170,12 +1170,16 @@ def test_catalogue_is_fully_covered_below():
     # Software deployment: the two types that carry a package. Covered by
     # tests/test_api_packages.py, delivery and download included.
     deployment = {"package_install", "package_uninstall"}
+    # Queued by the server on a designated reader alone. Covered by
+    # tests/test_directory.py, delivery and reading included.
+    directory = {"directory_read"}
     assert {t.value for t in CommandType} == (
         defender
         | windows_update
         | power
         | inventory
         | deployment
+        | directory
         | set(MAINTENANCE_TYPES)
     )
 

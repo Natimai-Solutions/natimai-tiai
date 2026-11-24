@@ -9,6 +9,7 @@ from sqlalchemy import func
 from sqlmodel import col, select
 
 from app.api.deps import CurrentScope, SessionDep, require_permission
+from app.features.asset import crud as asset_crud
 from app.features.threat.models import Threat
 from app.features.user.permissions import Action, Resource
 from app.features.user.scope import machine_ids_clause, restrict
@@ -52,11 +53,16 @@ async def list_threats(
     machine_id: uuid.UUID | None = None,
     status: str | None = None,
     severity: str | None = None,
+    in_parc: bool | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> ThreatList:
-    """List threats, optionally filtered by machine, status, and severity."""
+    """List threats, optionally filtered by machine, status, and severity.
+    ``in_parc=true`` leaves out the retired postes' — the dashboard's sample,
+    beside a card that does not count them."""
     stmt = restrict(select(Threat), machine_ids_clause(scope, col(Threat.machine_id)))
+    if in_parc:
+        stmt = stmt.where(asset_crud.in_parc_ids_clause(col(Threat.machine_id)))
     if machine_id is not None:
         stmt = stmt.where(col(Threat.machine_id) == machine_id)
     if status is not None:

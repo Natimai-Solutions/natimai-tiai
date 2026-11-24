@@ -197,6 +197,28 @@ class Gpu(SQLModel, table=True):
     resolution: str | None = None  # "1920x1080"
 
 
+class WingetPackage(SQLModel, table=True):
+    """One program winget knows on a poste, with the version it would
+    upgrade to (C5). Reported only by agents with ``ReportWingetPackages``."""
+
+    __tablename__ = "inventory_winget_packages"
+    __table_args__ = (
+        UniqueConstraint("machine_id", "winget_id", name="uq_inv_winget_machine_id"),
+        Index("ix_inv_winget_winget_id", "winget_id"),
+    )
+
+    id: int | None = _child_id()
+    machine_id: uuid.UUID = _machine_fk()
+    first_seen: datetime = utc_field(default_factory=utcnow)
+    last_seen: datetime = utc_field(default_factory=utcnow)
+
+    winget_id: str
+    name: str | None = None
+    version: str | None = None
+    # Empty when winget offers nothing newer.
+    available: str | None = None
+
+
 class Software(SQLModel, table=True):
     """One (name, version, publisher) known anywhere in the parc.
 

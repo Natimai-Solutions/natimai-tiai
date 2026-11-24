@@ -28,6 +28,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.features.alert.texts import worded_instructions
+from app.features.asset.models import Asset
 from app.features.base import utcnow
 from app.features.check.models import MachineCheck
 from app.features.machine.models import Machine
@@ -68,8 +70,13 @@ class ExportRow:
     # and the fiche do. Unset, the values stored at the last heartbeat.
     signature_max_age_days: int | None = None
     taken_at: datetime | None = None
-    # The language the words of the file are in (``EXPORT_TEXTS``).
+    # The language the words of the file are in (``EXPORT_TEXTS``), and the
+    # zone its instants are written in — the coded instructions' dates too.
     language: Language = Language.FR
+    zone: tzinfo | None = None
+    # The poste's asset, when it has one — read only for a caller holding
+    # ``asset:read`` (``resolve_columns``).
+    asset: Asset | None = None
 
     @property
     def room_location(self) -> str | None:
@@ -77,13 +84,23 @@ class ExportRow:
 
 
 Kind = Literal["text", "int", "float", "bool", "date", "datetime"]
-Group = Literal["identity", "antivirus", "windows_update", "hardware"]
+Group = Literal["identity", "antivirus", "windows_update", "hardware", "asset"]
 
 GROUP_LABELS: dict[Group, str] = {
     "identity": "Identité",
     "antivirus": "Antivirus",
     "windows_update": "Windows Update",
     "hardware": "Matériel",
+    "asset": "Actif",
+}
+
+# A poste's asset status, as the console words it (``assets``).
+ASSET_STATUS_LABELS = {
+    "in_stock": "En stock",
+    "in_service": "En service",
+    "in_repair": "En réparation",
+    "on_loan": "Prêté",
+    "retired": "Réformé",
 }
 
 # The words the console uses for the same values, so a spreadsheet and the
@@ -134,6 +151,17 @@ def _signature_age(r: ExportRow) -> object:
     )
 
 
+def _asset(name: str) -> Callable[[ExportRow], object]:
+    return lambda r: getattr(r.asset, name) if r.asset is not None else None
+
+
+def _asset_status(r: ExportRow) -> object:
+    if r.asset is None:
+        return None
+    labels = EXPORT_TEXTS[r.language].asset_status
+    return labels.get(r.asset.status, r.asset.status)
+
+
 def _building(r: ExportRow) -> object:
     return r.building.name if r.building else None
 
@@ -151,7 +179,16 @@ def _check_assigned_to(r: ExportRow) -> object:
 
 
 def _check_instructions(r: ExportRow) -> object:
-    return r.check.instructions if r.check is not None else None
+    if r.check is None:
+        return None
+    # Opened by the server for an alert: worded in the file's language.
+    return worded_instructions(
+        r.check.instructions,
+        r.check.instructions_code,
+        r.check.instructions_params,
+        r.language,
+        r.zone,
+    )
 
 
 MAINTENANCE_LABELS = {
@@ -546,7 +583,30 @@ COLUMNS: Sequence[ExportColumn] = (
         _attr("inventory_last_seen"),
         True,
     ),
+    # --- Actif: offered only to a reader holding ``asset:read``. No price:
+    # a spreadsheet travels further than the console.
+    ExportColumn(
+        "asset_inventory_number",
+        "N° d'inventaire",
+        "asset",
+        "text",
+        _asset("inventory_number"),
+    ),
+    ExportColumn("asset_status", "Statut de l'actif", "asset", "text", _asset_status),
+    ExportColumn(
+        "asset_purchase_date", "Date d'achat", "asset", "date", _asset("purchase_date")
+    ),
+    ExportColumn(
+        "asset_warranty_end",
+        "Fin de garantie",
+        "asset",
+        "date",
+        _asset("warranty_end"),
+    ),
+    ExportColumn("asset_supplier", "Fournisseur", "asset", "text", _asset("supplier")),
 )
+
+ASSET_KEYS = frozenset(c.key for c in COLUMNS if c.group == "asset")
 
 _BY_KEY: dict[str, ExportColumn] = {c.key: c for c in COLUMNS}
 
@@ -586,7 +646,9 @@ def headers(
     ]
 
 
-def resolve_columns(keys: str | None) -> list[ExportColumn]:
+def resolve_columns(
+    keys: str | None, *, with_assets: bool = True
+) -> list[ExportColumn]:
     """The columns a request asks for, in the order it asks for them.
 
     ``keys`` is the comma-separated list the console sends; ``None`` or empty
@@ -603,7 +665,9 @@ def resolve_columns(keys: str | None) -> list[ExportColumn]:
         if not key:
             continue
         column = _BY_KEY.get(key)
-        if column is None:
+        if column is None or (not with_assets and key in ASSET_KEYS):
+            # An asset column to a reader without ``asset:read`` does not
+            # exist, rather than being refused: the catalogue never offered it.
             unknown.append(key)
         elif column not in columns:
             columns.append(column)
@@ -699,6 +763,7 @@ class ExportTexts:
     no_user: str
     user_present: str
     no_antivirus: str
+    asset_status: dict[str, str]
     # A windowed column's header: its label and the window, in days.
     windowed: Callable[[str, int], str]
     sheet_title: str
@@ -715,6 +780,7 @@ EXPORT_TEXTS: dict[Language, ExportTexts] = {
         no_user="Aucun utilisateur",
         user_present="Utilisateur connecté",
         no_antivirus="Aucun",
+        asset_status=ASSET_STATUS_LABELS,
         windowed=lambda label, days: f"{label} ({days} j)",
         sheet_title="Parc",
         file_stem="parc",
@@ -725,6 +791,7 @@ EXPORT_TEXTS: dict[Language, ExportTexts] = {
             "antivirus": "Antivirus",
             "windows_update": "Windows Update",
             "hardware": "Hardware",
+            "asset": "Asset",
         },
         chassis={
             "desktop": "Desktop",
@@ -743,6 +810,13 @@ EXPORT_TEXTS: dict[Language, ExportTexts] = {
         no_user="No user",
         user_present="User logged on",
         no_antivirus="None",
+        asset_status={
+            "in_stock": "In stock",
+            "in_service": "In service",
+            "in_repair": "In repair",
+            "on_loan": "On loan",
+            "retired": "Retired",
+        },
         windowed=lambda label, days: f"{label} ({days} d)",
         sheet_title="Fleet",
         file_stem="fleet",
@@ -753,6 +827,11 @@ EXPORT_TEXTS: dict[Language, ExportTexts] = {
 # (``ExportColumn.label``). A column without its English fails
 # ``tests/test_export_languages.py``.
 COLUMN_LABELS_EN: dict[str, str] = {
+    "asset_inventory_number": "Inventory no.",
+    "asset_status": "Asset status",
+    "asset_purchase_date": "Purchase date",
+    "asset_warranty_end": "Warranty end",
+    "asset_supplier": "Supplier",
     "hostname": "Name",
     "domain": "Domain",
     "location": "Location",

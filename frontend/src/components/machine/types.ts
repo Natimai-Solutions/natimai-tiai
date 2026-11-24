@@ -19,7 +19,14 @@ export interface InfoRow {
  * on a poste running ESET the Defender card is the smaller half of the tab.
  */
 export type MachineTab =
-  'identity' | 'antivirus' | 'windows_update' | 'hardware' | 'software' | 'commands' | 'history';
+  | 'identity'
+  | 'antivirus'
+  | 'windows_update'
+  | 'hardware'
+  | 'software'
+  | 'compliance'
+  | 'commands'
+  | 'history';
 
 export const MACHINE_TABS: readonly MachineTab[] = [
   'identity',
@@ -27,6 +34,7 @@ export const MACHINE_TABS: readonly MachineTab[] = [
   'windows_update',
   'hardware',
   'software',
+  'compliance',
   'commands',
   'history',
 ];

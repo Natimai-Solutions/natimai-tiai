@@ -78,6 +78,54 @@ gère naturellement les postes éteints.
   installation logicielle, mise à niveau, maintenance, vérification, saisi
   depuis sa fiche avec une date qui peut être antérieure à la console, lu de
   haut en bas comme un cahier. Les suppressions sont tracées.
+- **Alertes** — huit règles évaluées par le serveur toutes les cinq minutes
+  sur ce que les postes remontent déjà : disque système presque plein, disque
+  en mauvaise santé, volume système non chiffré (portables par défaut),
+  redémarrage en attente depuis trop longtemps, **Windows hors support**
+  (selon la version et l'édition : Pro, Éducation, LTSC), logiciel interdit
+  installé, poste sans contact, garantie bientôt terminée. Une alerte s'ouvre
+  et se résout toute seule, avec sa date ; elle est sur la fiche du poste, sur
+  une page qui les range par règle, dans le résumé quotidien, et peut ouvrir
+  une vérification sur le poste. Un disque en mauvaise santé est signalé par
+  e-mail sur le moment. Règles, seuils et liste des logiciels interdits se
+  règlent dans les Paramètres.
+- **Actifs** — ce que le poste ne sait pas de lui-même : n° d'inventaire,
+  date d'achat, fournisseur, fin de garantie, prix, statut (en stock, en
+  service, en réparation, prêté, réformé) et prêts. Saisis sur la fiche, ou
+  **importés** d'un CSV ou d'un classeur Excel rapproché sur les numéros de
+  série, avec un aperçu avant écriture. Le matériel sans agent —
+  vidéoprojecteurs, imprimantes, écrans — a sa place dans les salles. Des
+  **étiquettes QR** s'impriment par lot ou par salle ; scannées, elles ouvrent
+  la fiche du poste ou du matériel. L'âge du parc se compte depuis la date d'achat, un poste réformé sort
+  des compteurs et des alertes, et la fiche dit si le matériel peut passer à
+  **Windows 11**. Droit à part (`asset`), pour que le prix d'achat ne soit pas
+  lu de tous.
+- **Signalements** — l'étiquette QR d'un poste ouvre, à qui la scanne sans
+  compte, un formulaire en deux langues pour signaler une panne (catégorie,
+  texte, contact facultatif). Les signalements arrivent dans une file : un
+  technicien les ouvre en vérification, les rattache à celle en cours ou les
+  clôt. Désactivé par défaut, borné, sans rien dire du poste. Les vérifications
+  ont désormais une priorité, une catégorie et une échéance.
+- **Planifications** — une commande lancée plus tard ou chaque semaine, sur
+  une salle, un bâtiment, une sélection ou tout le parc, à l'heure du fuseau
+  de la console. Option « réveiller d'abord » et « éteindre ensuite » (seuls
+  les postes réveillés, jamais une session ouverte), plages interdites pendant
+  les heures de cours, et **déploiement par étapes** (salle pilote, observation,
+  seuil d'échec) pour les mises à jour et les paquets. Chaque exécution
+  revérifie le compte et les droits de son auteur : planifier ne permet pas de
+  garder un droit perdu.
+- **Conformité** — dix contrôles fermés par poste, lus « 7 sur 9 » plutôt
+  qu'en note : chiffrement, Secure Boot, TPM 2.0, antivirus, correctifs
+  critiques, redémarrage, Windows pris en charge, agent à jour, pare-feu,
+  administrateurs locaux. Colonne et filtre de la liste, carte du tableau de
+  bord, détail sur la fiche. Les **mises à jour tierces** connues de winget
+  ont leur onglet sur la page Logiciels, avec la part des postes à jour. Les
+  administrateurs locaux et winget ne sont relevés que si l'agent y est
+  autorisé (désactivés par défaut).
+- **Annuaire vérifié** — en option, des postes désignés lisent les objets
+  ordinateurs de leur domaine avec leur compte machine ; les salles suivent
+  cette lecture et non plus la déclaration des agents, et un poste qui déclare
+  autre chose que l'annuaire est signalé.
 - **Vue du parc** — antivirus réellement actif sur chaque poste, y compris un
   produit tiers, adresse IP et session utilisateur ouverte : de quoi savoir qui
   est protégé, où joindre un poste et lequel est libre pour une intervention.
@@ -173,6 +221,14 @@ l'exécution est figée dans le binaire de l'agent.
 | Historique des interventions | 🟢 Livré |
 | Vérifications demandées | 🟢 Livré |
 | Maintenance (cycles, responsables, séances) | 🟢 Livré |
+| Alertes (règles fermées, résumé, e-mail, vérification automatique) | 🟢 Livré |
+| Actifs (achat, garantie, prêts, import, étiquettes QR, Windows 11) | 🟢 Livré |
+| Planifications (fenêtres, réveil et extinction, déploiement par étapes) | 🟢 Livré |
+| Signalement par l'utilisateur (QR sans compte, file de tri), priorités des vérifications | 🟢 Livré |
+| Conformité des postes, mises à jour tierces (winget) | 🟢 Livré |
+| Lecture de l'annuaire par des postes désignés (salles vérifiées) | 🟢 Livré — mode `ldap` prévu |
+| Licences, second facteur, webhooks… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
+| Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement
 

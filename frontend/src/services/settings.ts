@@ -177,6 +177,31 @@ export interface ConsoleSettings {
   env_digest_hour_utc: number;
   env_maintenance_reminder_weekday: number;
   room_source: string;
+  /** Alerts: the catalogue, the rules turned on, their thresholds, the
+   * forbidden programs, the rules that open a verification. Optional: an
+   * older server does not send them. */
+  alert_rules?: string[];
+  alert_enabled_rules?: string[];
+  alert_reboot_pending_days?: number;
+  alert_warranty_days?: number;
+  alert_unencrypted_scope?: 'laptops' | 'all';
+  alert_forbidden_software?: string[];
+  alert_auto_check_rules?: string[];
+  env_alert_reboot_pending_days?: number;
+  env_alert_warranty_days?: number;
+  env_alert_unencrypted_scope?: 'laptops' | 'all';
+  /** Compliance (C5). Optional: an older server. */
+  compliance_patch_grace_days?: number;
+  env_compliance_patch_grace_days?: number;
+  compliance_admins_allowed?: string[];
+  /** Schedules (C3): the zone the console plans in, and the weekly windows
+   * when nothing at risk runs on several postes. Optional: an older server. */
+  console_timezone?: string;
+  env_console_timezone?: string;
+  forbidden_windows?: { days: number[]; start: string; end: string }[];
+  /** C4: whether a label's QR code opens the report form without an account. */
+  reports_enabled?: boolean;
+  env_reports_enabled?: boolean;
   /** How mail leaves the console. */
   email: EmailSettings;
   /** The rest of the environment, read-only and never a secret: what an
@@ -201,6 +226,17 @@ export interface SettingsPayload {
   command_default_ttl_minutes?: number;
   digest_hour_utc?: number;
   maintenance_reminder_weekday?: number;
+  alert_enabled_rules?: string[];
+  alert_auto_check_rules?: string[];
+  alert_reboot_pending_days?: number;
+  alert_warranty_days?: number;
+  alert_unencrypted_scope?: 'laptops' | 'all';
+  alert_forbidden_software?: string[];
+  compliance_patch_grace_days?: number;
+  compliance_admins_allowed?: string[];
+  console_timezone?: string | null;
+  forbidden_windows?: { days: number[]; start: string; end: string }[] | null;
+  reports_enabled?: boolean | null;
   email?: EmailSettingsPayload;
 }
 

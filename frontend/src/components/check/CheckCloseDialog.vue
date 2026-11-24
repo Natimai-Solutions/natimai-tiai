@@ -5,7 +5,7 @@
     <q-card style="width: 480px; max-width: 95vw">
       <q-card-section class="text-h6">{{ t('checks.close.title') }}</q-card-section>
       <q-card-section v-if="check?.instructions" class="q-pt-none text-body2 text-muted">
-        {{ t('checks.close.instructions', { text: check.instructions }) }}
+        {{ t('checks.close.instructions', { text: checkInstructionsText(check) }) }}
       </q-card-section>
       <q-form @submit="submit">
         <q-card-section class="q-gutter-md">
@@ -55,6 +55,7 @@
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
+import { checkInstructionsText } from 'src/services/alerts';
 import { closeCheck } from 'src/services/checks';
 import { apiErrorMessage } from 'src/services/errors';
 import { t } from 'src/i18n';
@@ -63,7 +64,13 @@ import { notify } from 'src/utils/notify';
 const props = defineProps<{
   modelValue: boolean;
   /** `created_at`: the earliest date the closing may carry. */
-  check: { id: string; instructions: string | null; created_at?: string } | null;
+  check: {
+    id: string;
+    instructions: string | null;
+    instructions_code?: string | null;
+    instructions_params?: Record<string, unknown> | null;
+    created_at?: string;
+  } | null;
 }>();
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void;

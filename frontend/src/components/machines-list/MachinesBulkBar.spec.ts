@@ -10,6 +10,7 @@ function mountBar(
     canPlace: boolean;
     canCheck: boolean;
     actionGroups: CommandActionGroup[];
+    canSchedule: boolean;
   }> = {},
 ) {
   return mount(MachinesBulkBar, {
@@ -49,6 +50,17 @@ describe('MachinesBulkBar', () => {
 
     expect(wrapper.emitted('place')).toHaveLength(1);
     expect(wrapper.emitted('ask')).toHaveLength(1);
+  });
+
+  it('offers to schedule the selection to who may', async () => {
+    expect(buttonLabels(mountBar({ canCheck: false, canPlace: false }))).not.toContain('Planifier');
+    const wrapper = mountBar({ canCheck: false, canPlace: false, canSchedule: true });
+    expect(buttonLabels(wrapper)).toEqual(['Planifier']);
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('Planifier'))!
+      .trigger('click');
+    expect(wrapper.emitted('schedule')).toHaveLength(1);
   });
 
   it('lists the bulk commands in their sections and runs the one picked', async () => {

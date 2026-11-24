@@ -95,6 +95,8 @@ async def create_for_machines(
     package_id: uuid.UUID | None = None,
     package_digest: str | None = None,
     package_files: list[str] | None = None,
+    schedule_run_id: uuid.UUID | None = None,
+    schedule_stage: int | None = None,
 ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
     """Queue one command per machine, skipping those that already have it open.
 
@@ -131,6 +133,8 @@ async def create_for_machines(
             package_id=package_id,
             package_digest=package_digest,
             package_files=package_files,
+            schedule_run_id=schedule_run_id,
+            schedule_stage=schedule_stage,
         )
         for machine_id in targets
     ]

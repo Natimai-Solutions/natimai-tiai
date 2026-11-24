@@ -59,6 +59,16 @@ export interface Check {
    * older server, null on a note typed by someone.
    */
   closing_note_code?: string | null;
+  /** Set when the server opened the request for an alert (« alert.<rule> »):
+   * the console words the instructions (`checkInstructionsText`). */
+  instructions_code?: string | null;
+  instructions_params?: Record<string, unknown> | null;
+  /** C4: how urgent, what about, by when; the report it came from. Optional:
+   * an older server does not send them. */
+  priority?: CheckPriority;
+  category?: string | null;
+  due_date?: string | null;
+  report_id?: string | null;
   /** Filled on the task lists, where no fiche is open. */
   machine: CheckMachineRef | null;
 }
@@ -73,6 +83,25 @@ export interface CheckList {
 export interface CheckPayload {
   assigned_to_id?: string | null;
   instructions?: string | null;
+  priority?: CheckPriority;
+  category?: string | null;
+  due_date?: string | null;
+}
+
+export type CheckPriority = 'low' | 'normal' | 'high';
+export const CHECK_PRIORITIES: CheckPriority[] = ['high', 'normal', 'low'];
+/** The closed list a request — and a report — is about. */
+export const CHECK_CATEGORIES = [
+  'hardware',
+  'software',
+  'network',
+  'printing',
+  'account',
+  'other',
+] as const;
+
+export function priorityColor(priority: string | undefined): string {
+  return priority === 'high' ? 'negative' : priority === 'low' ? 'grey-6' : 'primary';
 }
 
 export interface ListChecksParams {

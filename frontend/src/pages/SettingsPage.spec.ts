@@ -20,7 +20,7 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
 
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { listAssignableOwners } from 'src/services/maintenance';
-import { QInput } from 'quasar';
+import { QInput, QToggle } from 'quasar';
 import { resetFleetThresholds, useFleetThresholds } from 'src/composables/useFleetThresholds';
 import { getSettings, updateSettings, type ConsoleSettings } from 'src/services/settings';
 import { useAuthStore } from 'src/stores/auth';
@@ -96,6 +96,18 @@ function consoleSettings(): ConsoleSettings {
     },
     environment: [],
     updated_at: null,
+    alert_rules: ['disk_low', 'disk_unhealthy', 'inactive'],
+    alert_enabled_rules: ['disk_low', 'disk_unhealthy', 'inactive'],
+    alert_auto_check_rules: ['disk_low', 'inactive'],
+    alert_reboot_pending_days: 7,
+    alert_warranty_days: 30,
+    alert_unencrypted_scope: 'laptops',
+    alert_forbidden_software: [],
+    console_timezone: 'Pacific/Tahiti',
+    env_console_timezone: 'Pacific/Tahiti',
+    forbidden_windows: [{ days: [0, 1, 2, 3, 4], start: '07:30', end: '12:00' }],
+    reports_enabled: false,
+    env_reports_enabled: false,
   };
   return value;
 }
@@ -288,6 +300,168 @@ describe('SettingsPage', () => {
       await flushPromises();
       expect(blocksUnload()).toBe(false);
       expect(await asksBeforeLeaving(page)).toBeNull();
+      page.app.unmount();
+    });
+  });
+
+  describe('the compliance card (C5)', () => {
+    beforeEach(() => {
+      vi.mocked(getSettings).mockResolvedValue({
+        ...consoleSettings(),
+        compliance_patch_grace_days: 14,
+        env_compliance_patch_grace_days: 14,
+        compliance_admins_allowed: ['GG-Techs'],
+      });
+      vi.mocked(updateSettings).mockReset();
+    });
+
+    it('saves the grace and the accepted administrators, trimmed', async () => {
+      vi.mocked(updateSettings).mockResolvedValue(consoleSettings());
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const vm = page.wrapper.vm as unknown as {
+        complianceForm: { patchGraceDays: number | string; admins: string[] };
+      };
+      vm.complianceForm.patchGraceDays = '21';
+      vm.complianceForm.admins = ['GG-Techs', ' LYCEE\\Tech ', ' '];
+      await flushPromises();
+      expect(blocksUnload()).toBe(true);
+      await saveCard(page, 'Conformité des postes');
+      expect(updateSettings).toHaveBeenCalledWith({
+        compliance_patch_grace_days: 21,
+        compliance_admins_allowed: ['GG-Techs', 'LYCEE\\Tech'],
+      });
+      page.app.unmount();
+    });
+
+    it('does not save a delay out of range', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      field(
+        page,
+        'Délai avant qu’un poste en retard d’un correctif critique ou important soit non conforme (jours)',
+      ).vm.$emit('update:modelValue', 400);
+      await flushPromises();
+      await saveCard(page, 'Conformité des postes');
+      expect(updateSettings).not.toHaveBeenCalled();
+      page.app.unmount();
+    });
+  });
+
+  describe('the alerts card', () => {
+    beforeEach(() => {
+      vi.mocked(getSettings).mockResolvedValue(consoleSettings());
+      vi.mocked(updateSettings).mockReset();
+    });
+
+    function toggle(page: Page, label: string) {
+      return page.wrapper.findAllComponents(QToggle).find((c) => c.props('label') === label)!;
+    }
+
+    it('is silent after a rule is turned off and on again', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const disk = toggle(page, 'Disque système presque plein');
+      await disk.trigger('click');
+      await flushPromises();
+      expect(blocksUnload()).toBe(true);
+      await disk.trigger('click');
+      await flushPromises();
+      // Back on, last in the list now: the same rules all the same.
+      expect(blocksUnload()).toBe(false);
+      expect(await asksBeforeLeaving(page)).toBeNull();
+      page.app.unmount();
+    });
+
+    it('saves only the auto-checks of rules turned on, and the patterns that read', async () => {
+      vi.mocked(updateSettings).mockResolvedValue(consoleSettings());
+      const page = await mountPage(['settings:read', 'settings:write']);
+      await toggle(page, 'Sans contact').trigger('click');
+      const vm = page.wrapper.vm as unknown as {
+        alertForm: { forbidden: string[]; warrantyDays: number | string };
+      };
+      vm.alertForm.forbidden = [' x ', ' uTorrent '];
+      vm.alertForm.warrantyDays = '45';
+      await flushPromises();
+      await saveCard(page, 'Alertes');
+      expect(updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          alert_enabled_rules: ['disk_low', 'disk_unhealthy'],
+          alert_auto_check_rules: ['disk_low'],
+          alert_forbidden_software: ['uTorrent'],
+          alert_warranty_days: 45,
+          alert_reboot_pending_days: 7,
+        }),
+      );
+      page.app.unmount();
+    });
+
+    it('does not save a number of days out of range', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      field(page, 'Fin de garantie signalée').vm.$emit('update:modelValue', 0);
+      await flushPromises();
+      await saveCard(page, 'Alertes');
+      expect(updateSettings).not.toHaveBeenCalled();
+      page.app.unmount();
+    });
+  });
+
+  it('opens the report form as it is switched (C4)', async () => {
+    vi.mocked(getSettings).mockResolvedValue(consoleSettings());
+    vi.mocked(updateSettings).mockReset();
+    vi.mocked(updateSettings).mockResolvedValue({ ...consoleSettings(), reports_enabled: true });
+    const page = await mountPage(['settings:read', 'settings:write']);
+    const toggle = page.wrapper
+      .findAllComponents(QToggle)
+      .find((c) => c.props('label') === 'Ouvrir le formulaire de signalement')!;
+    expect(toggle.props('modelValue')).toBe(false);
+    toggle.vm.$emit('update:modelValue', true);
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith({ reports_enabled: true });
+    expect(toggle.props('modelValue')).toBe(true);
+    page.app.unmount();
+  });
+
+  describe('the schedules card', () => {
+    beforeEach(() => {
+      vi.mocked(getSettings).mockResolvedValue(consoleSettings());
+      vi.mocked(updateSettings).mockReset();
+    });
+
+    it('saves the zone and the windows, days in order', async () => {
+      vi.mocked(updateSettings).mockResolvedValue(consoleSettings());
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const vm = page.wrapper.vm as unknown as {
+        planningForm: {
+          timezone: string;
+          windows: { days: number[]; start: string; end: string }[];
+        };
+      };
+      expect(vm.planningForm.windows).toEqual([
+        { days: [0, 1, 2, 3, 4], start: '07:30', end: '12:00' },
+      ]);
+      vm.planningForm.timezone = ' Europe/Paris ';
+      vm.planningForm.windows.push({ days: [5, 3], start: '13:00', end: '17:00' });
+      await flushPromises();
+      expect(blocksUnload()).toBe(true);
+      await saveCard(page, 'Planifications');
+      expect(updateSettings).toHaveBeenCalledWith({
+        console_timezone: 'Europe/Paris',
+        forbidden_windows: [
+          { days: [0, 1, 2, 3, 4], start: '07:30', end: '12:00' },
+          { days: [3, 5], start: '13:00', end: '17:00' },
+        ],
+      });
+      page.app.unmount();
+    });
+
+    it('does not save a window that ends before it starts', async () => {
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const vm = page.wrapper.vm as unknown as {
+        planningForm: { windows: { days: number[]; start: string; end: string }[] };
+      };
+      vm.planningForm.windows[0]!.end = '07:00';
+      await flushPromises();
+      expect(document.body.textContent).toContain('Des jours, et une fin après le début');
+      await saveCard(page, 'Planifications');
+      expect(updateSettings).not.toHaveBeenCalled();
       page.app.unmount();
     });
   });

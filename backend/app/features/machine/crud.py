@@ -6,6 +6,8 @@ from sqlalchemy.orm import aliased
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.features.alert import crud as alert_crud
+from app.features.asset import crud as asset_crud
 from app.features.base import utcnow
 from app.features.check import crud as check_crud
 from app.features.command import texts
@@ -14,6 +16,8 @@ from app.features.intervention import crud as intervention_crud
 from app.features.machine.models import Machine
 from app.features.machine.status import compute_is_up_to_date
 from app.features.maintenance.reach import owner_reach
+from app.features.report import crud as report_crud
+from app.features.schedule import crud as schedule_crud
 from app.features.threat.models import Threat
 from app.features.usage import crud as usage_crud
 
@@ -103,6 +107,13 @@ async def merge_into(
     # So do the hours it was on: usage is history, and the statistics must not
     # lose a week because an administrator reconciled two records.
     await usage_crud.move_to(session, source_id=source.id, target_id=target.id)
+    # Resolved alerts are history and follow; open ones are dropped, the next
+    # evaluation finds again on the kept record whatever still holds.
+    await alert_crud.move_to(session, source_id=source.id, target_id=target.id)
+    # The asset follows the poste: what was paid for it, its warranty.
+    await asset_crud.move_to(session, source_id=source.id, target_id=target.id)
+    await schedule_crud.move_to(session, source_id=source.id, target_id=target.id)
+    await report_crud.move_to(session, source_id=source.id, target_id=target.id)
 
     # Keep the freshest last-seen; the merge resolves the verification. The
     # room follows too, when the kept record has none: a duplicate was often

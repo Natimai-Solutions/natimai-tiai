@@ -646,6 +646,21 @@ export function formatDate(value: string | null | undefined): string {
 }
 
 /**
+ * The day of an instant, where the reader is: a full timestamp (« last seen »,
+ * « pending since ») shown without its time. Not `formatDate`, which reads a
+ * calendar date as written — the UTC day of 04:00 UTC is still the day
+ * before in Papeete.
+ */
+export function formatInstantDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return '—';
+  const day = String(at.getDate()).padStart(2, '0');
+  const month = String(at.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${at.getFullYear()}`;
+}
+
+/**
  * Hand a fetched blob to the browser as a download.
  *
  * The exports are fetched rather than linked because the API needs the

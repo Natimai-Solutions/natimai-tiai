@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { QInput, QTable } from 'quasar';
+import { QBtnToggle, QInput, QTable } from 'quasar';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
@@ -10,6 +10,7 @@ vi.mock('src/services/software', async (importOriginal) => ({
 }));
 
 import { listSoftware, type ListSoftwareParams, type SoftwareList } from 'src/services/software';
+import WingetUpdatesCard from 'src/components/software/WingetUpdatesCard.vue';
 import SoftwarePage from './SoftwarePage.vue';
 
 const Stub = defineComponent({ render: () => h('div') });
@@ -118,5 +119,33 @@ describe('SoftwarePage (audit T42)', () => {
 
     const rows = wrapper.findComponent(QTable).props('rows') as { name: string }[];
     expect(rows.map((r) => r.name)).toEqual(['Java']);
+  });
+});
+
+describe('SoftwarePage — third-party updates (C5)', () => {
+  beforeEach(() => {
+    vi.mocked(listSoftware).mockReset();
+    catalogue(3);
+  });
+
+  it('opens on the catalogue, and keeps the updates view in the URL', async () => {
+    const { wrapper, router } = await mountAt('/software');
+    expect(wrapper.findComponent(WingetUpdatesCard).exists()).toBe(false);
+    expect(wrapper.findComponent(QTable).exists()).toBe(true);
+
+    wrapper.findComponent(QBtnToggle).vm.$emit('update:model-value', 'updates');
+    await flushPromises();
+    expect(router.currentRoute.value.query).toEqual({ view: 'updates' });
+    expect(wrapper.findComponent(WingetUpdatesCard).exists()).toBe(true);
+    expect(wrapper.findComponent(QTable).exists()).toBe(false);
+
+    wrapper.findComponent(QBtnToggle).vm.$emit('update:model-value', 'catalogue');
+    await flushPromises();
+    expect(router.currentRoute.value.query).toEqual({});
+  });
+
+  it('comes back to the updates view from its URL', async () => {
+    const { wrapper } = await mountAt('/software?view=updates');
+    expect(wrapper.findComponent(WingetUpdatesCard).exists()).toBe(true);
   });
 });

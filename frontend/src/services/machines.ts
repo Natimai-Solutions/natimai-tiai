@@ -46,6 +46,12 @@ export interface Machine {
   /** A verification somebody asked for is open on this poste, and for whom. */
   check_open: boolean;
   check_assigned_to: string | null;
+  /** The compliance summary the worker keeps (C5): « 7 sur 9 ». */
+  /** What the directory read says of the agent's word: verified, mismatch,
+   * unknown, stale; null when not read. */
+  directory_status?: string | null;
+  compliance_passed?: number | null;
+  compliance_total?: number | null;
   /**
    * Maintenance as it resolves for this poste (`services/maintenance`): when
    * it is due, where it stands, who owns it. null due = excluded.
@@ -223,7 +229,53 @@ export interface InstalledSoftware {
   first_seen: string;
 }
 
+/** Whether the hardware can take Windows 11, from the inventory. */
+export interface ComplianceCheckResult {
+  check: string;
+  state: 'pass' | 'fail' | 'unknown' | 'not_applicable';
+  detail: Record<string, unknown>;
+}
+
+export interface LocalAdmin {
+  name: string;
+  sid?: string | null;
+}
+
+export interface WingetPackage {
+  winget_id: string;
+  name: string | null;
+  version: string | null;
+  available: string | null;
+}
+
+export interface Windows11Readiness {
+  verdict: 'already' | 'ready' | 'check' | 'blocked' | 'unknown';
+  tpm: 'ok' | 'fail' | 'check' | 'unknown';
+  ram: 'ok' | 'fail' | 'check' | 'unknown';
+  disk: 'ok' | 'fail' | 'check' | 'unknown';
+  architecture: 'ok' | 'fail' | 'check' | 'unknown';
+  secure_boot: 'ok' | 'fail' | 'check' | 'unknown';
+  processor: 'ok' | 'fail' | 'check' | 'unknown';
+}
+
 export interface MachineDetail extends Machine {
+  /** Absent from an older server. */
+  windows11?: Windows11Readiness | null;
+  /** C5: the compliance checks, live, and the readings behind the new ones. */
+  compliance?: ComplianceCheckResult[];
+  firewall_domain?: boolean | null;
+  firewall_private?: boolean | null;
+  firewall_public?: boolean | null;
+  local_admins?: LocalAdmin[] | null;
+  winget_reported_at?: string | null;
+  winget_packages?: WingetPackage[];
+  /** The directory as a reader read it (plan-lecture-annuaire.md). */
+  dir_distinguished_name?: string | null;
+  dir_ou?: string | null;
+  dir_location?: string | null;
+  directory_reader?: boolean;
+  directory_reader_since?: string | null;
+  directory_mode?: 'off' | 'relay';
   /** The window `usage_hours` covers on the fiche: the console's setting. */
   usage_days: number;
   /**
@@ -271,6 +323,8 @@ export interface MachineDetail extends Machine {
     /** false when the assignee no longer reaches the poste: « à prendre » again. */
     assignee_reachable?: boolean;
     instructions: string | null;
+    instructions_code?: string | null;
+    instructions_params?: Record<string, unknown> | null;
     created_at: string;
   } | null;
   machine_guid: string | null;
@@ -374,7 +428,9 @@ export type MachineSortField =
   /** Ordered as a version, not a string: "0.10.0" after "0.9.0". */
   | 'agent_version'
   /** Hours on over the usage window; postes enrolled inside it last. */
-  | 'usage_hours';
+  | 'usage_hours'
+  /** Compliance checks failed (C5); postes not evaluated last. */
+  | 'compliance_failed';
 
 export interface ListMachinesParams {
   /** Free search: hostname, UUID, IP, antivirus name — and MAC in any notation. */
@@ -443,6 +499,19 @@ export interface ListMachinesParams {
   enrollment?: 'pending' | 'revoked';
   /** Hardware past the parc's renewal age (`hardware_aging_years`). */
   hardware_aging?: boolean;
+  /** Postes with an open alert: a rule of the catalogue, or `any`. */
+  alert?: string;
+  /** The status of a poste's asset, or `none` for a poste without one. */
+  asset_status?: string;
+  /** Postes the inventory says cannot take Windows 11. */
+  win11_blocked?: boolean;
+  /** C5: failing / passing / unknown, one failed check, a winget update. */
+  compliance?: string;
+  compliance_check?: string;
+  winget_outdated?: string;
+  directory_status?: string;
+  /** true: the retired postes left out (the dashboard's links). */
+  in_parc?: boolean;
   /**
    * Comma-separated facets matched exactly rather than as a substring:
    * antivirus, os_version, hw_model, hw_manufacturer, cpu_model.

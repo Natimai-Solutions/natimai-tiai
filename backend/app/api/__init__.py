@@ -1,12 +1,16 @@
 from fastapi import APIRouter
 
 from app.api.routes.agent import router as agent_router
+from app.api.routes.alerts import router as alerts_router
+from app.api.routes.assets import machine_router as machine_assets_router
+from app.api.routes.assets import router as assets_router
 from app.api.routes.audit import router as audit_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.checks import assignable_router as checks_assignable_router
 from app.api.routes.checks import machine_router as machine_checks_router
 from app.api.routes.checks import router as checks_router
 from app.api.routes.commands import router as commands_router
+from app.api.routes.directory import router as directory_router
 from app.api.routes.groups import router as groups_router
 from app.api.routes.interventions import machine_router as machine_interventions_router
 from app.api.routes.interventions import router as interventions_router
@@ -16,7 +20,10 @@ from app.api.routes.maintenance import owners_router as maintenance_owners_route
 from app.api.routes.maintenance import room_router as room_maintenance_router
 from app.api.routes.maintenance import router as maintenance_router
 from app.api.routes.packages import router as packages_router
+from app.api.routes.reports import public_router as public_reports_router
+from app.api.routes.reports import router as reports_router
 from app.api.routes.rooms import buildings_router, rooms_router
+from app.api.routes.schedules import router as schedules_router
 from app.api.routes.settings_routes import router as settings_router
 from app.api.routes.software import router as software_router
 from app.api.routes.stats import router as stats_router
@@ -27,6 +34,13 @@ api_router = APIRouter()
 api_router.include_router(auth_router)
 api_router.include_router(agent_router)
 api_router.include_router(machines_router)
+api_router.include_router(alerts_router)
+api_router.include_router(assets_router)
+api_router.include_router(schedules_router)
+api_router.include_router(reports_router)
+api_router.include_router(directory_router)
+api_router.include_router(public_reports_router)
+api_router.include_router(machine_assets_router)
 api_router.include_router(buildings_router)
 api_router.include_router(rooms_router)
 api_router.include_router(machine_interventions_router)

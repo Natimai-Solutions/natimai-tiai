@@ -87,6 +87,41 @@ describe('useMachineBulkActions', () => {
       );
     });
 
+    it('asks once more inside a forbidden window, the window named, and sends confirmed', async () => {
+      const refusal = {
+        response: {
+          status: 409,
+          data: {
+            error: {
+              code: 'command.forbidden_window',
+              details: { window: { days: [0, 1, 2, 3, 4], start: '07:30', end: '12:00' } },
+            },
+          },
+        },
+      };
+      vi.mocked(createCommands)
+        .mockRejectedValueOnce(refusal)
+        .mockResolvedValueOnce({ count: 2, skipped: 0 } as never);
+      const { selected, runBulk } = setup();
+      const quick = action((a) => !a.confirm && !a.serverSide && a.bulk);
+
+      runBulk(quick);
+      await vi.waitFor(() => expect(q.state.onOk).not.toBeNull());
+      const asked = (q.dialog.mock.calls.at(-1) as unknown[] | undefined)?.[0] as {
+        message: string;
+      };
+      expect(asked.message).toContain('lundi, mardi, mercredi, jeudi, vendredi 07:30–12:00');
+      expect(createCommands).toHaveBeenCalledTimes(1);
+
+      q.state.onOk!();
+      await vi.waitFor(() => expect(selected.value).toEqual([]));
+      expect(createCommands).toHaveBeenLastCalledWith({
+        type: quick.type,
+        machine_ids: ['m-1', 'm-2'],
+        confirm_forbidden_window: true,
+      });
+    });
+
     it('asks first for a costly one, with the count — and sends nothing until « OK »', async () => {
       vi.mocked(createCommands).mockResolvedValue({ count: 2, skipped: 0 } as never);
       const { runBulk } = setup();

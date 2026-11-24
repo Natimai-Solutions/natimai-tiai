@@ -449,6 +449,7 @@ async def test_the_digest_goes_out_in_each_readers_language(
 async def test_a_threat_alert_is_written_once_per_language(
     client, db_session, mail_settings, monkeypatch
 ):
+    from app.features.base import utcnow
     from app.features.machine.models import Machine
     from app.features.notification import threat_alert
     from app.features.user.permissions import BuiltinGroup
@@ -474,8 +475,13 @@ async def test_a_threat_alert_is_written_once_per_language(
         return original(machine, detections, language)
 
     monkeypatch.setattr(threat_alert, "render_alert", counting)
+    # Dated now: the alert leaves out detections older than
+    # THREAT_ALERT_MAX_AGE_HOURS, and the fixed NOW above ages with the clock.
+    from app.features.threat.crud import NewDetection
+
+    fresh = [NewDetection("a", "Trojan:Win32/Test", "Severe", "Active", utcnow())]
     queued = await threat_alert.queue_threat_alert(
-        db_session, threat_alert.MachineContext.of(machine), _detections()[:1]
+        db_session, threat_alert.MachineContext.of(machine), fresh
     )
     await db_session.commit()
 

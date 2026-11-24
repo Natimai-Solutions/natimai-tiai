@@ -48,7 +48,7 @@ const fr = {
     LOW_DISK_FREE_PERCENT:
       'Seuil « disque presque plein » : pourcentage libre sur le volume système en dessous duquel un poste est signalé — valeur initiale : le réglage enregistré ci-dessus prend le dessus',
     HARDWARE_AGING_YEARS:
-      'Âge du poste (date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus',
+      'Âge du poste (date d’achat, à défaut date du BIOS) à partir duquel il est compté à renouveler — valeur initiale : le réglage enregistré ci-dessus prend le dessus',
     AGENT_EXPECTED_VERSION:
       "Version d'agent de référence pour « agent obsolète » ; vide = la plus haute version remontée par le parc — valeur initiale : le réglage enregistré ci-dessus prend le dessus",
     COMMAND_DEFAULT_TTL_MINUTES:
@@ -227,7 +227,7 @@ const en: Translation<typeof fr> = {
     LOW_DISK_FREE_PERCENT:
       '“Disk almost full” threshold: free percentage on the system volume below which a computer is flagged — initial value: the setting saved above takes precedence',
     HARDWARE_AGING_YEARS:
-      'Age of the computer (BIOS date) from which it counts as due for renewal — initial value: the setting saved above takes precedence',
+      'Age of the computer (purchase date, else BIOS date) from which it counts as due for renewal — initial value: the setting saved above takes precedence',
     AGENT_EXPECTED_VERSION:
       'Reference agent version for “outdated agent”; empty = the highest version the fleet reports — initial value: the setting saved above takes precedence',
     COMMAND_DEFAULT_TTL_MINUTES:

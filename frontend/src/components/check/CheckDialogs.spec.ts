@@ -44,6 +44,119 @@ describe('CheckRequestDialog — an assignee deactivated since (item 4)', () => 
   });
 });
 
+describe('CheckRequestDialog — a verification opened for an alert', () => {
+  const check = {
+    id: 'c-1',
+    machine_id: 'm-1',
+    instructions: 'Alerte : Il reste 2 % …',
+    instructions_code: 'alert.disk_low',
+    instructions_params: { free_percent: 2, threshold_percent: 10 },
+    assigned_to: null,
+  } as unknown as Check;
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    setActivePinia(createPinia());
+    vi.mocked(listAssignableUsers).mockResolvedValue([{ id: 'u-1', name: 'Alice' }]);
+  });
+
+  async function open(save: (payload: unknown) => Promise<void>) {
+    const wrapper = mount(CheckRequestDialog, {
+      props: { modelValue: false, check, save },
+      attachTo: document.body,
+    });
+    await wrapper.setProps({ modelValue: true });
+    await flushPromises();
+    const text = wrapper.findAllComponents(QInput).find((i) => i.props('label') === 'Consignes')!;
+    return { wrapper, text };
+  }
+
+  it('opens on the instructions worded from the code', async () => {
+    const { wrapper, text } = await open(vi.fn());
+    expect(text.props('modelValue')).toBe(
+      'Alerte : Disque système presque plein — 2 % libres (seuil : 10 %)',
+    );
+    wrapper.unmount();
+  });
+
+  it('sends no instructions on a reassignment, so they stay coded', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { wrapper } = await open(save);
+    wrapper.findComponent(QSelect).vm.$emit('update:modelValue', 'u-1');
+    await wrapper.findComponent(QForm).trigger('submit');
+    await flushPromises();
+    expect(save).toHaveBeenCalledWith({
+      assigned_to_id: 'u-1',
+      priority: 'normal',
+      category: null,
+      due_date: null,
+    });
+    wrapper.unmount();
+  });
+
+  it('sends the text once someone changes it', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { wrapper, text } = await open(save);
+    text.vm.$emit('update:modelValue', 'Vider la corbeille');
+    await wrapper.findComponent(QForm).trigger('submit');
+    await flushPromises();
+    expect(save).toHaveBeenCalledWith({
+      assigned_to_id: null,
+      priority: 'normal',
+      category: null,
+      due_date: null,
+      instructions: 'Vider la corbeille',
+    });
+    wrapper.unmount();
+  });
+});
+
+describe('CheckRequestDialog — priority, category, due date (C4)', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    setActivePinia(createPinia());
+    vi.mocked(listAssignableUsers).mockResolvedValue([]);
+  });
+
+  it('opens on what the request holds, and sends what was chosen', async () => {
+    const check = {
+      id: 'c-2',
+      machine_id: 'm-1',
+      instructions: 'Écran',
+      assigned_to: null,
+      priority: 'high',
+      category: 'hardware',
+      due_date: '2026-12-01',
+    } as unknown as Check;
+    const save = vi.fn().mockResolvedValue(undefined);
+    const wrapper = mount(CheckRequestDialog, {
+      props: { modelValue: false, check, save },
+      attachTo: document.body,
+    });
+    await wrapper.setProps({ modelValue: true });
+    await flushPromises();
+    const select = (label: string) =>
+      wrapper.findAllComponents(QSelect).find((s) => s.props('label') === label)!;
+    expect(select('Priorité').props('modelValue')).toBe('high');
+    expect(select('Catégorie').props('modelValue')).toBe('hardware');
+    select('Catégorie').vm.$emit('update:modelValue', 'network');
+    wrapper
+      .findAllComponents(QInput)
+      .find((i) => i.props('label') === 'Échéance')!
+      .vm.$emit('update:modelValue', null);
+    await flushPromises();
+    await wrapper.findComponent(QForm).trigger('submit');
+    await flushPromises();
+    expect(save).toHaveBeenCalledWith({
+      assigned_to_id: null,
+      priority: 'high',
+      category: 'network',
+      due_date: null,
+    });
+    wrapper.unmount();
+  });
+});
+
 describe('CheckRequestDialog — a session that ends mid-form (solidity item 7)', () => {
   beforeEach(() => {
     window.sessionStorage.clear();

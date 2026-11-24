@@ -334,7 +334,7 @@ Il n'est jamais committé.
 | `SIGNATURE_MAX_AGE_DAYS` | `3` | Seuil « signatures à jour », en jours. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage ; un changement est appliqué aussitôt à tout le parc, postes éteints compris |
 | `INACTIVE_AFTER_DAYS` | `30` | Seuil « poste inactif », en jours sans contact. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `LOW_DISK_FREE_PERCENT` | `10` | Seuil « disque presque plein » : pourcentage d'espace libre sur le volume système. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
-| `HARDWARE_AGING_YEARS` | `5` | Âge du poste (date du BIOS), en années, à partir duquel il est compté à renouveler. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+| `HARDWARE_AGING_YEARS` | `5` | Âge du poste (date d'achat de sa fiche matériel, à défaut date du BIOS), en années, à partir duquel il est compté à renouveler. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `OFFLINE_AFTER_SECONDS` | `180` | Seuil « poste allumé » : 3 × l'intervalle de heartbeat de l'agent, pour qu'un battement manqué n'éteigne pas le parc. À relever avec lui sur un parc plus lent |
 | `COMMAND_DEFAULT_TTL_MINUTES` | `60` | Durée de vie d'une commande mise en file. Passé ce délai, une commande **encore en attente** est périmée et n'est plus remise à un agent — un poste rallumé trois semaines plus tard ne rejoue pas ce qu'on lui avait demandé. À allonger sur un parc dont les postes ne sont allumés que par intermittence. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 | `COMMAND_RETENTION_DAYS` | `365` | Conservation de l'historique des commandes, en jours (0 à 3650). Chaque matin, le worker supprime les commandes **terminées** (réussies, échouées, périmées) et les commandes délivrées restées sans réponse dont le dernier événement est plus ancien. Jamais une commande en attente ou en cours. `0` = conserver indéfiniment |
@@ -346,6 +346,20 @@ Il n'est jamais committé.
 | `USAGE_LOW_HOURS` | `10` | En dessous de ce nombre d'heures sur la fenêtre, un poste est « peu utilisé ». Un poste enrôlé pendant la fenêtre ne l'est jamais. Valeur initiale, modifiable dans Paramètres |
 | `USAGE_HIGH_HOURS` | `30` | Au-dessus, un poste est « toujours allumé ». Valeur initiale, modifiable dans Paramètres |
 | `USAGE_RETENTION_DAYS` | `400` | Conservation des compteurs horaires d'utilisation, purgés chaque jour par le worker. Environ 7 200 lignes par jour pour 300 postes |
+| `ALERT_REBOOT_PENDING_DAYS` | `7` | Alerte « redémarrage en attente » : un redémarrage demandé par Windows Update et toujours pas fait au bout de ce nombre de jours (1 à 365). **Valeur initiale seulement**, modifiable dans Paramètres, comme la liste des règles actives, les logiciels interdits et les règles qui ouvrent une vérification |
+| `ALERT_UNENCRYPTED_SCOPE` | `laptops` | Alerte « volume système non chiffré » : `laptops` ne regarde que les portables et tablettes, `all` tous les postes. Valeur initiale, modifiable dans Paramètres |
+| `ALERT_WARRANTY_DAYS` | `30` | Alerte « garantie bientôt terminée » : ce nombre de jours avant la fin de garantie saisie sur la fiche d'actif d'un poste (1 à 365). Valeur initiale, modifiable dans Paramètres |
+| `ALERT_RETENTION_DAYS` | `400` | Conservation des alertes **résolues**, purgées chaque matin par le worker. Une alerte ouverte n'est jamais purgée |
+| `COMPLIANCE_PATCH_GRACE_DAYS` | `14` | Conformité des postes : une mise à jour Windows **critique ou importante** en attente depuis plus de ce nombre de jours (0 à 365) fait échouer le contrôle « correctifs ». Évite qu'un mardi de correctifs fasse passer tout le parc au rouge. **Valeur initiale seulement**, modifiable dans Paramètres, comme la liste des administrateurs locaux acceptés |
+| `CONSOLE_TIMEZONE` | `Pacific/Tahiti` | Fuseau (nom IANA) dans lequel la console **planifie** : « mercredi à 18 h » est 18 h dans ce fuseau, pas en UTC. Les plages interdites s'y lisent aussi. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
+| `SCHEDULE_COMMAND_TTL_MINUTES` | `180` | Durée d'attente par défaut d'une commande créée par une planification (10 à 1 440 min) : un poste réveillé met quelques minutes à contacter le serveur. Réglable par planification |
+| `REPORTS_ENABLED` | `false` | Le QR de l'étiquette d'un poste ouvre, à qui le scanne **sans compte**, un formulaire de signalement (catégorie, texte, contact facultatif). Désactivé par défaut : c'est le premier point d'entrée non authentifié qui ne soit pas l'agent ; borné par adresse et par étiquette, il ne renvoie rien sur le poste. Joignable seulement depuis le réseau de l'établissement si la console l'est. Le contact laissé est une donnée personnelle, à porter au registre des traitements. Les bornes sont comptées **par adresse** (10 envois et 60 lectures du formulaire par heure) : si la console est derrière un proxy, il doit figurer dans `TRUSTED_PROXIES` / `TRUSTED_PROXY_HOSTS`, sans quoi tout l'établissement partage une seule adresse et un seul quota ; l'adresse de l'émetteur est conservée dans le journal d'audit (`AUDIT_RETENTION_DAYS`), à porter au registre aussi. **Valeur initiale seulement** : modifiable dans Paramètres |
+| `REPORT_RETENTION_DAYS` | `90` | Conservation d'un signalement traité — et du contact qu'il porte — avant sa purge du matin. Un signalement à trier n'est jamais purgé |
+| `SCHEDULE_RUN_RETENTION_DAYS` | `180` | Conservation de l'historique des exécutions de planifications, purgé chaque matin. Les commandes créées restent dans l'historique des postes |
+| `DIRECTORY_VERIFY` | `off` | `relay` : des postes désignés lisent l'annuaire de leur domaine avec leur compte machine, et le serveur range les salles et vérifie la déclaration des agents d'après cette lecture (voir « Lire l'annuaire au lieu de croire les agents »). `off` : la déclaration des agents est crue. `ldap` n'existe pas encore |
+| `DIRECTORY_SYNC_MINUTES` | `60` | Intervalle entre deux lectures demandées à chaque lecteur (5 à 1 440) |
+| `DIRECTORY_STALE_HOURS` | `72` | Au-delà, un domaine non relu ne vérifie plus rien : ses postes passent « périmés » |
+| `DIRECTORY_CONFIRM_MOVES` | `20` | Une lecture qui déplacerait plus de postes que ce seuil attend la confirmation d'un administrateur (Paramètres → Annuaire) |
 | `ROOM_SOURCE` | `manual` | Comment les postes sont rangés en salles. `manual` : depuis la console, à la main. `ad_ou` : par l'**unité d'organisation** qui contient l'objet ordinateur — l'agent lit son propre DN dans le registre, sans interroger l'annuaire — une salle par OU, nommée comme elle. `ad_location` : par l'attribut **Emplacement** de l'objet ordinateur (onglet Emplacement d'ADUC), que l'agent lit via ADSI. Dans les deux modes annuaire, le rattachement manuel est verrouillé ; les salles créées gardent nom, bâtiment et notes modifiables. Après un changement de ce réglage, « Resynchroniser depuis l'annuaire » sur la page Salles reclasse tout le parc d'un coup |
 | `AGENT_EXPECTED_VERSION` | *(vide)* | Version d'agent de référence pour le filtre « agent obsolète », la carte du tableau de bord et l'alerte de la fiche. Vide : la référence est la **plus haute version remontée par le parc** — juste le lendemain d'un déploiement, sans appel à GitHub. À fixer quand on déploie d'abord sur un groupe pilote, pour ne pas voir tout le reste du parc signalé en retard. **Valeur initiale seulement** : modifiable dans Paramètres, sans redémarrage |
 
@@ -1428,6 +1442,8 @@ le secret d'enrôlement, plutôt qu'en clair dans le YAML.
 | `InventoryCollectIntervalSeconds` | `REG_DWORD` | `inventory_collect_interval_seconds` |
 | `ReportSessionUsername` | `REG_DWORD` | `report_session_username` |
 | `ReportSoftware` | `REG_DWORD` | `report_software` |
+| `ReportLocalAdmins` | `REG_DWORD` | `report_local_admins` (désactivé si absent) |
+| `ReportWingetPackages` | `REG_DWORD` | `report_winget_packages` (désactivé si absent) |
 | `Location` | `REG_SZ` | `location` |
 | `DeployWinget` | `REG_DWORD` | — (registre seulement) |
 | `DeployWingetAllow` | `REG_MULTI_SZ` | — (registre seulement) |
@@ -1453,6 +1469,19 @@ matériel continue de remonter, et la liste déjà stockée côté serveur est
 que déclarative. Les deux réglages sont à arbitrer avec le DPO / le CSE : croiser
 « quels logiciels sont installés » et « qui est connecté » porte sur une personne
 nommée.
+
+`ReportLocalAdmins` et `ReportWingetPackages` (conformité, C5) sont au contraire
+**désactivés tant que la clé est absente** : `1` les active, `0` les coupe à
+nouveau. Le premier remonte les membres du groupe Administrateurs local (noms de
+comptes et SID) — à arbitrer avec le DPO comme le nom de session ; coupé, la
+liste stockée côté serveur est effacée au cycle suivant. Le second lance
+`winget list --source winget` une fois par cycle d'inventaire (quelques
+secondes, et une mise à jour de l'index winget, donc un accès à
+`cdn.winget.microsoft.com`) pour remonter les logiciels connus de winget et la
+version disponible : **à valider sur un poste réel** avant de l'activer sur le
+parc — le comportement de winget sous `LocalSystem` varie selon la version
+d'App Installer. Le pare-feu (état des trois profils, réglage GPO prioritaire)
+remonte toujours : ce n'est pas une donnée personnelle.
 
 ```powershell
 New-Item -Path 'HKLM:\SOFTWARE\Tiai' -Force | Out-Null
@@ -1721,6 +1750,63 @@ inventaire. Elle ne s'exécute pas d'un clic : la console calcule d'abord, sans
 rien écrire, combien de postes changeront de salle et combien de salles seront
 créées, et demande confirmation avant de lancer le reclassement (tracé dans le
 journal d'audit).
+
+**Lire l'annuaire au lieu de croire les agents** (`DIRECTORY_VERIFY=relay`).
+Par défaut, l'OU, le DN et l'emplacement qui rangent un poste sont ceux que son
+agent déclare : un poste forgé avec le secret du parc peut donc se ranger dans
+la salle d'un autre. En mode `relay`, des postes **désignés** dans la console
+(fiche du poste, onglet Identité, « Désigner comme lecteur d'annuaire » ; droit
+`settings:write`) lisent les objets ordinateurs de leur domaine, avec leur
+**compte machine** (aucun compte de service ni mot de passe à fournir), et le
+serveur range les salles d'après cette lecture.
+
+- **Qui désigner** : un serveur membre ou un poste d'administration toujours
+  allumé, jamais un poste élève. Un lecteur par domaine au moins ; deux, et leurs
+  lectures sont comparées (un désaccord gèle les déplacements du domaine et est
+  signalé dans Paramètres → Annuaire). La désignation tombe d'elle-même si le
+  poste est ré-enrôlé, si son jeton est révoqué ou s'il passe en « Identité à
+  confirmer ». Seuls les lecteurs ont besoin d'un agent récent.
+- **Ce que le lecteur lit** : toutes les `DIRECTORY_SYNC_MINUTES` (60 min par
+  défaut), le serveur lui envoie la commande « Lecture de l'annuaire » avec la
+  liste des noms des postes de son domaine ; le lecteur lit, en lecture seule
+  (`System.DirectoryServices` par PowerShell), `sAMAccountName`,
+  `dNSHostName`, `objectGUID`, `distinguishedName`, `location` et l'état
+  désactivé de chaque objet, plus l'identité du domaine (nom DNS, nom NetBIOS,
+  SID) et la table sous-réseaux → sites. Le serveur refuse une lecture d'un poste
+  non désigné ou d'un autre domaine que le sien. Le compte machine lit ces
+  attributs avec les droits par défaut d'Active Directory ; rien n'est à
+  déléguer.
+- **Ce qui change** : chaque poste reçoit un statut — **vérifié** (sa
+  déclaration est ce que dit l'annuaire), **écart** (il déclare autre chose :
+  signalé, pas bloquant ; un poste déplacé dans AD et pas encore redémarré est
+  dans ce cas), **inconnu** (aucun objet de ce nom ; il reste où il est et ne
+  crée pas de salle) ou **périmé** (objet désactivé ou supprimé, ou domaine non
+  relu depuis `DIRECTORY_STALE_HOURS`). Avec `ROOM_SOURCE=ad_ou` ou
+  `ad_location`, la salle suit la lecture ; sa clé porte désormais le SID du
+  domaine, pour que deux établissements aient chacun leur « Salle 101 », et les
+  salles existantes sont reprises à la première lecture. Une lecture qui
+  déplacerait plus de `DIRECTORY_CONFIRM_MOVES` postes attend une confirmation
+  dans Paramètres → Annuaire. La liste des postes se filtre par statut
+  (« Annuaire : écart » depuis Paramètres) et la fiche montre côte à côte ce que
+  l'agent déclare et ce que l'annuaire dit.
+- **Ce qui borne un lecteur** : sa désignation est liée au domaine qu'il
+  déclarait quand il a été désigné et au SID de sa première lecture ; un nom
+  NetBIOS ne désigne qu'**un seul domaine** sur le serveur (deux domaines de
+  même nom NetBIOS ne sont pas pris en charge ; un domaine reconstruit sous un
+  autre SID se retire par « Oublier ce domaine »). Deux postes qui portent le
+  même nom dans un domaine sont « contestés » jusqu'à ce que l'un soit
+  fusionné, supprimé ou révoqué. Désigner un lecteur et confirmer des
+  déplacements sont réservés aux comptes sans limite de lieu. Une lecture ne
+  reprend pas une salle créée à la main : c'est « Resynchroniser depuis
+  l'annuaire », page Salles, qui le fait, après confirmation.
+- **Limite** : lire l'annuaire prouve ce qu'il dit d'un nom, pas que le poste
+  *est* ce nom. Un poste forgé qui prend le nom d'un poste réel pas encore
+  enrôlé est rangé à sa place ; un lecteur compromis ment pour tout son domaine.
+- **Dépannage** : le résultat de la commande « Lecture de l'annuaire » dans
+  l'historique du lecteur donne le nombre d'objets lus, ou l'erreur (contrôleur
+  de domaine injoignable, délai de 5 minutes dépassé, lecture refusée par le
+  serveur). Le mode `ldap` (le serveur interroge lui-même un contrôleur de
+  domaine) n'existe pas encore.
 
 **Vérifications et maintenance.** « Mes tâches » réunit, pour chaque compte, les
 vérifications qu'on lui a affectées et les salles et postes dont il est

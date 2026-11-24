@@ -253,6 +253,25 @@
         </q-tooltip>
       </q-td>
     </template>
+    <template #body-cell-compliance="props">
+      <q-td :props="props">
+        <q-badge
+          v-if="props.row.compliance_total"
+          :color="
+            props.row.compliance_passed === props.row.compliance_total ? 'positive' : 'negative'
+          "
+          outline
+        >
+          {{
+            t('compliance.card.summary', {
+              passed: props.row.compliance_passed ?? 0,
+              total: props.row.compliance_total,
+            })
+          }}
+        </q-badge>
+        <span v-else class="text-muted">—</span>
+      </q-td>
+    </template>
     <template #body-cell-last_seen="props">
       <q-td :props="props">{{ formatDateTime(props.value) }}</q-td>
     </template>

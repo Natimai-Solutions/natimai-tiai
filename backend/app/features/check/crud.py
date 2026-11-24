@@ -5,12 +5,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import func, or_, update
+from sqlalchemy import case, func, or_, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.base import utcnow
-from app.features.check.models import MachineCheck
+from app.features.check.models import CheckPriority, MachineCheck
 from app.features.machine.models import Machine
 from app.features.user import crud as user_crud
 from app.features.user.models import User
@@ -129,6 +129,22 @@ async def orphaned_open_checks(
     }
 
 
+async def open_ids_for_machines(
+    session: AsyncSession, machine_ids: Iterable[uuid.UUID]
+) -> dict[uuid.UUID, uuid.UUID]:
+    """The open verification of each poste that has one: ``{machine: check}``."""
+    ids = list(machine_ids)
+    if not ids:
+        return {}
+    rows = await session.exec(
+        select(MachineCheck.machine_id, MachineCheck.id).where(
+            col(MachineCheck.machine_id).in_(ids),
+            col(MachineCheck.closed_at).is_(None),
+        )
+    )
+    return dict(rows.all())
+
+
 async def open_for_machine(
     session: AsyncSession, machine_id: uuid.UUID
 ) -> MachineCheck | None:
@@ -143,6 +159,14 @@ async def open_for_machine(
 
 async def get(session: AsyncSession, check_id: uuid.UUID) -> MachineCheck | None:
     return await session.get(MachineCheck, check_id)
+
+
+# High first: the rank a list sorts on.
+PRIORITY_RANK = case(
+    (col(MachineCheck.priority) == CheckPriority.HIGH, 0),
+    (col(MachineCheck.priority) == CheckPriority.NORMAL, 1),
+    else_=2,
+)
 
 
 async def list_checks(
@@ -192,6 +216,10 @@ async def list_checks(
         stmt.order_by(
             col(MachineCheck.closed_at).is_not(None),
             col(MachineCheck.closed_at).desc().nulls_last(),
+            # Open ones: the urgent first, then the nearest due, then the
+            # oldest asked.
+            PRIORITY_RANK,
+            col(MachineCheck.due_date).asc().nulls_last(),
             col(MachineCheck.created_at),
         )
         .offset((page - 1) * page_size)

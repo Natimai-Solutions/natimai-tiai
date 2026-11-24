@@ -34,7 +34,10 @@ export type CommandType =
   // Software deployment: the two types that carry a package. Not in the
   // generic menu — they need a package chosen — but listed in histories.
   | 'package_install'
-  | 'package_uninstall';
+  | 'package_uninstall'
+  // Reading the directory: queued by the server alone on a designated
+  // reader, never offered in a menu — listed in that poste's history.
+  | 'directory_read';
 
 export type CommandStatus =
   'pending' | 'delivered' | 'running' | 'succeeded' | 'failed' | 'expired';
@@ -439,6 +442,14 @@ export interface CreateCommandsPayload {
   /** Every poste of a site, as the agents report it (exact). */
   target_location?: string;
   target_status?: string;
+  /** Every poste of a room, or of a building's rooms. */
+  target_room_id?: string;
+  target_building_id?: string;
+  /**
+   * A risky command for several postes inside a forbidden window: refused
+   * (`command.forbidden_window`) unless the person confirmed.
+   */
+  confirm_forbidden_window?: boolean;
 }
 
 export interface CreateCommandsResponse {

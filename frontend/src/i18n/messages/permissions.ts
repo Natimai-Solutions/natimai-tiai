@@ -21,6 +21,9 @@ const fr = {
     user: 'Comptes et groupes',
     audit: "Journal d'audit",
     package: 'Paquets logiciels',
+    asset: 'Actifs (achat, garantie, prêts)',
+    schedule: 'Planifications',
+    report: 'Signalements des utilisateurs',
   },
   /** What granting it lets someone do (`label`), and a sentence where the label
    *  alone would be read two ways (`hint`). */
@@ -109,6 +112,36 @@ const fr = {
         hint: 'Créer des paquets, déposer leurs fichiers, joindre la signature, les retirer.',
       },
     },
+    asset: {
+      read: {
+        label: 'Consulter',
+        hint: 'Voir les dates d’achat, garanties, prix, statuts et prêts, et le matériel sans agent.',
+      },
+      write: {
+        label: 'Gérer',
+        hint: 'Saisir et importer les actifs, déclarer un prêt ou une réforme, imprimer les étiquettes.',
+      },
+    },
+    schedule: {
+      read: {
+        label: 'Consulter',
+        hint: 'Voir les planifications et leurs exécutions.',
+      },
+      write: {
+        label: 'Gérer',
+        hint: 'Planifier une commande, la modifier, la suspendre. Il faut aussi le droit d’exécuter la commande planifiée.',
+      },
+    },
+    report: {
+      read: {
+        label: 'Consulter',
+        hint: 'Voir les signalements laissés par l’étiquette des postes, avec le contact donné.',
+      },
+      write: {
+        label: 'Trier',
+        hint: 'Clore ou rejeter un signalement ; l’ouvrir en vérification demande aussi « Vérifications demandées : gérer ».',
+      },
+    },
   },
   /** `{resource} — {action}`, for lists that show what a group grants. */
   named: '{resource} — {action}',
@@ -133,6 +166,9 @@ const en: Translation<typeof fr> = {
     user: 'Accounts and groups',
     audit: 'Audit log',
     package: 'Software packages',
+    asset: 'Assets (purchase, warranty, loans)',
+    schedule: 'Schedules',
+    report: 'Users’ reports',
   },
   entries: {
     machine: {
@@ -217,6 +253,36 @@ const en: Translation<typeof fr> = {
       write: {
         label: 'Manage',
         hint: 'Create packages, upload their files, attach the signature, retire them.',
+      },
+    },
+    asset: {
+      read: {
+        label: 'View',
+        hint: 'See purchase dates, warranties, prices, statuses and loans, and the equipment without an agent.',
+      },
+      write: {
+        label: 'Manage',
+        hint: 'Enter and import assets, record a loan or a retirement, print the labels.',
+      },
+    },
+    schedule: {
+      read: {
+        label: 'View',
+        hint: 'See the schedules and their runs.',
+      },
+      write: {
+        label: 'Manage',
+        hint: 'Schedule a command, change it, suspend it. The right to run the scheduled command is needed too.',
+      },
+    },
+    report: {
+      read: {
+        label: 'View',
+        hint: 'See the reports left through the computers’ labels, with the contact given.',
+      },
+      write: {
+        label: 'Sort',
+        hint: 'Close or reject a report; opening it as a check also needs “Requested checks: manage”.',
       },
     },
   },

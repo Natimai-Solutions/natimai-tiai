@@ -308,4 +308,60 @@ describe('PackageDeployDialog', () => {
     expect(labels.find((l) => l.includes('fichiers, setup.exe'))).toContain('créé le');
     w.unmount();
   });
+  it('asks before deploying inside a forbidden window, then sends with the confirmation', async () => {
+    const refusal = Object.assign(new Error('409'), {
+      response: {
+        status: 409,
+        data: {
+          error: {
+            code: 'command.forbidden_window',
+            details: { window: { days: [0, 1], start: '07:30', end: '12:00' } },
+          },
+        },
+      },
+    });
+    deployPackage
+      .mockReset()
+      .mockRejectedValueOnce(refusal)
+      .mockResolvedValue({ created: [], count: 2, skipped: 0 });
+    const w = await open({ package: pkg(), machineIds: ['m-1', 'm-2'] });
+    await sendButton(w).trigger('click');
+    await flushPromises();
+    const dialog = document.querySelector('.q-dialog-plugin')!;
+    expect(dialog.textContent).toContain('plage interdite');
+    expect(dialog.textContent).toContain('07:30–12:00');
+    expect(deployPackage).toHaveBeenCalledTimes(1);
+    (
+      [...dialog.querySelectorAll('button')].find(
+        (b) => b.textContent?.trim() === 'Envoyer quand même',
+      ) as HTMLElement
+    ).click();
+    await flushPromises();
+    expect(deployPackage).toHaveBeenLastCalledWith(
+      'p-1',
+      'install',
+      { machine_ids: ['m-1', 'm-2'] },
+      true,
+    );
+    w.unmount();
+  });
+
+  it('sends nothing more when the forbidden window is not confirmed', async () => {
+    deployPackage.mockReset().mockRejectedValueOnce(
+      Object.assign(new Error('409'), {
+        response: { status: 409, data: { error: { code: 'command.forbidden_window' } } },
+      }),
+    );
+    const w = await open({ package: pkg(), machineIds: ['m-1', 'm-2'] });
+    await sendButton(w).trigger('click');
+    await flushPromises();
+    (
+      [...document.querySelectorAll('.q-dialog-plugin button')].find(
+        (b) => b.textContent?.trim() === 'Annuler',
+      ) as HTMLElement
+    ).click();
+    await flushPromises();
+    expect(deployPackage).toHaveBeenCalledTimes(1);
+    w.unmount();
+  });
 });

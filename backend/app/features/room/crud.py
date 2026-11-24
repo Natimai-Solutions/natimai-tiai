@@ -315,7 +315,14 @@ def directory_key(machine: Machine, source: str) -> tuple[str, str] | None:
     key and the name to give it when it has to be created. None when the
     poste has nothing to be filed by — no OU, no location attribute — which
     unfiles it rather than leaving it where it was: the directory has spoken,
-    and it said "nowhere"."""
+    and it said "nowhere".
+
+    With the directory read by the server (``DIRECTORY_VERIFY``), the key is
+    the reading's, the domain's SID ahead of it — never the agent's word."""
+    from app.features.directory import crud as directory_crud
+
+    if directory_crud.enabled():
+        return directory_crud.room_key(machine, source)
     if source == "ad_ou":
         if machine.ad_ou_dn and machine.ad_ou:
             return machine.ad_ou_dn, machine.ad_ou
@@ -367,6 +374,16 @@ async def room_for_key(
     room = result.one_or_none()
     if room is not None:
         return room, False
+    # A room filed by the agents' word before its domain was read: its key
+    # gains the domain's SID, the room stays the same (plan-lecture-annuaire
+    # §4.1) — when it is that domain's room (``_legacy_room``).
+    old = await _legacy_room(session, key)
+    if old is not None:
+        old.ad_key = key
+        old.updated_at = utcnow()
+        session.add(old)
+        await session.flush()
+        return old, False
     hand_made = await hand_made_rooms(session, name)
     if hand_made:
         if not adopt or len(hand_made) > 1:
@@ -418,6 +435,46 @@ async def room_for_key(
     return room, True
 
 
+async def _legacy_room(session: AsyncSession, key: str) -> Room | None:
+    """The room that bore ``key`` before its domain was read — the same key
+    without the SID — when it is this domain's to take: empty, or holding
+    mostly postes read in that domain. A reading must not, by naming an OU or
+    a location, capture the room of another domain's postes and the scopes
+    attached to it."""
+    from app.features.directory import crud as directory_crud
+
+    if not directory_crud.enabled():
+        return None
+    legacy = directory_crud.legacy_key(key)
+    sid = directory_crud.key_sid(key)
+    if legacy is None or sid is None:
+        return None
+    old = (await session.exec(select(Room).where(Room.ad_key == legacy))).first()
+    if old is None:
+        return None
+    rows = (
+        await session.exec(
+            select(col(Machine.directory_domain_sid)).where(
+                col(Machine.room_id) == old.id
+            )
+        )
+    ).all()
+    ours = sum(1 for s in rows if s == sid)
+    return old if not rows or ours * 2 > len(rows) else None
+
+
+async def settles(session: AsyncSession, key: str, name: str, *, sid: str) -> bool:
+    """Whether a reading's key names a room without taking one made by hand:
+    the room of the key exists, or its legacy one is the domain's, or no
+    room made by hand bears the name (one is then created)."""
+    del sid  # carried by the key; named for the reader of the call
+    if (await session.exec(select(Room.id).where(Room.ad_key == key))).first():
+        return True
+    if await _legacy_room(session, key) is not None:
+        return True
+    return not await hand_made_rooms(session, name)
+
+
 def reported_dn_consistent(machine: Machine) -> bool:
     """Whether the OU an agent reports is the one its own DN sits in — the
     least the server can check of what it is told (audit S20)."""
@@ -462,7 +519,19 @@ async def _place(
     in the room its reading names: (room created, poste filed)."""
     if source == "manual":
         return False, False
-    if source == "ad_ou" and machine.ad_ou_dn and not reported_dn_consistent(machine):
+    from app.features.directory import crud as directory_crud
+
+    verifying = directory_crud.enabled()
+    if verifying and machine.directory_status not in directory_crud.READ:
+        # Not read, or no longer: the poste stays where it is, and creates
+        # no room (plan-lecture-annuaire §4.1).
+        return False, False
+    if (
+        not verifying
+        and source == "ad_ou"
+        and machine.ad_ou_dn
+        and not reported_dn_consistent(machine)
+    ):
         logger.warning(
             "directory: machine %s reports an OU its DN is not in, not filed",
             machine.id,
@@ -493,6 +562,15 @@ async def _place(
 def _filable(machine: Machine, source: str) -> tuple[str, str] | None:
     """The key ``machine`` would be filed by, None when it has none or when
     its reported OU is not the one its DN sits in."""
+    from app.features.directory import crud as directory_crud
+
+    if directory_crud.enabled():
+        if machine.directory_status not in (
+            directory_crud.VERIFIED,
+            directory_crud.MISMATCH,
+        ):
+            return None
+        return directory_key(machine, source)
     if source == "ad_ou" and machine.ad_ou_dn and not reported_dn_consistent(machine):
         return None
     return directory_key(machine, source)
@@ -523,7 +601,16 @@ def has_reading(machine: Machine) -> bool:
     """Whether the agent ever sent the directory block. A poste without any
     reading — an agent older than the block, a workgroup machine — has told
     the directory nothing: the re-sync leaves it where it was, as a heartbeat
-    without the block does, rather than emptying a room filed by hand."""
+    without the block does, rather than emptying a room filed by hand.
+
+    With the directory read by the server, the reading is the server's."""
+    from app.features.directory import crud as directory_crud
+
+    if directory_crud.enabled():
+        return machine.directory_status in (
+            directory_crud.VERIFIED,
+            directory_crud.MISMATCH,
+        )
     return any(
         (
             machine.ad_distinguished_name,
@@ -580,6 +667,7 @@ async def sync_from_directory(session: AsyncSession, source: str) -> SyncResult:
                 col(Machine.ad_ou).is_not(None),
                 col(Machine.ad_ou_dn).is_not(None),
                 col(Machine.ad_location).is_not(None),
+                col(Machine.directory_object_guid).is_not(None),
             )
         )
         .order_by(col(Machine.id))

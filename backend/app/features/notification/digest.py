@@ -18,12 +18,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, true
+from sqlalchemy import and_, func, true
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
+from app.features.alert.models import ALL_RULES, MachineAlert
+from app.features.asset import crud as asset_crud
 from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.machine.status import (
@@ -113,6 +115,9 @@ class Digest:
     threat_lines: list[MachineLine] = field(default_factory=list)
     update_lines: list[MachineLine] = field(default_factory=list)
     outdated_lines: list[MachineLine] = field(default_factory=list)
+    # Postes with an open alert, per rule (``app.features.alert``) — only the
+    # rules with at least one; printed after the running state.
+    alerts_by_rule: dict[str, int] = field(default_factory=dict)
 
     @property
     def has_events(self) -> bool:
@@ -150,8 +155,12 @@ def _name(machine_hostname: str | None, machine_uuid: str) -> str:
 
 async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Digest:
     """Read the current state of the fleet — of the part of it ``scope``
-    covers, for an account confined to some sites (``user/scope.py``)."""
-    in_scope = machine_clause(scope)
+    covers, for an account confined to some sites (``user/scope.py``).
+    A retired poste is out of the parc: out of every figure and every list,
+    as on the dashboard."""
+    scope_clause = machine_clause(scope)
+    in_parc = asset_crud.in_parc_clause()
+    in_scope = in_parc if scope_clause is None else and_(scope_clause, in_parc)
     now = utcnow()
     fleet = await setting_crud.fleet_policy(session)
     days = fleet.inactive_after_days
@@ -240,12 +249,33 @@ async def build_digest(session: AsyncSession, scope: Scope | None = None) -> Dig
             restrict(
                 select(func.count()).select_from(Threat),
                 machine_ids_clause(scope, col(Threat.machine_id)),
-            ).where(col(Threat.detected_at) >= since)
+            ).where(
+                col(Threat.detected_at) >= since,
+                asset_crud.in_parc_ids_clause(col(Threat.machine_id)),
+            )
         )
         or 0
     )
 
+    # --- open alerts, postes per rule, in the catalogue's order ---
+    alert_rows = await session.exec(
+        restrict(
+            select(col(MachineAlert.rule), func.count()),
+            machine_ids_clause(scope, col(MachineAlert.machine_id)),
+        )
+        .where(
+            col(MachineAlert.resolved_at).is_(None),
+            asset_crud.in_parc_ids_clause(col(MachineAlert.machine_id)),
+        )
+        .group_by(col(MachineAlert.rule))
+    )
+    open_alerts = dict(alert_rows.all())
+    alerts_by_rule = {
+        r.value: open_alerts[r.value] for r in ALL_RULES if open_alerts.get(r.value)
+    }
+
     return Digest(
+        alerts_by_rule=alerts_by_rule,
         generated_at=now,
         total=total,
         online=online,
@@ -347,6 +377,11 @@ def render_digest(
         t.inactive(digest.inactive_after_days, digest.inactive),
         "",
     ]
+
+    if digest.alerts_by_rule:
+        body.append(t.title_alerts)
+        body += [t.alert_line(rule, n) for rule, n in digest.alerts_by_rule.items()]
+        body.append("")
 
     body += _bullet_block(
         t, t.title_threats, digest.threat_lines, digest.with_active_threats
