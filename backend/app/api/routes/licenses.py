@@ -204,7 +204,7 @@ async def preview(
     and how many postes in scope carry one."""
     draft = License(name="", patterns=payload.patterns, publisher=payload.publisher)
     return PreviewOut(
-        programs=await crud.programs(session, draft),
+        programs=await crud.programs(session, draft, scope),
         installed=await crud.installed(session, draft, scope),
     )
 
@@ -219,7 +219,9 @@ async def get_license(
             code=ErrorCode.LICENSE_NOT_FOUND, status_code=404, message="No such licence"
         )
     state = await _state(session, lic, scope)
-    return LicenseDetail(**_out(state), programs=await crud.programs(session, lic))
+    return LicenseDetail(
+        **_out(state), programs=await crud.programs(session, lic, scope)
+    )
 
 
 @router.post("", response_model=LicenseOut, status_code=201, dependencies=[_WRITE])

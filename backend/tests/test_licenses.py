@@ -126,6 +126,15 @@ async def test_scoped_reader_counts_its_postes_without_verdict(client, db_sessio
     await _install(db_session, sites.b.id, "Microsoft Office")
     lic = await _create(client, sites.admin, seats=1)
 
+    await _install(db_session, sites.b.id, "Microsoft Office Visio B")
+    resp = await client.post(
+        f"{API}/preview", headers=sites.scoped, json={"patterns": ["Microsoft"]}
+    )
+    # Only the names installed where the reader sees.
+    assert resp.json() == {"programs": ["Microsoft Office"], "installed": 1}
+    detail = (await client.get(f"{API}/{lic['id']}", headers=sites.scoped)).json()
+    assert detail["programs"] == ["Microsoft Office"]
+
     resp = await client.get(API, headers=sites.scoped)
     body = resp.json()
     assert body["restricted"] is True

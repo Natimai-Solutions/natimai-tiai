@@ -86,15 +86,22 @@ async def installed(session: AsyncSession, lic: License, scope: Scope | None) ->
     return int(await session.scalar(stmt) or 0)
 
 
-async def programs(session: AsyncSession, lic: License, limit: int = 50) -> list[str]:
-    """The distinct program names the licence covers in the catalogue, for
-    the reader to check a pattern catches what was meant — and nothing else.
-    Names only: no poste is named, so scope does not apply."""
+async def programs(
+    session: AsyncSession, lic: License, scope: Scope | None, limit: int = 50
+) -> list[str]:
+    """The distinct program names the licence covers, for the reader to check
+    a pattern catches what was meant — and nothing else. Those installed on a
+    poste of the reader's scope, as the catalogue lists them."""
     rows = await session.exec(
         select(col(Software.name))
         .where(
             software_clause(lic),
-            exists().where(col(MachineSoftware.software_id) == col(Software.id)),
+            exists().where(
+                col(MachineSoftware.software_id) == col(Software.id),
+                machine_ids_clause(scope, col(MachineSoftware.machine_id))
+                if scope is not None
+                else true(),
+            ),
         )
         .group_by(col(Software.name))
         .order_by(func.lower(col(Software.name)))
