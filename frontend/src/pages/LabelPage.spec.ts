@@ -101,16 +101,40 @@ describe('LabelPage — where a label leads', () => {
     await flushPromises();
     await wrapper.findComponent(QForm).trigger('submit');
     await flushPromises();
-    expect(wrapper.text()).toContain('Trop de signalements depuis ce poste');
+    expect(wrapper.text()).toContain('Trop de signalements pour l’instant');
     const staff = wrapper
       .findAllComponents(QBtn)
       .find((b) => b.props('label') === 'Personnel : se connecter')!;
     expect(staff.props('to')).toEqual({ name: 'login', query: { redirect: '/a/tok-1' } });
   });
 
-  it('says a label leads nowhere', async () => {
-    vi.mocked(getReportForm).mockImplementation(() => Promise.reject(new Error('404')));
+  const refusal = (status: number, code: string) =>
+    Object.assign(new Error(String(status)), {
+      response: { status, data: { error: { code } } },
+    });
+
+  it('says a label leads nowhere, when the server says so', async () => {
+    vi.mocked(getReportForm).mockRejectedValueOnce(refusal(404, 'report.label.invalid'));
     const { wrapper } = await scan();
     expect(wrapper.text()).toContain('Cette étiquette ne correspond à aucun matériel.');
+  });
+
+  it('does not call a label invalid when the form is rate limited or unreachable', async () => {
+    vi.mocked(getReportForm).mockRejectedValueOnce(refusal(429, 'request.rate_limited'));
+    const { wrapper } = await scan();
+    expect(wrapper.text()).not.toContain('aucun matériel');
+    expect(wrapper.text()).toContain('Trop de demandes depuis cette connexion');
+    // The staff keep their way in, and the visitor a way to try again.
+    const buttons = wrapper.findAllComponents(QBtn);
+    const staff = buttons.find((b) => b.props('label') === 'Personnel : se connecter')!;
+    expect(staff.props('to')).toEqual({ name: 'login', query: { redirect: '/a/tok-1' } });
+    vi.mocked(getReportForm).mockResolvedValue({ enabled: true, categories: ['hardware'] });
+    await buttons.find((b) => b.props('label') === 'Réessayer')!.trigger('click');
+    await flushPromises();
+    expect(wrapper.findComponent(QForm).exists()).toBe(true);
+
+    vi.mocked(getReportForm).mockRejectedValueOnce(new Error('network'));
+    const down = await scan();
+    expect(down.wrapper.text()).toContain('Le formulaire n’a pas pu être chargé.');
   });
 });

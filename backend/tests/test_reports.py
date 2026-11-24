@@ -343,3 +343,63 @@ async def test_merge_and_purge(client, db_session):
     [left] = (await db_session.exec(select(Report))).all()
     assert left.machine_id == kept.id and left.status == "new"
     assert headers
+
+
+async def test_a_report_sorted_by_three_accounts_at_once_is_handled_once(
+    client, db_session
+):
+    """Close, convert and reject sent together: one wins, the others meet
+    « déjà traité » — not three 200 and a report closed with a verification
+    opened beside it."""
+    import asyncio
+
+    from app.features.audit.models import AuditEntry
+    from app.features.check.models import MachineCheck
+    from app.features.report.models import Report
+    from app.features.user.permissions import BuiltinGroup
+    from tests.test_api_maintenance import _user
+
+    headers, _ = await _admin(client, db_session)
+    h2, _ = await _user(client, db_session, "a2@test.local", [BuiltinGroup.ADMIN])
+    h3, _ = await _user(client, db_session, "a3@test.local", [BuiltinGroup.ADMIN])
+    m = await machine(db_session, "PC-1")
+    token = await _label(client, headers, m.id)
+    await _open_form(client, headers)
+    assert (
+        await client.post(f"/api/v1/public/reports/{token}", json=_report())
+    ).status_code == 202
+    [rep] = (await db_session.exec(select(Report))).all()
+    rid = rep.id
+    # Warm the pool: on cold connections the requests run one after another
+    # and the race does not show.
+    for _ in range(2):
+        await asyncio.gather(
+            *[client.get("/api/v1/reports", headers=h) for h in (headers, h2, h3) * 2]
+        )
+    answers = await asyncio.gather(
+        client.post(
+            f"/api/v1/reports/{rid}/close", headers=headers, json={"note": "a"}
+        ),
+        client.post(f"/api/v1/reports/{rid}/convert", headers=h2, json={}),
+        client.post(
+            f"/api/v1/reports/{rid}/close?reject=true", headers=h3, json={"note": "b"}
+        ),
+    )
+    codes = sorted(a.status_code for a in answers)
+    assert codes == [200, 409, 409], codes
+    await db_session.refresh(rep)
+    checks = (await db_session.exec(select(MachineCheck))).all()
+    assert (rep.status == "converted") == (len(checks) == 1)
+    handled = [
+        e.action
+        for e in (await db_session.exec(select(AuditEntry))).all()
+        if e.action in ("report.close", "report.reject", "report.convert")
+    ]
+    assert len(handled) == 1
+    # Its reception is filed under the report's own id.
+    created = (
+        await db_session.exec(
+            select(AuditEntry).where(AuditEntry.action == "report.create")
+        )
+    ).one()
+    assert created.resource_id == str(rid)

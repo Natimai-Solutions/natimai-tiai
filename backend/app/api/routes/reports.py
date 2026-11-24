@@ -137,23 +137,24 @@ async def submit_report(
     ratelimit.check_account(
         ratelimit.report_label_limiter, str(asset.id), "report label"
     )
-    session.add(
-        Report(
-            asset_id=asset.id,
-            machine_id=asset.machine_id,
-            category=payload.category.value,
-            text=payload.text or "",
-            contact=payload.contact,
-            language=payload.language,
-        )
+    report = Report(
+        asset_id=asset.id,
+        machine_id=asset.machine_id,
+        category=payload.category.value,
+        text=payload.text or "",
+        contact=payload.contact,
+        language=payload.language,
     )
+    session.add(report)
+    # Named by the report's own id, like its triage entries: one report is
+    # followed from reception to handling.
     audit.record(
         session,
         actor=f"report:{client_ip(request)}",
         action="report.create",
         resource_type="report",
-        resource_id=str(asset.id),
-        details={"category": payload.category.value},
+        resource_id=str(report.id),
+        details={"category": payload.category.value, "asset_id": str(asset.id)},
     )
     await session.commit()
     return ReportAccepted()
@@ -260,12 +261,18 @@ async def _out(session: SessionDep, rows: list[Report]) -> list[ReportOut]:
 async def _require(
     session: SessionDep, report_id: uuid.UUID, scope: Scope | None
 ) -> Report:
+    """The report, within the scope, locked for the length of the request:
+    two accounts sorting the same report at once are judged one after the
+    other, and the second meets « déjà traité » (``_still_new``) instead of
+    writing over the first."""
     report = (
         await session.exec(
             restrict(
                 select(Report).where(col(Report.id) == report_id),
                 crud.scope_clause(scope),
             )
+            .with_for_update(of=Report)
+            .execution_options(populate_existing=True)
         )
     ).first()
     if report is None:

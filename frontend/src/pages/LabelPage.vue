@@ -12,6 +12,25 @@
       {{ t('reports.form.invalid') }}
     </div>
 
+    <!-- The form could not be read (too many requests from this address, the
+         server unreachable): not « étiquette invalide », and the staff keep
+         their way in. -->
+    <div v-else-if="mode === 'unavailable'" class="column items-center q-gutter-md q-mt-xl">
+      <div class="text-body1 text-muted">
+        {{ tooMany ? t('reports.form.tooManyReads') : t('reports.form.unavailable') }}
+      </div>
+      <div class="row q-gutter-sm">
+        <q-btn flat no-caps color="primary" :label="t('reports.form.retry')" @click="open" />
+        <q-btn
+          flat
+          no-caps
+          color="grey-8"
+          :label="t('reports.form.staff')"
+          :to="{ name: 'login', query: { redirect: route.fullPath } }"
+        />
+      </div>
+    </div>
+
     <q-card v-else-if="mode === 'form' || mode === 'sent'" flat bordered class="label-card">
       <q-card-section class="row items-center">
         <div class="text-h6">{{ t('reports.form.title') }}</div>
@@ -104,7 +123,8 @@ const route = useRoute();
 const router = useRouter();
 const token = String(route.params.token ?? '');
 
-const mode = ref<'loading' | 'form' | 'sent' | 'invalid'>('loading');
+const mode = ref<'loading' | 'form' | 'sent' | 'invalid' | 'unavailable'>('loading');
+const tooMany = ref(false);
 const locale = ref<Locale>(currentLocale());
 const categories = ref<string[]>([...CHECK_CATEGORIES]);
 const category = ref('hardware');
@@ -154,7 +174,8 @@ async function send(): Promise<void> {
   }
 }
 
-onMounted(async () => {
+async function open(): Promise<void> {
+  mode.value = 'loading';
   // Staff signed in: the poste's fiche, as the label always led.
   if (await ensureSession(refreshSession)) {
     await router.replace({ name: 'asset-token', params: { token } });
@@ -169,10 +190,15 @@ onMounted(async () => {
     }
     categories.value = form.categories;
     mode.value = 'form';
-  } catch {
-    mode.value = 'invalid';
+  } catch (e) {
+    // Only the server saying so makes a label invalid.
+    const code = apiErrorCode(e);
+    tooMany.value = code === 'request.rate_limited';
+    mode.value = code === 'report.label.invalid' ? 'invalid' : 'unavailable';
   }
-});
+}
+
+onMounted(open);
 </script>
 
 <style scoped>
