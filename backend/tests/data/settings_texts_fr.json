@@ -561,6 +561,38 @@
        "params": {}
       },
       {
+       "key": "APPROVAL_ENABLED",
+       "value": "non",
+       "description": "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_THRESHOLD",
+       "value": "40",
+       "description": "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+       "raw": 40,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_TTL_HOURS",
+       "value": "24",
+       "description": "Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_RETENTION_DAYS",
+       "value": "180",
+       "description": "Jours pendant lesquels une demande d'approbation close est conservée",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
        "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
        "value": "oui",
        "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
@@ -1247,6 +1279,38 @@
        "params": {}
       },
       {
+       "key": "APPROVAL_ENABLED",
+       "value": "non",
+       "description": "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_THRESHOLD",
+       "value": "40",
+       "description": "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+       "raw": 40,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_TTL_HOURS",
+       "value": "24",
+       "description": "Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_RETENTION_DAYS",
+       "value": "180",
+       "description": "Jours pendant lesquels une demande d'approbation close est conservée",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
        "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
        "value": "oui",
        "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
@@ -1918,6 +1982,38 @@
        "value": "24",
        "description": "Fenêtre, en heures, de ce second compteur, et durée du verrou qu'il pose ; seul un nouveau mot de passe le lève. Non défini : 24, ou le double de LOGIN_LOCKOUT_MINUTES si c'est davantage",
        "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_ENABLED",
+       "value": "non",
+       "description": "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_THRESHOLD",
+       "value": "40",
+       "description": "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+       "raw": 40,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_TTL_HOURS",
+       "value": "24",
+       "description": "Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_RETENTION_DAYS",
+       "value": "180",
+       "description": "Jours pendant lesquels une demande d'approbation close est conservée",
+       "raw": 180,
        "format": "plain",
        "params": {}
       },
@@ -2614,6 +2710,38 @@
        "params": {}
       },
       {
+       "key": "APPROVAL_ENABLED",
+       "value": "non",
+       "description": "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_THRESHOLD",
+       "value": "40",
+       "description": "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+       "raw": 40,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_TTL_HOURS",
+       "value": "24",
+       "description": "Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_RETENTION_DAYS",
+       "value": "180",
+       "description": "Jours pendant lesquels une demande d'approbation close est conservée",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
        "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
        "value": "oui",
        "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
@@ -3291,6 +3419,38 @@
        "value": "24",
        "description": "Fenêtre, en heures, de ce second compteur, et durée du verrou qu'il pose ; seul un nouveau mot de passe le lève. Non défini : 24, ou le double de LOGIN_LOCKOUT_MINUTES si c'est davantage",
        "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_ENABLED",
+       "value": "non",
+       "description": "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_THRESHOLD",
+       "value": "40",
+       "description": "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+       "raw": 40,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_TTL_HOURS",
+       "value": "24",
+       "description": "Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_RETENTION_DAYS",
+       "value": "180",
+       "description": "Jours pendant lesquels une demande d'approbation close est conservée",
+       "raw": 180,
        "format": "plain",
        "params": {}
       },

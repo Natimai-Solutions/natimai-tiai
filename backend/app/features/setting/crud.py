@@ -43,6 +43,10 @@ KEY_ALERT_WARRANTY_DAYS = "alerts.warranty_days"
 KEY_COMPLIANCE_PATCH_GRACE = "compliance.patch_grace_days"
 KEY_COMPLIANCE_ADMINS = "compliance.admins_allowed"
 KEY_LICENSE_EXPIRY_DAYS = "licenses.expiry_days"
+# Two-person approval of mass actions (C10).
+KEY_APPROVAL_ENABLED = "approvals.enabled"
+KEY_APPROVAL_THRESHOLD = "approvals.threshold"
+KEY_APPROVAL_TTL_HOURS = "approvals.ttl_hours"
 
 
 async def get_all(session: AsyncSession) -> dict[str, Any]:
@@ -399,3 +403,28 @@ async def license_expiry_days(
     if values is None:
         values = await get_all(session)
     return _int_or(values.get(KEY_LICENSE_EXPIRY_DAYS), env.LICENSE_EXPIRY_DAYS)
+
+
+@dataclass(frozen=True)
+class ApprovalPolicy:
+    """Two-person approval of mass actions (C10), as resolved now: whether
+    it applies, above how many postes, and how long a request waits."""
+
+    enabled: bool
+    threshold: int
+    ttl_hours: int
+
+
+async def approval_policy(
+    session: AsyncSession, values: dict[str, Any] | None = None
+) -> ApprovalPolicy:
+    """The console's rows where they exist, the environment's values
+    otherwise."""
+    if values is None:
+        values = await get_all(session)
+    enabled = values.get(KEY_APPROVAL_ENABLED)
+    return ApprovalPolicy(
+        enabled=enabled if isinstance(enabled, bool) else env.APPROVAL_ENABLED,
+        threshold=_int_or(values.get(KEY_APPROVAL_THRESHOLD), env.APPROVAL_THRESHOLD),
+        ttl_hours=_int_or(values.get(KEY_APPROVAL_TTL_HOURS), env.APPROVAL_TTL_HOURS),
+    )

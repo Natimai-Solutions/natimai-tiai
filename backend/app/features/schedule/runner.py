@@ -141,19 +141,26 @@ async def rezone(
     policy: windows.SchedulePolicy,
     now: datetime,
 ) -> int:
-    """The console's zone changed: every active schedule keeps the hour it
-    was planned at — « mercredi à 18 h » is 18:00 in the new zone, as the
+    """The console's zone changed: every active schedule — or one-off waiting
+    for its approval — keeps the hour it was planned at — « mercredi à 18 h » is 18:00 in the new zone, as the
     list shows it — rather than the instant computed under the old one. A
     one-off that falls in the past by it runs at the next pass, late by less
     than the zones differ. Does not commit. Returns the schedules moved."""
     rows = await session.exec(
         select(Schedule)
-        .where(col(Schedule.state) == ScheduleState.ACTIVE)
+        .where(
+            col(Schedule.state).in_(
+                [ScheduleState.ACTIVE.value, ScheduleState.TO_APPROVE.value]
+            )
+        )
         .with_for_update()
     )
     moved = 0
     for schedule in rows.all():
         if schedule.recurrence == Recurrence.WEEKLY:
+            if schedule.state == ScheduleState.TO_APPROVE:
+                # Its next run is computed when it is approved (C10).
+                continue
             schedule.next_run_at = next_occurrence(schedule, policy, now)
         elif schedule.run_at is not None:
             local = schedule.run_at.astimezone(old_zone)
@@ -288,6 +295,33 @@ async def run_stage(
     return None
 
 
+async def _beyond_approval(
+    session: AsyncSession, schedule: Schedule, authority: Authority
+) -> Refusal | None:
+    """The approval guard of a run (C10, §2.4): with approval on, a
+    schedule at risk that reaches more postes than the threshold and than
+    what was approved — or whose author is not the one approved — does not
+    run. Counted once, at the start of the run, every stage together."""
+    from app.features.schedule import crud as schedule_crud
+    from app.features.setting import crud as setting_crud
+
+    if not (schedule.command_type in RISKY_COMMAND_TYPES or schedule.shutdown_after):
+        return None
+    policy = await setting_crud.approval_policy(session)
+    if not policy.enabled:
+        return None
+    count = await schedule_crud.estimate(session, schedule, authority.scope)
+    if count <= policy.threshold:
+        return None
+    if (
+        schedule.approved_for_id is not None
+        and schedule.approved_for_id == schedule.created_by_id
+        and count <= (schedule.approved_count or 0)
+    ):
+        return None
+    return Refusal("approval_required", {"count": count, "threshold": policy.threshold})
+
+
 def _needs_following(schedule: Schedule, run: ScheduleRun) -> bool:
     if schedule.rings and run.stage < len(schedule.rings) - 1:
         return True
@@ -335,6 +369,10 @@ async def run_one(
             else None
         )
         await _suspend(session, schedule, run, checked, now, author)
+        return run
+    unapproved = await _beyond_approval(session, schedule, checked)
+    if unapproved is not None:
+        await _suspend(session, schedule, run, unapproved, now, checked.user)
         return run
     try:
         refusal = await run_stage(session, schedule, run, 0, checked, now)
@@ -586,6 +624,27 @@ async def _advance_rings(
     return run.stage >= len(schedule.rings) - 1
 
 
+def _stage_stop(schedule: Schedule, run: ScheduleRun) -> str | None:
+    """Why the next stage of an open run must not start, if it must not."""
+    if run.result_code == "schedule_changed":
+        # Its schedule was rewritten since it started (``_apply``).
+        return "schedule_changed"
+    if not schedule.rings or run.stage >= len(schedule.rings) - 1:
+        return None
+    if schedule.state == ScheduleState.DISABLED:
+        return "schedule_disabled"
+    if schedule.state == ScheduleState.TO_APPROVE:
+        return "approval_required"
+    if schedule.state == ScheduleState.SUSPENDED:
+        code = schedule.suspended_code or ""
+        return (
+            "approval_required"
+            if code.startswith("approval_")
+            else ("schedule_disabled")
+        )
+    return None
+
+
 async def follow_one(session: AsyncSession, run: ScheduleRun, now: datetime) -> None:
     schedule = await session.get(Schedule, run.schedule_id)
     if schedule is None:
@@ -601,14 +660,13 @@ async def follow_one(session: AsyncSession, run: ScheduleRun, now: datetime) -> 
         )
         await _suspend(session, schedule, run, checked, now, author)
         return
-    if (
-        schedule.state == ScheduleState.DISABLED
-        and schedule.rings
-        and run.stage < len(schedule.rings) - 1
-    ):
-        # Turned off while a staged deployment was under observation: the
-        # next stage does not start. What was woken is still shut down.
-        run.result_code = "schedule_disabled"
+    stopped = _stage_stop(schedule, run)
+    if stopped is not None:
+        # Turned off, rewritten, or waiting for an approval while a staged
+        # deployment was under observation: the next stage does not start —
+        # neither with the rings it had, nor with the new ones, on behalf of
+        # an author nobody approved (C10). What was woken is still shut down.
+        run.result_code = stopped
         run.result_params = {"stage": run.stage + 1}
         rings_done = True
         halted = True

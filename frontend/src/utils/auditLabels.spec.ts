@@ -125,6 +125,12 @@ describe('auditActionLabel', () => {
       'directory.moves',
       'directory.confirm_moves',
       'directory.discard_moves',
+      'approval.request',
+      'approval.approve',
+      'approval.reject',
+      'approval.cancel',
+      'approval.expire',
+      'approval.fail',
     ];
     expect(Object.keys(AUDIT_ACTION_LABELS).sort()).toEqual([...slugs].sort());
   });

@@ -147,6 +147,24 @@ class ErrorCode(enum.StrEnum):
     SCHEDULE_FORBIDDEN_WINDOW = "schedule.forbidden_window"
     # A one-off planned in the past.
     SCHEDULE_IN_PAST = "schedule.in_past"
+    # Two-person approval of mass actions (C10).
+    APPROVAL_NOT_FOUND = "approval.not_found"
+    # Decided, cancelled or expired already (expired at this very moment
+    # included: recorded before the answer).
+    APPROVAL_NOT_PENDING = "approval.not_pending"
+    APPROVAL_OWN_REQUEST = "approval.own_request"
+    # No other account could approve it: nothing is asked.
+    APPROVAL_NO_APPROVER = "approval.no_approver"
+    APPROVAL_TOO_MANY_PENDING = "approval.too_many_pending"
+    # Turning approval on with fewer than two accounts able to approve.
+    APPROVAL_NOT_ENOUGH_APPROVERS = "approval.not_enough_approvers"
+    # The approval failed — the request is closed, recorded before the
+    # answer: the author lost their account or rights, the package was
+    # deleted or changed, no poste of the list is left.
+    APPROVAL_AUTHOR_NOT_ALLOWED = "approval.author_not_allowed"
+    APPROVAL_PACKAGE_GONE = "approval.package_gone"
+    APPROVAL_PACKAGE_CHANGED = "approval.package_changed"
+    APPROVAL_NOTHING_LEFT = "approval.nothing_left"
     ROOM_NAME_TAKEN = "room.name.taken"
     # ROOM_SOURCE is a directory mode: postes are filed by the directory, and
     # a placement made by hand here would be undone on the next inventory.

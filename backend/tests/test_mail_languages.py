@@ -208,7 +208,58 @@ def _test_mail(policy):
     return render
 
 
+def _approval(kind="command", outcome=None, **changes):
+    def render(language):
+        from app.features.notification import approval_mail
+
+        view = approval_mail.RequestView(
+            kind=kind,
+            command_type="package_install" if kind == "command" else "reboot",
+            package_name="7-Zip 23.01" if kind == "command" else None,
+            target_kind="domain" if kind == "command" else "room",
+            target_value="LYCEE" if kind == "command" else "B12",
+            count=45,
+            threshold=40,
+            expires_at=NOW + timedelta(hours=24),
+            requested_by="marie@test.local",
+            schedule_name="Redémarrage du soir" if kind == "schedule" else None,
+            **changes,
+        )
+        if outcome is None:
+            return approval_mail.render_request(view, language)
+        rendered = approval_mail.render_outcome(view, language)
+        assert rendered is not None
+        return rendered
+
+    return render
+
+
 PURE: dict[str, Callable] = {
+    "approval_request": _approval(),
+    "approval_request_schedule": _approval(kind="schedule"),
+    "approval_approved": _approval(
+        outcome=True,
+        status="approved",
+        decided_by="jean@test.local",
+        created=40,
+        skipped=3,
+        left_out=2,
+    ),
+    "approval_rejected": _approval(
+        kind="schedule",
+        outcome=True,
+        status="rejected",
+        decided_by="jean@test.local",
+        note="Pas pendant les examens",
+    ),
+    "approval_expired": _approval(outcome=True, status="expired"),
+    "approval_failed": _approval(
+        outcome=True,
+        status="failed",
+        decided_by="jean@test.local",
+        result_code="permission_lost",
+        result_params={"permission": "risky_command:execute"},
+    ),
     "digest_events": _digest_events,
     "digest_quiet": _render_digest(),
     "digest_updates": _render_digest(with_high_severity_updates=1),

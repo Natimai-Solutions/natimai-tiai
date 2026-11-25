@@ -282,6 +282,24 @@ async def purge_schedule_runs() -> int:
         return await runner.purge_runs(session, cutoff)
 
 
+async def expire_approvals() -> int:
+    """Close the approval requests past their time (C10)."""
+    from app.features.approval import crud as approval_crud
+
+    async with AsyncSession(engine) as session:
+        return await approval_crud.mark_expired(session, utcnow())
+
+
+async def purge_approvals() -> int:
+    """Drop the approval requests closed more than
+    ``APPROVAL_RETENTION_DAYS`` ago."""
+    from app.features.approval import crud as approval_crud
+
+    cutoff = utcnow() - timedelta(days=settings.APPROVAL_RETENTION_DAYS)
+    async with AsyncSession(engine) as session:
+        return await approval_crud.purge_before(session, cutoff)
+
+
 async def purge_reports() -> int:
     """Drop the reports handled more than ``REPORT_RETENTION_DAYS`` ago —
     their contact with them (C4)."""
@@ -570,6 +588,9 @@ def build_jobs(
         Job("sync_directory", sync_directory, now, every(60)),
         # Every minute: a schedule set for 18:00 runs by 18:01.
         Job("run_schedules", run_schedules, now, every(60)),
+        # Every five minutes: a request past its time is closed, its author
+        # told, its schedule suspended (C10).
+        Job("expire_approvals", expire_approvals, now, every(300)),
         # Every hour: the day's photo is the last one taken that day, so a
         # worker stopped in the evening leaves the afternoon's, not a gap.
         Job("snapshot_trends", snapshot_trends, now, every(3600)),
@@ -610,6 +631,7 @@ def build_jobs(
             housekeeping,
         ),
         Job("purge_sessions", purge_sessions, housekeeping(now), housekeeping),
+        Job("purge_approvals", purge_approvals, housekeeping(now), housekeeping),
         Job(
             "purge_webhook_deliveries",
             purge_webhook_deliveries,

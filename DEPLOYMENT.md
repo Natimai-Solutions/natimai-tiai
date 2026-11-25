@@ -376,6 +376,10 @@ Il n'est jamais committé.
 | `REPORTS_ENABLED` | `false` | Le QR de l'étiquette d'un poste ouvre, à qui le scanne **sans compte**, un formulaire de signalement (catégorie, texte, contact facultatif). Désactivé par défaut : c'est le premier point d'entrée non authentifié qui ne soit pas l'agent ; borné par adresse et par étiquette, il ne renvoie rien sur le poste. Joignable seulement depuis le réseau de l'établissement si la console l'est. Le contact laissé est une donnée personnelle, à porter au registre des traitements. Les bornes sont comptées **par adresse** (10 envois et 60 lectures du formulaire par heure) : si la console est derrière un proxy, il doit figurer dans `TRUSTED_PROXIES` / `TRUSTED_PROXY_HOSTS`, sans quoi tout l'établissement partage une seule adresse et un seul quota ; l'adresse de l'émetteur est conservée dans le journal d'audit (`AUDIT_RETENTION_DAYS`), à porter au registre aussi. **Valeur initiale seulement** : modifiable dans Paramètres |
 | `REPORT_RETENTION_DAYS` | `90` | Conservation d'un signalement traité — et du contact qu'il porte — avant sa purge du matin. Un signalement à trier n'est jamais purgé |
 | `SCHEDULE_RUN_RETENTION_DAYS` | `180` | Conservation de l'historique des exécutions de planifications, purgé chaque matin. Les commandes créées restent dans l'historique des postes |
+| `APPROVAL_ENABLED` | `false` | Approbation à deux des actions de masse (C10) : au-delà de `APPROVAL_THRESHOLD` postes, une commande à risque (ou une planification à risque) n'est pas mise en file mais attend l'accord d'un second compte — cf. « Approbation à deux ». **Valeur initiale seulement** : modifiable dans Paramètres, où elle ne s'active pas avec moins de deux comptes capables d'approuver |
+| `APPROVAL_THRESHOLD` | `40` | Nombre de postes (2 à 10 000) au-delà duquel l'approbation s'applique, compté par envoi sur les postes réellement visés. **Valeur initiale seulement** |
+| `APPROVAL_TTL_HOURS` | `24` | Durée (1 à 168 h) pendant laquelle une demande attend sa décision avant d'expirer. **Valeur initiale seulement** |
+| `APPROVAL_RETENTION_DAYS` | `180` | Conservation d'une demande d'approbation close, purgée chaque matin ; le journal d'audit en garde la trace au-delà |
 | `DIRECTORY_VERIFY` | `off` | `relay` : des postes désignés lisent l'annuaire de leur domaine avec leur compte machine, et le serveur range les salles et vérifie la déclaration des agents d'après cette lecture (voir « Lire l'annuaire au lieu de croire les agents »). `off` : la déclaration des agents est crue. `ldap` n'existe pas encore |
 | `DIRECTORY_SYNC_MINUTES` | `60` | Intervalle entre deux lectures demandées à chaque lecteur (5 à 1 440) |
 | `DIRECTORY_STALE_HOURS` | `72` | Au-delà, un domaine non relu ne vérifie plus rien : ses postes passent « périmés » |
@@ -639,6 +643,45 @@ interne) se déclare dans `WEBHOOK_ALLOWED_HOSTS` ; `http://` est alors admis
 pour lui. Le serveur doit pouvoir joindre la destination en HTTPS (directement
 ou par `WEBHOOK_PROXY_URL`).
 
+**Approbation à deux** (C10). Désactivée par défaut (`APPROVAL_ENABLED`,
+puis Paramètres). Activée, une commande **à risque** (redémarrage, extinction,
+mises à jour Windows, réparations, installation ou désinstallation d'un paquet)
+envoyée à **plus de** `APPROVAL_THRESHOLD` postes — comptés dans la portée de
+l'auteur, jetons révoqués exclus — n'est pas mise en file : elle devient une
+**demande** qu'un **autre compte**, détenant les mêmes droits (« Commandes :
+exécuter » et « Commandes à risque : exécuter », plus « Planifications :
+gérer » pour une planification) et voyant **tous** les postes visés, approuve
+ou refuse depuis la page « Approbations ». L'approbation exécute la liste figée
+à la demande (moins les postes supprimés ou sortis de la portée de l'auteur
+depuis), au nom de l'auteur, après avoir tout revérifié : compte et droits de
+l'auteur, paquet (un paquet modifié depuis fait échouer la demande), plages
+interdites à l'heure de l'approbation. Une demande expire après
+`APPROVAL_TTL_HOURS` ; son auteur peut l'annuler ; un auteur a au plus vingt
+demandes en attente. Une planification à risque au-delà du seuil est
+approuvée **une fois**, à l'écriture, pour son auteur et son nombre de postes :
+une modification, une réactivation par un autre compte ou une cible devenue
+plus large redemande une approbation (la planification est suspendue au
+départ d'une exécution qui dépasserait ce qui a été approuvé). Les comptes
+capables d'approuver reçoivent un e-mail (sauf préférence « rien ») ; un
+webhook peut s'abonner à `approval.requested`.
+
+L'approbation **ne s'active pas** avec moins de deux comptes capables
+d'approuver : dans un établissement à un seul administrateur, elle bloquerait
+tout. Ce nombre, affiché dans Paramètres, **ne tient pas compte des lieux** :
+un approbateur limité à des sites doit couvrir **tous** les postes d'une
+demande, et deux comptes limités à deux sites différents ne s'approuvent pas
+l'un l'autre. Une demande que personne d'autre ne pourrait approuver est
+refusée à sa création (« aucun approbateur possible ») plutôt que d'attendre
+son expiration ; retirer un droit ou désactiver un compte n'est jamais bloqué
+pour autant. Approuver ou refuser demande une session de la console : un jeton
+d'API est refusé. Ce que l'approbation ne protège pas : le seuil s'applique
+**par envoi** — une action découpée en lots de `APPROVAL_THRESHOLD` postes ou
+moins (console, script, plusieurs planifications) n'est pas arrêtée, chaque
+lot laissant sa ligne `command.bulk` au journal ; une même personne disposant
+de deux comptes (local de secours et annuaire) peut s'approuver elle-même ; un
+compte qui détient « Paramètres : gérer » peut désactiver l'approbation puis
+agir seul (`settings.update` au journal).
+
 *Jetons d'API* — « Mon compte », carte « Jetons d'API » (droit « Jetons d'API :
 créer des jetons », administrateurs par défaut). Créer un jeton demande le mot
 de passe du compte, et un code s'il a la double authentification ; un compte de
@@ -664,6 +707,13 @@ seul son hachage est gardé. Création et révocation sont au journal d'audit ; 
 carte montre la dernière utilisation. Tous les jetons d'un compte sont révoqués
 quand un administrateur le désactive, réinitialise son mot de passe ou son
 second facteur.
+
+Avec l'approbation à deux activée, `POST /api/v1/commands` peut répondre
+**202** : rien n'est parti, une demande attend un second compte. Le corps
+porte alors `approval_id` (la demande), `approval_expires_at` et
+`pending_approval` (les postes en attente) ; `count` y vaut 0 et ne veut **pas**
+dire « rien à faire ». Un script lit `approval_id` (et le statut HTTP), pas
+`count`. Renvoyer la même requête tant qu'elle attend redonne la même demande.
 
 Pour **déconnecter tout le monde** d'un coup (clé `SECRET_KEY` divulguée, poste
 compromis), changer `SECRET_KEY` puis fermer toutes les sessions — sans

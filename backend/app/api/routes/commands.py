@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func
 from sqlmodel import col, select
@@ -23,6 +23,7 @@ from app.api.deps import (
     require_permission,
 )
 from app.core.errors import AppError, ErrorCode
+from app.features.approval import crud as approval_crud
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.command import crud as command_crud
@@ -41,6 +42,7 @@ from app.features.machine.status import MachineStatus
 from app.features.package import crud as package_crud
 from app.features.package.models import Package
 from app.features.schedule import windows
+from app.features.setting import crud as setting_crud
 from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import machine_ids_clause, restrict
 
@@ -152,6 +154,14 @@ class CreateCommandsResponse(BaseModel):
     # the unfinished command already there. None when one was created, and
     # on a request aimed at several postes. ("gone" is answered as a 404.)
     reason: Literal["pending", "delivered", "running", "gone"] | None = None
+    # Answered with 202 (C10): nothing was sent — a command at risk above
+    # the approval threshold waits for a second account. ``count`` is then
+    # 0 and does not mean « nothing to do »: the request is ``approval_id``,
+    # it expires at ``approval_expires_at``, and ``pending_approval`` postes
+    # wait for it.
+    approval_id: uuid.UUID | None = None
+    approval_expires_at: datetime | None = None
+    pending_approval: int | None = None
 
 
 class CommandOut(BaseModel):
@@ -203,6 +213,12 @@ class CommandList(BaseModel):
     "",
     response_model=CreateCommandsResponse,
     dependencies=[Depends(require_permission(Resource.COMMAND, Action.EXECUTE))],
+    responses={
+        202: {
+            "model": CreateCommandsResponse,
+            "description": "En attente d'approbation",
+        }
+    },
 )
 async def create_commands(
     payload: CreateCommands,
@@ -210,6 +226,7 @@ async def create_commands(
     user: CurrentUser,
     permissions: CurrentPermissions,
     scope: CurrentScope,
+    response: Response,
 ) -> CreateCommandsResponse:
     """Queue one command per resolved target machine.
 
@@ -223,6 +240,10 @@ async def create_commands(
     transaction: the rows say which postes received the command, the entry
     says what was asked and how much of it was skipped. A command on a single
     poste is traced by its row's ``created_by`` alone, as it always was.
+
+    With two-person approval on (C10), a command at risk on more postes than
+    the threshold is not queued: a request waits for a second account, and
+    the answer is 202 with its ``approval_id``.
     """
     if payload.type in RISKY_COMMAND_TYPES and not has_permission(
         permissions, Resource.RISKY_COMMAND, Action.EXECUTE
@@ -271,6 +292,32 @@ async def create_commands(
         await windows.require_outside_forbidden(
             session, utcnow(), confirmed=payload.confirm_forbidden_window
         )
+    if payload.type in RISKY_COMMAND_TYPES and len(machine_ids) > 1:
+        policy = await setting_crud.approval_policy(session)
+        if policy.enabled and len(machine_ids) > policy.threshold:
+            request = await approval_crud.submit_command(
+                session,
+                author_id=user.id,
+                author_email=user.email,
+                command_type=payload.type,
+                package=package,
+                target=target,
+                machine_ids=machine_ids,
+                ttl_minutes=payload.ttl_minutes,
+                policy=policy,
+                now=utcnow(),
+            )
+            out = CreateCommandsResponse(
+                created=[],
+                count=0,
+                revoked=revoked_count,
+                approval_id=request.id,
+                approval_expires_at=request.expires_at,
+                pending_approval=request.machine_count,
+            )
+            await session.commit()
+            response.status_code = 202
+            return out
     queued = await dispatch.queue(
         session,
         command_type=payload.type,

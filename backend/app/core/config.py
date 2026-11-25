@@ -550,6 +550,18 @@ class Settings(BaseSettings):
     # How long a schedule's run history is kept.
     SCHEDULE_RUN_RETENTION_DAYS: int = Field(default=180, ge=1)
 
+    # --- Two-person approval of mass actions (C10) ---
+    # Above APPROVAL_THRESHOLD postes, a command at risk (and a schedule at
+    # risk) waits for a second account's approval instead of being queued.
+    # Off by default. Initial values only — changed in Paramètres, where it
+    # cannot be turned on with fewer than two accounts able to approve.
+    APPROVAL_ENABLED: bool = False
+    APPROVAL_THRESHOLD: int = Field(default=40, ge=2, le=10000)
+    # How long a request waits for its decision, in hours.
+    APPROVAL_TTL_HOURS: int = Field(default=24, ge=1, le=168)
+    # How long a decided request is kept, in days.
+    APPROVAL_RETENTION_DAYS: int = Field(default=180, ge=1)
+
     # --- Reports from the postes' users (C4) ---
     # Whether a label's QR code opens the report form to whoever scans it,
     # without an account. Off by default: the first unauthenticated entry

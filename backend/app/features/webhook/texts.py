@@ -28,6 +28,10 @@ _FR: dict[str, Callable[[dict[str, Any]], str]] = {
         f"Commande « {d['type']} » échouée sur "
         f"{d['machine']['hostname'] or d['machine']['id']}"
     ),
+    "approval.requested": lambda d: (
+        f"Approbation demandée par {d['requested_by']} : « {d['command_type']} » "
+        f"sur {d['count']} postes, avant {d['expires_at']}"
+    ),
     "test": lambda d: "Essai du webhook Tia'i : il fonctionne.",
 }
 
@@ -48,6 +52,10 @@ _EN: dict[str, Callable[[dict[str, Any]], str]] = {
     "command.failed": lambda d: (
         f"Command “{d['type']}” failed on "
         f"{d['machine']['hostname'] or d['machine']['id']}"
+    ),
+    "approval.requested": lambda d: (
+        f"Approval requested by {d['requested_by']}: “{d['command_type']}” "
+        f"on {d['count']} computers, before {d['expires_at']}"
     ),
     "test": lambda d: "Tia'i webhook test: it works.",
 }

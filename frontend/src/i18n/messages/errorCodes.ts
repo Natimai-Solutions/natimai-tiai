@@ -123,6 +123,20 @@ const fr = {
   'license.too_many': 'Le nombre maximal de licences est atteint',
   'schedule.forbidden_window': 'Cette planification tomberait dans une plage interdite',
   'schedule.in_past': 'Cette date et cette heure sont passées',
+  'approval.not_found': 'Cette demande d’approbation n’existe pas ou n’est pas de votre ressort',
+  'approval.not_pending': 'Cette demande a déjà été décidée, annulée ou a expiré',
+  'approval.own_request': 'Une demande est approuvée par un autre compte que le vôtre',
+  'approval.no_approver':
+    'Aucun autre compte ne pourrait approuver cette demande : visez moins de postes, ou faites ajuster les groupes ou le réglage par un administrateur',
+  'approval.too_many_pending': 'Vous avez trop de demandes en attente d’approbation',
+  'approval.not_enough_approvers':
+    'Il faut au moins deux comptes capables d’approuver pour activer l’approbation à deux',
+  'approval.author_not_allowed':
+    'L’auteur de la demande n’a plus son compte ou ses droits : la demande est close',
+  'approval.package_gone': 'Le paquet a été supprimé depuis la demande : elle est close',
+  'approval.package_changed': 'Le paquet a été modifié depuis la demande : elle est close',
+  'approval.nothing_left':
+    'Aucun poste de la demande n’est encore dans la portée de son auteur : elle est close',
   'room.name.taken': 'Une salle porte déjà ce nom dans ce bâtiment',
   'intervention.not_found': 'Intervention introuvable',
   'check.not_found': 'Vérification introuvable',
@@ -259,6 +273,20 @@ const en: Record<keyof typeof fr, string> = {
   'license.too_many': 'The maximum number of licences has been reached',
   'schedule.forbidden_window': 'This schedule would run inside a forbidden window',
   'schedule.in_past': 'This date and time are past',
+  'approval.not_found': 'This approval request does not exist or is not yours to see',
+  'approval.not_pending': 'This request was already decided, cancelled or has expired',
+  'approval.own_request': 'A request is approved by another account than yours',
+  'approval.no_approver':
+    'No other account could approve this request: target fewer computers, or have an administrator adjust the groups or the setting',
+  'approval.too_many_pending': 'You have too many requests waiting for approval',
+  'approval.not_enough_approvers':
+    'At least two accounts able to approve are needed to turn two-person approval on',
+  'approval.author_not_allowed':
+    'The author of the request no longer has their account or rights: the request is closed',
+  'approval.package_gone': 'The package was deleted since the request: it is closed',
+  'approval.package_changed': 'The package changed since the request: it is closed',
+  'approval.nothing_left':
+    'None of the request’s computers is in its author’s scope any more: it is closed',
   'room.name.taken': 'A room already has this name in this building',
   'intervention.not_found': 'Intervention not found',
   'check.not_found': 'Check not found',

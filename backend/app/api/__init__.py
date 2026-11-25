@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes.agent import router as agent_router
 from app.api.routes.alerts import router as alerts_router
+from app.api.routes.approvals import router as approvals_router
 from app.api.routes.assets import machine_router as machine_assets_router
 from app.api.routes.assets import router as assets_router
 from app.api.routes.audit import router as audit_router
@@ -40,6 +41,7 @@ api_router.include_router(machines_router)
 api_router.include_router(alerts_router)
 api_router.include_router(assets_router)
 api_router.include_router(schedules_router)
+api_router.include_router(approvals_router)
 api_router.include_router(reports_router)
 api_router.include_router(licenses_router)
 api_router.include_router(oidc_router)

@@ -6,6 +6,10 @@ Importing this module guarantees every table is registered on
 
 from app.features.alert.models import MachineAlert  # noqa: F401
 from app.features.api_token.models import ApiToken  # noqa: F401
+from app.features.approval.models import (  # noqa: F401
+    ApprovalRequest,
+    ApprovalRequestMachine,
+)
 from app.features.asset.models import Asset  # noqa: F401
 from app.features.audit.models import AuditEntry  # noqa: F401
 from app.features.auth_session.models import AuthSession, LoginChallenge  # noqa: F401

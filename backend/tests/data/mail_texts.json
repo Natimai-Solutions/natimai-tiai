@@ -484,5 +484,149 @@
     "You receive this message because you own the maintenance of rooms or computers. Choose your e-mails in the console, under My account."
    ]
   }
+ },
+ "approval_request": {
+  "fr": {
+   "subject": "Tia'i — Approbation demandée : Installer le paquet 7-Zip 23.01 sur 45 postes",
+   "body": [
+    "marie@test.local demande « Installer le paquet 7-Zip 23.01 » sur 45 postes (le domaine « LYCEE »).",
+    "Au-delà de 40 postes, une action à risque attend l'accord d'un second compte.",
+    "Sans décision, la demande expire le 19/11/2026 06:00 (UTC).",
+    "",
+    "L'approuver ou la refuser : https://tiai.test/#/approvals",
+    "",
+    "Vous recevez ce message parce que votre compte peut approuver cette demande."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — Approval requested: Install the package 7-Zip 23.01 on 45 computers",
+   "body": [
+    "marie@test.local asks for “Install the package 7-Zip 23.01” on 45 computers (the domain “LYCEE”).",
+    "Above 40 computers, an action at risk waits for a second account's approval.",
+    "Without a decision, the request expires on 19/11/2026 06:00 (UTC).",
+    "",
+    "Approve or reject it: https://tiai.test/#/approvals",
+    "",
+    "You receive this message because your account can approve this request."
+   ]
+  }
+ },
+ "approval_request_schedule": {
+  "fr": {
+   "subject": "Tia'i — Approbation demandée : Redémarrer sur 45 postes",
+   "body": [
+    "marie@test.local a enregistré la planification « Redémarrage du soir » : « Redémarrer » sur 45 postes (la salle « B12 »).",
+    "Au-delà de 40 postes, une action à risque attend l'accord d'un second compte.",
+    "Sans décision, la demande expire le 19/11/2026 06:00 (UTC).",
+    "",
+    "L'approuver ou la refuser : https://tiai.test/#/approvals",
+    "",
+    "Vous recevez ce message parce que votre compte peut approuver cette demande."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — Approval requested: Restart on 45 computers",
+   "body": [
+    "marie@test.local saved the schedule “Redémarrage du soir”: “Restart” on 45 computers (the room “B12”).",
+    "Above 40 computers, an action at risk waits for a second account's approval.",
+    "Without a decision, the request expires on 19/11/2026 06:00 (UTC).",
+    "",
+    "Approve or reject it: https://tiai.test/#/approvals",
+    "",
+    "You receive this message because your account can approve this request."
+   ]
+  }
+ },
+ "approval_approved": {
+  "fr": {
+   "subject": "Tia'i — Votre demande a été approuvée",
+   "body": [
+    "Votre demande « Installer le paquet 7-Zip 23.01 » sur 45 postes a été approuvée par jean@test.local.",
+    "Commandes envoyées : 40 ; postes qui l'avaient déjà : 3 ; postes laissés de côté : 2.",
+    "",
+    "Voir vos demandes : https://tiai.test/#/approvals",
+    "",
+    "Vous recevez ce message parce que vous êtes l'auteur de cette demande."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — Your request was approved",
+   "body": [
+    "Your request “Install the package 7-Zip 23.01” on 45 computers was approved by jean@test.local.",
+    "Commands sent: 40; computers that already had it: 3; computers left out: 2.",
+    "",
+    "See your requests: https://tiai.test/#/approvals",
+    "",
+    "You receive this message because you made this request."
+   ]
+  }
+ },
+ "approval_rejected": {
+  "fr": {
+   "subject": "Tia'i — Votre demande a été refusée",
+   "body": [
+    "Votre planification « Redémarrage du soir » (Redémarrer, 45 postes) a été refusée par jean@test.local.",
+    "Motif : Pas pendant les examens",
+    "",
+    "Voir vos demandes : https://tiai.test/#/approvals",
+    "",
+    "Vous recevez ce message parce que vous êtes l'auteur de cette demande."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — Your request was rejected",
+   "body": [
+    "Your schedule “Redémarrage du soir” (Restart, 45 computers) was rejected by jean@test.local.",
+    "Reason: Pas pendant les examens",
+    "",
+    "See your requests: https://tiai.test/#/approvals",
+    "",
+    "You receive this message because you made this request."
+   ]
+  }
+ },
+ "approval_expired": {
+  "fr": {
+   "subject": "Tia'i — Votre demande a expiré",
+   "body": [
+    "Votre demande « Installer le paquet 7-Zip 23.01 » sur 45 postes a expiré sans décision : rien n'a été envoyé.",
+    "",
+    "Voir vos demandes : https://tiai.test/#/approvals",
+    "",
+    "Vous recevez ce message parce que vous êtes l'auteur de cette demande."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — Your request expired",
+   "body": [
+    "Your request “Install the package 7-Zip 23.01” on 45 computers expired without a decision: nothing was sent.",
+    "",
+    "See your requests: https://tiai.test/#/approvals",
+    "",
+    "You receive this message because you made this request."
+   ]
+  }
+ },
+ "approval_failed": {
+  "fr": {
+   "subject": "Tia'i — Votre demande a échoué",
+   "body": [
+    "Votre demande « Installer le paquet 7-Zip 23.01 » sur 45 postes n'a pas pu être approuvée : votre compte n'a plus le droit « risky_command:execute ». Rien n'a été envoyé.",
+    "",
+    "Voir vos demandes : https://tiai.test/#/approvals",
+    "",
+    "Vous recevez ce message parce que vous êtes l'auteur de cette demande."
+   ]
+  },
+  "en": {
+   "subject": "Tia'i — Your request failed",
+   "body": [
+    "Your request “Install the package 7-Zip 23.01” on 45 computers could not be approved: your account no longer holds “risky_command:execute”. Nothing was sent.",
+    "",
+    "See your requests: https://tiai.test/#/approvals",
+    "",
+    "You receive this message because you made this request."
+   ]
+  }
  }
 }

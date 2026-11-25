@@ -155,6 +155,13 @@ const fr = {
       "Échecs de connexion, même espacés, en LOGIN_SLOW_WINDOW_HOURS heures qui verrouillent un compte pour ce nombre d'heures ; ce verrou ferme le compte aux adresses qui ont échoué pendant cette fenêtre. Non défini : 20, ou quatre fois LOGIN_MAX_FAILED_ATTEMPTS si c'est davantage",
     LOGIN_SLOW_WINDOW_HOURS:
       "Fenêtre, en heures, de ce second compteur, et durée du verrou qu'il pose ; seul un nouveau mot de passe le lève. Non défini : 24, ou le double de LOGIN_LOCKOUT_MINUTES si c'est davantage",
+    APPROVAL_ENABLED:
+      "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+    APPROVAL_THRESHOLD:
+      "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+    APPROVAL_TTL_HOURS:
+      'Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres',
+    APPROVAL_RETENTION_DAYS: "Jours pendant lesquels une demande d'approbation close est conservée",
     ENROLLMENT_REENROLL_REQUIRES_APPROVAL:
       "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
     RATE_LIMIT_ENABLED:
@@ -331,6 +338,13 @@ const en: Translation<typeof fr> = {
       'Failed sign-ins, even spread out, within LOGIN_SLOW_WINDOW_HOURS hours that lock an account for that many hours; this lock closes the account to the addresses that failed during that window. Not set: 20, or four times LOGIN_MAX_FAILED_ATTEMPTS if that is more',
     LOGIN_SLOW_WINDOW_HOURS:
       'Window, in hours, of this second counter, and length of the lock it sets; only a new password lifts it. Not set: 24, or twice LOGIN_LOCKOUT_MINUTES if that is more',
+    APPROVAL_ENABLED:
+      'Initial value of two-person approval: above the threshold, a command at risk waits for a second account’s consent; changed in Settings',
+    APPROVAL_THRESHOLD:
+      'Initial value of the number of computers above which approval applies; changed in Settings',
+    APPROVAL_TTL_HOURS:
+      'Initial value of how long, in hours, a request waits for its decision; changed in Settings',
+    APPROVAL_RETENTION_DAYS: 'Days a closed approval request is kept',
     ENROLLMENT_REENROLL_REQUIRES_APPROVAL:
       'A computer already enrolled that asks for a token again waits for an administrator’s approval',
     RATE_LIMIT_ENABLED:
