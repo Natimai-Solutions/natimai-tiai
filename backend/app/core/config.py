@@ -518,6 +518,13 @@ class Settings(BaseSettings):
     # rows a day.
     USAGE_RETENTION_DAYS: int = Field(default=400, ge=1)
 
+    # --- Trends (``app.features.trend``) ---
+    # How long the daily photos of the dashboard's counters are kept, in days.
+    # 25 months by default: twelve months shown, and the twelve before them
+    # to compare with. At least 400, so that the twelve months shown are
+    # always there. A storage policy, hence environment only.
+    TREND_RETENTION_DAYS: int = Field(default=760, ge=400, le=3650)
+
     # --- Alerts (``app.features.alert``) ---
     # A closed catalogue of rules evaluated by the worker over what the postes
     # already report. These are the initial values; the console's own

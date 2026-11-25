@@ -56,6 +56,9 @@ class MachineCheck(SQLModel, table=True):
         ),
         # The task page reads "open, assigned to me".
         Index("ix_machine_checks_assigned_open", "assigned_to_id", "closed_at"),
+        # The closing delay indicator (C9) reads the requests closed in a
+        # period.
+        Index("ix_machine_checks_closed_at", "closed_at"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)

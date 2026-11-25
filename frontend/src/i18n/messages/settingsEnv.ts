@@ -66,6 +66,8 @@ const fr = {
     SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET:
       'Nouvelles entrées du catalogue logiciel que tous les postes réunis peuvent créer par 24 heures ; un poste reçoit le plus petit de ce qui reste de son budget et de celui-ci',
     AUDIT_RETENTION_DAYS: "Jours de conservation du journal d'audit (0 = indéfiniment)",
+    TREND_RETENTION_DAYS:
+      'Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances',
     MAINTENANCE_DEFAULT_CYCLE_DAYS:
       'Cycle par défaut, en jours — valeur initiale : le réglage enregistré ci-dessus prend le dessus',
     MAINTENANCE_DUE_SOON_DAYS: 'Fenêtre « à échéance », en jours — même règle',
@@ -243,6 +245,7 @@ const en: Translation<typeof fr> = {
     SOFTWARE_NEW_ENTRIES_PER_DAY_FLEET:
       'New software catalogue entries all computers together may create per 24 hours; a computer gets the smaller of what is left of its own budget and of this one',
     AUDIT_RETENTION_DAYS: 'Days the audit log is kept (0 = indefinitely)',
+    TREND_RETENTION_DAYS: "Days the dashboard's daily snapshots, read by the Trends page, are kept",
     MAINTENANCE_DEFAULT_CYCLE_DAYS:
       'Default cycle, in days — initial value: the setting saved above takes precedence',
     MAINTENANCE_DUE_SOON_DAYS: '“Due soon” window, in days — same rule',

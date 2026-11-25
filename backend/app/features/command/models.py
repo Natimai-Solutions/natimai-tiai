@@ -170,6 +170,10 @@ class Command(SQLModel, table=True):
         Index("ix_commands_machine_status", "machine_id", "status"),
         Index("ix_commands_expires_at", "expires_at"),
         Index("ix_commands_type_status", "type", "status"),
+        # The success indicators (C9) read the commands finished in a period;
+        # the expired ones, which keep ``finished_at`` NULL, are served by
+        # ``ix_commands_expires_at``.
+        Index("ix_commands_finished_at", "finished_at"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)

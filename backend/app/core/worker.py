@@ -314,6 +314,27 @@ async def purge_usage() -> int:
         return await usage_crud.purge_before(session, cutoff)
 
 
+async def snapshot_trends() -> int:
+    """Take today's photo of the dashboard's counters, by cell (C9), in
+    place of the previous one of the day. One transaction: a failure leaves
+    the previous photo as it was."""
+    from app.features.trend import snapshot
+
+    async with AsyncSession(engine) as session:
+        cells = await snapshot.record(session, utcnow())
+        await session.commit()
+    return cells
+
+
+async def purge_trends() -> int:
+    """Drop the daily photos older than ``TREND_RETENTION_DAYS``."""
+    from app.features.trend import snapshot
+
+    cutoff = utcnow().date() - timedelta(days=settings.TREND_RETENTION_DAYS)
+    async with AsyncSession(engine) as session:
+        return await snapshot.purge_before(session, cutoff)
+
+
 async def deliver_webhooks(stop: asyncio.Event | None = None) -> int:
     """Send what the webhooks are owed (C8): due deliveries, once each."""
     from app.features.webhook import deliver
@@ -549,6 +570,9 @@ def build_jobs(
         Job("sync_directory", sync_directory, now, every(60)),
         # Every minute: a schedule set for 18:00 runs by 18:01.
         Job("run_schedules", run_schedules, now, every(60)),
+        # Every hour: the day's photo is the last one taken that day, so a
+        # worker stopped in the evening leaves the afternoon's, not a gap.
+        Job("snapshot_trends", snapshot_trends, now, every(3600)),
         Job(
             "daily_digest",
             send_daily_digest,
@@ -576,6 +600,7 @@ def build_jobs(
             housekeeping,
         ),
         Job("purge_usage", purge_usage, housekeeping(now), housekeeping),
+        Job("purge_trends", purge_trends, housekeeping(now), housekeeping),
         Job("purge_alerts", purge_alerts, housekeeping(now), housekeeping),
         Job("purge_reports", purge_reports, housekeeping(now), housekeeping),
         Job(

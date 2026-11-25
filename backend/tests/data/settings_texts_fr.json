@@ -119,6 +119,14 @@
        "raw": 730,
        "format": "plain",
        "params": {}
+      },
+      {
+       "key": "TREND_RETENTION_DAYS",
+       "value": "760",
+       "description": "Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances",
+       "raw": 760,
+       "format": "plain",
+       "params": {}
       }
      ]
     },
@@ -794,6 +802,14 @@
        "raw": 730,
        "format": "plain",
        "params": {}
+      },
+      {
+       "key": "TREND_RETENTION_DAYS",
+       "value": "760",
+       "description": "Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances",
+       "raw": 760,
+       "format": "plain",
+       "params": {}
       }
      ]
     },
@@ -1462,6 +1478,14 @@
        "value": "730",
        "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
        "raw": 730,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TREND_RETENTION_DAYS",
+       "value": "760",
+       "description": "Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances",
+       "raw": 760,
        "format": "plain",
        "params": {}
       }
@@ -2139,6 +2163,14 @@
        "raw": 730,
        "format": "plain",
        "params": {}
+      },
+      {
+       "key": "TREND_RETENTION_DAYS",
+       "value": "760",
+       "description": "Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances",
+       "raw": 760,
+       "format": "plain",
+       "params": {}
       }
      ]
     },
@@ -2813,6 +2845,14 @@
        "value": "730",
        "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
        "raw": 730,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TREND_RETENTION_DAYS",
+       "value": "760",
+       "description": "Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances",
+       "raw": 760,
        "format": "plain",
        "params": {}
       }

@@ -121,12 +121,14 @@ def test_build_jobs_registers_the_whole_schedule():
         "refresh_compliance",
         "sync_directory",
         "run_schedules",
+        "snapshot_trends",
         "daily_digest",
         "maintenance_reminders",
         "purge_outbox",
         "purge_software",
         "purge_shared_counters",
         "purge_usage",
+        "purge_trends",
         "purge_alerts",
         "purge_reports",
         "purge_schedule_runs",
@@ -140,8 +142,12 @@ def test_build_jobs_registers_the_whole_schedule():
     # The outbox is due immediately: a restarted worker must resume mail
     # delivery on its first tick, not after an arbitrary wait.
     assert jobs["outbox"].next_run == now
+    # The trends' photo is hourly, from the start (C9).
+    trends = jobs["snapshot_trends"]
+    assert trends.next_run == now
+    assert trends.schedule(now) == now + timedelta(hours=1)
     # Every retention purge runs in the morning housekeeping slot.
-    for name in ("purge_audit", "purge_commands", "purge_reset_tokens"):
+    for name in ("purge_audit", "purge_commands", "purge_reset_tokens", "purge_trends"):
         assert jobs[name].next_run == datetime(2026, 8, 20, 8, 0, tzinfo=UTC)
     # The digest fires at the configured hour, on the hour.
     digest = jobs["daily_digest"]

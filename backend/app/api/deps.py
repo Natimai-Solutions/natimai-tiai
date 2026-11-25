@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Header, Query, Request
 from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import InvalidTokenError
 from sqlmodel import col, select
@@ -20,7 +20,7 @@ from app.features.base import utcnow
 from app.features.machine import token_rotation
 from app.features.machine.models import Machine
 from app.features.user import crud as user_crud
-from app.features.user.models import User
+from app.features.user.models import Language, User
 from app.features.user.permissions import (
     Action,
     Authority,
@@ -30,6 +30,12 @@ from app.features.user.permissions import (
 from app.features.user.scope import Scope
 
 security_log = logging.getLogger("app.security")
+
+# The language of an export's words — its headers, sheet, values — as the
+# console asks for it. French when absent: a script or an older console gets
+# the file it always got. Shared by the exports of the postes, the software
+# and the trends' report.
+ExportLanguage = Annotated[Language, Query(description="fr or en; fr when absent")]
 
 SessionDep = Annotated[AsyncSession, Depends(get_db)]
 

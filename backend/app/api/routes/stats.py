@@ -1,15 +1,26 @@
 """Console dashboard KPIs (plan §6, M3)."""
 
-from datetime import datetime
-from typing import Any
+import uuid
+from dataclasses import asdict
+from datetime import date, datetime
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import and_, exists, func, true
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 
-from app.api.deps import CurrentScope, SessionDep, require_permission
+from app.api.deps import (
+    CurrentPermissions,
+    CurrentScope,
+    ExportLanguage,
+    SessionDep,
+    require_permission,
+)
+from app.api.xlsx_export import Sheet, xlsx_workbook_response
+from app.core.config import settings
+from app.core.errors import AppError, ErrorCode
 from app.features.alert.models import ALL_RULES, MachineAlert
 from app.features.asset import crud as asset_crud
 from app.features.asset import win11
@@ -30,15 +41,26 @@ from app.features.maintenance import policy as maintenance_policy
 from app.features.maintenance.policy import MaintenanceState
 from app.features.room.models import Room
 from app.features.setting import crud as setting_crud
+from app.features.stats import counters
 from app.features.threat.models import Threat
+from app.features.trend import crud as trend_crud
+from app.features.trend import failures, indicators
+from app.features.trend import report as trend_report
 from app.features.usage import crud as usage_crud
-from app.features.user.permissions import Action, Resource
-from app.features.user.scope import machine_clause, machine_ids_clause, restrict
+from app.features.user.models import Language
+from app.features.user.permissions import Action, Resource, permission_key
+from app.features.user.scope import (
+    Scope,
+    machine_clause,
+    machine_ids_clause,
+    restrict,
+)
 
 # What ``Win32_EncryptableVolume`` reports for a volume BitLocker has finished
 # protecting. Anything else — in progress, decrypting, suspended, off — is a
 # volume that is not protected right now, which is what the card counts.
-FULLY_ENCRYPTED = "FullyEncrypted"
+# Shared with the daily photo's counters (``features/stats/counters.py``).
+FULLY_ENCRYPTED = counters.FULLY_ENCRYPTED
 
 router = APIRouter(
     prefix="/stats",
@@ -389,4 +411,308 @@ async def overview(session: SessionDep, scope: CurrentScope) -> StatsOverview:
         usage_since=await usage_crud.usage_since(session),
         machines_reenroll_pending=machines_reenroll_pending,
         machines_token_revoked=machines_token_revoked,
+    )
+
+
+# --- Trends, indicators, recurring failures, report (C9) ----------------------
+
+TrendMonths = Annotated[int, Query(ge=1, le=24, description="1 to 24 months")]
+
+
+def _trend_keys(raw: str | None) -> list[str]:
+    """``keys=total,open_checks`` → the keys, in order, without repeats; an
+    unknown one is a 422 rather than a series silently missing."""
+    if not raw:
+        return list(trend_crud.DEFAULT_KEYS)
+    keys = list(dict.fromkeys(p.strip() for p in raw.split(",") if p.strip()))
+    unknown = sorted(set(keys) - set(counters.ALL_KEYS))
+    if unknown or not keys:
+        raise AppError(
+            code=ErrorCode.REQUEST_VALIDATION_ERROR,
+            status_code=422,
+            message=f"Unknown key in keys: {', '.join(unknown)}",
+        )
+    return keys
+
+
+class PolicyChange(BaseModel):
+    day: date
+    key: str
+    before: Any = None
+    after: Any = None
+
+
+class TrendsOut(BaseModel):
+    """The daily photo summed over the caller's scope (plan C9 §2.5)."""
+
+    days: list[date]
+    # One value per day of ``days``: the sum over the cells in scope (0 when
+    # none carries the key), or null for a day never photographed — a gap.
+    series: dict[str, list[int | None]]
+    step: Literal["day", "week"]
+    # Today, when it is on the axis: its point is redrawn every hour.
+    provisional_day: date | None
+    # The first day ever photographed; null before the first photo.
+    since: date | None
+    policy_changes: list[PolicyChange]
+
+
+@router.get("/trends", response_model=TrendsOut)
+async def trends(
+    session: SessionDep,
+    scope: CurrentScope,
+    months: TrendMonths = 12,
+    step: Literal["day", "week"] | None = None,
+    keys: str | None = Query(
+        None, description="Comma-separated counter keys; the default series when absent"
+    ),
+) -> TrendsOut:
+    """The dashboard's counters over the past months, for the caller's scope:
+    one point a day, or a week (its last day photographed) beyond 3 months."""
+    wanted = _trend_keys(keys)
+    period = await trend_crud.period(session, months, utcnow())
+    chosen_step = step or ("day" if months <= 3 else "week")
+    result = await trend_crud.series(
+        session,
+        scope,
+        start=period.first_day,
+        end=period.today,
+        step=chosen_step,
+        keys=wanted,
+        today=period.today,
+    )
+    return TrendsOut(
+        days=result.days,
+        series=result.series,
+        step=chosen_step,
+        provisional_day=result.provisional_day,
+        since=result.since,
+        policy_changes=[PolicyChange(**c) for c in result.policy_changes],
+    )
+
+
+class CheckMonthOut(BaseModel):
+    month: str
+    closed: int
+    median_hours: float | None
+    p90_hours: float | None
+    with_due: int
+    on_time_due: int
+
+
+class MaintenanceMonthOut(BaseModel):
+    month: str
+    done: int
+    on_time: int
+
+
+class CommandMonthOut(BaseModel):
+    month: str
+    succeeded: int
+    failed: int
+    expired: int
+    unanswered: int
+
+
+class DeploymentsOut(BaseModel):
+    direct: list[CommandMonthOut]
+    scheduled: list[CommandMonthOut]
+    # Null for a confined account, or one that does not read the schedules.
+    halted_runs: list[int] | None
+
+
+class RetentionOut(BaseModel):
+    # Null when nothing is purged (``COMMAND_RETENTION_DAYS = 0``).
+    commands_days: int | None
+    schedule_runs_days: int
+
+
+class IndicatorsOut(BaseModel):
+    """Monthly indicators read off the history (plan C9 §3). A section is
+    null when the caller may not read its source."""
+
+    months: list[str]
+    checks: list[CheckMonthOut] | None
+    maintenance: list[MaintenanceMonthOut] | None
+    commands: list[CommandMonthOut] | None
+    deployments: DeploymentsOut | None
+    retention: RetentionOut
+
+
+def _can(permissions: frozenset[str], resource: Resource) -> bool:
+    return permission_key(resource, Action.READ) in permissions
+
+
+async def _indicators(
+    session: SessionDep,
+    scope: Scope | None,
+    permissions: frozenset[str],
+    period: trend_crud.Period,
+) -> tuple[
+    list[indicators.CheckMonth] | None,
+    list[indicators.MaintenanceMonth] | None,
+    list[indicators.CommandMonth] | None,
+    indicators.Deployments | None,
+]:
+    checks = (
+        await indicators.checks(session, scope, period)
+        if _can(permissions, Resource.CHECK)
+        else None
+    )
+    maintenance = (
+        await indicators.maintenance(session, scope, period)
+        if _can(permissions, Resource.MAINTENANCE)
+        else None
+    )
+    commands = (
+        await indicators.commands(session, scope, period)
+        if _can(permissions, Resource.COMMAND)
+        else None
+    )
+    deployments = (
+        await indicators.deployments(
+            session,
+            scope,
+            period,
+            can_read_schedules=_can(permissions, Resource.SCHEDULE),
+        )
+        if _can(permissions, Resource.COMMAND) and _can(permissions, Resource.PACKAGE)
+        else None
+    )
+    return checks, maintenance, commands, deployments
+
+
+@router.get("/indicators", response_model=IndicatorsOut)
+async def indicators_route(
+    session: SessionDep,
+    scope: CurrentScope,
+    permissions: CurrentPermissions,
+    months: TrendMonths = 12,
+) -> IndicatorsOut:
+    """Closing delays, maintenance on time, command and deployment outcomes,
+    month by month, for the caller's scope."""
+    period = await trend_crud.period(session, months, utcnow())
+    checks, maintenance, commands, deployments = await _indicators(
+        session, scope, permissions, period
+    )
+    return IndicatorsOut(
+        months=period.months,
+        checks=(
+            [CheckMonthOut(**asdict(m)) for m in checks] if checks is not None else None
+        ),
+        maintenance=(
+            [MaintenanceMonthOut(**asdict(m)) for m in maintenance]
+            if maintenance is not None
+            else None
+        ),
+        commands=(
+            [CommandMonthOut(**asdict(m)) for m in commands]
+            if commands is not None
+            else None
+        ),
+        deployments=(
+            DeploymentsOut(
+                direct=[CommandMonthOut(**asdict(m)) for m in deployments.direct],
+                scheduled=[CommandMonthOut(**asdict(m)) for m in deployments.scheduled],
+                halted_runs=deployments.halted_runs,
+            )
+            if deployments is not None
+            else None
+        ),
+        retention=RetentionOut(
+            commands_days=settings.COMMAND_RETENTION_DAYS or None,
+            schedule_runs_days=settings.SCHEDULE_RUN_RETENTION_DAYS,
+        ),
+    )
+
+
+class FailureRowOut(BaseModel):
+    # By model: the model (null = unknown). By room: the room shown (null =
+    # no room, or the anonymous « other room » row when ``out_of_scope``).
+    hw_model: str | None = None
+    room_id: uuid.UUID | None = None
+    room_name: str | None = None
+    building_name: str | None = None
+    out_of_scope: bool = False
+    incidents: int
+    machines: int
+    parc: int
+    per_100: float | None
+    retired_incidents: int
+    retired_machines: int
+    last_at: datetime | None
+
+
+@router.get(
+    "/recurring-failures",
+    response_model=list[FailureRowOut],
+    dependencies=[Depends(require_permission(Resource.INTERVENTION, Action.READ))],
+)
+async def recurring_failures(
+    session: SessionDep,
+    scope: CurrentScope,
+    months: TrendMonths = 12,
+    by: Literal["hw_model", "room"] = "hw_model",
+    min_incidents: int = Query(2, ge=1, le=1000),
+    limit: int = Query(50, ge=1, le=500),
+) -> list[FailureRowOut]:
+    """The ``incident`` interventions of the period, by model or by room,
+    against the size of that model's or room's parc."""
+    period = await trend_crud.period(session, months, utcnow())
+    rows = await failures.recurring_failures(
+        session, scope, period, by=by, min_incidents=min_incidents, limit=limit
+    )
+    return [FailureRowOut(**asdict(r)) for r in rows]
+
+
+@router.get("/report.xlsx")
+async def trends_report(
+    session: SessionDep,
+    scope: CurrentScope,
+    permissions: CurrentPermissions,
+    months: TrendMonths = 12,
+    lang: ExportLanguage = Language.FR,
+) -> Response:
+    """The Tendances page as a workbook: the counters month by month, the
+    indicators and the recurring failures the caller may read."""
+    now = utcnow()
+    period = await trend_crud.period(session, months, now)
+    fleet = await trend_crud.month_ends(
+        session,
+        scope,
+        start=period.first_day,
+        end=period.today,
+        keys=list(trend_report.REPORT_KEYS),
+    )
+    checks, maintenance, commands, deployments = await _indicators(
+        session, scope, permissions, period
+    )
+    by_model = by_room = None
+    if _can(permissions, Resource.INTERVENTION):
+        by_model = await failures.recurring_failures(
+            session, scope, period, by="hw_model", min_incidents=2, limit=500
+        )
+        by_room = await failures.recurring_failures(
+            session, scope, period, by="room", min_incidents=2, limit=500
+        )
+    sheets = trend_report.sheets(
+        trend_report.ReportData(
+            months=period.months,
+            fleet=fleet,
+            checks=checks,
+            maintenance=maintenance,
+            commands=commands,
+            deployments=deployments,
+            by_model=by_model,
+            by_room=by_room,
+        ),
+        lang,
+        now=now,
+        zone_name=period.zone_name,
+        zone=period.zone,
+    )
+    texts = trend_report.REPORT_TEXTS[lang]
+    return await xlsx_workbook_response(
+        f"{texts.filename}-{period.today.isoformat()}.xlsx",
+        [Sheet(s.title, s.header, s.rows, s.caption) for s in sheets],
     )

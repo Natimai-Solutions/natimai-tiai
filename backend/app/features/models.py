@@ -34,6 +34,7 @@ from app.features.room.models import Building, Room  # noqa: F401
 from app.features.schedule.models import Schedule, ScheduleRun  # noqa: F401
 from app.features.setting.models import AppSetting  # noqa: F401
 from app.features.threat.models import Threat  # noqa: F401
+from app.features.trend.models import TrendDay, TrendSnapshot  # noqa: F401
 from app.features.usage.models import MachineUptime  # noqa: F401
 from app.features.user.models import (  # noqa: F401
     Group,

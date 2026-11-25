@@ -430,6 +430,12 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "AUDIT_RETENTION_DAYS",
                     "Jours de conservation du journal d'audit (0 = indéfiniment)",
                 ),
+                _item(
+                    env,
+                    "TREND_RETENTION_DAYS",
+                    "Jours de conservation des photos quotidiennes du tableau de "
+                    "bord, lues par la page Tendances",
+                ),
             ],
         ),
         EnvGroup(
