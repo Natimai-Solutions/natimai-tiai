@@ -38,6 +38,9 @@ def upgrade() -> None:
         sa.Column("code_verifier", sa.String(length=128), nullable=False),
         sa.Column("redirect", sa.String(length=2000), nullable=True),
         sa.Column("link_user_id", sa.Uuid(), nullable=True),
+        sa.Column(
+            "link_password_changed_at", sa.DateTime(timezone=True), nullable=True
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),

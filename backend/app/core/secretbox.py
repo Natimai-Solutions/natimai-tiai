@@ -66,13 +66,30 @@ def encrypt_totp(plaintext: str) -> str:
     return _fernet(_totp_key(), TOTP_INFO).encrypt(plaintext.encode()).decode()
 
 
-def decrypt_totp(token: str) -> str | None:
-    """The secret behind ``token``, or None when the key changed: the account
-    can then only use a backup code, or be reset by an administrator."""
+def _open_totp(key: str, token: str) -> str | None:
     try:
-        return _fernet(_totp_key(), TOTP_INFO).decrypt(token.encode()).decode()
+        return _fernet(key, TOTP_INFO).decrypt(token.encode()).decode()
     except (InvalidToken, ValueError, TypeError, AttributeError):
         return None
+
+
+def decrypt_totp(token: str) -> str | None:
+    """The secret behind ``token``, or None when it cannot be read: the
+    account can then only use a backup code, or be reset by an administrator.
+
+    Under ``TOTP_ENCRYPTION_KEY``, a secret sealed before it was set — under
+    the key derived from ``SECRET_KEY`` — is still read: setting the
+    dedicated key on an installation where accounts already enrolled must not
+    wipe their second factors. It is sealed again at its next use."""
+    plain = _open_totp(_totp_key(), token)
+    if plain is None and settings.TOTP_ENCRYPTION_KEY:
+        plain = _open_totp(settings.SECRET_KEY, token)
+    return plain
+
+
+def totp_needs_resealing(token: str) -> bool:
+    """A secret readable only under the key before TOTP_ENCRYPTION_KEY."""
+    return bool(settings.TOTP_ENCRYPTION_KEY) and _open_totp(_totp_key(), token) is None
 
 
 def decrypt(token: str) -> str | None:

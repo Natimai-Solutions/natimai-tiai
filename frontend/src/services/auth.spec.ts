@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('boot/axios', () => ({
-  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+  api: {
+    get: vi.fn(),
+    post: vi.fn(),
+    patch: vi.fn(),
+    delete: vi.fn(),
+    defaults: { baseURL: '/api/v1' },
+  },
 }));
 
 import { api } from 'boot/axios';
@@ -10,7 +16,17 @@ import {
   checkPasswordResetToken,
   closeSession,
   confirmPasswordReset,
+  directorySignInUrl,
+  getAuthMethods,
   getMe,
+  isChallenge,
+  regenerateBackupCodes,
+  startDirectoryLink,
+  totpConfirm,
+  totpDisable,
+  totpSetup,
+  unlinkDirectory,
+  verifySecondFactor,
   listSessions,
   login,
   logout,
@@ -211,5 +227,63 @@ describe('checkPasswordResetToken (C7)', () => {
     expect(await checkPasswordResetToken('t')).toBe('unknown');
     vi.mocked(api.post).mockRejectedValueOnce(new Error('Network Error'));
     expect(await checkPasswordResetToken('t')).toBe('unknown');
+  });
+});
+
+describe('second factor and directory (C7)', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset();
+    vi.mocked(api.get).mockReset();
+    vi.mocked(api.delete).mockReset();
+  });
+
+  it('tells a challenge from a token', () => {
+    expect(isChallenge({ access_token: 'a', token_type: 'bearer' })).toBe(false);
+    expect(isChallenge({ second_factor_required: true, challenge: 'c', expires_in: 300 })).toBe(
+      true,
+    );
+  });
+
+  it('sends the code, the password and what each call needs', async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      data: { access_token: 't', backup_codes: ['A'], secret: 's', otpauth_uri: 'u' },
+    });
+    await verifySecondFactor('ch', '123456');
+    expect(vi.mocked(api.post).mock.calls[0]!.slice(0, 2)).toEqual([
+      '/auth/login/second-factor',
+      { challenge: 'ch', code: '123456' },
+    ]);
+    await totpSetup('pw');
+    expect(vi.mocked(api.post).mock.calls[1]!.slice(0, 2)).toEqual([
+      '/auth/totp/setup',
+      { current_password: 'pw' },
+    ]);
+    expect(await totpConfirm('111111')).toEqual(['A']);
+    await totpDisable('pw', '222222');
+    expect(vi.mocked(api.post).mock.calls[3]!.slice(0, 2)).toEqual([
+      '/auth/totp/disable',
+      { current_password: 'pw', code: '222222' },
+    ]);
+    expect(await regenerateBackupCodes('333333')).toEqual(['A']);
+  });
+
+  it('builds the directory sign-in address and follows only https', async () => {
+    expect(directorySignInUrl('/machines?x=1')).toBe(
+      '/api/v1/auth/oidc/start?redirect=%2Fmachines%3Fx%3D1',
+    );
+    expect(directorySignInUrl(null)).toBe('/api/v1/auth/oidc/start');
+    vi.mocked(api.get).mockResolvedValue({ data: { oidc_enabled: true, oidc_label: 'M' } });
+    expect(await getAuthMethods()).toEqual({ oidc_enabled: true, oidc_label: 'M' });
+
+    vi.mocked(api.post).mockResolvedValue({ data: { url: 'https://login.test/a' } });
+    expect(await startDirectoryLink('pw', null)).toBe('https://login.test/a');
+    expect(vi.mocked(api.post).mock.calls[0]!.slice(0, 2)).toEqual([
+      '/auth/oidc/link',
+      { current_password: 'pw' },
+    ]);
+    vi.mocked(api.post).mockResolvedValue({ data: { url: 'javascript:alert(1)' } });
+    await expect(startDirectoryLink('pw', '123456')).rejects.toThrow();
+    await unlinkDirectory();
+    expect(api.delete).toHaveBeenCalledWith('/auth/oidc/link');
   });
 });

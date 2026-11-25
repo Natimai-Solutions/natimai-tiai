@@ -140,6 +140,12 @@ async def spend_backup_code(
     return result.first() is not None
 
 
+def readable(user: User) -> bool:
+    return user.totp_secret is not None and (
+        secretbox.decrypt_totp(user.totp_secret) is not None
+    )
+
+
 def check_code(user: User, code: str, now: datetime) -> int | None:
     """The TOTP step ``code`` matches for this account, or None (wrong,
     replayed, or a secret that can no longer be read)."""
@@ -151,14 +157,111 @@ def check_code(user: User, code: str, now: datetime) -> int | None:
     return totp.matching_step(secret, code, now.timestamp(), after=user.totp_last_step)
 
 
+# The longest a lock lasts, however many came before it.
+MAX_LOCK = timedelta(hours=24)
+
+
 def _note_wrong(user: User, now: datetime) -> bool:
-    """Count a wrong code; True when it locks the second factor."""
+    """Count a wrong code; True when it locks the second factor.
+
+    The count is not reset by a lock, only by a right code: every
+    SECOND_FACTOR_MAX_FAILED_ATTEMPTS wrong codes lock it again, each time
+    twice as long (LOGIN_LOCKOUT_MINUTES, then twice that…, 24 hours at
+    most). Five guesses every fifteen minutes for ever would be ten
+    thousand a month; doubling the wait leaves a few dozen."""
     user.totp_failed_attempts += 1
-    if user.totp_failed_attempts >= settings.SECOND_FACTOR_MAX_FAILED_ATTEMPTS:
-        user.totp_failed_attempts = 0
-        user.totp_locked_until = now + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
+    limit = settings.SECOND_FACTOR_MAX_FAILED_ATTEMPTS
+    if user.totp_failed_attempts % limit == 0:
+        rounds = user.totp_failed_attempts // limit
+        length = timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES) * 2 ** min(
+            rounds - 1, 20
+        )
+        user.totp_locked_until = now + min(length, MAX_LOCK)
         return True
     return False
+
+
+@dataclass
+class Check:
+    """A code checked against an account's second factor."""
+
+    ok: bool = False
+    used_backup: bool = False
+    just_locked: bool = False
+    locked: bool = False
+
+
+async def verify_code(
+    session: AsyncSession,
+    user: User,
+    code: str,
+    now: datetime,
+    *,
+    allow_backup: bool = True,
+) -> Check:
+    """Check a code typed for an account — at login, or in « Mon compte » to
+    disable the second factor or renew the backup codes. One place, so that
+    every path counts towards the same lock and none guesses around it.
+    The caller holds the account's row lock and commits the counters
+    whatever the outcome."""
+    if locked(user, now):
+        return Check(locked=True)
+    step = check_code(user, code, now)
+    used_backup = False
+    if step is None and allow_backup:
+        used_backup = await spend_backup_code(session, user.id, code, now)
+    if step is None and not used_backup:
+        if not readable(user):
+            # The secret can no longer be read (the key changed): no code
+            # can match it, so none is counted — the backup codes stay
+            # usable instead of being locked away by the app's codes.
+            return Check()
+        just_locked = _note_wrong(user, now)
+        session.add(user)
+        return Check(just_locked=just_locked)
+    if step is not None:
+        user.totp_last_step = step
+    # A secret still sealed under the key before TOTP_ENCRYPTION_KEY: sealed
+    # again under the current one, now that it was read.
+    if user.totp_secret is not None and secretbox.totp_needs_resealing(
+        user.totp_secret
+    ):
+        plain = secretbox.decrypt_totp(user.totp_secret)
+        if plain is not None:
+            user.totp_secret = secretbox.encrypt_totp(plain)
+    user.totp_failed_attempts = 0
+    user.totp_locked_until = None
+    session.add(user)
+    return Check(ok=True, used_backup=used_backup)
+
+
+async def enforce_on_members(session: AsyncSession, user_ids: list[uuid.UUID]) -> int:
+    """Narrow to enrolment the live password sessions of the accounts that a
+    group now requires a second factor of and that have none: the
+    obligation applies at once, not at their next login. Does not commit."""
+    if not user_ids:
+        return 0
+    from app.features.auth_session.models import AuthSession
+
+    required_ids = [uid for uid in user_ids if await required(session, uid)]
+    if not required_ids:
+        return 0
+    without = select(col(User.id)).where(
+        col(User.id).in_(required_ids),
+        col(User.totp_enabled_at).is_(None),
+    )
+    result = await session.exec(
+        update(AuthSession)
+        .where(
+            col(AuthSession.user_id).in_(without),
+            col(AuthSession.revoked_at).is_(None),
+            col(AuthSession.auth_method) == "password",
+            col(AuthSession.enrolment_only).is_(False),
+        )
+        .values(enrolment_only=True)
+        .execution_options(synchronize_session="fetch")
+    )
+    return result.rowcount or 0
 
 
 async def redeem(session: AsyncSession, token: str, code: str) -> Outcome:
@@ -202,25 +305,11 @@ async def redeem(session: AsyncSession, token: str, code: str) -> Outcome:
     ):
         challenge.used_at = now
         return Outcome()
-    if locked(user, now):
-        return Outcome(failed_user=user)
-
-    step = check_code(user, code, now)
-    used_backup = False
-    if step is None:
-        used_backup = await spend_backup_code(session, user.id, code, now)
-    if step is None and not used_backup:
-        just_locked = _note_wrong(user, now)
-        session.add(user)
-        return Outcome(just_locked=just_locked, failed_user=user)
-
-    if step is not None:
-        user.totp_last_step = step
-    user.totp_failed_attempts = 0
-    user.totp_locked_until = None
-    session.add(user)
+    checked = await verify_code(session, user, code, now)
+    if not checked.ok:
+        return Outcome(just_locked=checked.just_locked, failed_user=user)
     challenge.used_at = now
-    return Outcome(user=user, used_backup=used_backup)
+    return Outcome(user=user, used_backup=checked.used_backup)
 
 
 async def purge_challenges(session: AsyncSession) -> int:

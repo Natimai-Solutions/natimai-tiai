@@ -293,6 +293,8 @@
               new-value-mode="add-unique"
               input-debounce="0"
               data-test="group-idp-groups"
+              :error="idpError !== null"
+              :error-message="idpError ?? ''"
               @new-value="addIdpGroup"
               @input-value="(v: string) => (idpTyping = v)"
             />
@@ -374,6 +376,8 @@ const form = reactive({
 /** A directory group id as the server takes it: letters, digits, a few separators. */
 const IDP_GROUP = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
 const idpTyping = ref('');
+/** Why the last id typed was not taken, until the next one is. */
+const idpError = ref<string | null>(null);
 
 function addIdpGroup(
   value: string,
@@ -381,20 +385,26 @@ function addIdpGroup(
 ): void {
   idpTyping.value = '';
   const id = value.trim().toLowerCase();
-  if (!IDP_GROUP.test(id) || form.idp_groups.includes(id)) {
+  idpError.value = IDP_GROUP.test(id) ? null : t('groups.form.idpGroupInvalid');
+  if (idpError.value || form.idp_groups.includes(id)) {
     done();
     return;
   }
   done(id, 'add-unique');
 }
 
-/** An id typed without Entrée is kept on save, as the locations are. */
-function commitTypedIdpGroup() {
+/** An id typed without Entrée is kept on save, as the locations are; an
+ *  invalid one stops the save and says so, rather than vanishing. */
+function commitTypedIdpGroup(): boolean {
   const id = idpTyping.value.trim().toLowerCase();
-  idpTyping.value = '';
-  if (IDP_GROUP.test(id) && !form.idp_groups.includes(id)) {
-    form.idp_groups = [...form.idp_groups, id];
+  if (!id) return true;
+  if (!IDP_GROUP.test(id)) {
+    idpError.value = t('groups.form.idpGroupInvalid');
+    return false;
   }
+  idpTyping.value = '';
+  if (!form.idp_groups.includes(id)) form.idp_groups = [...form.idp_groups, id];
+  return true;
 }
 
 // What the scope pickers offer, and how a stored id is named in the table.
@@ -531,6 +541,8 @@ function openCreate() {
     mfa_required: false,
     idp_groups: [],
   });
+  idpError.value = null;
+  idpTyping.value = '';
   formOpen.value = true;
 }
 
@@ -548,6 +560,8 @@ function openEdit(group: Group) {
     mfa_required: group.mfa_required === true,
     idp_groups: [...(group.idp_groups ?? [])],
   });
+  idpError.value = null;
+  idpTyping.value = '';
   formOpen.value = true;
 }
 
@@ -585,7 +599,7 @@ function confirmWholeParc(): Promise<boolean> {
 
 async function submitForm() {
   commitTypedLocation();
-  commitTypedIdpGroup();
+  if (!commitTypedIdpGroup()) return;
   if (!(await confirmWholeParc())) return;
   saving.value = true;
   try {

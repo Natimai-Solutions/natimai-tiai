@@ -112,8 +112,12 @@ export async function verifySecondFactor(challenge: string, code: string): Promi
 }
 
 /** « Mon compte »: start an enrolment — a secret pending until a code confirms it. */
-export async function totpSetup(): Promise<{ secret: string; otpauth_uri: string }> {
-  const { data } = await api.post<{ secret: string; otpauth_uri: string }>('/auth/totp/setup');
+export async function totpSetup(
+  currentPassword: string,
+): Promise<{ secret: string; otpauth_uri: string }> {
+  const { data } = await api.post<{ secret: string; otpauth_uri: string }>('/auth/totp/setup', {
+    current_password: currentPassword,
+  });
   return data;
 }
 
@@ -149,10 +153,17 @@ export function directorySignInUrl(redirect: string | null): string {
 }
 
 /** « Associer mon compte »: the provider's URL to go through, for this account. */
-export async function startDirectoryLink(): Promise<string> {
-  const { data } = await api.post<{ url: string }>('/auth/oidc/link', undefined, {
-    withCredentials: true,
-  });
+export async function startDirectoryLink(
+  currentPassword: string,
+  code: string | null,
+): Promise<string> {
+  const { data } = await api.post<{ url: string }>(
+    '/auth/oidc/link',
+    { current_password: currentPassword, ...(code ? { code } : {}) },
+    { withCredentials: true },
+  );
+  // Only ever the provider's https page: anything else is not followed.
+  if (!/^https:\/\//i.test(data.url)) throw new Error('unexpected sign-in address');
   return data.url;
 }
 

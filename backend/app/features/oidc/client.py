@@ -235,15 +235,16 @@ async def verify(id_token: str, nonce: str) -> dict[str, Any]:
             key.key,
             algorithms=["RS256"],
             audience=settings.OIDC_CLIENT_ID,
-            issuer=issuer(),
             leeway=LEEWAY_SECONDS,
             options={"require": ["exp", "iat", "iss", "aud", "sub"]},
         )
     except jwt.exceptions.InvalidTokenError as exc:
         raise OidcError(INVALID, f"identity token refused: {exc}") from exc
-    # pyjwt compares the issuer exactly; the configured one may carry a
-    # trailing slash the token does not, which the comparison above handles
-    # by stripping it from ours — a token whose issuer has one is refused.
+    # The issuer compared here rather than by pyjwt, which compares exactly:
+    # « …/v2.0 » and « …/v2.0/ » are the same issuer, whichever side writes
+    # the slash.
+    if str(claims.get("iss", "")).rstrip("/") != issuer():
+        raise OidcError(INVALID, "issuer mismatch")
     if not secrets.compare_digest(str(claims.get("nonce", "")), nonce):
         raise OidcError(INVALID, "nonce mismatch")
     return claims

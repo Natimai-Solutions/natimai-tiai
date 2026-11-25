@@ -45,6 +45,8 @@ const fr = {
       'Ses membres se connectent avec un code en plus du mot de passe ; un membre qui ne l’a pas encore activée ne peut que le faire, depuis « Mon compte ».',
     mfaBadge: 'Double authentification',
     idpGroups: 'Groupes de l’annuaire',
+    idpGroupInvalid:
+      "Identifiant invalide : lettres, chiffres, « . », « _ », « : », « {'@'} », « - »",
     idpGroupsHint:
       'Identifiants (Entra ID : « ID d’objet ») des groupes de l’annuaire dont les membres reçoivent ce groupe en se connectant par l’annuaire. Entrée pour en ajouter un autre.',
     editTitle: 'Modifier le groupe',
@@ -141,6 +143,7 @@ const en: Translation<typeof fr> = {
       'Its members sign in with a code on top of the password; a member who has not turned it on yet can only do that, from My account.',
     mfaBadge: 'Two-step verification',
     idpGroups: 'Directory groups',
+    idpGroupInvalid: "Invalid id: letters, digits, “.”, “_”, “:”, “{'@'}”, “-”",
     idpGroupsHint:
       'Ids (Entra ID: “Object ID”) of the directory groups whose members get this group when they sign in through the directory. Enter to add another.',
     editTitle: 'Edit the group',

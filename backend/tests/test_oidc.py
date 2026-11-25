@@ -113,9 +113,13 @@ def provider(monkeypatch):
     oidc_client.reset_cache()
 
 
-async def _start(client, provider, headers=None, link=False):
+async def _start(client, provider, headers=None, link=False, link_code=None):
     if link:
-        resp = await client.post("/api/v1/auth/oidc/link", headers=headers)
+        resp = await client.post(
+            "/api/v1/auth/oidc/link",
+            headers=headers,
+            json={"current_password": STRONG, **(link_code or {})},
+        )
         assert resp.status_code == 200, resp.text
         url = resp.json()["url"]
     else:
@@ -363,7 +367,9 @@ async def test_a_local_account_links_itself(client, db_session, provider):
     assert me["directory_linked"] is True
 
     # Linking again is refused; unlinking keeps the password.
-    resp = await client.post("/api/v1/auth/oidc/link", headers=headers)
+    resp = await client.post(
+        "/api/v1/auth/oidc/link", headers=headers, json={"current_password": STRONG}
+    )
     assert resp.status_code == 409
     resp = await client.delete("/api/v1/auth/oidc/link", headers=headers)
     assert resp.status_code == 204

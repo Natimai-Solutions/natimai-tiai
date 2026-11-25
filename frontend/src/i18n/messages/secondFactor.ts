@@ -34,6 +34,7 @@ const fr = {
     qrLabel: 'Code QR à scanner avec l’application d’authentification',
     code: 'Code affiché par l’application',
     confirm: 'Confirmer',
+    continue: 'Continuer',
     cancel: 'Annuler',
   },
   codes: {
@@ -76,6 +77,13 @@ const fr = {
     unlink: 'Dissocier',
     linkedDone: 'Compte associé',
     unlinkedDone: 'Compte dissocié',
+    linkTitle: 'Associer mon compte {label}',
+    linkIntro: 'Confirmez avec votre mot de passe{withCode}.',
+    withCode: ' et un code de votre application',
+    password: 'Mot de passe actuel',
+    code: 'Code de l’application ou code de secours',
+    continue: 'Continuer',
+    cancel: 'Annuler',
     externalAccount:
       'Ce compte se connecte par l’annuaire de l’établissement : son mot de passe et sa double authentification s’y gèrent.',
   },
@@ -115,6 +123,7 @@ const en: Translation<typeof fr> = {
     qrLabel: 'QR code to scan with the authenticator app',
     code: 'Code shown by the app',
     confirm: 'Confirm',
+    continue: 'Continue',
     cancel: 'Cancel',
   },
   codes: {
@@ -157,6 +166,13 @@ const en: Translation<typeof fr> = {
     unlink: 'Unlink',
     linkedDone: 'Account linked',
     unlinkedDone: 'Account unlinked',
+    linkTitle: 'Link my {label} account',
+    linkIntro: 'Confirm with your password{withCode}.',
+    withCode: ' and a code from your app',
+    password: 'Current password',
+    code: 'App code or backup code',
+    continue: 'Continue',
+    cancel: 'Cancel',
     externalAccount:
       'This account signs in through the school’s directory: its password and two-step verification are managed there.',
   },

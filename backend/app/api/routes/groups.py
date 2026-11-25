@@ -33,7 +33,7 @@ from app.features.base import utcnow
 from app.features.machine.models import Machine
 from app.features.room import crud as room_crud
 from app.features.room.models import Building, Room
-from app.features.user import crud
+from app.features.user import crud, second_factor
 from app.features.user.models import GROUP_NAME_MAX_LENGTH, Group
 from app.features.user.permissions import (
     ALL_PERMISSIONS,
@@ -514,6 +514,16 @@ async def update_group(
                     actor_email=current.email,
                     action="edit_members",
                 )
+    # Requiring a second factor shuts its members out until they enrol
+    # (C7): the caller must reach every member, as for their permissions.
+    if "mfa_required" in fields and not authority.is_admin:
+        for member_id in await crud.group_member_ids(session, group.id):
+            reject_escalation(
+                authority,
+                await crud.user_authority(session, member_id),
+                actor_email=current.email,
+                action="edit_members",
+            )
     for name, value in fields.items():
         setattr(group, name, value)
     group.updated_at = utcnow()
@@ -526,6 +536,12 @@ async def update_group(
         await crud.set_group_scope(session, group, scope)
     if idp_groups is not None:
         await crud.set_group_idp_links(session, group, idp_groups)
+    if fields.get("mfa_required") is True:
+        # The obligation applies at once: the members' open password
+        # sessions without a second factor become enrolment sessions.
+        await second_factor.enforce_on_members(
+            session, await crud.group_member_ids(session, group.id)
+        )
     audit.record(
         session,
         actor=current.email,

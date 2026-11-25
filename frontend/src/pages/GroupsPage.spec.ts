@@ -128,6 +128,12 @@ describe('GroupsPage — scope (audit T26)', () => {
     await typeLocation(wrapper, 'Lycée Nord');
     const idp = wrapper.findAllComponents(QSelect).at(-1)!;
     idp.vm.$emit('new-value', 'BAD ID;', () => undefined);
+    await flushPromises();
+    expect(idp.props('errorMessage')).toContain('Identifiant invalide');
+    // An invalid id left typed stops the save instead of vanishing.
+    idp.vm.$emit('input-value', 'bad id;');
+    await submit();
+    expect(createGroup).not.toHaveBeenCalled();
     idp.vm.$emit('input-value', ' 11111111-AAAA-4bbb-8ccc-000000000001 ');
     await submit();
     expect(createGroup).toHaveBeenCalledWith(

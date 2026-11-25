@@ -463,6 +463,9 @@ async def update_user(
             raise
     if group_ids is not None:
         await crud.set_user_groups(session, user, group_ids)
+        # A group now requiring a second factor the account lacks: its open
+        # sessions become enrolment sessions at once (C7).
+        await second_factor.enforce_on_members(session, [user.id])
     if deactivating:
         await auth_sessions.revoke_all(session, user.id)
     audit.record(

@@ -125,7 +125,7 @@
       {{ t('secondFactor.directory.externalAccount') }}
     </q-banner>
 
-    <q-card v-if="!external" flat bordered style="max-width: 520px">
+    <q-card v-if="!external && !enrolmentOnly" flat bordered style="max-width: 520px">
       <q-card-section class="text-subtitle1">{{ t('account.password.title') }}</q-card-section>
 
       <q-form @submit="onSubmit">
@@ -179,9 +179,9 @@
     </q-card>
 
     <SecondFactorCard v-if="!external" />
-    <DirectoryCard />
+    <DirectoryCard v-if="!enrolmentOnly" />
 
-    <q-card flat bordered class="q-mt-md" style="max-width: 520px">
+    <q-card v-if="!enrolmentOnly" flat bordered class="q-mt-md" style="max-width: 520px">
       <q-card-section class="row items-start no-wrap">
         <div class="col">
           <div class="text-subtitle1">{{ t('account.sessions.title') }}</div>
@@ -294,6 +294,8 @@ const auth = useAuthStore();
 const router = useRouter();
 /** An account of the directory (C7): no password, no second factor here. */
 const external = computed(() => auth.user?.auth_source === 'oidc');
+/** A session for enrolment only: the second factor, and nothing the API would refuse. */
+const enrolmentOnly = computed(() => auth.user?.enrolment_only === true);
 
 // --- Language: the account's choice, or the browser's (`BROWSER`).
 const BROWSER = 'browser';

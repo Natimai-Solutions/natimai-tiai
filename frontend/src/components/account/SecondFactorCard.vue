@@ -76,7 +76,7 @@
         :label="t('secondFactor.card.enable')"
         :loading="busy"
         data-test="second-factor-enable"
-        @click="start"
+        @click="startOpen = true"
       />
       <template v-else>
         <q-btn
@@ -130,6 +130,41 @@
             @click="codesOpen = false"
           />
         </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- The password again before a secret is made: a stolen session must
+         not put a second factor of its own on the account. -->
+    <q-dialog v-model="startOpen">
+      <q-card style="width: 420px; max-width: 95vw">
+        <q-card-section class="text-h6">{{ t('secondFactor.card.enable') }}</q-card-section>
+        <q-form @submit="start">
+          <q-card-section class="q-pt-none">
+            <q-input
+              v-model="password"
+              type="password"
+              autocomplete="current-password"
+              :label="t('secondFactor.disable.password')"
+              outlined
+              dense
+              autofocus
+              reactive-rules
+              :rules="[(v: string) => !!v || t('account.password.required')]"
+              data-test="second-factor-password"
+            />
+          </q-card-section>
+          <q-card-actions align="right">
+            <q-btn v-close-popup flat no-caps :label="t('secondFactor.setup.cancel')" />
+            <q-btn
+              type="submit"
+              color="primary"
+              no-caps
+              unelevated
+              :label="t('secondFactor.setup.continue')"
+              :loading="busy"
+            />
+          </q-card-actions>
+        </q-form>
       </q-card>
     </q-dialog>
 
@@ -231,6 +266,7 @@ const password = ref('');
 const busy = ref(false);
 const backupCodes = ref<string[]>([]);
 const codesOpen = ref(false);
+const startOpen = ref(false);
 const disableOpen = ref(false);
 const regenerateOpen = ref(false);
 
@@ -242,7 +278,7 @@ const sixDigits = (v: string) =>
   /^\d{6}$/.test(v.replace(/\s/g, '')) || t('secondFactor.codeFormat');
 
 // Each dialog starts empty: a code typed for one action is not sent with another.
-watch([disableOpen, regenerateOpen], () => {
+watch([disableOpen, regenerateOpen, startOpen], () => {
   code.value = '';
   password.value = '';
 });
@@ -254,7 +290,9 @@ function fail(e: unknown): void {
 async function start(): Promise<void> {
   busy.value = true;
   try {
-    setup.value = await totpSetup();
+    setup.value = await totpSetup(password.value);
+    startOpen.value = false;
+    password.value = '';
     code.value = '';
   } catch (e) {
     fail(e);

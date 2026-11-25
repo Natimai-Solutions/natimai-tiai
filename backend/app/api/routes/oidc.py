@@ -17,10 +17,11 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Cookie, Depends, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, SessionDep
-from app.api.routes.auth import open_console_session
+from app.api.routes.auth import open_console_session, step_up
 from app.core import ratelimit
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
@@ -29,6 +30,8 @@ from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.oidc import client, crud
 from app.features.oidc.client import OidcError
+from app.features.user import crud as crud_users
+from app.features.user import second_factor
 
 security_log = logging.getLogger("app.security")
 
@@ -95,8 +98,18 @@ class LinkOut(BaseModel):
     url: str
 
 
+class LinkIn(BaseModel):
+    # Proven again: a stolen session must not bind the account to a
+    # directory identity that then signs in without password nor code.
+    current_password: str = Field(min_length=1, max_length=1024)
+    # Required when the account has a second factor.
+    code: str | None = Field(default=None, max_length=40)
+
+
 @router.post("/oidc/link", response_model=LinkOut, dependencies=[_START_LIMIT])
-async def oidc_link(session: SessionDep, user: CurrentUser) -> JSONResponse:
+async def oidc_link(
+    request: Request, payload: LinkIn, session: SessionDep, user: CurrentUser
+) -> JSONResponse:
     """« Associer mon compte » from a local account signed in by password:
     the sign-in that follows binds this account to the directory identity
     instead of opening another."""
@@ -118,10 +131,41 @@ async def oidc_link(session: SessionDep, user: CurrentUser) -> JSONResponse:
             status_code=409,
             message="This account is already linked",
         )
-    user_id = user.id
+    account = await crud_users.lock_account(session, user)
+    if account is None:
+        raise AppError(
+            code=ErrorCode.AUTH_SESSION_INVALID, status_code=401, message="Gone"
+        )
+    if second_factor.enabled(account) and not payload.code:
+        raise AppError(
+            code=ErrorCode.AUTH_SECOND_FACTOR_CODE_INVALID,
+            status_code=400,
+            message="A code is needed for an account with a second factor",
+        )
+    await step_up(
+        session,
+        request,
+        account,
+        password=payload.current_password,
+        code=payload.code if second_factor.enabled(account) else None,
+    )
+    user_id = account.id
+    changed_at = account.password_changed_at
+    email = account.email
+    audit.record(
+        session,
+        actor=email,
+        action="user.directory_link_started",
+        resource_type="user",
+        resource_id=str(user_id),
+        details={},
+    )
     try:
         url, browser = await crud.start(
-            session, redirect="/account", link_user_id=user_id
+            session,
+            redirect="/account",
+            link_user_id=user_id,
+            link_password_changed_at=changed_at,
         )
     except OidcError as exc:
         raise AppError(code=exc.code, status_code=502, message=str(exc)) from None
@@ -192,10 +236,19 @@ async def oidc_callback(
         return _login_error(exc.code)
     except OidcError as exc:
         await session.rollback()
+        # Refused: the state is spent all the same, never good twice.
+        await crud.spend(session, state)
         security_log.warning(
             "directory sign-in refused from %s: %s (%s)", ip, exc.code, exc
         )
         return _login_error(exc.code)
+    except IntegrityError:
+        # Two callbacks for one new identity at the same instant: the second
+        # one finds the account the first just created — at its next try.
+        await session.rollback()
+        await crud.spend(session, state)
+        security_log.warning("directory sign-in raced from %s", ip)
+        return _login_error(client.INVALID)
 
     user = result.user
     email = user.email
@@ -236,7 +289,11 @@ async def oidc_callback(
     response.delete_cookie(BROWSER_COOKIE, path=BROWSER_COOKIE_PATH)
     if result.linked:
         # The account was already signed in: the link is the whole outcome.
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            return _login_error(crud.ALREADY_LINKED)
         security_log.info("%s linked to a directory identity from %s", email, ip)
         return response
     security_log.info("login ok for %s from %s through the directory", email, ip)

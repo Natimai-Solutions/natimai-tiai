@@ -1094,6 +1094,12 @@ class TotpCodeIn(BaseModel):
     code: str = Field(min_length=1, max_length=40)
 
 
+class TotpSetupIn(BaseModel):
+    # Proven again: a stolen session must not put a second factor of its
+    # own on the account, shutting its owner out.
+    current_password: str = Field(min_length=1, max_length=1024)
+
+
 class TotpDisableIn(BaseModel):
     current_password: str = Field(min_length=1, max_length=1024)
     code: str = Field(min_length=1, max_length=40)
@@ -1138,9 +1144,62 @@ async def _locked_account(session: SessionDep, user: User) -> User:
     return account
 
 
+async def step_up(
+    session: SessionDep,
+    request: Request,
+    account: User,
+    *,
+    password: str | None,
+    code: str | None,
+    allow_backup: bool = True,
+) -> None:
+    """Prove the holder again before an action a stolen session must not
+    take: the current password (a wrong one counts towards the password's
+    lock) and, when given, a code — checked by ``second_factor.verify_code``,
+    which counts towards the second factor's lock like a login. The account
+    row is locked by the caller. Commits the counters on a refusal."""
+    if password is not None and not await security.check_password(
+        password, account.hashed_password
+    ):
+        await crud.record_failure(session, account, client_ip(request))
+        await session.commit()
+        raise AppError(
+            code=ErrorCode.PASSWORD_CURRENT_INVALID,
+            status_code=400,
+            message="Current password is incorrect",
+        )
+    if code is None:
+        return
+    checked = await second_factor.verify_code(
+        session, account, code, utcnow(), allow_backup=allow_backup
+    )
+    if checked.ok:
+        return
+    if checked.just_locked:
+        audit.record(
+            session,
+            actor=account.email,
+            action="user.second_factor_locked",
+            resource_type="user",
+            resource_id=str(account.id),
+            details={
+                "locked_until": account.totp_locked_until.isoformat()
+                if account.totp_locked_until
+                else None,
+                "via": "account",
+            },
+        )
+    await session.commit()
+    raise _code_invalid()
+
+
 @router.post("/totp/setup", response_model=TotpSetupOut)
 async def totp_setup(
-    user: CurrentUser, current: CurrentAuthSession, session: SessionDep
+    request: Request,
+    payload: TotpSetupIn,
+    user: CurrentUser,
+    current: CurrentAuthSession,
+    session: SessionDep,
 ) -> TotpSetupOut:
     """Start an enrolment: a fresh secret, pending until a code confirms it.
     Refused while one is active — disable it first — and for an account of
@@ -1154,6 +1213,9 @@ async def totp_setup(
             status_code=409,
             message="A second factor is already active on this account",
         )
+    await step_up(
+        session, request, account, password=payload.current_password, code=None
+    )
     secret, uri = second_factor.start_enrolment(account)
     session.add(account)
     await session.commit()
@@ -1228,23 +1290,13 @@ async def totp_disable(
             status_code=409,
             message="A group of this account requires a second factor",
         )
-    if not await security.check_password(
-        payload.current_password, account.hashed_password
-    ):
-        # A guess at the password through an open session counts towards
-        # the lock, as on « changer mon mot de passe ».
-        await crud.record_failure(session, account, client_ip(request))
-        await session.commit()
-        raise AppError(
-            code=ErrorCode.PASSWORD_CURRENT_INVALID,
-            status_code=400,
-            message="Current password is incorrect",
-        )
-    now = utcnow()
-    if second_factor.check_code(account, payload.code, now) is None and not (
-        await second_factor.spend_backup_code(session, account.id, payload.code, now)
-    ):
-        raise _code_invalid()
+    await step_up(
+        session,
+        request,
+        account,
+        password=payload.current_password,
+        code=payload.code,
+    )
     await second_factor.clear(session, account)
     audit.record(
         session,
@@ -1259,6 +1311,7 @@ async def totp_disable(
 
 @router.post("/totp/backup-codes", response_model=BackupCodesOut)
 async def totp_backup_codes(
+    request: Request,
     payload: TotpCodeIn,
     user: CurrentUser,
     current: CurrentAuthSession,
@@ -1274,12 +1327,10 @@ async def totp_backup_codes(
             status_code=409,
             message="No second factor is active on this account",
         )
-    now = utcnow()
-    step = second_factor.check_code(account, payload.code, now)
-    if step is None:
-        raise _code_invalid()
-    account.totp_last_step = step
-    session.add(account)
+    # The app's code only: a backup code must not buy ten new ones.
+    await step_up(
+        session, request, account, password=None, code=payload.code, allow_backup=False
+    )
     codes = await second_factor.new_backup_codes(session, account.id)
     audit.record(
         session,

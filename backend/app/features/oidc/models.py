@@ -34,6 +34,9 @@ class OidcLogin(SQLModel, table=True):
             ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
         ),
     )
+    # The account's password_changed_at when the link started: a password
+    # changed since (its owner taking it back) voids the link.
+    link_password_changed_at: datetime | None = utc_field(default=None, nullable=True)
     created_at: datetime = utc_field(default_factory=utcnow)
     expires_at: datetime = utc_field()
     used_at: datetime | None = utc_field(default=None, nullable=True)

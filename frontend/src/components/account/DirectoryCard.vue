@@ -29,7 +29,7 @@
         :label="t('secondFactor.directory.link', { label: methods.oidc_label })"
         :loading="busy"
         data-test="directory-link"
-        @click="link"
+        @click="openLink"
       />
       <q-btn
         v-else
@@ -42,6 +42,61 @@
         @click="unlink"
       />
     </q-card-actions>
+
+    <!-- Proven again before the link: a stolen session must not bind the
+         account to a directory identity that signs in without password. -->
+    <q-dialog v-model="linkOpen">
+      <q-card style="width: 420px; max-width: 95vw">
+        <q-card-section class="text-h6">
+          {{ t('secondFactor.directory.linkTitle', { label: methods.oidc_label }) }}
+        </q-card-section>
+        <q-form @submit="link">
+          <q-card-section class="q-gutter-md q-pt-none">
+            <div>
+              {{
+                t('secondFactor.directory.linkIntro', {
+                  withCode: needsCode ? t('secondFactor.directory.withCode') : '',
+                })
+              }}
+            </div>
+            <q-input
+              v-model="password"
+              type="password"
+              autocomplete="current-password"
+              :label="t('secondFactor.directory.password')"
+              outlined
+              dense
+              autofocus
+              reactive-rules
+              :rules="[(v: string) => !!v || t('account.password.required')]"
+              data-test="directory-password"
+            />
+            <q-input
+              v-if="needsCode"
+              v-model="code"
+              :label="t('secondFactor.directory.code')"
+              autocomplete="one-time-code"
+              outlined
+              dense
+              reactive-rules
+              :rules="[(v: string) => !!v.trim() || t('account.password.required')]"
+              data-test="directory-code"
+            />
+          </q-card-section>
+          <q-card-actions align="right">
+            <q-btn v-close-popup flat no-caps :label="t('secondFactor.directory.cancel')" />
+            <q-btn
+              type="submit"
+              color="primary"
+              no-caps
+              unelevated
+              :label="t('secondFactor.directory.continue')"
+              :loading="busy"
+            />
+          </q-card-actions>
+        </q-form>
+      </q-card>
+    </q-dialog>
   </q-card>
 </template>
 
@@ -68,6 +123,16 @@ const methods = ref<AuthMethods | null>(null);
 const busy = ref(false);
 const local = computed(() => (auth.user?.auth_source ?? 'local') === 'local');
 const linked = computed(() => auth.user?.directory_linked === true);
+const needsCode = computed(() => auth.user?.second_factor_enabled === true);
+const linkOpen = ref(false);
+const password = ref('');
+const code = ref('');
+
+function openLink(): void {
+  password.value = '';
+  code.value = '';
+  linkOpen.value = true;
+}
 
 onMounted(async () => {
   // Back from the provider after a link: said once.
@@ -84,7 +149,12 @@ onMounted(async () => {
 async function link(): Promise<void> {
   busy.value = true;
   try {
-    window.location.assign(await startDirectoryLink());
+    const url = await startDirectoryLink(
+      password.value,
+      needsCode.value ? code.value.trim() : null,
+    );
+    password.value = '';
+    window.location.assign(url);
   } catch (e) {
     notify($q, () => ({ type: 'negative', message: apiErrorMessage(e) }));
     busy.value = false;

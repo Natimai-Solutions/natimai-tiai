@@ -74,14 +74,24 @@ describe('SecondFactorCard', () => {
 
     await w.find('[data-test="second-factor-enable"]').trigger('click');
     await flushPromises();
+    // The password again first.
+    w.findAllComponents(QInput)
+      .find((i) => i.props('label') === 'Mot de passe actuel')!
+      .vm.$emit('update:modelValue', 'secret');
+    await flushPromises();
+    await w.findAllComponents(QForm).at(-1)!.trigger('submit');
+    await flushPromises();
+    expect(totpSetup).toHaveBeenCalledWith('secret');
     expect(w.find('svg[role="img"] path').attributes('d')).toMatch(/^M\d/);
     expect(w.find('[data-test="second-factor-secret"]').text()).toBe(
       'JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP',
     );
 
-    w.findComponent(QInput).vm.$emit('update:modelValue', '123 456');
+    w.findAllComponents(QInput)
+      .find((i) => i.props('label') === 'Code affiché par l’application')!
+      .vm.$emit('update:modelValue', '123 456');
     await flushPromises();
-    await w.findComponent(QForm).trigger('submit');
+    await w.find('[data-test="second-factor-setup"]').findComponent(QForm).trigger('submit');
     await flushPromises();
     expect(totpConfirm).toHaveBeenCalledWith('123456');
     expect(document.body.textContent).toContain('Vos codes de secours');

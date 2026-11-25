@@ -36,7 +36,9 @@ async def _password(client, email, password=STRONG):
 
 
 async def _enrol(client, headers, clock) -> tuple[str, list[str]]:
-    resp = await client.post("/api/v1/auth/totp/setup", headers=headers)
+    resp = await client.post(
+        "/api/v1/auth/totp/setup", headers=headers, json={"current_password": STRONG}
+    )
     assert resp.status_code == 200, resp.text
     secret = resp.json()["secret"]
     assert resp.json()["otpauth_uri"].startswith("otpauth://totp/")
@@ -227,6 +229,28 @@ async def test_backup_code_is_good_once(client, db_session, clock):
     assert entry.details["remaining"] == 9
 
 
+async def test_dedicated_key_set_later_keeps_second_factors(
+    client, db_session, clock, monkeypatch
+):
+    from app.core import secretbox
+    from app.core.config import settings
+    from app.features.user.permissions import BuiltinGroup
+
+    headers = await account(client, db_session, "ge@test.local", [BuiltinGroup.ADMIN])
+    secret, _ = await _enrol(client, headers, clock)
+    monkeypatch.setattr(
+        settings, "TOTP_ENCRYPTION_KEY", "a-dedicated-key-0123456789-abcdefgh"
+    )
+    user = await _user(db_session, "ge@test.local")
+    assert secretbox.totp_needs_resealing(user.totp_secret)
+    clock.tick()
+    challenge = (await _password(client, "ge@test.local")).json()["challenge"]
+    resp = await _second_step(client, challenge, totp.code_at(secret, clock.step))
+    assert resp.status_code == 200
+    await db_session.refresh(user)
+    assert not secretbox.totp_needs_resealing(user.totp_secret)
+
+
 async def test_unreadable_secret_leaves_the_backup_codes(
     client, db_session, clock, monkeypatch
 ):
@@ -235,13 +259,21 @@ async def test_unreadable_secret_leaves_the_backup_codes(
 
     headers = await account(client, db_session, "gu@test.local", [BuiltinGroup.ADMIN])
     secret, codes = await _enrol(client, headers, clock)
+    # SECRET_KEY changed without a dedicated key: the secret is unreadable.
     monkeypatch.setattr(
-        settings, "TOTP_ENCRYPTION_KEY", "another-key-entirely-0123456789"
+        settings, "SECRET_KEY", "another-key-entirely-0123456789-abcdefgh"
     )
     clock.tick()
+    # The app's codes cannot match, and are not counted: six of them leave
+    # the backup codes usable.
+    for _ in range(3):
+        challenge = (await _password(client, "gu@test.local")).json()["challenge"]
+        for _ in range(2):
+            resp = await _second_step(
+                client, challenge, totp.code_at(secret, clock.step)
+            )
+            assert resp.status_code == 401
     challenge = (await _password(client, "gu@test.local")).json()["challenge"]
-    resp = await _second_step(client, challenge, totp.code_at(secret, clock.step))
-    assert resp.status_code == 401
     resp = await _second_step(client, challenge, codes[1])
     assert resp.status_code == 200
 
@@ -323,7 +355,9 @@ async def test_regenerate_codes_and_setup_refused_while_on(client, db_session, c
 
     headers = await account(client, db_session, "jo@test.local", [BuiltinGroup.ADMIN])
     secret, old = await _enrol(client, headers, clock)
-    resp = await client.post("/api/v1/auth/totp/setup", headers=headers)
+    resp = await client.post(
+        "/api/v1/auth/totp/setup", headers=headers, json={"current_password": STRONG}
+    )
     assert resp.status_code == 409
     clock.tick()
     resp = await client.post(

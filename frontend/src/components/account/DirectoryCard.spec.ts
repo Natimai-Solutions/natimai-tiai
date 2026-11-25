@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { QForm, QInput } from 'quasar';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
@@ -50,7 +51,10 @@ async function mountCard(user: User) {
     routes: [{ path: '/account', component: Stub }],
   });
   await router.push('/account');
-  const w = mount(DirectoryCard, { global: { plugins: [pinia, router] } });
+  const w = mount(DirectoryCard, {
+    global: { plugins: [pinia, router] },
+    attachTo: document.body,
+  });
   await flushPromises();
   return w;
 }
@@ -75,6 +79,13 @@ describe('DirectoryCard', () => {
     expect(w.text()).toContain('Non associé');
     await w.find('[data-test="directory-link"]').trigger('click');
     await flushPromises();
+    w.findAllComponents(QInput)
+      .find((i) => i.props('label') === 'Mot de passe actuel')!
+      .vm.$emit('update:modelValue', 'secret');
+    await flushPromises();
+    await w.findComponent(QForm).trigger('submit');
+    await flushPromises();
+    expect(startDirectoryLink).toHaveBeenCalledWith('secret', null);
     expect(assign).toHaveBeenCalledWith('https://login.test/authorize?x=1');
   });
 
