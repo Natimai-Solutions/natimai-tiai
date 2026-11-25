@@ -16,7 +16,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
-from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
+from app.api.deps import (
+    CurrentPermissions,
+    CurrentScope,
+    CurrentUser,
+    SessionDep,
+    require_permission,
+)
 from app.api.fields import not_null
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
@@ -24,13 +30,16 @@ from app.features.base import utcnow
 from app.features.license import crud
 from app.features.license.models import License
 from app.features.setting import crud as setting_crud
-from app.features.user.permissions import Action, Resource
+from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import Scope
 
 router = APIRouter(prefix="/licenses", tags=["licenses"])
 
 _READ = Depends(require_permission(Resource.LICENSE, Action.READ))
 _WRITE = Depends(require_permission(Resource.LICENSE, Action.WRITE))
+# The catalogue's program names are machine data: the preview names them,
+# so it asks for what the Logiciels page asks for, on top of the licence.
+_MACHINE_READ = Depends(require_permission(Resource.MACHINE, Action.READ))
 
 Pattern = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=2, max_length=100)
@@ -70,10 +79,17 @@ class LicenseFields(BaseModel):
     reference: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=5000)
 
-    @field_validator("name", "publisher", "vendor", "reference", "notes", mode="before")
+    @field_validator("publisher", "vendor", "reference", "notes", mode="before")
     @classmethod
     def _trim(cls, value: Any) -> Any:
         return _blank_is_null(value)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip_name(cls, value: Any) -> Any:
+        # Stripped, never turned into null: a blank name is refused by its
+        # min_length (422), where a null would reach the NOT NULL column.
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("patterns")
     @classmethod
@@ -196,7 +212,7 @@ async def list_licenses(session: SessionDep, scope: CurrentScope) -> LicenseList
     )
 
 
-@router.post("/preview", response_model=PreviewOut, dependencies=[_READ])
+@router.post("/preview", response_model=PreviewOut, dependencies=[_READ, _MACHINE_READ])
 async def preview(
     payload: PreviewIn, session: SessionDep, scope: CurrentScope
 ) -> PreviewOut:
@@ -211,7 +227,10 @@ async def preview(
 
 @router.get("/{license_id}", response_model=LicenseDetail, dependencies=[_READ])
 async def get_license(
-    license_id: uuid.UUID, session: SessionDep, scope: CurrentScope
+    license_id: uuid.UUID,
+    session: SessionDep,
+    scope: CurrentScope,
+    permissions: CurrentPermissions,
 ) -> LicenseDetail:
     lic = await session.get(License, license_id)
     if lic is None:
@@ -219,8 +238,13 @@ async def get_license(
             code=ErrorCode.LICENSE_NOT_FOUND, status_code=404, message="No such licence"
         )
     state = await _state(session, lic, scope)
+    # The program names are the catalogue's: for whoever reads the postes.
+    reads_machines = has_permission(
+        permissions, Resource.MACHINE.value, Action.READ.value
+    )
     return LicenseDetail(
-        **_out(state), programs=await crud.programs(session, lic, scope)
+        **_out(state),
+        programs=await crud.programs(session, lic, scope) if reads_machines else [],
     )
 
 

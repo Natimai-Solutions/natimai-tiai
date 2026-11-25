@@ -364,3 +364,16 @@ Quatre relectures indépendantes, une par chantier. Corrections livrées dans la
 - **Fusion de postes** : rien à faire, aucune table de C6 ne référence `machines.id` ; le décompte suit le catalogue du poste gardé.
 - **Logiciels interdits** : la liste reste celle de C1 (Paramètres, Alertes), inchangée.
 - **Non fait** : export des licences ; historique du décompte dans le temps (C9) ; licences par utilisateur nommé (le produit ne connaît que des postes).
+
+### Relecture du 2026-11-25 (C6)
+
+Six relectures indépendantes (bugs du serveur, sécurité et portée, régressions, console, conformité au plan, couverture de tests), chaque constat soumis à deux vérificateurs chargés de le réfuter. Douze tiennent, trois de plus ont été trouvés par une dernière passe ; corrigés chacun avec son test.
+
+- **Nom vide** : `PATCH /licenses/{id}` avec un nom fait d'espaces écrivait `NULL` et répondait 500 ; il répond désormais 422, et un nom est enregistré sans ses espaces de bord.
+- **Postes réformés** : le nombre d'installations les laisse de côté, la liste qu'il ouvrait les montrait. Le lien porte maintenant `in_parc=true`, comme les cartes du tableau de bord, et la liste dit le même nombre.
+- **Noms du catalogue** : l'aperçu et la liste des logiciels d'une licence nomment des programmes du parc, c'est-à-dire des données des postes. L'aperçu demande donc aussi `machine:read`, et le détail d'une licence ne donne ces noms qu'à qui lit les postes. Les licences étant sur la page Logiciels, `license:read` ne sert dans la console qu'avec `machine:read` : la grille des groupes le dit.
+- **Dialogue** : un logiciel tapé sans appuyer sur Entrée est pris à l'enregistrement au lieu d'être perdu ; les bornes du serveur (100 caractères, 20 motifs, nombre de postes entier de 0 à 1 000 000) sont vérifiées avant l'envoi, avec un message précis plutôt qu'une erreur générique.
+- **Tableau de bord** : la carte « Licences à revoir » suit l'actualisation de la page.
+- **Anglais** : « Installed on 1 computer », « within 1 day » s'accordent avec leur nombre.
+- **Tests ajoutés** : nom vide, accord entre le nombre et la liste, droits sur les noms du catalogue, licence inconnue (404) et limite de 500 (`license.too_many`), licence de site, recompte après modification des motifs, ligne « échéance » du résumé et envoi réel du résumé ; côté console, modification, suppression, bandeau d'erreur, saisie sans Entrée, bornes du dialogue, carte de Paramètres et carte du tableau de bord.
+- **Écartés après vérification** : section des licences absente du résumé « seulement s'il y a du nouveau » (voulu : une licence n'est pas un évènement du jour), filtre `license_id` utilisable avec `machine:read` seul (il ne révèle aucune donnée de licence), une requête de décompte par licence (au plus 500, chacune indexée par le catalogue), journal de modification sans l'ancienne valeur (comme les autres ressources).

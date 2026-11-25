@@ -18,7 +18,7 @@
         />
       </q-card-section>
       <div class="q-px-md text-caption text-muted">
-        {{ t('licenses.dashboard.caption', { days: expiryDays }) }}
+        {{ t('licenses.dashboard.caption', { days: expiryDays }, expiryDays) }}
       </div>
       <q-list separator>
         <q-item v-for="lic in rows" :key="lic.id">
@@ -58,15 +58,19 @@ const expiryDays = ref(60);
 
 const rows = computed(() => items.value.filter(needsAttention));
 
-onMounted(async () => {
+/** Read again with the dashboard's own refresh. A failure keeps what was
+ *  shown: the dashboard's other figures do not wait on the licences. */
+async function load(): Promise<void> {
   try {
     const res = await listLicenses();
     items.value = res.items;
     expiryDays.value = res.expiry_days;
   } catch {
-    // A card that cannot load is left out: the dashboard's other figures
-    // do not wait on the licences.
-    items.value = [];
+    // Left as it was.
   }
-});
+}
+
+onMounted(load);
+
+defineExpose({ load });
 </script>

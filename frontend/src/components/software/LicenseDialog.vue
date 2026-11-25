@@ -38,6 +38,7 @@
             :error-message="patternError ?? ''"
             data-test="license-patterns"
             @new-value="addPattern"
+            @input-value="(v: string) => (pendingPattern = v)"
           />
           <q-input
             v-model="form.publisher"
@@ -57,6 +58,8 @@
             :hint="t('licenses.dialog.seatsHint')"
             outlined
             dense
+            :error="seatsError !== null"
+            :error-message="seatsError ?? ''"
             data-test="license-seats"
           />
           <q-input
@@ -109,7 +112,7 @@
             </div>
             <template v-else>
               <div class="text-caption q-mb-xs">
-                {{ t('licenses.dialog.previewCount', { n: preview.installed }) }}
+                {{ t('licenses.dialog.previewCount', { n: preview.installed }, preview.installed) }}
                 <span v-if="preview.programs.length >= 50">
                   {{ t('licenses.dialog.previewMore') }}
                 </span>
@@ -147,7 +150,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { t } from 'src/i18n';
 import { apiErrorMessage } from 'src/services/errors';
@@ -159,7 +162,13 @@ import {
   type LicenseFields,
   type LicensePreview,
 } from 'src/services/licenses';
+import { useAuthStore } from 'src/stores/auth';
 import { notify } from 'src/utils/notify';
+
+/** The server's bounds (`routes/licenses.py`). */
+const MAX_PATTERNS = 20;
+const PATTERN_MAX_LENGTH = 100;
+const MAX_SEATS = 1_000_000;
 
 const props = defineProps<{
   modelValue: boolean;
@@ -172,8 +181,13 @@ const emit = defineEmits<{
 }>();
 
 const $q = useQuasar();
+const auth = useAuthStore();
 const saving = ref(false);
 const touched = ref(false);
+/** Text typed in the patterns field and not yet confirmed with Enter. */
+const pendingPattern = ref('');
+/** Why the last pattern typed was not taken, until the next one is. */
+const patternRefusal = ref<string | null>(null);
 
 const empty = () => ({
   name: '',
@@ -199,6 +213,8 @@ watch(
     if (!open) return;
     Object.assign(form, empty());
     touched.value = false;
+    pendingPattern.value = '';
+    patternRefusal.value = null;
     if (previewTimer) clearTimeout(previewTimer);
     previewSeq += 1;
     preview.value = null;
@@ -218,35 +234,73 @@ watch(
   { immediate: true },
 );
 
-/** A pattern as the server keeps it: trimmed, two characters at least. */
+/** Why a pattern would be refused by the server, or null when it is taken. */
+function refusal(text: string): string | null {
+  if (text.length < 2) return t('licenses.dialog.minPattern');
+  if (text.length > PATTERN_MAX_LENGTH) return t('licenses.dialog.maxPatternLength');
+  if (form.patterns.length >= MAX_PATTERNS) return t('licenses.dialog.tooManyPatterns');
+  return null;
+}
+
+/** A pattern as the server keeps it: trimmed, 2 to 100 characters, 20 at most. */
 function addPattern(
   value: string,
   done: (item?: string, mode?: 'add' | 'add-unique' | 'toggle') => void,
 ): void {
   touched.value = true;
+  pendingPattern.value = '';
   const text = value.trim();
-  if (text.length < 2) {
+  if (form.patterns.some((p) => p.toLowerCase() === text.toLowerCase())) {
+    patternRefusal.value = null;
     done();
     return;
   }
-  if (form.patterns.some((p) => p.toLowerCase() === text.toLowerCase())) {
+  patternRefusal.value = refusal(text);
+  if (patternRefusal.value) {
     done();
     return;
   }
   done(text, 'add-unique');
 }
 
+/** The text left in the field when saving: taken as a pattern, as if Enter
+ *  had been pressed — a reader who typed « Office » and clicked Enregistrer
+ *  meant it. Returns false when it cannot be taken. */
+function takePending(): boolean {
+  const text = pendingPattern.value.trim();
+  if (!text) return true;
+  if (form.patterns.some((p) => p.toLowerCase() === text.toLowerCase())) {
+    pendingPattern.value = '';
+    return true;
+  }
+  patternRefusal.value = refusal(text);
+  if (patternRefusal.value) return false;
+  form.patterns = [...form.patterns, text];
+  pendingPattern.value = '';
+  return true;
+}
+
+/** The number of postes as typed: empty (a site licence) or a whole number. */
+const seatsError = computed(() => {
+  const text = String(form.seats).trim();
+  if (text === '') return null;
+  const n = Number(text);
+  return Number.isInteger(n) && n >= 0 && n <= MAX_SEATS ? null : t('licenses.dialog.seatsInvalid');
+});
+
 const validPatterns = computed(() => form.patterns.filter((p) => p.trim().length >= 2));
 
-const patternError = computed(() =>
-  touched.value && !validPatterns.value.length ? t('licenses.dialog.patternNeeded') : null,
-);
+const patternError = computed(() => {
+  if (patternRefusal.value) return patternRefusal.value;
+  return touched.value && !validPatterns.value.length ? t('licenses.dialog.patternNeeded') : null;
+});
 
 watch(
   () => [validPatterns.value.join('\u0000'), form.publisher],
   () => {
     if (previewTimer) clearTimeout(previewTimer);
-    if (!validPatterns.value.length) {
+    // The program names are the catalogue's, read with machine:read.
+    if (!validPatterns.value.length || !auth.can('machine', 'read')) {
       preview.value = null;
       return;
     }
@@ -267,6 +321,11 @@ async function loadPreview(): Promise<void> {
   }
 }
 
+onBeforeUnmount(() => {
+  if (previewTimer) clearTimeout(previewTimer);
+  previewSeq += 1;
+});
+
 function orNull(value: string): string | null {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
@@ -278,7 +337,7 @@ function payload(): LicenseFields {
     name: form.name.trim(),
     patterns: validPatterns.value,
     publisher: orNull(form.publisher),
-    seats: seats === '' ? null : Math.max(0, Math.floor(Number(seats))),
+    seats: seats === '' ? null : Number(seats),
     expires_on: orNull(form.expires_on),
     vendor: orNull(form.vendor),
     reference: orNull(form.reference),
@@ -288,7 +347,8 @@ function payload(): LicenseFields {
 
 async function submit(): Promise<void> {
   touched.value = true;
-  if (!validPatterns.value.length || !form.name.trim()) return;
+  if (!takePending()) return;
+  if (!validPatterns.value.length || !form.name.trim() || seatsError.value) return;
   saving.value = true;
   try {
     const body = payload();

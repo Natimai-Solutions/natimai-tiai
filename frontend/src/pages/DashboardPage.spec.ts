@@ -8,11 +8,17 @@ import { RouterLink, createMemoryHistory, createRouter } from 'vue-router';
 vi.mock('src/services/stats', () => ({ getOverview: vi.fn() }));
 vi.mock('src/services/machines', () => ({ listMachines: vi.fn() }));
 vi.mock('src/services/threats', () => ({ listThreats: vi.fn() }));
+vi.mock('src/services/licenses', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('src/services/licenses')>()),
+  listLicenses: vi.fn(),
+}));
 
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { listMachines } from 'src/services/machines';
 import { getOverview, type StatsOverview } from 'src/services/stats';
 import { listThreats } from 'src/services/threats';
+import { listLicenses } from 'src/services/licenses';
+import LicensesAttentionCard from 'src/components/software/LicensesAttentionCard.vue';
 import { useAuthStore } from 'src/stores/auth';
 import DashboardPage from './DashboardPage.vue';
 
@@ -45,13 +51,13 @@ function serverDown() {
   vi.mocked(listThreats).mockRejectedValue(fail500);
 }
 
-async function mountPage() {
+async function mountPage(permissions: string[] = ['machine:read', 'threat:read']) {
   const pinia = createPinia();
   setActivePinia(pinia);
   useAuthStore().user = {
     id: 'u',
     email: 'a@b.c',
-    permissions: ['machine:read', 'threat:read'],
+    permissions,
   } as never;
   const router = createRouter({
     history: createMemoryHistory(),
@@ -327,5 +333,16 @@ describe('DashboardPage — alerts, Windows 11 and the retired postes (C1, C2)',
     const none = await links({ machines_retired: 0 });
     expect(none.to).toContain(JSON.stringify({ name: 'machines' }));
     expect(none.to.some((l) => l.includes('in_parc'))).toBe(false);
+  });
+});
+
+describe('DashboardPage — licences (C6)', () => {
+  it('shows the licences card only to whoever reads the licences', async () => {
+    serverUp();
+    vi.mocked(listLicenses).mockResolvedValue({ items: [], restricted: false, expiry_days: 60 });
+    let w = await mountPage();
+    expect(w.findComponent(LicensesAttentionCard).exists()).toBe(false);
+    w = await mountPage(['machine:read', 'threat:read', 'license:read']);
+    expect(w.findComponent(LicensesAttentionCard).exists()).toBe(true);
   });
 });

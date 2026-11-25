@@ -57,7 +57,7 @@
               no-caps
               :color="props.row.over ? 'negative' : 'primary'"
               :label="usageLabel(props.row)"
-              :to="{ name: 'machines', query: { license_id: props.row.id } }"
+              :to="{ name: 'machines', query: { license_id: props.row.id, in_parc: 'true' } }"
             >
               <q-tooltip>{{ t('licenses.seeMachines') }}</q-tooltip>
             </q-btn>

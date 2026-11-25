@@ -146,7 +146,7 @@ const fr = {
     license: {
       read: {
         label: 'Consulter',
-        hint: 'Voir les licences, leur fournisseur et leur référence de commande, et combien de postes ont ce qu’elles couvrent.',
+        hint: 'Voir les licences, leur fournisseur et leur référence de commande, et combien de postes ont ce qu’elles couvrent. Elles sont sur la page Logiciels : il faut aussi « Postes : consulter ».',
       },
       write: {
         label: 'Gérer',
@@ -300,7 +300,7 @@ const en: Translation<typeof fr> = {
     license: {
       read: {
         label: 'View',
-        hint: 'See the licences, their supplier and order reference, and how many computers have what they cover.',
+        hint: 'See the licences, their supplier and order reference, and how many computers have what they cover. They are on the Software page: “Computers: view” is needed too.',
       },
       write: {
         label: 'Manage',
