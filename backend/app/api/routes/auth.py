@@ -26,12 +26,13 @@ from jwt.exceptions import InvalidTokenError
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Text, bindparam, update
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlmodel import col
+from sqlmodel import col, select
 
 from app.api.deps import (
     CurrentAuthSession,
     CurrentPermissions,
     CurrentUser,
+    OptionalAuthSession,
     SessionDep,
 )
 from app.api.fields import Email, Password
@@ -613,7 +614,7 @@ async def me(
     session: SessionDep,
     user: CurrentUser,
     permissions: CurrentPermissions,
-    current: CurrentAuthSession,
+    current: OptionalAuthSession,
 ) -> UserOut:
     """Return the current authenticated user."""
     return await _profile(session, user, permissions, current)
@@ -1342,3 +1343,145 @@ async def totp_backup_codes(
     )
     await session.commit()
     return BackupCodesOut(backup_codes=codes)
+
+
+# --- Personal API tokens (C8) -------------------------------------------------
+
+
+class ApiTokenOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    prefix: str
+    can_write: bool
+    created_at: datetime
+    expires_at: datetime
+    last_used_at: datetime | None
+    last_used_ip: str | None
+    revoked_at: datetime | None
+
+
+class ApiTokenCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    # Read-only unless asked.
+    can_write: bool = False
+    days: int = Field(default=90, ge=1, le=365)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
+
+
+class ApiTokenCreated(ApiTokenOut):
+    # Shown now and never again.
+    token: str
+
+
+def _token_out(row: Any) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "name": row.name,
+        "prefix": row.prefix,
+        "can_write": row.can_write,
+        "created_at": row.created_at,
+        "expires_at": row.expires_at,
+        "last_used_at": row.last_used_at,
+        "last_used_ip": row.last_used_ip,
+        "revoked_at": row.revoked_at,
+    }
+
+
+@router.get("/api-tokens", response_model=list[ApiTokenOut])
+async def list_api_tokens(
+    session: SessionDep, user: CurrentUser, current: CurrentAuthSession
+) -> list[ApiTokenOut]:
+    """The account's own tokens, live ones first, newest first."""
+    from app.features.api_token.models import ApiToken
+
+    rows = await session.exec(
+        select(ApiToken)
+        .where(col(ApiToken.user_id) == user.id)
+        .order_by(col(ApiToken.created_at).desc())
+        .limit(100)
+    )
+    return [ApiTokenOut(**_token_out(r)) for r in rows.all()]
+
+
+@router.post("/api-tokens", response_model=ApiTokenCreated, status_code=201)
+async def create_api_token(
+    payload: ApiTokenCreate,
+    session: SessionDep,
+    user: CurrentUser,
+    current: CurrentAuthSession,
+    permissions: CurrentPermissions,
+) -> ApiTokenCreated:
+    """A token for a script acting on behalf of this account: with at most
+    its rights and scope, read-only unless asked, for 1 to 365 days. The
+    clear value is returned once. From a console session only — a token
+    does not make tokens."""
+    from app.features.api_token import crud as api_tokens
+    from app.features.user.permissions import Action, Resource, has_permission
+
+    if not has_permission(permissions, Resource.API_TOKEN.value, Action.WRITE.value):
+        raise AppError(
+            code=ErrorCode.AUTH_PERMISSION_DENIED,
+            status_code=403,
+            message="Making API tokens is not granted to this account",
+        )
+    if await api_tokens.active_count(session, user.id) >= api_tokens.MAX_ACTIVE:
+        raise AppError(
+            code=ErrorCode.API_TOKEN_TOO_MANY,
+            status_code=409,
+            message=f"{api_tokens.MAX_ACTIVE} live tokens at most",
+        )
+    row, clear = api_tokens.create(
+        session,
+        user.id,
+        name=payload.name,
+        can_write=payload.can_write,
+        days=payload.days,
+    )
+    audit.record(
+        session,
+        actor=user.email,
+        action="api_token.create",
+        resource_type="user",
+        resource_id=str(user.id),
+        details={
+            "name": payload.name,
+            "prefix": row.prefix,
+            "can_write": payload.can_write,
+            "expires_at": row.expires_at.isoformat(),
+        },
+    )
+    await session.commit()
+    await session.refresh(row)
+    return ApiTokenCreated(**_token_out(row), token=clear)
+
+
+@router.delete("/api-tokens/{token_id}", status_code=204)
+async def revoke_api_token(
+    token_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUser,
+    current: CurrentAuthSession,
+) -> None:
+    from app.features.api_token.models import ApiToken
+
+    row = await session.get(ApiToken, token_id, with_for_update=True)
+    if row is None or row.user_id != user.id:
+        raise AppError(
+            code=ErrorCode.API_TOKEN_NOT_FOUND, status_code=404, message="No such token"
+        )
+    if row.revoked_at is None:
+        row.revoked_at = utcnow()
+        session.add(row)
+        audit.record(
+            session,
+            actor=user.email,
+            action="api_token.revoke",
+            resource_type="user",
+            resource_id=str(user.id),
+            details={"name": row.name, "prefix": row.prefix},
+        )
+    await session.commit()

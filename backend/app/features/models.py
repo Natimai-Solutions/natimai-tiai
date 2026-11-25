@@ -5,6 +5,7 @@ Importing this module guarantees every table is registered on
 """
 
 from app.features.alert.models import MachineAlert  # noqa: F401
+from app.features.api_token.models import ApiToken  # noqa: F401
 from app.features.asset.models import Asset  # noqa: F401
 from app.features.audit.models import AuditEntry  # noqa: F401
 from app.features.auth_session.models import AuthSession, LoginChallenge  # noqa: F401
@@ -45,6 +46,7 @@ from app.features.user.models import (  # noqa: F401
     UserBackupCode,
     UserGroup,
 )
+from app.features.webhook.models import Webhook, WebhookDelivery  # noqa: F401
 from app.features.windows_update.models import WindowsUpdate  # noqa: F401
 
 __all__ = [

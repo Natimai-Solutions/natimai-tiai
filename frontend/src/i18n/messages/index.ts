@@ -13,6 +13,7 @@ import errors from './errors';
 import exports from './exports';
 import format from './format';
 import groups from './groups';
+import integrations from './integrations';
 import interventions from './interventions';
 import layout from './layout';
 import licenses from './licenses';
@@ -46,6 +47,7 @@ export const fr = {
   common: common.fr,
   compliance: compliance.fr,
   licenses: licenses.fr,
+  integrations: integrations.fr,
   secondFactor: secondFactor.fr,
   errors: errors.fr,
   packages: packages.fr,
@@ -82,6 +84,7 @@ export const en = {
   common: common.en,
   compliance: compliance.en,
   licenses: licenses.en,
+  integrations: integrations.en,
   secondFactor: secondFactor.en,
   errors: errors.en,
   packages: packages.en,

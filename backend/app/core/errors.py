@@ -131,6 +131,15 @@ class ErrorCode(enum.StrEnum):
     # Sign-in through the directory not configured, or the link refused.
     AUTH_OIDC_DISABLED = "auth.oidc.disabled"
     AUTH_OIDC_ALREADY_LINKED = "auth.oidc.already_linked"
+    # Webhooks (C8): unknown, destination refused (the detail says why).
+    WEBHOOK_NOT_FOUND = "webhook.not_found"
+    WEBHOOK_DESTINATION_REFUSED = "webhook.destination_refused"
+    # Personal API tokens (C8).
+    API_TOKEN_NOT_FOUND = "api_token.not_found"
+    API_TOKEN_TOO_MANY = "api_token.too_many"
+    # A token used where only the account's own sign-in may act: its
+    # password, sessions, second factor, tokens, directory link.
+    API_TOKEN_FORBIDDEN_HERE = "api_token.forbidden_here"
     SCHEDULE_NOT_FOUND = "schedule.not_found"
     # A schedule that would run inside a forbidden window.
     SCHEDULE_FORBIDDEN_WINDOW = "schedule.forbidden_window"

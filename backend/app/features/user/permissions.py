@@ -66,6 +66,13 @@ class Resource(enum.StrEnum):
     # when. Granted to no built-in group but the administrators: a contract
     # and its order number are purchase material, like an asset.
     LICENSE = "license"
+    # Outbound webhooks (C8): where the console reports what happens. Admin
+    # material: they carry the parc's events to another tool.
+    WEBHOOK = "webhook"
+    # Personal API tokens (C8): ``write`` is the right to make one for one's
+    # own account — a script's access, granted to no built-in group but the
+    # administrators.
+    API_TOKEN = "api_token"
 
 
 class Action(enum.StrEnum):
@@ -109,6 +116,9 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.REPORT, Action.WRITE),
     (Resource.LICENSE, Action.READ),
     (Resource.LICENSE, Action.WRITE),
+    (Resource.WEBHOOK, Action.READ),
+    (Resource.WEBHOOK, Action.WRITE),
+    (Resource.API_TOKEN, Action.WRITE),
 )
 
 

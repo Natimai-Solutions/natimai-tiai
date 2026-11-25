@@ -25,6 +25,8 @@ const fr = {
     schedule: 'Planifications',
     report: 'Signalements des utilisateurs',
     license: 'Licences logicielles',
+    webhook: 'Webhooks',
+    api_token: 'Jetons d’API',
   },
   /** What granting it lets someone do (`label`), and a sentence where the label
    *  alone would be read two ways (`hint`). */
@@ -153,6 +155,22 @@ const fr = {
         hint: 'Créer, modifier et supprimer une licence. Réservé aux comptes sans limite de lieux.',
       },
     },
+    webhook: {
+      read: {
+        label: 'Consulter',
+        hint: 'Voir les webhooks, leurs adresses et l’historique de leurs envois.',
+      },
+      write: {
+        label: 'Gérer',
+        hint: 'Créer, modifier, essayer et supprimer un webhook : il envoie les évènements du parc à un autre outil. Réservé aux comptes sans limite de lieux.',
+      },
+    },
+    api_token: {
+      write: {
+        label: 'Créer des jetons',
+        hint: 'Créer, pour son propre compte, des jetons qui permettent à un script d’agir avec ses droits.',
+      },
+    },
   },
   /** `{resource} — {action}`, for lists that show what a group grants. */
   named: '{resource} — {action}',
@@ -181,6 +199,8 @@ const en: Translation<typeof fr> = {
     schedule: 'Schedules',
     report: 'Users’ reports',
     license: 'Software licences',
+    webhook: 'Webhooks',
+    api_token: 'API tokens',
   },
   entries: {
     machine: {
@@ -305,6 +325,22 @@ const en: Translation<typeof fr> = {
       write: {
         label: 'Manage',
         hint: 'Create, change and delete a licence. Only for accounts not limited to some places.',
+      },
+    },
+    webhook: {
+      read: {
+        label: 'View',
+        hint: 'See the webhooks, their addresses and their delivery history.',
+      },
+      write: {
+        label: 'Manage',
+        hint: 'Create, change, test and delete a webhook: it sends the fleet’s events to another tool. Only for accounts not limited to some places.',
+      },
+    },
+    api_token: {
+      write: {
+        label: 'Create tokens',
+        hint: 'Create, for one’s own account, tokens that let a script act with its rights.',
       },
     },
   },

@@ -164,6 +164,11 @@ export function apiErrorMessage(err: unknown, fallback: string = t('errors.gener
         return t('errors.withDetail', { label, detail: windowText(window) });
       }
     }
+    // A refused webhook address: why (« adresse du réseau interne »).
+    if (code === 'webhook.destination_refused' && typeof details?.reason === 'string') {
+      const detail = errorCodeMessage(details.reason);
+      if (detail) return t('errors.withDetail', { label, detail });
+    }
     if (code === 'room.in_group_scope') {
       const groups = body?.error?.details?.groups;
       if (Array.isArray(groups) && groups.length) {

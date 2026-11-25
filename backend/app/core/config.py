@@ -222,6 +222,21 @@ class Settings(BaseSettings):
     OIDC_PROXY_URL: str | None = None
     OIDC_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
 
+    # --- Outbound webhooks (C8) ---
+    # Hosts a webhook may reach although they resolve to an internal address
+    # (an in-house Mattermost), and the only ones http:// is accepted for.
+    # Exact host names, comma-separated. Everything else must be public and
+    # https: a webhook makes the server send requests where it is told.
+    WEBHOOK_ALLOWED_HOSTS: Annotated[list[str] | str, BeforeValidator(parse_list)] = []
+    # Outbound proxy for the webhook calls alone, as MAILGUN_PROXY_URL is.
+    WEBHOOK_PROXY_URL: str | None = None
+    WEBHOOK_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
+    # Attempts before a delivery is given up: 1 min doubling to 1 h, about a
+    # day in all at 8.
+    WEBHOOK_MAX_ATTEMPTS: int = Field(default=8, ge=1, le=30)
+    # How long delivered or abandoned deliveries are kept, as history.
+    WEBHOOK_DELIVERY_RETENTION_DAYS: int = Field(default=30, ge=1)
+
     # Second factor (C7): codes wrong in a row, on any challenge, before the
     # account's second factor is locked for LOGIN_LOCKOUT_MINUTES. Counted
     # per account: a new password login gives a new challenge, not a new

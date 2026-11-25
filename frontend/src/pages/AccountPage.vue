@@ -180,6 +180,7 @@
 
     <SecondFactorCard v-if="!external" />
     <DirectoryCard v-if="!enrolmentOnly" />
+    <ApiTokensCard />
 
     <q-card v-if="!enrolmentOnly" flat bordered class="q-mt-md" style="max-width: 520px">
       <q-card-section class="row items-start no-wrap">
@@ -261,6 +262,7 @@ import { groupName } from 'src/utils/groupText';
 import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { computed, onMounted, ref, watch } from 'vue';
 import { availableLocales, t } from 'src/i18n';
+import ApiTokensCard from 'src/components/account/ApiTokensCard.vue';
 import CardLoadError from 'src/components/CardLoadError.vue';
 import DirectoryCard from 'src/components/account/DirectoryCard.vue';
 import SecondFactorCard from 'src/components/account/SecondFactorCard.vue';

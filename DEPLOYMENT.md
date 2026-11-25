@@ -315,6 +315,11 @@ Il n'est jamais committé.
 | `OIDC_GROUPS_CLAIM` | `groups` | Revendication du jeton qui porte les groupes de l'annuaire |
 | `OIDC_PROXY_URL` | *(vide)* | Proxy HTTP des seuls appels au fournisseur (découverte, clés, jeton), comme `MAILGUN_PROXY_URL` |
 | `OIDC_TIMEOUT_SECONDS` | `10` | Délai d'attente des appels au fournisseur |
+| `WEBHOOK_ALLOWED_HOSTS` | *(vide)* | Hôtes de webhook admis bien qu'internes, séparés par des virgules (`chat.lycee.local`) : un Mattermost du réseau de l'établissement. Pour eux seuls, `http://` est aussi accepté — cf. « Webhooks et jetons d'API » |
+| `WEBHOOK_PROXY_URL` | *(vide)* | Proxy HTTP des seuls envois de webhooks, comme `MAILGUN_PROXY_URL` |
+| `WEBHOOK_TIMEOUT_SECONDS` | `10` | Délai d'attente d'un envoi |
+| `WEBHOOK_MAX_ATTEMPTS` | `8` | Tentatives avant abandon (1 min, doublé jusqu'à 1 h entre deux : environ une journée) |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS` | `30` | Durée de conservation de l'historique des envois ; ceux encore en attente ne sont jamais purgés |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Durée de vie du jeton d'accès console (1 à 1 440). Court à dessein : c'est lui que la page garde en mémoire et envoie à chaque appel, et la console le renouvelle seule par sa session. Ancien défaut : 480 — une valeur `480` restée dans un `.env` reste acceptée mais n'a plus de raison d'être |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Une session console non utilisée pendant ce nombre de jours se ferme. **Glissante** : chaque renouvellement repousse l'échéance, un opérateur qui ouvre la console chaque semaine ne se reconnecte pas |
 | `SESSION_MAX_DAYS` | `30` | Durée **absolue** d'une session, comptée depuis la connexion, glissement compris : au-delà, reconnexion obligatoire. Borne ce que vaut un jeton de session volé |
@@ -558,10 +563,76 @@ désactiver, de priver de « Comptes : gérer » ou de supprimer le dernier comp
 **local** qui gère les comptes ; un annuaire injoignable ne ferme donc jamais la
 console.
 
+**Webhooks et jetons d'API** (C8).
+
+*Webhooks* — Paramètres, carte « Webhooks » (droit « Webhooks : gérer »,
+administrateurs par défaut, et compte sans limite de lieux : les évènements
+portent sur tout le parc). Un webhook envoie à une adresse les évènements
+choisis : menace détectée, alerte ouverte ou résolue, vérification demandée ou
+close, commande échouée. Trois formats : **JSON signé** (pour un script ou un
+outil de tickets), **Microsoft Teams** et **Mattermost** (« Webhooks
+entrants » ; Slack comprend le même format). Ces deux derniers reçoivent un
+corps `{"text": "…"}` rédigé dans la langue du webhook : c'est ce qu'attend le
+connecteur « Incoming Webhook » d'un canal Teams ; un flux Power Automate
+(« Workflows ») qui le remplace doit lire ce champ `text`. Les envois passent par une file en
+base, envoyée par le worker : une destination en panne est réessayée pendant
+environ une journée, puis l'envoi est abandonné et noté dans l'historique du
+webhook. Le bouton « Envoyer un essai » envoie aussitôt un évènement `test`.
+
+Chaque envoi porte `X-Tiai-Event`, `X-Tiai-Delivery` (identifiant, à utiliser
+pour ignorer un doublon) et `X-Tiai-Signature: t=<horodatage>,v1=<signature>`,
+où la signature est le HMAC-SHA256, en hexadécimal, de `<horodatage>.<corps>`
+avec le secret du webhook (montré à la création et au renouvellement
+seulement). Le destinataire recalcule la signature et refuse un horodatage
+trop ancien (cinq minutes, par exemple) :
+
+```python
+import hashlib, hmac, time
+
+def verifie(secret: str, entete: str, corps: bytes) -> bool:
+    parts = dict(p.split("=", 1) for p in entete.split(","))
+    attendu = hmac.new(secret.encode(), parts["t"].encode() + b"." + corps,
+                       hashlib.sha256).hexdigest()
+    return (hmac.compare_digest(attendu, parts["v1"])
+            and abs(time.time() - int(parts["t"])) < 300)
+```
+
+**Destinations refusées** : un webhook fait émettre au serveur des requêtes
+vers l'adresse qu'on lui donne. Seul `https://` est accepté, sans identifiant
+dans l'adresse ; une adresse qui se résout vers le réseau interne (privée, de
+bouclage, lien-local — dont le service de métadonnées des clouds —, multicast
+ou réservée) est refusée, à l'enregistrement **et** à chaque envoi, et aucune
+redirection n'est suivie. Un outil du réseau de l'établissement (un Mattermost
+interne) se déclare dans `WEBHOOK_ALLOWED_HOSTS` ; `http://` est alors admis
+pour lui. Le serveur doit pouvoir joindre la destination en HTTPS (directement
+ou par `WEBHOOK_PROXY_URL`).
+
+*Jetons d'API* — « Mon compte », carte « Jetons d'API » (droit « Jetons d'API :
+créer des jetons », administrateurs par défaut). Un jeton `tiai_pat_…` permet à
+un script d'appeler l'API, dans l'en-tête `Authorization: Bearer <jeton>` :
+
+```bash
+curl -H "Authorization: Bearer tiai_pat_…" https://<serveur>/api/v1/machines
+```
+
+Il agit avec les droits et la portée de son compte **au moment de l'appel** ;
+en **lecture seule** sauf si l'écriture a été cochée à sa création ; il expire
+(1 à 365 jours, 90 par défaut) ; il n'atteint jamais le compte lui-même (mot de
+passe, sessions, second facteur, jetons, annuaire — seul `GET /auth/me` répond,
+pour qu'un script sache au nom de qui il agit). Il n'est montré qu'une fois ;
+seul son hachage est gardé. Création et révocation sont au journal d'audit ; la
+carte montre la dernière utilisation. Tous les jetons d'un compte sont révoqués
+quand un administrateur le désactive, réinitialise son mot de passe ou son
+second facteur.
+
 Pour **déconnecter tout le monde** d'un coup (clé `SECRET_KEY` divulguée, poste
 compromis), changer `SECRET_KEY` puis fermer toutes les sessions — sans
 `TOTP_ENCRYPTION_KEY`, cela efface aussi en pratique tous les seconds facteurs
-(cf. ci-dessus) :
+(cf. ci-dessus), et les secrets des webhooks deviennent illisibles : leurs
+envois échouent (« signing secret unreadable ») jusqu'à « Nouveau secret » sur
+chacun, à reporter chez le destinataire. Les jetons d'API ne dépendent pas de
+`SECRET_KEY` : les révoquer, s'il le faut, depuis « Mon compte » de chacun ou
+en désactivant le compte :
 
 ```bash
 cd deploy

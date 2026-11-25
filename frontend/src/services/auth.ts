@@ -287,3 +287,35 @@ export async function confirmPasswordReset(token: string, newPassword: string): 
     new_password: newPassword,
   });
 }
+
+/** A personal API token (C8), as « Mon compte » lists it: never its value. */
+export interface ApiToken {
+  id: string;
+  name: string;
+  prefix: string;
+  can_write: boolean;
+  created_at: string;
+  expires_at: string;
+  last_used_at: string | null;
+  last_used_ip: string | null;
+  revoked_at: string | null;
+}
+
+export async function listApiTokens(): Promise<ApiToken[]> {
+  const { data } = await api.get<ApiToken[]>('/auth/api-tokens');
+  return data;
+}
+
+/** A new token; its value comes back once, here. */
+export async function createApiToken(fields: {
+  name: string;
+  can_write: boolean;
+  days: number;
+}): Promise<ApiToken & { token: string }> {
+  const { data } = await api.post<ApiToken & { token: string }>('/auth/api-tokens', fields);
+  return data;
+}
+
+export async function revokeApiToken(id: string): Promise<void> {
+  await api.delete(`/auth/api-tokens/${id}`);
+}

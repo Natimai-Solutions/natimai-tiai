@@ -25,7 +25,9 @@ export type Resource =
   | 'asset'
   | 'schedule'
   | 'report'
-  | 'license';
+  | 'license'
+  | 'webhook'
+  | 'api_token';
 
 export type Action = 'read' | 'write' | 'execute';
 
@@ -84,6 +86,9 @@ export const PERMISSION_CATALOGUE: PermissionKey[] = [
   entry('report', 'write'),
   entry('license', 'read'),
   entry('license', 'write'),
+  entry('webhook', 'read'),
+  entry('webhook', 'write'),
+  entry('api_token', 'write'),
 ];
 
 /** Whether the catalogue has a hint for a permission (the same in both languages). */

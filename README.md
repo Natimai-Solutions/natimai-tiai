@@ -235,7 +235,8 @@ l'exécution est figée dans le binaire de l'agent.
 | Lecture de l'annuaire par des postes désignés (salles vérifiées) | 🟢 Livré — mode `ldap` prévu |
 | Licences logicielles (décompte, dépassement, échéances) | 🟢 Livré |
 | Second facteur, connexion par l'annuaire (OpenID Connect) | 🟢 Livré |
-| Webhooks et jetons d'API… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
+| Webhooks (JSON signé, Teams, Mattermost), jetons d'API personnels | 🟢 Livré |
+| Tendances, indicateurs… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
 | Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement
@@ -338,6 +339,10 @@ et un accès réseau au serveur.
 - **Connexion par l'annuaire** (OpenID Connect, Entra ID d'abord), désactivée
   par défaut : les groupes de l'annuaire donnent les groupes de la console, un
   compte local reste toujours là pour le cas où l'annuaire est injoignable.
+- **Jetons d'API personnels** pour les scripts : droits et portée du compte, en
+  lecture seule par défaut, à durée bornée, révocables, jamais sur le compte
+  lui-même. **Webhooks sortants** signés, dont les adresses du réseau interne
+  sont refusées : le serveur ne sert pas de rebond.
 - **Catalogue de commandes fermé** : aucun exécuteur de scripts, aucune
   modification du registre, des fichiers, du pare-feu ou des comptes — un serveur
   compromis ne peut déclencher que les actions prévues.

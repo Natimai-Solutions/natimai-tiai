@@ -31,6 +31,7 @@ from app.api.deps import CurrentAuthority, CurrentUser, SessionDep, require_perm
 from app.api.fields import Email, Password, bounded_name, not_null
 from app.core import security
 from app.core.errors import AppError, ErrorCode, violated_constraint
+from app.features.api_token import crud as api_tokens
 from app.features.audit import crud as audit
 from app.features.auth_session import crud as auth_sessions
 from app.features.base import utcnow
@@ -468,6 +469,7 @@ async def update_user(
         await second_factor.enforce_on_members(session, [user.id])
     if deactivating:
         await auth_sessions.revoke_all(session, user.id)
+        await api_tokens.revoke_all(session, user.id)
     audit.record(
         session,
         actor=current.email,
@@ -548,6 +550,8 @@ async def reset_second_factor(
     )
     await second_factor.clear(session, user)
     await auth_sessions.revoke_all(session, user.id)
+    # A lost or stolen second factor: the account's scripts too (C8).
+    await api_tokens.revoke_all(session, user.id)
     audit.record(
         session,
         actor=current.email,
@@ -589,6 +593,8 @@ async def reset_password(
     )
     password = payload.password or security.generate_password()
     await crud.set_password(session, user, password)
+    # Reset by an administrator — a compromised account: its tokens end (C8).
+    await api_tokens.revoke_all(session, user.id)
     await crud.purge_reset_tokens(session, user.id)
     audit.record(
         session,

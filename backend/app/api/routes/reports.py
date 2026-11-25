@@ -46,6 +46,7 @@ from app.features.report.models import Report, ReportStatus
 from app.features.room import crud as room_crud
 from app.features.user.permissions import Action, Resource, has_permission
 from app.features.user.scope import Scope, machine_visible, restrict
+from app.features.webhook import emit as webhook_emit
 
 public_router = APIRouter(prefix="/public/reports", tags=["reports"])
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -443,6 +444,14 @@ async def convert_report(
             requested_by=current.email,
             instructions=check.instructions,
         )
+    await webhook_emit.checks_created(
+        session,
+        [machine],
+        requested_by=current.email,
+        instructions=check.instructions,
+        priority=check.priority,
+        category=check.category,
+    )
     await _record(session, current.email, "convert", report, check_id=str(check.id))
     await session.commit()
     await session.refresh(report)
