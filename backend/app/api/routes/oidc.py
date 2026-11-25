@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentAuthSession, CurrentUser, SessionDep
 from app.api.routes.auth import open_console_session, step_up
 from app.core import ratelimit
 from app.core.config import settings
@@ -108,7 +108,11 @@ class LinkIn(BaseModel):
 
 @router.post("/oidc/link", response_model=LinkOut, dependencies=[_START_LIMIT])
 async def oidc_link(
-    request: Request, payload: LinkIn, session: SessionDep, user: CurrentUser
+    request: Request,
+    payload: LinkIn,
+    session: SessionDep,
+    user: CurrentUser,
+    current: CurrentAuthSession,
 ) -> JSONResponse:
     """« Associer mon compte » from a local account signed in by password:
     the sign-in that follows binds this account to the directory identity
@@ -146,6 +150,7 @@ async def oidc_link(
         session,
         request,
         account,
+        current,
         password=payload.current_password,
         code=payload.code if second_factor.enabled(account) else None,
     )

@@ -47,6 +47,7 @@ from app.features.user.permissions import (
 
 security_log = logging.getLogger("app.security")
 
+
 async def _not_own_account_by_token(request: Request, current: CurrentUser) -> None:
     """A personal API token never acts on its own account (C8): not through
     « Mon compte », and not through the accounts page either — its email,

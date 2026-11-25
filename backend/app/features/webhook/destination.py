@@ -45,9 +45,21 @@ INTERNAL = "webhook.url.internal"
 
 
 def _allowed_hosts() -> set[str]:
+    """The hosts the operator allowed, in the form they are compared in: an
+    entry written the readable way (``intranet.lycée.fr``) matches too."""
     raw = settings.WEBHOOK_ALLOWED_HOSTS
     hosts = raw if isinstance(raw, list) else [raw]
-    return {h.strip().lower().rstrip(".") for h in hosts if h and h.strip()}
+    allowed = set()
+    for h in hosts:
+        if not h or not h.strip():
+            continue
+        name = h.strip().lower().rstrip(".")
+        allowed.add(name)
+        try:
+            allowed.add(_ascii_host(f"https://{name}/"))
+        except DestinationError:
+            pass
+    return allowed
 
 
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
@@ -130,10 +142,15 @@ def parse(url: str) -> tuple[str, str, bool]:
 @dataclass(frozen=True)
 class Target:
     """A checked destination: its ASCII host and, unless the operator
-    allowed the host by name, the public address to connect to."""
+    allowed the host by name, the public addresses to connect to — every
+    one the name has, all checked, tried in turn."""
 
     host: str
-    address: str | None
+    addresses: tuple[str, ...] = ()
+
+    @property
+    def address(self) -> str | None:
+        return self.addresses[0] if self.addresses else None
 
 
 async def resolve(url: str) -> Target:
@@ -141,7 +158,7 @@ async def resolve(url: str) -> Target:
     to connect to. Resolves the host."""
     _, host, allowed = parse(url)
     if allowed:
-        return Target(host, None)
+        return Target(host)
     try:
         literal = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
@@ -149,13 +166,13 @@ async def resolve(url: str) -> Target:
     if literal is not None:
         if not _public(str(literal)):
             raise DestinationError(INTERNAL, "not a public address")
-        return Target(host, str(literal))
+        return Target(host, (str(literal),))
     loop = asyncio.get_running_loop()
     try:
         infos = await loop.getaddrinfo(host, None, type=socket.SOCK_STREAM)
     except (OSError, UnicodeError) as exc:
         raise DestinationError(UNRESOLVED, f"{host} cannot be resolved") from exc
-    addresses = [str(info[4][0]) for info in infos]
+    addresses = list(dict.fromkeys(str(info[4][0]) for info in infos))
     if not addresses:
         raise DestinationError(UNRESOLVED, f"{host} cannot be resolved")
     # Every address must be public: the client could pick any of them. The
@@ -163,7 +180,7 @@ async def resolve(url: str) -> Target:
     # would map the internal DNS for whoever types names.
     if any(not _public(a) for a in addresses):
         raise DestinationError(INTERNAL, f"{host} resolves to an internal address")
-    return Target(host, addresses[0])
+    return Target(host, tuple(addresses))
 
 
 async def check(url: str) -> None:

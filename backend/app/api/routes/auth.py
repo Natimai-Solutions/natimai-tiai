@@ -1145,30 +1145,102 @@ async def _locked_account(session: SessionDep, user: User) -> User:
     return account
 
 
+def _step_up_session_ended() -> AppError:
+    return AppError(
+        code=ErrorCode.AUTH_SESSION_INVALID,
+        status_code=401,
+        message="This session has ended",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def step_up(
     session: SessionDep,
     request: Request,
     account: User,
+    current: AuthSession,
     *,
     password: str | None,
     code: str | None,
     allow_backup: bool = True,
+    via: str = "step_up",
 ) -> None:
     """Prove the holder again before an action a stolen session must not
-    take: the current password (a wrong one counts towards the password's
-    lock) and, when given, a code — checked by ``second_factor.verify_code``,
-    which counts towards the second factor's lock like a login. The account
-    row is locked by the caller. Commits the counters on a refusal."""
-    if password is not None and not await security.check_password(
-        password, account.hashed_password
-    ):
-        await crud.record_failure(session, account, client_ip(request))
-        await session.commit()
-        raise AppError(
-            code=ErrorCode.PASSWORD_CURRENT_INVALID,
-            status_code=400,
-            message="Current password is incorrect",
+    take: the current password and, when given, a code — checked by
+    ``second_factor.verify_code``, which counts towards the second factor's
+    lock like a login. The account row is locked by the caller. Commits the
+    counters on a refusal.
+
+    The password has the budget of a password change: a wrong one counts
+    towards the account's lock like a login, and the session that has
+    spent PASSWORD_CHANGE_SESSION_FAILURES of them, or whose failure locks
+    the account, is ended — a stolen session cannot guess for ever."""
+    if password is not None:
+        ratelimit.check_account(
+            ratelimit.password_change_limiter, str(current.id), "auth.password"
         )
+        locked = await auth_sessions.lock_row(session, current)
+        if (
+            locked is None
+            or not auth_sessions.is_live(locked)
+            or locked.password_failures >= PASSWORD_CHANGE_SESSION_FAILURES
+        ):
+            if locked is not None:
+                auth_sessions.revoke(session, locked)
+                await session.commit()
+            raise _step_up_session_ended()
+        if not await security.check_password(password, account.hashed_password):
+            ip = client_ip(request)
+            failures = await auth_sessions.note_password_failure(session, current)
+            lock = await crud.record_failure(session, account, ip)
+            if lock is not None:
+                details: dict[str, Any] = {
+                    "locked_until": lock.until.isoformat(),
+                    "via": via,
+                }
+                if lock.slow:
+                    details["slow"] = True
+                audit.record(
+                    session,
+                    actor=account.email,
+                    action="user.locked",
+                    resource_type="user",
+                    resource_id=str(account.id),
+                    details=details,
+                )
+            if lock is not None or failures >= PASSWORD_CHANGE_SESSION_FAILURES:
+                auth_sessions.revoke(session, current)
+                audit.record(
+                    session,
+                    actor=account.email,
+                    action="auth.session_revoked",
+                    resource_type="user",
+                    resource_id=str(account.id),
+                    details={
+                        "current": True,
+                        "via": via,
+                        "failures": failures,
+                        "user_agent": current.user_agent,
+                        "ip": current.ip,
+                        "created_at": current.created_at.isoformat(),
+                    },
+                )
+                security_log.warning(
+                    "%s: %d wrong current passwords for %s from %s, session %s ended",
+                    via,
+                    failures,
+                    account.email,
+                    ip,
+                    current.id,
+                )
+                await session.commit()
+                raise _step_up_session_ended()
+            await session.commit()
+            raise AppError(
+                code=ErrorCode.PASSWORD_CURRENT_INVALID,
+                status_code=400,
+                message="Current password is incorrect",
+            )
     if code is None:
         return
     checked = await second_factor.verify_code(
@@ -1215,7 +1287,13 @@ async def totp_setup(
             message="A second factor is already active on this account",
         )
     await step_up(
-        session, request, account, password=payload.current_password, code=None
+        session,
+        request,
+        account,
+        current,
+        password=payload.current_password,
+        code=None,
+        via="totp_setup",
     )
     secret, uri = second_factor.start_enrolment(account)
     session.add(account)
@@ -1295,6 +1373,7 @@ async def totp_disable(
         session,
         request,
         account,
+        current,
         password=payload.current_password,
         code=payload.code,
     )
@@ -1330,7 +1409,13 @@ async def totp_backup_codes(
         )
     # The app's code only: a backup code must not buy ten new ones.
     await step_up(
-        session, request, account, password=None, code=payload.code, allow_backup=False
+        session,
+        request,
+        account,
+        current,
+        password=None,
+        code=payload.code,
+        allow_backup=False,
     )
     codes = await second_factor.new_backup_codes(session, account.id)
     audit.record(
@@ -1468,6 +1553,7 @@ async def create_api_token(
             session,
             request,
             account,
+            current,
             password=payload.current_password,
             code=payload.code if second_factor.enabled(account) else None,
         )

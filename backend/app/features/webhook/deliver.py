@@ -4,14 +4,14 @@ At-least-once, like the mail outbox. A pass first claims its deliveries — a
 lease, committed, so a second worker passes them by — then sends them one by
 one, committing each outcome as soon as it is known. A failure is retried, 1
 minute doubling to an hour, WEBHOOK_MAX_ATTEMPTS times (about a day by
-default), then given up. A pass takes a few deliveries per webhook and
-skips the rest of a webhook that just failed, so one receiver down never
-holds up the others.
+default), then given up. A pass takes a few deliveries per webhook, those of
+the webhooks that answer first, and skips the rest of a webhook that just
+failed, so one receiver down never holds up the others.
 
 The destination is checked again before each send and the connection goes to
-the address checked (``destination.resolve``); no redirect is followed, the
-response body is never read, and a whole send is bounded by
-WEBHOOK_TIMEOUT_SECONDS.
+an address checked (``destination.resolve``) unless a proxy resolves the
+name; no redirect is followed, the response body is never read, and a whole
+send, name resolution included, is bounded by WEBHOOK_TIMEOUT_SECONDS.
 
 The body is signed: ``X-Tiai-Signature: t=<unix time>,v1=<hex>``, the hex an
 HMAC-SHA256 of ``"<t>.<body>"`` under the webhook's secret. A receiver
@@ -24,6 +24,7 @@ import hmac
 import json
 import logging
 import time
+import urllib.request
 from datetime import timedelta
 from typing import Any
 
@@ -78,47 +79,89 @@ def _retry_delay(attempts: int) -> timedelta:
     )
 
 
+def _proxy_for(url: httpx.URL) -> str | None:
+    """The proxy a send goes through: WEBHOOK_PROXY_URL, else the one the
+    environment gives (HTTPS_PROXY from Docker's settings on a school
+    network, NO_PROXY honoured), else none. Read here rather than left to
+    the client: a send through a proxy names the host, and is not pinned."""
+    if TRANSPORT is not None:
+        return None
+    if settings.WEBHOOK_PROXY_URL:
+        return settings.WEBHOOK_PROXY_URL
+    proxies = urllib.request.getproxies()
+    proxy = proxies.get(url.scheme) or proxies.get("all")
+    if proxy and not urllib.request.proxy_bypass(url.host):
+        return proxy
+    return None
+
+
+async def _send(
+    url: httpx.URL,
+    proxy: str | None,
+    headers: dict[str, str],
+    extensions: dict[str, Any],
+    body: bytes,
+) -> int:
+    async with httpx.AsyncClient(
+        timeout=settings.WEBHOOK_TIMEOUT_SECONDS,
+        proxy=proxy,
+        transport=TRANSPORT,
+        follow_redirects=False,
+        # The proxy is decided above, once: the client must not pick another
+        # from the environment for a URL rewritten to an address.
+        trust_env=False,
+    ) as client:
+        # Streamed and closed unread: the status is all that counts, and a
+        # receiver must not make the server read a large body.
+        async with client.stream(
+            "POST", url, content=body, headers=headers, extensions=extensions
+        ) as resp:
+            return resp.status_code
+
+
 async def post(url: str, body: bytes, secret: str, event: str, delivery_id: str) -> int:
     """Send one body; returns the HTTP status. Raises on a refused
-    destination, a transport error or ``TimeoutError``."""
-    target = await destination.resolve(url)
-    proxy = settings.WEBHOOK_PROXY_URL if TRANSPORT is None else None
-    request_url = httpx.URL(url.strip())
-    timestamp = int(time.time())
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "User-Agent": USER_AGENT,
-        "X-Tiai-Event": event,
-        "X-Tiai-Delivery": delivery_id,
-        "X-Tiai-Signature": signature(secret, timestamp, body),
-    }
-    extensions: dict[str, Any] = {}
-    if target.address is not None and proxy is None:
-        # Connect to the address that was checked, not to a fresh answer for
-        # the name; the name still goes in Host and in the TLS handshake, so
-        # the certificate is checked against it.
-        headers["Host"] = request_url.netloc.decode("ascii")
-        if request_url.scheme == "https":
-            extensions["sni_hostname"] = target.host
-        request_url = request_url.copy_with(host=target.address)
+    destination, a transport error or ``TimeoutError`` — the whole send,
+    name resolution included, within WEBHOOK_TIMEOUT_SECONDS."""
     async with asyncio.timeout(settings.WEBHOOK_TIMEOUT_SECONDS):
-        async with httpx.AsyncClient(
-            timeout=settings.WEBHOOK_TIMEOUT_SECONDS,
-            proxy=proxy,
-            transport=TRANSPORT,
-            follow_redirects=False,
-        ) as client:
-            # Streamed and closed unread: the status is all that counts, and
-            # a receiver must not make the server read a large body.
-            async with client.stream(
-                "POST", request_url, content=body, headers=headers, extensions=extensions
-            ) as resp:
-                return resp.status_code
+        target = await destination.resolve(url)
+        named = httpx.URL(url.strip())
+        proxy = _proxy_for(named)
+        timestamp = int(time.time())
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+            "User-Agent": USER_AGENT,
+            "X-Tiai-Event": event,
+            "X-Tiai-Delivery": delivery_id,
+            "X-Tiai-Signature": signature(secret, timestamp, body),
+        }
+        if not target.addresses or proxy is not None:
+            # A host the operator allowed by name, or a proxy that resolves
+            # the name itself.
+            return await _send(named, proxy, headers, {}, body)
+        # Connect to an address that was checked, not to a fresh answer for
+        # the name; the name still goes in Host and in the TLS handshake, so
+        # the certificate is checked against it. Each checked address in
+        # turn, as a client given the name would.
+        pinned_headers = {**headers, "Host": named.netloc.decode("ascii")}
+        extensions = {"sni_hostname": target.host} if named.scheme == "https" else {}
+        failure: httpx.ConnectError | None = None
+        for address in target.addresses:
+            try:
+                return await _send(
+                    named.copy_with(host=address),
+                    None,
+                    pinned_headers,
+                    extensions,
+                    body,
+                )
+            except httpx.ConnectError as exc:
+                failure = exc
+        assert failure is not None
+        raise failure
 
 
-async def _claim(
-    session: AsyncSession, batch_size: int
-) -> list[tuple[Any, ...]]:
+async def _claim(session: AsyncSession, batch_size: int) -> list[tuple[Any, ...]]:
     """Take the due deliveries of this pass, at most PER_WEBHOOK per webhook,
     and push them out of the other passes' way for LEASE. Commits."""
     now = utcnow()
@@ -148,7 +191,13 @@ async def _claim(
             col(WebhookDelivery.status) == DeliveryStatus.PENDING,
             col(WebhookDelivery.next_attempt_at) <= now,
         )
-        .order_by(col(WebhookDelivery.created_at))
+        # The webhooks that are answering first, the oldest first: a pass
+        # spends its budget on receivers that are up, and one that is down
+        # gets a single try at the end of it.
+        .order_by(
+            col(Webhook.consecutive_failures) > 0,
+            col(WebhookDelivery.created_at),
+        )
         .limit(batch_size)
         .with_for_update(skip_locked=True, of=WebhookDelivery)
     )

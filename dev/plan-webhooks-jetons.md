@@ -89,4 +89,18 @@ Neuf relectures indépendantes (destinations des webhooks, file d'envoi, évène
 - **Console.** L'édition n'envoie que les champs modifiés ; la carte des jetons se charge dès l'enrôlement terminé ; pluriel anglais ; la grille des droits dit que les webhooks sont dans Paramètres (« Paramètres : consulter » nécessaire), comme les licences sur la page Logiciels.
 - **Documentation de C7.** Le verrou du second facteur double à chaque série de codes faux, jusqu'à 24 heures : DEPLOYMENT.md disait une durée fixe. Renseigner `TOTP_ENCRYPTION_KEY` après coup ne rechiffre un secret qu'à sa prochaine utilisation : dit aussi.
 - **Tests ajoutés.** Destinations (IDNA, formes IPv6, nom malformé, connexion à l'adresse vérifiée, refus au moment de l'envoi), destinataire lent, réservation, équité, webhook désactivé, secret illisible, `PATCH`, limite, journal, chaque point d'émission (heartbeat, verdict, commande sans réponse, vérification seule, groupée, signalement converti, vérifications des alertes), jetons (preuve à la création, annuaire, propre compte, double authentification exigée, révocations à la réinitialisation du second facteur et à la désactivation, limite, liste, dernière utilisation), obligation appliquée à l'ajout d'un groupe ; côté console, édition, essai, historique, secret, suppression, révocation, preuve, enrôlement.
-- **Réfutés par les vérificateurs.** Les proxys de l'environnement (`HTTPS_PROXY`) appliqués aux envois ; le secret gardé en mémoire après fermeture du dialogue ; un constat sur l'absence de tout test des émissions côté agent (des tests directs sont ajoutés quand même, cf. ci-dessus).
+- **Réfutés par les vérificateurs.** Les proxys de l'environnement (`HTTPS_PROXY`) appliqués aux envois (vrai avant l'épinglage ; c'est l'épinglage qui l'a rendu nuisible, cf. la contre-relecture ci-dessous) ; le secret gardé en mémoire après fermeture du dialogue ; un constat sur l'absence de tout test des émissions côté agent (des tests directs sont ajoutés quand même, cf. ci-dessus).
+
+### Contre-relecture des corrections (2026-11-25)
+
+Trois relecteurs sur les corrections ci-dessus, deux vérificateurs par constat : neuf tiennent, tous corrigés et testés.
+
+- **Proxy de l'environnement.** L'envoi épinglé à une adresse partait quand même par le `HTTPS_PROXY` de Docker (cas documenté des établissements), avec l'adresse à la place du nom : le certificat ne correspondait plus et tout envoi échouait. Le proxy est désormais choisi une fois — `WEBHOOK_PROXY_URL`, sinon celui de l'environnement, `NO_PROXY` respecté — et un envoi par proxy nomme l'hôte sans épinglage ; le client ne lit plus l'environnement de lui-même.
+- **Destinataire lent.** Les envois des webhooks en échec passaient encore en tête de chaque passage : ils passent désormais après ceux des webhooks qui répondent.
+- **Adresses de repli.** Toutes les adresses du nom sont vérifiées et essayées tour à tour, comme le ferait un client à qui l'on donne le nom.
+- **Hôtes autorisés** écrits en Unicode : comparés sous la même forme IDNA que l'adresse.
+- **Délai global** : la résolution du nom est désormais comprise dans `WEBHOOK_TIMEOUT_SECONDS`, comme l'écrit la documentation.
+- **Mot de passe à la création d'un jeton** (et à l'activation ou à la désactivation de la double authentification, et au rattachement à l'annuaire) : il n'avait pas de limite d'essais par session. Il a désormais le budget du changement de mot de passe : chaque échec compte pour le verrou du compte, et la session est fermée au cinquième échec ou au verrouillage du compte.
+- **Texte des vérifications ouvertes par les alertes** : le motif de chaque poste est repris dans le message Teams ou Mattermost.
+- **`command.failed`** : la documentation liste toutes les clôtures par le serveur qui ne l'émettent pas (paquet modifié après la mise en file, lecture de l'annuaire qui n'est plus permise).
+

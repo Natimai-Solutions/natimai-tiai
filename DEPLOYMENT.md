@@ -580,8 +580,11 @@ consulter » pour atteindre la page, et un compte sans limite de lieux : les
 évènements choisis : menace détectée (récente : l'historique de Defender
 remonté par un premier inventaire n'en est pas une, comme pour l'e-mail),
 alerte ouverte ou résolue, vérification demandée ou close, commande échouée
-(verdict du poste, ou commande restée sans réponse ; pas les commandes closes
-par une fusion de postes ou le retrait d'un paquet). Une évaluation des
+(verdict du poste, ou commande restée sans réponse ; pas les commandes que le
+serveur clôt lui-même après un geste d'opérateur : fusion de postes, paquet
+supprimé, retiré ou modifié après la mise en file, lecture de l'annuaire qui
+n'est plus permise au poste ; ni un réveil refusé sur-le-champ, que la console
+montre à qui l'a demandé). Une évaluation des
 alertes, une demande de vérification pour plusieurs postes ou les
 vérifications ouvertes par les alertes font **un** envoi, qui les liste ;
 chaque vérification y porte son `check_id`, que reprend `check.closed`. Trois formats : **JSON signé** (pour un script ou un
@@ -626,9 +629,10 @@ serveur DNS qui répondrait autrement la seconde fois (*DNS rebinding*) n'y gagn
 rien ; le nom reste dans l'en-tête `Host` et la négociation TLS, et le
 certificat est vérifié pour lui. Le nom est lu comme le client HTTP l'envoie
 (IDNA 2008 : `straße` est `xn--strae-oqa`). Aucune redirection n'est suivie.
-Avec `WEBHOOK_PROXY_URL`, c'est le proxy qui résout le nom et se connecte : le
-contrôle porte sur la résolution du serveur, et le proxy doit lui-même refuser
-le réseau interne. Le journal d'audit ne garde que l'hôte d'un webhook, pas son
+Par un proxy — `WEBHOOK_PROXY_URL`, ou à défaut celui de l'environnement
+(`HTTPS_PROXY`, transmis par Docker, `NO_PROXY` respecté) —, c'est le proxy qui
+résout le nom et se connecte : le contrôle porte sur la résolution du serveur,
+et le proxy doit lui-même refuser le réseau interne. Le journal d'audit ne garde que l'hôte d'un webhook, pas son
 chemin, qui est le secret des webhooks entrants de Teams ou Mattermost. Un outil du réseau de l'établissement (un Mattermost
 interne) se déclare dans `WEBHOOK_ALLOWED_HOSTS` ; `http://` est alors admis
 pour lui. Le serveur doit pouvoir joindre la destination en HTTPS (directement

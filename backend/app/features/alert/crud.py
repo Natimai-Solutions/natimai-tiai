@@ -216,7 +216,13 @@ async def _open_checks(session: AsyncSession, opened: list[OpenedAlert]) -> int:
                 if machine_id in machines
             ],
             requested_by=settings.PROJECT_NAME,
-            instructions=None,
+            # One reason for all of them, when they share it; else each item
+            # carries its own.
+            instructions=(
+                shared.pop()
+                if len(shared := {instructions_of.get(m) for _, m in created}) == 1
+                else None
+            ),
             instructions_of=instructions_of,
         )
     return len(created)

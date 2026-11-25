@@ -54,7 +54,14 @@ _EN: dict[str, Callable[[dict[str, Any]], str]] = {
 
 
 def _machines(d: dict[str, Any]) -> str:
-    shown = [m.get("hostname") or m.get("id") for m in d.get("items", [])[:10]]
+    # Each poste with its own reason where the request has none of its own
+    # (the checks the alerts open: one reason per poste).
+    per_item = not d.get("instructions")
+    shown = [
+        f"{m.get('hostname') or m.get('id')}"
+        + (f" ({m['instructions']})" if per_item and m.get("instructions") else "")
+        for m in d.get("items", [])[:10]
+    ]
     more = d.get("total", len(shown)) - len(shown)
     return ", ".join(str(n) for n in shown) + (f", … +{more}" if more > 0 else "")
 

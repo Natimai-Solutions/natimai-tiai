@@ -732,9 +732,8 @@ async def test_last_use_is_written_at_most_once_a_minute(client, db_session):
 async def test_joining_a_group_that_requires_it_narrows_open_sessions(
     client, db_session
 ):
-    from app.features.user.permissions import ALL_PERMISSIONS, BuiltinGroup
-
     from app.features.user.models import Group
+    from app.features.user.permissions import ALL_PERMISSIONS, BuiltinGroup
 
     strict = await group(db_session, "Strict", ALL_PERMISSIONS, None)
     row = await db_session.get(Group, strict.id)
@@ -754,3 +753,138 @@ async def test_joining_a_group_that_requires_it_narrows_open_sessions(
     resp = await client.get("/api/v1/machines", headers=headers)
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == "auth.second_factor.not_enrolled"
+
+
+# --- The second pass over the fixes ---------------------------------------------
+
+
+async def test_the_environment_proxy_is_used_by_name(resolver, monkeypatch):
+    """HTTPS_PROXY from Docker: the send goes through it with the host's
+    name, not pinned to an address the proxy would put in the handshake."""
+    monkeypatch.setattr(settings, "WEBHOOK_ALLOWED_HOSTS", [])
+    monkeypatch.setattr(settings, "WEBHOOK_PROXY_URL", None)
+    monkeypatch.setattr(deliver, "TRANSPORT", None)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.lycee.local:3128")
+    monkeypatch.delenv("https_proxy", raising=False)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    url = httpx.URL("https://pub.example/in")
+    assert deliver._proxy_for(url) == "http://proxy.lycee.local:3128"
+    sent: list[tuple[httpx.URL, str | None]] = []
+
+    async def fake_send(url, proxy, headers, extensions, body):
+        sent.append((url, proxy))
+        return 200
+
+    monkeypatch.setattr(deliver, "_send", fake_send)
+    assert await deliver.post("https://pub.example/in", b"{}", "s", "test", "i") == 200
+    assert sent == [(url, "http://proxy.lycee.local:3128")]
+    # NO_PROXY honoured: pinned again.
+    monkeypatch.setenv("NO_PROXY", "pub.example")
+    assert deliver._proxy_for(url) is None
+    sent.clear()
+    await deliver.post("https://pub.example/in", b"{}", "s", "test", "i")
+    assert sent[0][0].host == "93.184.216.34" and sent[0][1] is None
+
+
+async def test_each_checked_address_in_turn(resolver, monkeypatch):
+    tried: list[str] = []
+
+    async def getaddrinfo(host, port, **kwargs):
+        if not str(host).endswith(".example"):
+            return await resolver.real(host, port, **kwargs)
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.35", 0)),
+        ]
+
+    def handler(request):
+        tried.append(request.url.host)
+        if request.url.host == "93.184.216.34":
+            raise httpx.ConnectError("unreachable", request=request)
+        return httpx.Response(200)
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(settings, "WEBHOOK_ALLOWED_HOSTS", [])
+    monkeypatch.setattr(deliver, "TRANSPORT", httpx.MockTransport(handler))
+    assert await deliver.post("https://two.example/x", b"{}", "s", "test", "i") == 200
+    assert tried == ["93.184.216.34", "93.184.216.35"]
+
+
+async def test_an_allowed_host_written_in_unicode(monkeypatch):
+    monkeypatch.setattr(settings, "WEBHOOK_ALLOWED_HOSTS", ["chat.lycée.local"])
+    scheme, host, allowed = destination.parse("http://chat.lycée.local/hook")
+    assert (scheme, host, allowed) == ("http", "chat.xn--lyce-dpa.local", True)
+
+
+async def test_a_slow_resolver_counts_in_the_deadline(monkeypatch):
+    async def slow(host, port, **kwargs):
+        await asyncio.sleep(5)
+        return []
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", slow)
+    monkeypatch.setattr(settings, "WEBHOOK_ALLOWED_HOSTS", [])
+    monkeypatch.setattr(settings, "WEBHOOK_TIMEOUT_SECONDS", 1)
+    with pytest.raises(TimeoutError):
+        await deliver.post("https://slow.example/x", b"{}", "s", "test", "i")
+
+
+async def test_answering_webhooks_go_first(client, db_session, receiver):
+    from app.features.webhook.models import Webhook, WebhookDelivery
+
+    sites = await two_sites(client, db_session)
+    dead = await _create(client, sites.admin, name="Mort", url=f"https://{DEAD}/x")
+    alive = await _create(client, sites.admin, name="Vivant")
+    row = await db_session.get(Webhook, uuid.UUID(dead["id"]))
+    row.consecutive_failures = 3
+    db_session.add(row)
+    # The failing webhook's deliveries are the oldest.
+    for hook in (dead, dead, alive):
+        db_session.add(
+            WebhookDelivery(
+                webhook_id=uuid.UUID(hook["id"]), event="check.created", payload={}
+            )
+        )
+        await db_session.commit()
+    claimed = await deliver._claim(db_session, 50)
+    assert [str(c[5]) for c in claimed] == [alive["id"], dead["id"], dead["id"]]
+
+
+async def test_the_password_proof_has_a_budget(client, db_session):
+    from app.features.user.models import User
+    from app.features.user.permissions import BuiltinGroup
+
+    admin = await account(client, db_session, "tn@lycee.test", [BuiltinGroup.ADMIN])
+    body = {"name": "x", "current_password": "wrong"}
+    for _ in range(4):
+        resp = await client.post(TOKENS, headers=admin, json=body)
+        assert resp.status_code == 400
+    # The fifth wrong one ends the session: no endless guessing through it.
+    resp = await client.post(TOKENS, headers=admin, json=body)
+    assert resp.status_code == 401
+    resp = await client.post(
+        TOKENS, headers=admin, json={"name": "x", "current_password": STRONG}
+    )
+    assert resp.status_code == 401
+    user = (
+        await db_session.exec(select(User).where(User.email == "tn@lycee.test"))
+    ).one()
+    await db_session.refresh(user)
+    # Each wrong one counted towards the account's lock, like a login.
+    assert user.last_failed_login_at is not None and user.locked_until is not None
+
+
+async def test_alert_checks_word_each_reason():
+    from app.features.webhook.texts import text
+
+    data = {
+        "total": 2,
+        "instructions": None,
+        "items": [
+            {"hostname": "PC1", "instructions": "Disque presque plein"},
+            {"hostname": "PC2", "instructions": "Inactif"},
+        ],
+    }
+    assert text("check.created", data, "fr") == (
+        "Vérification demandée sur PC1 (Disque presque plein), PC2 (Inactif)"
+    )
