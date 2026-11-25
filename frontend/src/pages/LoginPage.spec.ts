@@ -8,10 +8,13 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 vi.mock('src/services/auth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/auth')>()),
   login: vi.fn(() => Promise.resolve({ access_token: 't' })),
+  verifySecondFactor: vi.fn(() => Promise.resolve({ access_token: 't2' })),
+  getAuthMethods: vi.fn(() => Promise.resolve({ oidc_enabled: false, oidc_label: 'Microsoft' })),
   getMe: vi.fn(() => Promise.resolve({ id: 'me', email: 'a@b.c', permissions: [] })),
 }));
 
-import { setAccessToken } from 'src/services/session';
+import { getAuthMethods, login, verifySecondFactor } from 'src/services/auth';
+import { getAccessToken, setAccessToken } from 'src/services/session';
 import LoginPage from './LoginPage.vue';
 
 const Stub = defineComponent({ render: () => h('div') });
@@ -95,5 +98,112 @@ describe('LoginPage — where a login lands', () => {
 
   it('goes home without a redirect', async () => {
     expect((await logInWith('')).target).toBe('/');
+  });
+});
+
+describe('LoginPage — second factor (C7)', () => {
+  beforeEach(() => {
+    setAccessToken(null);
+    vi.mocked(verifySecondFactor).mockReset().mockResolvedValue({
+      access_token: 't2',
+      token_type: 'bearer',
+    });
+  });
+
+  it('asks for the code after a right password, then lands where it was going', async () => {
+    vi.mocked(login).mockResolvedValueOnce({
+      second_factor_required: true,
+      challenge: 'ch-1',
+      expires_in: 300,
+    });
+    const { w, router } = await mountWithRouter('?redirect=/machines/m-5');
+    const push = vi.spyOn(router, 'push');
+    const [email, password] = w.findAllComponents(QInput);
+    email!.vm.$emit('update:modelValue', 'a@b.c');
+    password!.vm.$emit('update:modelValue', 'secret');
+    await flushPromises();
+    w.findComponent(QForm).vm.$emit('submit', new Event('submit'));
+    await flushPromises();
+
+    expect(push).not.toHaveBeenCalled();
+    expect(getAccessToken()).toBeNull();
+    expect(w.find('[data-test="second-factor-step"]').exists()).toBe(true);
+    const [code] = w.findAllComponents(QInput);
+    expect(code!.props('label')).toBe('Code à six chiffres');
+    code!.vm.$emit('update:modelValue', ' 123456 ');
+    await flushPromises();
+    w.findComponent(QForm).vm.$emit('submit', new Event('submit'));
+    await flushPromises();
+    expect(verifySecondFactor).toHaveBeenCalledWith('ch-1', '123456');
+    expect(getAccessToken()).toBe('t2');
+    expect(push.mock.calls.at(-1)?.[0]).toBe('/machines/m-5');
+  });
+
+  it('offers a backup code, and keeps the step after a wrong code', async () => {
+    vi.mocked(login).mockResolvedValueOnce({
+      second_factor_required: true,
+      challenge: 'ch-2',
+      expires_in: 300,
+    });
+    vi.mocked(verifySecondFactor).mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { status: 401, data: { error: { code: 'auth.second_factor.invalid' } } },
+    });
+    const { w } = await mountWithRouter('');
+    const [email, password] = w.findAllComponents(QInput);
+    email!.vm.$emit('update:modelValue', 'a@b.c');
+    password!.vm.$emit('update:modelValue', 'secret');
+    await flushPromises();
+    w.findComponent(QForm).vm.$emit('submit', new Event('submit'));
+    await flushPromises();
+
+    const toggle = w.findAll('button').find((b) => b.text() === 'Utiliser un code de secours');
+    await toggle!.trigger('click');
+    const [code] = w.findAllComponents(QInput);
+    expect(code!.props('label')).toBe('Code de secours');
+    code!.vm.$emit('update:modelValue', 'ABCDE-FGHJK');
+    await flushPromises();
+    w.findComponent(QForm).vm.$emit('submit', new Event('submit'));
+    await flushPromises();
+    expect(verifySecondFactor).toHaveBeenCalledWith('ch-2', 'ABCDE-FGHJK');
+    expect(w.find('[data-test="second-factor-step"]').exists()).toBe(true);
+    expect(getAccessToken()).toBeNull();
+
+    const back = w.findAll('button').find((b) => b.text() === 'Recommencer');
+    await back!.trigger('click');
+    expect(w.find('[data-test="second-factor-step"]').exists()).toBe(false);
+  });
+});
+
+describe('LoginPage — sign-in through the directory (C7)', () => {
+  it('offers the directory when the server does, and goes there by navigation', async () => {
+    vi.mocked(getAuthMethods).mockResolvedValueOnce({
+      oidc_enabled: true,
+      oidc_label: 'Microsoft',
+    });
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    const w = await mountPage('?redirect=/machines/m-5');
+    const button = w.find('[data-test="sso-button"]');
+    expect(button.text()).toContain('Se connecter avec Microsoft');
+    await button.trigger('click');
+    expect(assign).toHaveBeenCalledWith('/api/v1/auth/oidc/start?redirect=%2Fmachines%2Fm-5');
+    vi.unstubAllGlobals();
+  });
+
+  it('shows no directory button when the server offers none', async () => {
+    const w = await mountPage('');
+    expect(w.find('[data-test="sso-button"]').exists()).toBe(false);
+  });
+
+  it('says why the directory sign-in came back refused', async () => {
+    let w = await mountPage('?sso_error=auth.oidc.no_group');
+    expect(w.find('[data-test="sso-error"]').text()).toContain(
+      'n’appartient à aucun groupe autorisé',
+    );
+    w = await mountPage('?sso_error=auth.oidc.something_new');
+    expect(w.find('[data-test="sso-error"]').text()).toContain(
+      'La connexion par l’annuaire a échoué',
+    );
   });
 });

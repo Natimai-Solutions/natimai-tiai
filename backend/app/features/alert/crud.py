@@ -47,6 +47,8 @@ class OpenedAlert:
 class Evaluation:
     opened: list[OpenedAlert] = field(default_factory=list)
     resolved: int = 0
+    # (machine id, rule) of the alerts resolved, for the webhooks (C8).
+    resolved_keys: list[tuple[uuid.UUID, str]] = field(default_factory=list)
     refreshed: int = 0
     checks_opened: int = 0
 
@@ -101,6 +103,7 @@ async def evaluate(session: AsyncSession, now: datetime) -> Evaluation:
             alert.resolved_at = now
             session.add(alert)
             result.resolved += 1
+            result.resolved_keys.append(key)
         elif alert.detail != current[key]:
             alert.detail = current[key]
             session.add(alert)
@@ -171,6 +174,7 @@ async def _open_checks(session: AsyncSession, opened: list[OpenedAlert]) -> int:
             ).model_dump()
         )
     created: list[tuple[uuid.UUID, uuid.UUID]] = []
+    instructions_of = {r["machine_id"]: r["instructions"] for r in rows}
     for chunk in _chunks(rows):
         result = await session.exec(
             pg_insert(MachineCheck)
@@ -188,6 +192,23 @@ async def _open_checks(session: AsyncSession, opened: list[OpenedAlert]) -> int:
             .where(col(MachineAlert.id) == wanted[machine_id].id)
             .values(check_id=check_id)
         )
+    if created:
+        # To the webhooks (C8): the verifications the alerts opened.
+        from app.features.machine.models import Machine
+        from app.features.webhook import emit as webhook_emit
+
+        machines = (
+            await session.exec(
+                select(Machine).where(col(Machine.id).in_([m for _, m in created]))
+            )
+        ).all()
+        for machine in machines:
+            await webhook_emit.checks_created(
+                session,
+                [machine],
+                requested_by=settings.PROJECT_NAME,
+                instructions=instructions_of.get(machine.id),
+            )
     return len(created)
 
 

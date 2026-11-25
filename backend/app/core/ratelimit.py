@@ -108,8 +108,21 @@ report_label_limiter = RateLimiter(max_attempts=20, window_seconds=86400)
 # Reading the form: sends nothing, roomier.
 report_form_limiter = RateLimiter(max_attempts=60, window_seconds=3600)
 
+# The code after a right password (C7): per address, beside the account's
+# own counter (``second_factor``), which is what really bounds the guessing.
+second_factor_limiter = RateLimiter(max_attempts=10, window_seconds=300)
+# Sign-in through the directory (C7): a start and a callback per sign-in, a
+# school behind one address — roomier than the password's, which guards a
+# bcrypt; the provider does the checking.
+oidc_limiter = RateLimiter(max_attempts=60, window_seconds=300)
+# « Mon compte » enrolment and its codes, per session.
+second_factor_account_limiter = RateLimiter(max_attempts=10, window_seconds=900)
+
 _ALL = (
     login_limiter,
+    second_factor_limiter,
+    second_factor_account_limiter,
+    oidc_limiter,
     password_reset_limiter,
     password_reset_check_limiter,
     enroll_limiter,

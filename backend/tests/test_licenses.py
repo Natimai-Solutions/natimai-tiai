@@ -300,3 +300,130 @@ async def test_digest_lists_licences_to_whoever_reads_them(client, db_session):
 
     _, body = digest.render_digest(admin.digest, [], Language.EN, admin.licenses)
     assert "  Office: 2 installations for 1 licence" in body
+
+
+# --- Relecture de la PR #135 ------------------------------------------------
+
+
+async def test_blank_name_is_refused_not_a_500(client, db_session):
+    sites = await two_sites(client, db_session)
+    lic = await _create(client, sites.admin)
+    for blank in ("   ", ""):
+        resp = await client.patch(
+            f"{API}/{lic['id']}", headers=sites.admin, json={"name": blank}
+        )
+        assert resp.status_code == 422, resp.text
+    resp = await client.post(
+        API, headers=sites.admin, json={"name": "  ", "patterns": ["Office"]}
+    )
+    assert resp.status_code == 422
+    resp = await client.patch(
+        f"{API}/{lic['id']}", headers=sites.admin, json={"name": "  Office 2024 "}
+    )
+    assert resp.json()["name"] == "Office 2024"
+
+
+async def test_count_and_in_parc_list_agree(client, db_session):
+    """The console opens the count with in_parc=true: the list it lands on
+    holds as many postes as the count says, retired ones left out."""
+    from app.features.asset.models import Asset, AssetStatus
+
+    sites = await two_sites(client, db_session)
+    await _install(db_session, sites.a.id, "Microsoft Office")
+    await _install(db_session, sites.b.id, "Microsoft Office")
+    db_session.add(Asset(machine_id=sites.b.id, status=AssetStatus.RETIRED))
+    await db_session.commit()
+    lic = await _create(client, sites.admin, seats=1)
+    resp = await client.get(
+        "/api/v1/machines",
+        headers=sites.admin,
+        params={"license_id": lic["id"], "in_parc": "true"},
+    )
+    assert resp.json()["total"] == lic["installed"] == 1
+
+
+async def test_catalogue_names_need_machine_read(client, db_session):
+    sites = await two_sites(client, db_session)
+    await _install(db_session, sites.a.id, "Microsoft Office")
+    lic = await _create(client, sites.admin)
+    purchases = await group(db_session, "Achats", {"license:read"}, None)
+    buyer = await account(client, db_session, "achats@test.local", [purchases.id])
+
+    resp = await client.post(
+        f"{API}/preview", headers=buyer, json={"patterns": ["Microsoft"]}
+    )
+    assert resp.status_code == 403
+    detail = (await client.get(f"{API}/{lic['id']}", headers=buyer)).json()
+    assert detail["programs"] == []
+    assert detail["installed"] == 1
+
+
+async def test_unknown_licence_and_the_limit(client, db_session, monkeypatch):
+    from app.features.license import crud
+
+    sites = await two_sites(client, db_session)
+    gone = "00000000-0000-0000-0000-000000000000"
+    for method in ("get", "patch", "delete"):
+        kwargs = {"json": {"seats": 1}} if method == "patch" else {}
+        resp = await getattr(client, method)(
+            f"{API}/{gone}", headers=sites.admin, **kwargs
+        )
+        assert resp.status_code == 404
+        assert resp.json()["error"]["code"] == "license.not_found"
+
+    monkeypatch.setattr(crud, "MAX_LICENSES", 1)
+    await _create(client, sites.admin)
+    resp = await client.post(
+        API, headers=sites.admin, json={"name": "B", "patterns": ["Bb"]}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "license.too_many"
+
+
+async def test_unlimited_seats_and_pattern_edit_recount(client, db_session):
+    sites = await two_sites(client, db_session)
+    await _install(db_session, sites.a.id, "Microsoft Office")
+    await _install(db_session, sites.b.id, "Microsoft Visio")
+    lic = await _create(client, sites.admin, seats=None)
+    assert (lic["installed"], lic["over"]) == (1, False)
+    resp = await client.patch(
+        f"{API}/{lic['id']}",
+        headers=sites.admin,
+        json={"patterns": ["Office", "Visio"], "seats": 1},
+    )
+    assert (resp.json()["installed"], resp.json()["over"]) == (2, True)
+
+
+async def test_digest_soon_line_and_queued_mail(client, db_session, monkeypatch):
+    from sqlmodel import select
+
+    from app.core.config import settings
+    from app.features.notification import digest
+    from app.features.notification.models import EmailOutbox
+    from app.features.user.models import User
+
+    monkeypatch.setattr(settings, "MAILGUN_DOMAIN", "mg.test.local")
+    monkeypatch.setattr(settings, "MAILGUN_API_KEY", "key-test")
+    sites = await two_sites(client, db_session)
+    soon = date.today() + timedelta(days=10)
+    await _create(
+        client,
+        sites.admin,
+        name="Antidote",
+        patterns=["Antidote"],
+        expires_on=soon.isoformat(),
+    )
+    admin = (
+        await db_session.exec(select(User).where(User.email == "admin@test.local"))
+    ).one()
+    admin.email_preference = "digest_daily"
+    db_session.add(admin)
+    await db_session.commit()
+
+    assert await digest.send_daily_digest(db_session) >= 1
+    rows = {r.to_address: r.body for r in (await db_session.exec(select(EmailOutbox)))}
+    body = rows["admin@test.local"]
+    assert "LICENCES À REVOIR" in body
+    assert f"  Antidote : échéance le {soon:%d/%m/%Y}" in body
+    # The account confined to site A is mailed its digest without them.
+    assert "LICENCES" not in rows.get("tech-a@test.local", "")

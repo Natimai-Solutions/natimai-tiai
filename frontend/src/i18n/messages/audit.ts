@@ -57,6 +57,7 @@ const fr = {
   actions: {
     auth: {
       session_revoked: "Fermeture d'une session console",
+      backup_code_used: 'Connexion avec un code de secours',
     },
     asset: {
       create: 'Création d’un actif',
@@ -80,6 +81,16 @@ const fr = {
       attach: 'Signalement rattaché à une vérification',
       close: 'Signalement clos',
       reject: 'Signalement rejeté',
+    },
+    webhook: {
+      create: "Création d'un webhook",
+      update: "Modification d'un webhook",
+      delete: "Suppression d'un webhook",
+      secret_renew: "Nouveau secret d'un webhook",
+    },
+    api_token: {
+      create: "Création d'un jeton d'API",
+      revoke: "Révocation d'un jeton d'API",
     },
     license: {
       create: 'Création d’une licence',
@@ -161,6 +172,16 @@ const fr = {
       delete: "Suppression d'un compte",
       reset_password: "Réinitialisation d'un mot de passe",
       locked: 'Compte verrouillé après des échecs de connexion',
+      second_factor_locked: 'Double authentification verrouillée après des codes faux',
+      second_factor_enabled: 'Double authentification activée',
+      second_factor_disabled: 'Double authentification désactivée',
+      backup_codes_regenerated: 'Nouveaux codes de secours',
+      second_factor_reset: "Double authentification d'un compte réinitialisée",
+      directory_provisioned: "Compte créé par une connexion par l'annuaire",
+      directory_linked: "Compte associé à l'annuaire",
+      directory_link_started: "Association à l'annuaire commencée",
+      directory_unlinked: "Compte dissocié de l'annuaire",
+      groups_synced: "Groupes recalculés d'après l'annuaire",
     },
   },
   /** Resource type → label, in the order the filter offers them. */
@@ -179,6 +200,7 @@ const fr = {
     schedule: 'Planification',
     report: 'Signalement',
     license: 'Licence',
+    webhook: 'Webhook',
     directory_domain: 'Domaine',
     settings: 'Paramètres',
   },
@@ -349,6 +371,7 @@ const en: Translation<typeof fr> = {
   actions: {
     auth: {
       session_revoked: 'Console session closed',
+      backup_code_used: 'Signed in with a backup code',
     },
     asset: {
       create: 'Asset created',
@@ -372,6 +395,16 @@ const en: Translation<typeof fr> = {
       attach: 'Report attached to a check',
       close: 'Report closed',
       reject: 'Report rejected',
+    },
+    webhook: {
+      create: 'Webhook created',
+      update: 'Webhook changed',
+      delete: 'Webhook deleted',
+      secret_renew: 'Webhook secret renewed',
+    },
+    api_token: {
+      create: 'API token created',
+      revoke: 'API token revoked',
     },
     license: {
       create: 'Licence created',
@@ -453,6 +486,16 @@ const en: Translation<typeof fr> = {
       delete: 'Account deleted',
       reset_password: 'Password reset',
       locked: 'Account locked after failed logins',
+      second_factor_locked: 'Two-step verification locked after wrong codes',
+      second_factor_enabled: 'Two-step verification turned on',
+      second_factor_disabled: 'Two-step verification turned off',
+      backup_codes_regenerated: 'New backup codes',
+      second_factor_reset: 'Two-step verification of an account reset',
+      directory_provisioned: 'Account created by a directory sign-in',
+      directory_linked: 'Account linked to the directory',
+      directory_link_started: 'Directory link started',
+      directory_unlinked: 'Account unlinked from the directory',
+      groups_synced: 'Groups recomputed from the directory',
     },
   },
   resourceTypes: {
@@ -470,6 +513,7 @@ const en: Translation<typeof fr> = {
     schedule: 'Schedule',
     report: 'Report',
     license: 'Licence',
+    webhook: 'Webhook',
     directory_domain: 'Domain',
     settings: 'Settings',
   },

@@ -6,10 +6,16 @@ import { type Router } from 'vue-router';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => {
-  const value: { permissions: string[]; token: string | null; sessionAlive: boolean } = {
+  const value: {
+    permissions: string[];
+    token: string | null;
+    sessionAlive: boolean;
+    enrolmentOnly: boolean;
+  } = {
     permissions: [],
     token: 'token',
     sessionAlive: true,
+    enrolmentOnly: false,
   };
   return value;
 });
@@ -23,7 +29,7 @@ vi.mock('src/stores/auth', () => ({
   useAuthStore: () => ({
     ensureProfile: () => Promise.resolve(),
     get user() {
-      return { permissions: state.permissions };
+      return { permissions: state.permissions, enrolment_only: state.enrolmentOnly };
     },
   }),
   readCachedPermissions: () => state.permissions,
@@ -75,7 +81,21 @@ beforeEach(async () => {
   state.permissions = ['machine:read', 'room:read'];
   state.token = 'token';
   state.sessionAlive = true;
+  state.enrolmentOnly = false;
   await router.push('/account');
+});
+
+describe('a session for enrolment only (C7)', () => {
+  it('keeps it on « Mon compte », whatever the page asked', async () => {
+    state.enrolmentOnly = true;
+    await router.push('/machines/abc');
+    expect(router.currentRoute.value.name).toBe('account');
+    await router.push('/');
+    expect(router.currentRoute.value.name).toBe('account');
+    state.enrolmentOnly = false;
+    await router.push('/machines/abc');
+    expect(router.currentRoute.value.name).toBe('machine-detail');
+  });
 });
 
 describe('landing page (permissions)', () => {

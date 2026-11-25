@@ -234,7 +234,9 @@ l'exécution est figée dans le binaire de l'agent.
 | Conformité des postes, mises à jour tierces (winget) | 🟢 Livré |
 | Lecture de l'annuaire par des postes désignés (salles vérifiées) | 🟢 Livré — mode `ldap` prévu |
 | Licences logicielles (décompte, dépassement, échéances) | 🟢 Livré |
-| Second facteur, webhooks… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
+| Second facteur, connexion par l'annuaire (OpenID Connect) | 🟢 Livré |
+| Webhooks (JSON signé, Teams, Mattermost), jetons d'API personnels | 🟢 Livré |
+| Tendances, indicateurs… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
 | Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement
@@ -330,6 +332,17 @@ et un accès réseau au serveur.
 - **Connexion sans fuite d'information** : même réponse et même temps de calcul
   pour une adresse inconnue, un compte désactivé ou un mauvais mot de passe ;
   adresses e-mail insensibles à la casse.
+- **Double authentification** (TOTP) depuis « Mon compte », avec dix codes de
+  secours ; imposable par groupe. Elle n'est demandée qu'après un mot de passe
+  exact, et le mot de passe seul n'ouvre rien ; codes à usage unique, verrou
+  après cinq codes faux, secrets chiffrés en base.
+- **Connexion par l'annuaire** (OpenID Connect, Entra ID d'abord), désactivée
+  par défaut : les groupes de l'annuaire donnent les groupes de la console, un
+  compte local reste toujours là pour le cas où l'annuaire est injoignable.
+- **Jetons d'API personnels** pour les scripts : droits et portée du compte, en
+  lecture seule par défaut, à durée bornée, révocables, jamais sur le compte
+  lui-même. **Webhooks sortants** signés, dont les adresses du réseau interne
+  sont refusées : le serveur ne sert pas de rebond.
 - **Catalogue de commandes fermé** : aucun exécuteur de scripts, aucune
   modification du registre, des fichiers, du pare-feu ou des comptes — un serveur
   compromis ne peut déclencher que les actions prévues.

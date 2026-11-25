@@ -28,9 +28,20 @@ const fr = {
     actionsFor: 'Actions pour {email}',
     edit: 'Modifier',
     resetPassword: 'Réinitialiser le mot de passe',
+    resetSecondFactor: 'Réinitialiser la double authentification',
+    secondFactor: 'Double authentification',
+    directory: 'Annuaire',
     deactivate: 'Désactiver',
     reactivate: 'Réactiver',
     delete: 'Supprimer',
+  },
+  resetSecondFactor: {
+    title: 'Réinitialiser la double authentification',
+    message:
+      'Le compte {email} perd son second facteur et ses codes de secours, et toutes ses sessions sont fermées. Il pourra (ou devra, si un groupe l’impose) en activer un nouveau à sa prochaine connexion.',
+    ok: 'Réinitialiser',
+    cancel: 'Annuler',
+    done: 'Double authentification réinitialisée',
   },
   form: {
     createTitle: 'Nouveau compte',
@@ -112,9 +123,20 @@ const en: Translation<typeof fr> = {
     actionsFor: 'Actions for {email}',
     edit: 'Edit',
     resetPassword: 'Reset the password',
+    resetSecondFactor: 'Reset two-step verification',
+    secondFactor: 'Two-step verification',
+    directory: 'Directory',
     deactivate: 'Disable',
     reactivate: 'Re-enable',
     delete: 'Delete',
+  },
+  resetSecondFactor: {
+    title: 'Reset two-step verification',
+    message:
+      'The account {email} loses its second factor and its backup codes, and all its sessions are closed. It can (or must, if a group requires it) set up a new one at its next sign-in.',
+    ok: 'Reset',
+    cancel: 'Cancel',
+    done: 'Two-step verification reset',
   },
   form: {
     createTitle: 'New account',

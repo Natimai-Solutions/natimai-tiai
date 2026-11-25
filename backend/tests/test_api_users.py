@@ -1098,11 +1098,11 @@ async def test_two_last_admins_deactivating_each_other_leave_one(
     }
     counted = crud.users_holding
 
-    async def slow_count(session, permission):
+    async def slow_count(session, permission, **kwargs):
         # Counted, then a pause before the commit: without the lock, the
         # other change counts during it, sees this one's target still active,
         # and both commit.
-        held = await counted(session, permission)
+        held = await counted(session, permission, **kwargs)
         await asyncio.sleep(0.3)
         return held
 

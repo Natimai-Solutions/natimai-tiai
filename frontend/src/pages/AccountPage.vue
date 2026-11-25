@@ -2,6 +2,21 @@
   <q-page padding>
     <h1 class="text-h5 q-mb-md">{{ t('account.title') }}</h1>
 
+    <!-- A session opened for enrolment only (C7): the rest of the console
+         waits for the second factor a group requires. -->
+    <q-banner
+      v-if="auth.user?.enrolment_only"
+      class="surface-orange q-mb-md"
+      rounded
+      dense
+      role="status"
+      style="max-width: 520px"
+      data-test="enrolment-banner"
+    >
+      <template #avatar><q-icon name="phonelink_lock" /></template>
+      {{ t('secondFactor.card.enrolmentOnly') }}
+    </q-banner>
+
     <q-card flat bordered class="q-mb-md" style="max-width: 520px">
       <q-card-section class="q-gutter-xs">
         <div class="row items-center">
@@ -96,7 +111,21 @@
       </q-card-section>
     </q-card>
 
-    <q-card flat bordered style="max-width: 520px">
+    <!-- An account of the directory (C7): its password and second factor
+         live there, not here. -->
+    <q-banner
+      v-if="external"
+      class="surface-grey q-mb-md"
+      rounded
+      dense
+      style="max-width: 520px"
+      data-test="external-account"
+    >
+      <template #avatar><q-icon name="badge" /></template>
+      {{ t('secondFactor.directory.externalAccount') }}
+    </q-banner>
+
+    <q-card v-if="!external && !enrolmentOnly" flat bordered style="max-width: 520px">
       <q-card-section class="text-subtitle1">{{ t('account.password.title') }}</q-card-section>
 
       <q-form @submit="onSubmit">
@@ -149,7 +178,11 @@
       </q-form>
     </q-card>
 
-    <q-card flat bordered class="q-mt-md" style="max-width: 520px">
+    <SecondFactorCard v-if="!external" />
+    <DirectoryCard v-if="!enrolmentOnly" />
+    <ApiTokensCard />
+
+    <q-card v-if="!enrolmentOnly" flat bordered class="q-mt-md" style="max-width: 520px">
       <q-card-section class="row items-start no-wrap">
         <div class="col">
           <div class="text-subtitle1">{{ t('account.sessions.title') }}</div>
@@ -229,7 +262,10 @@ import { groupName } from 'src/utils/groupText';
 import { usePasswordPolicy } from 'src/composables/usePasswordPolicy';
 import { computed, onMounted, ref, watch } from 'vue';
 import { availableLocales, t } from 'src/i18n';
+import ApiTokensCard from 'src/components/account/ApiTokensCard.vue';
 import CardLoadError from 'src/components/CardLoadError.vue';
+import DirectoryCard from 'src/components/account/DirectoryCard.vue';
+import SecondFactorCard from 'src/components/account/SecondFactorCard.vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import {
@@ -258,6 +294,10 @@ const { passwordMin } = usePasswordPolicy();
 const $q = useQuasar();
 const auth = useAuthStore();
 const router = useRouter();
+/** An account of the directory (C7): no password, no second factor here. */
+const external = computed(() => auth.user?.auth_source === 'oidc');
+/** A session for enrolment only: the second factor, and nothing the API would refuse. */
+const enrolmentOnly = computed(() => auth.user?.enrolment_only === true);
 
 // --- Language: the account's choice, or the browser's (`BROWSER`).
 const BROWSER = 'browser';

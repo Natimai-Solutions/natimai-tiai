@@ -164,7 +164,7 @@
         </q-card>
       </div>
 
-      <LicensesAttentionCard v-if="canReadLicenses" class="col-12 col-md-6" />
+      <LicensesAttentionCard v-if="canReadLicenses" ref="licensesCard" class="col-12 col-md-6" />
 
       <div v-if="canReadThreats" class="col-12 col-md-6">
         <q-card flat bordered>
@@ -558,7 +558,11 @@ const auth = useAuthStore();
 const canReadThreats = computed(() => auth.can('threat', 'read'));
 const canReadLicenses = computed(() => auth.can('license', 'read'));
 
+const licensesCard = ref<InstanceType<typeof LicensesAttentionCard> | null>(null);
+
 async function fetchAll() {
+  // The licences card follows the refresh; its own failure stays its own.
+  void licensesCard.value?.load();
   // The side lists sit beside cards that leave the retired postes out: so
   // do they (`in_parc`), or a retired poste's frozen badge would show under
   // a card that does not count it.

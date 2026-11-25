@@ -51,6 +51,7 @@ from app.features.threat.crud import NewDetection, upsert_threats
 from app.features.threat.schemas import ThreatReport
 from app.features.usage import crud as usage_crud
 from app.features.usage.accounting import credit_for_gap
+from app.features.webhook import emit as webhook_emit
 from app.features.windows_update.crud import replace_pending
 from app.features.windows_update.schemas import WUStateReport
 from app.features.wol import relay as wol_relay
@@ -1149,6 +1150,8 @@ async def heartbeat(
         await threat_alert.queue_threat_alert(
             session, threat_alert.MachineContext.of(machine), new_detections
         )
+        # And to the webhooks that asked for it (C8), in the same transaction.
+        await webhook_emit.threats_detected(session, machine, new_detections)
 
     # Last, so that a heartbeat failing on anything above never mints a token
     # it would not return. Committed with the rest: the pending hash exists
@@ -1250,6 +1253,11 @@ async def command_result(
     cmd.finished_at = utcnow()
     cmd.agent_verdict_at = cmd.finished_at
     held_files = bool(cmd.package_files)
+    if cmd.status == CommandStatus.FAILED:
+        # The poste the command was for — not the relay that reported it.
+        target = machine if not relayed else await session.get(Machine, cmd.machine_id)
+        if target is not None:
+            await webhook_emit.command_failed(session, target, cmd)
     await session.commit()
     if held_files:
         # The files it held may have been replaced in the package meanwhile:

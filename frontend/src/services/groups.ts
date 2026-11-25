@@ -19,6 +19,10 @@ export interface Group {
    * from the room listings.
    */
   scope_labels?: ScopeLabel[];
+  /** Its members log in with a second factor (C7). Absent from an older server. */
+  mfa_required?: boolean;
+  /** Directory groups (Entra object ids) whose members get it at sign-in (C7). */
+  idp_groups?: string[];
   member_count: number;
   created_at: string;
   updated_at: string;
@@ -50,6 +54,8 @@ export interface CreateGroupPayload {
   description?: string | null;
   permissions: string[];
   scope?: GroupScope | null;
+  mfa_required?: boolean;
+  idp_groups?: string[];
 }
 
 /** Partial update — only the supplied fields are changed; `scope: null` lifts the restriction. */
@@ -58,6 +64,8 @@ export interface UpdateGroupPayload {
   description?: string | null;
   permissions?: string[];
   scope?: GroupScope | null;
+  mfa_required?: boolean;
+  idp_groups?: string[];
 }
 
 /** The scope to send for what the form holds: null when nothing is ticked. */

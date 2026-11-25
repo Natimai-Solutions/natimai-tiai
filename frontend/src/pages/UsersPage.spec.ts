@@ -8,6 +8,7 @@ vi.mock('src/services/users', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/users')>()),
   listUsers: vi.fn(),
   resetUserPassword: vi.fn(),
+  resetUserSecondFactor: vi.fn(),
 }));
 vi.mock('src/services/groups', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/groups')>()),
@@ -17,7 +18,12 @@ vi.mock('src/services/groups', async (importOriginal) => ({
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { setLocale, t } from 'src/i18n';
 import { listGroups, type Group } from 'src/services/groups';
-import { listUsers, resetUserPassword, type ConsoleUser } from 'src/services/users';
+import {
+  listUsers,
+  resetUserPassword,
+  resetUserSecondFactor,
+  type ConsoleUser,
+} from 'src/services/users';
 import { useAuthStore } from 'src/stores/auth';
 import UsersPage from './UsersPage.vue';
 
@@ -278,6 +284,38 @@ describe('UsersPage — the account form and the delete confirmation', () => {
     expect(html).toBe(true);
     expect(message).toContain('<b>&lt;img src=x&gt;@example.org</b>');
     expect(message).not.toContain('<img');
+    dialog.mockRestore();
+    wrapper.unmount();
+  });
+
+  it('shows the second factor, and resets it once confirmed (C7)', async () => {
+    const on = user('x', { second_factor_enabled: true, email: 'mfa@example.org' });
+    vi.mocked(listUsers).mockResolvedValue({ items: [on], total: 1, page: 1, page_size: 25 });
+    vi.mocked(resetUserSecondFactor).mockResolvedValue();
+    const { wrapper } = mountPage();
+    await flushPromises();
+    expect(wrapper.find('[data-test="user-mfa-badge"]').exists()).toBe(true);
+    let ok: (() => void) | undefined;
+    const dialog = vi.spyOn(wrapper.vm.$q, 'dialog').mockReturnValue({
+      onDismiss() {
+        return this;
+      },
+      update() {
+        return this;
+      },
+      onOk(fn: () => void) {
+        ok = fn;
+        return this;
+      },
+    } as never);
+    (
+      wrapper.vm as unknown as { confirmResetSecondFactor: (u: ConsoleUser) => void }
+    ).confirmResetSecondFactor(on);
+    const { message } = dialog.mock.calls[0]![0] as { message: string };
+    expect(message).toContain('mfa@example.org');
+    ok!();
+    await flushPromises();
+    expect(resetUserSecondFactor).toHaveBeenCalledWith('x');
     dialog.mockRestore();
     wrapper.unmount();
   });

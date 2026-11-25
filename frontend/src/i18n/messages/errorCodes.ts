@@ -19,6 +19,42 @@ const fr = {
   'auth.scope.restricted':
     'Refusé : votre compte est limité à certains emplacements, et cette action en sort',
   'auth.session.invalid': 'Votre session a pris fin : reconnectez-vous',
+  'auth.second_factor.invalid': 'Code invalide, ou connexion expirée : recommencez',
+  'auth.second_factor.not_enrolled':
+    'Un de vos groupes impose la double authentification : activez-la dans « Mon compte »',
+  'auth.second_factor.required_by_group':
+    'Un de vos groupes impose la double authentification : elle ne peut pas être désactivée',
+  'auth.second_factor.already_enabled': 'La double authentification est déjà activée',
+  'auth.second_factor.not_enabled':
+    'Aucune double authentification en cours : recommencez l’activation',
+  'auth.second_factor.code_invalid': 'Ce code ne correspond pas',
+  'user.external_account': 'Ce compte se connecte par l’annuaire : rien de cela ne se change ici',
+  'auth.oidc.disabled': 'La connexion par l’annuaire n’est pas configurée',
+  'auth.oidc.already_linked': 'Ce compte est déjà associé à un compte de l’annuaire',
+  'auth.oidc.unavailable':
+    'Le service d’identité ne répond pas : connectez-vous avec votre mot de passe',
+  'auth.oidc.invalid': 'La connexion par l’annuaire n’a pas pu être vérifiée : recommencez',
+  'auth.oidc.no_group':
+    'Votre compte de l’annuaire n’appartient à aucun groupe autorisé sur la console',
+  'auth.oidc.email_taken':
+    'Un compte de la console porte déjà cette adresse : connectez-vous avec son mot de passe et associez-le depuis « Mon compte »',
+  'auth.oidc.too_many_groups':
+    'Votre compte appartient à trop de groupes pour l’annuaire : l’administrateur doit restreindre les groupes émis à ceux de l’application',
+  'auth.oidc.no_email': 'Le service d’identité n’a pas transmis d’adresse e-mail',
+  'auth.oidc.account_disabled': 'Ce compte est désactivé',
+  'auth.oidc.denied': 'Connexion par l’annuaire annulée',
+  'webhook.not_found': 'Ce webhook n’existe plus',
+  'webhook.destination_refused': 'Cette adresse ne peut pas recevoir de webhook',
+  'webhook.url.scheme':
+    'L’adresse doit commencer par https:// (http:// seulement pour un hôte autorisé par l’exploitant)',
+  'webhook.url.credentials': 'L’adresse ne doit pas contenir d’identifiant ni de mot de passe',
+  'webhook.url.host': 'Adresse invalide',
+  'webhook.url.unresolved': 'Ce nom d’hôte est introuvable',
+  'webhook.url.internal':
+    'Cette adresse est sur un réseau interne : refusée, sauf hôte autorisé par l’exploitant (WEBHOOK_ALLOWED_HOSTS)',
+  'api_token.not_found': 'Ce jeton n’existe plus',
+  'api_token.too_many': 'Le nombre maximal de jetons actifs est atteint',
+  'api_token.forbidden_here': 'Un jeton d’API ne peut pas agir sur le compte lui-même',
   'auth.session.not_found': 'Session introuvable ou déjà fermée',
   'auth.token.missing': 'Jeton manquant',
   'auth.token.invalid': 'Jeton invalide',
@@ -120,6 +156,39 @@ const en: Record<keyof typeof fr, string> = {
   'auth.scope.restricted':
     'Refused: your account is limited to some places, and this action goes beyond them',
   'auth.session.invalid': 'Your session has ended: please log in again',
+  'auth.second_factor.invalid': 'Invalid code, or the sign-in has expired: start over',
+  'auth.second_factor.not_enrolled':
+    'One of your groups requires two-step verification: turn it on in My account',
+  'auth.second_factor.required_by_group':
+    'One of your groups requires two-step verification: it cannot be turned off',
+  'auth.second_factor.already_enabled': 'Two-step verification is already on',
+  'auth.second_factor.not_enabled': 'No two-step verification in progress: start again',
+  'auth.second_factor.code_invalid': 'This code does not match',
+  'user.external_account': 'This account signs in through the directory: none of this changes here',
+  'auth.oidc.disabled': 'Sign-in through the directory is not configured',
+  'auth.oidc.already_linked': 'This account is already linked to a directory account',
+  'auth.oidc.unavailable': 'The identity service does not answer: sign in with your password',
+  'auth.oidc.invalid': 'The directory sign-in could not be verified: start over',
+  'auth.oidc.no_group': 'Your directory account belongs to no group allowed on the console',
+  'auth.oidc.email_taken':
+    'A console account already has this address: sign in with its password and link it from My account',
+  'auth.oidc.too_many_groups':
+    'Your account belongs to too many groups for the directory token: the administrator must limit the groups sent to those of the application',
+  'auth.oidc.no_email': 'The identity service sent no e-mail address',
+  'auth.oidc.account_disabled': 'This account is disabled',
+  'auth.oidc.denied': 'Directory sign-in cancelled',
+  'webhook.not_found': 'This webhook no longer exists',
+  'webhook.destination_refused': 'This address cannot receive webhooks',
+  'webhook.url.scheme':
+    'The address must start with https:// (http:// only for a host the operator allowed)',
+  'webhook.url.credentials': 'The address must not contain a user name or a password',
+  'webhook.url.host': 'Invalid address',
+  'webhook.url.unresolved': 'This host name cannot be found',
+  'webhook.url.internal':
+    'This address is on an internal network: refused, unless the operator allowed the host (WEBHOOK_ALLOWED_HOSTS)',
+  'api_token.not_found': 'This token no longer exists',
+  'api_token.too_many': 'The maximum number of live tokens has been reached',
+  'api_token.forbidden_here': 'An API token cannot act on the account itself',
   'auth.session.not_found': 'Session not found or already closed',
   'auth.token.missing': 'Missing token',
   'auth.token.invalid': 'Invalid token',

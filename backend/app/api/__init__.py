@@ -20,6 +20,7 @@ from app.api.routes.maintenance import machine_router as machine_maintenance_rou
 from app.api.routes.maintenance import owners_router as maintenance_owners_router
 from app.api.routes.maintenance import room_router as room_maintenance_router
 from app.api.routes.maintenance import router as maintenance_router
+from app.api.routes.oidc import router as oidc_router
 from app.api.routes.packages import router as packages_router
 from app.api.routes.reports import public_router as public_reports_router
 from app.api.routes.reports import router as reports_router
@@ -30,6 +31,7 @@ from app.api.routes.software import router as software_router
 from app.api.routes.stats import router as stats_router
 from app.api.routes.threats import router as threats_router
 from app.api.routes.users import router as users_router
+from app.api.routes.webhooks import router as webhooks_router
 
 api_router = APIRouter()
 api_router.include_router(auth_router)
@@ -40,6 +42,8 @@ api_router.include_router(assets_router)
 api_router.include_router(schedules_router)
 api_router.include_router(reports_router)
 api_router.include_router(licenses_router)
+api_router.include_router(oidc_router)
+api_router.include_router(webhooks_router)
 api_router.include_router(directory_router)
 api_router.include_router(public_reports_router)
 api_router.include_router(machine_assets_router)

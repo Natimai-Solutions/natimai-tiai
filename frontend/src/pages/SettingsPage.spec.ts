@@ -346,6 +346,36 @@ describe('SettingsPage', () => {
     });
   });
 
+  describe('the licences card (C6)', () => {
+    beforeEach(() => {
+      vi.mocked(getSettings).mockResolvedValue({
+        ...consoleSettings(),
+        license_expiry_days: 60,
+        env_license_expiry_days: 60,
+      });
+      vi.mocked(updateSettings).mockReset();
+    });
+
+    it('saves the days before the end, and refuses them out of range', async () => {
+      vi.mocked(updateSettings).mockResolvedValue({
+        ...consoleSettings(),
+        license_expiry_days: 90,
+      });
+      const page = await mountPage(['settings:read', 'settings:write']);
+      field(page, 'Jours avant l’échéance').vm.$emit('update:modelValue', 0);
+      await flushPromises();
+      await saveCard(page, 'Licences logicielles');
+      expect(updateSettings).not.toHaveBeenCalled();
+
+      field(page, 'Jours avant l’échéance').vm.$emit('update:modelValue', '90');
+      await flushPromises();
+      expect(blocksUnload()).toBe(true);
+      await saveCard(page, 'Licences logicielles');
+      expect(updateSettings).toHaveBeenCalledWith({ license_expiry_days: 90 });
+      page.app.unmount();
+    });
+  });
+
   describe('the alerts card', () => {
     beforeEach(() => {
       vi.mocked(getSettings).mockResolvedValue(consoleSettings());

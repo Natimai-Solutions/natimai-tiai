@@ -12,7 +12,7 @@ access with it, on the next request.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, ForeignKey
+from sqlalchemy import Column, ForeignKey, false, text
 from sqlmodel import Field, SQLModel
 
 from app.features.base import utc_field, utcnow
@@ -62,3 +62,43 @@ class AuthSession(SQLModel, table=True):
     password_failures: int = Field(default=0)
     user_agent: str | None = Field(default=None, max_length=USER_AGENT_MAX_LENGTH)
     ip: str | None = Field(default=None, max_length=IP_MAX_LENGTH)
+    # How it was opened (C7): ``password``, ``password+totp`` or ``oidc``.
+    auth_method: str = Field(
+        default="password",
+        max_length=20,
+        sa_column_kwargs={"server_default": text("'password'")},
+    )
+    # Opened by a password alone for an account whose group requires a
+    # second factor it does not have yet: the API answers it for « Mon
+    # compte » only (``app.api.deps``), until the enrolment is confirmed.
+    enrolment_only: bool = Field(
+        default=False, sa_column_kwargs={"server_default": false()}
+    )
+
+
+class LoginChallenge(SQLModel, table=True):
+    """The step between a right password and a second factor (C7).
+
+    The browser holds an opaque token; the row holds its hash. Valid
+    SECOND_FACTOR_CHALLENGE_MINUTES, a few codes at most, served once: what
+    opens a session, never the API itself.
+    """
+
+    __tablename__ = "login_challenges"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        sa_column=Column(
+            ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        )
+    )
+    token_hash: str = Field(max_length=64, unique=True)
+    # The account's password_changed_at when the challenge was issued: a
+    # password changed since makes it void.
+    password_changed_at: datetime | None = utc_field(default=None, nullable=True)
+    ip: str | None = Field(default=None, max_length=IP_MAX_LENGTH)
+    user_agent: str | None = Field(default=None, max_length=USER_AGENT_MAX_LENGTH)
+    attempts: int = Field(default=0)
+    created_at: datetime = utc_field(default_factory=utcnow)
+    expires_at: datetime = utc_field()
+    used_at: datetime | None = utc_field(default=None, nullable=True)

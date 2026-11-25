@@ -36,6 +36,8 @@ from app.core.config import Settings, settings
 _NEVER_SHOWN = frozenset(
     {
         "SECRET_KEY",
+        "TOTP_ENCRYPTION_KEY",
+        "OIDC_CLIENT_SECRET",
         "ENROLLMENT_SECRET",
         "ENROLLMENT_SECRET_PREVIOUS",
         "FIRST_ADMIN_EMAIL",

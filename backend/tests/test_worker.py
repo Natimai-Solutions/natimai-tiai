@@ -114,6 +114,7 @@ def test_build_jobs_registers_the_whole_schedule():
 
     assert set(jobs) == {
         "outbox",
+        "webhooks",
         "expire_stale_commands",
         "close_unanswered_commands",
         "evaluate_alerts",
@@ -130,6 +131,7 @@ def test_build_jobs_registers_the_whole_schedule():
         "purge_reports",
         "purge_schedule_runs",
         "purge_sessions",
+        "purge_webhook_deliveries",
         "purge_audit",
         "purge_commands",
         "purge_reset_tokens",
@@ -594,7 +596,11 @@ async def test_the_outbox_job_is_a_bounded_drain_beside_the_loop(monkeypatch):
     now = datetime(2026, 8, 20, 6, 0, tzinfo=UTC)
     jobs = {job.name: job for job in worker.build_jobs(now, stop=stop)}
 
-    assert [name for name, job in jobs.items() if job.background] == ["outbox"]
+    # The webhooks (C8) drain in the background too, with their own budget.
+    assert [name for name, job in jobs.items() if job.background] == [
+        "outbox",
+        "webhooks",
+    ]
     await jobs["outbox"].run()
     assert calls == [{"budget_seconds": worker.OUTBOX_BUDGET_SECONDS, "stop": stop}]
     # Over before the next drain is due, and with room for the tick itself.

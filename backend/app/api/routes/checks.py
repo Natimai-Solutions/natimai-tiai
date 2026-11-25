@@ -47,6 +47,7 @@ from app.features.user.scope import (
     machine_visible,
     restrict,
 )
+from app.features.webhook import emit as webhook_emit
 
 _READ = Depends(require_permission(Resource.CHECK, Action.READ))
 _WRITE = Depends(require_permission(Resource.CHECK, Action.WRITE))
@@ -411,6 +412,14 @@ async def create_check(
             requested_by=current.email,
             instructions=row.instructions,
         )
+    await webhook_emit.checks_created(
+        session,
+        [machine],
+        requested_by=current.email,
+        instructions=row.instructions,
+        priority=row.priority,
+        category=row.category,
+    )
     await session.commit()
     await session.refresh(row)
     return await _one(session, row)
@@ -548,6 +557,14 @@ async def create_checks_bulk(
             requested_by=current.email,
             instructions=_clean(payload.instructions),
         )
+    await webhook_emit.checks_created(
+        session,
+        created_machines,
+        requested_by=current.email,
+        instructions=_clean(payload.instructions),
+        priority=payload.priority.value,
+        category=payload.category.value if payload.category else None,
+    )
     await session.commit()
     return CheckBulkOut(created=created, skipped=len(machine_ids) - created)
 
@@ -743,6 +760,15 @@ async def close_check(
             check_id=row.id,
         )
     )
+    closed_machine = await session.get(Machine, row.machine_id)
+    if closed_machine is not None:
+        await webhook_emit.check_closed(
+            session,
+            closed_machine,
+            check_id=row.id,
+            closed_by=current.email,
+            note=note,
+        )
     await session.commit()
     await session.refresh(row)
     return await _one(session, row)

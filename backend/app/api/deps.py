@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import InvalidTokenError
 from sqlmodel import col, select
@@ -96,10 +96,56 @@ CurrentMachine = Annotated[Machine, Depends(get_current_machine)]
 # --- Console user auth (JWT) -----------------------------------------------
 
 
+# What a session opened for enrolment only (C7) may reach: « Mon compte »,
+# the enrolment itself, the sessions list and the logout.
+_ENROLMENT_PATHS = frozenset(
+    f"{settings.API_V1_STR}/auth/{path}"
+    for path in ("me", "totp/setup", "totp/confirm", "sessions", "logout")
+)
+
+
+# What a personal API token may never reach (C8): the account itself — its
+# password, sessions, second factor, tokens, directory link. Only reading
+# the profile is allowed under /auth.
+_TOKEN_ALLOWED_AUTH = frozenset({("GET", f"{settings.API_V1_STR}/auth/me")})
+
+
+async def _authenticate_api_token(
+    request: Request, session: SessionDep, token: str
+) -> tuple[AuthSession | None, User]:
+    """A personal API token (C8): its account, if the token is live and the
+    account active; never for the account's own routes."""
+    from app.core.net import client_ip
+    from app.features.api_token import crud as api_tokens
+
+    found = await api_tokens.resolve(session, token)
+    if found is None:
+        raise AppError(
+            code=ErrorCode.AUTH_CREDENTIALS_INVALID,
+            status_code=401,
+            message="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    api_token, user = found
+    path = request.url.path
+    if path.startswith(f"{settings.API_V1_STR}/auth/") and (
+        (request.method, path) not in _TOKEN_ALLOWED_AUTH
+    ):
+        raise AppError(
+            code=ErrorCode.API_TOKEN_FORBIDDEN_HERE,
+            status_code=403,
+            message="An API token cannot act on the account itself",
+        )
+    request.state.api_token = api_token
+    await api_tokens.note_use(session, api_token, client_ip(request))
+    return None, user
+
+
 async def _authenticate(
+    request: Request,
     session: SessionDep,
     token: Annotated[str, Depends(oauth2_scheme)],
-) -> tuple[AuthSession, User]:
+) -> tuple[AuthSession | None, User]:
     """Resolve the console session a bearer access token belongs to, and its
     account.
 
@@ -116,6 +162,8 @@ async def _authenticate(
         message="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if token.startswith("tiai_pat_"):
+        return await _authenticate_api_token(request, session, token)
     try:
         payload = security.decode_access_token(token)
     except InvalidTokenError:
@@ -160,16 +208,29 @@ async def _authenticate(
         changed_at = int(user.password_changed_at.timestamp())
         if issued_at is None or int(issued_at) < changed_at:
             raise credentials_error
+    if auth_session.enrolment_only and request.url.path not in _ENROLMENT_PATHS:
+        raise AppError(
+            code=ErrorCode.AUTH_SECOND_FACTOR_NOT_ENROLLED,
+            status_code=403,
+            message="Set up the second factor your group requires first",
+        )
     return auth_session, user
 
 
 # FastAPI caches a dependency's value for the request: the two below share one
 # ``_authenticate`` call, hence one query, whichever a route asks for.
-_Authenticated = Annotated[tuple[AuthSession, User], Depends(_authenticate)]
+_Authenticated = Annotated[tuple[AuthSession | None, User], Depends(_authenticate)]
 
 
 async def get_current_auth_session(auth: _Authenticated) -> AuthSession:
-    """The console session the request's access token belongs to."""
+    """The console session the request's access token belongs to. None for
+    a personal API token: the routes asking for it are the account's own."""
+    if auth[0] is None:
+        raise AppError(
+            code=ErrorCode.API_TOKEN_FORBIDDEN_HERE,
+            status_code=403,
+            message="An API token cannot act on the account itself",
+        )
     return auth[0]
 
 
@@ -181,11 +242,20 @@ async def get_current_user(auth: _Authenticated) -> User:
 CurrentAuthSession = Annotated[AuthSession, Depends(get_current_auth_session)]
 
 
+async def get_optional_auth_session(auth: _Authenticated) -> AuthSession | None:
+    """The console session, or None for a personal API token: for the few
+    routes both may read (the profile)."""
+    return auth[0]
+
+
+OptionalAuthSession = Annotated[AuthSession | None, Depends(get_optional_auth_session)]
+
+
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
 async def get_current_permissions(
-    session: SessionDep, user: CurrentUser
+    request: Request, session: SessionDep, user: CurrentUser
 ) -> frozenset[str]:
     """The caller's permission set — the union of their groups' grants.
 
@@ -193,7 +263,12 @@ async def get_current_permissions(
     request, so a route guarded by ``require_permission`` and a handler that
     asks for ``CurrentPermissions`` share the same query.
     """
-    return await user_crud.user_permissions(session, user.id)
+    granted = await user_crud.user_permissions(session, user.id)
+    api_token = getattr(request.state, "api_token", None)
+    if api_token is not None and not api_token.can_write:
+        # A read-only token (C8): the account's reading rights, no others.
+        return frozenset(p for p in granted if p.endswith(":read"))
+    return granted
 
 
 CurrentPermissions = Annotated[frozenset[str], Depends(get_current_permissions)]

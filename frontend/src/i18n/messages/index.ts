@@ -13,6 +13,7 @@ import errors from './errors';
 import exports from './exports';
 import format from './format';
 import groups from './groups';
+import integrations from './integrations';
 import interventions from './interventions';
 import layout from './layout';
 import licenses from './licenses';
@@ -25,6 +26,7 @@ import permissions from './permissions';
 import reports from './reports';
 import rooms from './rooms';
 import schedules from './schedules';
+import secondFactor from './secondFactor';
 import settings from './settings';
 import settingsEnv from './settingsEnv';
 import software from './software';
@@ -45,6 +47,8 @@ export const fr = {
   common: common.fr,
   compliance: compliance.fr,
   licenses: licenses.fr,
+  integrations: integrations.fr,
+  secondFactor: secondFactor.fr,
   errors: errors.fr,
   packages: packages.fr,
   machine: machine.fr,
@@ -80,6 +84,8 @@ export const en = {
   common: common.en,
   compliance: compliance.en,
   licenses: licenses.en,
+  integrations: integrations.en,
+  secondFactor: secondFactor.en,
   errors: errors.en,
   packages: packages.en,
   machine: machine.en,

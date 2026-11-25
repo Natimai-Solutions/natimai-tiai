@@ -115,7 +115,31 @@ class ErrorCode(enum.StrEnum):
     DIRECTORY_PENDING_CHANGED = "directory.pending_changed"
     REPORT_NO_OPEN_CHECK = "report.no_open_check"
     LICENSE_NOT_FOUND = "license.not_found"
+    # Second factor (C7). One code for every refusal of the login step.
+    AUTH_SECOND_FACTOR_INVALID = "auth.second_factor.invalid"
+    # The session was opened for enrolment only: « Mon compte » until then.
+    AUTH_SECOND_FACTOR_NOT_ENROLLED = "auth.second_factor.not_enrolled"
+    AUTH_SECOND_FACTOR_REQUIRED_BY_GROUP = "auth.second_factor.required_by_group"
+    AUTH_SECOND_FACTOR_ALREADY_ENABLED = "auth.second_factor.already_enabled"
+    AUTH_SECOND_FACTOR_NOT_ENABLED = "auth.second_factor.not_enabled"
+    # A code typed in « Mon compte » that does not match.
+    AUTH_SECOND_FACTOR_CODE_INVALID = "auth.second_factor.code_invalid"
     LICENSE_TOO_MANY = "license.too_many"
+    # An account of the directory (C7): no password, no address, no second
+    # factor of the console's to change — they live in the directory.
+    USER_EXTERNAL_ACCOUNT = "user.external_account"
+    # Sign-in through the directory not configured, or the link refused.
+    AUTH_OIDC_DISABLED = "auth.oidc.disabled"
+    AUTH_OIDC_ALREADY_LINKED = "auth.oidc.already_linked"
+    # Webhooks (C8): unknown, destination refused (the detail says why).
+    WEBHOOK_NOT_FOUND = "webhook.not_found"
+    WEBHOOK_DESTINATION_REFUSED = "webhook.destination_refused"
+    # Personal API tokens (C8).
+    API_TOKEN_NOT_FOUND = "api_token.not_found"
+    API_TOKEN_TOO_MANY = "api_token.too_many"
+    # A token used where only the account's own sign-in may act: its
+    # password, sessions, second factor, tokens, directory link.
+    API_TOKEN_FORBIDDEN_HERE = "api_token.forbidden_here"
     SCHEDULE_NOT_FOUND = "schedule.not_found"
     # A schedule that would run inside a forbidden window.
     SCHEDULE_FORBIDDEN_WINDOW = "schedule.forbidden_window"

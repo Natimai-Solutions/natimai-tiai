@@ -56,11 +56,13 @@ from app.features.base import utcnow
 from app.features.command import crud as command_crud
 from app.features.command.models import Command, CommandStatus
 from app.features.notification import digest, outbox
+from app.features.oidc import crud as oidc_crud
 from app.features.setting import crud as setting_crud
 from app.features.setting.crud import SchedulePolicy
 from app.features.setting.models import AppSetting
 from app.features.usage import crud as usage_crud
 from app.features.user import addresses as login_addresses
+from app.features.user import second_factor
 
 logger = logging.getLogger(__name__)
 
@@ -212,10 +214,17 @@ async def evaluate_alerts() -> int:
     alerts were opened."""
     from app.features.alert import crud as alert_crud
     from app.features.notification import alert_mail
+    from app.features.webhook import emit as webhook_emit
 
     async with AsyncSession(engine) as session:
         result = await alert_crud.evaluate(session, utcnow())
         await alert_mail.queue_alert_mails(session, result.opened)
+        # To the webhooks (C8), with the alerts in the same commit.
+        await webhook_emit.alerts_changed(
+            session,
+            [(a.machine_id, a.rule, a.detail) for a in result.opened],
+            result.resolved_keys,
+        )
         await session.commit()
     if result.opened or result.resolved:
         logger.info(
@@ -305,11 +314,31 @@ async def purge_usage() -> int:
         return await usage_crud.purge_before(session, cutoff)
 
 
+async def deliver_webhooks(stop: asyncio.Event | None = None) -> int:
+    """Send what the webhooks are owed (C8): due deliveries, once each."""
+    from app.features.webhook import deliver
+
+    async with AsyncSession(engine) as session:
+        return await deliver.send_pending(session, stop=stop)
+
+
+async def purge_webhook_deliveries() -> int:
+    """Drop the settled webhook deliveries past their retention."""
+    from app.features.webhook import deliver
+
+    async with AsyncSession(engine) as session:
+        return await deliver.purge(session)
+
+
 async def purge_sessions() -> int:
     """Drop console sessions that have expired or been revoked: they can no
     longer be used, and a row per login for ever would only grow."""
     async with AsyncSession(engine) as session:
-        return await auth_session_crud.purge_expired_sessions(session)
+        gone = await auth_session_crud.purge_expired_sessions(session)
+        # The login challenges of the second factor (C7): spent or expired.
+        gone += await second_factor.purge_challenges(session)
+        # The directory sign-ins in flight (C7): spent or expired.
+        return gone + await oidc_crud.purge(session)
 
 
 async def purge_audit() -> int:
@@ -503,6 +532,14 @@ def build_jobs(
             every(POLL_SECONDS),
             background=True,
         ),
+        # Every thirty seconds: a threat reaches the chat channel within that.
+        Job(
+            "webhooks",
+            functools.partial(deliver_webhooks, stop),
+            now,
+            every(30),
+            background=True,
+        ),
         Job("expire_stale_commands", expire_stale_commands, now, every(300)),
         Job("close_unanswered_commands", close_unanswered_commands, now, every(300)),
         # Every five minutes: a disk turning unhealthy is mailed within that,
@@ -548,6 +585,12 @@ def build_jobs(
             housekeeping,
         ),
         Job("purge_sessions", purge_sessions, housekeeping(now), housekeeping),
+        Job(
+            "purge_webhook_deliveries",
+            purge_webhook_deliveries,
+            housekeeping(now),
+            housekeeping,
+        ),
         Job("purge_audit", purge_audit, housekeeping(now), housekeeping),
         Job("purge_commands", purge_commands, housekeeping(now), housekeeping),
         Job(

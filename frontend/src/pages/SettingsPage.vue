@@ -325,6 +325,7 @@
     </q-card>
 
     <SettingsDirectoryCard />
+    <SettingsWebhooksCard />
 
     <!-- Reports (C4): the form a label's QR code opens without an account.
          Saved as it is switched. -->
@@ -1012,6 +1013,7 @@ import { onBeforeRouteLeave } from 'vue-router';
 import { useQuasar } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import SettingsDirectoryCard from 'src/components/settings/SettingsDirectoryCard.vue';
+import SettingsWebhooksCard from 'src/components/settings/SettingsWebhooksCard.vue';
 import { t } from 'src/i18n';
 import { rememberFleetThresholds } from 'src/composables/useFleetThresholds';
 import { formSnapshot } from 'src/utils/formSnapshot';
