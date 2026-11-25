@@ -300,6 +300,22 @@ async def purge_approvals() -> int:
         return await approval_crud.purge_before(session, cutoff)
 
 
+async def purge_attachments() -> int:
+    """Drop the attachment rows older than the console's retention
+    (``attachments.retention_days``; 0 keeps them). Rows only: the worker
+    has no access to the volume, the API's hourly sweep removes the files
+    left unnamed (C11)."""
+    from app.features.attachment import crud as attachment_crud
+    from app.features.setting import crud as setting_crud
+
+    async with AsyncSession(engine) as session:
+        days = await setting_crud.attachment_retention_days(session)
+        if days <= 0:
+            return 0
+        cutoff = utcnow() - timedelta(days=days)
+        return await attachment_crud.purge_before(session, cutoff)
+
+
 async def purge_reports() -> int:
     """Drop the reports handled more than ``REPORT_RETENTION_DAYS`` ago —
     their contact with them (C4)."""
@@ -632,6 +648,12 @@ def build_jobs(
         ),
         Job("purge_sessions", purge_sessions, housekeeping(now), housekeeping),
         Job("purge_approvals", purge_approvals, housekeeping(now), housekeeping),
+        Job(
+            "purge_attachments",
+            purge_attachments,
+            housekeeping(now),
+            housekeeping,
+        ),
         Job(
             "purge_webhook_deliveries",
             purge_webhook_deliveries,

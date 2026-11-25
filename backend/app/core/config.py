@@ -668,6 +668,20 @@ class Settings(BaseSettings):
     # (GPO, default 8): the server and the console only predict what the
     # agent decides, and say "sign it" instead of queueing a sure failure.
     PACKAGE_METHOD_A_MAX_GB: int = Field(default=8, ge=1, le=1024)
+    # Attachments of the journal (C11, dev/plan-procedures-pieces-jointes.md).
+    # Where they are kept — one file per SHA-256, the ``attachments`` volume,
+    # distinct from the packages' — and the largest file accepted: under the
+    # 8 MB Caddy puts on every request but a package upload, with the room of
+    # the multipart headers.
+    ATTACHMENTS_DIR: str = "/data/attachments"
+    ATTACHMENT_MAX_BYTES: int = Field(default=5 * 1024**2, ge=64 * 1024, le=7 * 1024**2)
+    # The total of the distinct files the journal names, in bytes; 0 = none.
+    # Here and not in the console: it protects the disk the database is on,
+    # which only the operator sees (plan §5).
+    ATTACHMENT_QUOTA_BYTES: int = Field(default=2 * 1024**3, ge=0)
+    # The first value of the console's setting ``attachments.retention_days``:
+    # attachments older than this many days are deleted; 0 keeps them.
+    ATTACHMENT_RETENTION_DAYS: int = Field(default=0, ge=0, le=3650)
     # How long a relayed wake waits for a poste to claim it before expiring. Ten
     # minutes and not the general command TTL: a wake nobody relayed within ten
     # minutes is a site with nothing on, and a magic packet an hour late meets

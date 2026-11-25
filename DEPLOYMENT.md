@@ -294,7 +294,7 @@ Il n'est jamais committé.
 | `TIAI_VERSION` | `latest` | Version des images `tiai-backend` et `tiai-frontend` tirées de ghcr.io — à épingler en production (cf. § « Mettre à jour le serveur ») |
 | `TIAI_DEV_BACKEND_PORT` | `8800` | Port hôte du backend en HTTP direct (override de dev uniquement) |
 | `TIAI_DEV_BACKEND_BIND` | `127.0.0.1` | Adresse hôte sur laquelle ce port est publié (override de dev uniquement). `0.0.0.0` l'ouvre aux postes du réseau, en clair (cf. § « Mode A ») |
-| `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/` (cf. § « Sauvegardes et restauration ») |
+| `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/`, et des copies de pièces jointes que le volume ne contient plus (cf. § « Sauvegardes et restauration ») |
 | `BACKUP_ENCRYPT_RECIPIENT` | *(vide)* | Clé publique `age` (`age1…`), ou plusieurs séparées par des espaces : chaque dump quotidien est chiffré pour elles (`tiai-AAAAMMJJ-HHMMSS.dump.age`). Vide : dumps en clair. Jamais la clé privée (cf. § « [Chiffrer les sauvegardes](#chiffrer-les-sauvegardes) ») |
 
 ### Backend
@@ -950,6 +950,40 @@ Le volume `packages` **n'est pas dans le dump PostgreSQL** (voir ci-dessous) :
 le sauvegarder à part, ou garder les installateurs d'origine pour pouvoir les
 redéposer.
 
+## Pièces jointes
+
+Une ligne du journal d'un poste (intervention saisie, ligne d'une maintenance,
+clôture d'une vérification) peut porter des photos et des PDF : JPEG, PNG,
+WebP et PDF seulement, reconnus **au contenu** (SVG, HTML, GIF, HEIC et le
+reste sont refusés), dix au plus par ligne. Le serveur ne les retouche jamais
+et les sert toujours en téléchargement (`Content-Disposition: attachment`,
+`nosniff`, CSP `sandbox`). La console redessine les photos JPEG et WebP avant
+l'envoi, ce qui en retire les métadonnées EXIF (position GPS d'un téléphone).
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `ATTACHMENTS_DIR` | `/data/attachments` | Où les fichiers sont stockés, un par empreinte SHA-256. Monté sur le volume Docker `attachments`, distinct de `packages`. Hors `ENVIRONMENT=local`, un dossier qui n'est pas un point de montage fait refuser les dépôts (503 `attachment.store_unavailable`, avertissement au démarrage de l'API) : une photo écrite dans la couche du conteneur disparaîtrait au prochain `up --force-recreate`. Lecture, téléchargement et suppression restent permis |
+| `ATTACHMENT_MAX_BYTES` | `5242880` (5 Mio) | Taille maximale d'un fichier, de 65 536 à 7 340 032 (7 Mio) : sous la limite de 8 Mo que Caddy pose sur toute requête hors dépôt de paquet, en-têtes du formulaire compris. Au-delà, 413 `attachment.too_large` |
+| `ATTACHMENT_QUOTA_BYTES` | `2147483648` (2 Gio) | Total des fichiers distincts conservés ; `0` = pas de quota. Au-delà, 413 `attachment.quota_exceeded`. Il protège le disque qui porte aussi la base : sa valeur se choisit d'après ce disque, d'où une variable d'environnement et non un réglage de la console |
+| `ATTACHMENT_RETENTION_DAYS` | `0` (conserver) | Valeur **initiale** de la conservation, en jours (0 à 3 650). Elle se règle ensuite dans **Paramètres** (« Rétention des pièces jointes ») : les photos peuvent montrer des élèves ou des écrans nominatifs, la durée est un choix de l'établissement et de son DPO (5 ans, 1 825 jours, proposés) |
+
+**Mise à jour vers cette version : reprendre le nouveau `docker-compose.yml`.**
+Il déclare le volume `attachments`, monté sur `backend` et, en lecture seule,
+sur `db-backup`. Avec l'image nouvelle et l'ancien compose, `/data/attachments`
+existe dans le conteneur sans être un volume : les dépôts répondent 503
+`attachment.store_unavailable` jusqu'à `docker compose up -d` avec le nouveau
+fichier.
+
+La purge par l'âge est faite par le `worker` (les lignes de la base, chaque
+matin) ; les fichiers que plus rien ne nomme sont retirés par l'API, qui seule
+monte le volume — au démarrage puis toutes les heures, et aussitôt après la
+suppression d'une pièce jointe, d'une ligne ou d'une visite de maintenance.
+Rien n'est supprimé quand la base ne connaît aucun poste alors que le dossier
+contient des fichiers (base neuve ou vidée).
+
+À la différence des paquets, **les pièces jointes sont sauvegardées** : une
+photo de panne ne se reconstruit pas (§ « Sauvegardes et restauration »).
+
 ## Sauvegardes et restauration
 
 Toute la mémoire de Tia'i — postes, historique des menaces, commandes (qui a
@@ -1027,10 +1061,24 @@ importe le moyen, l'important est qu'il existe), chiffré par `age` ou à la
 copie. Pour pouvoir reconstruire le serveur de zéro, trois choses doivent
 exister ailleurs (quatre avec le chiffrement) :
 
-1. un dump récent de `deploy/backups/` ;
+1. un dump récent de `deploy/backups/`, et le dossier
+   `deploy/backups/attachments/` (les pièces jointes, ci-dessous) ;
 2. le fichier `deploy/.env` (les secrets ne sont dans aucun dump) ;
 3. le certificat `deploy/certs/` (mode C) ;
 4. avec le chiffrement, la **clé privée** `age` — et jamais sur le serveur.
+
+**Pièces jointes.** Après chaque dump réussi, `db-backup` copie les fichiers
+du volume `attachments` (monté en lecture seule sur `/attachments`) dans
+`deploy/backups/attachments/`, un fichier par empreinte SHA-256 : la copie est
+incrémentale — un fichier déjà copié, en clair ou en `.age`, est seulement
+« touché » — et chiffrée en `<empreinte>.age` comme les dumps quand
+`BACKUP_ENCRYPT_RECIPIENT` est posé (une copie en clair d'avant le chiffrement
+est alors remplacée, puis supprimée). Le dossier est en `700`, chaque fichier
+en `600`. Une copie que le volume ne contient plus n'est plus touchée et part
+après `BACKUP_KEEP_DAYS` jours : un dump de 14 jours retrouve ses photos. Une
+copie qui échoue est dite au journal (« ECHEC de la copie des pièces
+jointes ») et rien n'est purgé ; sans le volume (compose d'avant cette
+version), une ligne le dit et le dump continue seul.
 
 ### Chiffrer les sauvegardes
 
@@ -1147,6 +1195,30 @@ Sur un serveur reconstruit de zéro : déposer d'abord la copie hors site du
 > dump réussi — celui de la base encore vide, quelques secondes après
 > `docker compose up -d`, avant toute restauration. Un autre nom n'est jamais
 > purgé ; l'effacer à la main une fois la restauration vérifiée.
+
+**Remettre les pièces jointes.** Restaurer la base sans les fichiers laisse
+des lignes qui répondent « fichier absent du serveur »
+(`attachment.file_missing`), rien de plus. Pour les remettre dans le volume,
+`backend` arrêté, avec l'image `<projet>-db-backup` (elle a `sh` et `age` ;
+son point d'entrée est remplacé par `--entrypoint sh` — celui de l'image
+backend répondrait « Unknown mode: sh ») :
+
+```bash
+docker compose stop backend
+# Copie en clair
+docker run --rm --entrypoint sh -v <projet>_attachments:/data \
+  -v "$PWD/backups/attachments:/restore:ro" <projet>-db-backup \
+  -c 'for f in /restore/*; do case "$f" in *.age|*.tmp) continue;; esac; cp -n "$f" /data/; done; chown -R 10001:10001 /data'
+# Copie chiffrée : la clé privée par l'entrée standard, jamais écrite sur le serveur hors du conteneur éphémère
+docker run --rm -i --entrypoint sh -v <projet>_attachments:/data \
+  -v "$PWD/backups/attachments:/restore:ro" <projet>-db-backup \
+  -c 'umask 077; cat > /tmp/k; for f in /restore/*.age; do d=/data/$(basename "$f" .age); [ -e "$d" ] || age -d -i /tmp/k -o "$d" "$f"; done; chown -R 10001:10001 /data' < tiai-sauvegardes.key
+docker compose start backend
+```
+
+`10001` est l'uid et le gid du compte `tiai` de l'image backend ; au
+démarrage, l'entrypoint rend de toute façon au compte `tiai` tout fichier du
+volume qui ne lui appartiendrait pas.
 
 Au redémarrage, le backend rejoue les migrations Alembic si le dump vient
 d'une version plus ancienne du schéma — restaurer un dump d'hier après une

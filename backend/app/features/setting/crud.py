@@ -47,6 +47,8 @@ KEY_LICENSE_EXPIRY_DAYS = "licenses.expiry_days"
 KEY_APPROVAL_ENABLED = "approvals.enabled"
 KEY_APPROVAL_THRESHOLD = "approvals.threshold"
 KEY_APPROVAL_TTL_HOURS = "approvals.ttl_hours"
+# Attachments of the journal (C11): how many days they are kept; 0 = kept.
+KEY_ATTACHMENT_RETENTION = "attachments.retention_days"
 
 
 async def get_all(session: AsyncSession) -> dict[str, Any]:
@@ -403,6 +405,16 @@ async def license_expiry_days(
     if values is None:
         values = await get_all(session)
     return _int_or(values.get(KEY_LICENSE_EXPIRY_DAYS), env.LICENSE_EXPIRY_DAYS)
+
+
+async def attachment_retention_days(
+    session: AsyncSession, values: dict[str, Any] | None = None
+) -> int:
+    """How many days an attachment is kept before the worker deletes it;
+    0 keeps it. The console's row, the environment's value otherwise."""
+    if values is None:
+        values = await get_all(session)
+    return _int_or(values.get(KEY_ATTACHMENT_RETENTION), env.ATTACHMENT_RETENTION_DAYS)
 
 
 @dataclass(frozen=True)

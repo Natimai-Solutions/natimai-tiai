@@ -11,6 +11,7 @@ from app.features.approval.models import (  # noqa: F401
     ApprovalRequestMachine,
 )
 from app.features.asset.models import Asset  # noqa: F401
+from app.features.attachment.models import InterventionAttachment  # noqa: F401
 from app.features.audit.models import AuditEntry  # noqa: F401
 from app.features.auth_session.models import AuthSession, LoginChallenge  # noqa: F401
 from app.features.check.models import MachineCheck  # noqa: F401
@@ -33,6 +34,7 @@ from app.features.maintenance.models import Maintenance  # noqa: F401
 from app.features.notification.models import EmailOutbox  # noqa: F401
 from app.features.oidc.models import OidcLogin  # noqa: F401
 from app.features.package.models import Package, PackageFile  # noqa: F401
+from app.features.procedure.models import Procedure  # noqa: F401
 from app.features.report.models import Report  # noqa: F401
 from app.features.room.models import Building, Room  # noqa: F401
 from app.features.schedule.models import Schedule, ScheduleRun  # noqa: F401

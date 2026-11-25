@@ -135,6 +135,7 @@ def test_build_jobs_registers_the_whole_schedule():
         "purge_schedule_runs",
         "purge_sessions",
         "purge_approvals",
+        "purge_attachments",
         "purge_webhook_deliveries",
         "purge_audit",
         "purge_commands",

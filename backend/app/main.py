@@ -43,6 +43,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     from sqlmodel.ext.asyncio.session import AsyncSession
 
     from app.core.db import engine
+    from app.features.attachment import crud as attachment_crud
+    from app.features.attachment import storage as attachment_storage
     from app.features.package import crud as package_crud
 
     await assert_not_superuser()
@@ -60,17 +62,41 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             await package_crud.sweep_store(session)
     except Exception:
         logging.getLogger(__name__).exception("Could not sweep the package store")
+    # The attachments of the journal (C11): their volume must be mounted, or
+    # a photo would land in the container's layer and vanish at the next
+    # recreate — uploads are refused then (503), said once here.
+    if not attachment_storage.store_available():
+        logging.getLogger(__name__).warning(
+            "ATTACHMENTS_DIR (%s) is not a mounted volume: attachment uploads are "
+            "refused until the attachments volume is mounted (see the "
+            "docker-compose.yml of this version)",
+            settings.ATTACHMENTS_DIR,
+        )
+    # Their files no row names any more — the worker's retention purge
+    # deletes rows only, it has no access to the volume. Best effort.
+    try:
+        async with AsyncSession(engine) as session:
+            await attachment_crud.sweep_store(session)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not sweep the attachment store")
     # And again every hour while the API runs: a quiet server would otherwise
     # keep a replaced file until its next restart (audit S09).
-    sweeper = asyncio.create_task(
-        package_crud.sweep_periodically(lambda: AsyncSession(engine))
-    )
+    sweepers = [
+        asyncio.create_task(
+            package_crud.sweep_periodically(lambda: AsyncSession(engine))
+        ),
+        asyncio.create_task(
+            attachment_crud.sweep_attachments_periodically(lambda: AsyncSession(engine))
+        ),
+    ]
     try:
         yield
     finally:
-        sweeper.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await sweeper
+        for sweeper in sweepers:
+            sweeper.cancel()
+        for sweeper in sweepers:
+            with contextlib.suppress(asyncio.CancelledError):
+                await sweeper
 
 
 # The schema and its pages describe every route of the API: in local

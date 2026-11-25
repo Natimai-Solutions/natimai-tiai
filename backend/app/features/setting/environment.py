@@ -799,6 +799,41 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 ),
             ],
         ),
+        EnvGroup(
+            code="attachments",
+            label="Pièces jointes",
+            items=[
+                _item(
+                    env,
+                    "ATTACHMENTS_DIR",
+                    "Dossier du serveur où sont rangées les pièces jointes du journal "
+                    "(un fichier par empreinte SHA-256, volume attachments)",
+                ),
+                _item(
+                    env,
+                    "ATTACHMENT_MAX_BYTES",
+                    "Taille maximale d'une pièce jointe, en octets (7 Mio au plus, "
+                    "sous la limite de 8 Mo du proxy)",
+                    _bytes(env.ATTACHMENT_MAX_BYTES),
+                    raw=env.ATTACHMENT_MAX_BYTES,
+                    fmt="bytes",
+                ),
+                _item(
+                    env,
+                    "ATTACHMENT_QUOTA_BYTES",
+                    "Total des pièces jointes conservées, en octets ; 0 = pas de quota",
+                    _bytes(env.ATTACHMENT_QUOTA_BYTES),
+                    raw=env.ATTACHMENT_QUOTA_BYTES,
+                    fmt="bytes",
+                ),
+                _item(
+                    env,
+                    "ATTACHMENT_RETENTION_DAYS",
+                    "Valeur initiale de la conservation des pièces jointes, en "
+                    "jours (0 = conserver) ; modifiable dans Paramètres",
+                ),
+            ],
+        ),
     ]
 
 

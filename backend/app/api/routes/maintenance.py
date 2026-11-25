@@ -23,6 +23,7 @@ from app.api.deps import (
     require_permission,
 )
 from app.core.errors import AppError, ErrorCode
+from app.features.attachment import crud as attachment_crud
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.intervention import crud as intervention_crud
@@ -1074,6 +1075,7 @@ async def delete_session(
             status_code=403,
             message="This visit covers a room or postes beyond your scope",
         )
+    shas = await attachment_crud.shas_of(session, [line.id for line, _ in lines])
     audit.record(
         session,
         actor=current.email,
@@ -1087,7 +1089,12 @@ async def delete_session(
             "note": visit.note,
             "hostnames": sorted(m.hostname or str(m.id) for _, m in lines),
             "lines": len(lines),
+            "attachments": len(shas),
         },
     )
     await crud.delete_session(session, visit)
     await session.commit()
+    # The lines' attachments went with them (cascade): their files too,
+    # unless another line names them (C11).
+    for sha in set(shas):
+        await attachment_crud.discard_if_orphan(session, sha)

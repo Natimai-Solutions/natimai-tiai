@@ -173,6 +173,30 @@ class ErrorCode(enum.StrEnum):
     # would name nothing, and dropping the row could widen the group (C11).
     ROOM_IN_GROUP_SCOPE = "room.in_group_scope"
     INTERVENTION_NOT_FOUND = "intervention.not_found"
+    # Attachments of the journal (C11).
+    ATTACHMENT_NOT_FOUND = "attachment.not_found"
+    # The row is there, the file is not on the disk (a database restored
+    # without its files).
+    ATTACHMENT_FILE_MISSING = "attachment.file_missing"
+    ATTACHMENT_TOO_LARGE = "attachment.too_large"
+    # Recognised from the content: JPEG, PNG, WebP and PDF only.
+    ATTACHMENT_TYPE_REFUSED = "attachment.type_refused"
+    ATTACHMENT_TOO_MANY = "attachment.too_many"
+    # The same file is already joined to this line.
+    ATTACHMENT_DUPLICATE = "attachment.duplicate"
+    ATTACHMENT_QUOTA_EXCEEDED = "attachment.quota_exceeded"
+    # ATTACHMENTS_DIR is not a mounted volume (outside ``local``).
+    ATTACHMENT_STORE_UNAVAILABLE = "attachment.store_unavailable"
+    # Procedure notes per hardware model (C11).
+    PROCEDURE_NOT_FOUND = "procedure.not_found"
+    # No poste, retired ones included, has this model.
+    PROCEDURE_MODEL_UNKNOWN = "procedure.model_unknown"
+    PROCEDURE_EXISTS = "procedure.exists"
+    # Changed or deleted by someone else since it was read.
+    PROCEDURE_CHANGED = "procedure.changed"
+    # Written by the accounts that see every poste only: a note is shared
+    # between sites.
+    PROCEDURE_SCOPE_LIMITED = "procedure.scope_limited"
     CHECK_NOT_FOUND = "check.not_found"
     CHECK_ALREADY_OPEN = "check.already_open"
     CHECK_CLOSED = "check.closed"

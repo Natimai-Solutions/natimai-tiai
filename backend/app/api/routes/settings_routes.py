@@ -200,6 +200,9 @@ class SettingsOut(BaseModel):
     # échue ».
     license_expiry_days: int = 60
     env_license_expiry_days: int = 60
+    # Attachments (C11): how many days they are kept; 0 = kept.
+    attachment_retention_days: int = 0
+    env_attachment_retention_days: int = 0
     # Schedules (C3): the zone the console plans in, and the weekly windows
     # when nothing at risk runs on several postes.
     console_timezone: str = "UTC"
@@ -357,6 +360,7 @@ class SettingsUpdate(BaseModel):
     )
     compliance_patch_grace_days: int | None = Field(default=None, ge=0, le=365)
     license_expiry_days: int | None = Field(default=None, ge=1, le=365)
+    attachment_retention_days: int | None = Field(default=None, ge=0, le=3650)
     compliance_admins_allowed: (
         list[
             Annotated[
@@ -534,6 +538,8 @@ async def _out(session: SessionDep) -> SettingsOut:
         compliance_admins_allowed=list(compliance.admins_allowed),
         license_expiry_days=await crud.license_expiry_days(session, values),
         env_license_expiry_days=env.LICENSE_EXPIRY_DAYS,
+        attachment_retention_days=await crud.attachment_retention_days(session, values),
+        env_attachment_retention_days=env.ATTACHMENT_RETENTION_DAYS,
         console_timezone=planning.zone_name,
         env_console_timezone=env.CONSOLE_TIMEZONE,
         forbidden_windows=[w.as_json() for w in planning.forbidden],
@@ -644,6 +650,7 @@ _SIMPLE_KEYS = {
     "reports_enabled": report_crud.KEY_ENABLED,
     "compliance_patch_grace_days": crud.KEY_COMPLIANCE_PATCH_GRACE,
     "license_expiry_days": crud.KEY_LICENSE_EXPIRY_DAYS,
+    "attachment_retention_days": crud.KEY_ATTACHMENT_RETENTION,
     "approval_threshold": crud.KEY_APPROVAL_THRESHOLD,
     "approval_ttl_hours": crud.KEY_APPROVAL_TTL_HOURS,
 }

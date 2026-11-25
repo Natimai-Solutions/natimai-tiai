@@ -81,6 +81,9 @@ services:
     volumes:
       - ./backup/backup.sh:/backup.sh:ro
       - ./backups:/backups
+      # Les pièces jointes du journal, en lecture seule : copiées après chaque
+      # dump dans ./backups/attachments (une photo ne se reconstruit pas).
+      - attachments:/attachments:ro
     depends_on:
       db:
         condition: service_healthy
@@ -101,16 +104,22 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD manquant, cf. DEPLOYMENT.md « Rôle applicatif PostgreSQL »}
     command: ["api"]
     # Sans root ni capacité (audit S32) : l'entrypoint démarre en root le
-    # temps de confier le volume des paquets au compte `tiai`, puis l'abandonne
-    # — d'où les trois seules capacités gardées, perdues aussitôt après.
+    # temps de confier les volumes des paquets et des pièces jointes au compte
+    # `tiai`, puis l'abandonne — d'où les trois seules capacités gardées,
+    # perdues aussitôt après.
     cap_drop: [ALL]
     cap_add: [CHOWN, SETUID, SETGID]
     security_opt: ["no-new-privileges:true"]
     # Les fichiers des paquets de déploiement, un par empreinte SHA-256
     # (PACKAGES_DIR). À sauvegarder avec la base, ou à tenir pour
     # reconstructible depuis les installateurs d'origine.
+    # Les pièces jointes du journal (ATTACHMENTS_DIR), un fichier par
+    # empreinte : elles, à la différence des paquets, ne se reconstruisent
+    # pas — db-backup les copie avec les dumps. Sans ce volume, l'API refuse
+    # les dépôts (503 attachment.store_unavailable).
     volumes:
       - packages:/data/packages
+      - attachments:/data/attachments
     # Sain quand l'API répond ET joint la base : /health renvoie 200 dans les
     # deux cas, c'est le champ `database` qui tranche — lu en JSON par le
     # Python de l'image, sans dépendre d'un outil de plus, et sans proxy quoi
@@ -216,5 +225,6 @@ services:
 volumes:
   db_data:
   packages:
+  attachments:
   caddy_data:
   caddy_config:

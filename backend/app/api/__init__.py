@@ -5,6 +5,10 @@ from app.api.routes.alerts import router as alerts_router
 from app.api.routes.approvals import router as approvals_router
 from app.api.routes.assets import machine_router as machine_assets_router
 from app.api.routes.assets import router as assets_router
+from app.api.routes.attachments import (
+    intervention_router as intervention_attachments_router,
+)
+from app.api.routes.attachments import router as attachments_router
 from app.api.routes.audit import router as audit_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.checks import assignable_router as checks_assignable_router
@@ -23,6 +27,8 @@ from app.api.routes.maintenance import room_router as room_maintenance_router
 from app.api.routes.maintenance import router as maintenance_router
 from app.api.routes.oidc import router as oidc_router
 from app.api.routes.packages import router as packages_router
+from app.api.routes.procedures import machine_router as machine_procedure_router
+from app.api.routes.procedures import router as procedures_router
 from app.api.routes.reports import public_router as public_reports_router
 from app.api.routes.reports import router as reports_router
 from app.api.routes.rooms import buildings_router, rooms_router
@@ -53,6 +59,10 @@ api_router.include_router(buildings_router)
 api_router.include_router(rooms_router)
 api_router.include_router(machine_interventions_router)
 api_router.include_router(interventions_router)
+api_router.include_router(intervention_attachments_router)
+api_router.include_router(attachments_router)
+api_router.include_router(machine_procedure_router)
+api_router.include_router(procedures_router)
 api_router.include_router(machine_checks_router)
 api_router.include_router(checks_assignable_router)
 api_router.include_router(checks_router)

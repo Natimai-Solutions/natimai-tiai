@@ -72,7 +72,7 @@ exit 1
 
 # Tools backup.sh calls (besides pg_dump and age), and the fake pg_dump's own.
 TOOLS = ["basename", "cat", "chmod", "cut", "date", "du", "find", "mv", "rm"]
-TOOLS += ["sleep", "stat", "head"]
+TOOLS += ["sleep", "stat", "head", "cp", "mkdir", "touch"]
 
 DAILY = "tiai-20260101-010203"
 OLD_DAILY = [f"{DAILY}.dump", f"{DAILY}.dump.age"]  # purged after a good dump
@@ -164,7 +164,18 @@ class Run:
 
     def new_dumps(self) -> list[Path]:
         before = set(OLD_DAILY) | set(KEPT) | {STALE_PARTIAL}
-        return [self.folder / f for f in sorted(self.files() - before)]
+        return [
+            self.folder / f
+            for f in sorted(self.files() - before)
+            if not f.startswith("attachments/")
+        ]
+
+    def copies(self) -> dict[str, bytes]:
+        """The attachments' copy: name → content."""
+        copy = self.folder / "attachments"
+        if not copy.exists():
+            return {}
+        return {p.name: p.read_bytes() for p in copy.iterdir()}
 
 
 @pytest.fixture
@@ -195,19 +206,28 @@ def run_script(
     fail=None,
     tmpdir=None,
     age_fails=False,
+    attachments=None,
+    cp_fails=False,
 ):
     """One cycle of backup.sh: returns once it exits or closes its first
     cycle (``sauvegarde OK`` / ``ECHEC de la sauvegarde``). ``fail`` is how
     the fake pg_dump fails (``FAKE_PG_DUMP``); ``tmpdir`` the script's
     ``TMPDIR`` when it is not the test's folder; ``age_fails`` puts
-    ``FAKE_AGE`` in place of age."""
+    ``FAKE_AGE`` in place of age; ``attachments`` the attachments volume
+    (absent unless given); ``cp_fails`` a ``cp`` that always fails."""
     bindir = tmp_path / f"bin-{shell}"
     bindir.mkdir(exist_ok=True)
     for tool in TOOLS:
         target = _tool("busybox") if shell == "busybox" else shutil.which(tool)
         assert target, tool
         link = bindir / tool
-        if not link.exists():
+        if tool == "cp" and cp_fails:
+            link.unlink(missing_ok=True)
+            link.write_text(
+                "#!/bin/sh\necho 'cp: No space left on device' >&2\nexit 1\n"
+            )
+            link.chmod(0o755)
+        elif not link.exists():
             link.symlink_to(target)
     if age_fails:
         (bindir / "age").write_text(FAKE_AGE)
@@ -228,6 +248,7 @@ def run_script(
         "POSTGRES_DB": "tiai",
         "BACKUP_KEEP_DAYS": "14",
         "BACKUP_DIR": str(folder),
+        "BACKUP_ATTACHMENTS_DIR": str(attachments or tmp_path / "no-attachments"),
         "FAKE_PG_DUMP_DATA": str(data),
         "FAKE_PG_DUMP_CALLED": str(tmp_path / "pg_dump-called"),
     }
@@ -433,3 +454,160 @@ def test_a_failed_clear_dump_writes_and_purges_nothing(shell, fail, tmp_path, ba
 def test_the_script_parses(shell):
     command = [_tool("busybox"), "sh"] if shell == "busybox" else ["sh"]
     subprocess.run([*command, "-n", str(SCRIPT)], check=True)
+
+
+# --- Attachments (C11) ------------------------------------------------------------
+
+PHOTO = b"\xff\xd8\xff photo"
+SCAN = b"%PDF-1.7 scan"
+SHA_PHOTO = "a" * 64
+SHA_SCAN = "b" * 64
+SHA_GONE = "c" * 64
+
+
+@pytest.fixture
+def volume(tmp_path):
+    """The attachments volume: two files named by their hash, and what the
+    copy skips — another name, an upload in progress."""
+    folder = tmp_path / "attachments-volume"
+    folder.mkdir()
+    (folder / SHA_PHOTO).write_bytes(PHOTO)
+    (folder / SHA_SCAN).write_bytes(SCAN)
+    (folder / "README").write_bytes(b"not a hash")
+    (folder / ".upload-abc").write_bytes(b"in progress")
+    (folder / ("A" * 64)).write_bytes(b"upper case: not one")
+    return folder
+
+
+def _old(path: Path, days: float = 30) -> None:
+    when = time.time() - days * 86400
+    os.utime(path, (when, when))
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attachments_are_copied_after_a_good_dump(shell, tmp_path, backups, volume):
+    run = run_script(shell, tmp_path, backups, attachments=volume)
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    assert "pièces jointes : 2 copiée(s), 0 déjà présente(s)" in run.stdout
+    assert run.copies() == {SHA_PHOTO: PHOTO, SHA_SCAN: SCAN}
+    copy = backups / "attachments"
+    assert _mode(copy) == 0o700
+    assert {_mode(p) for p in copy.iterdir()} == {0o600}
+    _assert_cycle_kept_and_purged(run)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_file_already_copied_is_touched_not_copied_again(
+    shell, tmp_path, backups, volume
+):
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_PHOTO).write_bytes(b"copied before")
+    (copy / f"{SHA_SCAN}.age").write_bytes(b"encrypted before")
+    for p in copy.iterdir():
+        p.chmod(0o644)
+        _old(p, days=20)
+    run = run_script(shell, tmp_path, backups, attachments=volume)
+    assert "pièces jointes : 0 copiée(s), 2 déjà présente(s)" in run.stdout, run.stderr
+    # Under either form: neither copied again nor turned into the other.
+    assert run.copies() == {
+        SHA_PHOTO: b"copied before",
+        f"{SHA_SCAN}.age": b"encrypted before",
+    }
+    for p in copy.iterdir():
+        assert time.time() - p.stat().st_mtime < 3600  # touched: kept
+        assert _mode(p) == 0o600
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_copy_the_volume_lost_goes_after_the_retention(
+    shell, tmp_path, backups, volume
+):
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_GONE).write_bytes(b"gone from the volume")
+    _old(copy / SHA_GONE, days=30)
+    (copy / f"{SHA_GONE[:-1]}d").write_bytes(b"gone, but recently")
+    _old(copy / f"{SHA_GONE[:-1]}d", days=3)
+    (copy / SHA_PHOTO).write_bytes(PHOTO)
+    _old(copy / SHA_PHOTO, days=30)  # still in the volume: touched, kept
+    run = run_script(shell, tmp_path, backups, attachments=volume)
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    assert sorted(run.copies()) == sorted([SHA_PHOTO, SHA_SCAN, f"{SHA_GONE[:-1]}d"])
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("fail", FAILURES)
+def test_nothing_is_copied_nor_purged_when_the_dump_fails(
+    shell, fail, tmp_path, backups, volume
+):
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_GONE).write_bytes(b"old")
+    _old(copy / SHA_GONE)
+    run = run_script(shell, tmp_path, backups, attachments=volume, fail=fail)
+    assert "ECHEC de la sauvegarde" in run.stderr, run.stderr
+    assert run.copies() == {SHA_GONE: b"old"}
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_failed_copy_is_said_and_purges_nothing(shell, tmp_path, backups, volume):
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_GONE).write_bytes(b"old")
+    _old(copy / SHA_GONE)
+    run = run_script(shell, tmp_path, backups, attachments=volume, cp_fails=True)
+    assert "ECHEC de la copie des pièces jointes" in run.stderr, run.stderr
+    # The dump itself stands, and closes the cycle.
+    assert "sauvegarde OK" in run.stdout
+    [dump] = run.new_dumps()
+    assert dump.read_bytes() == DUMP
+    assert run.copies() == {SHA_GONE: b"old"}  # no .tmp left, nothing purged
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_without_the_volume_the_dump_alone(shell, tmp_path, backups):
+    run = run_script(shell, tmp_path, backups)
+    assert "non copiées" in run.stdout, run.stderr
+    assert "sauvegarde OK" in run.stdout
+    assert run.returncode != 1
+    assert not (backups / "attachments").exists()
+    _assert_cycle_kept_and_purged(run)
+
+
+@needs_age
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attachments_are_encrypted_with_the_dumps(shell, tmp_path, backups, volume):
+    key, public = _keypair(tmp_path, "admin")
+    run = run_script(shell, tmp_path, backups, recipient=public, attachments=volume)
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    copies = run.copies()
+    assert sorted(copies) == [f"{SHA_PHOTO}.age", f"{SHA_SCAN}.age"]
+    for name, clear in ((SHA_PHOTO, PHOTO), (SHA_SCAN, SCAN)):
+        path = backups / "attachments" / f"{name}.age"
+        assert PHOTO not in path.read_bytes() and SCAN not in path.read_bytes()
+        assert _mode(path) == 0o600
+        out = subprocess.run(
+            ["age", "-d", "-i", str(key), str(path)], check=True, capture_output=True
+        ).stdout
+        assert out == clear
+
+
+@needs_age
+@pytest.mark.parametrize("shell", SHELLS)
+def test_turning_encryption_on_replaces_the_clear_copies(
+    shell, tmp_path, backups, volume
+):
+    key, public = _keypair(tmp_path, "admin")
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_PHOTO).write_bytes(PHOTO)
+    run = run_script(shell, tmp_path, backups, recipient=public, attachments=volume)
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    assert sorted(run.copies()) == [f"{SHA_PHOTO}.age", f"{SHA_SCAN}.age"]
+    out = subprocess.run(
+        ["age", "-d", "-i", str(key), str(copy / f"{SHA_PHOTO}.age")],
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert out == PHOTO

@@ -334,4 +334,17 @@ Autres :
 
 ## 8. Écarts constatés à l'implémentation
 
-*(à remplir)*
+Partie serveur (PJ1, PJ2, PR1, PJ4) :
+
+1. **Ménage périodique nommé `attachment_crud.sweep_attachments_periodically`**, pas `sweep_periodically` : `test_api_packages_acceptance.py` reconnaît la tâche du ménage des paquets au nom de sa coroutine et en attend une seule. Garder ce nom aurait obligé à modifier un test des paquets, que §2.1 veut inchangés.
+2. **`package/storage.py:save` lit le premier bloc avant de créer le temporaire** : un type refusé ne crée aucun `.upload-*` (plus strict que « le temporaire est supprimé »). `Stored` gagne `content_type` (None sans reniflage) et le module une exception `Unrecognised`. Sans `sniff`, le comportement des paquets est inchangé (tests des paquets verts sans modification).
+3. **`AttachmentOut` est dans `features/attachment/schemas.py`** : partagé par `routes/attachments.py` et `routes/interventions.py:InterventionOut` sans import circulaire (la route des pièces jointes réutilise `_require_intervention`).
+4. **Nom de fichier** : tous les caractères Unicode de catégorie C sont retirés (contrôle, mais aussi format, dont U+202E qui retourne l'affichage d'un nom) ; un nom vide devient `piece-jointe` **plus l'extension du type reconnu** (`piece-jointe.png`), la règle de l'extension s'appliquant à tous les noms ; au-delà de 200 caractères, le nom est coupé avant son extension, qui reste.
+5. **`DELETE /interventions/{id}` verrouille la ligne (`FOR UPDATE`) avant de lire ses empreintes** : un dépôt en cours tient la ligne `FOR SHARE` ; la suppression l'attend et compte sa pièce jointe dans `attachments`, et son fichier part avec les autres. La suppression d'une visite de maintenance ne verrouille pas ses lignes : un dépôt achevé au même instant sur l'une d'elles laisse un fichier que le ménage horaire retire.
+6. **Procédures : bords du texte retirés** à la création et à la modification (`" F10 \n"` → `"F10"`), comme pour le modèle ; `GET /procedures` rend une liste JSON (sans enveloppe de pagination, 500 au plus).
+7. **`backup.sh`, échec de copie** : journal « ECHEC de la copie des pièces jointes », pas de purge de la copie, mais **le script ne s'arrête pas en code 1** : il tourne en boucle, et un arrêt ferait redémarrer le conteneur avec un dump de plus à chaque redémarrage. Le tour se clôt par « sauvegarde OK » (le dump, lui, est bon). Les fichiers temporaires de copie sont `<sha>.tmp` / `<sha>.age.tmp` (ceux que la commande de restauration saute), purgés avec les copies trop vieilles.
+8. **Tests de `backup.sh` non exécutables dans la session d'implémentation** : l'environnement place un garde-fou devant `rm` qui ne trouve pas de « vrai » `rm` dans le `PATH` réduit des tests ; les 13 tests de sauvegarde qui atteignent `rm` échouaient déjà ainsi avant C11. Les nouveaux cas qui n'appellent pas `rm` passent ; les autres sont à confirmer par la CI.
+9. **Restauration des pièces jointes non rejouée à la main** (pas de Docker dans la session) : la procédure de DEPLOYMENT.md reprend §2.6 telle quelle et reste à vérifier une fois.
+10. **Catalogues de la console laissés au jalon console** (comme pour C10) : `errorCodes.ts` (les treize codes), `audit.ts` (`intervention.attachment_add|delete`, `procedure.*`, ressource `procedure`), `settingsEnv.ts` (groupe `attachments`), `permissions.ts`. D'ici là, `test_errors_unit.py::test_every_code_has_a_message_in_the_console` et `::test_every_audit_action_has_a_label_in_the_console` échouent, et `serverEnvironment.spec.ts` de la console attend les textes du groupe `attachments`.
+
+Partie console : *(à remplir)*
