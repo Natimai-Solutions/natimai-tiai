@@ -1225,10 +1225,11 @@ async def step_up(
                         "created_at": current.created_at.isoformat(),
                     },
                 )
+                # The count is in the audit entry above: the log names the
+                # account, the address and the session only.
                 security_log.warning(
-                    "%s: %d wrong current passwords for %s from %s, session %s ended",
+                    "%s: wrong current passwords for %s from %s, session %s ended",
                     via,
-                    failures,
                     account.email,
                     ip,
                     current.id,
