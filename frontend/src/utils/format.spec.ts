@@ -15,6 +15,7 @@ import {
   encryptionColor,
   encryptionLabel,
   formatDate,
+  formatSize,
   protectionBadgeLabel,
   documentTitle,
   formatDateTime,
@@ -588,5 +589,14 @@ describe('one French number notation (item 10)', () => {
     expect(dash(null)).toBe('—');
     expect(dash('  ')).toBe('—');
     expect(dash('CORP')).toBe('CORP');
+  });
+});
+
+describe('formatSize (moved from services/packages, C11)', () => {
+  it('reads like the file explorer', () => {
+    expect(formatSize(512)).toBe('512 o');
+    expect(formatSize(1536)).toBe('1,5 Kio');
+    expect(formatSize(250 * 1024 * 1024)).toBe('250 Mio');
+    expect(formatSize(3 * 1024 ** 3)).toBe('3,0 Gio');
   });
 });

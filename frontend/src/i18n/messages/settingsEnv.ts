@@ -17,6 +17,7 @@ const fr = {
     wol: 'Réveil des postes (Wake-on-LAN)',
     console: 'Console et sécurité',
     packages: 'Paquets logiciels',
+    attachments: 'Pièces jointes',
   },
   values: {
     yes: 'oui',
@@ -183,6 +184,13 @@ const fr = {
       "Taille maximale d'un fichier de paquet déposé, en octets ; le proxy devant le serveur est dimensionné en conséquence",
     PACKAGE_METHOD_A_MAX_GB:
       'Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents',
+    ATTACHMENTS_DIR:
+      'Dossier du serveur où sont rangées les pièces jointes du journal (un fichier par empreinte SHA-256, volume attachments)',
+    ATTACHMENT_MAX_BYTES:
+      "Taille maximale d'une pièce jointe, en octets (7 Mio au plus, sous la limite de 8 Mo du proxy)",
+    ATTACHMENT_QUOTA_BYTES: 'Total des pièces jointes conservées, en octets ; 0 = pas de quota',
+    ATTACHMENT_RETENTION_DAYS:
+      'Valeur initiale de la conservation des pièces jointes, en jours (0 = conserver) ; modifiable dans Paramètres',
     SMTP_HOST:
       'Serveur SMTP ; vide = SMTP non configuré — valeur initiale : la carte « Envoi des e-mails » prend le dessus',
     SMTP_PORT:
@@ -206,6 +214,7 @@ const en: Translation<typeof fr> = {
     wol: 'Waking computers (Wake-on-LAN)',
     console: 'Console and security',
     packages: 'Software packages',
+    attachments: 'Attachments',
   },
   values: {
     yes: 'yes',
@@ -365,6 +374,13 @@ const en: Translation<typeof fr> = {
       'Maximum size of an uploaded package file, in bytes; the proxy in front of the server is sized to match',
     PACKAGE_METHOD_A_MAX_GB:
       'Total size, in GiB, beyond which computers refuse to download an unsigned package (method A); must equal the DeployMethodAMaxGB of the agents’ GPO',
+    ATTACHMENTS_DIR:
+      'Folder on the server where the journal’s attachments are stored (one file per SHA-256 hash, attachments volume)',
+    ATTACHMENT_MAX_BYTES:
+      'Maximum size of an attachment, in bytes (7 MiB at most, under the proxy’s 8 MB limit)',
+    ATTACHMENT_QUOTA_BYTES: 'Total of the attachments kept, in bytes; 0 = no quota',
+    ATTACHMENT_RETENTION_DAYS:
+      'Initial value of how long attachments are kept, in days (0 = kept); changed in Settings',
     SMTP_HOST:
       'SMTP server; empty = SMTP not configured — initial value: the “Sending e-mails” card takes precedence',
     SMTP_PORT: 'SMTP server port — initial value: the “Sending e-mails” card takes precedence',

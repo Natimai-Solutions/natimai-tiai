@@ -78,6 +78,9 @@ class MachineProcedure(BaseModel):
     # Null when the inventory has not reported one.
     hw_model: str | None
     procedure: ProcedureOut | None
+    # The caller is confined to some sites: it reads the note, never writes
+    # one (``procedure.scope_limited``); the console hides its buttons.
+    scope_limited: bool = False
 
 
 class ProcedureCreate(BaseModel):
@@ -149,12 +152,16 @@ async def machine_procedure(
     machine = await _require_machine(session, machine_id, scope)
     model = (machine.hw_model or "").strip() or None
     if model is None:
-        return MachineProcedure(hw_model=None, procedure=None)
+        return MachineProcedure(
+            hw_model=None, procedure=None, scope_limited=scope is not None
+        )
     found = (
         await session.exec(select(Procedure).where(col(Procedure.hw_model) == model))
     ).first()
     return MachineProcedure(
-        hw_model=model, procedure=_out(found) if found is not None else None
+        hw_model=model,
+        procedure=_out(found) if found is not None else None,
+        scope_limited=scope is not None,
     )
 
 

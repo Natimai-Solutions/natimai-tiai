@@ -396,6 +396,44 @@ describe('SettingsPage', () => {
     });
   });
 
+  describe('the attachments card (C11)', () => {
+    beforeEach(() => {
+      vi.mocked(getSettings).mockResolvedValue({
+        ...consoleSettings(),
+        attachment_retention_days: 0,
+        env_attachment_retention_days: 0,
+      });
+      vi.mocked(updateSettings).mockReset();
+    });
+
+    it('saves the retention, 0 = kept, and refuses it out of range', async () => {
+      vi.mocked(updateSettings).mockResolvedValue({
+        ...consoleSettings(),
+        attachment_retention_days: 1825,
+      });
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const label = 'Rétention des pièces jointes (jours, 0 = conserver)';
+      field(page, label).vm.$emit('update:modelValue', 4000);
+      await flushPromises();
+      await saveCard(page, 'Pièces jointes');
+      expect(updateSettings).not.toHaveBeenCalled();
+
+      field(page, label).vm.$emit('update:modelValue', '1825');
+      await flushPromises();
+      expect(blocksUnload()).toBe(true);
+      await saveCard(page, 'Pièces jointes');
+      expect(updateSettings).toHaveBeenCalledWith({ attachment_retention_days: 1825 });
+      page.app.unmount();
+    });
+
+    it('is not shown by a server older than the attachments', async () => {
+      vi.mocked(getSettings).mockResolvedValue(consoleSettings());
+      const page = await mountPage(['settings:read', 'settings:write']);
+      expect(page.wrapper.find('[data-test="attachment-settings-card"]').exists()).toBe(false);
+      page.app.unmount();
+    });
+  });
+
   describe('the alerts card', () => {
     beforeEach(() => {
       vi.mocked(getSettings).mockResolvedValue(consoleSettings());

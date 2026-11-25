@@ -1,6 +1,5 @@
 import { api } from 'boot/axios';
 import type { Command, CommandList, CreateCommandsResponse } from './commands';
-import { frNumber } from 'src/utils/format';
 import { intlTag, t } from 'src/i18n';
 
 /**
@@ -352,17 +351,8 @@ export function joinArgs(args: string[]): string {
   return args.map((a) => (a === '' || /[\s"]/.test(a) ? quoteArg(a) : a)).join(' ');
 }
 
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return t('packagePages.size.bytes', { n: bytes });
-  const units = ['kib', 'mib', 'gib'];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return t(`packagePages.size.${units[unit]}`, { n: frNumber(value, value < 10 ? 1 : 0) });
-}
+/** Moved to `utils/format` (C11): the fiche's attachments use it too. */
+export { formatSize } from 'src/utils/format';
 
 export async function listPackages(retired = false): Promise<Package[]> {
   const { data } = await api.get<Package[]>('/packages', { params: { retired } });

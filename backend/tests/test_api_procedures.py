@@ -245,7 +245,11 @@ async def test_the_fiche_reads_the_note_of_its_model(client, db_session):
     resp = await client.get(
         f"/api/v1/machines/{sites.a.id}/procedure", headers=sites.admin
     )
-    assert resp.json() == {"hw_model": MODEL, "procedure": None}
+    assert resp.json() == {
+        "hw_model": MODEL,
+        "procedure": None,
+        "scope_limited": False,
+    }
     note = await _created(client, sites.admin)
     resp = await client.get(
         f"/api/v1/machines/{sites.a.id}/procedure", headers=sites.admin
@@ -255,7 +259,14 @@ async def test_the_fiche_reads_the_note_of_its_model(client, db_session):
     resp = await client.get(
         f"/api/v1/machines/{bare.id}/procedure", headers=sites.admin
     )
-    assert resp.json() == {"hw_model": None, "procedure": None}
+    assert resp.json() == {"hw_model": None, "procedure": None, "scope_limited": False}
+    # A confined account reads the note of a poste in its scope, and is told
+    # it does not write it (the console hides its buttons).
+    resp = await client.get(
+        f"/api/v1/machines/{sites.a.id}/procedure", headers=sites.scoped
+    )
+    assert resp.json()["procedure"]["id"] == note["id"]
+    assert resp.json()["scope_limited"] is True
     resp = await client.get(
         f"/api/v1/machines/{sites.b.id}/procedure", headers=sites.scoped
     )

@@ -518,6 +518,9 @@
              shows: an account that reads neither was told « Aucune
              intervention enregistrée » about a journal nobody had asked for. -->
         <q-tab-panel v-if="canSeeHistory" name="history" class="q-px-none">
+          <!-- The procedure of the poste's model (C11) first: read where the
+               technician is when repairing. -->
+          <MachineProcedureCard v-if="canReadProcedures" :machine-id="props.id" />
           <MachineMaintenanceCard
             v-if="auth.can('maintenance', 'read')"
             :machine-id="props.id"
@@ -589,6 +592,7 @@ import MachineGpuCard from 'src/components/machine/MachineGpuCard.vue';
 import MachineHardwareCard from 'src/components/machine/MachineHardwareCard.vue';
 import MachineHistoryCard from 'src/components/machine/MachineHistoryCard.vue';
 import MachineMaintenanceCard from 'src/components/machine/MachineMaintenanceCard.vue';
+import MachineProcedureCard from 'src/components/machine/MachineProcedureCard.vue';
 import CheckCloseDialog from 'src/components/check/CheckCloseDialog.vue';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
 import { createCheck, updateCheck, type Check, type CheckPayload } from 'src/services/checks';
@@ -680,14 +684,18 @@ const complianceFailed = computed(
 // (audit B02). What the account may not read is not asked for.
 const canReadThreats = computed(() => auth.can('threat', 'read'));
 const canReadCommands = computed(() => auth.can('command', 'read'));
-// « Historique » holds the journal of interventions and the maintenance card,
-// each behind its own right; the tab is offered when either can show. The
-// write alone (a group made through the API) still adds a line.
+// « Historique » holds the journal of interventions, the maintenance card and
+// the procedure of the model (C11), each behind its own right; the tab is
+// offered when any of them can show. The write alone (a group made through the API) still adds a line.
 const canReadInterventions = computed(() => auth.can('intervention', 'read'));
 const canWriteInterventions = computed(() => auth.can('intervention', 'write'));
+const canReadProcedures = computed(() => auth.can('procedure', 'read'));
 const canSeeHistory = computed(
   () =>
-    canReadInterventions.value || canWriteInterventions.value || auth.can('maintenance', 'read'),
+    canReadInterventions.value ||
+    canWriteInterventions.value ||
+    auth.can('maintenance', 'read') ||
+    canReadProcedures.value,
 );
 
 /**

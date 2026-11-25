@@ -139,6 +139,25 @@ const fr = {
     'Aucun poste de la demande n’est encore dans la portée de son auteur : elle est close',
   'room.name.taken': 'Une salle porte déjà ce nom dans ce bâtiment',
   'intervention.not_found': 'Intervention introuvable',
+  'attachment.not_found': 'Pièce jointe introuvable',
+  'attachment.file_missing':
+    'Fichier absent du serveur : la pièce jointe est enregistrée, mais son fichier n’a pas été retrouvé (base restaurée sans ses fichiers ?)',
+  'attachment.too_large': 'Fichier trop volumineux pour une pièce jointe',
+  'attachment.type_refused':
+    'Type de fichier refusé : seules les images JPEG, PNG, WebP et les PDF sont acceptés',
+  'attachment.too_many': 'Cette ligne porte déjà le nombre maximal de pièces jointes',
+  'attachment.duplicate': 'Ce fichier est déjà joint à cette ligne',
+  'attachment.quota_exceeded':
+    'Espace des pièces jointes plein : supprimez des pièces jointes ou demandez une hausse du quota',
+  'attachment.store_unavailable':
+    'Ajout de pièces jointes impossible : le volume de stockage n’est pas monté sur le serveur (voir DEPLOYMENT.md)',
+  'procedure.not_found': 'Procédure introuvable',
+  'procedure.model_unknown': 'Aucun poste du parc n’a ce modèle',
+  'procedure.exists': 'Ce modèle a déjà sa procédure : modifiez-la',
+  'procedure.changed':
+    'Cette procédure a été modifiée ou supprimée entre-temps : relisez-la avant de recommencer',
+  'procedure.scope_limited':
+    'Refusé : les procédures sont rédigées par les comptes sans limite de lieux',
   'check.not_found': 'Vérification introuvable',
   'check.already_open': 'Une vérification est déjà ouverte sur ce poste',
   'check.closed': 'Cette vérification est déjà close',
@@ -289,6 +308,25 @@ const en: Record<keyof typeof fr, string> = {
     'None of the request’s computers is in its author’s scope any more: it is closed',
   'room.name.taken': 'A room already has this name in this building',
   'intervention.not_found': 'Intervention not found',
+  'attachment.not_found': 'Attachment not found',
+  'attachment.file_missing':
+    'File missing from the server: the attachment is recorded, but its file was not found (database restored without its files?)',
+  'attachment.too_large': 'File too large for an attachment',
+  'attachment.type_refused':
+    'File type refused: only JPEG, PNG and WebP images and PDFs are accepted',
+  'attachment.too_many': 'This line already holds the maximum number of attachments',
+  'attachment.duplicate': 'This file is already attached to this line',
+  'attachment.quota_exceeded':
+    'Attachment storage full: delete attachments or ask for a larger quota',
+  'attachment.store_unavailable':
+    'Attachments cannot be added: the storage volume is not mounted on the server (see DEPLOYMENT.md)',
+  'procedure.not_found': 'Procedure not found',
+  'procedure.model_unknown': 'No computer of the fleet has this model',
+  'procedure.exists': 'This model already has its procedure: edit it',
+  'procedure.changed':
+    'This procedure was changed or deleted in the meantime: read it again before retrying',
+  'procedure.scope_limited':
+    'Refused: procedures are written by accounts not limited to some places',
   'check.not_found': 'Check not found',
   'check.already_open': 'A check is already open on this computer',
   'check.closed': 'This check is already closed',

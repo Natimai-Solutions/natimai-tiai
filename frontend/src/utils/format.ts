@@ -487,6 +487,22 @@ export function sizeLabel(mb: number | null | undefined): string {
   return t('format.size.tib', { size: frNumber(gib / 1024, 1) });
 }
 
+/**
+ * A size given in bytes, the way the file explorer writes it: « 512 o »,
+ * « 1,5 Kio », « 250 Mio ». One decimal below ten, none above.
+ */
+export function formatSize(bytes: number): string {
+  if (bytes < 1024) return t('format.size.bytes', { size: bytes });
+  const units = ['kib', 'mib', 'gib'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return t(`format.size.${units[unit]}`, { size: frNumber(value, value < 10 ? 1 : 0) });
+}
+
 /** Free space as a whole percentage, or null when there is nothing to divide. */
 export function freePercent(
   totalMb: number | null | undefined,

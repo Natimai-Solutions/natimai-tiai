@@ -143,6 +143,15 @@ gère naturellement les postes éteints.
   e-mail, webhook `approval.requested`). Ce qui est approuvé est la liste figée
   à la demande, revérifiée au moment d'approuver. Elle ne s'active pas avec un
   seul compte capable d'approuver.
+- **Pièces jointes et procédures** — une ligne du journal d'un poste porte
+  ses photos et ses PDF (dix au plus, reconnus au contenu, toujours servis en
+  téléchargement) : les photos sont réduites et perdent leurs métadonnées
+  (position GPS comprise) avant l'envoi ; elles sont bornées en taille, en
+  quota et en durée de conservation, et entrent dans la sauvegarde
+  quotidienne. Chaque modèle de poste a sa **note de procédure** (« le BIOS
+  s'ouvre par F2 »), en tête de l'onglet « Interventions » de chacun de ses
+  postes, écrite par les techniciens qui voient tout le parc, son texte
+  remplacé gardé au journal d'audit.
 - **Annuaire vérifié** — en option, des postes désignés lisent les objets
   ordinateurs de leur domaine avec leur compte machine ; les salles suivent
   cette lecture et non plus la déclaration des agents, et un poste qui déclare
@@ -253,6 +262,7 @@ l'exécution est figée dans le binaire de l'agent.
 | Webhooks (JSON signé, Teams, Mattermost), jetons d'API personnels | 🟢 Livré |
 | Tendances, indicateurs, pannes récurrentes, rapport Excel | 🟢 Livré |
 | Approbation à deux des actions de masse | 🟢 Livré |
+| Pièces jointes du journal, procédures par modèle | 🟢 Livré |
 | Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement

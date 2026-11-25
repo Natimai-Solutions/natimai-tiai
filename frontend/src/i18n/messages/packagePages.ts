@@ -15,11 +15,8 @@ const fr = {
     publisher: 'Éditeur (méthode A)',
     none: 'Non signé',
   },
-  /** Sizes, as `formatSize` and `methodAMaxLabel` write them. */
+  /** The method A bound, as `methodAMaxLabel` writes it (other sizes: `formatSize`). */
   size: {
-    bytes: '{n} o',
-    kib: '{n} Kio',
-    mib: '{n} Mio',
     gib: '{n} Gio',
   },
   /** A package in a list to choose from, when another reads the same. */
@@ -308,9 +305,6 @@ const en: Translation<typeof fr> = {
     none: 'Unsigned',
   },
   size: {
-    bytes: '{n} B',
-    kib: '{n} KiB',
-    mib: '{n} MiB',
     gib: '{n} GiB',
   },
   choice: {

@@ -131,6 +131,20 @@ describe('audit labels — in English', () => {
     ).toBe('1 computer · 1 handed to a relay');
   });
 
+  it('sums up attachments and procedures (C11)', () => {
+    setLocale('en');
+    expect(auditActionLabel('intervention.attachment_delete')).toBe(
+      'Attachment deleted from an intervention',
+    );
+    expect(auditDetailValue(1536, 'size')).toBe('1.5 KiB');
+    expect(
+      auditDetailsSummary('intervention.attachment_add', { filename: 'fault.png', size: 512 }),
+    ).toBe('fault.png · 512 B');
+    expect(
+      auditDetailsSummary('procedure.update', { hw_model: 'HP 400', previous: 'x'.repeat(200) }),
+    ).toBe(`HP 400 · ${'x'.repeat(120)}…`);
+  });
+
   it('sums up a bulk command, whatever its target', () => {
     setLocale('en');
     const base = { command_type: 'teleport', created: 3, skipped: 2, ttl_minutes: 2880 };

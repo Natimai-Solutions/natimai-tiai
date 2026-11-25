@@ -24,6 +24,7 @@ import maintenance from './maintenance';
 import packagePages from './packagePages';
 import packages from './packages';
 import permissions from './permissions';
+import procedures from './procedures';
 import reports from './reports';
 import rooms from './rooms';
 import schedules from './schedules';
@@ -69,6 +70,7 @@ export const fr = {
   tasks: tasks.fr,
   trends: trends.fr,
   interventions: interventions.fr,
+  procedures: procedures.fr,
   layout: layout.fr,
   auth: auth.fr,
   dashboard: dashboard.fr,
@@ -108,6 +110,7 @@ export const en = {
   tasks: tasks.en,
   trends: trends.en,
   interventions: interventions.en,
+  procedures: procedures.en,
   layout: layout.en,
   auth: auth.en,
   dashboard: dashboard.en,

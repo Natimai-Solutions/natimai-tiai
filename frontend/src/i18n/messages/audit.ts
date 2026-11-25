@@ -137,6 +137,8 @@ const fr = {
     intervention: {
       update: "Modification d'une intervention",
       delete: "Suppression d'une intervention",
+      attachment_add: "Ajout d'une pièce jointe à une intervention",
+      attachment_delete: "Suppression d'une pièce jointe d'une intervention",
     },
     machine: {
       allow_reenroll: 'Ré-enrôlement autorisé',
@@ -191,6 +193,11 @@ const fr = {
       directory_unlinked: "Compte dissocié de l'annuaire",
       groups_synced: "Groupes recalculés d'après l'annuaire",
     },
+    procedure: {
+      create: 'Création d’une procédure de modèle',
+      update: 'Modification d’une procédure de modèle',
+      delete: 'Suppression d’une procédure de modèle',
+    },
   },
   /** Resource type → label, in the order the filter offers them. */
   resourceTypes: {
@@ -211,6 +218,7 @@ const fr = {
     license: 'Licence',
     webhook: 'Webhook',
     directory_domain: 'Domaine',
+    procedure: 'Procédure de modèle',
     settings: 'Paramètres',
   },
   /** Detail key → label, for the full view of an entry. */
@@ -293,6 +301,15 @@ const fr = {
     approved_count: 'Postes approuvés',
     schedule: 'Planification',
     approval: 'Approbation',
+    attachment_id: 'Pièce jointe',
+    filename: 'Nom du fichier',
+    size: 'Taille',
+    content_type: 'Type de fichier',
+    sha256: 'Empreinte SHA-256',
+    attachments: 'Pièces jointes emportées',
+    hw_model: 'Modèle',
+    previous: 'Texte remplacé',
+    length: 'Longueur du texte (caractères)',
   },
   /** Detail values that have words of their own. */
   values: {
@@ -477,6 +494,8 @@ const en: Translation<typeof fr> = {
     intervention: {
       update: 'Intervention edited',
       delete: 'Intervention deleted',
+      attachment_add: 'Attachment added to an intervention',
+      attachment_delete: 'Attachment deleted from an intervention',
     },
     machine: {
       allow_reenroll: 'Re-enrolment allowed',
@@ -531,6 +550,11 @@ const en: Translation<typeof fr> = {
       directory_unlinked: 'Account unlinked from the directory',
       groups_synced: 'Groups recomputed from the directory',
     },
+    procedure: {
+      create: 'Model procedure created',
+      update: 'Model procedure edited',
+      delete: 'Model procedure deleted',
+    },
   },
   resourceTypes: {
     machine: 'Computer',
@@ -550,6 +574,7 @@ const en: Translation<typeof fr> = {
     license: 'Licence',
     webhook: 'Webhook',
     directory_domain: 'Domain',
+    procedure: 'Model procedure',
     settings: 'Settings',
   },
   detailKeys: {
@@ -631,6 +656,15 @@ const en: Translation<typeof fr> = {
     approved_count: 'Computers approved',
     schedule: 'Schedule',
     approval: 'Approval',
+    attachment_id: 'Attachment',
+    filename: 'File name',
+    size: 'Size',
+    content_type: 'File type',
+    sha256: 'SHA-256 fingerprint',
+    attachments: 'Attachments removed with it',
+    hw_model: 'Model',
+    previous: 'Replaced text',
+    length: 'Text length (characters)',
   },
   values: {
     yes: 'Yes',

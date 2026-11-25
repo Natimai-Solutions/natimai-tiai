@@ -324,6 +324,55 @@
       </q-card-actions>
     </q-card>
 
+    <!-- Attachments of the journal (C11): how long they are kept. The
+         size and the quota are the server's (environment): shown, not set. -->
+    <q-card
+      v-if="settings && settings.attachment_retention_days !== undefined"
+      flat
+      bordered
+      style="max-width: 640px"
+      class="q-mb-md"
+      data-test="attachment-settings-card"
+    >
+      <q-card-section class="text-subtitle1">
+        {{ t('interventions.attachments.settings.title') }}
+        <div class="text-caption text-muted">
+          {{ t('interventions.attachments.settings.caption') }}
+        </div>
+      </q-card-section>
+      <q-separator />
+      <q-card-section>
+        <q-input
+          v-model.number="attachmentForm.retentionDays"
+          type="number"
+          min="0"
+          max="3650"
+          :suffix="t('settings.units.days')"
+          :label="t('interventions.attachments.settings.retentionDays')"
+          outlined
+          dense
+          :error="attachmentRetentionError !== null"
+          :error-message="attachmentRetentionError ?? undefined"
+          :hint="
+            t('interventions.attachments.settings.envDefault', {
+              days: settings.env_attachment_retention_days ?? 0,
+            })
+          "
+          :disable="!canWrite"
+        />
+      </q-card-section>
+      <q-card-actions v-if="canWrite" align="right" class="q-px-md q-pb-md">
+        <q-btn
+          color="primary"
+          :label="t('settings.save')"
+          :loading="savingAttachments"
+          :disable="attachmentRetentionError !== null"
+          data-test="attachment-settings-save"
+          @click="saveAttachments"
+        />
+      </q-card-actions>
+    </q-card>
+
     <SettingsDirectoryCard />
     <SettingsWebhooksCard />
 
@@ -1219,6 +1268,34 @@ async function saveLicenses() {
   }
 }
 
+// The attachments card (C11): how many days they are kept, 0 = kept.
+const attachmentForm = reactive({ retentionDays: 0 as number | string });
+const attachmentRetentionError = computed(() =>
+  intFieldError(attachmentForm.retentionDays, 0, 3650),
+);
+const savingAttachments = ref(false);
+
+function fillAttachmentForm(s: ConsoleSettings) {
+  attachmentForm.retentionDays = s.attachment_retention_days ?? 0;
+  saved.attachments = formSnapshot(attachmentForm);
+}
+
+async function saveAttachments() {
+  if (attachmentRetentionError.value) return;
+  savingAttachments.value = true;
+  try {
+    settings.value = await updateSettings({
+      attachment_retention_days: Number(attachmentForm.retentionDays),
+    });
+    fillAttachmentForm(settings.value);
+    notify($q, () => ({ type: 'positive', message: t('settings.saved') }));
+  } catch (e) {
+    notify($q, () => ({ type: 'negative', message: apiErrorMessage(e, t('settings.saveFailed')) }));
+  } finally {
+    savingAttachments.value = false;
+  }
+}
+
 // The reports card (C4): one switch, saved as it is switched.
 const savingReports = ref(false);
 async function saveReports(enabled: boolean) {
@@ -1446,6 +1523,7 @@ const saved = reactive({
   alerts: '',
   compliance: '',
   licenses: '',
+  attachments: '',
   planning: '',
   fleet: '',
   schedule: '',
@@ -1460,6 +1538,12 @@ const unsavedCards = computed(() => {
   if (alertSnapshot() !== saved.alerts) cards.push('alerts');
   if (formSnapshot(complianceForm) !== saved.compliance) cards.push('compliance');
   if (formSnapshot(licenseForm) !== saved.licenses) cards.push('licenses');
+  if (
+    settings.value.attachment_retention_days !== undefined &&
+    formSnapshot(attachmentForm) !== saved.attachments
+  ) {
+    cards.push('attachments');
+  }
   if (planningSnapshot() !== saved.planning) cards.push('planning');
   if (approvalCard.value?.dirty) cards.push('approval');
   if (formSnapshot(fleetForm) !== saved.fleet) cards.push('fleet');
@@ -1555,6 +1639,7 @@ async function load() {
     fillAlertForm(settings.value);
     fillComplianceForm(settings.value);
     fillLicenseForm(settings.value);
+    fillAttachmentForm(settings.value);
     fillPlanningForm(settings.value);
     fillFleetForm(settings.value);
     fillScheduleForm(settings.value);

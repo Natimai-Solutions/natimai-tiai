@@ -51,6 +51,10 @@
           <q-item-label v-if="item.note" class="q-mt-xs" style="white-space: pre-line">
             {{ item.note }}
           </q-item-label>
+          <!-- Its photos and PDFs (C11), under the note. -->
+          <q-item-label v-if="item.attachments?.length" class="q-mt-xs">
+            <InterventionAttachments :attachments="item.attachments" />
+          </q-item-label>
           <!-- A line of a maintenance visit: the visit holds the global note
                and the other postes, one click away. -->
           <q-item-label v-if="item.maintenance_id && canReadMaintenance" class="q-mt-xs">
@@ -146,6 +150,21 @@
               stack-label
               :hint="t('interventions.history.dateHint')"
             />
+            <!-- Attachments (C11): read with the journal, so only for an
+                 account that reads it. On a new line, the files wait for it. -->
+            <InterventionAttachments
+              v-if="canRead"
+              v-model:queued="queued"
+              :attachments="editing?.attachments ?? []"
+              :intervention-id="editing?.id ?? null"
+              :policy="policy"
+              editable
+              @changed="attachmentsChanged = true"
+            />
+            <div v-if="sendingName" class="text-caption text-muted" data-test="sending-attachments">
+              {{ t('interventions.attachments.uploading', { name: sendingName }) }}
+              <q-linear-progress :value="sendingProgress" class="q-mt-xs" />
+            </div>
           </q-card-section>
           <q-card-actions align="right" class="q-px-md q-pb-md">
             <q-btn v-close-popup flat :label="t('interventions.actions.cancel')" />
@@ -163,9 +182,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import CardLoadError from 'src/components/CardLoadError.vue';
+import InterventionAttachments from 'src/components/machine/InterventionAttachments.vue';
 import MaintenanceSessionViewDialog from 'src/components/maintenance/MaintenanceSessionViewDialog.vue';
 import {
   createIntervention,
@@ -181,6 +201,12 @@ import {
   type InterventionKind,
 } from 'src/services/interventions';
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
+import {
+  attachmentErrorMessage,
+  getAttachmentPolicy,
+  uploadAttachment,
+  type AttachmentPolicy,
+} from 'src/services/attachments';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import { formatDateTime } from 'src/utils/format';
@@ -217,6 +243,55 @@ function openSession(id: string) {
 const formOpen = ref(false);
 const saving = ref(false);
 const editing = ref<Intervention | null>(null);
+
+// Attachments (C11): the server's limits, read as the dialog opens; the files
+// picked for a line being created; whether the dialog changed those of an
+// existing line (the journal is read again when it closes).
+const policy = ref<AttachmentPolicy | null>(null);
+const queued = ref<File[]>([]);
+const attachmentsChanged = ref(false);
+const sendingName = ref<string | null>(null);
+const sendingProgress = ref(0);
+
+async function loadPolicy() {
+  if (!props.canRead) return;
+  try {
+    policy.value = await getAttachmentPolicy();
+  } catch {
+    // Unread: the console checks nothing before sending, the server judges.
+    policy.value = null;
+  }
+}
+
+watch(formOpen, (open) => {
+  if (open || !attachmentsChanged.value) return;
+  attachmentsChanged.value = false;
+  emit('changed');
+});
+
+/** Send the files picked for a new line, one by one; the refused ones, in words. */
+async function sendQueued(interventionId: string): Promise<string[]> {
+  const refused: string[] = [];
+  for (const file of queued.value) {
+    sendingName.value = file.name;
+    sendingProgress.value = 0;
+    try {
+      await uploadAttachment(interventionId, file, (f) => {
+        sendingProgress.value = f;
+      });
+    } catch (e) {
+      refused.push(
+        t('interventions.attachments.notSentItem', {
+          name: file.name,
+          reason: attachmentErrorMessage(e),
+        }),
+      );
+    }
+  }
+  sendingName.value = null;
+  queued.value = [];
+  return refused;
+}
 const form = reactive({
   kind: 'incident' as InterventionKind,
   title: '',
@@ -246,6 +321,8 @@ function toLocalInput(iso: string): string {
 
 function openCreate() {
   editing.value = null;
+  queued.value = [];
+  void loadPolicy();
   Object.assign(form, {
     kind: 'incident',
     title: '',
@@ -257,6 +334,8 @@ function openCreate() {
 
 function openEdit(item: Intervention) {
   editing.value = item;
+  queued.value = [];
+  void loadPolicy();
   shownTitle = interventionTitle(item) ?? '';
   Object.assign(form, {
     kind: item.kind as InterventionKind,
@@ -283,8 +362,23 @@ async function submit() {
       await updateIntervention(editing.value.id, keepCode ? rest : { ...rest, title });
       notify($q, () => ({ type: 'positive', message: t('interventions.history.updated') }));
     } else {
-      await createIntervention(props.machineId, payload);
-      notify($q, () => ({ type: 'positive', message: t('interventions.history.created') }));
+      const created = await createIntervention(props.machineId, payload);
+      // The line first, then its files: a refused file does not undo the line.
+      const refused = queued.value.length ? await sendQueued(created.id) : [];
+      if (refused.length) {
+        notify($q, () => ({
+          type: 'warning',
+          message: t(
+            'interventions.attachments.notSent',
+            { files: refused.join(', '), count: refused.length },
+            refused.length,
+          ),
+          timeout: 0,
+          actions: [{ icon: 'close', color: 'white' }],
+        }));
+      } else {
+        notify($q, () => ({ type: 'positive', message: t('interventions.history.created') }));
+      }
     }
     formOpen.value = false;
     // A maintenance line moves the poste's due date, and with it « Mes

@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { QBtn, QForm } from 'quasar';
+import { QBtn, QFile, QForm } from 'quasar';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('src/services/interventions', async (importOriginal) => ({
@@ -8,6 +8,20 @@ vi.mock('src/services/interventions', async (importOriginal) => ({
   createIntervention: vi.fn(),
   updateIntervention: vi.fn(),
   deleteIntervention: vi.fn(),
+}));
+
+const shown = vi.hoisted(() => [] as { type?: string; message?: string }[]);
+vi.mock('src/utils/notify', () => ({
+  notify: (_q: unknown, build: () => { type?: string; message?: string }) => {
+    shown.push(build());
+    return () => undefined;
+  },
+}));
+
+vi.mock('src/services/attachments', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('src/services/attachments')>()),
+  getAttachmentPolicy: vi.fn(),
+  uploadAttachment: vi.fn(),
 }));
 
 vi.mock('src/services/maintenance', async (importOriginal) => ({
@@ -23,7 +37,9 @@ import {
   deleteIntervention,
   type Intervention,
 } from 'src/services/interventions';
+import { getAttachmentPolicy, uploadAttachment } from 'src/services/attachments';
 import CardLoadError from 'src/components/CardLoadError.vue';
+import InterventionAttachments from './InterventionAttachments.vue';
 import MachineHistoryCard from './MachineHistoryCard.vue';
 
 function mountCard(items: Intervention[] = [], permissions: string[] = []) {
@@ -219,6 +235,125 @@ describe('MachineHistoryCard — a journal that was not read', () => {
     expect(wrapper.text()).not.toContain('Aucune intervention');
     expect(wrapper.text()).toContain("Votre compte ne permet pas de consulter l'historique");
     expect(wrapper.text()).toContain('Ajouter une intervention');
+    wrapper.unmount();
+  });
+});
+
+// C11: the photos and PDFs of a line.
+describe('MachineHistoryCard — attachments', () => {
+  const POLICY = {
+    max_bytes: 5 * 1024 * 1024,
+    max_per_intervention: 10,
+    types: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+    quota_bytes: 0,
+    used_bytes: 0,
+    retention_days: 0,
+    store_available: true,
+  };
+  const withFiles = {
+    ...visit,
+    attachments: [
+      {
+        id: 'a1',
+        intervention_id: 'i1',
+        filename: 'carte-mere.pdf',
+        content_type: 'application/pdf',
+        size: 2048,
+        uploaded_by: 'Alice',
+        created_at: '2026-11-10T20:00:00Z',
+      },
+    ],
+  } as unknown as Intervention;
+
+  function pdf(name: string): File {
+    return new File(['%PDF-'], name, { type: 'application/pdf' });
+  }
+
+  beforeEach(() => {
+    shown.length = 0;
+    vi.mocked(getAttachmentPolicy).mockResolvedValue(POLICY);
+    vi.mocked(uploadAttachment).mockReset();
+    vi.mocked(createIntervention).mockReset();
+  });
+
+  it('creates the line, then sends its files one by one; a refused file keeps the line', async () => {
+    vi.mocked(createIntervention).mockResolvedValue({ ...visit, id: 'new' });
+    vi.mocked(uploadAttachment)
+      .mockResolvedValueOnce(withFiles.attachments![0]!)
+      .mockRejectedValueOnce({
+        response: { status: 413, data: { error: { code: 'attachment.quota_exceeded' } } },
+      });
+    const wrapper = mountCard();
+    await wrapper
+      .findAllComponents(QBtn)
+      .find((b) => b.text().includes('Ajouter une intervention'))!
+      .trigger('click');
+    await flushPromises();
+    expect(getAttachmentPolicy).toHaveBeenCalled();
+
+    wrapper.findComponent(QFile).vm.$emit('update:modelValue', [pdf('a.pdf'), pdf('b.pdf')]);
+    await flushPromises();
+    // Nothing leaves before the line exists.
+    expect(uploadAttachment).not.toHaveBeenCalled();
+
+    wrapper.findComponent(QForm).vm.$emit('submit', new Event('submit'));
+    await flushPromises();
+
+    expect(createIntervention).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(uploadAttachment).mock.calls.map((c) => [c[0], c[1].name])).toEqual([
+      ['new', 'a.pdf'],
+      ['new', 'b.pdf'],
+    ]);
+    const warning = shown.find((n) => n.type === 'warning')!;
+    expect(warning.message).toContain('Intervention enregistrée, mais fichier(s) non envoyé(s)');
+    expect(warning.message).toContain('« b.pdf » (Espace des pièces jointes plein');
+    expect(warning.message).not.toContain('a.pdf');
+    expect(wrapper.emitted('changed')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('shows the attachments of each line under its note', () => {
+    const wrapper = mountCard([withFiles]);
+    const chip = wrapper.find('[data-test="attachment-chip"]');
+    expect(chip.text()).toContain('carte-mere.pdf');
+    // Reading: neither upload nor deletion on the line itself.
+    expect(wrapper.findComponent(QFile).exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('without the write, lists them and offers no adding', () => {
+    setActivePinia(createPinia());
+    useAuthStore().user = { id: 'me', email: 'a@b.c', permissions: [] } as never;
+    const wrapper = mount(MachineHistoryCard, {
+      props: { machineId: 'm1', items: [withFiles], total: 1, loading: false, canWrite: false },
+      attachTo: document.body,
+    });
+    expect(wrapper.find('[data-test="attachment-chip"]').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain('Ajouter une intervention');
+    expect(wrapper.findComponent(QFile).exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('reads the journal again when the dialog that changed attachments closes', async () => {
+    const wrapper = mountCard([withFiles]);
+    await wrapper.find('[aria-label="Actions sur l\'intervention"]').trigger('click');
+    await flushPromises();
+    const entry = [...document.body.querySelectorAll('.q-menu .q-item')].find((el) =>
+      el.textContent?.includes('Modifier'),
+    ) as HTMLElement;
+    entry.click();
+    await flushPromises();
+    const list = wrapper
+      .findAllComponents(InterventionAttachments)
+      .find((c) => c.props('editable'))!;
+    expect(list.props('interventionId')).toBe('i1');
+    expect(list.props('attachments')).toHaveLength(1);
+    list.vm.$emit('changed');
+    await flushPromises();
+    expect(wrapper.emitted('changed')).toBeUndefined();
+    (wrapper.vm as unknown as { formOpen: boolean }).formOpen = false;
+    await flushPromises();
+    expect(wrapper.emitted('changed')).toHaveLength(1);
     wrapper.unmount();
   });
 });

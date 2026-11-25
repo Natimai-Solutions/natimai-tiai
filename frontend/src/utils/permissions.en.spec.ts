@@ -37,6 +37,7 @@ describe('the permission grid', () => {
       'Licences logicielles',
       'Webhooks',
       'Jetons d’API',
+      'Procédures par modèle',
     ]);
     const machine = rows[0]!.entries;
     expect(machine.map((e) => [e.key, e.label, e.hint])).toEqual([

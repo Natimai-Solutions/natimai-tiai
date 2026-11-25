@@ -11,6 +11,7 @@
 
 import { commandTypeLabel } from 'src/services/commands';
 import { intlTag, t } from 'src/i18n';
+import { formatSize } from 'src/utils/format';
 import auditMessages from 'src/i18n/messages/audit';
 
 /** The shape of the catalogue — the same in both languages. */
@@ -131,6 +132,10 @@ export function auditDetailValue(value: unknown, key?: string): string {
   if (key === 'ok' && value === OK_YES) return t('audit.values.okYes');
   if (key === 'ok' && value === OK_NO) return t('audit.values.okNo');
   if (value === null || value === undefined || value === '') return '—';
+  // An attachment's size (C11), in bytes: as the file explorer writes it.
+  if (key === 'size' && typeof value === 'number' && Number.isFinite(value)) {
+    return formatSize(value);
+  }
   if (typeof value === 'boolean') return value ? t('audit.values.yes') : t('audit.values.no');
   if (typeof value === 'string') return value;
   if (typeof value === 'number') return value.toLocaleString(intlTag());
@@ -200,6 +205,15 @@ export function formatTtlMinutes(minutes: number): string {
   }
   if (minutes >= 60 && minutes % 60 === 0) return t('audit.ttl.hours', { count: minutes / 60 });
   return t('audit.ttl.minutes', { count: minutes });
+}
+
+/** How much of a procedure's replaced text the table shows (C11). */
+export const PREVIOUS_SUMMARY_MAX = 120;
+
+/** `value` cut to `max` characters followed by « … », whole when it fits. */
+function truncated(value: string, max: number): string {
+  const chars = Array.from(value);
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : value;
 }
 
 /** Keys the summary already spells out, or that only matter in the full view. */
@@ -275,6 +289,21 @@ export function auditDetailsSummary(action: string, details: Record<string, unkn
     if (placed !== null) parts.push(counted('audit.summary.placed', placed));
     if (unplaced !== null) parts.push(counted('audit.summary.unplaced', unplaced));
     if (created !== null) parts.push(counted('audit.summary.roomsCreated', created));
+  }
+
+  if (action === 'intervention.attachment_add' || action === 'intervention.attachment_delete') {
+    const filename = text(details, 'filename');
+    if (filename) parts.push(filename);
+    const size = count(details, 'size');
+    if (size !== null) parts.push(formatSize(size));
+  }
+
+  if (action.startsWith('procedure.')) {
+    const model = text(details, 'hw_model');
+    if (model) parts.push(model);
+    // The replaced text, cut for the table: the full one is in the entry.
+    const previous = text(details, 'previous');
+    if (previous) parts.push(truncated(previous, PREVIOUS_SUMMARY_MAX));
   }
 
   if (action === 'settings.email_test') {

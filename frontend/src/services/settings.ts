@@ -197,6 +197,10 @@ export interface ConsoleSettings {
   /** Licences (C6). Optional: an older server. */
   license_expiry_days?: number;
   env_license_expiry_days?: number;
+  /** Attachments of the journal (C11): days they are kept, 0 = kept.
+   * Optional: an older server. */
+  attachment_retention_days?: number;
+  env_attachment_retention_days?: number;
   /** Schedules (C3): the zone the console plans in, and the weekly windows
    * when nothing at risk runs on several postes. Optional: an older server. */
   console_timezone?: string;
@@ -247,6 +251,7 @@ export interface SettingsPayload {
   compliance_patch_grace_days?: number;
   compliance_admins_allowed?: string[];
   license_expiry_days?: number;
+  attachment_retention_days?: number;
   console_timezone?: string | null;
   forbidden_windows?: { days: number[]; start: string; end: string }[] | null;
   reports_enabled?: boolean | null;

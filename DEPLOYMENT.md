@@ -984,6 +984,24 @@ contient des fichiers (base neuve ou vidée).
 À la différence des paquets, **les pièces jointes sont sauvegardées** : une
 photo de panne ne se reconstruit pas (§ « Sauvegardes et restauration »).
 
+Dans la console, les pièces jointes s'ajoutent dans le dialogue d'une ligne du
+journal (fiche du poste, onglet « Interventions » ; droits de l'intervention :
+`intervention:read` pour voir et télécharger, `intervention:write` pour ajouter
+et supprimer). Une photo JPEG ou WebP est toujours redessinée avant l'envoi
+(2 560 px de côté au plus, JPEG 0,85), ce qui en retire l'EXIF ; un PNG l'est
+s'il dépasse la limite ou 2 560 px. L'aperçu d'une image s'affiche en URL
+`data:` (la CSP de Caddy n'autorise que `'self'` et `data:` en `img-src`). Le
+dialogue grise l'ajout quand le volume n'est pas monté et prévient à partir de
+90 % du quota.
+
+**Procédures par modèle.** En tête du même onglet, la carte « Procédure pour ce
+modèle » montre la note écrite pour le `hw_model` du poste (texte brut, 5 000
+caractères). Droit `procedure` (lecture, écriture), accordé par la migration au
+seul groupe *Techniciens* ; écriture réservée aux comptes sans limite de lieux
+(`procedure.scope_limited`), chaque écriture au journal d'audit avec le texte
+remplacé. « Toutes les procédures » liste les notes et permet de retirer
+celles des modèles qui n'ont plus de poste.
+
 ## Sauvegardes et restauration
 
 Toute la mémoire de Tia'i — postes, historique des menaces, commandes (qui a
@@ -2047,7 +2065,8 @@ variables `USAGE_*` n'en donnent que les valeurs initiales.
 **Groupes de droits.** Un compte peut ce que ses groupes lui accordent. Trois
 groupes existent d'emblée : *Administrateurs* (tous les droits, implicites),
 *Lecture seule*, *Techniciens* (lecture + commandes, courantes et à risque +
-saisie des interventions, vérifications et maintenances). Page « Groupes » pour
+saisie des interventions, vérifications et maintenances + procédures par
+modèle, que *Lecture seule* ne lit pas). Page « Groupes » pour
 en composer d'autres — par exemple « exécute les commandes courantes mais pas
 les commandes à risque, et ne gère pas les postes ». Le premier compte est dans
 *Administrateurs* ; une base migrée depuis une version à deux rôles y range ses

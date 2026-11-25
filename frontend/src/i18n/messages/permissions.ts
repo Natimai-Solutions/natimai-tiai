@@ -27,6 +27,7 @@ const fr = {
     license: 'Licences logicielles',
     webhook: 'Webhooks',
     api_token: 'Jetons d’API',
+    procedure: 'Procédures par modèle',
   },
   /** What granting it lets someone do (`label`), and a sentence where the label
    *  alone would be read two ways (`hint`). */
@@ -171,6 +172,16 @@ const fr = {
         hint: 'Créer, pour son propre compte, des jetons qui permettent à un script d’agir avec ses droits.',
       },
     },
+    procedure: {
+      read: {
+        label: 'Consulter',
+        hint: 'Lire la note de procédure du modèle d’un poste (onglet « Interventions » de la fiche) et la liste des notes des modèles de sa portée.',
+      },
+      write: {
+        label: 'Rédiger',
+        hint: 'Écrire, modifier et supprimer la note de procédure d’un modèle de poste, lue par tous les techniciens. Réservé aux comptes sans limite de lieux.',
+      },
+    },
   },
   /** `{resource} — {action}`, for lists that show what a group grants. */
   named: '{resource} — {action}',
@@ -201,6 +212,7 @@ const en: Translation<typeof fr> = {
     license: 'Software licences',
     webhook: 'Webhooks',
     api_token: 'API tokens',
+    procedure: 'Procedures per model',
   },
   entries: {
     machine: {
@@ -341,6 +353,16 @@ const en: Translation<typeof fr> = {
       write: {
         label: 'Create tokens',
         hint: 'Create, for one’s own account, tokens that let a script act with its rights.',
+      },
+    },
+    procedure: {
+      read: {
+        label: 'View',
+        hint: 'Read the procedure note of a computer’s model (“Interventions” tab of its page) and the list of the notes of the models in one’s scope.',
+      },
+      write: {
+        label: 'Write',
+        hint: 'Write, change and delete the procedure note of a computer model, read by every technician. Only for accounts not limited to some places.',
       },
     },
   },
