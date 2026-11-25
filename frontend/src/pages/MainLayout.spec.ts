@@ -65,6 +65,12 @@ async function mountLayout(user: User | null, path = '/machines', realLayout = f
         component: Stub,
         meta: { requiresPermission: 'machine:read' },
       },
+      {
+        path: '/trends',
+        name: 'trends',
+        component: Stub,
+        meta: { requiresPermission: 'machine:read' },
+      },
       { path: '/software', name: 'software', component: Stub },
       { path: '/page', name: 'page', component: PageStub },
       { path: '/tasks', name: 'tasks', component: Stub },
@@ -110,6 +116,17 @@ describe('MainLayout', () => {
     expect(entries).not.toContain('Tableau de bord');
     expect(entries).not.toContain('Postes');
     expect(entries).toContain('Salles');
+  });
+
+  // C9: « Tendances » right under the dashboard, for whoever reads the parc.
+  it('offers the trends page under the dashboard with machine:read', async () => {
+    const { w } = await mountLayout(profile(['machine:read']));
+    const entries = menu(w);
+    const at = (label: string) => entries.findIndex((e) => e.endsWith(label));
+    expect(at('Tendances')).toBeGreaterThan(0);
+    expect(at('Tendances')).toBe(at('Tableau de bord') + 1);
+    const { w: other } = await mountLayout(profile(['room:read']), '/rooms');
+    expect(menu(other).join(' | ')).not.toContain('Tendances');
   });
 
   // Item 4: rights withdrawn during the session.

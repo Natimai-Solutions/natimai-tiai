@@ -13,7 +13,7 @@ function find(name: string, list: RouteRecordRaw[] = routes): RouteRecordRaw | u
 
 describe('routes (item 4)', () => {
   it('puts the parc pages behind machine:read, so a forbidden account is sent elsewhere', () => {
-    for (const name of ['dashboard', 'machines', 'software', 'machine-detail']) {
+    for (const name of ['dashboard', 'trends', 'machines', 'software', 'machine-detail']) {
       expect(find(name)?.meta?.requiresPermission, name).toBe('machine:read');
     }
   });

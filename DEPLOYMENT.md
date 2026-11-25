@@ -2009,6 +2009,37 @@ n'a été fait s'enregistre si elle dit pourquoi, sans toucher les échéances.
 Les e-mails suivent le réglage de
 chaque compte (page « Mon compte »).
 
+**Tendances, indicateurs et pannes récurrentes.** La page « Tendances » (menu,
+juste sous le tableau de bord, et lien « Évolution » de sa barre de titre)
+montre, sur 3, 12 ou 24 mois :
+
+- **L'évolution du parc** : les compteurs du tableau de bord, photographiés
+  toutes les heures par le worker (le dernier passage d'un jour, dans le fuseau
+  de la console, est le chiffre de ce jour) et gardés par lieu, de sorte qu'un
+  compte limité à des lieux ne voit que la somme des siens. **L'historique
+  commence au déploiement** : rien n'est reconstitué, et la page le dit
+  (« Suivi depuis le … »). Un jour où le worker était arrêté est un trou dans la
+  courbe, pas un zéro. Les changements de seuil (disque presque plein, cycle de
+  maintenance…) sont signalés sous la courbe. Conservation :
+  `TREND_RETENTION_DAYS` (25 mois par défaut).
+- **Les indicateurs**, mois par mois : délai de clôture des vérifications
+  (médiane et 9e décile), maintenances faites à l'heure (jugées avec le cycle
+  d'aujourd'hui), réussite des commandes et des déploiements (les commandes
+  expirées ou sans réponse sont comptées à part, hors du taux). Ils sont
+  calculés sur l'historique déjà en base, donc limités par sa conservation :
+  `COMMAND_RETENTION_DAYS` (365 jours) et `SCHEDULE_RUN_RETENTION_DAYS`
+  (180 jours) ; la page avertit quand la période demandée est plus longue.
+- **Les pannes récurrentes** : les interventions de type « incident » par
+  modèle ou par salle actuelle du poste, rapportées au nombre de postes en parc
+  (« pour 100 postes ») ; les postes réformés sont comptés à part.
+- **Le rapport Excel** : la page sur la période choisie, dans la langue de la
+  console, téléchargé à la demande (pas d'envoi périodique).
+
+Droits : la page s'ouvre avec la lecture des postes ; chaque indicateur demande
+en plus la lecture de sa source (vérifications, maintenance, commandes,
+paquets), et les pannes la lecture des interventions. Rien à configurer, aucune
+action d'audit : la page ne fait que lire.
+
 ## Dépannage
 
 | Symptôme | Cause probable | Correctif |

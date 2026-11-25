@@ -128,6 +128,13 @@ gère naturellement les postes éteints.
   la clé. La page Logiciels dit « 32 installations pour 30 licences » et mène
   aux postes concernés ; les licences dépassées ou bientôt échues ont leur
   carte au tableau de bord et leur section dans le résumé quotidien.
+- **Tendances** — l'évolution des compteurs du tableau de bord sur 3, 12 ou
+  24 mois (photographiés chaque jour, gardés par lieu : un compte limité voit
+  la somme des siens), des indicateurs mois par mois (délai de clôture des
+  vérifications, maintenances à l'heure, réussite des commandes et des
+  déploiements), les pannes qui reviennent par modèle ou par salle, rapportées
+  au nombre de postes, et un rapport Excel. L'historique commence au
+  déploiement : rien n'est inventé.
 - **Annuaire vérifié** — en option, des postes désignés lisent les objets
   ordinateurs de leur domaine avec leur compte machine ; les salles suivent
   cette lecture et non plus la déclaration des agents, et un poste qui déclare
@@ -236,7 +243,7 @@ l'exécution est figée dans le binaire de l'agent.
 | Licences logicielles (décompte, dépassement, échéances) | 🟢 Livré |
 | Second facteur, connexion par l'annuaire (OpenID Connect) | 🟢 Livré |
 | Webhooks (JSON signé, Teams, Mattermost), jetons d'API personnels | 🟢 Livré |
-| Tendances, indicateurs… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
+| Tendances, indicateurs, pannes récurrentes, rapport Excel | 🟢 Livré |
 | Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement

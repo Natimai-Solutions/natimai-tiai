@@ -96,6 +96,16 @@ $ti-surfaces: (
   --ti-tint-3: rgba(0, 0, 0, 0.07);
   --ti-rule: #{$grey-4};
   --ti-rule-faint: #{$grey-3};
+  // Chart series, in a fixed order (the validated categorical palette of the
+  // dataviz method): a series keeps its slot while others come and go.
+  --ti-series-1: #257de0;
+  --ti-series-2: #f47230;
+  --ti-series-3: #00b894;
+  --ti-series-4: #f2a600;
+  --ti-series-5: #ee7fac;
+  --ti-series-6: #008a17;
+  --ti-series-7: #6a4ce2;
+  --ti-series-8: #ec4647;
 }
 
 body.body--dark {
@@ -112,6 +122,14 @@ body.body--dark {
   --ti-tint-3: rgba(255, 255, 255, 0.1);
   --ti-rule: #{$grey-8};
   --ti-rule-faint: #2c2c2c;
+  --ti-series-1: #338ced;
+  --ti-series-2: #e76624;
+  --ti-series-3: #00a888;
+  --ti-series-4: #d28e05;
+  --ti-series-5: #e24d8b;
+  --ti-series-6: #0aac23;
+  --ti-series-7: #9887ef;
+  --ti-series-8: #eb6263;
 }
 
 .text-muted {

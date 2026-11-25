@@ -31,6 +31,7 @@ import settings from './settings';
 import settingsEnv from './settingsEnv';
 import software from './software';
 import tasks from './tasks';
+import trends from './trends';
 import users from './users';
 
 /**
@@ -64,6 +65,7 @@ export const fr = {
   maintenance: maintenance.fr,
   checks: checks.fr,
   tasks: tasks.fr,
+  trends: trends.fr,
   interventions: interventions.fr,
   layout: layout.fr,
   auth: auth.fr,
@@ -101,6 +103,7 @@ export const en = {
   maintenance: maintenance.en,
   checks: checks.en,
   tasks: tasks.en,
+  trends: trends.en,
   interventions: interventions.en,
   layout: layout.en,
   auth: auth.en,

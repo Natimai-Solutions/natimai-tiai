@@ -13,6 +13,7 @@ export const LANDING_PAGES: readonly {
   permission: string | readonly string[] | null;
 }[] = [
   { name: 'dashboard', permission: 'machine:read' },
+  { name: 'trends', permission: 'machine:read' },
   { name: 'machines', permission: 'machine:read' },
   { name: 'alerts', permission: 'machine:read' },
   // An intendance account may read the purchases and not the parc.

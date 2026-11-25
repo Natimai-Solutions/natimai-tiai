@@ -58,6 +58,10 @@
           <q-item-section avatar><q-icon name="dashboard" /></q-item-section>
           <q-item-section>{{ t('layout.pages.dashboard') }}</q-item-section>
         </q-item>
+        <q-item v-if="canReadMachines" v-ripple clickable :to="{ name: 'trends' }">
+          <q-item-section avatar><q-icon name="insights" /></q-item-section>
+          <q-item-section>{{ t('layout.pages.trends') }}</q-item-section>
+        </q-item>
         <q-item v-if="canReadMachines" v-ripple clickable :to="{ name: 'machines' }">
           <q-item-section avatar><q-icon name="devices" /></q-item-section>
           <q-item-section>{{ t('layout.pages.machines') }}</q-item-section>

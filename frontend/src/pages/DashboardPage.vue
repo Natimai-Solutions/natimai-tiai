@@ -3,6 +3,18 @@
     <div class="row items-center q-mb-md">
       <h1 class="text-h5 q-my-none">{{ t('dashboard.title') }}</h1>
       <q-space />
+      <q-btn
+        flat
+        no-caps
+        color="primary"
+        icon="insights"
+        class="q-mr-sm"
+        :label="t('dashboard.trends')"
+        :to="{ name: 'trends' }"
+        data-test="dashboard-trends"
+      >
+        <q-tooltip>{{ t('dashboard.trendsHint') }}</q-tooltip>
+      </q-btn>
       <div v-if="lastRefreshedAt" class="text-caption text-muted q-mr-sm">
         {{ t('dashboard.refreshedAt', { time: lastRefreshLabel }) }}
       </div>
