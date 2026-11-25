@@ -682,6 +682,18 @@ de deux comptes (local de secours et annuaire) peut s'approuver elle-même ; un
 compte qui détient « Paramètres : gérer » peut désactiver l'approbation puis
 agir seul (`settings.update` au journal).
 
+Dans la console : carte « Approbation à deux » de Paramètres (interrupteur,
+seuil, validité, nombre de comptes capables d'approuver ; l'interrupteur reste
+grisé sous deux) ; page « Approbations » dans le menu, après « Planifications »,
+pour les comptes qui détiennent « Commandes à risque : exécuter », tant que
+l'approbation est activée ou qu'il reste des demandes — onglets « À approuver »
+(badge orange dans le menu) et « Mes demandes » (statut, motif d'un refus,
+cause d'un échec, annulation). L'approbateur voit les postes de la demande
+qu'il couvre et, à l'heure d'une plage interdite, la même confirmation que
+l'auteur. Un envoi en masse ou un déploiement mis en attente le dit (« Demande
+d'approbation envoyée pour N postes… », avec « Voir ») ; une planification en
+attente apparaît « À approuver » sur la page Planifications.
+
 *Jetons d'API* — « Mon compte », carte « Jetons d'API » (droit « Jetons d'API :
 créer des jetons », administrateurs par défaut). Créer un jeton demande le mot
 de passe du compte, et un code s'il a la double authentification ; un compte de

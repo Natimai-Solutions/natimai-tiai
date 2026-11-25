@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RouteRecordRaw } from 'vue-router';
+import { canOpen } from './access';
 import routes from './routes';
 
 function find(name: string, list: RouteRecordRaw[] = routes): RouteRecordRaw | undefined {
@@ -16,6 +17,14 @@ describe('routes (item 4)', () => {
     for (const name of ['dashboard', 'trends', 'machines', 'software', 'machine-detail']) {
       expect(find(name)?.meta?.requiresPermission, name).toBe('machine:read');
     }
+  });
+
+  // C10: the approvals page asks for the right the requests are about.
+  it('puts the approvals page behind risky_command:execute', () => {
+    const required = find('approvals')?.meta?.requiresPermission;
+    expect(required).toBe('risky_command:execute');
+    expect(canOpen(['command:execute'], required)).toBe(false);
+    expect(canOpen(['command:execute', 'risky_command:execute'], required)).toBe(true);
   });
 
   it('has a page for an account that can read nothing, and « Mon compte » for everyone', () => {

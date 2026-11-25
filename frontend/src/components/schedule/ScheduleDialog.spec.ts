@@ -3,6 +3,13 @@ import { createPinia, setActivePinia } from 'pinia';
 import { QForm, QInput, QOptionGroup, QSelect, QToggle } from 'quasar';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const shown = vi.hoisted(() => [] as { type?: string; message?: string }[]);
+vi.mock('src/utils/notify', () => ({
+  notify: (_q: unknown, build: () => { type?: string; message?: string }) => {
+    shown.push(build());
+    return () => undefined;
+  },
+}));
 vi.mock('src/services/schedules', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/schedules')>()),
   createSchedule: vi.fn(),
@@ -28,6 +35,7 @@ import {
   type ScheduleTargetIn,
 } from 'src/services/schedules';
 import { useAuthStore } from 'src/stores/auth';
+import { approvalsVersion } from 'src/composables/useApprovalsBadge';
 import ScheduleDialog from './ScheduleDialog.vue';
 
 const ALL = [
@@ -116,6 +124,38 @@ describe('ScheduleDialog', () => {
       wake_first: false,
       shutdown_after: false,
     });
+    expect(wrapper.emitted('saved')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  // C10: beyond the threshold, saved but waiting for a second account.
+  it('says a schedule saved beyond the threshold waits for approval', async () => {
+    vi.mocked(createSchedule).mockResolvedValue({
+      state: 'to_approve',
+      approval: {
+        id: 'ap-1',
+        status: 'pending',
+        expires_at: '2026-11-26T10:00:00Z',
+        approved_by: null,
+        approved_at: null,
+        approved_count: null,
+      },
+    } as Schedule);
+    const before = approvalsVersion.value;
+    const { input, submit, wrapper } = await open({
+      initialTarget: { kind: 'room', value: 'r-1' },
+    });
+    input('Nom').vm.$emit('update:modelValue', 'Redémarrage du soir');
+    input('Date').vm.$emit('update:modelValue', '2026-12-01');
+    input('Heure').vm.$emit('update:modelValue', '18:30');
+    await flushPromises();
+    await submit();
+    await flushPromises();
+    expect(approvalsVersion.value).toBe(before + 1);
+    expect(shown.at(-1)?.type).toBe('info');
+    expect(shown.at(-1)?.message).toContain(
+      'Planification enregistrée, en attente d’approbation : un second compte doit l’approuver avant le',
+    );
     expect(wrapper.emitted('saved')).toHaveLength(1);
     wrapper.unmount();
   });

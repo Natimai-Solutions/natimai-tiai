@@ -22,6 +22,8 @@ const q = vi.hoisted(() => {
   };
 });
 vi.mock('quasar', () => ({ useQuasar: () => q }));
+const push = vi.hoisted(() => vi.fn());
+vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }));
 vi.mock('boot/axios', () => ({ api: {} }));
 vi.mock('src/services/checks', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/checks')>()),
@@ -43,6 +45,7 @@ vi.mock('src/services/rooms', async (importOriginal) => ({
 }));
 
 import { tasksVersion } from 'src/composables/useTasksBadge';
+import { approvalsVersion } from 'src/composables/useApprovalsBadge';
 import { createChecksBulk } from 'src/services/checks';
 import { commandActions, createCommands, type CommandAction } from 'src/services/commands';
 import { approveReenroll, wakeMachines, type Machine } from 'src/services/machines';
@@ -85,6 +88,33 @@ describe('useMachineBulkActions', () => {
           message: '2 commande(s) envoyée(s)',
         }),
       );
+    });
+
+    // C10: beyond the threshold, nothing is sent — a request waits, and the
+    // notification says so from approval_id, with a way to the page.
+    it('says a request for approval waits, rather than « nothing sent »', async () => {
+      vi.mocked(createCommands).mockResolvedValue({
+        created: [],
+        count: 0,
+        revoked: 0,
+        approval_id: 'ap-1',
+        approval_expires_at: '2026-11-26T10:00:00Z',
+        pending_approval: 45,
+      });
+      const before = approvalsVersion.value;
+      const { selected, runBulk } = setup();
+      runBulk(action((a) => !a.confirm && !a.serverSide && a.bulk));
+      await vi.waitFor(() => expect(selected.value).toEqual([]));
+      const shown = q.notify.mock.calls.at(-1)![0] as {
+        type: string;
+        message: string;
+        actions: { label: string; handler: () => void }[];
+      };
+      expect(shown.type).toBe('info');
+      expect(shown.message).toContain('Demande d’approbation envoyée pour 45 postes');
+      expect(approvalsVersion.value).toBe(before + 1);
+      shown.actions[0]!.handler();
+      expect(push).toHaveBeenCalledWith({ name: 'approvals' });
     });
 
     it('asks once more inside a forbidden window, the window named, and sends confirmed', async () => {

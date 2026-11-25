@@ -97,6 +97,14 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'layout.pages.schedules', requiresPermission: 'schedule:read' },
       },
       {
+        // Two-person approval of mass actions (C10): the requests to decide
+        // and one's own. Not a landing page.
+        path: 'approvals',
+        name: 'approvals',
+        component: () => import('pages/ApprovalsPage.vue'),
+        meta: { title: 'layout.pages.approvals', requiresPermission: 'risky_command:execute' },
+      },
+      {
         // Where a staff member's scan lands, signed in: the poste behind the
         // label. Reached from the public `/a/:token` (LabelPage).
         path: 'a/:token/open',

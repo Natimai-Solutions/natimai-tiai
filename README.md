@@ -135,6 +135,14 @@ gère naturellement les postes éteints.
   déploiements), les pannes qui reviennent par modèle ou par salle, rapportées
   au nombre de postes, et un rapport Excel. L'historique commence au
   déploiement : rien n'est inventé.
+- **Approbation à deux** — en option, au-delà d'un nombre de postes (40 par
+  défaut), une commande à risque (redémarrage, extinction, mises à jour,
+  déploiement d'un paquet) ou une planification à risque n'est pas envoyée :
+  elle attend l'accord d'un second compte qui détient les mêmes droits et voit
+  tous les postes visés, sur la page « Approbations » (badge dans le menu,
+  e-mail, webhook `approval.requested`). Ce qui est approuvé est la liste figée
+  à la demande, revérifiée au moment d'approuver. Elle ne s'active pas avec un
+  seul compte capable d'approuver.
 - **Annuaire vérifié** — en option, des postes désignés lisent les objets
   ordinateurs de leur domaine avec leur compte machine ; les salles suivent
   cette lecture et non plus la déclaration des agents, et un poste qui déclare
@@ -244,6 +252,7 @@ l'exécution est figée dans le binaire de l'agent.
 | Second facteur, connexion par l'annuaire (OpenID Connect) | 🟢 Livré |
 | Webhooks (JSON signé, Teams, Mattermost), jetons d'API personnels | 🟢 Livré |
 | Tendances, indicateurs, pannes récurrentes, rapport Excel | 🟢 Livré |
+| Approbation à deux des actions de masse | 🟢 Livré |
 | Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement

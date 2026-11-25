@@ -246,6 +246,26 @@ describe('SettingsPage', () => {
       page.app.unmount();
     });
 
+    // C10: the two-person approval card sits after the schedules' and counts
+    // among the cards the page asks about.
+    it('shows the approval card after the schedules, and asks for it too', async () => {
+      vi.mocked(getSettings).mockResolvedValue({
+        ...consoleSettings(),
+        approval_enabled: false,
+        approval_threshold: 40,
+        approval_ttl_hours: 24,
+        approval_eligible: 2,
+      });
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const titles = page.wrapper.findAll('.q-card').map((c) => c.text());
+      const at = (title: string) => titles.findIndex((t) => t.startsWith(title));
+      expect(at('Approbation à deux')).toBe(at('Planifications') + 1);
+      field(page, 'Au-delà de (postes)').vm.$emit('update:modelValue', 60);
+      await flushPromises();
+      expect(await asksBeforeLeaving(page)).toContain('« Approbation à deux »');
+      page.app.unmount();
+    });
+
     it('asks for the « à échéance » window and for the default owner too', async () => {
       const page = await mountPage(['settings:read', 'settings:write']);
       field(page, 'Fenêtre « à échéance »').vm.$emit('update:modelValue', 20);

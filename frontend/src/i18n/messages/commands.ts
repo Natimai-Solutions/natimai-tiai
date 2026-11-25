@@ -128,6 +128,9 @@ const fr = {
     revoked: '{count} au token révoqué',
     leftSeparator: ', ',
     sentAndLeft: '{sent} — {left}, ignoré(s)',
+    pendingApproval:
+      'Demande d’approbation envoyée pour {count} poste : un second compte doit l’approuver avant le {at}. | Demande d’approbation envoyée pour {count} postes : un second compte doit l’approuver avant le {at}.',
+    viewApproval: 'Voir',
   },
   card: {
     title: 'Dernières commandes',
@@ -622,6 +625,9 @@ const en: Translation<typeof fr> = {
     revoked: '{count} with a revoked token',
     leftSeparator: ', ',
     sentAndLeft: '{sent} — {left}, skipped',
+    pendingApproval:
+      'Approval request sent for {count} computer: a second account must approve it before {at}. | Approval request sent for {count} computers: a second account must approve it before {at}.',
+    viewApproval: 'View',
   },
   card: {
     title: 'Latest commands',

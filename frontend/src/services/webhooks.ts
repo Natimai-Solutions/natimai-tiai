@@ -9,6 +9,7 @@ export const WEBHOOK_EVENTS = [
   'check.created',
   'check.closed',
   'command.failed',
+  'approval.requested',
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 export const WEBHOOK_FORMATS = ['json', 'teams', 'mattermost'] as const;

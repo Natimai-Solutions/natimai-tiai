@@ -114,6 +114,22 @@
           <q-item-section avatar><q-icon name="event_repeat" /></q-item-section>
           <q-item-section>{{ t('layout.pages.schedules') }}</q-item-section>
         </q-item>
+        <!-- C10: for whoever may run a command at risk, while two-person
+             approval is on or requests remain to decide. -->
+        <q-item v-if="showApprovals" v-ripple clickable :to="{ name: 'approvals' }">
+          <q-item-section avatar><q-icon name="how_to_reg" /></q-item-section>
+          <q-item-section>{{ t('layout.pages.approvals') }}</q-item-section>
+          <q-item-section v-if="approvals.to_decide" side>
+            <q-badge
+              color="orange-8"
+              :label="approvals.to_decide"
+              :aria-label="t('approvals.badge')"
+              data-test="approvals-badge"
+            >
+              <q-tooltip>{{ t('approvals.badge') }}</q-tooltip>
+            </q-badge>
+          </q-item-section>
+        </q-item>
         <q-item v-if="auth.can('room', 'read')" v-ripple clickable :to="{ name: 'rooms' }">
           <q-item-section avatar><q-icon name="meeting_room" /></q-item-section>
           <q-item-section>{{ t('layout.pages.rooms') }}</q-item-section>
@@ -174,6 +190,8 @@ import { useAutoRefresh } from 'src/composables/useAutoRefresh';
 import { tasksVersion } from 'src/composables/useTasksBadge';
 import { reportsVersion } from 'src/composables/useReportsBadge';
 import { listReports } from 'src/services/reports';
+import { approvalsVersion } from 'src/composables/useApprovalsBadge';
+import { getApprovalSummary } from 'src/services/approvals';
 
 const drawer = ref(false);
 const auth = useAuthStore();
@@ -231,8 +249,27 @@ async function countReports() {
     if (isForbidden(e)) newReports.value = 0;
   }
 }
+// C10: the requests the reader may decide. The entry shows while approval
+// is on, or while requests remain (one turned off still leaves them to decide).
+const approvals = ref({ enabled: false, to_decide: 0, mine_pending: 0 });
+const showApprovals = computed(
+  () =>
+    auth.can('risky_command', 'execute') &&
+    (approvals.value.enabled || approvals.value.to_decide > 0 || approvals.value.mine_pending > 0),
+);
+async function countApprovals() {
+  if (!auth.can('risky_command', 'execute')) {
+    approvals.value = { enabled: false, to_decide: 0, mine_pending: 0 };
+    return;
+  }
+  try {
+    approvals.value = await getApprovalSummary();
+  } catch (e) {
+    if (isForbidden(e)) approvals.value = { enabled: false, to_decide: 0, mine_pending: 0 };
+  }
+}
 async function countMyTasks() {
-  await Promise.all([countMyChecks(), countMyOverdue(), countReports()]);
+  await Promise.all([countMyChecks(), countMyOverdue(), countReports(), countApprovals()]);
 }
 
 const canReadMachines = computed(() => auth.can('machine', 'read'));
@@ -301,6 +338,7 @@ watch(
     () => auth.can('check', 'read'),
     () => auth.can('maintenance', 'read'),
     () => auth.can('report', 'read'),
+    () => auth.can('risky_command', 'execute'),
   ],
   () => void countMyTasks(),
   { immediate: true },
@@ -312,6 +350,7 @@ watch(
 // A check closed or a visit recorded where the route does not change.
 watch(tasksVersion, () => void countMyTasks());
 watch(reportsVersion, () => void countReports());
+watch(approvalsVersion, () => void countApprovals());
 
 // Logging out is a server call — the session is revoked there, not just
 // forgotten here — so the button waits for it rather than racing the router.

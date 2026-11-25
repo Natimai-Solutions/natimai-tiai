@@ -205,6 +205,15 @@ export interface ConsoleSettings {
   /** C4: whether a label's QR code opens the report form without an account. */
   reports_enabled?: boolean;
   env_reports_enabled?: boolean;
+  /** Two-person approval of mass actions (C10), as resolved, and how many
+   * accounts could approve (places not counted). Optional: an older server. */
+  approval_enabled?: boolean;
+  approval_threshold?: number;
+  approval_ttl_hours?: number;
+  approval_eligible?: number;
+  env_approval_enabled?: boolean;
+  env_approval_threshold?: number;
+  env_approval_ttl_hours?: number;
   /** How mail leaves the console. */
   email: EmailSettings;
   /** The rest of the environment, read-only and never a secret: what an
@@ -241,6 +250,11 @@ export interface SettingsPayload {
   console_timezone?: string | null;
   forbidden_windows?: { days: number[]; start: string; end: string }[] | null;
   reports_enabled?: boolean | null;
+  /** Turning it on is refused (`approval.not_enough_approvers`) with fewer
+   * than two accounts able to approve. */
+  approval_enabled?: boolean | null;
+  approval_threshold?: number;
+  approval_ttl_hours?: number;
   email?: EmailSettingsPayload;
 }
 

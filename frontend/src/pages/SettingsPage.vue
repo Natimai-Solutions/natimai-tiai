@@ -458,6 +458,10 @@
       </q-card-actions>
     </q-card>
 
+    <!-- Two-person approval of mass actions (C10): its own card, saved on its
+         own, right after the schedules it also applies to. -->
+    <SettingsApprovalCard ref="approvalCard" :settings="settings" @saved="onApprovalSaved" />
+
     <!-- Parc thresholds: what makes the console call a poste « périmé »,
          « inactif », short of disk, due for renewal or behind on its agent,
          and how long a queued command waits for it. The environment gives the
@@ -1012,6 +1016,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import { useQuasar } from 'quasar';
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
+import SettingsApprovalCard from 'src/components/settings/SettingsApprovalCard.vue';
 import SettingsDirectoryCard from 'src/components/settings/SettingsDirectoryCard.vue';
 import SettingsWebhooksCard from 'src/components/settings/SettingsWebhooksCard.vue';
 import { t } from 'src/i18n';
@@ -1279,6 +1284,13 @@ async function savePlanning() {
   }
 }
 
+// The two-person approval card (C10): saved on its own; the page keeps the
+// answer, which every card reads.
+const approvalCard = ref<{ dirty: boolean } | null>(null);
+function onApprovalSaved(next: ConsoleSettings) {
+  settings.value = next;
+}
+
 // The parc thresholds card. The agent version is a string: '' = automatic.
 const savingFleet = ref(false);
 const fleetForm = reactive({
@@ -1449,6 +1461,7 @@ const unsavedCards = computed(() => {
   if (formSnapshot(complianceForm) !== saved.compliance) cards.push('compliance');
   if (formSnapshot(licenseForm) !== saved.licenses) cards.push('licenses');
   if (planningSnapshot() !== saved.planning) cards.push('planning');
+  if (approvalCard.value?.dirty) cards.push('approval');
   if (formSnapshot(fleetForm) !== saved.fleet) cards.push('fleet');
   if (formSnapshot(scheduleForm) !== saved.schedule) cards.push('schedule');
   if (formSnapshot(emailForm) !== saved.email) cards.push('email');

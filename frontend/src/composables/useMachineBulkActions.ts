@@ -1,5 +1,6 @@
 import { ref, type Ref } from 'vue';
 import { useQuasar } from 'quasar';
+import { useRouter } from 'vue-router';
 import { t } from 'src/i18n';
 import { bulkCheckNotification, createChecksBulk, type CheckPayload } from 'src/services/checks';
 import {
@@ -11,6 +12,7 @@ import {
 import { apiErrorCode, apiErrorMessage } from 'src/services/errors';
 import { windowText, type ForbiddenWindow } from 'src/services/schedules';
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
+import { notifyApprovalsChanged } from 'src/composables/useApprovalsBadge';
 import {
   approveReenroll,
   approveReenrollNotification,
@@ -38,6 +40,7 @@ export function useMachineBulkActions(options: {
 }) {
   const { selected, reload, onPlaced } = options;
   const $q = useQuasar();
+  const router = useRouter();
 
   const askOpen = ref(false);
   const placeOpen = ref(false);
@@ -141,7 +144,9 @@ export function useMachineBulkActions(options: {
       machine_ids: ids,
       ...(confirmed ? { confirm_forbidden_window: true } : {}),
     });
-    notify($q, () => bulkSendNotification(res));
+    // C10: a request waiting for a second account, with a way to it.
+    if (res.approval_id) notifyApprovalsChanged();
+    notify($q, () => bulkSendNotification(res, () => void router.push({ name: 'approvals' })));
     selected.value = [];
   }
 

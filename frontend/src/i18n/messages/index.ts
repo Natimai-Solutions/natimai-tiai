@@ -1,5 +1,6 @@
 import account from './account';
 import alerts from './alerts';
+import approvals from './approvals';
 import assets from './assets';
 import audit from './audit';
 import auth from './auth';
@@ -42,6 +43,7 @@ import users from './users';
  */
 export const fr = {
   alerts: alerts.fr,
+  approvals: approvals.fr,
   assets: assets.fr,
   schedules: schedules.fr,
   reports: reports.fr,
@@ -80,6 +82,7 @@ export const fr = {
 
 export const en = {
   alerts: alerts.en,
+  approvals: approvals.en,
   assets: assets.en,
   schedules: schedules.en,
   reports: reports.en,

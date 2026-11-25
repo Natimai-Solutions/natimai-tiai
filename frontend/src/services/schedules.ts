@@ -1,6 +1,6 @@
 import { api } from 'boot/axios';
 import { errorCodeMessage, t } from 'src/i18n';
-import { formatDate } from 'src/utils/format';
+import { formatDate, formatDateTime } from 'src/utils/format';
 import { weekdayName } from 'src/utils/settingsSchedule';
 
 /**
@@ -68,7 +68,8 @@ export interface Schedule {
   rings: ScheduleTarget[] | null;
   ring_observe_hours: number | null;
   ring_failure_percent: number | null;
-  state: 'active' | 'disabled' | 'suspended' | 'done';
+  /** `to_approve` (C10): waiting for a second account before it runs. */
+  state: 'active' | 'disabled' | 'suspended' | 'done' | 'to_approve';
   suspended_code: string | null;
   suspended_at: string | null;
   next_run_at: string | null;
@@ -78,6 +79,20 @@ export interface Schedule {
   created_by: string;
   created_at: string;
   updated_at: string;
+  /**
+   * Its approval (C10): the latest request, and who approved it. Null when
+   * it never needed one. Optional: an older server does not send it.
+   */
+  approval?: ScheduleApproval | null;
+}
+
+export interface ScheduleApproval {
+  id: string | null;
+  status: string | null;
+  expires_at: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  approved_count: number | null;
 }
 
 export interface ForbiddenWindow {
@@ -221,6 +236,18 @@ export function targetText(target: ScheduleTarget): string {
   }
 }
 
+/** Who approved a schedule, when, for how many postes (C10); '' if nobody. */
+export function approvedText(s: Pick<Schedule, 'approval'>): string {
+  const a = s.approval;
+  if (!a?.approved_by) return '';
+  const count = a.approved_count ?? 0;
+  return t(
+    'schedules.approval.approvedBy',
+    { by: a.approved_by, at: formatDateTime(a.approved_at), count },
+    count,
+  );
+}
+
 export function stateLabel(state: string): string {
   const key = `schedules.state.${state}`;
   const text = t(key);
@@ -253,6 +280,11 @@ export function runCauseText(
     params.due = run.due_local ? localText(run.due_local) : new Date(params.due).toLocaleString();
   }
   if (code === 'forbidden_window') return t('schedules.runs.cause.forbidden_window');
+  // C10: stopped at its start beyond what was approved ({count},
+  // {threshold}), or before a next stage ({stage}).
+  if (code === 'approval_required' && params.stage !== undefined) {
+    return t('schedules.runs.cause.approval_required_stage', params);
+  }
   for (const prefix of ['schedules.runs.cause', 'schedules.suspended']) {
     const key = `${prefix}.${code}`;
     const text = t(key, params);

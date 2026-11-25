@@ -5,6 +5,7 @@ vi.mock('boot/axios', () => ({
 }));
 
 import { api } from 'boot/axios';
+import { formatDateTime } from 'src/utils/format';
 import {
   bulkSendNotification,
   canRunCommand,
@@ -296,6 +297,35 @@ describe('bulkSendNotification', () => {
       type: 'positive',
       message: '0 commande(s) envoyée(s)',
     });
+  });
+});
+
+describe('bulkSendNotification under two-person approval (C10)', () => {
+  const waiting = {
+    created: [],
+    count: 0,
+    revoked: 0,
+    approval_id: 'ap-1',
+    approval_expires_at: '2026-11-26T18:00:00Z',
+    pending_approval: 45,
+  };
+
+  it('says a request waits, from approval_id — not « nothing sent » from count = 0', () => {
+    const note = bulkSendNotification(waiting);
+    expect(note.type).toBe('info');
+    expect(note.message).toBe(
+      `Demande d’approbation envoyée pour 45 postes : un second compte doit l’approuver avant le ${formatDateTime('2026-11-26T18:00:00Z')}.`,
+    );
+    expect(note.message).not.toContain('Rien à envoyer');
+    expect(note.actions).toBeUndefined();
+  });
+
+  it('offers « Voir » when the caller can go to the page', () => {
+    const view = vi.fn();
+    const note = bulkSendNotification(waiting, view);
+    expect(note.actions?.map((a) => a.label)).toEqual(['Voir']);
+    note.actions![0]!.handler!();
+    expect(view).toHaveBeenCalled();
   });
 });
 

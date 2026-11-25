@@ -14,6 +14,12 @@ vi.mock('src/services/auth', async (importOriginal) => ({
 vi.mock('src/services/checks', () => ({
   listChecks: vi.fn(() => Promise.resolve({ items: [], total: 0 })),
 }));
+vi.mock('src/services/approvals', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('src/services/approvals')>()),
+  getApprovalSummary: vi.fn(() =>
+    Promise.resolve({ enabled: false, to_decide: 0, mine_pending: 0 }),
+  ),
+}));
 vi.mock('src/services/maintenance', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/maintenance')>()),
   getDue: vi.fn(() => Promise.resolve(null)),
@@ -21,6 +27,8 @@ vi.mock('src/services/maintenance', async (importOriginal) => ({
 
 import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import { getMe, type User } from 'src/services/auth';
+import { getApprovalSummary } from 'src/services/approvals';
+import { notifyApprovalsChanged } from 'src/composables/useApprovalsBadge';
 import { listChecks } from 'src/services/checks';
 import { notifyTasksChanged } from 'src/composables/useTasksBadge';
 import { getDue } from 'src/services/maintenance';
@@ -74,6 +82,12 @@ async function mountLayout(user: User | null, path = '/machines', realLayout = f
       { path: '/software', name: 'software', component: Stub },
       { path: '/page', name: 'page', component: PageStub },
       { path: '/tasks', name: 'tasks', component: Stub },
+      {
+        path: '/approvals',
+        name: 'approvals',
+        component: Stub,
+        meta: { requiresPermission: 'risky_command:execute' },
+      },
       { path: '/rooms', name: 'rooms', component: Stub, meta: { requiresPermission: 'room:read' } },
       { path: '/account', name: 'account', component: Stub },
       { path: '/no-access', name: 'no-access', component: Stub },
@@ -127,6 +141,65 @@ describe('MainLayout', () => {
     expect(at('Tendances')).toBe(at('Tableau de bord') + 1);
     const { w: other } = await mountLayout(profile(['room:read']), '/rooms');
     expect(menu(other).join(' | ')).not.toContain('Tendances');
+  });
+
+  // C10: « Approbations », with the count of requests to decide, for whoever
+  // may run a command at risk — while approval is on or requests remain.
+  describe('the approvals entry', () => {
+    const entry = (w: Awaited<ReturnType<typeof mountLayout>>['w']) =>
+      w.findAll('.q-item').find((i) => i.text().includes('Approbations'));
+
+    it('shows with its badge when approval is on', async () => {
+      vi.mocked(getApprovalSummary).mockResolvedValue({
+        enabled: true,
+        to_decide: 3,
+        mine_pending: 0,
+      });
+      const { w } = await mountLayout(
+        profile(['machine:read', 'command:execute', 'risky_command:execute']),
+      );
+      expect(entry(w)).toBeDefined();
+      expect(w.find('[data-test="approvals-badge"]').text()).toBe('3');
+      // Decided elsewhere: the badge reads again.
+      vi.mocked(getApprovalSummary).mockResolvedValue({
+        enabled: true,
+        to_decide: 2,
+        mine_pending: 0,
+      });
+      notifyApprovalsChanged();
+      await flushPromises();
+      expect(w.find('[data-test="approvals-badge"]').text()).toBe('2');
+    });
+
+    it('stays while requests remain once approval is off, and goes when none do', async () => {
+      vi.mocked(getApprovalSummary).mockResolvedValue({
+        enabled: false,
+        to_decide: 0,
+        mine_pending: 1,
+      });
+      const perms = ['machine:read', 'command:execute', 'risky_command:execute'];
+      let { w } = await mountLayout(profile(perms));
+      expect(entry(w)).toBeDefined();
+      expect(w.find('[data-test="approvals-badge"]').exists()).toBe(false);
+      vi.mocked(getApprovalSummary).mockResolvedValue({
+        enabled: false,
+        to_decide: 0,
+        mine_pending: 0,
+      });
+      ({ w } = await mountLayout(profile(perms)));
+      expect(entry(w)).toBeUndefined();
+    });
+
+    it('is absent, and not asked for, without risky_command:execute', async () => {
+      vi.mocked(getApprovalSummary).mockClear().mockResolvedValue({
+        enabled: true,
+        to_decide: 3,
+        mine_pending: 0,
+      });
+      const { w } = await mountLayout(profile(['machine:read', 'command:execute']));
+      expect(entry(w)).toBeUndefined();
+      expect(getApprovalSummary).not.toHaveBeenCalled();
+    });
   });
 
   // Item 4: rights withdrawn during the session.

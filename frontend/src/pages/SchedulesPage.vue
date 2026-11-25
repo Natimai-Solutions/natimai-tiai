@@ -58,11 +58,27 @@
         </template>
         <template #body-cell-state="props">
           <q-td :props="props" style="white-space: normal; max-width: 260px">
-            <q-badge :color="stateColor(props.row.state)">{{
-              stateLabel(props.row.state)
-            }}</q-badge>
+            <q-badge :color="stateColor(props.row.state)" data-test="schedule-state">
+              {{ stateLabel(props.row.state) }}
+              <!-- C10: who approved it, for how many postes. -->
+              <q-tooltip v-if="approvedText(props.row)">{{ approvedText(props.row) }}</q-tooltip>
+            </q-badge>
             <div v-if="props.row.state === 'suspended'" class="text-caption text-negative">
               {{ suspendedText(props.row.suspended_code, suspendedParams(props.row)) }}
+            </div>
+            <div
+              v-else-if="props.row.state === 'to_approve'"
+              class="text-caption text-warn"
+              data-test="schedule-to-approve"
+            >
+              {{
+                t('schedules.approval.waiting', {
+                  at: formatDateTime(props.row.approval?.expires_at ?? null),
+                })
+              }}
+              <router-link v-if="canApprove" :to="{ name: 'approvals' }" class="row-link">{{
+                t('layout.pages.approvals')
+              }}</router-link>
             </div>
           </q-td>
         </template>
@@ -104,7 +120,7 @@
                 @click="openEdit(props.row)"
               />
               <q-btn
-                v-if="props.row.state === 'active'"
+                v-if="props.row.state === 'active' || props.row.state === 'to_approve'"
                 flat
                 dense
                 round
@@ -207,6 +223,7 @@ import {
   setScheduleEnabled,
   stateLabel,
   suspendedText,
+  approvedText,
   targetText,
   whenText,
   type ForbiddenWindow,
@@ -215,6 +232,7 @@ import {
   type ScheduleTargetIn,
 } from 'src/services/schedules';
 import { useAuthStore } from 'src/stores/auth';
+import { notifyApprovalsChanged } from 'src/composables/useApprovalsBadge';
 import { formatDateTime } from 'src/utils/format';
 import { liveDialog } from 'src/utils/liveDialog';
 import { queryValue } from 'src/utils/machineQuery';
@@ -225,6 +243,7 @@ const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const canWrite = computed(() => auth.can('schedule', 'write'));
+const canApprove = computed(() => auth.can('risky_command', 'execute'));
 
 /** When a run started, in the console's zone as the schedules are planned;
  * the browser's only for a server that does not send it. */
@@ -288,6 +307,7 @@ function suspendedParams(s: Schedule): Record<string, unknown> {
 }
 
 function stateColor(state: string): string {
+  if (state === 'to_approve') return 'orange-8';
   return state === 'active' ? 'positive' : state === 'suspended' ? 'negative' : 'grey-7';
 }
 
@@ -340,10 +360,18 @@ async function openRuns(s: Schedule): Promise<void> {
 
 async function toggle(s: Schedule, enabled: boolean): Promise<void> {
   try {
-    await setScheduleEnabled(s.id, enabled);
+    const after = await setScheduleEnabled(s.id, enabled);
+    // C10: turned back on beyond the threshold, it waits for a second account;
+    // turned off while waiting, its request is closed.
+    const waiting = after.state === 'to_approve';
+    if (waiting || s.state === 'to_approve') notifyApprovalsChanged();
     notify($q, () => ({
-      type: 'positive',
-      message: enabled ? t('schedules.actions.enabled') : t('schedules.actions.disabled'),
+      type: waiting ? 'info' : 'positive',
+      message: waiting
+        ? t('schedules.actions.enabledToApprove')
+        : enabled
+          ? t('schedules.actions.enabled')
+          : t('schedules.actions.disabled'),
     }));
     await load();
   } catch (e) {
@@ -363,6 +391,8 @@ function remove(s: Schedule): void {
     void (async () => {
       try {
         await deleteSchedule(s.id);
+        // Its request goes with it (C10).
+        if (s.state === 'to_approve') notifyApprovalsChanged();
         notify($q, () => ({ type: 'positive', message: t('schedules.actions.deleted') }));
         await load();
       } catch (e) {

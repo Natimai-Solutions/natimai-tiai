@@ -103,6 +103,26 @@ const fr = {
     removeWindow: 'Retirer la plage',
     windowInvalid: 'Des jours, et une fin après le début',
   },
+  /** Two-person approval of mass actions (C10). */
+  approval: {
+    title: 'Approbation à deux',
+    caption:
+      'Au-delà d’un nombre de postes, une commande à risque (redémarrage, extinction, mises à jour, réparations, paquets) ou une planification à risque attend l’accord d’un second compte qui détient les mêmes droits et voit tous les postes visés.',
+    enabled: 'Exiger une seconde approbation',
+    threshold: 'Au-delà de (postes)',
+    thresholdHint: 'De 2 à 10 000, compté par envoi · variable d’environnement : {value}',
+    ttl: 'Validité d’une demande (heures)',
+    ttlHint: 'De 1 à 168 heures · variable d’environnement : {value}',
+    eligible:
+      '{count} compte peut approuver (sans tenir compte des lieux). | {count} comptes peuvent approuver (sans tenir compte des lieux).',
+    notEnough:
+      'Il faut au moins deux comptes actifs détenant « Commandes : exécuter » et « Commandes à risque : exécuter » pour l’activer : un seul bloquerait tout.',
+    scopeNote:
+      'Un approbateur limité à des lieux doit voir tous les postes d’une demande : deux comptes limités à deux sites différents ne s’approuvent pas l’un l’autre.',
+    envHint: 'Variable d’environnement : {value}',
+    on: 'activée',
+    off: 'désactivée',
+  },
   fleet: {
     title: 'Supervision du parc',
     caption:
@@ -305,6 +325,7 @@ const fr = {
       fleet: 'Seuils du parc',
       schedule: 'Calendrier des e-mails',
       planning: 'Planifications',
+      approval: 'Approbation à deux',
       email: 'Envoi des e-mails',
     },
   },
@@ -419,6 +440,25 @@ const en: Translation<typeof fr> = {
     addWindow: 'Add a window',
     removeWindow: 'Remove the window',
     windowInvalid: 'Days, and an end after the start',
+  },
+  approval: {
+    title: 'Two-person approval',
+    caption:
+      'Beyond a number of computers, a risky command (restart, shutdown, updates, repairs, packages) or a schedule at risk waits for the consent of a second account holding the same rights and seeing every computer targeted.',
+    enabled: 'Require a second approval',
+    threshold: 'Beyond (computers)',
+    thresholdHint: 'From 2 to 10,000, counted per sending · environment variable: {value}',
+    ttl: 'A request’s validity (hours)',
+    ttlHint: 'From 1 to 168 hours · environment variable: {value}',
+    eligible:
+      '{count} account can approve (places not taken into account). | {count} accounts can approve (places not taken into account).',
+    notEnough:
+      'At least two active accounts holding “Commands: run” and “Risky commands: run” are needed to turn it on: a single one would block everything.',
+    scopeNote:
+      'An approver limited to some places must see every computer of a request: two accounts limited to two different sites do not approve each other.',
+    envHint: 'Environment variable: {value}',
+    on: 'on',
+    off: 'off',
   },
   fleet: {
     title: 'Fleet monitoring',
@@ -616,6 +656,7 @@ const en: Translation<typeof fr> = {
       fleet: 'Fleet thresholds',
       schedule: 'E-mail schedule',
       planning: 'Schedules',
+      approval: 'Two-person approval',
       email: 'Sending e-mails',
     },
   },

@@ -26,6 +26,13 @@ const fr = {
     disabled: 'Désactivée',
     suspended: 'Suspendue',
     done: 'Exécutée',
+    to_approve: 'À approuver',
+  },
+  /** Two-person approval (C10). */
+  approval: {
+    waiting: 'En attente d’approbation, avant le {at}.',
+    approvedBy:
+      'Approuvée par {by} le {at} pour {count} poste. | Approuvée par {by} le {at} pour {count} postes.',
   },
   suspended: {
     author_gone: 'Le compte de son auteur n’existe plus.',
@@ -33,6 +40,12 @@ const fr = {
     permission_lost: 'Son auteur n’a plus le droit « {permission} ».',
     target_gone: 'La salle ou le bâtiment visé n’existe plus ou est hors de portée.',
     package_gone: 'Le paquet à déployer n’existe plus.',
+    approval_required:
+      'Elle vise plus de postes que ce qui a été approuvé, ou son auteur a changé : une approbation est nécessaire.',
+    approval_rejected: 'Sa demande d’approbation a été refusée.',
+    approval_expired: 'Sa demande d’approbation a expiré sans décision.',
+    in_past: 'Son heure était passée au moment de l’approbation.',
+    forbidden_window: 'Elle tombait dans une plage interdite au moment de l’approbation.',
     reenable: 'La réactiver la reprend à votre nom.',
   },
   target: {
@@ -65,6 +78,9 @@ const fr = {
       'Supprimer la planification « {name} » et son historique ? Les commandes déjà créées restent dans l’historique des postes.',
     cancel: 'Annuler',
     saved: 'Planification enregistrée',
+    savedToApprove:
+      'Planification enregistrée, en attente d’approbation : un second compte doit l’approuver avant le {at}.',
+    enabledToApprove: 'Planification réactivée, en attente d’approbation par un second compte.',
     deleted: 'Planification supprimée',
     enabled: 'Planification réactivée',
     disabled: 'Planification désactivée',
@@ -148,6 +164,12 @@ const fr = {
         'Planification désactivée pendant l’observation de l’étape {stage} : les étapes suivantes ne sont pas lancées.',
       internal_error:
         'Erreur du serveur pendant l’exécution (voir ses journaux) : exécution sautée.',
+      approval_required:
+        'Au départ, {count} postes visés au-delà de ce qui a été approuvé (seuil {threshold}) : planification suspendue.',
+      approval_required_stage:
+        'Planification en attente d’approbation pendant l’observation de l’étape {stage} : les étapes suivantes ne sont pas lancées.',
+      schedule_changed:
+        'Planification modifiée pendant le déploiement : les étapes suivantes ne sont pas lancées.',
     },
   },
   window: '{days} {start}–{end}',
@@ -189,6 +211,12 @@ const en: Translation<typeof fr> = {
     disabled: 'Disabled',
     suspended: 'Suspended',
     done: 'Run',
+    to_approve: 'To approve',
+  },
+  approval: {
+    waiting: 'Waiting for approval, before {at}.',
+    approvedBy:
+      'Approved by {by} on {at} for {count} computer. | Approved by {by} on {at} for {count} computers.',
   },
   suspended: {
     author_gone: 'Its author’s account no longer exists.',
@@ -196,6 +224,12 @@ const en: Translation<typeof fr> = {
     permission_lost: 'Its author no longer holds “{permission}”.',
     target_gone: 'The targeted room or building no longer exists or is out of reach.',
     package_gone: 'The package to deploy no longer exists.',
+    approval_required:
+      'It targets more computers than were approved, or its author changed: an approval is needed.',
+    approval_rejected: 'Its approval request was rejected.',
+    approval_expired: 'Its approval request expired without a decision.',
+    in_past: 'Its time had passed when it was approved.',
+    forbidden_window: 'It fell in a forbidden window when it was approved.',
     reenable: 'Turning it back on puts it in your name.',
   },
   target: {
@@ -228,6 +262,9 @@ const en: Translation<typeof fr> = {
       'Delete the schedule “{name}” and its history? The commands it already created stay in the computers’ history.',
     cancel: 'Cancel',
     saved: 'Schedule saved',
+    savedToApprove:
+      'Schedule saved, waiting for approval: a second account must approve it before {at}.',
+    enabledToApprove: 'Schedule turned back on, waiting for approval by a second account.',
     deleted: 'Schedule deleted',
     enabled: 'Schedule turned back on',
     disabled: 'Schedule disabled',
@@ -310,6 +347,11 @@ const en: Translation<typeof fr> = {
       schedule_disabled:
         'Schedule disabled while stage {stage} was under observation: the later stages are not started.',
       internal_error: 'Server error during the run (see its logs): run skipped.',
+      approval_required:
+        'At its start, {count} computers targeted beyond what was approved (threshold {threshold}): schedule suspended.',
+      approval_required_stage:
+        'Schedule waiting for approval while stage {stage} was under observation: the later stages are not started.',
+      schedule_changed: 'Schedule changed during the deployment: the later stages are not started.',
     },
   },
   window: '{days} {start}–{end}',
