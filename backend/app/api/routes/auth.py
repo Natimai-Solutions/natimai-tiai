@@ -17,7 +17,7 @@ import logging
 import math
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Cookie, Depends, Header, Request, Response
@@ -1360,11 +1360,21 @@ class ApiTokenOut(BaseModel):
     revoked_at: datetime | None
 
 
+# How recent the console session of a directory account must be to make a
+# token: its sign-in is its proof.
+API_TOKEN_FRESH_SIGN_IN = timedelta(minutes=10)
+
+
 class ApiTokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     # Read-only unless asked.
     can_write: bool = False
     days: int = Field(default=90, ge=1, le=365)
+    # Proof of the holder (local account): a stolen session must not mint a
+    # token that outlives the owner taking the account back.
+    current_password: str | None = Field(default=None, max_length=1024)
+    # And a code, when the account has a second factor.
+    code: str | None = Field(default=None, max_length=32)
 
     @field_validator("name", mode="before")
     @classmethod
@@ -1398,18 +1408,28 @@ async def list_api_tokens(
     """The account's own tokens, live ones first, newest first."""
     from app.features.api_token.models import ApiToken
 
-    rows = await session.exec(
+    now = utcnow()
+    live = col(ApiToken.revoked_at).is_(None) & (col(ApiToken.expires_at) > now)
+    # Every live token — at most MAX_ACTIVE, and each must stay revocable
+    # here — then the latest ended ones, as history.
+    alive = await session.exec(
         select(ApiToken)
-        .where(col(ApiToken.user_id) == user.id)
+        .where(col(ApiToken.user_id) == user.id, live)
         .order_by(col(ApiToken.created_at).desc())
-        .limit(100)
     )
-    return [ApiTokenOut(**_token_out(r)) for r in rows.all()]
+    ended = await session.exec(
+        select(ApiToken)
+        .where(col(ApiToken.user_id) == user.id, ~live)
+        .order_by(col(ApiToken.created_at).desc())
+        .limit(50)
+    )
+    return [ApiTokenOut(**_token_out(r)) for r in [*alive.all(), *ended.all()]]
 
 
 @router.post("/api-tokens", response_model=ApiTokenCreated, status_code=201)
 async def create_api_token(
     payload: ApiTokenCreate,
+    request: Request,
     session: SessionDep,
     user: CurrentUser,
     current: CurrentAuthSession,
@@ -1427,6 +1447,37 @@ async def create_api_token(
             code=ErrorCode.AUTH_PERMISSION_DENIED,
             status_code=403,
             message="Making API tokens is not granted to this account",
+        )
+    # The account row, locked: the proof below counts towards its locks, and
+    # two creations at once count the live tokens one after the other.
+    account = await _locked_account(session, user)
+    if account.auth_source == "local":
+        if not payload.current_password:
+            raise AppError(
+                code=ErrorCode.PASSWORD_CURRENT_INVALID,
+                status_code=400,
+                message="The current password is required",
+            )
+        if second_factor.enabled(account) and not payload.code:
+            raise AppError(
+                code=ErrorCode.AUTH_SECOND_FACTOR_CODE_INVALID,
+                status_code=400,
+                message="A code of the second factor is required",
+            )
+        await step_up(
+            session,
+            request,
+            account,
+            password=payload.current_password,
+            code=payload.code if second_factor.enabled(account) else None,
+        )
+    elif current.created_at < utcnow() - API_TOKEN_FRESH_SIGN_IN:
+        # An account of the directory has no password here: its proof is a
+        # sign-in through the directory a moment ago.
+        raise AppError(
+            code=ErrorCode.API_TOKEN_SIGN_IN_AGAIN,
+            status_code=403,
+            message="Sign in again through the directory to make a token",
         )
     if await api_tokens.active_count(session, user.id) >= api_tokens.MAX_ACTIVE:
         raise AppError(

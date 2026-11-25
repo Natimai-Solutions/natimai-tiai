@@ -136,6 +136,18 @@ async def _authenticate_api_token(
             status_code=403,
             message="An API token cannot act on the account itself",
         )
+    if user.auth_source == "local" and user.totp_enabled_at is None:
+        from app.features.user import second_factor
+
+        if await second_factor.required(session, user.id):
+            # The account's group requires a second factor it has not set
+            # up: its console sessions are narrowed to the enrolment, and a
+            # token must not be the way around that.
+            raise AppError(
+                code=ErrorCode.AUTH_SECOND_FACTOR_NOT_ENROLLED,
+                status_code=403,
+                message="Set up the second factor your group requires first",
+            )
     request.state.api_token = api_token
     await api_tokens.note_use(session, api_token, client_ip(request))
     return None, user

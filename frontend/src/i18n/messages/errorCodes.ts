@@ -45,6 +45,7 @@ const fr = {
   'auth.oidc.denied': 'Connexion par l’annuaire annulée',
   'webhook.not_found': 'Ce webhook n’existe plus',
   'webhook.destination_refused': 'Cette adresse ne peut pas recevoir de webhook',
+  'webhook.too_many': 'Le nombre maximal de webhooks est atteint',
   'webhook.url.scheme':
     'L’adresse doit commencer par https:// (http:// seulement pour un hôte autorisé par l’exploitant)',
   'webhook.url.credentials': 'L’adresse ne doit pas contenir d’identifiant ni de mot de passe',
@@ -55,6 +56,8 @@ const fr = {
   'api_token.not_found': 'Ce jeton n’existe plus',
   'api_token.too_many': 'Le nombre maximal de jetons actifs est atteint',
   'api_token.forbidden_here': 'Un jeton d’API ne peut pas agir sur le compte lui-même',
+  'api_token.sign_in_again':
+    'Reconnectez-vous par l’annuaire pour créer un jeton : la connexion doit dater de moins de dix minutes',
   'auth.session.not_found': 'Session introuvable ou déjà fermée',
   'auth.token.missing': 'Jeton manquant',
   'auth.token.invalid': 'Jeton invalide',
@@ -179,6 +182,7 @@ const en: Record<keyof typeof fr, string> = {
   'auth.oidc.denied': 'Directory sign-in cancelled',
   'webhook.not_found': 'This webhook no longer exists',
   'webhook.destination_refused': 'This address cannot receive webhooks',
+  'webhook.too_many': 'The maximum number of webhooks has been reached',
   'webhook.url.scheme':
     'The address must start with https:// (http:// only for a host the operator allowed)',
   'webhook.url.credentials': 'The address must not contain a user name or a password',
@@ -189,6 +193,8 @@ const en: Record<keyof typeof fr, string> = {
   'api_token.not_found': 'This token no longer exists',
   'api_token.too_many': 'The maximum number of live tokens has been reached',
   'api_token.forbidden_here': 'An API token cannot act on the account itself',
+  'api_token.sign_in_again':
+    'Sign in again through the directory to create a token: the sign-in must be less than ten minutes old',
   'auth.session.not_found': 'Session not found or already closed',
   'auth.token.missing': 'Missing token',
   'auth.token.invalid': 'Invalid token',

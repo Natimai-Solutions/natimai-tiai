@@ -134,12 +134,14 @@ class ErrorCode(enum.StrEnum):
     # Webhooks (C8): unknown, destination refused (the detail says why).
     WEBHOOK_NOT_FOUND = "webhook.not_found"
     WEBHOOK_DESTINATION_REFUSED = "webhook.destination_refused"
+    WEBHOOK_TOO_MANY = "webhook.too_many"
     # Personal API tokens (C8).
     API_TOKEN_NOT_FOUND = "api_token.not_found"
     API_TOKEN_TOO_MANY = "api_token.too_many"
     # A token used where only the account's own sign-in may act: its
     # password, sessions, second factor, tokens, directory link.
     API_TOKEN_FORBIDDEN_HERE = "api_token.forbidden_here"
+    API_TOKEN_SIGN_IN_AGAIN = "api_token.sign_in_again"
     SCHEDULE_NOT_FOUND = "schedule.not_found"
     # A schedule that would run inside a forbidden window.
     SCHEDULE_FORBIDDEN_WINDOW = "schedule.forbidden_window"

@@ -311,6 +311,8 @@ export async function createApiToken(fields: {
   name: string;
   can_write: boolean;
   days: number;
+  current_password?: string;
+  code?: string;
 }): Promise<ApiToken & { token: string }> {
   const { data } = await api.post<ApiToken & { token: string }>('/auth/api-tokens', fields);
   return data;

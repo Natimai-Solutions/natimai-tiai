@@ -7,6 +7,7 @@ import secrets
 import uuid
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
@@ -15,6 +16,7 @@ from sqlmodel import col, select
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.api.fields import not_null
 from app.core import secretbox
+from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.features.audit import crud as audit
 from app.features.base import utcnow
@@ -71,6 +73,8 @@ class WebhookFields(BaseModel):
     ) -> list[WebhookEvent] | None:
         if value is None:
             return None
+        if not value:
+            raise ValueError("at least one event")
         if WebhookEvent.TEST in value:
             raise ValueError("« test » is sent on demand, not subscribed to")
         return list(dict.fromkeys(value))
@@ -189,9 +193,11 @@ def _out(hook: Webhook, pending: int = 0) -> dict[str, Any]:
 
 
 def _audit_details(hook: Webhook) -> dict[str, Any]:
+    # The host only: the path of a Teams or Mattermost incoming webhook is
+    # its credential, and the journal is read more widely than this page.
     return {
         "name": hook.name,
-        "url": hook.url,
+        "host": urlsplit(hook.url).hostname or "",
         "format": hook.format,
         "events": ", ".join(hook.events),
         "enabled": hook.enabled,
@@ -224,9 +230,10 @@ async def create_webhook(
     count = await session.scalar(select(func.count()).select_from(Webhook))
     if (count or 0) >= MAX_WEBHOOKS:
         raise AppError(
-            code=ErrorCode.REQUEST_VALIDATION_ERROR,
+            code=ErrorCode.WEBHOOK_TOO_MANY,
             status_code=409,
             message=f"{MAX_WEBHOOKS} webhooks at most",
+            details={"limit": MAX_WEBHOOKS},
         )
     secret = secrets.token_urlsafe(32)
     hook = Webhook(
@@ -274,13 +281,17 @@ async def update_webhook(
     _whole_parc(scope)
     hook = await _require(session, webhook_id, lock=True)
     fields = payload.model_dump(exclude_unset=True)
-    if "url" in fields and fields["url"] != hook.url:
+    url_changed = "url" in fields and fields["url"] != hook.url
+    if url_changed:
         await _check_destination(fields["url"])
     if "events" in fields:
         fields["events"] = [WebhookEvent(e).value for e in fields["events"]]
+    # The failure count is the receiver's: it starts again only for another
+    # address or a webhook switched back on, not on renaming a failing one.
+    restart = url_changed or (fields.get("enabled") is True and not hook.enabled)
     for name, value in fields.items():
         setattr(hook, name, value)
-    if fields.get("enabled") is True:
+    if restart:
         hook.consecutive_failures = 0
     hook.updated_at = utcnow()
     session.add(hook)
@@ -378,6 +389,8 @@ async def test_webhook(
                 error = f"HTTP {status_code}"
         except destination.DestinationError as exc:
             error = f"destination refused: {exc}"
+        except TimeoutError:
+            error = f"no answer within {settings.WEBHOOK_TIMEOUT_SECONDS} s"
         except Exception as exc:  # noqa: BLE001 — any transport failure, said
             error = f"{type(exc).__name__}: {exc}"
     now = utcnow()

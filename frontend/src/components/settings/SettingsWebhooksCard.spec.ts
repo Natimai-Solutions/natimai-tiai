@@ -3,6 +3,19 @@ import { createPinia, setActivePinia } from 'pinia';
 import { QForm, QInput } from 'quasar';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// QExpansionItem slides open with the Web Animations API, which the test DOM
+// lacks: a stand-in that finishes at once.
+if (!('animate' in Element.prototype)) {
+  Object.defineProperty(Element.prototype, 'animate', {
+    configurable: true,
+    value: () => ({ cancel: () => undefined, reverse: () => undefined, onfinish: null }),
+  });
+}
+
+vi.mock('src/utils/liveDialog', () => ({
+  liveDialog: () => ({ onOk: (ok: () => void) => ok() }),
+}));
+
 vi.mock('src/services/webhooks', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/webhooks')>()),
   listWebhooks: vi.fn(),
@@ -10,9 +23,20 @@ vi.mock('src/services/webhooks', async (importOriginal) => ({
   updateWebhook: vi.fn(),
   listWebhookDeliveries: vi.fn(),
   testWebhook: vi.fn(),
+  deleteWebhook: vi.fn(),
+  renewWebhookSecret: vi.fn(),
 }));
 
-import { createWebhook, listWebhooks, testWebhook, type Webhook } from 'src/services/webhooks';
+import {
+  createWebhook,
+  deleteWebhook,
+  listWebhookDeliveries,
+  listWebhooks,
+  renewWebhookSecret,
+  testWebhook,
+  updateWebhook,
+  type Webhook,
+} from 'src/services/webhooks';
 import { apiErrorMessage } from 'src/services/errors';
 import { useAuthStore } from 'src/stores/auth';
 import SettingsWebhooksCard from './SettingsWebhooksCard.vue';
@@ -121,5 +145,88 @@ describe('SettingsWebhooksCard', () => {
         refused('webhook.destination_refused', { reason: 'webhook.url.credentials' }),
       ),
     ).toContain('identifiant');
+  });
+
+  it('edits by sending only what changed', async () => {
+    vi.mocked(updateWebhook).mockReset().mockResolvedValue(hook());
+    const w = await mountCard(['webhook:read', 'webhook:write']);
+    await w.find('[data-test="webhook-h1"]').trigger('click');
+    await flushPromises();
+    const edit = w.findAll('button').find((b) => b.text().includes('Modifier'))!;
+    await edit.trigger('click');
+    await flushPromises();
+    w.findAllComponents(QInput)
+      .find((i) => i.props('label') === 'Nom')!
+      .vm.$emit('update:modelValue', 'Canal renommé');
+    await flushPromises();
+    await w.findComponent(QForm).trigger('submit');
+    await flushPromises();
+    expect(updateWebhook).toHaveBeenCalledWith('h1', { name: 'Canal renommé' });
+    w.unmount();
+  });
+
+  it('tests, shows the history, renews the secret and deletes', async () => {
+    vi.mocked(testWebhook).mockResolvedValue({
+      ok: false,
+      response_status: 500,
+      error: 'HTTP 500',
+    });
+    vi.mocked(listWebhookDeliveries)
+      .mockReset()
+      .mockResolvedValue([
+        {
+          id: 'd1',
+          event: 'test',
+          status: 'failed',
+          attempts: 1,
+          response_status: 500,
+          last_error: 'HTTP 500',
+          created_at: '2026-11-25T10:00:00Z',
+          sent_at: null,
+          next_attempt_at: '2026-11-25T10:00:00Z',
+        },
+      ]);
+    vi.mocked(renewWebhookSecret)
+      .mockReset()
+      .mockResolvedValue({ ...hook(), secret: 'new-secret-value' });
+    vi.mocked(deleteWebhook).mockReset().mockResolvedValue();
+    const w = await mountCard(['webhook:read', 'webhook:write']);
+    await w.find('[data-test="webhook-h1"] .q-item').trigger('click');
+    await flushPromises();
+    expect(listWebhookDeliveries).toHaveBeenCalledWith('h1');
+    expect(w.text()).toContain('Abandonné');
+    await w.find('[data-test="webhook-test"]').trigger('click');
+    await flushPromises();
+    expect(testWebhook).toHaveBeenCalledWith('h1');
+    expect(document.body.textContent).toContain('Essai refusé : HTTP 500');
+
+    const button = (label: string) => w.findAll('button').find((b) => b.text().includes(label))!;
+    await button('Nouveau secret').trigger('click');
+    await flushPromises();
+    expect(renewWebhookSecret).toHaveBeenCalledWith('h1');
+    expect(document.body.textContent).toContain('new-secret-value');
+
+    vi.mocked(listWebhooks).mockResolvedValue([]);
+    await button('Supprimer').trigger('click');
+    await flushPromises();
+    expect(deleteWebhook).toHaveBeenCalledWith('h1');
+    expect(w.text()).toContain('Aucun webhook.');
+    w.unmount();
+  });
+
+  it('counts the pending deliveries in English with a plural', async () => {
+    const { setLocale } = await import('src/i18n');
+    vi.mocked(listWebhooks).mockResolvedValue([
+      hook({ pending: 1 }),
+      hook({ id: 'h2', pending: 3 }),
+    ]);
+    setLocale('en');
+    try {
+      const w = await mountCard(['webhook:read']);
+      expect(w.text()).toContain('1 delivery pending');
+      expect(w.text()).toContain('3 deliveries pending');
+    } finally {
+      setLocale('fr');
+    }
   });
 });

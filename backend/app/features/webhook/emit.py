@@ -93,21 +93,34 @@ async def threats_detected(
 
 async def checks_created(
     session: AsyncSession,
-    machines: list[Any],
+    created: list[tuple[Any, Any]],
     *,
     requested_by: str,
     instructions: str | None,
     priority: str | None = None,
     category: str | None = None,
+    instructions_of: dict[Any, str | None] | None = None,
 ) -> int:
-    if not machines:
+    """One event for the verifications a request opened: ``created`` as
+    (machine, check id). Each item carries its check id, which
+    ``check.closed`` names too; ``instructions_of`` gives per-poste
+    instructions where they differ (the checks the alerts open)."""
+    if not created:
         return 0
+    rows = []
+    for machine, check_id in created:
+        row = {**machine_ref(machine), "check_id": str(check_id)}
+        if instructions_of is not None:
+            row["instructions"] = instructions_of.get(machine.id)
+        rows.append(row)
+    first_machine, first_check = created[0]
     return await emit(
         session,
         WebhookEvent.CHECK_CREATED,
         {
-            **items([machine_ref(m) for m in machines]),
-            "machine": machine_ref(machines[0]),
+            **items(rows),
+            "machine": machine_ref(first_machine),
+            "check_id": str(first_check),
             "requested_by": requested_by,
             "instructions": instructions,
             "priority": priority,
@@ -148,6 +161,27 @@ async def command_failed(session: AsyncSession, machine: Any, command: Any) -> i
             "error": (command.error or "")[:500] or None,
         },
     )
+
+
+async def commands_failed(session: AsyncSession, command_ids: list[Any]) -> int:
+    """``command.failed`` for commands the server closed as failed (no
+    answer from the poste): one event each, as for an agent's verdict."""
+    from app.features.command.models import Command
+    from app.features.machine.models import Machine
+
+    if not command_ids:
+        return 0
+    rows = (
+        await session.exec(
+            select(Command, Machine)
+            .join(Machine, col(Machine.id) == col(Command.machine_id))
+            .where(col(Command.id).in_(command_ids))
+        )
+    ).all()
+    queued = 0
+    for command, machine in rows:
+        queued += await command_failed(session, machine, command)
+    return queued
 
 
 async def alerts_changed(
