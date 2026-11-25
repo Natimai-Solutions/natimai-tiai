@@ -158,7 +158,7 @@ const fr = {
     webhook: {
       read: {
         label: 'Consulter',
-        hint: 'Voir les webhooks, leurs adresses et l’historique de leurs envois.',
+        hint: 'Voir les webhooks, leurs adresses et l’historique de leurs envois. Réservé aux comptes sans limite de lieux. Ils sont dans Paramètres : il faut aussi « Paramètres : consulter ».',
       },
       write: {
         label: 'Gérer',
@@ -330,7 +330,7 @@ const en: Translation<typeof fr> = {
     webhook: {
       read: {
         label: 'View',
-        hint: 'See the webhooks, their addresses and their delivery history.',
+        hint: 'See the webhooks, their addresses and their delivery history. Only for accounts not limited to some places. They are in Settings: “Settings: view” is needed too.',
       },
       write: {
         label: 'Manage',

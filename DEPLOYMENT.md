@@ -304,7 +304,7 @@ Il n'est jamais committé.
 | `ENVIRONMENT` | `production` | `local` / `staging` / `production`. Hors `local` : garde anti-placeholder et longueur minimale des secrets + masquage des erreurs 500. Absent, il vaut `production` : un `.env` qui l'oublie reste gardé |
 | `SECRET_KEY` | `changeme` | 32 caractères minimum hors `local`. Signature des JWT console, et dérivation de la clé qui chiffre les identifiants e-mail enregistrés dans la console. **La changer oblige à ressaisir ces identifiants** (voir « Alertes e-mail ») |
 | `TOTP_ENCRYPTION_KEY` | *(vide)* | Clé qui chiffre les secrets de double authentification (32 caractères minimum conseillés). Vide : dérivée de `SECRET_KEY`, et **changer `SECRET_KEY` rend alors illisibles tous les seconds facteurs** — chaque compte n'entre plus qu'avec un code de secours, ou après une réinitialisation par un administrateur. La renseigner une fois pour toutes, et la garder |
-| `SECOND_FACTOR_MAX_FAILED_ATTEMPTS` | `5` | Codes faux de suite, sur n'importe quelles tentatives, avant que le second facteur du compte soit verrouillé `LOGIN_LOCKOUT_MINUTES` minutes |
+| `SECOND_FACTOR_MAX_FAILED_ATTEMPTS` | `5` | Codes faux de suite, sur n'importe quelles tentatives, avant que le second facteur du compte soit verrouillé : `LOGIN_LOCKOUT_MINUTES` minutes la première fois, puis deux fois plus à chaque nouvelle série de codes faux, 24 heures au plus. Seul un code juste remet le compte à zéro |
 | `SECOND_FACTOR_CHALLENGE_MINUTES` | `5` | Temps laissé pour saisir le code une fois le mot de passe accepté (1 à 30) |
 | `OIDC_ENABLED` | `false` | Connexion par l'annuaire (OpenID Connect, Entra ID d'abord) — cf. « Connexion par l'annuaire » |
 | `OIDC_ISSUER` | *(vide)* | Émetteur : `https://login.microsoftonline.com/<ID de locataire>/v2.0` pour Entra ID. Un locataire, jamais `common` ni `organizations` |
@@ -318,7 +318,7 @@ Il n'est jamais committé.
 | `WEBHOOK_ALLOWED_HOSTS` | *(vide)* | Hôtes de webhook admis bien qu'internes, séparés par des virgules (`chat.lycee.local`) : un Mattermost du réseau de l'établissement. Pour eux seuls, `http://` est aussi accepté — cf. « Webhooks et jetons d'API » |
 | `WEBHOOK_PROXY_URL` | *(vide)* | Proxy HTTP des seuls envois de webhooks, comme `MAILGUN_PROXY_URL` |
 | `WEBHOOK_TIMEOUT_SECONDS` | `10` | Délai d'attente d'un envoi |
-| `WEBHOOK_MAX_ATTEMPTS` | `8` | Tentatives avant abandon (1 min, doublé jusqu'à 1 h entre deux : environ une journée) |
+| `WEBHOOK_MAX_ATTEMPTS` | `30` | Tentatives avant abandon (1 min, doublé jusqu'à 1 h entre deux : environ une journée à 30, deux heures à 8) |
 | `WEBHOOK_DELIVERY_RETENTION_DAYS` | `30` | Durée de conservation de l'historique des envois ; ceux encore en attente ne sont jamais purgés |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Durée de vie du jeton d'accès console (1 à 1 440). Court à dessein : c'est lui que la page garde en mémoire et envoie à chaque appel, et la console le renouvelle seule par sa session. Ancien défaut : 480 — une valeur `480` restée dans un `.env` reste acceptée mais n'a plus de raison d'être |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Une session console non utilisée pendant ce nombre de jours se ferme. **Glissante** : chaque renouvellement repousse l'échéance, un opérateur qui ouvre la console chaque semaine ne se reconnecte pas |
@@ -515,8 +515,10 @@ activée.
 - Un code ne sert qu'une fois ; l'horloge du serveur doit être juste à 30
   secondes près (NTP sur l'hôte Docker).
 - `SECOND_FACTOR_MAX_FAILED_ATTEMPTS` codes faux de suite verrouillent le
-  second facteur du compte `LOGIN_LOCKOUT_MINUTES` minutes (journal d'audit :
-  `user.second_factor_locked`).
+  second facteur du compte `LOGIN_LOCKOUT_MINUTES` minutes ; chaque nouvelle
+  série de codes faux double la durée, jusqu'à 24 heures, et seul un code juste
+  remet le compteur à zéro (journal d'audit : `user.second_factor_locked`).
+  Un administrateur lève le verrou en réinitialisant la double authentification.
 - **Téléphone perdu** : un code de secours ; sinon un administrateur
   « Réinitialise la double authentification » du compte (page Utilisateurs) —
   ses sessions sont fermées, il en active une nouvelle à sa connexion suivante.
@@ -525,6 +527,12 @@ activée.
   à double authentification obligatoire.
 - Les secrets sont chiffrés en base sous `TOTP_ENCRYPTION_KEY` (à défaut, une
   clé dérivée de `SECRET_KEY`) ; les codes de secours n'y sont que hachés.
+  Renseigner `TOTP_ENCRYPTION_KEY` sur une installation où des comptes ont déjà
+  un second facteur ne les efface pas : chaque secret est relu sous l'ancienne
+  clé et rechiffré sous la nouvelle **à sa prochaine utilisation**. Tant qu'un
+  compte ne s'est pas reconnecté, son secret dépend encore de `SECRET_KEY` :
+  ne changer `SECRET_KEY` qu'après que tous l'ont fait, ou réinitialiser la
+  double authentification des retardataires.
 
 **Connexion par l'annuaire** (C7, OpenID Connect ; désactivée par défaut). Un
 bouton « Se connecter avec Microsoft » s'ajoute à la page de connexion ; le mot
@@ -565,19 +573,32 @@ console.
 
 **Webhooks et jetons d'API** (C8).
 
-*Webhooks* — Paramètres, carte « Webhooks » (droit « Webhooks : gérer »,
-administrateurs par défaut, et compte sans limite de lieux : les évènements
-portent sur tout le parc). Un webhook envoie à une adresse les évènements
-choisis : menace détectée, alerte ouverte ou résolue, vérification demandée ou
-close, commande échouée. Trois formats : **JSON signé** (pour un script ou un
+*Webhooks* — Paramètres, carte « Webhooks » (droits « Webhooks : consulter »
+et « Webhooks : gérer », administrateurs par défaut, avec « Paramètres :
+consulter » pour atteindre la page, et un compte sans limite de lieux : les
+évènements portent sur tout le parc). Un webhook envoie à une adresse les
+évènements choisis : menace détectée (récente : l'historique de Defender
+remonté par un premier inventaire n'en est pas une, comme pour l'e-mail),
+alerte ouverte ou résolue, vérification demandée ou close, commande échouée
+(verdict du poste, ou commande restée sans réponse ; pas les commandes que le
+serveur clôt lui-même après un geste d'opérateur : fusion de postes, paquet
+supprimé, retiré ou modifié après la mise en file, lecture de l'annuaire qui
+n'est plus permise au poste ; ni un réveil refusé sur-le-champ, que la console
+montre à qui l'a demandé). Une évaluation des
+alertes, une demande de vérification pour plusieurs postes ou les
+vérifications ouvertes par les alertes font **un** envoi, qui les liste ;
+chaque vérification y porte son `check_id`, que reprend `check.closed`. Trois formats : **JSON signé** (pour un script ou un
 outil de tickets), **Microsoft Teams** et **Mattermost** (« Webhooks
 entrants » ; Slack comprend le même format). Ces deux derniers reçoivent un
 corps `{"text": "…"}` rédigé dans la langue du webhook : c'est ce qu'attend le
 connecteur « Incoming Webhook » d'un canal Teams ; un flux Power Automate
 (« Workflows ») qui le remplace doit lire ce champ `text`. Les envois passent par une file en
 base, envoyée par le worker : une destination en panne est réessayée pendant
-environ une journée, puis l'envoi est abandonné et noté dans l'historique du
-webhook. Le bouton « Envoyer un essai » envoie aussitôt un évènement `test`.
+environ une journée (`WEBHOOK_MAX_ATTEMPTS`), puis l'envoi est abandonné et
+noté dans l'historique du webhook ; un destinataire en panne ne retarde pas les
+autres. Un envoi dure au plus `WEBHOOK_TIMEOUT_SECONDS` en tout, et la réponse
+n'est pas lue : seul son code compte. Désactiver un webhook abandonne ses envois
+en attente. Le bouton « Envoyer un essai » envoie aussitôt un évènement `test`.
 
 Chaque envoi porte `X-Tiai-Event`, `X-Tiai-Delivery` (identifiant, à utiliser
 pour ignorer un doublon) et `X-Tiai-Signature: t=<horodatage>,v1=<signature>`,
@@ -600,16 +621,30 @@ def verifie(secret: str, entete: str, corps: bytes) -> bool:
 **Destinations refusées** : un webhook fait émettre au serveur des requêtes
 vers l'adresse qu'on lui donne. Seul `https://` est accepté, sans identifiant
 dans l'adresse ; une adresse qui se résout vers le réseau interne (privée, de
-bouclage, lien-local — dont le service de métadonnées des clouds —, multicast
-ou réservée) est refusée, à l'enregistrement **et** à chaque envoi, et aucune
-redirection n'est suivie. Un outil du réseau de l'établissement (un Mattermost
+bouclage, lien-local — dont le service de métadonnées des clouds —, partagée
+(CGNAT), site-local, multicast ou réservée, y compris écrite en IPv6 :
+NAT64, 6to4, Teredo) est refusée, à l'enregistrement **et** à chaque envoi. La
+connexion va à l'adresse vérifiée, et non à une nouvelle résolution du nom : un
+serveur DNS qui répondrait autrement la seconde fois (*DNS rebinding*) n'y gagne
+rien ; le nom reste dans l'en-tête `Host` et la négociation TLS, et le
+certificat est vérifié pour lui. Le nom est lu comme le client HTTP l'envoie
+(IDNA 2008 : `straße` est `xn--strae-oqa`). Aucune redirection n'est suivie.
+Par un proxy — `WEBHOOK_PROXY_URL`, ou à défaut celui de l'environnement
+(`HTTPS_PROXY`, transmis par Docker, `NO_PROXY` respecté) —, c'est le proxy qui
+résout le nom et se connecte : le contrôle porte sur la résolution du serveur,
+et le proxy doit lui-même refuser le réseau interne. Le journal d'audit ne garde que l'hôte d'un webhook, pas son
+chemin, qui est le secret des webhooks entrants de Teams ou Mattermost. Un outil du réseau de l'établissement (un Mattermost
 interne) se déclare dans `WEBHOOK_ALLOWED_HOSTS` ; `http://` est alors admis
 pour lui. Le serveur doit pouvoir joindre la destination en HTTPS (directement
 ou par `WEBHOOK_PROXY_URL`).
 
 *Jetons d'API* — « Mon compte », carte « Jetons d'API » (droit « Jetons d'API :
-créer des jetons », administrateurs par défaut). Un jeton `tiai_pat_…` permet à
-un script d'appeler l'API, dans l'en-tête `Authorization: Bearer <jeton>` :
+créer des jetons », administrateurs par défaut). Créer un jeton demande le mot
+de passe du compte, et un code s'il a la double authentification ; un compte de
+l'annuaire doit s'être connecté depuis moins de dix minutes. Une session volée
+ne peut donc pas se donner un accès qui survive à la reprise du compte. Un
+jeton `tiai_pat_…` permet à un script d'appeler l'API, dans l'en-tête
+`Authorization: Bearer <jeton>` :
 
 ```bash
 curl -H "Authorization: Bearer tiai_pat_…" https://<serveur>/api/v1/machines
@@ -619,7 +654,11 @@ Il agit avec les droits et la portée de son compte **au moment de l'appel** ;
 en **lecture seule** sauf si l'écriture a été cochée à sa création ; il expire
 (1 à 365 jours, 90 par défaut) ; il n'atteint jamais le compte lui-même (mot de
 passe, sessions, second facteur, jetons, annuaire — seul `GET /auth/me` répond,
-pour qu'un script sache au nom de qui il agit). Il n'est montré qu'une fois ;
+pour qu'un script sache au nom de qui il agit), ni depuis « Mon compte » ni
+depuis la page des comptes (`/users/<son propre id>` : adresse, mot de passe,
+groupes, désactivation). Un compte dont un groupe exige la double
+authentification et qui ne l'a pas activée n'a pas d'accès par jeton tant
+qu'il ne l'a pas fait. Il n'est montré qu'une fois ;
 seul son hachage est gardé. Création et révocation sont au journal d'audit ; la
 carte montre la dernière utilisation. Tous les jetons d'un compte sont révoqués
 quand un administrateur le désactive, réinitialise son mot de passe ou son

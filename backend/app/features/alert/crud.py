@@ -197,18 +197,34 @@ async def _open_checks(session: AsyncSession, opened: list[OpenedAlert]) -> int:
         from app.features.machine.models import Machine
         from app.features.webhook import emit as webhook_emit
 
-        machines = (
-            await session.exec(
-                select(Machine).where(col(Machine.id).in_([m for _, m in created]))
-            )
-        ).all()
-        for machine in machines:
-            await webhook_emit.checks_created(
-                session,
-                [machine],
-                requested_by=settings.PROJECT_NAME,
-                instructions=instructions_of.get(machine.id),
-            )
+        machines = {
+            m.id: m
+            for m in (
+                await session.exec(
+                    select(Machine).where(col(Machine.id).in_([m for _, m in created]))
+                )
+            ).all()
+        }
+        # One event for the whole evaluation, as for the alerts themselves:
+        # a first evaluation on a large parc must not post one message per
+        # poste. Each item carries its own instructions.
+        await webhook_emit.checks_created(
+            session,
+            [
+                (machines[machine_id], check_id)
+                for check_id, machine_id in created
+                if machine_id in machines
+            ],
+            requested_by=settings.PROJECT_NAME,
+            # One reason for all of them, when they share it; else each item
+            # carries its own.
+            instructions=(
+                shared.pop()
+                if len(shared := {instructions_of.get(m) for _, m in created}) == 1
+                else None
+            ),
+            instructions_of=instructions_of,
+        )
     return len(created)
 
 

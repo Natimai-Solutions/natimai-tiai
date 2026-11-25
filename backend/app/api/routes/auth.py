@@ -17,7 +17,7 @@ import logging
 import math
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Cookie, Depends, Header, Request, Response
@@ -1145,30 +1145,103 @@ async def _locked_account(session: SessionDep, user: User) -> User:
     return account
 
 
+def _step_up_session_ended() -> AppError:
+    return AppError(
+        code=ErrorCode.AUTH_SESSION_INVALID,
+        status_code=401,
+        message="This session has ended",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def step_up(
     session: SessionDep,
     request: Request,
     account: User,
+    current: AuthSession,
     *,
     password: str | None,
     code: str | None,
     allow_backup: bool = True,
+    via: str = "step_up",
 ) -> None:
     """Prove the holder again before an action a stolen session must not
-    take: the current password (a wrong one counts towards the password's
-    lock) and, when given, a code — checked by ``second_factor.verify_code``,
-    which counts towards the second factor's lock like a login. The account
-    row is locked by the caller. Commits the counters on a refusal."""
-    if password is not None and not await security.check_password(
-        password, account.hashed_password
-    ):
-        await crud.record_failure(session, account, client_ip(request))
-        await session.commit()
-        raise AppError(
-            code=ErrorCode.PASSWORD_CURRENT_INVALID,
-            status_code=400,
-            message="Current password is incorrect",
+    take: the current password and, when given, a code — checked by
+    ``second_factor.verify_code``, which counts towards the second factor's
+    lock like a login. The account row is locked by the caller. Commits the
+    counters on a refusal.
+
+    The password has the budget of a password change: a wrong one counts
+    towards the account's lock like a login, and the session that has
+    spent PASSWORD_CHANGE_SESSION_FAILURES of them, or whose failure locks
+    the account, is ended — a stolen session cannot guess for ever."""
+    if password is not None:
+        ratelimit.check_account(
+            ratelimit.password_change_limiter, str(current.id), "auth.password"
         )
+        locked = await auth_sessions.lock_row(session, current)
+        if (
+            locked is None
+            or not auth_sessions.is_live(locked)
+            or locked.password_failures >= PASSWORD_CHANGE_SESSION_FAILURES
+        ):
+            if locked is not None:
+                auth_sessions.revoke(session, locked)
+                await session.commit()
+            raise _step_up_session_ended()
+        if not await security.check_password(password, account.hashed_password):
+            ip = client_ip(request)
+            failures = await auth_sessions.note_password_failure(session, current)
+            lock = await crud.record_failure(session, account, ip)
+            if lock is not None:
+                details: dict[str, Any] = {
+                    "locked_until": lock.until.isoformat(),
+                    "via": via,
+                }
+                if lock.slow:
+                    details["slow"] = True
+                audit.record(
+                    session,
+                    actor=account.email,
+                    action="user.locked",
+                    resource_type="user",
+                    resource_id=str(account.id),
+                    details=details,
+                )
+            if lock is not None or failures >= PASSWORD_CHANGE_SESSION_FAILURES:
+                auth_sessions.revoke(session, current)
+                audit.record(
+                    session,
+                    actor=account.email,
+                    action="auth.session_revoked",
+                    resource_type="user",
+                    resource_id=str(account.id),
+                    details={
+                        "current": True,
+                        "via": via,
+                        "failures": failures,
+                        "user_agent": current.user_agent,
+                        "ip": current.ip,
+                        "created_at": current.created_at.isoformat(),
+                    },
+                )
+                # The count is in the audit entry above: the log names the
+                # account, the address and the session only.
+                security_log.warning(
+                    "%s: wrong current passwords for %s from %s, session %s ended",
+                    via,
+                    account.email,
+                    ip,
+                    current.id,
+                )
+                await session.commit()
+                raise _step_up_session_ended()
+            await session.commit()
+            raise AppError(
+                code=ErrorCode.PASSWORD_CURRENT_INVALID,
+                status_code=400,
+                message="Current password is incorrect",
+            )
     if code is None:
         return
     checked = await second_factor.verify_code(
@@ -1215,7 +1288,13 @@ async def totp_setup(
             message="A second factor is already active on this account",
         )
     await step_up(
-        session, request, account, password=payload.current_password, code=None
+        session,
+        request,
+        account,
+        current,
+        password=payload.current_password,
+        code=None,
+        via="totp_setup",
     )
     secret, uri = second_factor.start_enrolment(account)
     session.add(account)
@@ -1295,6 +1374,7 @@ async def totp_disable(
         session,
         request,
         account,
+        current,
         password=payload.current_password,
         code=payload.code,
     )
@@ -1330,7 +1410,13 @@ async def totp_backup_codes(
         )
     # The app's code only: a backup code must not buy ten new ones.
     await step_up(
-        session, request, account, password=None, code=payload.code, allow_backup=False
+        session,
+        request,
+        account,
+        current,
+        password=None,
+        code=payload.code,
+        allow_backup=False,
     )
     codes = await second_factor.new_backup_codes(session, account.id)
     audit.record(
@@ -1360,11 +1446,21 @@ class ApiTokenOut(BaseModel):
     revoked_at: datetime | None
 
 
+# How recent the console session of a directory account must be to make a
+# token: its sign-in is its proof.
+API_TOKEN_FRESH_SIGN_IN = timedelta(minutes=10)
+
+
 class ApiTokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     # Read-only unless asked.
     can_write: bool = False
     days: int = Field(default=90, ge=1, le=365)
+    # Proof of the holder (local account): a stolen session must not mint a
+    # token that outlives the owner taking the account back.
+    current_password: str | None = Field(default=None, max_length=1024)
+    # And a code, when the account has a second factor.
+    code: str | None = Field(default=None, max_length=32)
 
     @field_validator("name", mode="before")
     @classmethod
@@ -1398,18 +1494,28 @@ async def list_api_tokens(
     """The account's own tokens, live ones first, newest first."""
     from app.features.api_token.models import ApiToken
 
-    rows = await session.exec(
+    now = utcnow()
+    live = col(ApiToken.revoked_at).is_(None) & (col(ApiToken.expires_at) > now)
+    # Every live token — at most MAX_ACTIVE, and each must stay revocable
+    # here — then the latest ended ones, as history.
+    alive = await session.exec(
         select(ApiToken)
-        .where(col(ApiToken.user_id) == user.id)
+        .where(col(ApiToken.user_id) == user.id, live)
         .order_by(col(ApiToken.created_at).desc())
-        .limit(100)
     )
-    return [ApiTokenOut(**_token_out(r)) for r in rows.all()]
+    ended = await session.exec(
+        select(ApiToken)
+        .where(col(ApiToken.user_id) == user.id, ~live)
+        .order_by(col(ApiToken.created_at).desc())
+        .limit(50)
+    )
+    return [ApiTokenOut(**_token_out(r)) for r in [*alive.all(), *ended.all()]]
 
 
 @router.post("/api-tokens", response_model=ApiTokenCreated, status_code=201)
 async def create_api_token(
     payload: ApiTokenCreate,
+    request: Request,
     session: SessionDep,
     user: CurrentUser,
     current: CurrentAuthSession,
@@ -1427,6 +1533,38 @@ async def create_api_token(
             code=ErrorCode.AUTH_PERMISSION_DENIED,
             status_code=403,
             message="Making API tokens is not granted to this account",
+        )
+    # The account row, locked: the proof below counts towards its locks, and
+    # two creations at once count the live tokens one after the other.
+    account = await _locked_account(session, user)
+    if account.auth_source == "local":
+        if not payload.current_password:
+            raise AppError(
+                code=ErrorCode.PASSWORD_CURRENT_INVALID,
+                status_code=400,
+                message="The current password is required",
+            )
+        if second_factor.enabled(account) and not payload.code:
+            raise AppError(
+                code=ErrorCode.AUTH_SECOND_FACTOR_CODE_INVALID,
+                status_code=400,
+                message="A code of the second factor is required",
+            )
+        await step_up(
+            session,
+            request,
+            account,
+            current,
+            password=payload.current_password,
+            code=payload.code if second_factor.enabled(account) else None,
+        )
+    elif current.created_at < utcnow() - API_TOKEN_FRESH_SIGN_IN:
+        # An account of the directory has no password here: its proof is a
+        # sign-in through the directory a moment ago.
+        raise AppError(
+            code=ErrorCode.API_TOKEN_SIGN_IN_AGAIN,
+            status_code=403,
+            message="Sign in again through the directory to make a token",
         )
     if await api_tokens.active_count(session, user.id) >= api_tokens.MAX_ACTIVE:
         raise AppError(

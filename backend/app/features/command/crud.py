@@ -174,8 +174,15 @@ async def close_unanswered(session: AsyncSession, *, hours: int) -> int:
             result_params=verdict.params,
             finished_at=now,
         )
+        .returning(col(Command.id))
     )
-    return result.rowcount or 0
+    closed = [command_id for (command_id,) in result.all()]
+    if closed:
+        # To the webhooks (C8): the poste never said how it went.
+        from app.features.webhook import emit as webhook_emit
+
+        await webhook_emit.commands_failed(session, closed)
+    return len(closed)
 
 
 async def mark_expired(

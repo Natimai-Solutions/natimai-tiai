@@ -23,7 +23,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
@@ -47,10 +47,35 @@ from app.features.user.permissions import (
 
 security_log = logging.getLogger("app.security")
 
+
+async def _not_own_account_by_token(request: Request, current: CurrentUser) -> None:
+    """A personal API token never acts on its own account (C8): not through
+    « Mon compte », and not through the accounts page either — its email,
+    password, second factor, groups or deactivation."""
+    if getattr(request.state, "api_token", None) is None:
+        return
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    raw = request.path_params.get("user_id")
+    try:
+        target = uuid.UUID(str(raw))
+    except ValueError:
+        return
+    if target == current.id:
+        raise AppError(
+            code=ErrorCode.API_TOKEN_FORBIDDEN_HERE,
+            status_code=403,
+            message="An API token cannot act on the account itself",
+        )
+
+
 router = APIRouter(
     prefix="/users",
     tags=["users"],
-    dependencies=[Depends(require_permission(Resource.USER, Action.READ))],
+    dependencies=[
+        Depends(require_permission(Resource.USER, Action.READ)),
+        Depends(_not_own_account_by_token),
+    ],
 )
 
 _WRITE = Depends(require_permission(Resource.USER, Action.WRITE))

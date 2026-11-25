@@ -11,7 +11,8 @@ API = "/api/v1/auth/api-tokens"
 
 
 async def _token(client, headers, **fields):
-    resp = await client.post(API, headers=headers, json={"name": "Script", **fields})
+    body = {"name": "Script", "current_password": STRONG, **fields}
+    resp = await client.post(API, headers=headers, json=body)
     assert resp.status_code == 201, resp.text
     body = resp.json()
     return body, {"Authorization": f"Bearer {body['token']}"}
@@ -38,10 +39,16 @@ async def test_made_once_and_listed_without_the_value(client, db_session):
     assert actions == ["api_token.create"]
     # Bounds: a year at most, a name.
     assert (
-        await client.post(API, headers=admin, json={"name": "x", "days": 366})
+        await client.post(
+            API,
+            headers=admin,
+            json={"name": "x", "days": 366, "current_password": STRONG},
+        )
     ).status_code == 422
     assert (
-        await client.post(API, headers=admin, json={"name": "  "})
+        await client.post(
+            API, headers=admin, json={"name": "  ", "current_password": STRONG}
+        )
     ).status_code == 422
 
 
@@ -49,7 +56,9 @@ async def test_needs_the_right_to_make_one(client, db_session):
     from app.features.user.permissions import BuiltinGroup
 
     tech = await account(client, db_session, "ab@lycee.test", [BuiltinGroup.TECHNICIAN])
-    resp = await client.post(API, headers=tech, json={"name": "x"})
+    resp = await client.post(
+        API, headers=tech, json={"name": "x", "current_password": STRONG}
+    )
     assert resp.status_code == 403
 
 

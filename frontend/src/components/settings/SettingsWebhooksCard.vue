@@ -386,7 +386,17 @@ async function save(): Promise<void> {
   };
   try {
     if (editing.value) {
-      await updateWebhook(editing.value.id, fields);
+      // Only what changed: an unchanged address is not checked again, and
+      // an unchanged « Actif » does not count as switching it back on.
+      const before = editing.value;
+      const changed: Partial<typeof fields> = {};
+      if (fields.name !== before.name) changed.name = fields.name;
+      if (fields.url !== before.url) changed.url = fields.url;
+      if (fields.format !== before.format) changed.format = fields.format;
+      if (fields.language !== before.language) changed.language = fields.language;
+      if (fields.events.join() !== before.events.join()) changed.events = fields.events;
+      if (fields.enabled !== before.enabled) changed.enabled = fields.enabled;
+      if (Object.keys(changed).length) await updateWebhook(before.id, changed);
     } else {
       const created = await createWebhook(fields);
       showSecret(created.secret);

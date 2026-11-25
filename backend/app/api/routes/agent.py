@@ -1150,8 +1150,12 @@ async def heartbeat(
         await threat_alert.queue_threat_alert(
             session, threat_alert.MachineContext.of(machine), new_detections
         )
-        # And to the webhooks that asked for it (C8), in the same transaction.
-        await webhook_emit.threats_detected(session, machine, new_detections)
+        # And to the webhooks that asked for it (C8), in the same transaction —
+        # the same detections as the mail: a first inventory's years of
+        # Defender history is not news for a chat channel either.
+        fresh = threat_alert.recent_detections(new_detections)
+        if fresh:
+            await webhook_emit.threats_detected(session, machine, fresh)
 
     # Last, so that a heartbeat failing on anything above never mints a token
     # it would not return. Committed with the rest: the pending hash exists

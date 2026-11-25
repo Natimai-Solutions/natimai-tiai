@@ -414,7 +414,7 @@ async def create_check(
         )
     await webhook_emit.checks_created(
         session,
-        [machine],
+        [(machine, row.id)],
         requested_by=current.email,
         instructions=row.instructions,
         priority=row.priority,
@@ -532,7 +532,7 @@ async def create_checks_bulk(
         for machine_id in machine_ids
         if machine_id not in open_ids
     ]
-    inserted: set[uuid.UUID] = set()
+    inserted: dict[uuid.UUID, uuid.UUID] = {}
     if new_rows:
         # A request opened meanwhile on one of them is skipped, not a failure
         # of the whole batch (audit B21): the partial unique index decides.
@@ -543,9 +543,9 @@ async def create_checks_bulk(
                 index_elements=[col(MachineCheck.machine_id)],
                 index_where=col(MachineCheck.closed_at).is_(None),
             )
-            .returning(col(MachineCheck.machine_id))
+            .returning(col(MachineCheck.machine_id), col(MachineCheck.id))
         )
-        inserted = set(result.scalars().all())
+        inserted = dict(result.tuples().all())
     created_machines = [machines[m] for m in machine_ids if m in inserted]
     created = len(created_machines)
     # One mail for the whole request, not one per poste.
@@ -559,7 +559,7 @@ async def create_checks_bulk(
         )
     await webhook_emit.checks_created(
         session,
-        created_machines,
+        [(m, inserted[m.id]) for m in created_machines],
         requested_by=current.email,
         instructions=_clean(payload.instructions),
         priority=payload.priority.value,

@@ -231,9 +231,9 @@ class Settings(BaseSettings):
     # Outbound proxy for the webhook calls alone, as MAILGUN_PROXY_URL is.
     WEBHOOK_PROXY_URL: str | None = None
     WEBHOOK_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
-    # Attempts before a delivery is given up: 1 min doubling to 1 h, about a
-    # day in all at 8.
-    WEBHOOK_MAX_ATTEMPTS: int = Field(default=8, ge=1, le=30)
+    # Attempts before a delivery is given up: 1 min doubling to 1 h between
+    # two, so about a day in all at 30 (about two hours at 8).
+    WEBHOOK_MAX_ATTEMPTS: int = Field(default=30, ge=1, le=100)
     # How long delivered or abandoned deliveries are kept, as history.
     WEBHOOK_DELIVERY_RETENTION_DAYS: int = Field(default=30, ge=1)
 

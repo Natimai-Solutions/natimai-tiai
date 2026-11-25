@@ -3,6 +3,10 @@ import { createPinia, setActivePinia } from 'pinia';
 import { QForm, QInput, QToggle } from 'quasar';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('src/utils/liveDialog', () => ({
+  liveDialog: () => ({ onOk: (ok: () => void) => ok() }),
+}));
+
 vi.mock('src/services/auth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/auth')>()),
   listApiTokens: vi.fn(),
@@ -10,7 +14,14 @@ vi.mock('src/services/auth', async (importOriginal) => ({
   revokeApiToken: vi.fn(),
 }));
 
-import { createApiToken, listApiTokens, type ApiToken, type User } from 'src/services/auth';
+import {
+  createApiToken,
+  listApiTokens,
+  revokeApiToken,
+  type ApiToken,
+  type User,
+} from 'src/services/auth';
+import { nextTick } from 'vue';
 import { useAuthStore } from 'src/stores/auth';
 import ApiTokensCard from './ApiTokensCard.vue';
 
@@ -69,10 +80,18 @@ describe('ApiTokensCard', () => {
     w.findAllComponents(QToggle)
       .find((i) => i.props('label') === 'Autoriser l’écriture')!
       .vm.$emit('update:modelValue', true);
+    w.findAllComponents(QInput)
+      .find((i) => i.props('label') === 'Mot de passe actuel')!
+      .vm.$emit('update:modelValue', 'secret');
     await flushPromises();
     await w.findComponent(QForm).trigger('submit');
     await flushPromises();
-    expect(createApiToken).toHaveBeenCalledWith({ name: 'Sauvegarde', can_write: true, days: 90 });
+    expect(createApiToken).toHaveBeenCalledWith({
+      name: 'Sauvegarde',
+      can_write: true,
+      days: 90,
+      current_password: 'secret',
+    });
     expect(document.body.textContent).toContain('tiai_pat_secretvalue');
     w.unmount();
   });
@@ -103,5 +122,66 @@ describe('ApiTokensCard', () => {
     expect(w.text()).toContain('Révoqué');
     expect(w.text()).toContain('Expiré');
     expect(w.find('[data-test="token-revoke"]').exists()).toBe(false);
+  });
+
+  it('asks for a code too with a second factor, and nothing for the directory', async () => {
+    vi.mocked(createApiToken).mockResolvedValue({ ...token({ id: 't2' }), token: 'tiai_pat_x' });
+    let w = await mountCard(['api_token:write'], { second_factor_enabled: true });
+    await w.find('[data-test="token-add"]').trigger('click');
+    await flushPromises();
+    const input = (label: string) =>
+      w.findAllComponents(QInput).find((i) => i.props('label') === label)!;
+    input('Nom').vm.$emit('update:modelValue', 'Export');
+    input('Mot de passe actuel').vm.$emit('update:modelValue', 'secret');
+    input('Code de double authentification').vm.$emit('update:modelValue', ' 123456 ');
+    await flushPromises();
+    await w.findComponent(QForm).trigger('submit');
+    await flushPromises();
+    expect(createApiToken).toHaveBeenLastCalledWith({
+      name: 'Export',
+      can_write: false,
+      days: 90,
+      current_password: 'secret',
+      code: '123456',
+    });
+    w.unmount();
+
+    w = await mountCard(['api_token:write'], { auth_source: 'oidc' });
+    await w.find('[data-test="token-add"]').trigger('click');
+    await flushPromises();
+    expect(document.body.querySelector('[data-test="token-password"]')).toBeNull();
+    expect(document.body.textContent).toContain('moins de dix minutes');
+    w.findAllComponents(QInput)
+      .find((i) => i.props('label') === 'Nom')!
+      .vm.$emit('update:modelValue', 'Annuaire');
+    await flushPromises();
+    await w.findComponent(QForm).trigger('submit');
+    await flushPromises();
+    expect(createApiToken).toHaveBeenLastCalledWith({
+      name: 'Annuaire',
+      can_write: false,
+      days: 90,
+    });
+    w.unmount();
+  });
+
+  it('revokes a token after confirmation', async () => {
+    vi.mocked(revokeApiToken).mockReset().mockResolvedValue();
+    const w = await mountCard(['api_token:write']);
+    vi.mocked(listApiTokens).mockResolvedValue([token({ revoked_at: '2026-11-25T10:00:00Z' })]);
+    await w.find('[data-test="token-revoke"]').trigger('click');
+    await flushPromises();
+    expect(revokeApiToken).toHaveBeenCalledWith('t1');
+    expect(w.text()).toContain('Révoqué');
+  });
+
+  it('loads once an enrolment-only session has set up its second factor', async () => {
+    const w = await mountCard(['api_token:write'], { enrolment_only: true });
+    expect(listApiTokens).not.toHaveBeenCalled();
+    useAuthStore().$patch({ user: { enrolment_only: false } as never });
+    await nextTick();
+    await flushPromises();
+    expect(listApiTokens).toHaveBeenCalled();
+    expect(w.find('[data-test="api-tokens-card"]').exists()).toBe(true);
   });
 });

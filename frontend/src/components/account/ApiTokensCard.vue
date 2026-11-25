@@ -123,6 +123,36 @@
                 {{ t('integrations.tokens.form.canWriteHint') }}
               </div>
             </div>
+            <template v-if="local">
+              <q-input
+                v-model="form.current_password"
+                type="password"
+                autocomplete="current-password"
+                :label="t('integrations.tokens.form.password')"
+                :hint="t('integrations.tokens.form.passwordHint')"
+                outlined
+                dense
+                reactive-rules
+                :rules="[(v: string) => !!v || t('integrations.webhooks.form.required')]"
+                data-test="token-password"
+              />
+              <q-input
+                v-if="withCode"
+                v-model="form.code"
+                autocomplete="one-time-code"
+                inputmode="numeric"
+                :label="t('integrations.tokens.form.code')"
+                outlined
+                dense
+                maxlength="32"
+                reactive-rules
+                :rules="[(v: string) => !!v.trim() || t('integrations.webhooks.form.required')]"
+                data-test="token-code"
+              />
+            </template>
+            <div v-else class="text-caption text-muted">
+              {{ t('integrations.tokens.form.directoryProof') }}
+            </div>
           </q-card-section>
           <q-card-actions align="right">
             <q-btn v-close-popup flat no-caps :label="t('integrations.tokens.form.cancel')" />
@@ -170,7 +200,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import CardLoadError from 'src/components/CardLoadError.vue';
 import { t } from 'src/i18n';
@@ -195,7 +225,11 @@ const loading = ref(false);
 const loadError = ref<unknown>(null);
 const formOpen = ref(false);
 const saving = ref(false);
-const form = reactive({ name: '', can_write: false, days: 90 });
+// A local account proves itself with its password (and a code when it has
+// a second factor); an account of the directory, by a recent sign-in.
+const local = computed(() => auth.user?.auth_source !== 'oidc');
+const withCode = computed(() => auth.user?.second_factor_enabled === true);
+const form = reactive({ name: '', can_write: false, days: 90, current_password: '', code: '' });
 const createdOpen = ref(false);
 const clear = ref('');
 
@@ -217,7 +251,7 @@ async function load(): Promise<void> {
 }
 
 function openForm(): void {
-  Object.assign(form, { name: '', can_write: false, days: 90 });
+  Object.assign(form, { name: '', can_write: false, days: 90, current_password: '', code: '' });
   formOpen.value = true;
 }
 
@@ -228,7 +262,11 @@ async function create(): Promise<void> {
       name: form.name.trim(),
       can_write: form.can_write,
       days: form.days,
+      ...(local.value ? { current_password: form.current_password } : {}),
+      ...(local.value && withCode.value ? { code: form.code.trim() } : {}),
     });
+    form.current_password = '';
+    form.code = '';
     formOpen.value = false;
     clear.value = made.token;
     createdOpen.value = true;
@@ -274,6 +312,11 @@ function revoke(tok: ApiToken): void {
 }
 
 onMounted(load);
+// An enrolment-only session that has just set up its second factor is a full
+// one now: the tokens become reachable.
+watch(enrolling, (now, before) => {
+  if (before && !now) void load();
+});
 
 defineExpose({ load });
 </script>

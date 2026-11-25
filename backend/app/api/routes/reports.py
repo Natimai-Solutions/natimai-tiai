@@ -446,7 +446,7 @@ async def convert_report(
         )
     await webhook_emit.checks_created(
         session,
-        [machine],
+        [(machine, check.id)],
         requested_by=current.email,
         instructions=check.instructions,
         priority=check.priority,
