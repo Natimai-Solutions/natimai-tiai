@@ -122,6 +122,12 @@ gère naturellement les postes éteints.
   ont leur onglet sur la page Logiciels, avec la part des postes à jour. Les
   administrateurs locaux et winget ne sont relevés que si l'agent y est
   autorisé (désactivés par défaut).
+- **Licences logicielles** — ce que l'établissement a le droit d'installer :
+  logiciels couverts (un morceau de leur nom, toutes versions comprises),
+  nombre de postes, échéance, fournisseur et référence de commande — jamais
+  la clé. La page Logiciels dit « 32 installations pour 30 licences » et mène
+  aux postes concernés ; les licences dépassées ou bientôt échues ont leur
+  carte au tableau de bord et leur section dans le résumé quotidien.
 - **Annuaire vérifié** — en option, des postes désignés lisent les objets
   ordinateurs de leur domaine avec leur compte machine ; les salles suivent
   cette lecture et non plus la déclaration des agents, et un poste qui déclare
@@ -227,7 +233,8 @@ l'exécution est figée dans le binaire de l'agent.
 | Signalement par l'utilisateur (QR sans compte, file de tri), priorités des vérifications | 🟢 Livré |
 | Conformité des postes, mises à jour tierces (winget) | 🟢 Livré |
 | Lecture de l'annuaire par des postes désignés (salles vérifiées) | 🟢 Livré — mode `ldap` prévu |
-| Licences, second facteur, webhooks… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
+| Licences logicielles (décompte, dépassement, échéances) | 🟢 Livré |
+| Second facteur, webhooks… | 🟡 Prévu — [plan-evolutions-itil.md](dev/plan-evolutions-itil.md) |
 | Connecteur GLPI | ⏸️ Reporté — [plan-connecteur-glpi.md](dev/plan-connecteur-glpi.md) |
 
 ## Téléchargement

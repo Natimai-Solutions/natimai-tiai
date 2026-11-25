@@ -15,6 +15,7 @@ import format from './format';
 import groups from './groups';
 import interventions from './interventions';
 import layout from './layout';
+import licenses from './licenses';
 import machine from './machine';
 import machines from './machines';
 import maintenance from './maintenance';
@@ -43,6 +44,7 @@ export const fr = {
   reports: reports.fr,
   common: common.fr,
   compliance: compliance.fr,
+  licenses: licenses.fr,
   errors: errors.fr,
   packages: packages.fr,
   machine: machine.fr,
@@ -77,6 +79,7 @@ export const en = {
   reports: reports.en,
   common: common.en,
   compliance: compliance.en,
+  licenses: licenses.en,
   errors: errors.en,
   packages: packages.en,
   machine: machine.en,

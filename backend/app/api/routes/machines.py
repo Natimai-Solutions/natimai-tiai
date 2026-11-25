@@ -62,6 +62,8 @@ from app.features.inventory.models import (
     Volume,
     WingetPackage,
 )
+from app.features.license import crud as license_crud
+from app.features.license.models import License
 from app.features.machine import crud as machine_crud
 from app.features.machine import token_rotation
 from app.features.machine.agent_version import FleetVersions, fleet_versions
@@ -872,6 +874,10 @@ class MachineFilters:
     compliance_check: Check | None = None
     # Postes winget would upgrade this program on (a winget id, C5).
     winget_outdated: str | None = None
+    # The postes carrying a program a licence covers (C6): the licence
+    # itself, read by the dependency, since its patterns make the clause.
+    license_id: uuid.UUID | None = None
+    license: License | None = None
     # The directory's verdict (plan-lecture-annuaire); « none »: not read.
     directory_status: (
         Literal["verified", "mismatch", "unknown", "stale", "contested", "none"] | None
@@ -903,6 +909,21 @@ def _exact_facets(raw: str | None) -> frozenset[ExactFacet]:
     return frozenset(names)  # type: ignore[arg-type]
 
 
+async def _license_filter(
+    session: SessionDep, license_id: uuid.UUID | None
+) -> License | None:
+    """The licence a ``license_id`` filter names; an unknown one is a 404
+    rather than a filter that silently matches nothing."""
+    if license_id is None:
+        return None
+    lic = await session.get(License, license_id)
+    if lic is None:
+        raise AppError(
+            code=ErrorCode.LICENSE_NOT_FOUND, status_code=404, message="No such licence"
+        )
+    return lic
+
+
 def _alert_filter(raw: str | None) -> str | None:
     """``alert=any`` or a rule of the catalogue; another value is a 422
     rather than a filter that silently matches nothing."""
@@ -915,8 +936,9 @@ def _alert_filter(raw: str | None) -> str | None:
     )
 
 
-def machine_filters(
+async def machine_filters(
     scope: CurrentScope,
+    session: SessionDep,
     search: str | None = None,
     domain: str | None = None,
     location: str | None = None,
@@ -960,6 +982,7 @@ def machine_filters(
     compliance: Literal["failing", "passing", "unknown"] | None = None,
     compliance_check: Check | None = None,
     winget_outdated: str | None = Query(None, max_length=200),
+    license_id: uuid.UUID | None = None,
     directory_status: Literal[
         "verified", "mismatch", "unknown", "stale", "contested", "none"
     ]
@@ -1016,6 +1039,8 @@ def machine_filters(
         compliance=compliance,
         compliance_check=compliance_check,
         winget_outdated=winget_outdated,
+        license_id=license_id,
+        license=await _license_filter(session, license_id),
         directory_status=directory_status,
         in_parc=in_parc,
         exact=_exact_facets(exact),
@@ -1122,6 +1147,8 @@ def _filtered_machines(
             if filters.directory_status == "none"
             else col(Machine.directory_status) == filters.directory_status
         )
+    if filters.license is not None:
+        stmt = stmt.where(license_crud.machine_clause(filters.license))
     if filters.winget_outdated is not None:
         stmt = stmt.where(
             exists().where(

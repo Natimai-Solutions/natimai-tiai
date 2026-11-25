@@ -195,6 +195,10 @@ class SettingsOut(BaseModel):
     compliance_patch_grace_days: int = 14
     env_compliance_patch_grace_days: int = 14
     compliance_admins_allowed: list[str] = Field(default_factory=list)
+    # Licences (C6): how many days before its end a licence is « bientôt
+    # échue ».
+    license_expiry_days: int = 60
+    env_license_expiry_days: int = 60
     # Schedules (C3): the zone the console plans in, and the weekly windows
     # when nothing at risk runs on several postes.
     console_timezone: str = "UTC"
@@ -341,6 +345,7 @@ class SettingsUpdate(BaseModel):
         default=None, max_length=len(ALL_RULES)
     )
     compliance_patch_grace_days: int | None = Field(default=None, ge=0, le=365)
+    license_expiry_days: int | None = Field(default=None, ge=1, le=365)
     compliance_admins_allowed: (
         list[
             Annotated[
@@ -510,6 +515,8 @@ async def _out(session: SessionDep) -> SettingsOut:
         compliance_patch_grace_days=compliance.patch_grace_days,
         env_compliance_patch_grace_days=env.COMPLIANCE_PATCH_GRACE_DAYS,
         compliance_admins_allowed=list(compliance.admins_allowed),
+        license_expiry_days=await crud.license_expiry_days(session, values),
+        env_license_expiry_days=env.LICENSE_EXPIRY_DAYS,
         console_timezone=planning.zone_name,
         env_console_timezone=env.CONSOLE_TIMEZONE,
         forbidden_windows=[w.as_json() for w in planning.forbidden],
@@ -612,6 +619,7 @@ _SIMPLE_KEYS = {
     "console_timezone": windows.KEY_TIMEZONE,
     "reports_enabled": report_crud.KEY_ENABLED,
     "compliance_patch_grace_days": crud.KEY_COMPLIANCE_PATCH_GRACE,
+    "license_expiry_days": crud.KEY_LICENSE_EXPIRY_DAYS,
 }
 
 # List settings: written whole, without duplicates, in the order sent.

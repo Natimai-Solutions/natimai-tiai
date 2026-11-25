@@ -163,6 +163,8 @@ export interface MachineFilters {
   /** Postes winget would upgrade a program on (its winget id); from the
    * « Mises à jour tierces » view. */
   wingetOutdated: string | null;
+  /** Postes carrying a program a licence covers (C6); from the « Licences » view. */
+  licenseId: string | null;
   /** The directory's verdict (plan-lecture-annuaire); from Paramètres. */
   directoryStatus: string | null;
   /**
@@ -235,6 +237,7 @@ export function emptyMachineFilters(): MachineFilters {
     compliance: null,
     complianceCheck: null,
     wingetOutdated: null,
+    licenseId: null,
     directoryStatus: null,
     inParc: null,
   };
@@ -474,6 +477,12 @@ export function machineFiltersFromQuery(q: LocationQuery): MachineFilters {
       return v && isComplianceCheck(v) ? v : null;
     })(),
     wingetOutdated: wingetQuery(q.winget_outdated),
+    licenseId: (() => {
+      const v = queryValue(q.license_id);
+      return v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
+        ? v.toLowerCase()
+        : null;
+    })(),
     directoryStatus: (() => {
       const v = queryValue(q.directory_status);
       return v && isDirectoryStatus(v) ? v : null;
@@ -533,6 +542,7 @@ export function machineFiltersToQuery(f: MachineFilters): Record<string, string>
   if (f.compliance) query.compliance = f.compliance;
   if (f.complianceCheck) query.compliance_check = f.complianceCheck;
   if (f.wingetOutdated) query.winget_outdated = f.wingetOutdated;
+  if (f.licenseId) query.license_id = f.licenseId;
   if (f.directoryStatus) query.directory_status = f.directoryStatus;
   if (f.inParc) query.in_parc = 'true';
   return query;
@@ -594,6 +604,7 @@ export function machineFiltersToParams(f: MachineFilters): ListMachinesParams {
   if (f.compliance) params.compliance = f.compliance;
   if (f.complianceCheck) params.compliance_check = f.complianceCheck;
   if (f.wingetOutdated) params.winget_outdated = f.wingetOutdated;
+  if (f.licenseId) params.license_id = f.licenseId;
   if (f.directoryStatus) params.directory_status = f.directoryStatus;
   if (f.inParc) params.in_parc = true;
   // The console sets these five from dropdowns fed by the fleet's exact
@@ -645,6 +656,7 @@ export type MachineFilterKey =
   | 'compliance'
   | 'complianceCheck'
   | 'wingetOutdated'
+  | 'licenseId'
   | 'directoryStatus'
   | 'inParc';
 
@@ -752,6 +764,9 @@ export function machineFilterChips(
       label: t('compliance.chips.winget', { id: f.wingetOutdated }),
     });
   }
+  if (f.licenseId) {
+    chips.push({ key: 'licenseId', label: t('licenses.chip') });
+  }
   if (f.directoryStatus) {
     chips.push({
       key: 'directoryStatus',
@@ -838,6 +853,7 @@ const FIELDS_BY_KEY: Record<
   compliance: 'compliance',
   complianceCheck: 'complianceCheck',
   wingetOutdated: 'wingetOutdated',
+  licenseId: 'licenseId',
   directoryStatus: 'directoryStatus',
   inParc: 'inParc',
 };

@@ -62,6 +62,10 @@ class Resource(enum.StrEnum):
     # Reports of the postes' users (C4): the queue, read and triaged.
     # Turning one into a verification also asks for ``check:write``.
     REPORT = "report"
+    # Software licences (C6): what was bought, how many postes, until
+    # when. Granted to no built-in group but the administrators: a contract
+    # and its order number are purchase material, like an asset.
+    LICENSE = "license"
 
 
 class Action(enum.StrEnum):
@@ -103,6 +107,8 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.SCHEDULE, Action.WRITE),
     (Resource.REPORT, Action.READ),
     (Resource.REPORT, Action.WRITE),
+    (Resource.LICENSE, Action.READ),
+    (Resource.LICENSE, Action.WRITE),
 )
 
 

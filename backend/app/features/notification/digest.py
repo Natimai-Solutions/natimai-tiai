@@ -27,6 +27,8 @@ from app.core.config import settings
 from app.features.alert.models import ALL_RULES, MachineAlert
 from app.features.asset import crud as asset_crud
 from app.features.base import utcnow
+from app.features.license import crud as license_crud
+from app.features.license.crud import LicenseState
 from app.features.machine.models import Machine
 from app.features.machine.status import (
     MachineStatus,
@@ -45,6 +47,7 @@ from app.features.notification.tasks import (
     personal_block,
 )
 from app.features.setting import crud as setting_crud
+from app.features.setting.crud import license_expiry_days
 from app.features.setting.email_policy import email_policy
 from app.features.threat.models import Threat
 from app.features.user import crud as user_crud
@@ -323,6 +326,7 @@ def render_digest(
     digest: Digest,
     personal: list[str] | None = None,
     language: Language | None = None,
+    licenses: list[LicenseState] | None = None,
 ) -> tuple[str, str]:
     """The digest as (subject, plain-text body), ``personal`` — the
     recipient's « VOS TÂCHES » block (``tasks.personal_block``) — after the
@@ -383,6 +387,11 @@ def render_digest(
         body += [t.alert_line(rule, n) for rule, n in digest.alerts_by_rule.items()]
         body.append("")
 
+    if licenses:
+        body.append(t.title_licenses)
+        body += _license_lines(t, licenses)
+        body.append("")
+
     body += _bullet_block(
         t, t.title_threats, digest.threat_lines, digest.with_active_threats
     )
@@ -395,6 +404,21 @@ def render_digest(
 
     body += _ending(t, personal or [])
     return subject, "\n".join(body)
+
+
+def _license_lines(t: DigestTexts, licenses: list[LicenseState]) -> list[str]:
+    """A line per finding: a licence both over its count and ending has two.
+    The dates are the contract's own days, printed as such (no zone)."""
+    lines = []
+    for state in licenses:
+        lic = state.license
+        if state.over and lic.seats is not None:
+            lines.append(t.license_over(lic.name, state.installed, lic.seats))
+        if lic.expires_on is not None and state.expiry == "soon":
+            lines.append(t.license_soon(lic.name, f"{lic.expires_on:%d/%m/%Y}"))
+        elif lic.expires_on is not None and state.expiry == "expired":
+            lines.append(t.license_expired(lic.name, f"{lic.expires_on:%d/%m/%Y}"))
+    return lines
 
 
 def render_tasks_digest(
@@ -417,6 +441,9 @@ class PlannedDigest:
     # machine:read, whose digest is its tasks alone.
     digest: Digest | None
     personal: list[str]
+    # The licences to look at (C6), for an account that reads them on the
+    # whole parc; empty otherwise.
+    licenses: list[LicenseState] = field(default_factory=list)
 
 
 async def plan_daily_digest(session: AsyncSession) -> list[PlannedDigest]:
@@ -445,6 +472,8 @@ async def plan_daily_digest(session: AsyncSession) -> list[PlannedDigest]:
     # about that site, and "events only" is decided on what *it* would read.
     # Most installations have one scope — everybody's — hence one build.
     digests: dict[Scope | None, Digest] = {}
+    # The licences to look at, read once for the run when someone reads them.
+    licenses: list[LicenseState] | None = None
     planned: list[PlannedDigest] = []
     for user in users:
         authority = await user_crud.user_authority(session, user.id)
@@ -463,7 +492,16 @@ async def plan_daily_digest(session: AsyncSession) -> list[PlannedDigest]:
             digest.has_events
         ):
             continue
-        planned.append(PlannedDigest(user, digest, personal))
+        to_review: list[LicenseState] = []
+        if scope is None and has_permission(
+            authority.permissions, Resource.LICENSE.value, Action.READ.value
+        ):
+            if licenses is None:
+                licenses = await license_crud.attention(
+                    session, now.date(), await license_expiry_days(session)
+                )
+            to_review = licenses
+        planned.append(PlannedDigest(user, digest, personal, to_review))
     return planned
 
 
@@ -500,7 +538,9 @@ async def send_daily_digest(session: AsyncSession) -> int:
         # In their language: the parc is read once per scope, worded per reader.
         language = mail_language(plan.user.language)
         if plan.digest is not None:
-            subject, body = render_digest(plan.digest, plan.personal, language)
+            subject, body = render_digest(
+                plan.digest, plan.personal, language, plan.licenses
+            )
         else:
             subject, body = render_tasks_digest(plan.personal, utcnow(), language)
         if queue_email(session, to=plan.user.email, subject=subject, text=body):

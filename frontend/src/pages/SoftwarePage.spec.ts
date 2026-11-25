@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { QBtnToggle, QInput, QTable } from 'quasar';
+import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
@@ -8,9 +9,16 @@ vi.mock('src/services/software', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/software')>()),
   listSoftware: vi.fn(),
 }));
+vi.mock('src/services/licenses', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('src/services/licenses')>()),
+  listLicenses: vi.fn(),
+}));
 
 import { listSoftware, type ListSoftwareParams, type SoftwareList } from 'src/services/software';
 import WingetUpdatesCard from 'src/components/software/WingetUpdatesCard.vue';
+import LicensesCard from 'src/components/software/LicensesCard.vue';
+import { listLicenses } from 'src/services/licenses';
+import { useAuthStore } from 'src/stores/auth';
 import SoftwarePage from './SoftwarePage.vue';
 
 const Stub = defineComponent({ render: () => h('div') });
@@ -58,6 +66,7 @@ const tablePage = (wrapper: Awaited<ReturnType<typeof mountAt>>['wrapper']) =>
 
 describe('SoftwarePage (audit T42)', () => {
   beforeEach(() => {
+    setActivePinia(createPinia());
     vi.mocked(listSoftware).mockReset();
   });
 
@@ -124,6 +133,7 @@ describe('SoftwarePage (audit T42)', () => {
 
 describe('SoftwarePage — third-party updates (C5)', () => {
   beforeEach(() => {
+    setActivePinia(createPinia());
     vi.mocked(listSoftware).mockReset();
     catalogue(3);
   });
@@ -147,5 +157,31 @@ describe('SoftwarePage — third-party updates (C5)', () => {
   it('comes back to the updates view from its URL', async () => {
     const { wrapper } = await mountAt('/software?view=updates');
     expect(wrapper.findComponent(WingetUpdatesCard).exists()).toBe(true);
+  });
+});
+
+describe('SoftwarePage — licences (C6)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.mocked(listSoftware).mockReset();
+    catalogue(3);
+    vi.mocked(listLicenses).mockReset().mockResolvedValue({
+      items: [],
+      restricted: false,
+      expiry_days: 60,
+    });
+  });
+
+  it('offers the licences only to whoever reads them', async () => {
+    let { wrapper } = await mountAt('/software?view=licenses');
+    expect(wrapper.findComponent(LicensesCard).exists()).toBe(false);
+    const values = (w: typeof wrapper) =>
+      (w.findComponent(QBtnToggle).props('options') as { value: string }[]).map((o) => o.value);
+    expect(values(wrapper)).toEqual(['catalogue', 'updates']);
+
+    useAuthStore().user = { id: 'u', email: 'a@b.c', permissions: ['license:read'] } as never;
+    ({ wrapper } = await mountAt('/software?view=licenses'));
+    expect(values(wrapper)).toEqual(['catalogue', 'updates', 'licenses']);
+    expect(wrapper.findComponent(LicensesCard).exists()).toBe(true);
   });
 });

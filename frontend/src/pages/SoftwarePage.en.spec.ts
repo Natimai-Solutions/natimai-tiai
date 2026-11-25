@@ -2,6 +2,7 @@
 // and following a change of language while it is open.
 import { flushPromises, mount } from '@vue/test-utils';
 import { QTable } from 'quasar';
+import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h, nextTick } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
@@ -58,6 +59,7 @@ const headers = (wrapper: Awaited<ReturnType<typeof mountAt>>) =>
 
 describe('SoftwarePage in English', () => {
   beforeEach(() => {
+    setActivePinia(createPinia());
     vi.mocked(listSoftware).mockReset();
     vi.mocked(listSoftware).mockResolvedValue({
       items: entries,

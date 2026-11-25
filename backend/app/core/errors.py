@@ -114,6 +114,8 @@ class ErrorCode(enum.StrEnum):
     DIRECTORY_NOTHING_PENDING = "directory.nothing_pending"
     DIRECTORY_PENDING_CHANGED = "directory.pending_changed"
     REPORT_NO_OPEN_CHECK = "report.no_open_check"
+    LICENSE_NOT_FOUND = "license.not_found"
+    LICENSE_TOO_MANY = "license.too_many"
     SCHEDULE_NOT_FOUND = "schedule.not_found"
     # A schedule that would run inside a forbidden window.
     SCHEDULE_FORBIDDEN_WINDOW = "schedule.forbidden_window"
