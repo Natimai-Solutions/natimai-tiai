@@ -34,7 +34,7 @@ from app.core.errors import AppError, ErrorCode, violated_constraint
 from app.features.audit import crud as audit
 from app.features.auth_session import crud as auth_sessions
 from app.features.base import utcnow
-from app.features.user import crud
+from app.features.user import crud, second_factor
 from app.features.user.models import FULL_NAME_MAX_LENGTH, EmailPreference, User
 from app.features.user.permissions import (
     Action,
@@ -85,6 +85,12 @@ class UserOut(BaseModel):
     # Set while the account is locked after failed logins — the later of
     # the quick lock and the slow one; resetting its password lifts both.
     locked_until: datetime | None
+    # A second factor is active on the account (C7).
+    second_factor_enabled: bool = False
+    # ``local`` or ``oidc`` (signs in through the directory), and whether a
+    # local account is linked to a directory identity.
+    auth_source: str = "local"
+    directory_linked: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -210,6 +216,16 @@ async def _require_groups_exist(
             )
 
 
+def _reject_external(user: User) -> None:
+    """An account of the directory has no password here to set (C7)."""
+    if user.auth_source != "local":
+        raise AppError(
+            code=ErrorCode.USER_EXTERNAL_ACCOUNT,
+            status_code=409,
+            message="This account signs in through the directory",
+        )
+
+
 def _reject_self(current: User, target: User, action: str) -> None:
     """Refuse an operation an admin would apply to their own account."""
     if current.id == target.id:
@@ -273,11 +289,13 @@ async def reject_lockout(session: SessionDep) -> None:
     # the first has committed (READ COMMITTED: the count below is a fresh
     # snapshot), and is refused.
     await crud.lock_account_management(session)
-    if await crud.users_holding(session, USER_WRITE) == 0:
+    # Counted among the console's own accounts (C7): one signing in through
+    # the directory is shut out with it when the directory cannot be reached.
+    if await crud.users_holding(session, USER_WRITE, local_only=True) == 0:
         raise AppError(
             code=ErrorCode.USER_LOCKOUT,
             status_code=409,
-            message="This would leave no active account able to manage accounts",
+            message="This would leave no active local account able to manage accounts",
         )
 
 
@@ -299,6 +317,9 @@ async def _out(session: SessionDep, users: list[User]) -> list[UserOut]:
             email_preference=u.email_preference,
             groups=[GroupRef.model_validate(g) for g in groups[u.id]],
             locked_until=_locked_until(u),
+            second_factor_enabled=second_factor.enabled(u),
+            auth_source=u.auth_source,
+            directory_linked=u.oidc_subject is not None,
             created_at=u.created_at,
             updated_at=u.updated_at,
         )
@@ -416,6 +437,8 @@ async def update_user(
     email_changed = "email" in fields and fields["email"] != user.email
     previous_email = user.email
     if email_changed:
+        # The address of an account of the directory is the directory's (C7).
+        _reject_external(user)
         await _reject_email_taken(session, fields["email"], exclude=user.id)
         # A link mailed to the old address must not outlive it: the address
         # is often changed because the old box is no longer its owner's
@@ -498,6 +521,41 @@ async def delete_user(
     await session.commit()
 
 
+@router.post("/{user_id}/reset-second-factor", status_code=204, dependencies=[_WRITE])
+async def reset_second_factor(
+    user_id: uuid.UUID,
+    session: SessionDep,
+    current: CurrentUser,
+    authority: CurrentAuthority,
+) -> None:
+    """Remove an account's second factor and backup codes (C7): its phone
+    is lost and its codes with it. Every session of the account ends; it
+    enrols again at its next login if a group requires it.
+
+    Refused on an account holding more than the caller, and on one's own:
+    lifting a second factor is the first half of a takeover.
+    """
+    user = await _require_user(session, user_id, for_write=True)
+    _reject_self(current, user, "reset the second factor of")
+    reject_escalation(
+        authority,
+        await crud.user_authority(session, user.id),
+        actor_email=current.email,
+        action="reset_second_factor",
+    )
+    await second_factor.clear(session, user)
+    await auth_sessions.revoke_all(session, user.id)
+    audit.record(
+        session,
+        actor=current.email,
+        action="user.second_factor_reset",
+        resource_type="user",
+        resource_id=str(user.id),
+        details={"email": user.email},
+    )
+    await session.commit()
+
+
 @router.post(
     "/{user_id}/reset-password", response_model=PasswordResetOut, dependencies=[_WRITE]
 )
@@ -519,6 +577,7 @@ async def reset_password(
     itself: only whether it was generated or typed by the administrator.
     """
     user = await _require_user(session, user_id, for_write=True)
+    _reject_external(user)
     reject_escalation(
         authority,
         await crud.user_authority(session, user.id),

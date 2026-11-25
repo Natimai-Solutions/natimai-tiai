@@ -32,8 +32,14 @@ from app.core.config import settings
 _INFO = b"tiai:app-settings-secrets:v1"
 
 
-@lru_cache(maxsize=4)
-def _fernet(secret_key: str) -> Fernet:
+# The second factors' secrets (C7): their own label, and their own key when
+# ``TOTP_ENCRYPTION_KEY`` is set, so that changing ``SECRET_KEY`` — the way
+# to sign everybody out — does not wipe everybody's second factor too.
+TOTP_INFO = b"tiai:totp-secrets:v1"
+
+
+@lru_cache(maxsize=8)
+def _fernet(secret_key: str, info: bytes = _INFO) -> Fernet:
     # Cached per key value rather than once: the key is read off ``settings``
     # at every call, so a test (or a process reloaded with another key) gets
     # the key that is current, not the one the first call happened to see.
@@ -41,7 +47,7 @@ def _fernet(secret_key: str) -> Fernet:
         algorithm=hashes.SHA256(),
         length=32,
         salt=None,
-        info=_INFO,
+        info=info,
     ).derive(secret_key.encode())
     return Fernet(base64.urlsafe_b64encode(derived))
 
@@ -49,6 +55,24 @@ def _fernet(secret_key: str) -> Fernet:
 def encrypt(plaintext: str) -> str:
     """Encrypt ``plaintext`` under the current ``SECRET_KEY``; a printable token."""
     return _fernet(settings.SECRET_KEY).encrypt(plaintext.encode()).decode()
+
+
+def _totp_key() -> str:
+    return settings.TOTP_ENCRYPTION_KEY or settings.SECRET_KEY
+
+
+def encrypt_totp(plaintext: str) -> str:
+    """A second factor's secret, sealed under its own key and label."""
+    return _fernet(_totp_key(), TOTP_INFO).encrypt(plaintext.encode()).decode()
+
+
+def decrypt_totp(token: str) -> str | None:
+    """The secret behind ``token``, or None when the key changed: the account
+    can then only use a backup code, or be reset by an administrator."""
+    try:
+        return _fernet(_totp_key(), TOTP_INFO).decrypt(token.encode()).decode()
+    except (InvalidToken, ValueError, TypeError, AttributeError):
+        return None
 
 
 def decrypt(token: str) -> str | None:

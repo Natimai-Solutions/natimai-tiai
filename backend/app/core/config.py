@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # explicitly (docker-compose.dev.yml, tests/conftest.py).
     ENVIRONMENT: Literal["local", "staging", "production"] = "production"
     SECRET_KEY: str = "changeme"
+    # The key the second factors' secrets are sealed with (C7). Empty: derived
+    # from SECRET_KEY — then changing SECRET_KEY (« déconnecter tout le
+    # monde ») also makes every second factor unreadable, and each account
+    # falls back on its backup codes. Set it once and keep it.
+    TOTP_ENCRYPTION_KEY: str = ""
 
     # --- Console auth (admin users) ---
     # A console login is a server-side session (``auth_sessions``) seen through
@@ -196,6 +201,34 @@ class Settings(BaseSettings):
     # the duration, never below the default written here.
     LOGIN_SLOW_MAX_FAILED_ATTEMPTS: int = Field(default=20, ge=2, le=1000)
     LOGIN_SLOW_WINDOW_HOURS: int = Field(default=24, ge=1, le=24 * 7)
+    # --- Sign-in through the directory: OpenID Connect (C7) ---
+    # Off by default. Entra ID first: OIDC_ISSUER is then
+    # https://login.microsoftonline.com/<tenant id>/v2.0 — a tenant, never
+    # « common » or « organizations », whose tokens any tenant could mint.
+    OIDC_ENABLED: bool = False
+    OIDC_ISSUER: str = ""
+    OIDC_CLIENT_ID: str = ""
+    OIDC_CLIENT_SECRET: str = ""
+    # The label of the login page's button: « Se connecter avec Microsoft ».
+    OIDC_LABEL: str = "Microsoft"
+    # Where the provider sends the browser back. Empty: derived from the
+    # console URL (``console_base_url``) + /api/v1/auth/oidc/callback — the
+    # value to register on the provider's side, exactly.
+    OIDC_REDIRECT_URI: str = ""
+    # The claim carrying the directory groups (Entra: « groups », object ids).
+    OIDC_GROUPS_CLAIM: str = "groups"
+    # Outbound proxy for the calls to the provider (discovery, keys, token),
+    # as MAILGUN_PROXY_URL is for Mailgun alone.
+    OIDC_PROXY_URL: str | None = None
+    OIDC_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
+
+    # Second factor (C7): codes wrong in a row, on any challenge, before the
+    # account's second factor is locked for LOGIN_LOCKOUT_MINUTES. Counted
+    # per account: a new password login gives a new challenge, not a new
+    # budget against the 10^6 codes.
+    SECOND_FACTOR_MAX_FAILED_ATTEMPTS: int = Field(default=5, ge=1, le=100)
+    # How long the step between the password and the code may take.
+    SECOND_FACTOR_CHALLENGE_MINUTES: int = Field(default=5, ge=1, le=30)
     # « Mot de passe oublié » (audit S14, T34): counted per account *and*
     # requesting address — no new mail within this many minutes of the last
     # one asked from that address, at most this many links alive from it — so

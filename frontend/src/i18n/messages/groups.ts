@@ -40,6 +40,13 @@ const fr = {
   },
   form: {
     createTitle: 'Nouveau groupe',
+    mfaRequired: 'Double authentification obligatoire',
+    mfaHint:
+      'Ses membres se connectent avec un code en plus du mot de passe ; un membre qui ne l’a pas encore activée ne peut que le faire, depuis « Mon compte ».',
+    mfaBadge: 'Double authentification',
+    idpGroups: 'Groupes de l’annuaire',
+    idpGroupsHint:
+      'Identifiants (Entra ID : « ID d’objet ») des groupes de l’annuaire dont les membres reçoivent ce groupe en se connectant par l’annuaire. Entrée pour en ajouter un autre.',
     editTitle: 'Modifier le groupe',
     name: 'Nom',
     description: 'Description',
@@ -129,6 +136,13 @@ const en: Translation<typeof fr> = {
   },
   form: {
     createTitle: 'New group',
+    mfaRequired: 'Two-step verification required',
+    mfaHint:
+      'Its members sign in with a code on top of the password; a member who has not turned it on yet can only do that, from My account.',
+    mfaBadge: 'Two-step verification',
+    idpGroups: 'Directory groups',
+    idpGroupsHint:
+      'Ids (Entra ID: “Object ID”) of the directory groups whose members get this group when they sign in through the directory. Enter to add another.',
     editTitle: 'Edit the group',
     name: 'Name',
     description: 'Description',

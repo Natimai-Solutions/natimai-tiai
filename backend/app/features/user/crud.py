@@ -14,6 +14,7 @@ from app.features.base import contains, utcnow
 from app.features.user import addresses
 from app.features.user.models import (
     Group,
+    GroupIdpLink,
     GroupPermission,
     GroupScope,
     PasswordResetToken,
@@ -142,7 +143,12 @@ def slow_lock_since(user: User, now: datetime) -> datetime | None:
 
 
 async def authenticate(
-    session: AsyncSession, email: str, password: str, ip: str = ""
+    session: AsyncSession,
+    email: str,
+    password: str,
+    ip: str = "",
+    *,
+    finish: bool = True,
 ) -> User | None:
     """Return the user if credentials are valid and the account is active.
 
@@ -169,9 +175,18 @@ async def authenticate(
     attempt refused by the lock (to log); the route answers both like any
     failure (audit S12). The counter moves in the database, so concurrent
     failures all count (audit S13). Nothing is committed — the caller does.
+
+    ``finish=False`` stops at the password: the success's effects (counters
+    back to zero, the address marked known) are left to
+    ``note_login_success``, which the login calls once the whole login has
+    succeeded — after the second factor, for an account that has one (C7).
+    A stolen password alone must not lift the lock nor make its address
+    « known ».
     """
     user = await get_by_email(session, email)
-    if user is None or not user.is_active:
+    # An account of the directory has no password (C7): refused at the same
+    # cost as an unknown address.
+    if user is None or not user.is_active or user.auth_source != "local":
         await security.burn_password_check_async(password)
         return None
     now = utcnow()
@@ -194,6 +209,15 @@ async def authenticate(
         if lock is not None:
             raise AccountLockedError(user, lock.until, just_locked=True, slow=lock.slow)
         return None
+    if finish:
+        await note_login_success(session, user, ip)
+    return user
+
+
+async def note_login_success(session: AsyncSession, user: User, ip: str) -> None:
+    """What a successful login does to the lock: the quick counter back to
+    zero, the address marked known. Does not commit."""
+    now = utcnow()
     # The slow counter, its window and its lock are left alone: the owner
     # logging in every morning would otherwise hand a slow guesser a fresh
     # budget every day (and the addresses the lock shuts out, a way back
@@ -206,7 +230,6 @@ async def authenticate(
         # Written now: the account's row before the address's (``lock_account``).
         await session.flush()
     await addresses.note_success(session, user.id, ip, now)
-    return user
 
 
 async def record_failure(session: AsyncSession, user: User, ip: str) -> Lock | None:
@@ -877,9 +900,12 @@ async def lock_account_management(session: AsyncSession) -> None:
     await session.exec(select(func.pg_advisory_xact_lock(ACCOUNT_MANAGEMENT_LOCK)))
 
 
-async def users_holding(session: AsyncSession, permission: str) -> int:
+async def users_holding(
+    session: AsyncSession, permission: str, *, local_only: bool = False
+) -> int:
     """How many *active* accounts hold ``permission`` through any group. What
-    the lock-out guard on group edits reads."""
+    the lock-out guard on group edits reads. ``local_only``: accounts of the
+    console only (C7) — those an outage of the directory leaves usable."""
     direct = (
         select(func.count(func.distinct(col(UserGroup.user_id))))
         .select_from(UserGroup)
@@ -898,5 +924,34 @@ async def users_holding(session: AsyncSession, permission: str) -> int:
             ),
         )
     )
+    if local_only:
+        direct = direct.where(col(User.auth_source) == "local")
     result = await session.exec(direct)
     return result.one() or 0
+
+
+async def idp_links_of_groups(
+    session: AsyncSession, group_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, set[str]]:
+    """The directory groups each group stands for (C7)."""
+    if not group_ids:
+        return {}
+    rows = await session.exec(
+        select(GroupIdpLink).where(col(GroupIdpLink.group_id).in_(group_ids))
+    )
+    out: dict[uuid.UUID, set[str]] = {}
+    for link in rows.all():
+        out.setdefault(link.group_id, set()).add(link.idp_group_id)
+    return out
+
+
+async def set_group_idp_links(
+    session: AsyncSession, group: Group, idp_group_ids: Iterable[str]
+) -> None:
+    """Replace the directory groups a group stands for. Does not commit."""
+    await session.exec(
+        delete(GroupIdpLink).where(col(GroupIdpLink.group_id) == group.id)
+    )
+    for idp_id in {i.lower() for i in idp_group_ids}:
+        session.add(GroupIdpLink(group_id=group.id, idp_group_id=idp_id))
+    await session.flush()

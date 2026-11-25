@@ -1,0 +1,166 @@
+import type { Translation } from './types';
+
+/** Le second facteur (plan `dev/plan-second-facteur-oidc.md`, C7). */
+const fr = {
+  login: {
+    title: 'Code de vérification',
+    intro: 'Saisissez le code à six chiffres affiché par votre application d’authentification.',
+    code: 'Code à six chiffres',
+    backupIntro: 'Saisissez l’un de vos codes de secours (il ne servira qu’une fois).',
+    backupCode: 'Code de secours',
+    useBackup: 'Utiliser un code de secours',
+    useApp: 'Utiliser l’application',
+    submit: 'Valider',
+    back: 'Recommencer',
+    failed: 'Code invalide, ou connexion expirée : recommencez.',
+  },
+  card: {
+    title: 'Double authentification',
+    caption:
+      'Après le mot de passe, un code à six chiffres affiché par une application d’authentification (Microsoft Authenticator, Google Authenticator, FreeOTP…).',
+    on: 'Activée',
+    off: 'Désactivée',
+    required: 'Un de vos groupes l’impose.',
+    enrolmentOnly:
+      'Un de vos groupes impose la double authentification : activez-la pour accéder à la console.',
+    codesLeft: 'Codes de secours restants : {n}',
+    enable: 'Activer',
+    disable: 'Désactiver',
+    regenerate: 'Nouveaux codes de secours',
+  },
+  setup: {
+    scan: 'Scannez ce code avec votre application, puis saisissez le code qu’elle affiche.',
+    manual: 'Ou saisissez cette clé dans l’application :',
+    qrLabel: 'Code QR à scanner avec l’application d’authentification',
+    code: 'Code affiché par l’application',
+    confirm: 'Confirmer',
+    cancel: 'Annuler',
+  },
+  codes: {
+    title: 'Vos codes de secours',
+    intro:
+      'Chacun permet de vous connecter une fois si vous n’avez plus votre téléphone. Ils ne seront plus affichés : imprimez-les ou rangez-les en lieu sûr.',
+    copy: 'Copier',
+    copied: 'Codes copiés',
+    download: 'Télécharger',
+    fileName: 'tiai-codes-de-secours.txt',
+    done: 'C’est noté',
+  },
+  disable: {
+    title: 'Désactiver la double authentification',
+    password: 'Mot de passe actuel',
+    code: 'Code de l’application ou code de secours',
+    submit: 'Désactiver',
+    cancel: 'Annuler',
+    done: 'Double authentification désactivée',
+  },
+  regenerate: {
+    title: 'Nouveaux codes de secours',
+    intro: 'Les codes actuels cesseront de fonctionner.',
+    code: 'Code de l’application',
+    submit: 'Générer',
+    cancel: 'Annuler',
+  },
+  enabled: 'Double authentification activée',
+  required: 'Obligatoire',
+  directory: {
+    signIn: 'Se connecter avec {label}',
+    failed: 'La connexion par l’annuaire a échoué : recommencez.',
+    or: 'ou',
+    cardTitle: 'Compte {label}',
+    cardCaption:
+      'Associez votre compte à votre compte {label} pour vous connecter avec lui ; votre mot de passe reste valable.',
+    linked: 'Associé',
+    notLinked: 'Non associé',
+    link: 'Associer mon compte {label}',
+    unlink: 'Dissocier',
+    linkedDone: 'Compte associé',
+    unlinkedDone: 'Compte dissocié',
+    externalAccount:
+      'Ce compte se connecte par l’annuaire de l’établissement : son mot de passe et sa double authentification s’y gèrent.',
+  },
+  codeFormat: 'Six chiffres',
+};
+
+const en: Translation<typeof fr> = {
+  login: {
+    title: 'Verification code',
+    intro: 'Enter the six-digit code shown by your authenticator app.',
+    code: 'Six-digit code',
+    backupIntro: 'Enter one of your backup codes (it works only once).',
+    backupCode: 'Backup code',
+    useBackup: 'Use a backup code',
+    useApp: 'Use the app',
+    submit: 'Verify',
+    back: 'Start over',
+    failed: 'Invalid code, or the sign-in has expired: start over.',
+  },
+  card: {
+    title: 'Two-step verification',
+    caption:
+      'After the password, a six-digit code shown by an authenticator app (Microsoft Authenticator, Google Authenticator, FreeOTP…).',
+    on: 'On',
+    off: 'Off',
+    required: 'One of your groups requires it.',
+    enrolmentOnly:
+      'One of your groups requires two-step verification: turn it on to reach the console.',
+    codesLeft: 'Backup codes left: {n}',
+    enable: 'Turn on',
+    disable: 'Turn off',
+    regenerate: 'New backup codes',
+  },
+  setup: {
+    scan: 'Scan this code with your app, then enter the code it shows.',
+    manual: 'Or enter this key in the app:',
+    qrLabel: 'QR code to scan with the authenticator app',
+    code: 'Code shown by the app',
+    confirm: 'Confirm',
+    cancel: 'Cancel',
+  },
+  codes: {
+    title: 'Your backup codes',
+    intro:
+      'Each one signs you in once if you no longer have your phone. They will not be shown again: print them or keep them somewhere safe.',
+    copy: 'Copy',
+    copied: 'Codes copied',
+    download: 'Download',
+    fileName: 'tiai-backup-codes.txt',
+    done: 'Done',
+  },
+  disable: {
+    title: 'Turn off two-step verification',
+    password: 'Current password',
+    code: 'App code or backup code',
+    submit: 'Turn off',
+    cancel: 'Cancel',
+    done: 'Two-step verification turned off',
+  },
+  regenerate: {
+    title: 'New backup codes',
+    intro: 'The current codes will stop working.',
+    code: 'App code',
+    submit: 'Generate',
+    cancel: 'Cancel',
+  },
+  enabled: 'Two-step verification turned on',
+  required: 'Required',
+  directory: {
+    signIn: 'Sign in with {label}',
+    failed: 'The directory sign-in failed: start over.',
+    or: 'or',
+    cardTitle: '{label} account',
+    cardCaption:
+      'Link your account to your {label} account to sign in with it; your password keeps working.',
+    linked: 'Linked',
+    notLinked: 'Not linked',
+    link: 'Link my {label} account',
+    unlink: 'Unlink',
+    linkedDone: 'Account linked',
+    unlinkedDone: 'Account unlinked',
+    externalAccount:
+      'This account signs in through the school’s directory: its password and two-step verification are managed there.',
+  },
+  codeFormat: 'Six digits',
+};
+
+export default { fr, en };

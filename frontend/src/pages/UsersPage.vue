@@ -70,6 +70,26 @@
           </q-badge>
           <!-- A lock lifts by itself; until then the way out is a password
                reset, from the menu of the row. -->
+          <q-badge
+            v-if="props.row.auth_source === 'oidc' || props.row.directory_linked"
+            outline
+            color="primary"
+            class="q-ml-xs"
+            data-test="user-directory-badge"
+          >
+            <q-icon name="badge" size="12px" class="q-mr-xs" />
+            {{ t('users.row.directory') }}
+          </q-badge>
+          <q-badge
+            v-if="props.row.second_factor_enabled"
+            outline
+            color="primary"
+            class="q-ml-xs"
+            data-test="user-mfa-badge"
+          >
+            <q-icon name="phonelink_lock" size="12px" class="q-mr-xs" />
+            {{ t('users.row.secondFactor') }}
+          </q-badge>
           <q-badge v-if="isLocked(props.row)" color="warning" class="q-ml-xs">
             {{ t('users.row.locked') }}
             <q-tooltip>
@@ -120,6 +140,7 @@
                   <q-item-section>{{ t('users.row.edit') }}</q-item-section>
                 </q-item>
                 <q-item
+                  v-if="props.row.auth_source !== 'oidc'"
                   v-close-popup
                   clickable
                   :disable="beyondMe(props.row)"
@@ -127,6 +148,17 @@
                 >
                   <q-item-section avatar><q-icon name="lock_reset" /></q-item-section>
                   <q-item-section>{{ t('users.row.resetPassword') }}</q-item-section>
+                </q-item>
+                <q-item
+                  v-if="props.row.second_factor_enabled"
+                  v-close-popup
+                  clickable
+                  :disable="isSelf(props.row) || beyondMe(props.row)"
+                  data-test="user-reset-mfa"
+                  @click="confirmResetSecondFactor(props.row)"
+                >
+                  <q-item-section avatar><q-icon name="phonelink_erase" /></q-item-section>
+                  <q-item-section>{{ t('users.row.resetSecondFactor') }}</q-item-section>
                 </q-item>
 
                 <q-separator />
@@ -344,6 +376,7 @@ import {
   deleteUser,
   listUsers,
   resetUserPassword,
+  resetUserSecondFactor,
   updateUser,
   type ConsoleUser,
 } from 'src/services/users';
@@ -680,6 +713,25 @@ async function toggleActive(user: ConsoleUser) {
       message: apiErrorMessage(e, t('users.notify.editFailed')),
     }));
   }
+}
+
+function confirmResetSecondFactor(user: ConsoleUser) {
+  liveDialog($q, () => ({
+    title: t('users.resetSecondFactor.title'),
+    message: t('users.resetSecondFactor.message', { email: user.email }),
+    cancel: { flat: true, noCaps: true, label: t('users.resetSecondFactor.cancel') },
+    ok: { color: 'negative', noCaps: true, label: t('users.resetSecondFactor.ok') },
+  })).onOk(() => {
+    void (async () => {
+      try {
+        await resetUserSecondFactor(user.id);
+        notify($q, () => ({ type: 'positive', message: t('users.resetSecondFactor.done') }));
+        await reload();
+      } catch (e) {
+        notify($q, () => ({ type: 'negative', message: apiErrorMessage(e) }));
+      }
+    })();
+  });
 }
 
 function confirmDelete(user: ConsoleUser) {

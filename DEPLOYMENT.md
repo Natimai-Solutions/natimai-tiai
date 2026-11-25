@@ -235,6 +235,7 @@ Quatre valeurs du `.env` doivent être générées aléatoirement — format rec
 | `POSTGRES_PASSWORD` | Compte d'administration PostgreSQL (superutilisateur) | Accès total au serveur de base |
 | `POSTGRES_APP_PASSWORD` | Rôle applicatif PostgreSQL, celui du backend | Accès aux tables de Tia'i |
 | `FIRST_ADMIN_PASSWORD` | Premier compte console | Accès admin à la console |
+| `TOTP_ENCRYPTION_KEY` (recommandé) | Clé qui chiffre les secrets de double authentification ; vide, elle est dérivée de `SECRET_KEY` | Une copie de la base et la clé permettent de calculer les codes |
 
 ```bash
 # Linux / macOS / Git Bash
@@ -302,6 +303,18 @@ Il n'est jamais committé.
 |---|---|---|
 | `ENVIRONMENT` | `production` | `local` / `staging` / `production`. Hors `local` : garde anti-placeholder et longueur minimale des secrets + masquage des erreurs 500. Absent, il vaut `production` : un `.env` qui l'oublie reste gardé |
 | `SECRET_KEY` | `changeme` | 32 caractères minimum hors `local`. Signature des JWT console, et dérivation de la clé qui chiffre les identifiants e-mail enregistrés dans la console. **La changer oblige à ressaisir ces identifiants** (voir « Alertes e-mail ») |
+| `TOTP_ENCRYPTION_KEY` | *(vide)* | Clé qui chiffre les secrets de double authentification (32 caractères minimum conseillés). Vide : dérivée de `SECRET_KEY`, et **changer `SECRET_KEY` rend alors illisibles tous les seconds facteurs** — chaque compte n'entre plus qu'avec un code de secours, ou après une réinitialisation par un administrateur. La renseigner une fois pour toutes, et la garder |
+| `SECOND_FACTOR_MAX_FAILED_ATTEMPTS` | `5` | Codes faux de suite, sur n'importe quelles tentatives, avant que le second facteur du compte soit verrouillé `LOGIN_LOCKOUT_MINUTES` minutes |
+| `SECOND_FACTOR_CHALLENGE_MINUTES` | `5` | Temps laissé pour saisir le code une fois le mot de passe accepté (1 à 30) |
+| `OIDC_ENABLED` | `false` | Connexion par l'annuaire (OpenID Connect, Entra ID d'abord) — cf. « Connexion par l'annuaire » |
+| `OIDC_ISSUER` | *(vide)* | Émetteur : `https://login.microsoftonline.com/<ID de locataire>/v2.0` pour Entra ID. Un locataire, jamais `common` ni `organizations` |
+| `OIDC_CLIENT_ID` | *(vide)* | ID d'application (client) de l'inscription |
+| `OIDC_CLIENT_SECRET` | *(vide)* | Secret client de l'inscription. Jamais affiché par la console |
+| `OIDC_LABEL` | `Microsoft` | Libellé du bouton « Se connecter avec … » |
+| `OIDC_REDIRECT_URI` | *(dérivée)* | URI de redirection ; vide = `<URL de la console>/api/v1/auth/oidc/callback`, la valeur à déclarer chez le fournisseur |
+| `OIDC_GROUPS_CLAIM` | `groups` | Revendication du jeton qui porte les groupes de l'annuaire |
+| `OIDC_PROXY_URL` | *(vide)* | Proxy HTTP des seuls appels au fournisseur (découverte, clés, jeton), comme `MAILGUN_PROXY_URL` |
+| `OIDC_TIMEOUT_SECONDS` | `10` | Délai d'attente des appels au fournisseur |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Durée de vie du jeton d'accès console (1 à 1 440). Court à dessein : c'est lui que la page garde en mémoire et envoie à chaque appel, et la console le renouvelle seule par sa session. Ancien défaut : 480 — une valeur `480` restée dans un `.env` reste acceptée mais n'a plus de raison d'être |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Une session console non utilisée pendant ce nombre de jours se ferme. **Glissante** : chaque renouvellement repousse l'échéance, un opérateur qui ouvre la console chaque semaine ne se reconnecte pas |
 | `SESSION_MAX_DAYS` | `30` | Durée **absolue** d'une session, comptée depuis la connexion, glissement compris : au-delà, reconnexion obligatoire. Borne ce que vaut un jeton de session volé |
@@ -482,8 +495,73 @@ passe par un administrateur lève les deux verrous. Le verrouillage et la
 réinitialisation figurent au journal d'audit, chaque entrée avec l'adresse
 source de la requête.
 
+**Double authentification** (C7). Chacun l'active depuis « Mon compte » : un
+code QR à scanner avec une application d'authentification (Microsoft
+Authenticator, Google Authenticator, FreeOTP, Aegis…), un premier code pour
+confirmer, puis **dix codes de secours** affichés une seule fois, à imprimer.
+Un groupe peut l'**imposer** (case « Double authentification obligatoire » de
+la page Groupes) : un membre qui ne l'a pas encore n'obtient qu'une session
+d'enrôlement, qui ne donne accès qu'à « Mon compte » tant qu'il ne l'a pas
+activée.
+
+- La réponse de connexion ne dit qu'un code est attendu qu'**après** un mot de
+  passe exact ; le mot de passe seul ne remet pas à zéro le compteur d'échecs et
+  ne rend pas l'adresse « habituelle ».
+- Un code ne sert qu'une fois ; l'horloge du serveur doit être juste à 30
+  secondes près (NTP sur l'hôte Docker).
+- `SECOND_FACTOR_MAX_FAILED_ATTEMPTS` codes faux de suite verrouillent le
+  second facteur du compte `LOGIN_LOCKOUT_MINUTES` minutes (journal d'audit :
+  `user.second_factor_locked`).
+- **Téléphone perdu** : un code de secours ; sinon un administrateur
+  « Réinitialise la double authentification » du compte (page Utilisateurs) —
+  ses sessions sont fermées, il en active une nouvelle à sa connexion suivante.
+- **Ne pas s'enfermer dehors** : gardez un compte administrateur de secours dont
+  les codes de secours sont imprimés et rangés, ou qui n'est dans aucun groupe
+  à double authentification obligatoire.
+- Les secrets sont chiffrés en base sous `TOTP_ENCRYPTION_KEY` (à défaut, une
+  clé dérivée de `SECRET_KEY`) ; les codes de secours n'y sont que hachés.
+
+**Connexion par l'annuaire** (C7, OpenID Connect ; désactivée par défaut). Un
+bouton « Se connecter avec Microsoft » s'ajoute à la page de connexion ; le mot
+de passe reste toujours possible.
+
+1. **Inscription d'application** dans Entra ID (Microsoft Entra, « Inscriptions
+   d'applications », « Nouvelle inscription ») : comptes de ce seul annuaire ;
+   URI de redirection de type **Web** égale à `OIDC_REDIRECT_URI`, soit
+   `https://<serveur>/api/v1/auth/oidc/callback`.
+2. **Certificats et secrets** : un secret client → `OIDC_CLIENT_SECRET` (noter
+   son échéance : un secret expiré coupe la connexion par l'annuaire, pas
+   celle par mot de passe).
+3. **Configuration du jeton** : « Ajouter une revendication de groupes »,
+   *groupes affectés à l'application*, émis en **ID de groupe**. Affecter à
+   l'application (« Applications d'entreprise », « Utilisateurs et groupes »)
+   les groupes qui doivent entrer. Sans cette restriction, un compte membre de
+   plus de 200 groupes reçoit un jeton sans la liste, et sa connexion est
+   refusée (`auth.oidc.too_many_groups`).
+4. `.env` : `OIDC_ENABLED=true`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`,
+   `OIDC_CLIENT_SECRET`, puis redémarrer le backend.
+5. **Page Groupes** : dans chaque groupe de Tia'i, « Groupes de l'annuaire »
+   reçoit l'ID d'objet des groupes Entra correspondants.
+
+À la première connexion, un compte est créé si le jeton porte au moins un
+groupe relié ; sinon la connexion est refusée. Ensuite, à chaque connexion, les
+groupes reliés sont recalculés d'après l'annuaire ; ceux donnés à la main dans
+la console restent. Un compte de l'annuaire n'a pas de mot de passe dans la
+console ni de double authentification de la console : elle se règle chez Entra
+(accès conditionnel). Un **compte local existant** de même adresse n'est jamais
+rattaché d'office : son titulaire l'associe depuis « Mon compte », connecté par
+mot de passe ; il garde alors son mot de passe et ses groupes.
+
+**Réseau** : le serveur doit joindre `login.microsoftonline.com` en HTTPS
+(directement ou par `OIDC_PROXY_URL`). **Secours** : la console refuse de
+désactiver, de priver de « Comptes : gérer » ou de supprimer le dernier compte
+**local** qui gère les comptes ; un annuaire injoignable ne ferme donc jamais la
+console.
+
 Pour **déconnecter tout le monde** d'un coup (clé `SECRET_KEY` divulguée, poste
-compromis), changer `SECRET_KEY` puis fermer toutes les sessions :
+compromis), changer `SECRET_KEY` puis fermer toutes les sessions — sans
+`TOTP_ENCRYPTION_KEY`, cela efface aussi en pratique tous les seconds facteurs
+(cf. ci-dessus) :
 
 ```bash
 cd deploy

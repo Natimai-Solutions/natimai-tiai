@@ -6,6 +6,23 @@ export interface Token {
 }
 
 /**
+ * A right password for an account with a second factor (C7): no session yet,
+ * a challenge to redeem with a code. Only ever answered to whoever typed the
+ * right password.
+ */
+export interface SecondFactorChallenge {
+  second_factor_required: true;
+  challenge: string;
+  expires_in: number;
+}
+
+export function isChallenge(
+  answer: Token | SecondFactorChallenge,
+): answer is SecondFactorChallenge {
+  return (answer as SecondFactorChallenge).second_factor_required === true;
+}
+
+/**
  * How much this account hears from Tia'i by e-mail. One axis rather than a set
  * of switches — see the backend enum of the same name.
  *
@@ -51,6 +68,17 @@ export interface User {
    * decide what to show; the backend re-checks every call.
    */
   permissions: string[];
+  /** Second factor (C7). Absent from an older server: read as off. */
+  second_factor_enabled?: boolean;
+  /** A group of the account requires one. */
+  second_factor_required?: boolean;
+  backup_codes_left?: number;
+  /** This session was opened for enrolment only: « Mon compte » until then. */
+  enrolment_only?: boolean;
+  /** Where the account signs in from (C7): `local`, or `oidc` for the directory. */
+  auth_source?: 'local' | 'oidc';
+  /** A local account linked to a directory identity. */
+  directory_linked?: boolean;
 }
 
 /**
@@ -59,13 +87,84 @@ export interface User {
  * `services/session`). `withCredentials` lets that cookie be stored even when
  * the API sits on another origin than the console (`BACKEND_CORS_ORIGINS`).
  */
-export async function login(email: string, password: string): Promise<Token> {
+export async function login(
+  email: string,
+  password: string,
+): Promise<Token | SecondFactorChallenge> {
   // OAuth2 password flow: the backend expects form-encoded username/password.
   const form = new URLSearchParams();
   form.append('username', email);
   form.append('password', password);
-  const { data } = await api.post<Token>('/auth/login', form, { withCredentials: true });
+  const { data } = await api.post<Token | SecondFactorChallenge>('/auth/login', form, {
+    withCredentials: true,
+  });
   return data;
+}
+
+/** The second step: a challenge redeemed with a code (or a backup code). */
+export async function verifySecondFactor(challenge: string, code: string): Promise<Token> {
+  const { data } = await api.post<Token>(
+    '/auth/login/second-factor',
+    { challenge, code },
+    { withCredentials: true },
+  );
+  return data;
+}
+
+/** « Mon compte »: start an enrolment — a secret pending until a code confirms it. */
+export async function totpSetup(): Promise<{ secret: string; otpauth_uri: string }> {
+  const { data } = await api.post<{ secret: string; otpauth_uri: string }>('/auth/totp/setup');
+  return data;
+}
+
+/** Confirm the enrolment with a first code; returns the ten backup codes, shown once. */
+export async function totpConfirm(code: string): Promise<string[]> {
+  const { data } = await api.post<{ backup_codes: string[] }>('/auth/totp/confirm', { code });
+  return data.backup_codes;
+}
+
+export async function totpDisable(currentPassword: string, code: string): Promise<void> {
+  await api.post('/auth/totp/disable', { current_password: currentPassword, code });
+}
+
+/** What the login page offers beside the password (C7). */
+export interface AuthMethods {
+  oidc_enabled: boolean;
+  oidc_label: string;
+}
+
+export async function getAuthMethods(): Promise<AuthMethods> {
+  const { data } = await api.get<AuthMethods>('/auth/methods');
+  return data;
+}
+
+/**
+ * Where the browser goes to sign in through the directory: a navigation, not
+ * a request — the provider's page must take the whole window.
+ */
+export function directorySignInUrl(redirect: string | null): string {
+  const base = (api.defaults?.baseURL ?? '/api/v1').replace(/\/$/, '');
+  const query = redirect ? `?redirect=${encodeURIComponent(redirect)}` : '';
+  return `${base}/auth/oidc/start${query}`;
+}
+
+/** « Associer mon compte »: the provider's URL to go through, for this account. */
+export async function startDirectoryLink(): Promise<string> {
+  const { data } = await api.post<{ url: string }>('/auth/oidc/link', undefined, {
+    withCredentials: true,
+  });
+  return data.url;
+}
+
+export async function unlinkDirectory(): Promise<void> {
+  await api.delete('/auth/oidc/link');
+}
+
+export async function regenerateBackupCodes(code: string): Promise<string[]> {
+  const { data } = await api.post<{ backup_codes: string[] }>('/auth/totp/backup-codes', {
+    code,
+  });
+  return data.backup_codes;
 }
 
 /**

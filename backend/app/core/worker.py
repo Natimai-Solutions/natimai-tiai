@@ -56,11 +56,13 @@ from app.features.base import utcnow
 from app.features.command import crud as command_crud
 from app.features.command.models import Command, CommandStatus
 from app.features.notification import digest, outbox
+from app.features.oidc import crud as oidc_crud
 from app.features.setting import crud as setting_crud
 from app.features.setting.crud import SchedulePolicy
 from app.features.setting.models import AppSetting
 from app.features.usage import crud as usage_crud
 from app.features.user import addresses as login_addresses
+from app.features.user import second_factor
 
 logger = logging.getLogger(__name__)
 
@@ -309,7 +311,11 @@ async def purge_sessions() -> int:
     """Drop console sessions that have expired or been revoked: they can no
     longer be used, and a row per login for ever would only grow."""
     async with AsyncSession(engine) as session:
-        return await auth_session_crud.purge_expired_sessions(session)
+        gone = await auth_session_crud.purge_expired_sessions(session)
+        # The login challenges of the second factor (C7): spent or expired.
+        gone += await second_factor.purge_challenges(session)
+        # The directory sign-ins in flight (C7): spent or expired.
+        return gone + await oidc_crud.purge(session)
 
 
 async def purge_audit() -> int:

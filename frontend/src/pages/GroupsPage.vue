@@ -40,7 +40,19 @@
               <q-tooltip v-if="props.row.builtin_key">{{ t('groups.row.builtin') }}</q-tooltip>
             </q-icon>
             <div>
-              <div>{{ groupName(props.row, rows) }}</div>
+              <div>
+                {{ groupName(props.row, rows) }}
+                <q-badge
+                  v-if="props.row.mfa_required"
+                  outline
+                  color="primary"
+                  class="q-ml-xs"
+                  data-test="group-mfa-badge"
+                >
+                  <q-icon name="phonelink_lock" size="12px" class="q-mr-xs" />
+                  {{ t('groups.form.mfaBadge') }}
+                </q-badge>
+              </div>
               <div v-if="props.row.description" class="text-caption text-muted">
                 {{ groupDescription(props.row) }}
               </div>
@@ -210,6 +222,16 @@
               </div>
             </div>
 
+            <!-- Second factor (C7): the administrators' group too. -->
+            <div>
+              <q-toggle
+                v-model="form.mfa_required"
+                :label="t('groups.form.mfaRequired')"
+                data-test="group-mfa-toggle"
+              />
+              <div class="text-caption text-muted q-ml-xl">{{ t('groups.form.mfaHint') }}</div>
+            </div>
+
             <div v-if="!editing?.is_admin">
               <div class="text-subtitle2 q-mb-xs">{{ t('groups.form.scope') }}</div>
               <div class="text-caption text-muted q-mb-sm">
@@ -255,6 +277,25 @@
                 />
               </div>
             </div>
+
+            <!-- Directory groups (C7): their members get this group when they
+                 sign in through the directory. -->
+            <q-select
+              v-model="form.idp_groups"
+              :label="t('groups.form.idpGroups')"
+              :hint="t('groups.form.idpGroupsHint')"
+              outlined
+              dense
+              multiple
+              use-chips
+              use-input
+              hide-dropdown-icon
+              new-value-mode="add-unique"
+              input-debounce="0"
+              data-test="group-idp-groups"
+              @new-value="addIdpGroup"
+              @input-value="(v: string) => (idpTyping = v)"
+            />
           </q-card-section>
 
           <q-card-actions align="right" class="q-px-md q-pb-md">
@@ -326,7 +367,35 @@ const form = reactive({
   description: '',
   permissions: [] as string[],
   scope: { locations: [] as string[], buildings: [] as string[], rooms: [] as string[] },
+  mfa_required: false,
+  idp_groups: [] as string[],
 });
+
+/** A directory group id as the server takes it: letters, digits, a few separators. */
+const IDP_GROUP = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
+const idpTyping = ref('');
+
+function addIdpGroup(
+  value: string,
+  done: (item?: string, mode?: 'add' | 'add-unique' | 'toggle') => void,
+): void {
+  idpTyping.value = '';
+  const id = value.trim().toLowerCase();
+  if (!IDP_GROUP.test(id) || form.idp_groups.includes(id)) {
+    done();
+    return;
+  }
+  done(id, 'add-unique');
+}
+
+/** An id typed without Entrée is kept on save, as the locations are. */
+function commitTypedIdpGroup() {
+  const id = idpTyping.value.trim().toLowerCase();
+  idpTyping.value = '';
+  if (IDP_GROUP.test(id) && !form.idp_groups.includes(id)) {
+    form.idp_groups = [...form.idp_groups, id];
+  }
+}
 
 // What the scope pickers offer, and how a stored id is named in the table.
 const locations = ref<string[]>([]);
@@ -459,6 +528,8 @@ function openCreate() {
     description: '',
     permissions: [],
     scope: { locations: [], buildings: [], rooms: [] },
+    mfa_required: false,
+    idp_groups: [],
   });
   formOpen.value = true;
 }
@@ -474,6 +545,8 @@ function openEdit(group: Group) {
       buildings: [...(group.scope?.buildings ?? [])],
       rooms: [...(group.scope?.rooms ?? [])],
     },
+    mfa_required: group.mfa_required === true,
+    idp_groups: [...(group.idp_groups ?? [])],
   });
   formOpen.value = true;
 }
@@ -512,6 +585,7 @@ function confirmWholeParc(): Promise<boolean> {
 
 async function submitForm() {
   commitTypedLocation();
+  commitTypedIdpGroup();
   if (!(await confirmWholeParc())) return;
   saving.value = true;
   try {
@@ -519,6 +593,8 @@ async function submitForm() {
       await updateGroup(editing.value.id, {
         name: form.name.trim(),
         description: form.description.trim() || null,
+        mfa_required: form.mfa_required,
+        idp_groups: form.idp_groups,
         // Implicit for the administrators: sending them would be refused.
         ...(editing.value.is_admin
           ? {}
@@ -531,6 +607,8 @@ async function submitForm() {
         description: form.description.trim() || null,
         permissions: form.permissions,
         scope: scopeOrNull(form.scope),
+        mfa_required: form.mfa_required,
+        idp_groups: form.idp_groups,
       });
       notify($q, () => ({ type: 'positive', message: t('groups.notify.created') }));
     }

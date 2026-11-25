@@ -45,7 +45,7 @@ from app.features.auth_session import crud as auth_sessions
 from app.features.auth_session.models import AuthSession
 from app.features.base import utcnow
 from app.features.user import addresses as login_addresses
-from app.features.user import crud, emails
+from app.features.user import crud, emails, second_factor
 from app.features.user.models import EmailPreference, Language, User
 
 # The security log: authentication events, one greppable line each. Without it
@@ -61,6 +61,16 @@ class Token(BaseModel):
 
     access_token: str
     token_type: str = "bearer"
+
+
+class SecondFactorChallenge(BaseModel):
+    """A right password for an account with a second factor (C7): no session
+    yet, a challenge to redeem with a code on ``/auth/login/second-factor``.
+    Only ever answered to whoever typed the right password."""
+
+    second_factor_required: bool = True
+    challenge: str
+    expires_in: int
 
 
 # --- The refresh cookie -------------------------------------------------------
@@ -155,10 +165,25 @@ class UserOut(BaseModel):
     preferences: dict[str, Any]
     groups: list[GroupRef]
     permissions: list[str]
+    # Second factor (C7): on, required by a group, how many backup codes are
+    # left, and whether this session is for enrolment only.
+    second_factor_enabled: bool = False
+    second_factor_required: bool = False
+    backup_codes_left: int = 0
+    enrolment_only: bool = False
+    # Where the account signs in from (C7): ``local`` or ``oidc``; and
+    # whether a local one is linked to a directory identity.
+    auth_source: str = "local"
+    directory_linked: bool = False
 
 
 async def _profile(
-    session: SessionDep, user: User, permissions: frozenset[str]
+    session: SessionDep,
+    user: User,
+    permissions: frozenset[str],
+    current: AuthSession | None = None,
+    *,
+    enrolment_only: bool | None = None,
 ) -> UserOut:
     groups = (await crud.groups_of_users(session, [user.id]))[user.id]
     return UserOut(
@@ -180,12 +205,22 @@ async def _profile(
         },
         groups=[GroupRef.model_validate(g) for g in groups],
         permissions=sorted(permissions),
+        second_factor_enabled=second_factor.enabled(user),
+        auth_source=user.auth_source,
+        directory_linked=user.oidc_subject is not None,
+        second_factor_required=await second_factor.required(session, user.id),
+        backup_codes_left=await second_factor.backup_codes_left(session, user.id),
+        enrolment_only=(
+            enrolment_only
+            if enrolment_only is not None
+            else (current.enrolment_only if current is not None else False)
+        ),
     )
 
 
 @router.post(
     "/login",
-    response_model=Token,
+    response_model=Token | SecondFactorChallenge,
     dependencies=[
         Depends(ratelimit.rate_limit(ratelimit.login_limiter, "auth.login")),
         # The form is accepted as multipart too, which the control-character
@@ -199,14 +234,18 @@ async def login(
     response: Response,
     session: SessionDep,
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
-) -> Token:
+) -> Token | SecondFactorChallenge:
     """Authenticate with email (username) + password and open a session.
 
-    Returns the access token; sets the refresh token as a cookie.
+    Returns the access token; sets the refresh token as a cookie. For an
+    account with a second factor, returns a challenge instead and opens
+    nothing: the success's effects on the lock wait for the code (C7).
     """
     ip = client_ip(request)
     try:
-        user = await crud.authenticate(session, form.username, form.password, ip)
+        user = await crud.authenticate(
+            session, form.username, form.password, ip, finish=False
+        )
     except crud.AccountLockedError as exc:
         if exc.just_locked:
             details = {"locked_until": exc.locked_until.isoformat()}
@@ -250,14 +289,143 @@ async def login(
             message="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    security_log.info("login ok for %s from %s", user.email, ip)
+    user_agent = request.headers.get("user-agent")
+    if second_factor.enabled(user):
+        email = user.email
+        token = await second_factor.issue_challenge(
+            session, user, ip=ip, user_agent=user_agent
+        )
+        await session.commit()
+        security_log.info("password ok for %s from %s, second factor asked", email, ip)
+        return SecondFactorChallenge(
+            challenge=token,
+            expires_in=settings.SECOND_FACTOR_CHALLENGE_MINUTES * 60,
+        )
+    await crud.note_login_success(session, user, ip)
+    # A group requires a second factor the account does not have: a session
+    # for « Mon compte » only, until it enrols (``app.api.deps``).
+    enrolment_only = await second_factor.required(session, user.id)
+    security_log.info(
+        "login ok for %s from %s%s",
+        user.email,
+        ip,
+        ", enrolment only" if enrolment_only else "",
+    )
+    return await open_console_session(
+        session,
+        response,
+        user,
+        ip=ip,
+        user_agent=user_agent,
+        auth_method="password",
+        enrolment_only=enrolment_only,
+    )
+
+
+async def open_console_session(
+    session: SessionDep,
+    response: Response,
+    user: User,
+    *,
+    ip: str,
+    user_agent: str | None,
+    auth_method: str,
+    enrolment_only: bool = False,
+) -> Token:
+    """The end of every login: the session, its tokens, the cookie, the
+    commit. Password, password and code, and the directory all end here."""
     row, refresh_token = await auth_sessions.open_session(
-        session, user.id, user_agent=request.headers.get("user-agent"), ip=ip
+        session,
+        user.id,
+        user_agent=user_agent,
+        ip=ip,
+        auth_method=auth_method,
+        enrolment_only=enrolment_only,
     )
     access_token = security.create_access_token(user.id, session_id=row.id)
     _set_refresh_cookie(response, refresh_token, row.expires_at)
     await session.commit()
     return Token(access_token=access_token)
+
+
+class SecondFactorIn(BaseModel):
+    challenge: str = Field(min_length=1, max_length=200)
+    # Six digits, or a backup code (« XXXXX-XXXXX »).
+    code: str = Field(min_length=1, max_length=40)
+
+
+@router.post(
+    "/login/second-factor",
+    response_model=Token,
+    dependencies=[
+        Depends(
+            ratelimit.rate_limit(
+                ratelimit.second_factor_limiter, "auth.login.second_factor"
+            )
+        )
+    ],
+)
+async def login_second_factor(
+    request: Request, response: Response, payload: SecondFactorIn, session: SessionDep
+) -> Token:
+    """Redeem a login challenge with a code and open the session.
+
+    One answer for every refusal — wrong code, replayed code, expired, spent
+    or exhausted challenge, locked second factor — since telling them apart
+    helps only whoever is guessing.
+    """
+    ip = client_ip(request)
+    outcome = await second_factor.redeem(session, payload.challenge, payload.code)
+    if outcome.user is None:
+        failed = outcome.failed_user
+        failed_email = failed.email if failed is not None else None
+        if failed is not None and outcome.just_locked:
+            audit.record(
+                session,
+                actor=failed.email,
+                action="user.second_factor_locked",
+                resource_type="user",
+                resource_id=str(failed.id),
+                details={
+                    "locked_until": failed.totp_locked_until.isoformat()
+                    if failed.totp_locked_until
+                    else None
+                },
+            )
+        await session.commit()
+        security_log.warning(
+            "second factor refused for %s from %s%s",
+            failed_email or "an unknown challenge",
+            ip,
+            " (locked)" if outcome.just_locked else "",
+        )
+        raise AppError(
+            code=ErrorCode.AUTH_SECOND_FACTOR_INVALID,
+            status_code=401,
+            message="Invalid code, or the login has expired",
+        )
+    user = outcome.user
+    await crud.note_login_success(session, user, ip)
+    if outcome.used_backup:
+        audit.record(
+            session,
+            actor=user.email,
+            action="auth.backup_code_used",
+            resource_type="user",
+            resource_id=str(user.id),
+            details={
+                "remaining": await second_factor.backup_codes_left(session, user.id)
+            },
+        )
+    security_log.info("login ok for %s from %s with a second factor", user.email, ip)
+    return await open_console_session(
+        session,
+        response,
+        user,
+        ip=ip,
+        user_agent=request.headers.get("user-agent"),
+        auth_method="password+totp",
+    )
 
 
 @router.post("/refresh", response_model=Token)
@@ -442,10 +610,13 @@ async def close_session(
 
 @router.get("/me", response_model=UserOut)
 async def me(
-    session: SessionDep, user: CurrentUser, permissions: CurrentPermissions
+    session: SessionDep,
+    user: CurrentUser,
+    permissions: CurrentPermissions,
+    current: CurrentAuthSession,
 ) -> UserOut:
     """Return the current authenticated user."""
-    return await _profile(session, user, permissions)
+    return await _profile(session, user, permissions, current)
 
 
 # Bounds on the preference document, generous for what the console stores
@@ -571,6 +742,7 @@ async def update_me(
     user: CurrentUser,
     session: SessionDep,
     permissions: CurrentPermissions,
+    current: CurrentAuthSession,
 ) -> UserOut:
     """Update one's own profile.
 
@@ -579,6 +751,8 @@ async def update_me(
     whether it is active stay with an administrator (``/users``) — a read-only
     operator who could edit their own row would not be read-only for long.
     """
+    # Read before the commit, which expires the row.
+    enrolment_only = current.enrolment_only
     if payload.preferences is not None:
         await _merge_stored_preferences(session, user, payload.preferences)
     if payload.email_preference is not None:
@@ -589,7 +763,7 @@ async def update_me(
     session.add(user)
     await session.commit()
     await session.refresh(user)
-    return await _profile(session, user, permissions)
+    return await _profile(session, user, permissions, enrolment_only=enrolment_only)
 
 
 # --- Password lifecycle -----------------------------------------------------
@@ -620,6 +794,7 @@ async def change_password(
     Every session of the account is revoked — the one this request came
     through included — so the console re-authenticates right after.
     """
+    _reject_external(user)
     # Keyed on the session, not the account (audit T07): a stolen session
     # guesses from anywhere, and each check is a bcrypt the whole API would
     # wait for (audit S04) — but an account-wide budget was one the thief
@@ -813,7 +988,8 @@ async def _issue_reset_link(session: SessionDep, email: str, ip: str) -> None:
     """The work behind a reset request. Every path ends its transaction the
     same way (a commit), so none has a step of its own left to time."""
     user = await crud.get_by_email(session, email)
-    if user is None or not user.is_active:
+    # An account of the directory has no password to reset (C7).
+    if user is None or not user.is_active or user.auth_source != "local":
         await session.commit()
         return
     if not await crud.reset_request_allowed(session, user, ip):
@@ -903,3 +1079,215 @@ async def confirm_password_reset(
         session, user, payload.new_password, chosen_from=client_ip(request)
     )
     await session.commit()
+
+
+# --- Second factor, from « Mon compte » (C7) ----------------------------------
+
+
+class TotpSetupOut(BaseModel):
+    # Shown as text beside the QR code, for an app that cannot scan.
+    secret: str
+    otpauth_uri: str
+
+
+class TotpCodeIn(BaseModel):
+    code: str = Field(min_length=1, max_length=40)
+
+
+class TotpDisableIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=1024)
+    code: str = Field(min_length=1, max_length=40)
+
+
+class BackupCodesOut(BaseModel):
+    # Shown once: the server keeps only their hashes.
+    backup_codes: list[str]
+
+
+def _reject_external(user: User) -> None:
+    if user.auth_source != "local":
+        raise AppError(
+            code=ErrorCode.USER_EXTERNAL_ACCOUNT,
+            status_code=409,
+            message="This account signs in through the directory",
+        )
+
+
+def _limit_second_factor(current: AuthSession) -> None:
+    ratelimit.check_account(
+        ratelimit.second_factor_account_limiter, str(current.id), "auth.totp"
+    )
+
+
+def _code_invalid() -> AppError:
+    return AppError(
+        code=ErrorCode.AUTH_SECOND_FACTOR_CODE_INVALID,
+        status_code=400,
+        message="This code does not match",
+    )
+
+
+async def _locked_account(session: SessionDep, user: User) -> User:
+    account = await crud.lock_account(session, user)
+    if account is None:
+        raise AppError(
+            code=ErrorCode.AUTH_SESSION_INVALID,
+            status_code=401,
+            message="This session has ended",
+        )
+    return account
+
+
+@router.post("/totp/setup", response_model=TotpSetupOut)
+async def totp_setup(
+    user: CurrentUser, current: CurrentAuthSession, session: SessionDep
+) -> TotpSetupOut:
+    """Start an enrolment: a fresh secret, pending until a code confirms it.
+    Refused while one is active — disable it first — and for an account of
+    the directory, whose second factor is the directory's (C7)."""
+    _limit_second_factor(current)
+    _reject_external(user)
+    account = await _locked_account(session, user)
+    if second_factor.enabled(account):
+        raise AppError(
+            code=ErrorCode.AUTH_SECOND_FACTOR_ALREADY_ENABLED,
+            status_code=409,
+            message="A second factor is already active on this account",
+        )
+    secret, uri = second_factor.start_enrolment(account)
+    session.add(account)
+    await session.commit()
+    return TotpSetupOut(secret=secret, otpauth_uri=uri)
+
+
+@router.post("/totp/confirm", response_model=BackupCodesOut)
+async def totp_confirm(
+    payload: TotpCodeIn,
+    user: CurrentUser,
+    current: CurrentAuthSession,
+    session: SessionDep,
+) -> BackupCodesOut:
+    """Confirm the pending secret with a first code: the second factor is on,
+    and the ten backup codes are handed out. An enrolment-only session
+    becomes a full one."""
+    _limit_second_factor(current)
+    account = await _locked_account(session, user)
+    if second_factor.enabled(account) or account.totp_secret is None:
+        raise AppError(
+            code=ErrorCode.AUTH_SECOND_FACTOR_NOT_ENABLED,
+            status_code=409,
+            message="No enrolment is pending: start it again",
+        )
+    now = utcnow()
+    step = second_factor.check_code(account, payload.code, now)
+    if step is None:
+        raise _code_invalid()
+    account.totp_enabled_at = now
+    account.totp_last_step = step
+    account.totp_failed_attempts = 0
+    account.totp_locked_until = None
+    session.add(account)
+    codes = await second_factor.new_backup_codes(session, account.id)
+    if current.enrolment_only:
+        current.enrolment_only = False
+        session.add(current)
+    audit.record(
+        session,
+        actor=account.email,
+        action="user.second_factor_enabled",
+        resource_type="user",
+        resource_id=str(account.id),
+        details={},
+    )
+    await session.commit()
+    return BackupCodesOut(backup_codes=codes)
+
+
+@router.post("/totp/disable", status_code=204)
+async def totp_disable(
+    request: Request,
+    payload: TotpDisableIn,
+    user: CurrentUser,
+    current: CurrentAuthSession,
+    session: SessionDep,
+) -> None:
+    """Turn the second factor off: the current password and a code (or a
+    backup code), as for a password change. Refused while a group of the
+    account requires it."""
+    _limit_second_factor(current)
+    account = await _locked_account(session, user)
+    if not second_factor.enabled(account):
+        raise AppError(
+            code=ErrorCode.AUTH_SECOND_FACTOR_NOT_ENABLED,
+            status_code=409,
+            message="No second factor is active on this account",
+        )
+    if await second_factor.required(session, account.id):
+        raise AppError(
+            code=ErrorCode.AUTH_SECOND_FACTOR_REQUIRED_BY_GROUP,
+            status_code=409,
+            message="A group of this account requires a second factor",
+        )
+    if not await security.check_password(
+        payload.current_password, account.hashed_password
+    ):
+        # A guess at the password through an open session counts towards
+        # the lock, as on « changer mon mot de passe ».
+        await crud.record_failure(session, account, client_ip(request))
+        await session.commit()
+        raise AppError(
+            code=ErrorCode.PASSWORD_CURRENT_INVALID,
+            status_code=400,
+            message="Current password is incorrect",
+        )
+    now = utcnow()
+    if second_factor.check_code(account, payload.code, now) is None and not (
+        await second_factor.spend_backup_code(session, account.id, payload.code, now)
+    ):
+        raise _code_invalid()
+    await second_factor.clear(session, account)
+    audit.record(
+        session,
+        actor=account.email,
+        action="user.second_factor_disabled",
+        resource_type="user",
+        resource_id=str(account.id),
+        details={},
+    )
+    await session.commit()
+
+
+@router.post("/totp/backup-codes", response_model=BackupCodesOut)
+async def totp_backup_codes(
+    payload: TotpCodeIn,
+    user: CurrentUser,
+    current: CurrentAuthSession,
+    session: SessionDep,
+) -> BackupCodesOut:
+    """Ten new backup codes against a current code; the old ones stop
+    working."""
+    _limit_second_factor(current)
+    account = await _locked_account(session, user)
+    if not second_factor.enabled(account):
+        raise AppError(
+            code=ErrorCode.AUTH_SECOND_FACTOR_NOT_ENABLED,
+            status_code=409,
+            message="No second factor is active on this account",
+        )
+    now = utcnow()
+    step = second_factor.check_code(account, payload.code, now)
+    if step is None:
+        raise _code_invalid()
+    account.totp_last_step = step
+    session.add(account)
+    codes = await second_factor.new_backup_codes(session, account.id)
+    audit.record(
+        session,
+        actor=account.email,
+        action="user.backup_codes_regenerated",
+        resource_type="user",
+        resource_id=str(account.id),
+        details={},
+    )
+    await session.commit()
+    return BackupCodesOut(backup_codes=codes)

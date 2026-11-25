@@ -57,6 +57,7 @@ const fr = {
   actions: {
     auth: {
       session_revoked: "Fermeture d'une session console",
+      backup_code_used: 'Connexion avec un code de secours',
     },
     asset: {
       create: 'Création d’un actif',
@@ -161,6 +162,15 @@ const fr = {
       delete: "Suppression d'un compte",
       reset_password: "Réinitialisation d'un mot de passe",
       locked: 'Compte verrouillé après des échecs de connexion',
+      second_factor_locked: 'Double authentification verrouillée après des codes faux',
+      second_factor_enabled: 'Double authentification activée',
+      second_factor_disabled: 'Double authentification désactivée',
+      backup_codes_regenerated: 'Nouveaux codes de secours',
+      second_factor_reset: "Double authentification d'un compte réinitialisée",
+      directory_provisioned: "Compte créé par une connexion par l'annuaire",
+      directory_linked: "Compte associé à l'annuaire",
+      directory_unlinked: "Compte dissocié de l'annuaire",
+      groups_synced: "Groupes recalculés d'après l'annuaire",
     },
   },
   /** Resource type → label, in the order the filter offers them. */
@@ -349,6 +359,7 @@ const en: Translation<typeof fr> = {
   actions: {
     auth: {
       session_revoked: 'Console session closed',
+      backup_code_used: 'Signed in with a backup code',
     },
     asset: {
       create: 'Asset created',
@@ -453,6 +464,15 @@ const en: Translation<typeof fr> = {
       delete: 'Account deleted',
       reset_password: 'Password reset',
       locked: 'Account locked after failed logins',
+      second_factor_locked: 'Two-step verification locked after wrong codes',
+      second_factor_enabled: 'Two-step verification turned on',
+      second_factor_disabled: 'Two-step verification turned off',
+      backup_codes_regenerated: 'New backup codes',
+      second_factor_reset: 'Two-step verification of an account reset',
+      directory_provisioned: 'Account created by a directory sign-in',
+      directory_linked: 'Account linked to the directory',
+      directory_unlinked: 'Account unlinked from the directory',
+      groups_synced: 'Groups recomputed from the directory',
     },
   },
   resourceTypes: {

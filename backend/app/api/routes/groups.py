@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
@@ -79,6 +79,11 @@ class GroupOut(BaseModel):
     # not hold room:read, and would otherwise see bare ids. Sites, then
     # buildings, then rooms; empty for the whole parc.
     scope_labels: list["ScopeLabel"] = []
+    # Its members log in with a second factor (C7).
+    mfa_required: bool = False
+    # The directory groups (Entra object ids) whose members get this group
+    # when they sign in through the directory (C7).
+    idp_groups: list[str] = []
     member_count: int
     created_at: datetime
     updated_at: datetime
@@ -207,11 +212,29 @@ async def _scope_labels(
 GroupName = Annotated[str, bounded_name(GROUP_NAME_MAX_LENGTH)]
 
 
+# Directory groups one Tia'i group stands for, at most.
+MAX_IDP_GROUPS = 50
+# An Entra object id, or another provider's group name: letters, digits and
+# a few separators — never a space nor anything a query would read.
+IdpGroupId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        to_lower=True,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@-]*$",
+    ),
+]
+
+
 class GroupCreate(BaseModel):
     name: GroupName
     description: str | None = Field(default=None, max_length=500)
     permissions: list[str] = []
     scope: ScopeBody | None = None
+    mfa_required: bool = False
+    idp_groups: list[IdpGroupId] = Field(default=[], max_length=MAX_IDP_GROUPS)
 
 
 class GroupUpdate(BaseModel):
@@ -222,8 +245,10 @@ class GroupUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     permissions: list[str] | None = None
     scope: ScopeBody | None = None
+    mfa_required: bool | None = None
+    idp_groups: list[IdpGroupId] | None = Field(default=None, max_length=MAX_IDP_GROUPS)
 
-    _not_null = not_null("name", "permissions")
+    _not_null = not_null("name", "permissions", "mfa_required", "idp_groups")
 
 
 async def _require_group(session: SessionDep, group_id: uuid.UUID) -> Group:
@@ -310,6 +335,7 @@ async def _out(session: SessionDep, groups: list[Group]) -> list[GroupOut]:
     ids = [g.id for g in groups]
     permissions = await crud.permissions_of_groups(session, ids)
     scopes = await crud.scopes_of_groups(session, ids)
+    idp_links = await crud.idp_links_of_groups(session, ids)
     counts = await crud.member_counts(session, ids)
     labels = await _scope_labels(session, scopes)
     return [
@@ -322,6 +348,8 @@ async def _out(session: SessionDep, groups: list[Group]) -> list[GroupOut]:
             permissions=sorted(permissions.get(g.id, frozenset())),
             scope=ScopeBody.of(scopes.get(g.id)),
             scope_labels=labels.get(g.id, []),
+            mfa_required=g.mfa_required,
+            idp_groups=sorted(idp_links.get(g.id, set())),
             member_count=counts.get(g.id, 0),
             created_at=g.created_at,
             updated_at=g.updated_at,
@@ -369,11 +397,16 @@ async def create_group(
         actor_email=current.email,
         action="grant",
     )
-    group = Group(name=payload.name, description=payload.description)
+    group = Group(
+        name=payload.name,
+        description=payload.description,
+        mfa_required=payload.mfa_required,
+    )
     session.add(group)
     await _flush_name(session)
     await crud.set_group_permissions(session, group, permissions)
     await crud.set_group_scope(session, group, scope)
+    await crud.set_group_idp_links(session, group, payload.idp_groups)
     audit.record(
         session,
         actor=current.email,
@@ -384,6 +417,12 @@ async def create_group(
             "name": group.name,
             "permissions": sorted(permissions),
             **({"scope": scope.rows()} if scope is not None else {}),
+            **({"mfa_required": True} if group.mfa_required else {}),
+            **(
+                {"idp_groups": sorted(set(payload.idp_groups))}
+                if payload.idp_groups
+                else {}
+            ),
         },
     )
     await session.commit()
@@ -437,6 +476,16 @@ async def update_group(
         )
     fields.pop("scope", None)
     scope = await _validate_scope(session, payload.scope) if scope_changed else None
+    # Linking directory groups hands the group to their members (C7): a
+    # grant, as much as adding them one by one.
+    idp_groups = fields.pop("idp_groups", None)
+    if idp_groups is not None:
+        reject_escalation(
+            authority,
+            await crud.groups_authority(session, [group.id]),
+            actor_email=current.email,
+            action="grant",
+        )
     if permissions is not None or scope_changed:
         current_scope = (await crud.scopes_of_groups(session, [group.id]))[group.id]
         reject_escalation(
@@ -475,6 +524,8 @@ async def update_group(
         await crud.set_group_permissions(session, group, permissions)
     if scope_changed:
         await crud.set_group_scope(session, group, scope)
+    if idp_groups is not None:
+        await crud.set_group_idp_links(session, group, idp_groups)
     audit.record(
         session,
         actor=current.email,
@@ -484,6 +535,14 @@ async def update_group(
         details={
             "name": group.name,
             "fields": sorted(fields),
+            **(
+                {"mfa_required": group.mfa_required} if "mfa_required" in fields else {}
+            ),
+            **(
+                {"idp_groups": sorted(set(idp_groups))}
+                if idp_groups is not None
+                else {}
+            ),
             **({"permissions": sorted(permissions)} if permissions is not None else {}),
             **(
                 {"scope": scope.rows() if scope is not None else None}

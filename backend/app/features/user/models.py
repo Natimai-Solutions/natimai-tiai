@@ -3,9 +3,9 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Column, ForeignKey, Index, func, text
+from sqlalchemy import BigInteger, Column, ForeignKey, Index, false, func, text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, SQLModel, col
 
 from app.features.base import utc_field, utcnow
 
@@ -124,12 +124,79 @@ class User(SQLModel, table=True):
     # (``addresses.shut_out``). Apart from ``locked_until``, which a
     # successful login lifts: this one outlives it.
     slow_locked_until: datetime | None = utc_field(default=None, nullable=True)
+    # --- Second factor (C7, ``core/totp.py``) ---
+    # The TOTP secret, sealed (``secretbox.encrypt_totp``). Set by « Activer »
+    # and pending until a first code confirms it (``totp_enabled_at``): an
+    # enrolment left half-way never stands between the holder and the console.
+    totp_secret: str | None = Field(default=None, max_length=255)
+    totp_enabled_at: datetime | None = utc_field(default=None, nullable=True)
+    # The last time step a code was accepted for: a code of that step or an
+    # earlier one is refused (replay).
+    totp_last_step: int | None = Field(
+        default=None, sa_column=Column(BigInteger, nullable=True)
+    )
+    # Wrong codes in a row, on any challenge. Reaching
+    # SECOND_FACTOR_MAX_FAILED_ATTEMPTS sets ``totp_locked_until``
+    # (LOGIN_LOCKOUT_MINUTES); a right code starts over at zero.
+    totp_failed_attempts: int = Field(default=0)
+    totp_locked_until: datetime | None = utc_field(default=None, nullable=True)
+    # --- The directory (C7, OpenID Connect) ---
+    # ``local``: an account of the console, with its password. ``oidc``: an
+    # account created by a sign-in through the directory — no password, its
+    # groups follow the directory's (``group_idp_links``).
+    auth_source: str = Field(
+        default="local",
+        max_length=20,
+        sa_column_kwargs={"server_default": text("'local'")},
+    )
+    # The directory identity the account answers to: the provider and its
+    # subject. Set for an ``oidc`` account, and for a local one linked from
+    # « Mon compte ». The address is only a label: it changes in the
+    # directory, the subject does not.
+    oidc_issuer: str | None = Field(default=None, max_length=255)
+    oidc_subject: str | None = Field(default=None, max_length=255)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
 
 
+class UserBackupCode(SQLModel, table=True):
+    """One single-use code to log in when the phone is gone (C7). Stored as
+    a hash: shown once, at enrolment or regeneration, never again."""
+
+    __tablename__ = "user_backup_codes"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        sa_column=Column(
+            ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        )
+    )
+    code_hash: str = Field(max_length=64)
+    used_at: datetime | None = utc_field(default=None, nullable=True)
+    created_at: datetime = utc_field(default_factory=utcnow)
+
+
 # Declared outside the class because it is on an expression, not a column.
 Index("ix_users_email_lower", func.lower(User.email), unique=True)
+Index(
+    "uq_users_oidc_identity",
+    col(User.oidc_issuer),
+    col(User.oidc_subject),
+    unique=True,
+    postgresql_where=text("oidc_subject IS NOT NULL"),
+)
+
+
+class GroupIdpLink(SQLModel, table=True):
+    """A directory group whose members get this Tia'i group when they sign
+    in through the directory (C7). Entra: the group's object id."""
+
+    __tablename__ = "group_idp_links"
+
+    group_id: uuid.UUID = Field(
+        sa_column=Column(ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
+    )
+    idp_group_id: str = Field(primary_key=True, max_length=128)
 
 
 class Group(SQLModel, table=True):
@@ -148,6 +215,11 @@ class Group(SQLModel, table=True):
     name: str = Field(unique=True, max_length=GROUP_NAME_MAX_LENGTH)
     description: str | None = Field(default=None, max_length=500)
     builtin_key: str | None = Field(default=None, unique=True)
+    # Its members log in with a second factor (C7): one group requiring it
+    # is enough. A member without one is given an enrolment-only session.
+    mfa_required: bool = Field(
+        default=False, sa_column_kwargs={"server_default": false()}
+    )
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
 

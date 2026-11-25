@@ -78,6 +78,12 @@ export default defineRouter(() => {
     // the page, which reads its permissions as it loads.
     const auth = useAuthStore();
     if (to.meta.requiresAuth) await auth.ensureProfile();
+    // A session opened for enrolment only (C7: a group requires a second
+    // factor the account does not have yet): « Mon compte », where it is set
+    // up, and nothing else — the API answers nothing else either.
+    if (to.meta.requiresAuth && auth.user?.enrolment_only && to.name !== 'account') {
+      return { name: 'account' };
+    }
     // Opening /login directly with a live session goes where the link meant
     // to (`?redirect=`), else home; the refresh is only tried on that first
     // navigation — once the console runs, reaching /login means the session

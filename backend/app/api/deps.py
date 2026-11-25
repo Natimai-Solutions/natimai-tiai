@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import InvalidTokenError
 from sqlmodel import col, select
@@ -96,7 +96,16 @@ CurrentMachine = Annotated[Machine, Depends(get_current_machine)]
 # --- Console user auth (JWT) -----------------------------------------------
 
 
+# What a session opened for enrolment only (C7) may reach: « Mon compte »,
+# the enrolment itself, the sessions list and the logout.
+_ENROLMENT_PATHS = frozenset(
+    f"{settings.API_V1_STR}/auth/{path}"
+    for path in ("me", "totp/setup", "totp/confirm", "sessions", "logout")
+)
+
+
 async def _authenticate(
+    request: Request,
     session: SessionDep,
     token: Annotated[str, Depends(oauth2_scheme)],
 ) -> tuple[AuthSession, User]:
@@ -160,6 +169,12 @@ async def _authenticate(
         changed_at = int(user.password_changed_at.timestamp())
         if issued_at is None or int(issued_at) < changed_at:
             raise credentials_error
+    if auth_session.enrolment_only and request.url.path not in _ENROLMENT_PATHS:
+        raise AppError(
+            code=ErrorCode.AUTH_SECOND_FACTOR_NOT_ENROLLED,
+            status_code=403,
+            message="Set up the second factor your group requires first",
+        )
     return auth_session, user
 
 

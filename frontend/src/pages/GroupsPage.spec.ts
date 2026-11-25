@@ -54,7 +54,7 @@ const wholeParc = { ...restricted, id: 'g-2', name: 'Tous', scope: null } as unk
 interface GroupsApi {
   openCreate: () => void;
   openEdit: (group: Group) => void;
-  form: { name: string; scope: { locations: string[] } };
+  form: { name: string; scope: { locations: string[] }; mfa_required: boolean };
 }
 
 async function mountPage() {
@@ -105,6 +105,35 @@ describe('GroupsPage — scope (audit T26)', () => {
   });
   afterEach(() => {
     document.body.innerHTML = '';
+  });
+
+  it('sends the second factor obligation (C7) on create and edit', async () => {
+    const { wrapper, vm } = await mountPage();
+    vm.openCreate();
+    await flushPromises();
+    expect(vm.form.mfa_required).toBe(false);
+    vm.form.name = 'Techs MFA';
+    vm.form.mfa_required = true;
+    await typeLocation(wrapper, 'Lycée Nord');
+    await submit();
+    expect(createGroup).toHaveBeenCalledWith(expect.objectContaining({ mfa_required: true }));
+    wrapper.unmount();
+  });
+
+  it('sends the directory groups (C7), one typed without Entrée included', async () => {
+    const { wrapper, vm } = await mountPage();
+    vm.openCreate();
+    await flushPromises();
+    vm.form.name = 'Techs annuaire';
+    await typeLocation(wrapper, 'Lycée Nord');
+    const idp = wrapper.findAllComponents(QSelect).at(-1)!;
+    idp.vm.$emit('new-value', 'BAD ID;', () => undefined);
+    idp.vm.$emit('input-value', ' 11111111-AAAA-4bbb-8ccc-000000000001 ');
+    await submit();
+    expect(createGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ idp_groups: ['11111111-aaaa-4bbb-8ccc-000000000001'] }),
+    );
+    wrapper.unmount();
   });
 
   it('keeps a location typed without Entrée when the form is saved', async () => {

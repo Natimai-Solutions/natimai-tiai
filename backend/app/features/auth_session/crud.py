@@ -90,6 +90,8 @@ async def open_session(
     *,
     user_agent: str | None,
     ip: str | None,
+    auth_method: str = "password",
+    enrolment_only: bool = False,
 ) -> tuple[AuthSession, str]:
     """Open a session for a login; returns it with its clear refresh token.
 
@@ -108,6 +110,8 @@ async def open_session(
         expires_at=_expiry(now, now),
         user_agent=_bounded(user_agent, USER_AGENT_MAX_LENGTH),
         ip=_bounded(ip, IP_MAX_LENGTH),
+        auth_method=auth_method,
+        enrolment_only=enrolment_only,
     )
     session.add(row)
     await session.flush()

@@ -5,7 +5,9 @@ import {
   login as loginRequest,
   logout as logoutRequest,
   updateMe,
+  verifySecondFactor as verifySecondFactorRequest,
   type AccountLanguage,
+  type SecondFactorChallenge,
   type User,
 } from 'src/services/auth';
 import {
@@ -80,8 +82,20 @@ export const useAuthStore = defineStore('auth', {
     },
   },
   actions: {
-    async login(email: string, password: string) {
-      const { access_token } = await loginRequest(email, password);
+    /**
+     * Log in with a password. Returns the challenge when the account has a
+     * second factor (C7): nothing is open yet, the page asks for the code
+     * and calls `verifySecondFactor`.
+     */
+    async login(email: string, password: string): Promise<SecondFactorChallenge | null> {
+      const answer = await loginRequest(email, password);
+      if ('second_factor_required' in answer) return answer;
+      setAccessToken(answer.access_token);
+      await this.fetchMe();
+      return null;
+    },
+    async verifySecondFactor(challenge: string, code: string) {
+      const { access_token } = await verifySecondFactorRequest(challenge, code);
       setAccessToken(access_token);
       await this.fetchMe();
     },

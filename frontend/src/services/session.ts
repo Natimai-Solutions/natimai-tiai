@@ -92,7 +92,13 @@ export function singleFlight<T>(task: () => Promise<T>): () => Promise<T> {
  * login is not an expired session, the refresh itself failing is what ends
  * one, and logout answers 204 whatever happens.
  */
-const NO_REFRESH_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout'];
+// The second step of a login answers 401 for a wrong code: not a session to refresh.
+const NO_REFRESH_PATHS = [
+  '/auth/login',
+  '/auth/login/second-factor',
+  '/auth/refresh',
+  '/auth/logout',
+];
 
 function isNoRefreshPath(url: string | undefined): boolean {
   if (!url) return false;

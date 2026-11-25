@@ -30,7 +30,7 @@ describe('login', () => {
 
     const result = await login('admin@test.local', 'secret');
 
-    expect(result.access_token).toBe('jwt-123');
+    expect(result).toEqual({ access_token: 'jwt-123', token_type: 'bearer' });
     const [url, body] = vi.mocked(api.post).mock.calls[0]!;
     expect(url).toBe('/auth/login');
     expect(body).toBeInstanceOf(URLSearchParams);

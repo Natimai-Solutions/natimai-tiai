@@ -16,6 +16,11 @@ export interface ConsoleUser {
   groups: GroupRef[];
   /** Set while the account is locked after failed logins. */
   locked_until: string | null;
+  /** A second factor is active (C7). Absent from an older server. */
+  second_factor_enabled?: boolean;
+  /** `oidc`: signs in through the directory (C7); no password to reset. */
+  auth_source?: 'local' | 'oidc';
+  directory_linked?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -74,6 +79,11 @@ export async function deleteUser(id: string): Promise<void> {
  * Reset an account's password. Omit `password` to have the server generate one.
  * The returned value is shown once — it is never retrievable afterwards.
  */
+/** Remove an account's second factor and backup codes (C7); its sessions end. */
+export async function resetUserSecondFactor(id: string): Promise<void> {
+  await api.post(`/users/${id}/reset-second-factor`);
+}
+
 export async function resetUserPassword(id: string, password?: string): Promise<string> {
   const body = password ? { password } : {};
   const { data } = await api.post<{ password: string }>(`/users/${id}/reset-password`, body);
