@@ -74,13 +74,15 @@ jobs:
       # rejoue aussi la restauration de DEPLOYMENT.md (psql, pg_dump,
       # pg_restore) sur le service postgres. Sans ces outils, ces tests
       # étaient sautés en silence ; ici (CI posé), leur absence les fait
-      # échouer. postgresql-client est souvent déjà sur l'image du runner :
-      # nommé quand même, pour ne pas dépendre de ce qu'elle embarque.
+      # échouer. Le client de la version du service (16) : celui du PATH du
+      # runner est plus récent et écrit des réglages qu'un serveur 16 refuse
+      # (SET transaction_timeout) ; le test de restauration prend
+      # /usr/lib/postgresql/16/bin, comme db-backup prend l'image de db.
       - name: Outils des tests de sauvegarde (age, busybox, client PostgreSQL)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends age busybox-static postgresql-client
-          age --version && busybox | head -n 1 && pg_dump --version && pg_restore --version && psql --version
+          sudo apt-get install -y --no-install-recommends age busybox-static postgresql-client-16
+          age --version && busybox | head -n 1 && /usr/lib/postgresql/16/bin/pg_dump --version && /usr/lib/postgresql/16/bin/pg_restore --version && psql --version
 
       - name: Ruff format
         run: uv run ruff format --check

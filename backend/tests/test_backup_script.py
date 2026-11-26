@@ -221,7 +221,6 @@ def run_script(
     tmpdir=None,
     age_fails=False,
     attachments=None,
-    cp_fails=False,
     db_rows=None,
 ):
     """One cycle of backup.sh: returns once it exits or closes its first
@@ -229,21 +228,14 @@ def run_script(
     the fake pg_dump fails (``FAKE_PG_DUMP``); ``tmpdir`` the script's
     ``TMPDIR`` when it is not the test's folder; ``age_fails`` puts
     ``FAKE_AGE`` in place of age; ``attachments`` the attachments volume
-    (absent unless given); ``cp_fails`` a ``cp`` that always fails;
-    ``db_rows`` what ``FAKE_PSQL`` answers (no psql unless given)."""
+    (absent unless given); ``db_rows`` what ``FAKE_PSQL`` answers (no psql unless given)."""
     bindir = tmp_path / f"bin-{shell}"
     bindir.mkdir(exist_ok=True)
     for tool in TOOLS:
         target = _tool("busybox") if shell == "busybox" else shutil.which(tool)
         assert target, tool
         link = bindir / tool
-        if tool == "cp" and cp_fails:
-            link.unlink(missing_ok=True)
-            link.write_text(
-                "#!/bin/sh\necho 'cp: No space left on device' >&2\nexit 1\n"
-            )
-            link.chmod(0o755)
-        elif not link.exists():
+        if not link.exists():
             link.symlink_to(target)
     if age_fails:
         (bindir / "age").write_text(FAKE_AGE)
@@ -655,7 +647,12 @@ def test_a_failed_copy_is_said_and_purges_nothing(shell, tmp_path, backups, volu
     copy.mkdir()
     (copy / SHA_GONE).write_bytes(b"old")
     _old(copy / SHA_GONE)
-    run = run_script(shell, tmp_path, backups, attachments=volume, cp_fails=True)
+    # Every copy fails where it is written: its temporary name is a link to
+    # a folder that does not exist. A fake ``cp`` on the PATH would not do —
+    # busybox runs its own applet whatever the PATH says.
+    for source in volume.iterdir():
+        (copy / f"{source.name}.tmp").symlink_to(tmp_path / "nowhere" / "copy")
+    run = run_script(shell, tmp_path, backups, attachments=volume)
     assert "ECHEC de la copie des pièces jointes" in run.stderr, run.stderr
     # The dump itself stands, and closes the cycle.
     assert "sauvegarde OK" in run.stdout
@@ -774,6 +771,21 @@ def test_the_documented_restore_puts_back_a_dump_older_than_the_schema(tmp_path)
             capture_output=True,
             text=True,
         ).stdout
+
+    # The tools of the server's own version, as in production, where
+    # db-backup runs the image of the db service. A newer pg_dump writes
+    # settings an older server refuses (``SET transaction_timeout``, 17+), and
+    # a runner's PATH holds whatever version its image ships.
+    major = int(psql("postgres", "SHOW server_version_num")) // 10000
+    tools = Path(f"/usr/lib/postgresql/{major}/bin")
+    if tools.is_dir():
+        env["PATH"] = f"{tools}{os.pathsep}{env['PATH']}"
+    elif os.environ.get("CI"):
+        pytest.fail(
+            f"no PostgreSQL {major} client in {tools}: install "
+            f"postgresql-client-{major} in the workflow's step for the backup "
+            "tests' tools (.github/workflows/ci.yml)"
+        )
 
     psql("postgres", f'DROP DATABASE IF EXISTS "{db}"', f'CREATE DATABASE "{db}"')
     try:

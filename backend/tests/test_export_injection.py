@@ -126,7 +126,11 @@ def test_the_xlsx_export_grows_linearly_with_its_rows():
         xlsx_bytes([f"C{j}" for j in range(20)], rows)
         return time.perf_counter() - start
 
-    small, large = timed(400), timed(1600)
+    # The best of three for each size: one stall of a busy CI runner in a
+    # single run (seen: 0.24 s then 4.9 s) is not the export's own cost. The
+    # quadratic regression shows in every run, so it still fails here.
+    small = min(timed(400) for _ in range(3))
+    large = min(timed(1600) for _ in range(3))
     assert large < small * 8, (small, large)
 
 
