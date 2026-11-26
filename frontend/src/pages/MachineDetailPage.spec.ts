@@ -70,6 +70,7 @@ import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import CheckRequestDialog from 'src/components/check/CheckRequestDialog.vue';
 import MachineCommandsCard from 'src/components/machine/MachineCommandsCard.vue';
 import MachineHistoryCard from 'src/components/machine/MachineHistoryCard.vue';
+import MachineProcedureCard from 'src/components/machine/MachineProcedureCard.vue';
 import MachineMaintenanceCard from 'src/components/machine/MachineMaintenanceCard.vue';
 import MachineMergeDialog from 'src/components/machine/MachineMergeDialog.vue';
 import MachineStatusCard from 'src/components/machine/MachineStatusCard.vue';
@@ -440,6 +441,41 @@ describe('MachineDetailPage', () => {
       expect(w.findComponent(MachineMaintenanceCard).exists()).toBe(true);
       expect(w.findComponent(MachineHistoryCard).exists()).toBe(false);
       expect(journalCalls()).toBe(0);
+    });
+
+    // C11: the procedure of the model is a card of the tab of its own.
+    it('is offered to an account that reads the procedures alone', async () => {
+      const w = await mountPage('B', ['machine:read', 'procedure:read'], '?tab=history');
+      answer('B');
+      await flushPromises();
+
+      expect(w.findComponent(QTabPanels).props('modelValue')).toBe('history');
+      expect(w.findComponent(MachineProcedureCard).exists()).toBe(true);
+      expect(w.findComponent(MachineProcedureCard).props('machineId')).toBe('B');
+      expect(w.findComponent(MachineHistoryCard).exists()).toBe(false);
+      expect(journalCalls()).toBe(0);
+    });
+
+    it('puts the procedure at the head of the tab, above the maintenance and the journal', async () => {
+      const w = await mountPage(
+        'B',
+        ['machine:read', 'procedure:read', 'maintenance:read', 'intervention:read'],
+        '?tab=history',
+      );
+      answer('B');
+      await flushPromises();
+
+      const card = w.findComponent(MachineProcedureCard).element;
+      expect(card.parentElement!.firstElementChild).toBe(card);
+      expect(w.findComponent(MachineMaintenanceCard).exists()).toBe(true);
+    });
+
+    it('asks nothing of the procedures without procedure:read', async () => {
+      const w = await mountPage('B', ['machine:read', 'intervention:read'], '?tab=history');
+      answer('B');
+      await flushPromises();
+
+      expect(w.findComponent(MachineProcedureCard).exists()).toBe(false);
     });
 
     it('shows the journal alone to an account that only reads interventions', async () => {

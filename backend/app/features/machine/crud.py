@@ -7,6 +7,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.features.alert import crud as alert_crud
+from app.features.approval import crud as approval_crud
 from app.features.asset import crud as asset_crud
 from app.features.base import utcnow
 from app.features.check import crud as check_crud
@@ -113,6 +114,7 @@ async def merge_into(
     # The asset follows the poste: what was paid for it, its warranty.
     await asset_crud.move_to(session, source_id=source.id, target_id=target.id)
     await schedule_crud.move_to(session, source_id=source.id, target_id=target.id)
+    await approval_crud.move_to(session, source_id=source.id, target_id=target.id)
     await report_crud.move_to(session, source_id=source.id, target_id=target.id)
 
     # Keep the freshest last-seen; the merge resolves the verification. The

@@ -23,6 +23,7 @@ from app.core import ratelimit
 from app.core.config import settings as env
 from app.core.errors import AppError, ErrorCode
 from app.features.alert.models import ALL_RULES, AlertRule
+from app.features.approval import reach as approval_reach
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.machine import crud as machine_crud
@@ -199,6 +200,9 @@ class SettingsOut(BaseModel):
     # échue ».
     license_expiry_days: int = 60
     env_license_expiry_days: int = 60
+    # Attachments (C11): how many days they are kept; 0 = kept.
+    attachment_retention_days: int = 0
+    env_attachment_retention_days: int = 0
     # Schedules (C3): the zone the console plans in, and the weekly windows
     # when nothing at risk runs on several postes.
     console_timezone: str = "UTC"
@@ -207,6 +211,16 @@ class SettingsOut(BaseModel):
     # Reports (C4): whether a label's QR code opens the form without an account.
     reports_enabled: bool = False
     env_reports_enabled: bool = False
+    # Two-person approval of mass actions (C10): on or off, the threshold,
+    # how long a request waits; how many accounts could approve (places not
+    # considered); the environment's values.
+    approval_enabled: bool = False
+    approval_threshold: int = 40
+    approval_ttl_hours: int = 24
+    approval_eligible: int = 0
+    env_approval_enabled: bool = False
+    env_approval_threshold: int = 40
+    env_approval_ttl_hours: int = 24
     # How mail leaves the console: the console's values, the environment's.
     email: EmailSettingsOut
     # The rest of the environment an administrator may want to check without
@@ -346,6 +360,7 @@ class SettingsUpdate(BaseModel):
     )
     compliance_patch_grace_days: int | None = Field(default=None, ge=0, le=365)
     license_expiry_days: int | None = Field(default=None, ge=1, le=365)
+    attachment_retention_days: int | None = Field(default=None, ge=0, le=3650)
     compliance_admins_allowed: (
         list[
             Annotated[
@@ -360,6 +375,11 @@ class SettingsUpdate(BaseModel):
     # back to CONSOLE_TIMEZONE. Windows are written whole.
     console_timezone: str | None = Field(default=None, max_length=64)
     reports_enabled: bool | None = None
+    # Two-person approval (C10): turning it on is refused with fewer than
+    # two accounts able to approve.
+    approval_enabled: bool | None = None
+    approval_threshold: int | None = Field(default=None, ge=2, le=10000)
+    approval_ttl_hours: int | None = Field(default=None, ge=1, le=168)
     forbidden_windows: list[ForbiddenWindowIn] | None = Field(
         default=None, max_length=20
     )
@@ -445,6 +465,7 @@ async def _out(session: SessionDep) -> SettingsOut:
     alerts = await crud.alert_policy(session, values)
     compliance = await crud.compliance_policy(session, values)
     planning = await windows.schedule_policy(session, values)
+    approvals = await crud.approval_policy(session, values)
     # Also refreshes what this process's ``queue_email`` reads: after a
     # patch, the new mail settings apply to the very next queued mail.
     stored = await mail.load_stored(session, values)
@@ -517,11 +538,20 @@ async def _out(session: SessionDep) -> SettingsOut:
         compliance_admins_allowed=list(compliance.admins_allowed),
         license_expiry_days=await crud.license_expiry_days(session, values),
         env_license_expiry_days=env.LICENSE_EXPIRY_DAYS,
+        attachment_retention_days=await crud.attachment_retention_days(session, values),
+        env_attachment_retention_days=env.ATTACHMENT_RETENTION_DAYS,
         console_timezone=planning.zone_name,
         env_console_timezone=env.CONSOLE_TIMEZONE,
         forbidden_windows=[w.as_json() for w in planning.forbidden],
         reports_enabled=await report_crud.enabled(session, values),
         env_reports_enabled=env.REPORTS_ENABLED,
+        approval_enabled=approvals.enabled,
+        approval_threshold=approvals.threshold,
+        approval_ttl_hours=approvals.ttl_hours,
+        approval_eligible=await approval_reach.eligible_count(session),
+        env_approval_enabled=env.APPROVAL_ENABLED,
+        env_approval_threshold=env.APPROVAL_THRESHOLD,
+        env_approval_ttl_hours=env.APPROVAL_TTL_HOURS,
         email=_email_out(stored),
         environment=[
             EnvGroupOut(
@@ -620,6 +650,9 @@ _SIMPLE_KEYS = {
     "reports_enabled": report_crud.KEY_ENABLED,
     "compliance_patch_grace_days": crud.KEY_COMPLIANCE_PATCH_GRACE,
     "license_expiry_days": crud.KEY_LICENSE_EXPIRY_DAYS,
+    "attachment_retention_days": crud.KEY_ATTACHMENT_RETENTION,
+    "approval_threshold": crud.KEY_APPROVAL_THRESHOLD,
+    "approval_ttl_hours": crud.KEY_APPROVAL_TTL_HOURS,
 }
 
 # List settings: written whole, without duplicates, in the order sent.
@@ -685,6 +718,28 @@ async def _write_simple(
             await schedule_runner.rezone(session, zone_before, planning, utcnow())
 
 
+async def _write_approval(
+    session: SessionDep, payload: SettingsUpdate, *, actor: str
+) -> None:
+    """Turn two-person approval on or off (C10). On is refused while fewer
+    than two accounts could approve: with a single administrator, every
+    action of mass would wait for nobody. Off leaves the pending requests
+    decidable until they expire."""
+    if "approval_enabled" not in payload.model_fields_set:
+        return
+    value = payload.approval_enabled
+    if value and not (await crud.approval_policy(session)).enabled:
+        eligible = await approval_reach.eligible_count(session)
+        if eligible < 2:
+            raise AppError(
+                code=ErrorCode.APPROVAL_NOT_ENOUGH_APPROVERS,
+                status_code=422,
+                message="Two accounts at least must be able to approve",
+                details={"eligible": eligible},
+            )
+    await crud.set_value(session, crud.KEY_APPROVAL_ENABLED, value, actor=actor)
+
+
 @router.get("", response_model=SettingsOut)
 async def get_settings(session: SessionDep) -> SettingsOut:
     return await _out(session)
@@ -718,6 +773,7 @@ async def update_settings(
     await _write_usage(session, payload, actor=current.email)
     await _write_simple(session, payload, actor=current.email)
     await _write_lists(session, payload, actor=current.email)
+    await _write_approval(session, payload, actor=current.email)
     if "maintenance_default_cycle_days" in fields:
         await crud.set_value(
             session,

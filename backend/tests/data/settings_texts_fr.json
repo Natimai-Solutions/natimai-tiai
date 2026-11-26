@@ -119,6 +119,14 @@
        "raw": 730,
        "format": "plain",
        "params": {}
+      },
+      {
+       "key": "TREND_RETENTION_DAYS",
+       "value": "760",
+       "description": "Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances",
+       "raw": 760,
+       "format": "plain",
+       "params": {}
       }
      ]
     },
@@ -553,6 +561,38 @@
        "params": {}
       },
       {
+       "key": "APPROVAL_ENABLED",
+       "value": "non",
+       "description": "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_THRESHOLD",
+       "value": "40",
+       "description": "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+       "raw": 40,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_TTL_HOURS",
+       "value": "24",
+       "description": "Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_RETENTION_DAYS",
+       "value": "180",
+       "description": "Jours pendant lesquels une demande d'approbation close est conservée",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
        "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
        "value": "oui",
        "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
@@ -653,6 +693,44 @@
        "value": "8",
        "description": "Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents",
        "raw": 8,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "attachments",
+     "label": "Pièces jointes",
+     "items": [
+      {
+       "key": "ATTACHMENTS_DIR",
+       "value": "/data/attachments",
+       "description": "Dossier du serveur où sont rangées les pièces jointes du journal (un fichier par empreinte SHA-256, volume attachments)",
+       "raw": "/data/attachments",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_MAX_BYTES",
+       "value": "5242880 (5 Mio)",
+       "description": "Taille maximale d'une pièce jointe, en octets (7 Mio au plus, sous la limite de 8 Mo du proxy)",
+       "raw": 5242880,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_QUOTA_BYTES",
+       "value": "2147483648 (2 Gio)",
+       "description": "Total des pièces jointes conservées, en octets ; 0 = pas de quota",
+       "raw": 2147483648,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_RETENTION_DAYS",
+       "value": "0",
+       "description": "Valeur initiale de la conservation des pièces jointes, en jours (0 = conserver) ; modifiable dans Paramètres",
+       "raw": 0,
        "format": "plain",
        "params": {}
       }
@@ -792,6 +870,14 @@
        "value": "730",
        "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
        "raw": 730,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TREND_RETENTION_DAYS",
+       "value": "760",
+       "description": "Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances",
+       "raw": 760,
        "format": "plain",
        "params": {}
       }
@@ -1231,6 +1317,38 @@
        "params": {}
       },
       {
+       "key": "APPROVAL_ENABLED",
+       "value": "non",
+       "description": "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_THRESHOLD",
+       "value": "40",
+       "description": "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+       "raw": 40,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_TTL_HOURS",
+       "value": "24",
+       "description": "Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_RETENTION_DAYS",
+       "value": "180",
+       "description": "Jours pendant lesquels une demande d'approbation close est conservée",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
        "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
        "value": "oui",
        "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
@@ -1331,6 +1449,44 @@
        "value": "8",
        "description": "Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents",
        "raw": 8,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "attachments",
+     "label": "Pièces jointes",
+     "items": [
+      {
+       "key": "ATTACHMENTS_DIR",
+       "value": "/data/attachments",
+       "description": "Dossier du serveur où sont rangées les pièces jointes du journal (un fichier par empreinte SHA-256, volume attachments)",
+       "raw": "/data/attachments",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_MAX_BYTES",
+       "value": "5242880 (5 Mio)",
+       "description": "Taille maximale d'une pièce jointe, en octets (7 Mio au plus, sous la limite de 8 Mo du proxy)",
+       "raw": 5242880,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_QUOTA_BYTES",
+       "value": "2147483648 (2 Gio)",
+       "description": "Total des pièces jointes conservées, en octets ; 0 = pas de quota",
+       "raw": 2147483648,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_RETENTION_DAYS",
+       "value": "0",
+       "description": "Valeur initiale de la conservation des pièces jointes, en jours (0 = conserver) ; modifiable dans Paramètres",
+       "raw": 0,
        "format": "plain",
        "params": {}
       }
@@ -1462,6 +1618,14 @@
        "value": "730",
        "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
        "raw": 730,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TREND_RETENTION_DAYS",
+       "value": "760",
+       "description": "Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances",
+       "raw": 760,
        "format": "plain",
        "params": {}
       }
@@ -1898,6 +2062,38 @@
        "params": {}
       },
       {
+       "key": "APPROVAL_ENABLED",
+       "value": "non",
+       "description": "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_THRESHOLD",
+       "value": "40",
+       "description": "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+       "raw": 40,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_TTL_HOURS",
+       "value": "24",
+       "description": "Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_RETENTION_DAYS",
+       "value": "180",
+       "description": "Jours pendant lesquels une demande d'approbation close est conservée",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
        "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
        "value": "oui",
        "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
@@ -1998,6 +2194,44 @@
        "value": "8",
        "description": "Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents",
        "raw": 8,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "attachments",
+     "label": "Pièces jointes",
+     "items": [
+      {
+       "key": "ATTACHMENTS_DIR",
+       "value": "/data/attachments",
+       "description": "Dossier du serveur où sont rangées les pièces jointes du journal (un fichier par empreinte SHA-256, volume attachments)",
+       "raw": "/data/attachments",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_MAX_BYTES",
+       "value": "5242880 (5 Mio)",
+       "description": "Taille maximale d'une pièce jointe, en octets (7 Mio au plus, sous la limite de 8 Mo du proxy)",
+       "raw": 5242880,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_QUOTA_BYTES",
+       "value": "2147483648 (2 Gio)",
+       "description": "Total des pièces jointes conservées, en octets ; 0 = pas de quota",
+       "raw": 2147483648,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_RETENTION_DAYS",
+       "value": "0",
+       "description": "Valeur initiale de la conservation des pièces jointes, en jours (0 = conserver) ; modifiable dans Paramètres",
+       "raw": 0,
        "format": "plain",
        "params": {}
       }
@@ -2137,6 +2371,14 @@
        "value": "730",
        "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
        "raw": 730,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TREND_RETENTION_DAYS",
+       "value": "760",
+       "description": "Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances",
+       "raw": 760,
        "format": "plain",
        "params": {}
       }
@@ -2582,6 +2824,38 @@
        "params": {}
       },
       {
+       "key": "APPROVAL_ENABLED",
+       "value": "non",
+       "description": "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_THRESHOLD",
+       "value": "40",
+       "description": "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+       "raw": 40,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_TTL_HOURS",
+       "value": "24",
+       "description": "Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_RETENTION_DAYS",
+       "value": "180",
+       "description": "Jours pendant lesquels une demande d'approbation close est conservée",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
        "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
        "value": "oui",
        "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
@@ -2685,6 +2959,44 @@
        "value": "8",
        "description": "Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents",
        "raw": 8,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "attachments",
+     "label": "Pièces jointes",
+     "items": [
+      {
+       "key": "ATTACHMENTS_DIR",
+       "value": "/data/attachments",
+       "description": "Dossier du serveur où sont rangées les pièces jointes du journal (un fichier par empreinte SHA-256, volume attachments)",
+       "raw": "/data/attachments",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_MAX_BYTES",
+       "value": "5242880 (5 Mio)",
+       "description": "Taille maximale d'une pièce jointe, en octets (7 Mio au plus, sous la limite de 8 Mo du proxy)",
+       "raw": 5242880,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_QUOTA_BYTES",
+       "value": "2147483648 (2 Gio)",
+       "description": "Total des pièces jointes conservées, en octets ; 0 = pas de quota",
+       "raw": 2147483648,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_RETENTION_DAYS",
+       "value": "0",
+       "description": "Valeur initiale de la conservation des pièces jointes, en jours (0 = conserver) ; modifiable dans Paramètres",
+       "raw": 0,
        "format": "plain",
        "params": {}
       }
@@ -2813,6 +3125,14 @@
        "value": "730",
        "description": "Jours de conservation du journal d'audit (0 = indéfiniment)",
        "raw": 730,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "TREND_RETENTION_DAYS",
+       "value": "760",
+       "description": "Jours de conservation des photos quotidiennes du tableau de bord, lues par la page Tendances",
+       "raw": 760,
        "format": "plain",
        "params": {}
       }
@@ -3255,6 +3575,38 @@
        "params": {}
       },
       {
+       "key": "APPROVAL_ENABLED",
+       "value": "non",
+       "description": "Valeur initiale de l'approbation à deux : au-delà du seuil, une commande à risque attend l'accord d'un second compte ; modifiable dans Paramètres",
+       "raw": false,
+       "format": "bool",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_THRESHOLD",
+       "value": "40",
+       "description": "Valeur initiale du nombre de postes au-delà duquel l'approbation s'applique ; modifiable dans Paramètres",
+       "raw": 40,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_TTL_HOURS",
+       "value": "24",
+       "description": "Valeur initiale de la durée, en heures, pendant laquelle une demande attend sa décision ; modifiable dans Paramètres",
+       "raw": 24,
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "APPROVAL_RETENTION_DAYS",
+       "value": "180",
+       "description": "Jours pendant lesquels une demande d'approbation close est conservée",
+       "raw": 180,
+       "format": "plain",
+       "params": {}
+      },
+      {
        "key": "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
        "value": "oui",
        "description": "Un poste déjà enrôlé qui redemande un token attend l'approbation d'un administrateur",
@@ -3355,6 +3707,44 @@
        "value": "8",
        "description": "Poids total, en Gio, au-delà duquel les postes refusent de télécharger un paquet non signé (méthode A) ; doit valoir le DeployMethodAMaxGB de la GPO des agents",
        "raw": 8,
+       "format": "plain",
+       "params": {}
+      }
+     ]
+    },
+    {
+     "code": "attachments",
+     "label": "Pièces jointes",
+     "items": [
+      {
+       "key": "ATTACHMENTS_DIR",
+       "value": "/data/attachments",
+       "description": "Dossier du serveur où sont rangées les pièces jointes du journal (un fichier par empreinte SHA-256, volume attachments)",
+       "raw": "/data/attachments",
+       "format": "plain",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_MAX_BYTES",
+       "value": "5242880 (5 Mio)",
+       "description": "Taille maximale d'une pièce jointe, en octets (7 Mio au plus, sous la limite de 8 Mo du proxy)",
+       "raw": 5242880,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_QUOTA_BYTES",
+       "value": "2147483648 (2 Gio)",
+       "description": "Total des pièces jointes conservées, en octets ; 0 = pas de quota",
+       "raw": 2147483648,
+       "format": "bytes",
+       "params": {}
+      },
+      {
+       "key": "ATTACHMENT_RETENTION_DAYS",
+       "value": "0",
+       "description": "Valeur initiale de la conservation des pièces jointes, en jours (0 = conserver) ; modifiable dans Paramètres",
+       "raw": 0,
        "format": "plain",
        "params": {}
       }

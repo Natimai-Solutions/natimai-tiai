@@ -430,6 +430,12 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "AUDIT_RETENTION_DAYS",
                     "Jours de conservation du journal d'audit (0 = indéfiniment)",
                 ),
+                _item(
+                    env,
+                    "TREND_RETENTION_DAYS",
+                    "Jours de conservation des photos quotidiennes du tableau de "
+                    "bord, lues par la page Tendances",
+                ),
             ],
         ),
         EnvGroup(
@@ -683,6 +689,31 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                 ),
                 _item(
                     env,
+                    "APPROVAL_ENABLED",
+                    "Valeur initiale de l'approbation à deux : au-delà du seuil, une "
+                    "commande à risque attend l'accord d'un second compte ; modifiable "
+                    "dans Paramètres",
+                ),
+                _item(
+                    env,
+                    "APPROVAL_THRESHOLD",
+                    "Valeur initiale du nombre de postes au-delà duquel l'approbation "
+                    "s'applique ; modifiable dans Paramètres",
+                ),
+                _item(
+                    env,
+                    "APPROVAL_TTL_HOURS",
+                    "Valeur initiale de la durée, en heures, pendant laquelle une "
+                    "demande attend sa décision ; modifiable dans Paramètres",
+                ),
+                _item(
+                    env,
+                    "APPROVAL_RETENTION_DAYS",
+                    "Jours pendant lesquels une demande d'approbation close est "
+                    "conservée",
+                ),
+                _item(
+                    env,
                     "ENROLLMENT_REENROLL_REQUIRES_APPROVAL",
                     "Un poste déjà enrôlé qui redemande un token attend l'approbation "
                     "d'un administrateur",
@@ -765,6 +796,41 @@ def environment_overview(env: Settings = settings) -> list[EnvGroup]:
                     "Poids total, en Gio, au-delà duquel les postes refusent de "
                     "télécharger un paquet non signé (méthode A) ; doit valoir le "
                     "DeployMethodAMaxGB de la GPO des agents",
+                ),
+            ],
+        ),
+        EnvGroup(
+            code="attachments",
+            label="Pièces jointes",
+            items=[
+                _item(
+                    env,
+                    "ATTACHMENTS_DIR",
+                    "Dossier du serveur où sont rangées les pièces jointes du journal "
+                    "(un fichier par empreinte SHA-256, volume attachments)",
+                ),
+                _item(
+                    env,
+                    "ATTACHMENT_MAX_BYTES",
+                    "Taille maximale d'une pièce jointe, en octets (7 Mio au plus, "
+                    "sous la limite de 8 Mo du proxy)",
+                    _bytes(env.ATTACHMENT_MAX_BYTES),
+                    raw=env.ATTACHMENT_MAX_BYTES,
+                    fmt="bytes",
+                ),
+                _item(
+                    env,
+                    "ATTACHMENT_QUOTA_BYTES",
+                    "Total des pièces jointes conservées, en octets ; 0 = pas de quota",
+                    _bytes(env.ATTACHMENT_QUOTA_BYTES),
+                    raw=env.ATTACHMENT_QUOTA_BYTES,
+                    fmt="bytes",
+                ),
+                _item(
+                    env,
+                    "ATTACHMENT_RETENTION_DAYS",
+                    "Valeur initiale de la conservation des pièces jointes, en "
+                    "jours (0 = conserver) ; modifiable dans Paramètres",
                 ),
             ],
         ),

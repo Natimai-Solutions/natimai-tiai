@@ -23,11 +23,13 @@ RUN apt-get update && apt-get upgrade -y --no-install-recommends \
 RUN python -m pip uninstall -y pip
 
 # The account the API and the worker run as (audit S32). The entrypoint
-# starts as root only to hand it the packages volume — which an existing
-# deployment created root-owned — then drops to it for good (setpriv).
+# starts as root only to hand it the packages and attachments volumes — which
+# an existing deployment, or a restore, left root-owned — then drops to it for
+# good (setpriv).
 RUN groupadd -g 10001 tiai \
     && useradd -u 10001 -g tiai -M -d /nonexistent -s /usr/sbin/nologin tiai \
-    && mkdir -p /data/packages && chown tiai:tiai /data/packages
+    && mkdir -p /data/packages /data/attachments \
+    && chown tiai:tiai /data/packages /data/attachments
 
 # uv binary (https://docs.astral.sh/uv/guides/integration/docker/)
 COPY --from=ghcr.io/astral-sh/uv:0.9.7 /uv /bin/uv

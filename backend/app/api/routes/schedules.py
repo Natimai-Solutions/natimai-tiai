@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlmodel import col, select
 
 from app.api.deps import (
@@ -28,6 +28,9 @@ from app.api.deps import (
 )
 from app.core.config import settings as env
 from app.core.errors import AppError, ErrorCode
+from app.features.approval import crud as approval_crud
+from app.features.approval import schedule as approval_schedule
+from app.features.approval.models import ApprovalRequest, ApprovalStatus
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.command import target as target_crud
@@ -41,20 +44,23 @@ from app.features.machine.models import Machine
 from app.features.machine.status import MachineStatus
 from app.features.package.models import Package
 from app.features.room.models import Building, Room
+from app.features.schedule import crud as schedule_crud
 from app.features.schedule import runner, windows
 from app.features.schedule.models import (
     Recurrence,
+    RunStatus,
     Schedule,
     ScheduleRun,
     ScheduleState,
 )
+from app.features.setting import crud as setting_crud
 from app.features.user.permissions import (
     Action,
     Resource,
     has_permission,
     permission_key,
 )
-from app.features.user.scope import Scope, machine_clause, restrict
+from app.features.user.scope import Scope
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
 
@@ -202,6 +208,17 @@ class RunOut(BaseModel):
     stage: int
 
 
+class ScheduleApprovalOut(BaseModel):
+    """Its approval (C10): the latest request, and who approved it."""
+
+    id: uuid.UUID | None = None
+    status: str | None = None
+    expires_at: datetime | None = None
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    approved_count: int | None = None
+
+
 class ScheduleOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -231,6 +248,7 @@ class ScheduleOut(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+    approval: ScheduleApprovalOut | None = None
 
 
 class ScheduleList(BaseModel):
@@ -331,6 +349,24 @@ async def _out(
             .limit(1)
         )
     ).first()
+    request = (
+        await session.exec(
+            select(ApprovalRequest)
+            .where(col(ApprovalRequest.schedule_id) == schedule.id)
+            .order_by(col(ApprovalRequest.requested_at).desc())
+            .limit(1)
+        )
+    ).first()
+    approval = None
+    if request is not None or schedule.approved_at is not None:
+        approval = ScheduleApprovalOut(
+            id=request.id if request is not None else None,
+            status=request.status if request is not None else None,
+            expires_at=request.expires_at if request is not None else None,
+            approved_by=schedule.approved_by,
+            approved_at=schedule.approved_at,
+            approved_count=schedule.approved_count,
+        )
     package_name = None
     if schedule.package_id is not None:
         package = await session.get(Package, schedule.package_id)
@@ -369,42 +405,55 @@ async def _out(
         created_by=schedule.created_by,
         created_at=schedule.created_at,
         updated_at=schedule.updated_at,
+        approval=approval,
     )
 
 
 async def _visible(
     session: SessionDep, schedule: Schedule, scope: Scope | None, user_id: uuid.UUID
 ) -> bool:
-    """Whether a restricted reader may see ``schedule`` (see the module)."""
-    if scope is None or schedule.created_by_id == user_id:
-        return True
-    targets = [Target.from_json(schedule.target)] + [
-        Target.from_json(r["target"]) for r in schedule.rings or []
-    ]
-    for target in targets:
-        if target.kind in ("room", "building"):
-            if not await target_crud.place_visible(session, target, scope):
-                return False
-        elif target.kind == "machines":
-            inside = await session.scalar(
-                restrict(
-                    select(func.count())
-                    .select_from(Machine)
-                    .where(col(Machine.id).in_(list(target.machine_ids))),
-                    machine_clause(scope),
-                )
-            )
-            if (inside or 0) < len(set(target.machine_ids)):
-                return False
-        else:
-            return False
-    return True
+    """Whether a restricted reader may see ``schedule`` (see the module):
+    ``schedule_crud.visible_to``, the rule approving one follows too."""
+    return await schedule_crud.visible_to(session, schedule, scope, user_id)
 
 
 async def _require(
     session: SessionDep, schedule_id: uuid.UUID, scope: Scope | None, user_id: uuid.UUID
 ) -> Schedule:
     schedule = await session.get(Schedule, schedule_id)
+    if schedule is None or not await _visible(session, schedule, scope, user_id):
+        raise AppError(
+            code=ErrorCode.SCHEDULE_NOT_FOUND,
+            status_code=404,
+            message="Schedule not found",
+        )
+    return schedule
+
+
+async def _lock(
+    session: SessionDep, schedule_id: uuid.UUID, scope: Scope | None, user_id: uuid.UUID
+) -> Schedule:
+    """The schedule about to be rewritten, turned off or on, or deleted:
+    locked in the order an approval locks them — its pending request, then
+    the schedule (``approval.schedule.approve_schedule``) — and read again
+    under the lock. An approval committed meanwhile is seen, and cleared by
+    the write; never the reverse order, which deadlocks against it."""
+    await session.exec(
+        select(col(ApprovalRequest.id))
+        .where(
+            col(ApprovalRequest.schedule_id) == schedule_id,
+            col(ApprovalRequest.status) == ApprovalStatus.PENDING,
+        )
+        .with_for_update()
+    )
+    schedule = (
+        await session.exec(
+            select(Schedule)
+            .where(col(Schedule.id) == schedule_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).first()
     if schedule is None or not await _visible(session, schedule, scope, user_id):
         raise AppError(
             code=ErrorCode.SCHEDULE_NOT_FOUND,
@@ -517,6 +566,12 @@ async def _apply(
             message="This schedule would run inside a forbidden window",
             details=windows.window_details(window),
         )
+    # Any write of its content voids its approval, and closes the request
+    # still waiting for the previous version (C10).
+    approval_schedule.clear_approval(schedule)
+    await approval_crud.close_for_schedule(
+        session, schedule.id, actor=user.email, cause="schedule_changed", now=now
+    )
     schedule.name = payload.name
     schedule.command_type = payload.command_type.value
     schedule.package_id = payload.package_id
@@ -548,6 +603,32 @@ async def _apply(
     schedule.created_by_id = user.id
     schedule.created_by = user.email
     schedule.updated_at = now
+
+
+async def _gate(
+    session: SessionDep,
+    schedule: Schedule,
+    *,
+    user_id: uuid.UUID,
+    user_email: str,
+    scope: Scope | None,
+    keep_approval: bool = False,
+) -> bool:
+    """After a write or a reactivation: whether the schedule now waits for
+    its approval (C10). A request still pending for it is closed first."""
+    now = utcnow()
+    policy = await setting_crud.approval_policy(session)
+    request = await approval_schedule.gate(
+        session,
+        schedule,
+        author_id=user_id,
+        author_email=user_email,
+        scope=scope,
+        policy=policy,
+        now=now,
+        keep_approval=keep_approval,
+    )
+    return request is not None
 
 
 def _audit_details(schedule: Schedule) -> dict[str, Any]:
@@ -612,24 +693,32 @@ async def create_schedule(
     user: CurrentUser,
     permissions: CurrentPermissions,
 ) -> ScheduleOut:
+    user_id, user_email = user.id, user.email
     schedule = Schedule(
         name=payload.name,
         command_type=payload.command_type.value,
         target={},
         recurrence=payload.recurrence.value,
-        created_by=user.email,
+        created_by=user_email,
     )
     await _apply(
         session, schedule, payload, scope=scope, permissions=permissions, user=user
     )
     session.add(schedule)
+    await session.flush()
+    required = await _gate(
+        session, schedule, user_id=user_id, user_email=user_email, scope=scope
+    )
     audit.record(
         session,
-        actor=user.email,
+        actor=user_email,
         action="schedule.create",
         resource_type="schedule",
         resource_id=str(schedule.id),
-        details=_audit_details(schedule),
+        details={
+            **_audit_details(schedule),
+            **({"approval": "required"} if required else {}),
+        },
     )
     await session.commit()
     await session.refresh(schedule)
@@ -654,15 +743,34 @@ async def update_schedule(
     permissions: CurrentPermissions,
 ) -> ScheduleOut:
     """Rewrite a schedule — in the writer's name from now on, active again."""
-    schedule = await _require(session, schedule_id, scope, user.id)
+    user_id, user_email = user.id, user.email
+    schedule = await _lock(session, schedule_id, scope, user_id)
     previous_author = schedule.created_by
+    previous_stages = len(schedule.rings or [])
     await _apply(
         session, schedule, payload, scope=scope, permissions=permissions, user=user
     )
     session.add(schedule)
+    if previous_stages > 1:
+        # A staged deployment under way does not go on to its next stage
+        # with the rings — nor on behalf of the author — of this new version
+        # (``runner.follow_one``, C10); what it woke is still shut down.
+        await session.exec(
+            update(ScheduleRun)
+            .where(
+                col(ScheduleRun.schedule_id) == schedule.id,
+                col(ScheduleRun.status) == RunStatus.RUNNING,
+                col(ScheduleRun.stage) < previous_stages - 1,
+            )
+            .values(result_code="schedule_changed")
+        )
+    await session.flush()
+    required = await _gate(
+        session, schedule, user_id=user_id, user_email=user_email, scope=scope
+    )
     audit.record(
         session,
-        actor=user.email,
+        actor=user_email,
         action="schedule.update",
         resource_type="schedule",
         resource_id=str(schedule.id),
@@ -670,9 +778,10 @@ async def update_schedule(
             **_audit_details(schedule),
             **(
                 {"previous_author": previous_author}
-                if previous_author != user.email
+                if previous_author != user_email
                 else {}
             ),
+            **({"approval": "required"} if required else {}),
         },
     )
     await session.commit()
@@ -695,8 +804,10 @@ async def set_state(
 ) -> ScheduleOut:
     """Turn a schedule off, or back on — suspended ones included, in the
     name of whoever turns it on, who must hold what it needs."""
-    schedule = await _require(session, schedule_id, scope, user.id)
+    user_id, user_email = user.id, user.email
+    schedule = await _lock(session, schedule_id, scope, user_id)
     now = utcnow()
+    required = False
     if payload.enabled:
         _require_command_rights(
             permissions, CommandType(schedule.command_type), schedule.shutdown_after
@@ -715,20 +826,42 @@ async def set_state(
         schedule.state = ScheduleState.ACTIVE
         schedule.suspended_code = None
         schedule.suspended_at = None
-        schedule.created_by_id = user.id
-        schedule.created_by = user.email
+        schedule.created_by_id = user_id
+        schedule.created_by = user_email
+        # Turned back on, it is its author's: approved for them and for
+        # these postes, it runs; otherwise it is asked again (C10).
+        await approval_crud.close_for_schedule(
+            session, schedule.id, actor=user_email, cause="schedule_changed", now=now
+        )
+        schedule.updated_at = now
+        session.add(schedule)
+        await session.flush()
+        required = await _gate(
+            session,
+            schedule,
+            user_id=user_id,
+            user_email=user_email,
+            scope=scope,
+            keep_approval=True,
+        )
     else:
         schedule.state = ScheduleState.DISABLED
         schedule.next_run_at = None
+        await approval_crud.close_for_schedule(
+            session, schedule.id, actor=user_email, cause="schedule_disabled", now=now
+        )
     schedule.updated_at = now
     session.add(schedule)
     audit.record(
         session,
-        actor=user.email,
+        actor=user_email,
         action="schedule.enable" if payload.enabled else "schedule.disable",
         resource_type="schedule",
         resource_id=str(schedule.id),
-        details={"name": schedule.name},
+        details={
+            "name": schedule.name,
+            **({"approval": "required"} if required else {}),
+        },
     )
     await session.commit()
     await session.refresh(schedule)
@@ -741,7 +874,7 @@ async def delete_schedule(
 ) -> None:
     """Delete a schedule and its run history; the commands it created stay
     in the postes' history."""
-    schedule = await _require(session, schedule_id, scope, user.id)
+    schedule = await _lock(session, schedule_id, scope, user.id)
     audit.record(
         session,
         actor=user.email,

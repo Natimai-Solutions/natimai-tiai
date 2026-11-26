@@ -34,6 +34,7 @@ from app.api.deps import (
     CurrentPermissions,
     CurrentScope,
     CurrentUser,
+    ExportLanguage,
     SessionDep,
     require_permission,
 )
@@ -2002,12 +2003,6 @@ class ExportColumnOut(BaseModel):
     group_label: str
     kind: str
     default: bool
-
-
-# The language of an export's words — its headers, sheet, values — as the
-# console asks for it. French when absent: a script or an older console gets
-# the file it always got.
-ExportLanguage = Annotated[Language, Query(description="fr or en; fr when absent")]
 
 
 @router.get("/export-columns", response_model=list[ExportColumnOut])

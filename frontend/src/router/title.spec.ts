@@ -65,7 +65,7 @@ describe('route titles', () => {
     const keys = flatten(real)
       .map((r) => r.meta?.title)
       .filter((k): k is string => typeof k === 'string');
-    expect(keys).toHaveLength(26);
+    expect(keys).toHaveLength(28);
     for (const key of keys) {
       expect(key).toMatch(/^layout\.pages\./);
       expect(t(key)).not.toBe(key);

@@ -294,7 +294,7 @@ Il n'est jamais committé.
 | `TIAI_VERSION` | `latest` | Version des images `tiai-backend` et `tiai-frontend` tirées de ghcr.io — à épingler en production (cf. § « Mettre à jour le serveur ») |
 | `TIAI_DEV_BACKEND_PORT` | `8800` | Port hôte du backend en HTTP direct (override de dev uniquement) |
 | `TIAI_DEV_BACKEND_BIND` | `127.0.0.1` | Adresse hôte sur laquelle ce port est publié (override de dev uniquement). `0.0.0.0` l'ouvre aux postes du réseau, en clair (cf. § « Mode A ») |
-| `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/` (cf. § « Sauvegardes et restauration ») |
+| `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/`, et des copies de pièces jointes que le volume ne contient plus — sauf volume vide alors que la base en référence encore, ou ne peut pas le dire : rien n'est alors purgé (cf. § « Sauvegardes et restauration ») |
 | `BACKUP_ENCRYPT_RECIPIENT` | *(vide)* | Clé publique `age` (`age1…`), ou plusieurs séparées par des espaces : chaque dump quotidien est chiffré pour elles (`tiai-AAAAMMJJ-HHMMSS.dump.age`). Vide : dumps en clair. Jamais la clé privée (cf. § « [Chiffrer les sauvegardes](#chiffrer-les-sauvegardes) ») |
 
 ### Backend
@@ -364,6 +364,7 @@ Il n'est jamais committé.
 | `USAGE_LOW_HOURS` | `10` | En dessous de ce nombre d'heures sur la fenêtre, un poste est « peu utilisé ». Un poste enrôlé pendant la fenêtre ne l'est jamais. Valeur initiale, modifiable dans Paramètres |
 | `USAGE_HIGH_HOURS` | `30` | Au-dessus, un poste est « toujours allumé ». Valeur initiale, modifiable dans Paramètres |
 | `USAGE_RETENTION_DAYS` | `400` | Conservation des compteurs horaires d'utilisation, purgés chaque jour par le worker. Environ 7 200 lignes par jour pour 300 postes |
+| `TREND_RETENTION_DAYS` | `760` | Conservation des photos quotidiennes du tableau de bord (page Tendances), en jours (400 à 3650), purgées chaque matin par le worker. 25 mois par défaut : douze mois affichés et les douze d'avant pour comparer. Une ligne par jour et par cellule (site de l'agent, salle), quelques centaines par jour |
 | `ALERT_REBOOT_PENDING_DAYS` | `7` | Alerte « redémarrage en attente » : un redémarrage demandé par Windows Update et toujours pas fait au bout de ce nombre de jours (1 à 365). **Valeur initiale seulement**, modifiable dans Paramètres, comme la liste des règles actives, les logiciels interdits et les règles qui ouvrent une vérification |
 | `ALERT_UNENCRYPTED_SCOPE` | `laptops` | Alerte « volume système non chiffré » : `laptops` ne regarde que les portables et tablettes, `all` tous les postes. Valeur initiale, modifiable dans Paramètres |
 | `ALERT_WARRANTY_DAYS` | `30` | Alerte « garantie bientôt terminée » : ce nombre de jours avant la fin de garantie saisie sur la fiche d'actif d'un poste (1 à 365). Valeur initiale, modifiable dans Paramètres |
@@ -375,6 +376,10 @@ Il n'est jamais committé.
 | `REPORTS_ENABLED` | `false` | Le QR de l'étiquette d'un poste ouvre, à qui le scanne **sans compte**, un formulaire de signalement (catégorie, texte, contact facultatif). Désactivé par défaut : c'est le premier point d'entrée non authentifié qui ne soit pas l'agent ; borné par adresse et par étiquette, il ne renvoie rien sur le poste. Joignable seulement depuis le réseau de l'établissement si la console l'est. Le contact laissé est une donnée personnelle, à porter au registre des traitements. Les bornes sont comptées **par adresse** (10 envois et 60 lectures du formulaire par heure) : si la console est derrière un proxy, il doit figurer dans `TRUSTED_PROXIES` / `TRUSTED_PROXY_HOSTS`, sans quoi tout l'établissement partage une seule adresse et un seul quota ; l'adresse de l'émetteur est conservée dans le journal d'audit (`AUDIT_RETENTION_DAYS`), à porter au registre aussi. **Valeur initiale seulement** : modifiable dans Paramètres |
 | `REPORT_RETENTION_DAYS` | `90` | Conservation d'un signalement traité — et du contact qu'il porte — avant sa purge du matin. Un signalement à trier n'est jamais purgé |
 | `SCHEDULE_RUN_RETENTION_DAYS` | `180` | Conservation de l'historique des exécutions de planifications, purgé chaque matin. Les commandes créées restent dans l'historique des postes |
+| `APPROVAL_ENABLED` | `false` | Approbation à deux des actions de masse (C10) : au-delà de `APPROVAL_THRESHOLD` postes, une commande à risque (ou une planification à risque) n'est pas mise en file mais attend l'accord d'un second compte — cf. « Approbation à deux ». **Valeur initiale seulement** : modifiable dans Paramètres, où elle ne s'active pas avec moins de deux comptes capables d'approuver |
+| `APPROVAL_THRESHOLD` | `40` | Nombre de postes (2 à 10 000) au-delà duquel l'approbation s'applique, compté par envoi sur les postes réellement visés. **Valeur initiale seulement** |
+| `APPROVAL_TTL_HOURS` | `24` | Durée (1 à 168 h) pendant laquelle une demande attend sa décision avant d'expirer. **Valeur initiale seulement** |
+| `APPROVAL_RETENTION_DAYS` | `180` | Conservation d'une demande d'approbation close, purgée chaque matin ; le journal d'audit en garde la trace au-delà |
 | `DIRECTORY_VERIFY` | `off` | `relay` : des postes désignés lisent l'annuaire de leur domaine avec leur compte machine, et le serveur range les salles et vérifie la déclaration des agents d'après cette lecture (voir « Lire l'annuaire au lieu de croire les agents »). `off` : la déclaration des agents est crue. `ldap` n'existe pas encore |
 | `DIRECTORY_SYNC_MINUTES` | `60` | Intervalle entre deux lectures demandées à chaque lecteur (5 à 1 440) |
 | `DIRECTORY_STALE_HOURS` | `72` | Au-delà, un domaine non relu ne vérifie plus rien : ses postes passent « périmés » |
@@ -638,6 +643,65 @@ interne) se déclare dans `WEBHOOK_ALLOWED_HOSTS` ; `http://` est alors admis
 pour lui. Le serveur doit pouvoir joindre la destination en HTTPS (directement
 ou par `WEBHOOK_PROXY_URL`).
 
+**Approbation à deux** (C10). Désactivée par défaut (`APPROVAL_ENABLED`,
+puis Paramètres). Activée, une commande **à risque** (redémarrage, extinction,
+mises à jour Windows, réparations, installation ou désinstallation d'un paquet)
+envoyée à **plus de** `APPROVAL_THRESHOLD` postes — comptés dans la portée de
+l'auteur, jetons révoqués exclus — n'est pas mise en file : elle devient une
+**demande** qu'un **autre compte**, détenant les mêmes droits (« Commandes :
+exécuter » et « Commandes à risque : exécuter », plus « Planifications :
+gérer » pour une planification) et voyant **tous** les postes visés, approuve
+ou refuse depuis la page « Approbations ». L'approbation exécute la liste figée
+à la demande (moins les postes supprimés ou sortis de la portée de l'auteur
+depuis), au nom de l'auteur, après avoir tout revérifié : compte et droits de
+l'auteur, paquet (un paquet modifié depuis fait échouer la demande), plages
+interdites à l'heure de l'approbation. Une demande expire après
+`APPROVAL_TTL_HOURS` ; son auteur peut l'annuler ; un auteur a au plus vingt
+demandes en attente. Une planification à risque au-delà du seuil est
+approuvée **une fois**, à l'écriture, pour son auteur et son nombre de postes :
+une modification, une réactivation par un autre compte ou une cible devenue
+plus large redemande une approbation (la planification est suspendue au
+départ d'une exécution qui dépasserait ce qui a été approuvé). Une cible qui
+a grandi entre la demande et l'approbation fait échouer celle-ci (« La
+planification vise plus de postes que ceux de la demande ») et suspend la
+planification : l'approbateur n'approuve jamais plus de postes que ceux que la
+demande lui a montrés. Les comptes
+capables d'approuver reçoivent un e-mail (sauf préférence « rien ») ; un
+webhook peut s'abonner à `approval.requested`.
+
+Activée depuis Paramètres, l'approbation **ne s'active pas** avec moins de deux
+comptes capables d'approuver : dans un établissement à un seul administrateur,
+elle bloquerait tout. `APPROVAL_ENABLED=true` posé dans l'environnement est en
+revanche appliqué tel quel, sans ce contrôle : avec un seul compte capable
+d'approuver, toute action à risque au-delà du seuil est alors refusée
+(« aucun approbateur possible ») jusqu'à ce que l'approbation soit désactivée
+dans Paramètres. Ce nombre, affiché dans Paramètres, **ne tient pas compte des lieux** :
+un approbateur limité à des sites doit couvrir **tous** les postes d'une
+demande, et deux comptes limités à deux sites différents ne s'approuvent pas
+l'un l'autre. Une demande que personne d'autre ne pourrait approuver est
+refusée à sa création (« aucun approbateur possible ») plutôt que d'attendre
+son expiration ; retirer un droit ou désactiver un compte n'est jamais bloqué
+pour autant. Approuver ou refuser demande une session de la console : un jeton
+d'API est refusé. Ce que l'approbation ne protège pas : le seuil s'applique
+**par envoi** — une action découpée en lots de `APPROVAL_THRESHOLD` postes ou
+moins (console, script, plusieurs planifications) n'est pas arrêtée, chaque
+lot laissant sa ligne `command.bulk` au journal ; une même personne disposant
+de deux comptes (local de secours et annuaire) peut s'approuver elle-même ; un
+compte qui détient « Paramètres : gérer » peut désactiver l'approbation puis
+agir seul (`settings.update` au journal).
+
+Dans la console : carte « Approbation à deux » de Paramètres (interrupteur,
+seuil, validité, nombre de comptes capables d'approuver ; l'interrupteur reste
+grisé sous deux) ; page « Approbations » dans le menu, après « Planifications »,
+pour les comptes qui détiennent « Commandes à risque : exécuter », tant que
+l'approbation est activée ou qu'il reste des demandes — onglets « À approuver »
+(badge orange dans le menu) et « Mes demandes » (statut, motif d'un refus,
+cause d'un échec, annulation). L'approbateur voit les postes de la demande
+qu'il couvre et, à l'heure d'une plage interdite, la même confirmation que
+l'auteur. Un envoi en masse ou un déploiement mis en attente le dit (« Demande
+d'approbation envoyée pour N postes… », avec « Voir ») ; une planification en
+attente apparaît « À approuver » sur la page Planifications.
+
 *Jetons d'API* — « Mon compte », carte « Jetons d'API » (droit « Jetons d'API :
 créer des jetons », administrateurs par défaut). Créer un jeton demande le mot
 de passe du compte, et un code s'il a la double authentification ; un compte de
@@ -663,6 +727,13 @@ seul son hachage est gardé. Création et révocation sont au journal d'audit ; 
 carte montre la dernière utilisation. Tous les jetons d'un compte sont révoqués
 quand un administrateur le désactive, réinitialise son mot de passe ou son
 second facteur.
+
+Avec l'approbation à deux activée, `POST /api/v1/commands` peut répondre
+**202** : rien n'est parti, une demande attend un second compte. Le corps
+porte alors `approval_id` (la demande), `approval_expires_at` et
+`pending_approval` (les postes en attente) ; `count` y vaut 0 et ne veut **pas**
+dire « rien à faire ». Un script lit `approval_id` (et le statut HTTP), pas
+`count`. Renvoyer la même requête tant qu'elle attend redonne la même demande.
 
 Pour **déconnecter tout le monde** d'un coup (clé `SECRET_KEY` divulguée, poste
 compromis), changer `SECRET_KEY` puis fermer toutes les sessions — sans
@@ -887,6 +958,58 @@ Le volume `packages` **n'est pas dans le dump PostgreSQL** (voir ci-dessous) :
 le sauvegarder à part, ou garder les installateurs d'origine pour pouvoir les
 redéposer.
 
+## Pièces jointes
+
+Une ligne du journal d'un poste (intervention saisie, ligne d'une maintenance,
+clôture d'une vérification) peut porter des photos et des PDF : JPEG, PNG,
+WebP et PDF seulement, reconnus **au contenu** (SVG, HTML, GIF, HEIC et le
+reste sont refusés), dix au plus par ligne. Le serveur ne les retouche jamais
+et les sert toujours en téléchargement (`Content-Disposition: attachment`,
+`nosniff`, CSP `sandbox`). La console redessine les photos JPEG et WebP avant
+l'envoi, ce qui en retire les métadonnées EXIF (position GPS d'un téléphone).
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `ATTACHMENTS_DIR` | `/data/attachments` | Où les fichiers sont stockés, un par empreinte SHA-256. Monté sur le volume Docker `attachments`, distinct de `packages`. Hors `ENVIRONMENT=local`, un dossier qui n'est pas un point de montage fait refuser les dépôts (503 `attachment.store_unavailable`, avertissement au démarrage de l'API) : une photo écrite dans la couche du conteneur disparaîtrait au prochain `up --force-recreate`. Lecture, téléchargement et suppression restent permis |
+| `ATTACHMENT_MAX_BYTES` | `5242880` (5 Mio) | Taille maximale d'un fichier, de 65 536 à 7 340 032 (7 Mio) : sous la limite de 8 Mo que Caddy pose sur toute requête hors dépôt de paquet, en-têtes du formulaire compris. Au-delà, 413 `attachment.too_large` |
+| `ATTACHMENT_QUOTA_BYTES` | `2147483648` (2 Gio) | Total des fichiers distincts conservés ; `0` = pas de quota. Au-delà, 413 `attachment.quota_exceeded`. Il protège le disque qui porte aussi la base : sa valeur se choisit d'après ce disque, d'où une variable d'environnement et non un réglage de la console |
+| `ATTACHMENT_RETENTION_DAYS` | `0` (conserver) | Valeur **initiale** de la conservation, en jours (0 à 3 650). Elle se règle ensuite dans **Paramètres** (« Rétention des pièces jointes ») : les photos peuvent montrer des élèves ou des écrans nominatifs, la durée est un choix de l'établissement et de son DPO (5 ans, 1 825 jours, proposés) |
+
+**Mise à jour vers cette version : reprendre le nouveau `docker-compose.yml`.**
+Il déclare le volume `attachments`, monté sur `backend` et, en lecture seule,
+sur `db-backup`. Avec l'image nouvelle et l'ancien compose, `/data/attachments`
+existe dans le conteneur sans être un volume : les dépôts répondent 503
+`attachment.store_unavailable` jusqu'à `docker compose up -d` avec le nouveau
+fichier.
+
+La purge par l'âge est faite par le `worker` (les lignes de la base, chaque
+matin) ; les fichiers que plus rien ne nomme sont retirés par l'API, qui seule
+monte le volume — au démarrage puis toutes les heures, et aussitôt après la
+suppression d'une pièce jointe, d'une ligne ou d'une visite de maintenance.
+Rien n'est supprimé quand la base ne connaît aucun poste alors que le dossier
+contient des fichiers (base neuve ou vidée).
+
+À la différence des paquets, **les pièces jointes sont sauvegardées** : une
+photo de panne ne se reconstruit pas (§ « Sauvegardes et restauration »).
+
+Dans la console, les pièces jointes s'ajoutent dans le dialogue d'une ligne du
+journal (fiche du poste, onglet « Interventions » ; droits de l'intervention :
+`intervention:read` pour voir et télécharger, `intervention:write` pour ajouter
+et supprimer). Une photo JPEG ou WebP est toujours redessinée avant l'envoi
+(2 560 px de côté au plus, JPEG 0,85), ce qui en retire l'EXIF ; un PNG l'est
+s'il dépasse la limite ou 2 560 px. L'aperçu d'une image s'affiche en URL
+`data:` (la CSP de Caddy n'autorise que `'self'` et `data:` en `img-src`). Le
+dialogue grise l'ajout quand le volume n'est pas monté et prévient à partir de
+90 % du quota.
+
+**Procédures par modèle.** En tête du même onglet, la carte « Procédure pour ce
+modèle » montre la note écrite pour le `hw_model` du poste (texte brut, 5 000
+caractères). Droit `procedure` (lecture, écriture), accordé par la migration au
+seul groupe *Techniciens* ; écriture réservée aux comptes sans limite de lieux
+(`procedure.scope_limited`), chaque écriture au journal d'audit avec le texte
+remplacé. « Toutes les procédures » liste les notes et permet de retirer
+celles des modèles qui n'ont plus de poste.
+
 ## Sauvegardes et restauration
 
 Toute la mémoire de Tia'i — postes, historique des menaces, commandes (qui a
@@ -964,10 +1087,32 @@ importe le moyen, l'important est qu'il existe), chiffré par `age` ou à la
 copie. Pour pouvoir reconstruire le serveur de zéro, trois choses doivent
 exister ailleurs (quatre avec le chiffrement) :
 
-1. un dump récent de `deploy/backups/` ;
+1. un dump récent de `deploy/backups/`, et le dossier
+   `deploy/backups/attachments/` (les pièces jointes, ci-dessous) ;
 2. le fichier `deploy/.env` (les secrets ne sont dans aucun dump) ;
 3. le certificat `deploy/certs/` (mode C) ;
 4. avec le chiffrement, la **clé privée** `age` — et jamais sur le serveur.
+
+**Pièces jointes.** Après chaque dump réussi, `db-backup` copie les fichiers
+du volume `attachments` (monté en lecture seule sur `/attachments`) dans
+`deploy/backups/attachments/`, un fichier par empreinte SHA-256 : la copie est
+incrémentale — un fichier déjà copié, en clair ou en `.age`, est seulement
+« touché » — et chiffrée en `<empreinte>.age` comme les dumps quand
+`BACKUP_ENCRYPT_RECIPIENT` est posé (une copie en clair d'avant le chiffrement
+est alors remplacée, puis supprimée). Le dossier est en `700`, chaque fichier
+en `600`. Une copie que le volume ne contient plus n'est plus touchée et part
+après `BACKUP_KEEP_DAYS` jours : un dump de 14 jours retrouve ses photos. Une
+copie qui échoue est dite au journal (« ECHEC de la copie des pièces
+jointes ») et rien n'est purgé ; sans le volume (compose d'avant cette
+version), une ligne le dit et le dump continue seul. **Volume vide** : la
+base dit ce qu'il en est (`psql`, le nombre de lignes de
+`intervention_attachments`). Elle référence encore des pièces jointes (volume
+perdu, base restaurée avant « Remettre les pièces jointes ») ou ne peut pas
+répondre (table pas encore créée, base injoignable) : rien n'est purgé, et le
+journal le dit (« volume vide, N référencée(s) en base », « volume vide et
+base muette »). Elle n'en référence aucune (la dernière a été supprimée) : la
+purge a lieu comme d'habitude, et les copies des photos supprimées — des
+données personnelles, EXIF compris — partent après `BACKUP_KEEP_DAYS` jours.
 
 ### Chiffrer les sauvegardes
 
@@ -1042,14 +1187,28 @@ Pour revenir aux dumps en clair : vider `BACKUP_ENCRYPT_RECIPIENT`, puis
 
 ### Restaurer
 
-Sur une stack levée (la base peut être vide ou pleine — `--clean` remet à
-plat). Un dump chiffré (`.dump.age`) se déchiffre d'abord, voir plus bas.
+Sur une stack levée (la base peut être vide ou pleine). Un dump chiffré
+(`.dump.age`) se déchiffre d'abord, voir plus bas.
+
+La commande **vide d'abord le schéma** (`DROP SCHEMA public CASCADE`), puis
+restaure : la base revient exactement à l'état du dump. `pg_restore --clean`
+seul ne suffit pas dès que le dump est d'un schéma plus ancien que la base :
+une table créée depuis (par exemple `intervention_attachments`, migration
+0062) garde une clé étrangère vers une table du dump, qui ne peut alors être
+ni supprimée ni rechargée — les lignes du dump ne reviennent pas, et le
+backend, qui rejoue ensuite la migration, ne démarre plus (« relation already
+exists »). Tout ce qui est dans la base est donc effacé : en cas de doute,
+faire d'abord un dump manuel (plus bas).
 
 ```bash
 cd deploy
 docker compose stop backend worker      # plus personne n'écrit dans la base
 docker compose exec db-backup sh -c \
-  'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -h db -U "$POSTGRES_USER" \
+  'export PGPASSWORD="$POSTGRES_PASSWORD" &&
+   psql -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
+     -c "DROP SCHEMA public CASCADE" \
+     -c "CREATE SCHEMA public AUTHORIZATION \"$POSTGRES_APP_USER\"" &&
+   pg_restore -h db -U "$POSTGRES_USER" \
    -d "$POSTGRES_DB" --clean --if-exists --no-owner --role="$POSTGRES_APP_USER" \
    /backups/tiai-AAAAMMJJ-HHMMSS.dump'
 docker compose start backend worker
@@ -1074,8 +1233,16 @@ docker compose exec db-backup rm /backups/restauration-en-clair.dump
 ```
 
 Sur un serveur reconstruit de zéro : déposer d'abord la copie hors site du
-`.dump.age` dans `deploy/backups/`, et le `.env` d'origine (sa
-`BACKUP_ENCRYPT_RECIPIENT` comprise).
+`.dump.age` dans `deploy/backups/`, sa copie des pièces jointes dans
+**`deploy/backups/attachments-a-restaurer/`** (pas dans
+`backups/attachments/`), et le `.env` d'origine (sa
+`BACKUP_ENCRYPT_RECIPIENT` comprise). `db-backup` ne touche jamais à
+`attachments-a-restaurer/` ; dans `backups/attachments/`, les copies datées de
+plus de `BACKUP_KEEP_DAYS` jours seraient purgées dès qu'une base neuve, qui
+ne référence encore aucune pièce jointe, répond. « Remettre les pièces
+jointes » (plus bas) lit alors `attachments-a-restaurer/` ; l'effacer à la
+main une fois les photos vérifiées dans la console — les tours suivants ont
+recopié le volume dans `backups/attachments/`.
 
 > **Renommer le dump déposé avant de démarrer la stack** (clair ou chiffré) :
 > `mv backups/tiai-AAAAMMJJ-HHMMSS.dump.age backups/tiai-a-restaurer.dump.age`.
@@ -1085,10 +1252,38 @@ Sur un serveur reconstruit de zéro : déposer d'abord la copie hors site du
 > `docker compose up -d`, avant toute restauration. Un autre nom n'est jamais
 > purgé ; l'effacer à la main une fois la restauration vérifiée.
 
+**Remettre les pièces jointes.** Restaurer la base sans les fichiers laisse
+des lignes qui répondent « fichier absent du serveur »
+(`attachment.file_missing`), rien de plus. Pour les remettre dans le volume,
+`backend` arrêté, avec l'image `<projet>-db-backup` (elle a `sh` et `age` ;
+son point d'entrée est remplacé par `--entrypoint sh` — celui de l'image
+backend répondrait « Unknown mode: sh »). Sur un serveur reconstruit, monter
+`backups/attachments-a-restaurer` à la place de `backups/attachments` :
+
+```bash
+docker compose stop backend
+# Copie en clair
+docker run --rm --entrypoint sh -v <projet>_attachments:/data \
+  -v "$PWD/backups/attachments:/restore:ro" <projet>-db-backup \
+  -c 'for f in /restore/*; do case "$f" in *.age|*.tmp) continue;; esac; cp -n "$f" /data/; done; chown -R 10001:10001 /data'
+# Copie chiffrée : la clé privée par l'entrée standard, jamais écrite sur le serveur hors du conteneur éphémère
+docker run --rm -i --entrypoint sh -v <projet>_attachments:/data \
+  -v "$PWD/backups/attachments:/restore:ro" <projet>-db-backup \
+  -c 'umask 077; cat > /tmp/k; for f in /restore/*.age; do d=/data/$(basename "$f" .age); [ -e "$d" ] || age -d -i /tmp/k -o "$d" "$f"; done; chown -R 10001:10001 /data' < tiai-sauvegardes.key
+docker compose start backend
+```
+
+`10001` est l'uid et le gid du compte `tiai` de l'image backend ; au
+démarrage, l'entrypoint rend de toute façon au compte `tiai` tout fichier du
+volume qui ne lui appartiendrait pas.
+
 Au redémarrage, le backend rejoue les migrations Alembic si le dump vient
-d'une version plus ancienne du schéma — restaurer un dump d'hier après une
-montée de version fonctionne donc sans étape supplémentaire. L'inverse (un
-dump plus récent que le code) n'est pas supporté.
+d'une version plus ancienne du schéma : restaurer un dump d'hier (ou celui
+pris juste avant une montée de version) après la montée fonctionne, **à
+condition d'avoir vidé le schéma avant `pg_restore`** comme le fait la
+commande ci-dessus — sans cela, les tables apparues depuis restent et
+bloquent la restauration. L'inverse (un dump plus récent que le code) n'est
+pas supporté.
 
 Un dump manuel avant une opération risquée :
 
@@ -1912,7 +2107,8 @@ variables `USAGE_*` n'en donnent que les valeurs initiales.
 **Groupes de droits.** Un compte peut ce que ses groupes lui accordent. Trois
 groupes existent d'emblée : *Administrateurs* (tous les droits, implicites),
 *Lecture seule*, *Techniciens* (lecture + commandes, courantes et à risque +
-saisie des interventions, vérifications et maintenances). Page « Groupes » pour
+saisie des interventions, vérifications et maintenances + procédures par
+modèle, que *Lecture seule* ne lit pas). Page « Groupes » pour
 en composer d'autres — par exemple « exécute les commandes courantes mais pas
 les commandes à risque, et ne gère pas les postes ». Le premier compte est dans
 *Administrateurs* ; une base migrée depuis une version à deux rôles y range ses
@@ -2007,6 +2203,37 @@ l'envoie par parts de 250 postes, une seule séance) ; une séance où aucun pos
 n'a été fait s'enregistre si elle dit pourquoi, sans toucher les échéances.
 Les e-mails suivent le réglage de
 chaque compte (page « Mon compte »).
+
+**Tendances, indicateurs et pannes récurrentes.** La page « Tendances » (menu,
+juste sous le tableau de bord, et lien « Évolution » de sa barre de titre)
+montre, sur 3, 12 ou 24 mois :
+
+- **L'évolution du parc** : les compteurs du tableau de bord, photographiés
+  toutes les heures par le worker (le dernier passage d'un jour, dans le fuseau
+  de la console, est le chiffre de ce jour) et gardés par lieu, de sorte qu'un
+  compte limité à des lieux ne voit que la somme des siens. **L'historique
+  commence au déploiement** : rien n'est reconstitué, et la page le dit
+  (« Suivi depuis le … »). Un jour où le worker était arrêté est un trou dans la
+  courbe, pas un zéro. Les changements de seuil (disque presque plein, cycle de
+  maintenance…) sont signalés sous la courbe. Conservation :
+  `TREND_RETENTION_DAYS` (25 mois par défaut).
+- **Les indicateurs**, mois par mois : délai de clôture des vérifications
+  (médiane et 9e décile), maintenances faites à l'heure (jugées avec le cycle
+  d'aujourd'hui), réussite des commandes et des déploiements (les commandes
+  expirées ou sans réponse sont comptées à part, hors du taux). Ils sont
+  calculés sur l'historique déjà en base, donc limités par sa conservation :
+  `COMMAND_RETENTION_DAYS` (365 jours) et `SCHEDULE_RUN_RETENTION_DAYS`
+  (180 jours) ; la page avertit quand la période demandée est plus longue.
+- **Les pannes récurrentes** : les interventions de type « incident » par
+  modèle ou par salle actuelle du poste, rapportées au nombre de postes en parc
+  (« pour 100 postes ») ; les postes réformés sont comptés à part.
+- **Le rapport Excel** : la page sur la période choisie, dans la langue de la
+  console, téléchargé à la demande (pas d'envoi périodique).
+
+Droits : la page s'ouvre avec la lecture des postes ; chaque indicateur demande
+en plus la lecture de sa source (vérifications, maintenance, commandes,
+paquets), et les pannes la lecture des interventions. Rien à configurer, aucune
+action d'audit : la page ne fait que lire.
 
 ## Dépannage
 

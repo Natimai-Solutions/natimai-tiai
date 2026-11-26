@@ -235,3 +235,37 @@ async def alerts_changed(
             ),
         )
     return queued
+
+
+async def approval_requested(session: AsyncSession, request: Any) -> int:
+    """A request waits for its approval (C10): what is asked, on how many
+    postes, by whom, until when — never the list of postes. The readers of
+    the webhooks are unrestricted accounts: the target may be described."""
+    target = dict(request.target or {})
+    kind = target.get("kind")
+    if request.kind == "schedule":
+        described: dict[str, Any] = {"target": kind}
+        if target.get("value") is not None:
+            described[str(kind)] = target.get("value")
+    elif kind == "machines":
+        described = {"target": "machines", "requested": request.machine_count}
+    elif kind == "all":
+        described = {"target": "all"}
+    else:
+        described = {"target": kind, str(kind): target.get("value")}
+    return await emit(
+        session,
+        WebhookEvent.APPROVAL_REQUESTED,
+        {
+            "id": str(request.id),
+            "kind": request.kind,
+            "command_type": request.command_type,
+            "package": request.package_name,
+            "schedule": request.schedule_name,
+            "target": described,
+            "count": request.machine_count,
+            "threshold": request.threshold,
+            "requested_by": request.requested_by,
+            "expires_at": _iso(request.expires_at),
+        },
+    )

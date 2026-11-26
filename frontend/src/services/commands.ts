@@ -1,6 +1,7 @@
 import { api } from 'boot/axios';
 import { t } from 'src/i18n';
 import catalogue from 'src/i18n/messages/commands';
+import { formatDateTime } from 'src/utils/format';
 
 export type CommandType =
   // Defender (phase 1).
@@ -476,6 +477,16 @@ export interface CreateCommandsResponse {
    * send it, and the console then says « déjà en attente ».
    */
   reason?: 'pending' | 'delivered' | 'running' | null;
+  /**
+   * Two-person approval (C10): answered 202, nothing was queued — a request
+   * waits for a second account. `count` is then 0 and does not mean
+   * « nothing to do ». Optional: absent when the command was queued, and
+   * from an older server.
+   */
+  approval_id?: string | null;
+  approval_expires_at?: string | null;
+  /** How many postes the request is for. */
+  pending_approval?: number | null;
 }
 
 export interface Command {
@@ -600,10 +611,34 @@ export function commandConfirm(
  * — « 0 commande(s) envoyée(s) » alone would read as a failure rather than as
  * "they all already have it".
  */
-export function bulkSendNotification(res: CreateCommandsResponse): {
-  type: 'positive' | 'warning';
+export function bulkSendNotification(
+  res: CreateCommandsResponse,
+  onView?: () => void,
+): {
+  type: 'positive' | 'warning' | 'info';
   message: string;
+  timeout?: number;
+  actions?: { label: string; color: string; handler?: () => void }[];
 } {
+  // C10: read from `approval_id`, never from `count` — 0 there means the
+  // command waits for a second account, not that there was nothing to do.
+  if (res.approval_id) {
+    const count = res.pending_approval ?? 0;
+    return {
+      type: 'info',
+      message: t(
+        'commands.bulk.pendingApproval',
+        { count, at: formatDateTime(res.approval_expires_at ?? null) },
+        count,
+      ),
+      timeout: 10000,
+      ...(onView
+        ? {
+            actions: [{ label: t('commands.bulk.viewApproval'), color: 'white', handler: onView }],
+          }
+        : {}),
+    };
+  }
   // ?? 0 and not a required field: an older server does not send it, and NaN
   // in a notification is worse than an undercount.
   const skipped = res.skipped ?? 0;

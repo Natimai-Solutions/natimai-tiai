@@ -14,10 +14,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
+from sqlmodel import col, select
 
 from app.api.deps import CurrentScope, CurrentUser, SessionDep, require_permission
 from app.core.errors import AppError, ErrorCode
 from app.core.validation import refusal
+from app.features.attachment import crud as attachment_crud
+from app.features.attachment.schemas import AttachmentOut
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.intervention import crud
@@ -56,6 +59,9 @@ class InterventionOut(BaseModel):
     maintenance_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    # Its attachments (C11), oldest first: filled by the journal's page, empty
+    # in the answers to a creation or an edit (the console reads the page).
+    attachments: list[AttachmentOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -131,8 +137,15 @@ async def list_interventions(
     rows, total = await crud.list_for_machine(
         session, machine_id, page=page, page_size=page_size
     )
+    # The whole page's attachments in one query.
+    attached = await attachment_crud.of_interventions(session, [r.id for r in rows])
+    items = []
+    for r in rows:
+        item = InterventionOut.model_validate(r)
+        item.attachments = [AttachmentOut.model_validate(a) for a in attached[r.id]]
+        items.append(item)
     return InterventionList(
-        items=[InterventionOut.model_validate(r) for r in rows],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -253,6 +266,23 @@ async def delete_intervention(
     current: CurrentUser,
 ) -> None:
     row = await _require_intervention(session, intervention_id, scope)
+    # Locked before its attachments are read: an upload in progress holds
+    # the line ``FOR SHARE`` until it commits, and is counted then (C11).
+    # Gone once the lock is ours: a deletion at the same moment won — 404,
+    # not a second 204 with a second audit entry.
+    locked = await session.exec(
+        select(Intervention)
+        .where(col(Intervention.id) == row.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked.first() is None:
+        raise AppError(
+            code=ErrorCode.INTERVENTION_NOT_FOUND,
+            status_code=404,
+            message="Intervention not found",
+        )
+    shas = await attachment_crud.shas_of(session, [row.id])
     audit.record(
         session,
         actor=current.email,
@@ -265,6 +295,7 @@ async def delete_intervention(
             "title": row.title,
             "author": row.performed_by,
             "performed_at": row.performed_at.isoformat(),
+            "attachments": len(shas),
         },
     )
     machine_id = row.machine_id
@@ -272,3 +303,7 @@ async def delete_intervention(
     # A deleted visit no longer counts: the due date goes back (audit B06).
     await crud.recompute_last_maintenance(session, [machine_id])
     await session.commit()
+    # Its attachments went with it (cascade): their files too, unless
+    # another line names them.
+    for sha in set(shas):
+        await attachment_crud.discard_if_orphan(session, sha)

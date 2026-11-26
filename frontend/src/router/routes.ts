@@ -58,6 +58,14 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'layout.pages.dashboard', requiresPermission: 'machine:read' },
       },
       {
+        // The dashboard's counters over the past months, the indicators and
+        // the recurring failures (C9). Each block asks for its own right.
+        path: 'trends',
+        name: 'trends',
+        component: () => import('pages/TrendsPage.vue'),
+        meta: { title: 'layout.pages.trends', requiresPermission: 'machine:read' },
+      },
+      {
         path: 'machines',
         name: 'machines',
         component: () => import('pages/MachinesPage.vue'),
@@ -87,6 +95,14 @@ const routes: RouteRecordRaw[] = [
         name: 'schedules',
         component: () => import('pages/SchedulesPage.vue'),
         meta: { title: 'layout.pages.schedules', requiresPermission: 'schedule:read' },
+      },
+      {
+        // Two-person approval of mass actions (C10): the requests to decide
+        // and one's own. Not a landing page.
+        path: 'approvals',
+        name: 'approvals',
+        component: () => import('pages/ApprovalsPage.vue'),
+        meta: { title: 'layout.pages.approvals', requiresPermission: 'risky_command:execute' },
       },
       {
         // Where a staff member's scan lands, signed in: the poste behind the

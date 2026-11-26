@@ -518,6 +518,13 @@ class Settings(BaseSettings):
     # rows a day.
     USAGE_RETENTION_DAYS: int = Field(default=400, ge=1)
 
+    # --- Trends (``app.features.trend``) ---
+    # How long the daily photos of the dashboard's counters are kept, in days.
+    # 25 months by default: twelve months shown, and the twelve before them
+    # to compare with. At least 400, so that the twelve months shown are
+    # always there. A storage policy, hence environment only.
+    TREND_RETENTION_DAYS: int = Field(default=760, ge=400, le=3650)
+
     # --- Alerts (``app.features.alert``) ---
     # A closed catalogue of rules evaluated by the worker over what the postes
     # already report. These are the initial values; the console's own
@@ -542,6 +549,18 @@ class Settings(BaseSettings):
     SCHEDULE_COMMAND_TTL_MINUTES: int = Field(default=180, ge=10, le=60 * 24)
     # How long a schedule's run history is kept.
     SCHEDULE_RUN_RETENTION_DAYS: int = Field(default=180, ge=1)
+
+    # --- Two-person approval of mass actions (C10) ---
+    # Above APPROVAL_THRESHOLD postes, a command at risk (and a schedule at
+    # risk) waits for a second account's approval instead of being queued.
+    # Off by default. Initial values only — changed in Paramètres, where it
+    # cannot be turned on with fewer than two accounts able to approve.
+    APPROVAL_ENABLED: bool = False
+    APPROVAL_THRESHOLD: int = Field(default=40, ge=2, le=10000)
+    # How long a request waits for its decision, in hours.
+    APPROVAL_TTL_HOURS: int = Field(default=24, ge=1, le=168)
+    # How long a decided request is kept, in days.
+    APPROVAL_RETENTION_DAYS: int = Field(default=180, ge=1)
 
     # --- Reports from the postes' users (C4) ---
     # Whether a label's QR code opens the report form to whoever scans it,
@@ -649,6 +668,20 @@ class Settings(BaseSettings):
     # (GPO, default 8): the server and the console only predict what the
     # agent decides, and say "sign it" instead of queueing a sure failure.
     PACKAGE_METHOD_A_MAX_GB: int = Field(default=8, ge=1, le=1024)
+    # Attachments of the journal (C11, dev/plan-procedures-pieces-jointes.md).
+    # Where they are kept — one file per SHA-256, the ``attachments`` volume,
+    # distinct from the packages' — and the largest file accepted: under the
+    # 8 MB Caddy puts on every request but a package upload, with the room of
+    # the multipart headers.
+    ATTACHMENTS_DIR: str = "/data/attachments"
+    ATTACHMENT_MAX_BYTES: int = Field(default=5 * 1024**2, ge=64 * 1024, le=7 * 1024**2)
+    # The total of the distinct files the journal names, in bytes; 0 = none.
+    # Here and not in the console: it protects the disk the database is on,
+    # which only the operator sees (plan §5).
+    ATTACHMENT_QUOTA_BYTES: int = Field(default=2 * 1024**3, ge=0)
+    # The first value of the console's setting ``attachments.retention_days``:
+    # attachments older than this many days are deleted; 0 keeps them.
+    ATTACHMENT_RETENTION_DAYS: int = Field(default=0, ge=0, le=3650)
     # How long a relayed wake waits for a poste to claim it before expiring. Ten
     # minutes and not the general command TTL: a wake nobody relayed within ten
     # minutes is a site with nothing on, and a magic packet an hour late meets

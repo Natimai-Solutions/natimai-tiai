@@ -113,3 +113,14 @@ def test_authority_union_adds_permissions_and_admin_status():
     assert not empty.is_admin and empty.permissions == frozenset()
     # No group confines to nothing rather than to everything (``scope.union``).
     assert empty.scope is not None and empty.scope.is_empty()
+
+
+def test_procedures_are_the_technicians_only():
+    """C11: the technicians read and write the procedure notes; the
+    read-only group receives nothing."""
+    tech = BUILTIN_GROUP_DEFAULTS[BuiltinGroup.TECHNICIAN][2]
+    readonly = BUILTIN_GROUP_DEFAULTS[BuiltinGroup.READONLY][2]
+    for action in (Action.READ, Action.WRITE):
+        assert has_permission(tech, Resource.PROCEDURE, action)
+        assert not has_permission(readonly, Resource.PROCEDURE, action)
+        assert (Resource.PROCEDURE, action) in PERMISSION_CATALOGUE

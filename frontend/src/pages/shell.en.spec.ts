@@ -125,6 +125,7 @@ describe('MainLayout in English', () => {
     const menu = w.findAll('.q-item .q-item__section--main').map((i) => i.text());
     expect(menu).toEqual([
       'Dashboard',
+      'Trends',
       'Computers',
       'Alerts',
       'Software',

@@ -117,7 +117,8 @@ def _fresh_email_settings():
 
 @pytest_asyncio.fixture(autouse=True)
 def _packages_in_tmp(tmp_path, monkeypatch):
-    """Keep the package store of every test under its own ``tmp_path``.
+    """Keep the package and attachment stores of every test under its own
+    ``tmp_path``.
 
     Any agent download reaches the store, which creates its directory on
     first use: left at the default (``/data/packages``), a test that only
@@ -127,6 +128,9 @@ def _packages_in_tmp(tmp_path, monkeypatch):
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "PACKAGES_DIR", str(tmp_path / "packages"))
+    # The same for the attachments of the journal (C11): their store reads
+    # the setting at each call.
+    monkeypatch.setattr(settings, "ATTACHMENTS_DIR", str(tmp_path / "attachments"))
     yield
 
 

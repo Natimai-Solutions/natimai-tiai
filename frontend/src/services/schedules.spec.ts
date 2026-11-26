@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { setLocale } from 'src/i18n';
 import { apiErrorMessage } from './errors';
 import {
+  approvedText,
   localText,
   runCauseText,
   runSummary,
+  stateLabel,
   suspendedText,
   targetText,
   whenText,
@@ -108,6 +110,39 @@ describe('schedules wording', () => {
       ),
     ).toBe('Son auteur n’a plus le droit « risky_command:execute ».');
     expect(suspendedText('author_inactive')).toBe('Le compte de son auteur est désactivé.');
+    // C10: the causes an approval leaves behind.
+    expect(suspendedText('approval_expired')).toBe(
+      'Sa demande d’approbation a expiré sans décision.',
+    );
+    expect(
+      runCauseText(
+        run({ result_code: 'approval_required', result_params: { count: 45, threshold: 40 } }),
+      ),
+    ).toBe(
+      'Au départ, 45 postes visés au-delà de ce qui a été approuvé (seuil 40) : planification suspendue.',
+    );
+    expect(
+      runCauseText(run({ result_code: 'approval_required', result_params: { stage: 2 } })),
+    ).toContain('pendant l’observation de l’étape 2');
+    expect(
+      runCauseText(run({ result_code: 'schedule_changed', result_params: { stage: 2 } })),
+    ).toBe(
+      'Planification modifiée pendant le déploiement : les étapes suivantes ne sont pas lancées.',
+    );
+    expect(stateLabel('to_approve')).toBe('À approuver');
+    expect(
+      approvedText({
+        approval: {
+          id: null,
+          status: null,
+          expires_at: null,
+          approved_by: 'chef@lycee.example',
+          approved_at: '2026-11-25T10:00:00Z',
+          approved_count: 45,
+        },
+      }),
+    ).toContain('Approuvée par chef@lycee.example le');
+    expect(approvedText({ approval: null })).toBe('');
     expect(runCauseText(run({ result_code: 'something_new' }))).toBe('something_new');
     setLocale('en');
     expect(

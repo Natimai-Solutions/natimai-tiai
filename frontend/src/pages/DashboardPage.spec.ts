@@ -63,6 +63,7 @@ async function mountPage(permissions: string[] = ['machine:read', 'threat:read']
     history: createMemoryHistory(),
     routes: [
       { path: '/', name: 'dashboard', component: Stub },
+      { path: '/trends', name: 'trends', component: Stub },
       { path: '/machines', name: 'machines', component: Stub },
       { path: '/software', name: 'software', component: Stub },
       { path: '/machines/:id', name: 'machine-detail', component: Stub },
@@ -251,6 +252,15 @@ describe('DashboardPage — enrolment and hardware age (C2, item 9)', () => {
     expect(links).toContain(
       JSON.stringify({ name: 'machines', query: { hardware_aging: 'true' } }),
     );
+  });
+
+  it('links its title bar to the trends page (C9)', async () => {
+    serverUp();
+    const w = await mountPage();
+    const link = w.find('[data-test="dashboard-trends"]');
+    expect(link.exists()).toBe(true);
+    expect(link.attributes('label')).toBe('Évolution');
+    expect(link.attributes('to')).toBeDefined();
   });
 
   it('shows no enrolment card for a server that does not count them', async () => {

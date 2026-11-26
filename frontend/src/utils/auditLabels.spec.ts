@@ -15,6 +15,7 @@ import {
   auditResourceTypeLabel,
   formatTtlMinutes,
   isUuid,
+  PREVIOUS_SUMMARY_MAX,
 } from './auditLabels';
 
 const MACHINE_ID = '0d4c1a52-7e1b-4c4f-9a35-2b1f0c9e11aa';
@@ -46,6 +47,11 @@ describe('auditActionLabel', () => {
       'group.delete',
       'intervention.update',
       'intervention.delete',
+      'intervention.attachment_add',
+      'intervention.attachment_delete',
+      'procedure.create',
+      'procedure.update',
+      'procedure.delete',
       'machine.allow_reenroll',
       'machine.revoke_token',
       'machine.merge',
@@ -125,6 +131,12 @@ describe('auditActionLabel', () => {
       'directory.moves',
       'directory.confirm_moves',
       'directory.discard_moves',
+      'approval.request',
+      'approval.approve',
+      'approval.reject',
+      'approval.cancel',
+      'approval.expire',
+      'approval.fail',
     ];
     expect(Object.keys(AUDIT_ACTION_LABELS).sort()).toEqual([...slugs].sort());
   });
@@ -368,5 +380,50 @@ describe('auditDetailValue — what triggered a lock', () => {
     expect(auditDetailValue('password_change', 'via')).toBe('changement de mot de passe');
     expect(auditDetailValue('autre', 'via')).toBe('autre');
     expect(auditDetailKeyLabel('via')).toBe('Déclenché par');
+  });
+});
+
+describe('audit labels — attachments and procedures (C11)', () => {
+  it('names the new actions, the resource type and the detail keys', () => {
+    expect(auditActionLabel('intervention.attachment_add')).toBe(
+      "Ajout d'une pièce jointe à une intervention",
+    );
+    expect(auditActionLabel('procedure.update')).toBe('Modification d’une procédure de modèle');
+    expect(auditResourceTypeLabel('procedure')).toBe('Procédure de modèle');
+    expect(auditDetailKeyLabel('previous')).toBe('Texte remplacé');
+    expect(auditDetailKeyLabel('attachments')).toBe('Pièces jointes emportées');
+  });
+
+  it('writes an attachment size the way the file explorer does', () => {
+    expect(auditDetailValue(1536, 'size')).toBe('1,5 Kio');
+    // Another number stays a number.
+    expect(auditDetailValue(1536, 'length')).toBe((1536).toLocaleString('fr-FR'));
+  });
+
+  it('sums up an attachment by its name and size', () => {
+    expect(
+      auditDetailsSummary('intervention.attachment_add', {
+        filename: 'panne.jpg',
+        size: 2 * 1024 * 1024,
+        sha256: 'a'.repeat(64),
+      }),
+    ).toBe('panne.jpg · 2,0 Mio');
+  });
+
+  it('cuts the replaced text of a procedure to 120 characters in the table', () => {
+    const previous = 'é'.repeat(PREVIOUS_SUMMARY_MAX + 30);
+    const line = auditDetailsSummary('procedure.update', {
+      hw_model: 'OptiPlex 7090',
+      previous,
+      length: 12,
+    });
+    expect(PREVIOUS_SUMMARY_MAX).toBe(120);
+    expect(line).toBe(`OptiPlex 7090 · ${'é'.repeat(120)}…`);
+    // Short enough: whole, without the ellipsis.
+    expect(auditDetailsSummary('procedure.delete', { hw_model: 'HP 400', previous: 'F10' })).toBe(
+      'HP 400 · F10',
+    );
+    // The full text stays in the entry's detail.
+    expect(auditDetailValue(previous, 'previous')).toBe(previous);
   });
 });

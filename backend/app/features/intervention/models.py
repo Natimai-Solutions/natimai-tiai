@@ -41,6 +41,9 @@ class Intervention(SQLModel, table=True):
     __table_args__ = (
         # The fiche reads one poste's journal newest first: this is that read.
         Index("ix_interventions_machine_performed", "machine_id", "performed_at"),
+        # The indicators and the recurring failures (C9) read one kind over
+        # a period: maintenances done, incidents.
+        Index("ix_interventions_kind_performed", "kind", "performed_at"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)

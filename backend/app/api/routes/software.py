@@ -13,7 +13,7 @@ list, and "qui a Java 8 *et* est allumé" costs nothing extra.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
@@ -22,7 +22,7 @@ from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 from sqlmodel import col, select
 
 from app.api.csv_export import csv_response
-from app.api.deps import CurrentScope, SessionDep, require_permission
+from app.api.deps import CurrentScope, ExportLanguage, SessionDep, require_permission
 from app.api.xlsx_export import xlsx_response
 from app.core.errors import AppError, ErrorCode
 from app.features.asset import crud as asset_crud
@@ -191,8 +191,6 @@ EXPORT_TEXTS: dict[Language, SoftwareExportTexts] = {
         "software",
     ),
 }
-
-ExportLanguage = Annotated[Language, Query(description="fr or en; fr when absent")]
 
 
 async def _export_rows(

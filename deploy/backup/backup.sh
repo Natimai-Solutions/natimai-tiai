@@ -13,6 +13,18 @@
 # plusieurs clés publiques age (age1…, séparées par des espaces), chaque dump
 # est chiffré pour elles AVANT d'arriver sur le disque (tiai-….dump.age) ; la
 # clé privée n'est jamais sur le serveur. Vide : dumps en clair, comme avant.
+#
+# Pièces jointes du journal (C11) : après chaque dump réussi, les fichiers du
+# volume `attachments` (monté en lecture seule sur /attachments) sont copiés
+# dans attachments/ à côté des dumps — incrémental : un fichier par empreinte
+# SHA-256, immuable, copié une fois puis seulement « touché » à chaque tour
+# (chiffré en <sha>.age comme les dumps si BACKUP_ENCRYPT_RECIPIENT est posé).
+# Une copie que le volume ne contient plus n'est plus touchée, et part après
+# BACKUP_KEEP_DAYS jours : un dump de 14 jours retrouve ses photos. Volume
+# vide : rien de purgé tant que la base référence des pièces jointes (volume
+# perdu, ou base restaurée avant « Remettre les pièces jointes ») ou ne peut
+# pas le dire ; si elle n'en référence aucune (la dernière a été supprimée),
+# purge normale — une photo supprimée ne reste pas indéfiniment dans la copie.
 set -eu
 
 : "${POSTGRES_USER:?}"
@@ -23,6 +35,10 @@ RECIPIENTS="${BACKUP_ENCRYPT_RECIPIENT:-}"
 # Le montage du compose. Variable pour les tests seulement
 # (backend/tests/test_backup_script.py) : le compose ne la pose pas.
 DIR="${BACKUP_DIR:-/backups}"
+# Le volume des pièces jointes (compose : attachments:/attachments:ro), et leur
+# copie. Variable pour les tests seulement, comme BACKUP_DIR.
+ATTACHMENTS="${BACKUP_ATTACHMENTS_DIR:-/attachments}"
+COPY="$DIR/attachments"
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
@@ -101,6 +117,116 @@ dump() {
   [ "$pg_status" = 0 ] && [ "$age_status" = 0 ]
 }
 
+# Le nombre de pièces jointes que la base référence, sur la sortie : échoue
+# (code 1) si elle ne peut pas le dire — injoignable en dix secondes, table
+# absente, réponse qui n'est pas un nombre. psql est dans l'image (celle de db).
+attachment_rows() {
+  rows="$(PGCONNECT_TIMEOUT=10 psql -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -X -A -t -q -v ON_ERROR_STOP=1 \
+    -c 'SELECT count(*) FROM intervention_attachments' 2>/dev/null)" || return 1
+  case "$rows" in '' | *[!0-9]*) return 1 ;; esac
+  echo "$rows"
+}
+
+# Copie incrémentale des pièces jointes (C11). Renvoie 1 si un fichier n'a pas
+# pu être copié : la copie n'est alors pas purgée (même règle que les dumps).
+# Volume absent (compose d'avant C11) : une ligne au journal, rien d'autre.
+# Chaque fichier est écrit en <sha>.tmp (ou <sha>.age.tmp) puis renommé : une
+# copie interrompue n'est jamais prise pour un fichier complet.
+copy_attachments() {
+  if [ ! -d "$ATTACHMENTS" ]; then
+    echo "pièces jointes : $ATTACHMENTS absent (volume non monté) — non copiées"
+    return 0
+  fi
+  if ! mkdir -p "$COPY"; then
+    echo "ECHEC : dossier $COPY impossible à créer — pièces jointes non copiées" >&2
+    return 1
+  fi
+  chmod 700 "$COPY" 2>/dev/null || true
+  chmod 600 "$COPY"/* 2>/dev/null || true
+  failed=0
+  copied=0
+  kept=0
+  seen=0
+  for f in "$ATTACHMENTS"/*; do
+    [ -f "$f" ] || continue
+    sha="$(basename "$f")"
+    case "$sha" in *[!0-9a-f]*) continue ;; esac
+    [ "${#sha}" -eq 64 ] || continue
+    seen=$((seen + 1))
+    if [ -n "$AGE_ARGS" ]; then
+      if [ -e "$COPY/$sha.age" ]; then
+        touch "$COPY/$sha.age" || failed=1
+        # Une copie en clair restée d'avant le chiffrement : retirée.
+        rm -f "$COPY/$sha" || failed=1
+        kept=$((kept + 1))
+        continue
+      fi
+      # shellcheck disable=SC2086 # AGE_ARGS : des mots age1[a-z0-9]*, contrôlés
+      if age $AGE_ARGS -o "$COPY/$sha.age.tmp" "$f" \
+        && mv "$COPY/$sha.age.tmp" "$COPY/$sha.age"; then
+        chmod 600 "$COPY/$sha.age" 2>/dev/null || true
+        # Passage au chiffrement : la copie en clair part une fois la copie
+        # chiffrée écrite, pas avant.
+        rm -f "$COPY/$sha" || failed=1
+        copied=$((copied + 1))
+      else
+        rm -f "$COPY/$sha.age.tmp"
+        failed=1
+      fi
+    else
+      if [ -e "$COPY/$sha" ]; then
+        touch "$COPY/$sha" || failed=1
+        kept=$((kept + 1))
+        continue
+      fi
+      if [ -e "$COPY/$sha.age" ]; then
+        touch "$COPY/$sha.age" || failed=1
+        kept=$((kept + 1))
+        continue
+      fi
+      if cp "$f" "$COPY/$sha.tmp" && mv "$COPY/$sha.tmp" "$COPY/$sha"; then
+        chmod 600 "$COPY/$sha" 2>/dev/null || true
+        copied=$((copied + 1))
+      else
+        rm -f "$COPY/$sha.tmp"
+        failed=1
+      fi
+    fi
+  done
+  if [ "$failed" != 0 ]; then
+    echo "ECHEC de la copie des pièces jointes ($copied copiée(s)) — copie non purgée" >&2
+    return 1
+  fi
+  # Volume vide : la base dit si c'est normal. Elle référence encore des
+  # pièces jointes (volume perdu, base restaurée avant « Remettre les pièces
+  # jointes ») : pas de purge, la copie est tout ce qui reste des fichiers.
+  # Elle ne peut pas répondre (table pas encore créée par les migrations,
+  # base injoignable) : pas de purge non plus, au tour suivant de trancher.
+  # Elle n'en référence aucune (la dernière a été supprimée) : purge
+  # normale, sans quoi les copies des photos supprimées — données
+  # personnelles, EXIF compris — resteraient indéfiniment. Sur un serveur
+  # reconstruit, la copie hors site se dépose donc à côté, dans un dossier
+  # que ce script ne purge jamais (DEPLOYMENT.md) : la base neuve n'en
+  # référence aucune.
+  if [ "$seen" -eq 0 ]; then
+    if ! refs="$(attachment_rows)"; then
+      echo "pièces jointes : volume vide et base muette (table absente ou injoignable) — copie non purgée"
+      return 0
+    fi
+    if [ "$refs" -gt 0 ]; then
+      echo "pièces jointes : volume vide, $refs référencée(s) en base — copie conservée, non purgée"
+      return 0
+    fi
+  fi
+  # Ce que le volume ne contient plus n'est plus touché : parti après
+  # KEEP_DAYS jours. Les .tmp d'une copie interrompue aussi.
+  find "$COPY" -maxdepth 1 -type f -mtime +"$KEEP_DAYS" -exec rm -- {} + \
+    || echo "ATTENTION : purge des pièces jointes de plus de $KEEP_DAYS jours incomplète" >&2
+  echo "pièces jointes : $copied copiée(s), $kept déjà présente(s)"
+  return 0
+}
+
 if [ -n "$AGE_ARGS" ]; then
   ext=dump.age
   how=", chiffrée"
@@ -144,6 +270,10 @@ while :; do
         -mtime +"$KEEP_DAYS" -exec rm -- {} + \
         || echo "ATTENTION : purge des dumps de plus de $KEEP_DAYS jours incomplète" >&2
     done
+    # Après un dump réussi seulement. Un échec est dit au journal, sans
+    # arrêter le script : le conteneur redémarrerait en boucle, avec un dump
+    # de plus à chaque tour.
+    copy_attachments || true
     # En dernier : la ligne qui clôt le tour (les tests l'attendent).
     echo "sauvegarde OK : $(basename "$out") ($(du -h "$out" | cut -f1)$how)"
   else

@@ -107,7 +107,9 @@
 import { installBlockerTexts, problemText } from 'src/utils/packageText';
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
+import { useRouter } from 'vue-router';
 import { t } from 'src/i18n';
+import { notifyApprovalsChanged } from 'src/composables/useApprovalsBadge';
 import { bulkSendNotification } from 'src/services/commands';
 import { apiErrorCode, apiErrorMessage } from 'src/services/errors';
 import { listLocations, listMachines } from 'src/services/machines';
@@ -141,6 +143,7 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [boolean]; sent: [] }>();
 
 const $q = useQuasar();
+const router = useRouter();
 const action = ref<'install' | 'uninstall'>('install');
 const packages = ref<Package[]>([]);
 const loadingPackages = ref(false);
@@ -366,7 +369,9 @@ async function send() {
       if (!(await confirmedForbidden(e)) || mine !== showing) return;
       res = await deployPackage(chosen.value.id, action.value, target, true);
     }
-    notify($q, () => bulkSendNotification(res));
+    // C10: a request waiting for a second account, with a way to it.
+    if (res.approval_id) notifyApprovalsChanged();
+    notify($q, () => bulkSendNotification(res, () => void router.push({ name: 'approvals' })));
     emit('update:modelValue', false);
     emit('sent');
   } catch (e) {

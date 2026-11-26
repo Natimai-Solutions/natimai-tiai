@@ -40,6 +40,9 @@ class ScheduleState(enum.StrEnum):
     DISABLED = "disabled"
     SUSPENDED = "suspended"
     DONE = "done"
+    # At risk and above the approval threshold (C10): waits for a second
+    # account's approval, and does not run meanwhile.
+    TO_APPROVE = "to_approve"
 
 
 class RunStatus(enum.StrEnum):
@@ -111,6 +114,24 @@ class Schedule(SQLModel, table=True):
     created_by: str = Field(max_length=255)
     created_at: datetime = utc_field(default_factory=utcnow)
     updated_at: datetime = utc_field(default_factory=utcnow)
+    # Its approval (C10): who approved it and when, for which author and how
+    # many postes. Valid while ``created_by_id`` is ``approved_for_id`` and
+    # the target does not grow past ``approved_count`` (``runner.run_one``).
+    approved_by_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+        ),
+    )
+    approved_by: str | None = Field(default=None, max_length=255)
+    approved_at: datetime | None = utc_field(default=None, nullable=True)
+    approved_for_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+        ),
+    )
+    approved_count: int | None = None
 
 
 class ScheduleRun(SQLModel, table=True):

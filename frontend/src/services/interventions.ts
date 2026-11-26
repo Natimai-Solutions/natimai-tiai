@@ -1,5 +1,6 @@
 import { api } from 'boot/axios';
 import { currentLocale, t, type Locale } from 'src/i18n';
+import type { AttachmentOut } from 'src/services/attachments';
 
 /**
  * The journal of a poste: every human intervention on it, whatever the cause.
@@ -34,6 +35,9 @@ export interface Intervention {
   maintenance_id?: string | null;
   created_at: string;
   updated_at: string;
+  /** Its attachments (C11), oldest first, filled by the journal's page;
+   * empty in the answers to a creation or an edit. Absent from an older server. */
+  attachments?: AttachmentOut[];
 }
 
 export interface InterventionList {

@@ -41,6 +41,7 @@ const fr = {
       check_created: 'Vérification demandée',
       check_closed: 'Vérification close',
       command_failed: 'Commande échouée',
+      approval_requested: 'Approbation demandée',
       test: 'Essai',
     },
     formats: {
@@ -158,6 +159,7 @@ const en: Translation<typeof fr> = {
       check_created: 'Check requested',
       check_closed: 'Check closed',
       command_failed: 'Command failed',
+      approval_requested: 'Approval requested',
       test: 'Test',
     },
     formats: {

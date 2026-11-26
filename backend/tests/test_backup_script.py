@@ -17,6 +17,7 @@ none of it ran.
 """
 
 import os
+import re
 import shutil
 import signal
 import stat
@@ -70,9 +71,21 @@ echo "age: error: write: no space left on device" >&2
 exit 1
 """
 
+FAKE_PSQL = """#!/bin/sh
+# Stands in for psql: records its arguments, then answers FAKE_PSQL_ROWS
+# (the attachments the database references), or fails as a database that
+# cannot say (`fail`: the table not created yet, the server unreachable).
+printf '%s\\n' "$@" > "$FAKE_PSQL_CALLED"
+if [ "$FAKE_PSQL_ROWS" = fail ]; then
+  echo 'psql: error: relation "intervention_attachments" does not exist' >&2
+  exit 1
+fi
+echo "$FAKE_PSQL_ROWS"
+"""
+
 # Tools backup.sh calls (besides pg_dump and age), and the fake pg_dump's own.
 TOOLS = ["basename", "cat", "chmod", "cut", "date", "du", "find", "mv", "rm"]
-TOOLS += ["sleep", "stat", "head"]
+TOOLS += ["sleep", "stat", "head", "cp", "mkdir", "touch"]
 
 DAILY = "tiai-20260101-010203"
 OLD_DAILY = [f"{DAILY}.dump", f"{DAILY}.dump.age"]  # purged after a good dump
@@ -106,9 +119,10 @@ def _tool(name: str) -> str:
     path = shutil.which(name)
     if path is None:
         pytest.fail(
-            f"{name} is not installed, and CI is set: the encryption and busybox "
-            "tests of backup.sh are run there, not skipped — install age and "
-            "busybox-static in the workflow (.github/workflows/ci.yml)"
+            f"{name} is not installed, and CI is set: the tests of backup.sh "
+            "and of the documented restore that need it are run there, not "
+            f"skipped — install the package providing {name} in the workflow's "
+            "step for the backup tests' tools (.github/workflows/ci.yml)"
         )
     return path
 
@@ -164,7 +178,18 @@ class Run:
 
     def new_dumps(self) -> list[Path]:
         before = set(OLD_DAILY) | set(KEPT) | {STALE_PARTIAL}
-        return [self.folder / f for f in sorted(self.files() - before)]
+        return [
+            self.folder / f
+            for f in sorted(self.files() - before)
+            if not f.startswith("attachments/")
+        ]
+
+    def copies(self) -> dict[str, bytes]:
+        """The attachments' copy: name → content."""
+        copy = self.folder / "attachments"
+        if not copy.exists():
+            return {}
+        return {p.name: p.read_bytes() for p in copy.iterdir()}
 
 
 @pytest.fixture
@@ -195,12 +220,15 @@ def run_script(
     fail=None,
     tmpdir=None,
     age_fails=False,
+    attachments=None,
+    db_rows=None,
 ):
     """One cycle of backup.sh: returns once it exits or closes its first
     cycle (``sauvegarde OK`` / ``ECHEC de la sauvegarde``). ``fail`` is how
     the fake pg_dump fails (``FAKE_PG_DUMP``); ``tmpdir`` the script's
     ``TMPDIR`` when it is not the test's folder; ``age_fails`` puts
-    ``FAKE_AGE`` in place of age."""
+    ``FAKE_AGE`` in place of age; ``attachments`` the attachments volume
+    (absent unless given); ``db_rows`` what ``FAKE_PSQL`` answers (no psql unless given)."""
     bindir = tmp_path / f"bin-{shell}"
     bindir.mkdir(exist_ok=True)
     for tool in TOOLS:
@@ -217,6 +245,11 @@ def run_script(
     pg_dump = bindir / "pg_dump"
     pg_dump.write_text(FAKE_PG_DUMP)
     pg_dump.chmod(0o755)
+    psql = bindir / "psql"
+    psql.unlink(missing_ok=True)
+    if db_rows is not None:
+        psql.write_text(FAKE_PSQL)
+        psql.chmod(0o755)
     data = tmp_path / "dump-data"
     data.write_bytes(DUMP)
 
@@ -228,8 +261,11 @@ def run_script(
         "POSTGRES_DB": "tiai",
         "BACKUP_KEEP_DAYS": "14",
         "BACKUP_DIR": str(folder),
+        "BACKUP_ATTACHMENTS_DIR": str(attachments or tmp_path / "no-attachments"),
         "FAKE_PG_DUMP_DATA": str(data),
         "FAKE_PG_DUMP_CALLED": str(tmp_path / "pg_dump-called"),
+        "FAKE_PSQL_ROWS": str(db_rows),
+        "FAKE_PSQL_CALLED": str(tmp_path / "psql-called"),
     }
     if recipient is not None:
         env["BACKUP_ENCRYPT_RECIPIENT"] = recipient
@@ -433,3 +469,383 @@ def test_a_failed_clear_dump_writes_and_purges_nothing(shell, fail, tmp_path, ba
 def test_the_script_parses(shell):
     command = [_tool("busybox"), "sh"] if shell == "busybox" else ["sh"]
     subprocess.run([*command, "-n", str(SCRIPT)], check=True)
+
+
+# --- Attachments (C11) ------------------------------------------------------------
+
+PHOTO = b"\xff\xd8\xff photo"
+SCAN = b"%PDF-1.7 scan"
+SHA_PHOTO = "a" * 64
+SHA_SCAN = "b" * 64
+SHA_GONE = "c" * 64
+
+
+@pytest.fixture
+def volume(tmp_path):
+    """The attachments volume: two files named by their hash, and what the
+    copy skips — another name, an upload in progress."""
+    folder = tmp_path / "attachments-volume"
+    folder.mkdir()
+    (folder / SHA_PHOTO).write_bytes(PHOTO)
+    (folder / SHA_SCAN).write_bytes(SCAN)
+    (folder / "README").write_bytes(b"not a hash")
+    (folder / ".upload-abc").write_bytes(b"in progress")
+    (folder / ("A" * 64)).write_bytes(b"upper case: not one")
+    return folder
+
+
+def _old(path: Path, days: float = 30) -> None:
+    when = time.time() - days * 86400
+    os.utime(path, (when, when))
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attachments_are_copied_after_a_good_dump(shell, tmp_path, backups, volume):
+    run = run_script(shell, tmp_path, backups, attachments=volume)
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    assert "pièces jointes : 2 copiée(s), 0 déjà présente(s)" in run.stdout
+    assert run.copies() == {SHA_PHOTO: PHOTO, SHA_SCAN: SCAN}
+    copy = backups / "attachments"
+    assert _mode(copy) == 0o700
+    assert {_mode(p) for p in copy.iterdir()} == {0o600}
+    _assert_cycle_kept_and_purged(run)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_file_already_copied_is_touched_not_copied_again(
+    shell, tmp_path, backups, volume
+):
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_PHOTO).write_bytes(b"copied before")
+    (copy / f"{SHA_SCAN}.age").write_bytes(b"encrypted before")
+    for p in copy.iterdir():
+        p.chmod(0o644)
+        _old(p, days=20)
+    run = run_script(shell, tmp_path, backups, attachments=volume)
+    assert "pièces jointes : 0 copiée(s), 2 déjà présente(s)" in run.stdout, run.stderr
+    # Under either form: neither copied again nor turned into the other.
+    assert run.copies() == {
+        SHA_PHOTO: b"copied before",
+        f"{SHA_SCAN}.age": b"encrypted before",
+    }
+    for p in copy.iterdir():
+        assert time.time() - p.stat().st_mtime < 3600  # touched: kept
+        assert _mode(p) == 0o600
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_copy_the_volume_lost_goes_after_the_retention(
+    shell, tmp_path, backups, volume
+):
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_GONE).write_bytes(b"gone from the volume")
+    _old(copy / SHA_GONE, days=30)
+    (copy / f"{SHA_GONE[:-1]}d").write_bytes(b"gone, but recently")
+    _old(copy / f"{SHA_GONE[:-1]}d", days=3)
+    (copy / SHA_PHOTO).write_bytes(PHOTO)
+    _old(copy / SHA_PHOTO, days=30)  # still in the volume: touched, kept
+    run = run_script(shell, tmp_path, backups, attachments=volume)
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    assert sorted(run.copies()) == sorted([SHA_PHOTO, SHA_SCAN, f"{SHA_GONE[:-1]}d"])
+
+
+def _empty_volume_and_old_copies(tmp_path, backups) -> Path:
+    """An empty volume, and a copy of three files untouched for 30 days and
+    one for 3: the volume lost them, or never had them back."""
+    empty = tmp_path / "empty-volume"
+    empty.mkdir()
+    (empty / "README").write_bytes(b"not a hash")  # not an attachment
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_PHOTO).write_bytes(PHOTO)
+    (copy / f"{SHA_SCAN}.age").write_bytes(b"encrypted")
+    (copy / f"{SHA_GONE}.tmp").write_bytes(b"interrupted")
+    (copy / SHA_GONE).write_bytes(b"recent")
+    for p in copy.iterdir():
+        _old(p, days=3 if p.name == SHA_GONE else 30)
+    return empty
+
+
+OLD_COPIES = {
+    SHA_PHOTO: PHOTO,
+    f"{SHA_SCAN}.age": b"encrypted",
+    f"{SHA_GONE}.tmp": b"interrupted",
+    SHA_GONE: b"recent",
+}
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("rows", ["2", "fail", None])
+def test_an_empty_volume_the_database_still_needs_purges_no_copy(
+    shell, rows, tmp_path, backups
+):
+    """The volume lost its files while the database still references them
+    (``2``: a lost volume, a database restored before « Remettre les pièces
+    jointes »), or the database cannot say (``fail``: no table yet, ``None``:
+    no psql): the copy is all that is left of the files, nothing goes."""
+    empty = _empty_volume_and_old_copies(tmp_path, backups)
+    run = run_script(shell, tmp_path, backups, attachments=empty, db_rows=rows)
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    said = (
+        "volume vide, 2 référencée(s)" if rows == "2" else "volume vide et base muette"
+    )
+    assert said in run.stdout, run.stdout
+    assert run.copies() == OLD_COPIES
+    _assert_cycle_kept_and_purged(run)  # the dumps' own purge still runs
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_an_empty_volume_nothing_references_purges_as_usual(shell, tmp_path, backups):
+    """The last attachment was deleted: the database references none, and the
+    copies of the deleted photos (personal data, EXIF) go after the
+    retention like any other, instead of staying for ever."""
+    empty = _empty_volume_and_old_copies(tmp_path, backups)
+    run = run_script(shell, tmp_path, backups, attachments=empty, db_rows="0")
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    assert "pièces jointes : 0 copiée(s), 0 déjà présente(s)" in run.stdout
+    assert run.copies() == {SHA_GONE: b"recent"}
+    asked = (tmp_path / "psql-called").read_text().split("\n")
+    assert asked[:4] == ["-h", "db", "-U", "tiai"]
+    assert "SELECT count(*) FROM intervention_attachments" in asked
+
+
+def test_the_script_counts_the_attachments_table():
+    from app.features.attachment.models import InterventionAttachment
+
+    table = InterventionAttachment.__tablename__
+    assert f"SELECT count(*) FROM {table}" in SCRIPT.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_volume_with_files_does_not_ask_the_database(
+    shell, tmp_path, backups, volume
+):
+    run = run_script(shell, tmp_path, backups, attachments=volume, db_rows="fail")
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    assert not (tmp_path / "psql-called").exists()
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("fail", FAILURES)
+def test_nothing_is_copied_nor_purged_when_the_dump_fails(
+    shell, fail, tmp_path, backups, volume
+):
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_GONE).write_bytes(b"old")
+    _old(copy / SHA_GONE)
+    run = run_script(shell, tmp_path, backups, attachments=volume, fail=fail)
+    assert "ECHEC de la sauvegarde" in run.stderr, run.stderr
+    assert run.copies() == {SHA_GONE: b"old"}
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_failed_copy_is_said_and_purges_nothing(shell, tmp_path, backups, volume):
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_GONE).write_bytes(b"old")
+    _old(copy / SHA_GONE)
+    # Every copy fails where it is written: its temporary name is a link to
+    # a folder that does not exist. A fake ``cp`` on the PATH would not do —
+    # busybox runs its own applet whatever the PATH says.
+    for sha in (SHA_PHOTO, SHA_SCAN):
+        (copy / f"{sha}.tmp").symlink_to(tmp_path / "nowhere" / "copy")
+    run = run_script(shell, tmp_path, backups, attachments=volume)
+    assert "ECHEC de la copie des pièces jointes" in run.stderr, run.stderr
+    # The dump itself stands, and closes the cycle.
+    assert "sauvegarde OK" in run.stdout
+    [dump] = run.new_dumps()
+    assert dump.read_bytes() == DUMP
+    assert run.copies() == {SHA_GONE: b"old"}  # no .tmp left, nothing purged
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_without_the_volume_the_dump_alone(shell, tmp_path, backups):
+    run = run_script(shell, tmp_path, backups)
+    assert "non copiées" in run.stdout, run.stderr
+    assert "sauvegarde OK" in run.stdout
+    assert run.returncode != 1
+    assert not (backups / "attachments").exists()
+    _assert_cycle_kept_and_purged(run)
+
+
+@needs_age
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attachments_are_encrypted_with_the_dumps(shell, tmp_path, backups, volume):
+    key, public = _keypair(tmp_path, "admin")
+    run = run_script(shell, tmp_path, backups, recipient=public, attachments=volume)
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    copies = run.copies()
+    assert sorted(copies) == [f"{SHA_PHOTO}.age", f"{SHA_SCAN}.age"]
+    for name, clear in ((SHA_PHOTO, PHOTO), (SHA_SCAN, SCAN)):
+        path = backups / "attachments" / f"{name}.age"
+        assert PHOTO not in path.read_bytes() and SCAN not in path.read_bytes()
+        assert _mode(path) == 0o600
+        out = subprocess.run(
+            ["age", "-d", "-i", str(key), str(path)], check=True, capture_output=True
+        ).stdout
+        assert out == clear
+
+
+@needs_age
+@pytest.mark.parametrize("shell", SHELLS)
+def test_turning_encryption_on_replaces_the_clear_copies(
+    shell, tmp_path, backups, volume
+):
+    key, public = _keypair(tmp_path, "admin")
+    copy = backups / "attachments"
+    copy.mkdir()
+    (copy / SHA_PHOTO).write_bytes(PHOTO)
+    run = run_script(shell, tmp_path, backups, recipient=public, attachments=volume)
+    assert "sauvegarde OK" in run.stdout, run.stderr
+    assert sorted(run.copies()) == [f"{SHA_PHOTO}.age", f"{SHA_SCAN}.age"]
+    out = subprocess.run(
+        ["age", "-d", "-i", str(key), str(copy / f"{SHA_PHOTO}.age")],
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert out == PHOTO
+
+
+# --- The documented restore (DEPLOYMENT.md, « Restaurer ») -----------------
+
+DEPLOYMENT = SCRIPT.parents[2] / "DEPLOYMENT.md"
+PG_TOOLS = ("psql", "pg_dump", "pg_restore")
+PROBE_APP = "tiai_restore_probe_app"
+
+
+def documented_restore() -> str:
+    """The script DEPLOYMENT.md has the operator run in ``db-backup``: the
+    single-quoted ``sh -c`` argument of the first ``docker compose exec
+    db-backup`` after the « Restaurer » heading."""
+    text = DEPLOYMENT.read_text(encoding="utf-8")
+    section = text[text.index("### Restaurer") :]
+    start = section.index("docker compose exec db-backup sh -c \\\n")
+    body = section[start:].split("'", 2)
+    assert len(body) == 3, "the restore command is no longer a sh -c '…'"
+    return body[1]
+
+
+def test_the_documented_restore_resets_the_schema_first():
+    script = documented_restore()
+    assert "pg_restore" in script
+    assert script.index("DROP SCHEMA public CASCADE") < script.index("pg_restore")
+
+
+@pytest.mark.skipif(
+    skip_without(*PG_TOOLS) or not os.environ.get("TIAI_TEST_DATABASE_URL"),
+    reason="needs psql, pg_dump, pg_restore and TIAI_TEST_DATABASE_URL",
+)
+def test_the_documented_restore_puts_back_a_dump_older_than_the_schema(tmp_path):
+    """A dump taken before a migration added a table holding a foreign key
+    to one of the dump's (0062: intervention_attachments → interventions),
+    restored with the documented command after the upgrade: the dump's rows
+    come back, the newer table is gone (Alembic recreates it), the objects
+    belong to the application role. ``pg_restore --clean`` alone fails here:
+    the foreign key keeps the old table, its rows and the new table."""
+    from sqlalchemy.engine import make_url
+
+    for tool in PG_TOOLS:
+        _tool(tool)
+    url = make_url(os.environ["TIAI_TEST_DATABASE_URL"])
+    db = f"{url.database}_restore_probe"
+    # Roles are the server's, not a database's: one per test database, so
+    # that two runs on one server do not drop each other's.
+    probe_app = re.sub(r"[^a-z0-9_]", "_", f"{PROBE_APP}_{url.database}".lower())[:63]
+    env = {
+        "PATH": os.environ["PATH"],
+        "PGHOST": url.host or "localhost",
+        "PGPORT": str(url.port or 5432),
+        "PGUSER": url.username or "",
+        "PGPASSWORD": url.password or "",
+    }
+
+    def psql(database: str, *sql: str) -> str:
+        args = [a for q in sql for a in ("-c", q)]
+        return subprocess.run(
+            ["psql", "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-d", database] + args,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    # The tools of the server's own version, as in production, where
+    # db-backup runs the image of the db service. A newer pg_dump writes
+    # settings an older server refuses (``SET transaction_timeout``, 17+), and
+    # a runner's PATH holds whatever version its image ships. TIAI_PG_BIN
+    # names them (CI: launchers of the service's image); else the distro's.
+    major = int(psql("postgres", "SHOW server_version_num")) // 10000
+    tools = Path(os.environ.get("TIAI_PG_BIN") or f"/usr/lib/postgresql/{major}/bin")
+    if tools.is_dir():
+        env["PATH"] = f"{tools}{os.pathsep}{env['PATH']}"
+    elif os.environ.get("CI"):
+        pytest.fail(
+            f"no PostgreSQL {major} client in {tools}: set TIAI_PG_BIN in the "
+            "workflow's step for the backup tests' tools (.github/workflows/ci.yml)"
+        )
+    version = subprocess.run(
+        ["pg_restore", "--version"], env=env, check=True, capture_output=True, text=True
+    ).stdout
+    if f") {major}." not in version and os.environ.get("CI"):
+        pytest.fail(f"pg_restore is not of the server's version {major}: {version}")
+
+    psql("postgres", f'DROP DATABASE IF EXISTS "{db}"', f'CREATE DATABASE "{db}"')
+    try:
+        psql(
+            db,
+            f"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE "
+            f"rolname = '{probe_app}') THEN CREATE ROLE {probe_app}; END IF; END $$",
+            f"ALTER SCHEMA public OWNER TO {probe_app}",
+            "CREATE TABLE interventions (id int PRIMARY KEY)",
+            "INSERT INTO interventions VALUES (1)",
+            f"ALTER TABLE interventions OWNER TO {probe_app}",
+        )
+        dump = tmp_path / "tiai-20260101-010203.dump"
+        subprocess.run(
+            ["pg_dump", "-d", db, "-Fc", "-f", str(dump)],
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        # The upgrade, then a day of work.
+        psql(
+            db,
+            "CREATE TABLE intervention_attachments (id int PRIMARY KEY, "
+            "intervention_id int REFERENCES interventions (id))",
+            f"ALTER TABLE intervention_attachments OWNER TO {probe_app}",
+            "INSERT INTO interventions VALUES (2)",
+            "INSERT INTO intervention_attachments VALUES (1, 2)",
+        )
+        script = (
+            documented_restore()
+            .replace("-h db", "")
+            .replace("/backups/tiai-AAAAMMJJ-HHMMSS.dump", str(dump))
+        )
+        run_env = {
+            **env,
+            "POSTGRES_USER": env["PGUSER"],
+            "POSTGRES_PASSWORD": env["PGPASSWORD"],
+            "POSTGRES_DB": db,
+            "POSTGRES_APP_USER": probe_app,
+        }
+        done = subprocess.run(
+            ["sh", "-c", script], env=run_env, capture_output=True, text=True
+        )
+        assert done.returncode == 0, done.stderr
+        assert psql(db, "SELECT id FROM interventions ORDER BY id") == "1\n"
+        assert psql(db, "SELECT to_regclass('intervention_attachments')") == "\n"
+        owners = psql(
+            db,
+            "SELECT tableowner FROM pg_tables WHERE schemaname = 'public'",
+            "SELECT nspowner::regrole FROM pg_namespace WHERE nspname = 'public'",
+        )
+        assert owners.split() == [probe_app, probe_app]
+    finally:
+        psql(
+            "postgres",
+            f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)',
+            f"DROP ROLE IF EXISTS {probe_app}",
+        )

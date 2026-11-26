@@ -246,6 +246,26 @@ describe('SettingsPage', () => {
       page.app.unmount();
     });
 
+    // C10: the two-person approval card sits after the schedules' and counts
+    // among the cards the page asks about.
+    it('shows the approval card after the schedules, and asks for it too', async () => {
+      vi.mocked(getSettings).mockResolvedValue({
+        ...consoleSettings(),
+        approval_enabled: false,
+        approval_threshold: 40,
+        approval_ttl_hours: 24,
+        approval_eligible: 2,
+      });
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const titles = page.wrapper.findAll('.q-card').map((c) => c.text());
+      const at = (title: string) => titles.findIndex((t) => t.startsWith(title));
+      expect(at('Approbation à deux')).toBe(at('Planifications') + 1);
+      field(page, 'Au-delà de (postes)').vm.$emit('update:modelValue', 60);
+      await flushPromises();
+      expect(await asksBeforeLeaving(page)).toContain('« Approbation à deux »');
+      page.app.unmount();
+    });
+
     it('asks for the « à échéance » window and for the default owner too', async () => {
       const page = await mountPage(['settings:read', 'settings:write']);
       field(page, 'Fenêtre « à échéance »').vm.$emit('update:modelValue', 20);
@@ -372,6 +392,44 @@ describe('SettingsPage', () => {
       expect(blocksUnload()).toBe(true);
       await saveCard(page, 'Licences logicielles');
       expect(updateSettings).toHaveBeenCalledWith({ license_expiry_days: 90 });
+      page.app.unmount();
+    });
+  });
+
+  describe('the attachments card (C11)', () => {
+    beforeEach(() => {
+      vi.mocked(getSettings).mockResolvedValue({
+        ...consoleSettings(),
+        attachment_retention_days: 0,
+        env_attachment_retention_days: 0,
+      });
+      vi.mocked(updateSettings).mockReset();
+    });
+
+    it('saves the retention, 0 = kept, and refuses it out of range', async () => {
+      vi.mocked(updateSettings).mockResolvedValue({
+        ...consoleSettings(),
+        attachment_retention_days: 1825,
+      });
+      const page = await mountPage(['settings:read', 'settings:write']);
+      const label = 'Rétention des pièces jointes (jours, 0 = conserver)';
+      field(page, label).vm.$emit('update:modelValue', 4000);
+      await flushPromises();
+      await saveCard(page, 'Pièces jointes');
+      expect(updateSettings).not.toHaveBeenCalled();
+
+      field(page, label).vm.$emit('update:modelValue', '1825');
+      await flushPromises();
+      expect(blocksUnload()).toBe(true);
+      await saveCard(page, 'Pièces jointes');
+      expect(updateSettings).toHaveBeenCalledWith({ attachment_retention_days: 1825 });
+      page.app.unmount();
+    });
+
+    it('is not shown by a server older than the attachments', async () => {
+      vi.mocked(getSettings).mockResolvedValue(consoleSettings());
+      const page = await mountPage(['settings:read', 'settings:write']);
+      expect(page.wrapper.find('[data-test="attachment-settings-card"]').exists()).toBe(false);
       page.app.unmount();
     });
   });

@@ -1,5 +1,6 @@
 import account from './account';
 import alerts from './alerts';
+import approvals from './approvals';
 import assets from './assets';
 import audit from './audit';
 import auth from './auth';
@@ -23,6 +24,7 @@ import maintenance from './maintenance';
 import packagePages from './packagePages';
 import packages from './packages';
 import permissions from './permissions';
+import procedures from './procedures';
 import reports from './reports';
 import rooms from './rooms';
 import schedules from './schedules';
@@ -31,6 +33,7 @@ import settings from './settings';
 import settingsEnv from './settingsEnv';
 import software from './software';
 import tasks from './tasks';
+import trends from './trends';
 import users from './users';
 
 /**
@@ -41,6 +44,7 @@ import users from './users';
  */
 export const fr = {
   alerts: alerts.fr,
+  approvals: approvals.fr,
   assets: assets.fr,
   schedules: schedules.fr,
   reports: reports.fr,
@@ -64,7 +68,9 @@ export const fr = {
   maintenance: maintenance.fr,
   checks: checks.fr,
   tasks: tasks.fr,
+  trends: trends.fr,
   interventions: interventions.fr,
+  procedures: procedures.fr,
   layout: layout.fr,
   auth: auth.fr,
   dashboard: dashboard.fr,
@@ -78,6 +84,7 @@ export const fr = {
 
 export const en = {
   alerts: alerts.en,
+  approvals: approvals.en,
   assets: assets.en,
   schedules: schedules.en,
   reports: reports.en,
@@ -101,7 +108,9 @@ export const en = {
   maintenance: maintenance.en,
   checks: checks.en,
   tasks: tasks.en,
+  trends: trends.en,
   interventions: interventions.en,
+  procedures: procedures.en,
   layout: layout.en,
   auth: auth.en,
   dashboard: dashboard.en,

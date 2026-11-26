@@ -27,6 +27,8 @@ class WebhookEvent(enum.StrEnum):
     CHECK_CREATED = "check.created"
     CHECK_CLOSED = "check.closed"
     COMMAND_FAILED = "command.failed"
+    # A mass action waits for a second account's approval (C10).
+    APPROVAL_REQUESTED = "approval.requested"
     # Sent by « Envoyer un essai » only; never subscribed to.
     TEST = "test"
 

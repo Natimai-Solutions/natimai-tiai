@@ -218,6 +218,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import ScheduleTargetField from 'src/components/schedule/ScheduleTargetField.vue';
 import { t } from 'src/i18n';
+import { notifyApprovalsChanged } from 'src/composables/useApprovalsBadge';
 import { canRunCommand, commandActions, commandTypeLabel } from 'src/services/commands';
 import { apiErrorMessage } from 'src/services/errors';
 import { listPackages, type Package } from 'src/services/packages';
@@ -234,6 +235,7 @@ import {
   type ScheduleTargetIn,
 } from 'src/services/schedules';
 import { useAuthStore } from 'src/stores/auth';
+import { formatDateTime } from 'src/utils/format';
 import { notify } from 'src/utils/notify';
 import { WEEKDAY_KEYS, weekdayName } from 'src/utils/settingsSchedule';
 
@@ -404,7 +406,23 @@ async function submit(): Promise<void> {
     const saved = props.schedule
       ? await updateSchedule(props.schedule.id, body)
       : await createSchedule(body);
-    notify($q, () => ({ type: 'positive', message: t('schedules.actions.saved') }));
+    // C10: beyond the threshold, a schedule at risk waits for a second
+    // account before it runs — said, rather than « saved » alone.
+    const waiting = saved.state === 'to_approve';
+    // Rewriting a schedule that was waiting closes its request (the server's
+    // schedule_changed) even when the new one needs none: the badge and the
+    // approvals page read again in both cases.
+    if (waiting || props.schedule?.state === 'to_approve') notifyApprovalsChanged();
+    notify($q, () =>
+      waiting
+        ? {
+            type: 'info',
+            message: t('schedules.actions.savedToApprove', {
+              at: formatDateTime(saved.approval?.expires_at ?? null),
+            }),
+          }
+        : { type: 'positive', message: t('schedules.actions.saved') },
+    );
     emit('saved', saved);
     emit('update:modelValue', false);
   } catch (e) {

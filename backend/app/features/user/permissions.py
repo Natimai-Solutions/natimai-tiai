@@ -73,6 +73,10 @@ class Resource(enum.StrEnum):
     # own account — a script's access, granted to no built-in group but the
     # administrators.
     API_TOKEN = "api_token"
+    # Procedure notes per hardware model (C11): field knowledge written by
+    # those who repair, possibly sensitive. Granted to the technicians only
+    # (and implicitly to the administrators), not to the supervision.
+    PROCEDURE = "procedure"
 
 
 class Action(enum.StrEnum):
@@ -119,6 +123,8 @@ PERMISSION_CATALOGUE: tuple[tuple[Resource, Action], ...] = (
     (Resource.WEBHOOK, Action.READ),
     (Resource.WEBHOOK, Action.WRITE),
     (Resource.API_TOKEN, Action.WRITE),
+    (Resource.PROCEDURE, Action.READ),
+    (Resource.PROCEDURE, Action.WRITE),
 )
 
 
@@ -181,6 +187,9 @@ BUILTIN_GROUP_DEFAULTS: dict[BuiltinGroup, tuple[str, str, frozenset[str]]] = {
             permission_key(Resource.MAINTENANCE, Action.WRITE),
             # To pick the package a deployment installs.
             permission_key(Resource.PACKAGE, Action.READ),
+            # Procedure notes per model (C11): theirs to read and write.
+            permission_key(Resource.PROCEDURE, Action.READ),
+            permission_key(Resource.PROCEDURE, Action.WRITE),
         },
     ),
 }

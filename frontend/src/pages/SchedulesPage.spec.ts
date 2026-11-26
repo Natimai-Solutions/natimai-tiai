@@ -19,7 +19,9 @@ import {
   setScheduleEnabled,
   type Schedule,
 } from 'src/services/schedules';
+import { setLocale } from 'src/i18n';
 import { useAuthStore } from 'src/stores/auth';
+import { approvalsVersion } from 'src/composables/useApprovalsBadge';
 import SchedulesPage from './SchedulesPage.vue';
 
 const Stub = defineComponent({ render: () => h('div') });
@@ -73,7 +75,10 @@ async function mountAt(path: string, permissions: string[]) {
   useAuthStore().user = { id: 'u', email: 'a@b.c', permissions } as never;
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/schedules', name: 'schedules', component: Stub }],
+    routes: [
+      { path: '/schedules', name: 'schedules', component: Stub },
+      { path: '/approvals', name: 'approvals', component: Stub },
+    ],
   });
   await router.push(path);
   const wrapper = mount(SchedulesPage, {
@@ -151,6 +156,110 @@ describe('SchedulesPage', () => {
     expect(second.wrapper.findComponent(ScheduleDialog).props('initialTarget')).toEqual({
       kind: 'machines',
       machine_ids: ['m-1', 'm-2'],
+    });
+  });
+
+  // C10: a schedule waiting for a second account, and the causes of a
+  // suspension that came from an approval.
+  describe('two-person approval', () => {
+    const waiting = {
+      ...suspended,
+      id: 's-2',
+      state: 'to_approve',
+      suspended_code: null,
+      last_run: null,
+      approval: {
+        id: 'ap-1',
+        status: 'pending',
+        expires_at: '2026-11-26T10:00:00Z',
+        approved_by: null,
+        approved_at: null,
+        approved_count: null,
+      },
+    } as Schedule;
+
+    function listing(items: Schedule[]) {
+      vi.mocked(listSchedules).mockResolvedValue({
+        items,
+        total: items.length,
+        page: 1,
+        page_size: 200,
+        timezone: 'Pacific/Tahiti',
+        forbidden_windows: [],
+      });
+    }
+
+    it('shows « À approuver » with its deadline, and the way to the page for an approver', async () => {
+      listing([waiting]);
+      const { wrapper } = await mountAt('/schedules', [
+        'schedule:read',
+        'command:execute',
+        'risky_command:execute',
+      ]);
+      expect(wrapper.find('[data-test="schedule-state"]').text()).toContain('À approuver');
+      const note = wrapper.find('[data-test="schedule-to-approve"]');
+      expect(note.text()).toContain('En attente d’approbation, avant le');
+      expect(note.find('a').text()).toBe('Approbations');
+
+      const reader = await mountAt('/schedules', ['schedule:read']);
+      expect(reader.wrapper.find('[data-test="schedule-to-approve"] a').exists()).toBe(false);
+    });
+
+    it('can be turned off while it waits, which closes its request', async () => {
+      listing([waiting]);
+      vi.mocked(setScheduleEnabled).mockResolvedValue({ ...waiting, state: 'disabled' });
+      const { wrapper } = await mountAt('/schedules', ['schedule:read', 'schedule:write']);
+      const before = approvalsVersion.value;
+      await wrapper
+        .findAllComponents(QBtn)
+        .find((b) => b.props('icon') === 'pause')!
+        .trigger('click');
+      await flushPromises();
+      expect(setScheduleEnabled).toHaveBeenCalledWith('s-2', false);
+      expect(approvalsVersion.value).toBe(before + 1);
+    });
+
+    it('turned back on beyond the threshold, it waits again and the badge reads again', async () => {
+      vi.mocked(setScheduleEnabled).mockResolvedValue(waiting);
+      const { wrapper } = await mountAt('/schedules', ['schedule:read', 'schedule:write']);
+      const before = approvalsVersion.value;
+      await wrapper
+        .findAllComponents(QBtn)
+        .find((b) => b.props('icon') === 'play_arrow')!
+        .trigger('click');
+      await flushPromises();
+      expect(approvalsVersion.value).toBe(before + 1);
+    });
+
+    it.each([
+      ['approval_rejected', 'Sa demande d’approbation a été refusée.'],
+      ['approval_expired', 'Sa demande d’approbation a expiré sans décision.'],
+      ['approval_required', 'une approbation est nécessaire'],
+    ])('says why it was suspended: %s', async (code, text) => {
+      listing([{ ...suspended, suspended_code: code, last_run: null }]);
+      const { wrapper } = await mountAt('/schedules', ['schedule:read']);
+      expect(wrapper.text()).toContain(text);
+    });
+
+    // An approval that found the target grown suspends without a run: the
+    // text has no number to show, so it carries none (FR and EN).
+    it.each([
+      [
+        'fr',
+        'Au moment de l’approbation, elle visait plus de postes que la demande n’en annonçait.',
+      ],
+      ['en', 'When it was approved, it targeted more computers than the request stated.'],
+    ] as const)('says the target grew, without a run, in %s', async (locale, text) => {
+      listing([{ ...suspended, suspended_code: 'target_grew', last_run: null }]);
+      setLocale(locale);
+      try {
+        const { wrapper } = await mountAt('/schedules', ['schedule:read']);
+        const note = wrapper.find('.text-negative').text();
+        expect(note).toBe(text);
+        expect(note).not.toMatch(/[{}]|\s{2}|\s[,.]/);
+      } finally {
+        setLocale('fr');
+      }
     });
   });
 });

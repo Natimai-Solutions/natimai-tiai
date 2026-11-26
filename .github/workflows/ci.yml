@@ -20,10 +20,11 @@ jobs:
   backend:
     name: Backend (lint · types · tests · coverage)
     runs-on: ubuntu-latest
-    # Pytest seul prenait 27 min 24 s sur main au 18/11 (~1 650 tests) ; la
-    # suite en compte ~1 810 depuis C1 à C5 et l'annuaire. 45 min laissent la
-    # marge qu'il faut sans laisser tourner une suite bloquée une heure.
-    timeout-minutes: 45
+    # Pytest seul prenait 27 min 24 s sur main au 18/11 (~1 650 tests), 38 min
+    # 37 s au 26/11 (2 180 tests, C9 à C11), et plus de 44 min sur un runner
+    # lent. 75 min laissent la marge qu'il faut sans laisser tourner une suite
+    # bloquée des heures.
+    timeout-minutes: 75
     permissions:
       contents: read
       pull-requests: write # coverage comment on the PR
@@ -70,14 +71,32 @@ jobs:
         run: uv sync --frozen
 
       # tests/test_backup_script.py lance deploy/backup/backup.sh pour de vrai :
-      # chiffrement avec age, et sous le shell du conteneur (busybox ash).
-      # Sans ces deux outils, ces tests étaient sautés en silence ; ici (CI
-      # posé), leur absence les fait échouer.
-      - name: Outils des tests de sauvegarde (age, busybox)
+      # chiffrement avec age, et sous le shell du conteneur (busybox ash) ; il
+      # rejoue aussi la restauration de DEPLOYMENT.md (psql, pg_dump,
+      # pg_restore) sur le service postgres. Sans ces outils, ces tests
+      # étaient sautés en silence ; ici (CI posé), leur absence les fait
+      # échouer. La restauration se rejoue avec les outils de la version du
+      # service (16), comme db-backup prend l'image de db : ceux du runner
+      # sont plus récents et écrivent des réglages qu'un serveur 16 refuse
+      # (SET transaction_timeout), et l'archive Ubuntu du runner n'a pas de
+      # client 16. Ils viennent donc de l'image postgres:16-alpine du service,
+      # par de petits lanceurs que TIAI_PG_BIN désigne au test.
+      - name: Outils des tests de sauvegarde (age, busybox, client PostgreSQL)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends age busybox-static
-          age --version && busybox | head -n 1
+          sudo apt-get install -y --no-install-recommends age busybox-static postgresql-client
+          docker pull -q postgres:16-alpine
+          bin="$RUNNER_TEMP/pg16"
+          mkdir -p "$bin"
+          for tool in psql pg_dump pg_restore; do
+            printf '%s\n' '#!/bin/sh' \
+              "exec docker run --rm -i --network host --user \"\$(id -u):\$(id -g)\" -v /tmp:/tmp -v \"\$PWD:\$PWD\" -w \"\$PWD\" -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE postgres:16-alpine $tool \"\$@\"" \
+              > "$bin/$tool"
+            chmod +x "$bin/$tool"
+          done
+          echo "TIAI_PG_BIN=$bin" >> "$GITHUB_ENV"
+          age --version && busybox | head -n 1 && psql --version
+          "$bin/pg_dump" --version && "$bin/pg_restore" --version && "$bin/psql" --version
 
       - name: Ruff format
         run: uv run ruff format --check

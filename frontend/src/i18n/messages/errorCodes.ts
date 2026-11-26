@@ -123,8 +123,43 @@ const fr = {
   'license.too_many': 'Le nombre maximal de licences est atteint',
   'schedule.forbidden_window': 'Cette planification tomberait dans une plage interdite',
   'schedule.in_past': 'Cette date et cette heure sont passées',
+  'approval.not_found': 'Cette demande d’approbation n’existe pas ou n’est pas de votre ressort',
+  'approval.not_pending': 'Cette demande a déjà été décidée, annulée ou a expiré',
+  'approval.own_request': 'Une demande est approuvée par un autre compte que le vôtre',
+  'approval.no_approver':
+    'Aucun autre compte ne pourrait approuver cette demande : visez moins de postes, ou faites ajuster les groupes ou le réglage par un administrateur',
+  'approval.too_many_pending': 'Vous avez trop de demandes en attente d’approbation',
+  'approval.not_enough_approvers':
+    'Il faut au moins deux comptes capables d’approuver pour activer l’approbation à deux',
+  'approval.author_not_allowed':
+    'L’auteur de la demande n’a plus son compte ou ses droits : la demande est close',
+  'approval.package_gone': 'Le paquet a été supprimé depuis la demande : elle est close',
+  'approval.package_changed': 'Le paquet a été modifié depuis la demande : elle est close',
+  'approval.nothing_left':
+    'Aucun poste de la demande n’est encore dans la portée de son auteur : elle est close',
+  'approval.target_grew':
+    'La planification vise plus de postes que ceux de la demande : elle est close et la planification suspendue',
   'room.name.taken': 'Une salle porte déjà ce nom dans ce bâtiment',
   'intervention.not_found': 'Intervention introuvable',
+  'attachment.not_found': 'Pièce jointe introuvable',
+  'attachment.file_missing':
+    'Fichier absent du serveur : la pièce jointe est enregistrée, mais son fichier n’a pas été retrouvé (base restaurée sans ses fichiers ?)',
+  'attachment.too_large': 'Fichier trop volumineux pour une pièce jointe',
+  'attachment.type_refused':
+    'Type de fichier refusé : seules les images JPEG, PNG, WebP et les PDF sont acceptés',
+  'attachment.too_many': 'Cette ligne porte déjà le nombre maximal de pièces jointes',
+  'attachment.duplicate': 'Ce fichier est déjà joint à cette ligne',
+  'attachment.quota_exceeded':
+    'Espace des pièces jointes plein : supprimez des pièces jointes ou demandez une hausse du quota',
+  'attachment.store_unavailable':
+    'Ajout de pièces jointes impossible : le volume de stockage n’est pas monté sur le serveur (voir DEPLOYMENT.md)',
+  'procedure.not_found': 'Procédure introuvable',
+  'procedure.model_unknown': 'Aucun poste du parc n’a ce modèle',
+  'procedure.exists': 'Ce modèle a déjà sa procédure : modifiez-la',
+  'procedure.changed':
+    'Cette procédure a été modifiée ou supprimée entre-temps : relisez-la avant de recommencer',
+  'procedure.scope_limited':
+    'Refusé : les procédures sont rédigées par les comptes sans limite de lieux',
   'check.not_found': 'Vérification introuvable',
   'check.already_open': 'Une vérification est déjà ouverte sur ce poste',
   'check.closed': 'Cette vérification est déjà close',
@@ -259,8 +294,43 @@ const en: Record<keyof typeof fr, string> = {
   'license.too_many': 'The maximum number of licences has been reached',
   'schedule.forbidden_window': 'This schedule would run inside a forbidden window',
   'schedule.in_past': 'This date and time are past',
+  'approval.not_found': 'This approval request does not exist or is not yours to see',
+  'approval.not_pending': 'This request was already decided, cancelled or has expired',
+  'approval.own_request': 'A request is approved by another account than yours',
+  'approval.no_approver':
+    'No other account could approve this request: target fewer computers, or have an administrator adjust the groups or the setting',
+  'approval.too_many_pending': 'You have too many requests waiting for approval',
+  'approval.not_enough_approvers':
+    'At least two accounts able to approve are needed to turn two-person approval on',
+  'approval.author_not_allowed':
+    'The author of the request no longer has their account or rights: the request is closed',
+  'approval.package_gone': 'The package was deleted since the request: it is closed',
+  'approval.package_changed': 'The package changed since the request: it is closed',
+  'approval.nothing_left':
+    'None of the request’s computers is in its author’s scope any more: it is closed',
+  'approval.target_grew':
+    'The schedule targets more computers than the request did: the request is closed and the schedule suspended',
   'room.name.taken': 'A room already has this name in this building',
   'intervention.not_found': 'Intervention not found',
+  'attachment.not_found': 'Attachment not found',
+  'attachment.file_missing':
+    'File missing from the server: the attachment is recorded, but its file was not found (database restored without its files?)',
+  'attachment.too_large': 'File too large for an attachment',
+  'attachment.type_refused':
+    'File type refused: only JPEG, PNG and WebP images and PDFs are accepted',
+  'attachment.too_many': 'This line already holds the maximum number of attachments',
+  'attachment.duplicate': 'This file is already attached to this line',
+  'attachment.quota_exceeded':
+    'Attachment storage full: delete attachments or ask for a larger quota',
+  'attachment.store_unavailable':
+    'Attachments cannot be added: the storage volume is not mounted on the server (see DEPLOYMENT.md)',
+  'procedure.not_found': 'Procedure not found',
+  'procedure.model_unknown': 'No computer of the fleet has this model',
+  'procedure.exists': 'This model already has its procedure: edit it',
+  'procedure.changed':
+    'This procedure was changed or deleted in the meantime: read it again before retrying',
+  'procedure.scope_limited':
+    'Refused: procedures are written by accounts not limited to some places',
   'check.not_found': 'Check not found',
   'check.already_open': 'A check is already open on this computer',
   'check.closed': 'This check is already closed',

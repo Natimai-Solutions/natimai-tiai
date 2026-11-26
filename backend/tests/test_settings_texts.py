@@ -369,6 +369,7 @@ def test_every_format_and_group_is_covered():
         "wol",
         "console",
         "packages",
+        "attachments",
     }
     codes = {c["code"] for c in data["email_test"]}
     assert codes >= {

@@ -40,6 +40,13 @@ FR = ScheduleMailTexts(
         "permission_lost": "le compte qui l'a créée n'a plus le droit « {permission} ».",
         "target_gone": "la salle ou le bâtiment visé n'existe plus ou n'est plus dans sa portée.",
         "package_gone": "le paquet à déployer n'existe plus.",
+        "approval_required": (
+            "elle vise {count} postes, au-delà du seuil d'approbation ({threshold}) "
+            "et de ce qui a été approuvé ; la réactiver demande une nouvelle "
+            "approbation."
+        ),
+        "approval_rejected": "sa demande d'approbation a été refusée.",
+        "approval_expired": "sa demande d'approbation a expiré sans décision.",
     },
     halted_detail=(
         "{failed} échec(s) sur {finished} poste(s) ayant répondu ({percent} %), "
@@ -64,6 +71,13 @@ EN = ScheduleMailTexts(
         "permission_lost": "the account that created it no longer holds “{permission}”.",
         "target_gone": "the targeted room or building no longer exists or is out of its scope.",
         "package_gone": "the package to deploy no longer exists.",
+        "approval_required": (
+            "it targets {count} computers, above the approval threshold "
+            "({threshold}) and what was approved; turning it back on asks for "
+            "a new approval."
+        ),
+        "approval_rejected": "its approval request was rejected.",
+        "approval_expired": "its approval request expired without a decision.",
     },
     halted_detail=(
         "{failed} failure(s) out of {finished} computer(s) that answered "

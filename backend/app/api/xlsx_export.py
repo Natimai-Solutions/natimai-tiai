@@ -11,6 +11,7 @@ import asyncio
 import io
 import re
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
 
 from fastapi import Response
@@ -18,6 +19,7 @@ from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.worksheet import Worksheet
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -73,13 +75,35 @@ async def xlsx_response(
     )
 
 
+@dataclass(frozen=True)
+class Sheet:
+    """One sheet of a workbook: its title, its header and its rows, and an
+    optional caption written above the header (a report's « généré le … »)."""
+
+    title: str
+    header: Sequence[str]
+    rows: Sequence[Sequence[object]]
+    caption: str | None = None
+
+
+async def xlsx_workbook_response(filename: str, sheets: Sequence[Sheet]) -> Response:
+    """``xlsx_response`` for a workbook of several sheets, built in a thread
+    for the same reason."""
+    content = await asyncio.to_thread(xlsx_workbook_bytes, list(sheets))
+    return Response(
+        content=content,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def xlsx_bytes(
     header: Sequence[str],
     rows: Iterable[Sequence[object]],
     *,
     sheet_title: str = "Export",
 ) -> bytes:
-    """The workbook of ``xlsx_response``, as bytes.
+    """The workbook of ``xlsx_response``, as bytes: one sheet.
 
     ``None`` becomes an empty cell, as in the CSV: a spreadsheet has no notion
     of "never reported". Dates and datetimes are written as Excel dates with a
@@ -91,16 +115,38 @@ def xlsx_bytes(
     come from the agents (a poste can name itself ``=HYPERLINK(...)``), so every
     string cell is forced to text.
     """
+    return xlsx_workbook_bytes([Sheet(sheet_title, header, list(rows))])
+
+
+def xlsx_workbook_bytes(sheets: Sequence[Sheet]) -> bytes:
+    """A workbook of ``sheets``, in order, under the rules of ``xlsx_bytes``
+    — text forced, illegal characters dropped, native dates, bounded widths."""
     workbook = Workbook()
-    # A new sheet rather than the default one: ``active`` is typed as possibly
+    # New sheets rather than the default one: ``active`` is typed as possibly
     # absent, and the default sheet is dropped so the workbook opens on ours.
-    sheet = workbook.create_sheet(title=sheet_title, index=0)
+    created = [
+        _fill(workbook.create_sheet(title=sheet.title, index=i), sheet)
+        for i, sheet in enumerate(sheets)
+    ]
     for other in list(workbook.worksheets):
-        if other is not sheet:
+        if other not in created:
             workbook.remove(other)
 
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def _fill(sheet: Worksheet, spec: Sheet) -> Worksheet:
+    header = spec.header
+    first = 1
+    if spec.caption is not None:
+        sheet.append([_cell(spec.caption)])
+        sheet.cell(row=1, column=1).data_type = "s"
+        sheet.cell(row=1, column=1).font = Font(italic=True)
+        first = 2
     sheet.append(list(header))
-    for cell in sheet[1]:
+    for cell in sheet[first]:
         cell.font = Font(bold=True)
 
     widths = [len(h) for h in header]
@@ -108,8 +154,8 @@ def xlsx_bytes(
     # ``sheet.max_row`` walks every cell written so far, and reading it once
     # per cell made the export quadratic — 10 s for 1,500 postes, minutes for
     # all columns.
-    last = 1
-    for row in rows:
+    last = first
+    for row in spec.rows:
         values = [_cell(v) for v in row]
         sheet.append(values)
         last += 1
@@ -125,7 +171,7 @@ def xlsx_bytes(
                 length = len(DATE_FORMAT)
             else:
                 length = len(str(value))
-            if length > widths[i]:
+            if i < len(widths) and length > widths[i]:
                 widths[i] = length
 
     for i, width in enumerate(widths):
@@ -134,10 +180,7 @@ def xlsx_bytes(
         )
     # The header stays put while the rows scroll, and every column gets the
     # dropdown Excel users reach for first.
-    sheet.freeze_panes = "A2"
+    sheet.freeze_panes = f"A{first + 1}"
     if header:
-        sheet.auto_filter.ref = f"A1:{get_column_letter(len(header))}{last}"
-
-    buffer = io.BytesIO()
-    workbook.save(buffer)
-    return buffer.getvalue()
+        sheet.auto_filter.ref = f"A{first}:{get_column_letter(len(header))}{last}"
+    return sheet

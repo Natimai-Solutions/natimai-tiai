@@ -19,6 +19,20 @@ vi.mock('src/services/packages', async (orig) => ({
   listPackages: (...a: unknown[]) => listPackages(...a),
 }));
 
+const shown = vi.hoisted(() => [] as { type?: string; message?: string }[]);
+vi.mock('src/utils/notify', () => ({
+  notify: (_q: unknown, build: () => { type?: string; message?: string }) => {
+    shown.push(build());
+    return () => undefined;
+  },
+}));
+const push = vi.hoisted(() => vi.fn());
+vi.mock('vue-router', async (orig) => ({
+  ...(await orig<object>()),
+  useRouter: () => ({ push }),
+}));
+
+import { approvalsVersion } from 'src/composables/useApprovalsBadge';
 import PackageDeployDialog from './PackageDeployDialog.vue';
 
 const PRODUCT_CODE = '{6C2A1A7B-0D5E-4F1C-9E4B-3B1C2D3E4F50}';
@@ -109,6 +123,35 @@ describe('PackageDeployDialog', () => {
     expect(banner).toContain('code produit');
     expect(banner).not.toContain('aucun poste');
     expect(sendButton(w).props('disable')).toBe(false);
+    w.unmount();
+  });
+
+  // C10: beyond the threshold the deployment waits for a second account —
+  // said from approval_id, not « nothing sent » from count = 0.
+  it('says a deployment waits for approval', async () => {
+    deployPackage.mockResolvedValue({
+      created: [],
+      count: 0,
+      revoked: 0,
+      approval_id: 'ap-1',
+      approval_expires_at: '2026-11-26T10:00:00Z',
+      pending_approval: 45,
+    });
+    shown.length = 0;
+    const before = approvalsVersion.value;
+    const ids = Array.from({ length: 45 }, (_, i) => `m-${i}`);
+    const w = await open({ package: pkg(), machineIds: ids, initialAction: 'install' });
+    await sendButton(w).trigger('click');
+    await flushPromises();
+    const ok = [...document.querySelectorAll('.q-dialog-plugin button')].find(
+      (b) => b.textContent?.trim() === 'Installer',
+    ) as HTMLElement | undefined;
+    ok?.click();
+    await flushPromises();
+    expect(deployPackage).toHaveBeenCalled();
+    expect(shown.at(-1)?.type).toBe('info');
+    expect(shown.at(-1)?.message).toContain('Demande d’approbation envoyée pour 45 postes');
+    expect(approvalsVersion.value).toBe(before + 1);
     w.unmount();
   });
 

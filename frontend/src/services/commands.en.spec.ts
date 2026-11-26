@@ -119,3 +119,16 @@ describe('confirmations and notifications in English', () => {
     );
   });
 });
+
+describe('a request for approval in English (C10)', () => {
+  it('agrees with its number', () => {
+    setLocale('en');
+    const base = { created: [], count: 0, approval_id: 'ap-1', approval_expires_at: null };
+    expect(bulkSendNotification({ ...base, pending_approval: 1 }).message).toContain(
+      'Approval request sent for 1 computer: a second account must approve it',
+    );
+    expect(bulkSendNotification({ ...base, pending_approval: 45 }).message).toContain(
+      'Approval request sent for 45 computers',
+    );
+  });
+});

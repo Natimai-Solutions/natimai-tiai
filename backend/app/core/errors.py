@@ -147,6 +147,26 @@ class ErrorCode(enum.StrEnum):
     SCHEDULE_FORBIDDEN_WINDOW = "schedule.forbidden_window"
     # A one-off planned in the past.
     SCHEDULE_IN_PAST = "schedule.in_past"
+    # Two-person approval of mass actions (C10).
+    APPROVAL_NOT_FOUND = "approval.not_found"
+    # Decided, cancelled or expired already (expired at this very moment
+    # included: recorded before the answer).
+    APPROVAL_NOT_PENDING = "approval.not_pending"
+    APPROVAL_OWN_REQUEST = "approval.own_request"
+    # No other account could approve it: nothing is asked.
+    APPROVAL_NO_APPROVER = "approval.no_approver"
+    APPROVAL_TOO_MANY_PENDING = "approval.too_many_pending"
+    # Turning approval on with fewer than two accounts able to approve.
+    APPROVAL_NOT_ENOUGH_APPROVERS = "approval.not_enough_approvers"
+    # The approval failed — the request is closed, recorded before the
+    # answer: the author lost their account or rights, the package was
+    # deleted or changed, no poste of the list is left.
+    APPROVAL_AUTHOR_NOT_ALLOWED = "approval.author_not_allowed"
+    APPROVAL_PACKAGE_GONE = "approval.package_gone"
+    APPROVAL_PACKAGE_CHANGED = "approval.package_changed"
+    APPROVAL_NOTHING_LEFT = "approval.nothing_left"
+    # A schedule's target grew past the count the approver was shown.
+    APPROVAL_TARGET_GREW = "approval.target_grew"
     ROOM_NAME_TAKEN = "room.name.taken"
     # ROOM_SOURCE is a directory mode: postes are filed by the directory, and
     # a placement made by hand here would be undone on the next inventory.
@@ -155,6 +175,30 @@ class ErrorCode(enum.StrEnum):
     # would name nothing, and dropping the row could widen the group (C11).
     ROOM_IN_GROUP_SCOPE = "room.in_group_scope"
     INTERVENTION_NOT_FOUND = "intervention.not_found"
+    # Attachments of the journal (C11).
+    ATTACHMENT_NOT_FOUND = "attachment.not_found"
+    # The row is there, the file is not on the disk (a database restored
+    # without its files).
+    ATTACHMENT_FILE_MISSING = "attachment.file_missing"
+    ATTACHMENT_TOO_LARGE = "attachment.too_large"
+    # Recognised from the content: JPEG, PNG, WebP and PDF only.
+    ATTACHMENT_TYPE_REFUSED = "attachment.type_refused"
+    ATTACHMENT_TOO_MANY = "attachment.too_many"
+    # The same file is already joined to this line.
+    ATTACHMENT_DUPLICATE = "attachment.duplicate"
+    ATTACHMENT_QUOTA_EXCEEDED = "attachment.quota_exceeded"
+    # ATTACHMENTS_DIR is not a mounted volume (outside ``local``).
+    ATTACHMENT_STORE_UNAVAILABLE = "attachment.store_unavailable"
+    # Procedure notes per hardware model (C11).
+    PROCEDURE_NOT_FOUND = "procedure.not_found"
+    # No poste, retired ones included, has this model.
+    PROCEDURE_MODEL_UNKNOWN = "procedure.model_unknown"
+    PROCEDURE_EXISTS = "procedure.exists"
+    # Changed or deleted by someone else since it was read.
+    PROCEDURE_CHANGED = "procedure.changed"
+    # Written by the accounts that see every poste only: a note is shared
+    # between sites.
+    PROCEDURE_SCOPE_LIMITED = "procedure.scope_limited"
     CHECK_NOT_FOUND = "check.not_found"
     CHECK_ALREADY_OPEN = "check.already_open"
     CHECK_CLOSED = "check.closed"

@@ -100,6 +100,15 @@ describe('SettingsWebhooksCard', () => {
     expect(w.find('[data-test="webhook-add"]').exists()).toBe(true);
   });
 
+  // C10: the request for a second approval can go to the team's channel.
+  it('offers and names the approval.requested event', async () => {
+    vi.mocked(listWebhooks).mockResolvedValue([hook({ events: ['approval.requested'] })]);
+    const w = await mountCard(['webhook:read', 'webhook:write']);
+    expect(w.text()).toContain('Approbation demandée');
+    const { WEBHOOK_EVENTS } = await import('src/services/webhooks');
+    expect(WEBHOOK_EVENTS).toContain('approval.requested');
+  });
+
   it('read-only without the right to write, absent without the right to read', async () => {
     let w = await mountCard(['webhook:read']);
     expect(w.find('[data-test="webhook-add"]').exists()).toBe(false);

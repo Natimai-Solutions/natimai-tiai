@@ -109,7 +109,10 @@ const fr = {
       hint: 'Un e-mail chaque matin, même sans incident : état du parc, antivirus périmés, postes à mettre à jour, puis vos tâches. Un « rien à signaler » est aussi une information.',
     },
   },
+  /** `sizeLabel` (megabytes in) and `formatSize` (bytes in). */
   size: {
+    bytes: '{size} o',
+    kib: '{size} Kio',
     mib: '{size} Mio',
     gib: '{size} Gio',
     tib: '{size} Tio',
@@ -266,6 +269,8 @@ const en: Translation<typeof fr> = {
     },
   },
   size: {
+    bytes: '{size} B',
+    kib: '{size} KiB',
     mib: '{size} MiB',
     gib: '{size} GiB',
     tib: '{size} TiB',
