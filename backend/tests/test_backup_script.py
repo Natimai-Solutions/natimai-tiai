@@ -650,8 +650,8 @@ def test_a_failed_copy_is_said_and_purges_nothing(shell, tmp_path, backups, volu
     # Every copy fails where it is written: its temporary name is a link to
     # a folder that does not exist. A fake ``cp`` on the PATH would not do —
     # busybox runs its own applet whatever the PATH says.
-    for source in volume.iterdir():
-        (copy / f"{source.name}.tmp").symlink_to(tmp_path / "nowhere" / "copy")
+    for sha in (SHA_PHOTO, SHA_SCAN):
+        (copy / f"{sha}.tmp").symlink_to(tmp_path / "nowhere" / "copy")
     run = run_script(shell, tmp_path, backups, attachments=volume)
     assert "ECHEC de la copie des pièces jointes" in run.stderr, run.stderr
     # The dump itself stands, and closes the cycle.
