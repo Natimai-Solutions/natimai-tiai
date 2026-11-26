@@ -775,17 +775,22 @@ def test_the_documented_restore_puts_back_a_dump_older_than_the_schema(tmp_path)
     # The tools of the server's own version, as in production, where
     # db-backup runs the image of the db service. A newer pg_dump writes
     # settings an older server refuses (``SET transaction_timeout``, 17+), and
-    # a runner's PATH holds whatever version its image ships.
+    # a runner's PATH holds whatever version its image ships. TIAI_PG_BIN
+    # names them (CI: launchers of the service's image); else the distro's.
     major = int(psql("postgres", "SHOW server_version_num")) // 10000
-    tools = Path(f"/usr/lib/postgresql/{major}/bin")
+    tools = Path(os.environ.get("TIAI_PG_BIN") or f"/usr/lib/postgresql/{major}/bin")
     if tools.is_dir():
         env["PATH"] = f"{tools}{os.pathsep}{env['PATH']}"
     elif os.environ.get("CI"):
         pytest.fail(
-            f"no PostgreSQL {major} client in {tools}: install "
-            f"postgresql-client-{major} in the workflow's step for the backup "
-            "tests' tools (.github/workflows/ci.yml)"
+            f"no PostgreSQL {major} client in {tools}: set TIAI_PG_BIN in the "
+            "workflow's step for the backup tests' tools (.github/workflows/ci.yml)"
         )
+    version = subprocess.run(
+        ["pg_restore", "--version"], env=env, check=True, capture_output=True, text=True
+    ).stdout
+    if f") {major}." not in version and os.environ.get("CI"):
+        pytest.fail(f"pg_restore is not of the server's version {major}: {version}")
 
     psql("postgres", f'DROP DATABASE IF EXISTS "{db}"', f'CREATE DATABASE "{db}"')
     try:

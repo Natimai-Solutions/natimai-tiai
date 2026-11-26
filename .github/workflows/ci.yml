@@ -74,15 +74,28 @@ jobs:
       # rejoue aussi la restauration de DEPLOYMENT.md (psql, pg_dump,
       # pg_restore) sur le service postgres. Sans ces outils, ces tests
       # étaient sautés en silence ; ici (CI posé), leur absence les fait
-      # échouer. Le client de la version du service (16) : celui du PATH du
-      # runner est plus récent et écrit des réglages qu'un serveur 16 refuse
-      # (SET transaction_timeout) ; le test de restauration prend
-      # /usr/lib/postgresql/16/bin, comme db-backup prend l'image de db.
+      # échouer. La restauration se rejoue avec les outils de la version du
+      # service (16), comme db-backup prend l'image de db : ceux du runner
+      # sont plus récents et écrivent des réglages qu'un serveur 16 refuse
+      # (SET transaction_timeout), et l'archive Ubuntu du runner n'a pas de
+      # client 16. Ils viennent donc de l'image postgres:16-alpine du service,
+      # par de petits lanceurs que TIAI_PG_BIN désigne au test.
       - name: Outils des tests de sauvegarde (age, busybox, client PostgreSQL)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends age busybox-static postgresql-client-16
-          age --version && busybox | head -n 1 && /usr/lib/postgresql/16/bin/pg_dump --version && /usr/lib/postgresql/16/bin/pg_restore --version && psql --version
+          sudo apt-get install -y --no-install-recommends age busybox-static postgresql-client
+          docker pull -q postgres:16-alpine
+          bin="$RUNNER_TEMP/pg16"
+          mkdir -p "$bin"
+          for tool in psql pg_dump pg_restore; do
+            printf '%s\n' '#!/bin/sh' \
+              "exec docker run --rm -i --network host --user \"\$(id -u):\$(id -g)\" -v /tmp:/tmp -v \"\$PWD:\$PWD\" -w \"\$PWD\" -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE postgres:16-alpine $tool \"\$@\"" \
+              > "$bin/$tool"
+            chmod +x "$bin/$tool"
+          done
+          echo "TIAI_PG_BIN=$bin" >> "$GITHUB_ENV"
+          age --version && busybox | head -n 1 && psql --version
+          "$bin/pg_dump" --version && "$bin/pg_restore" --version && "$bin/psql" --version
 
       - name: Ruff format
         run: uv run ruff format --check
