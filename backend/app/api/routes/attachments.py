@@ -95,11 +95,19 @@ def _duplicate() -> AppError:
 
 
 async def _require_attachment(
-    session: SessionDep, attachment_id: uuid.UUID, scope: Scope | None
+    session: SessionDep,
+    attachment_id: uuid.UUID,
+    scope: Scope | None,
+    *,
+    lock: bool = False,
 ) -> tuple[InterventionAttachment, uuid.UUID]:
     """The attachment and its line's poste, when that poste is in reach;
-    404 otherwise."""
-    found = await session.exec(
+    404 otherwise.
+
+    ``lock``: the attachment's row is held until the commit (``FOR UPDATE``,
+    the row only, not its line). Two deletions at once: the second waits,
+    then finds the row gone and answers 404 — one 204, one audit entry."""
+    query = (
         select(InterventionAttachment, Intervention.machine_id)
         .join(
             Intervention,
@@ -107,6 +115,11 @@ async def _require_attachment(
         )
         .where(col(InterventionAttachment.id) == attachment_id)
     )
+    if lock:
+        query = query.with_for_update(of=InterventionAttachment).execution_options(
+            populate_existing=True
+        )
+    found = await session.exec(query)
     row = found.first()
     if row is None:
         raise _not_found()
@@ -325,7 +338,9 @@ async def delete_attachment(
     scope: CurrentScope,
     current: CurrentUser,
 ) -> None:
-    attachment, machine_id = await _require_attachment(session, attachment_id, scope)
+    attachment, machine_id = await _require_attachment(
+        session, attachment_id, scope, lock=True
+    )
     out = AttachmentOut.model_validate(attachment)
     sha = attachment.sha256
     audit.record(

@@ -63,12 +63,12 @@
     </q-card>
 
     <ProcedureEditDialog
-      v-if="editing"
+      v-if="editModel"
       v-model="editOpen"
-      :hw-model="editing.hw_model"
+      :hw-model="editModel"
       :procedure="editing"
       @saved="onChanged"
-      @stale="onChanged"
+      @stale="onStale"
     />
   </q-dialog>
 </template>
@@ -102,6 +102,8 @@ const items = ref<ProcedureListItem[]>([]);
 const loading = ref(false);
 const failed = ref(false);
 const editing = ref<ProcedureListItem | null>(null);
+/** The model of the note being edited: kept when the note is deleted meanwhile. */
+const editModel = ref<string | null>(null);
 const editOpen = ref(false);
 
 function caption(p: ProcedureListItem): string {
@@ -137,12 +139,25 @@ watch(
 
 function openEdit(p: ProcedureListItem) {
   editing.value = p;
+  editModel.value = p.hw_model;
   editOpen.value = true;
 }
 
 async function onChanged() {
   emit('changed');
   await load();
+}
+
+/**
+ * The note was changed or deleted meanwhile: the open edit dialog moves onto
+ * the version read again (its next save names that one), or, deleted, onto
+ * a new note for the same model — what was typed is kept either way.
+ */
+async function onStale() {
+  const model = editModel.value;
+  await onChanged();
+  if (failed.value || model === null) return;
+  editing.value = items.value.find((i) => i.hw_model === model) ?? null;
 }
 
 function confirmDelete(p: ProcedureListItem) {

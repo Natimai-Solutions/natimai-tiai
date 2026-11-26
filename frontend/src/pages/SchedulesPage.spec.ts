@@ -19,6 +19,7 @@ import {
   setScheduleEnabled,
   type Schedule,
 } from 'src/services/schedules';
+import { setLocale } from 'src/i18n';
 import { useAuthStore } from 'src/stores/auth';
 import { approvalsVersion } from 'src/composables/useApprovalsBadge';
 import SchedulesPage from './SchedulesPage.vue';
@@ -238,6 +239,27 @@ describe('SchedulesPage', () => {
       listing([{ ...suspended, suspended_code: code, last_run: null }]);
       const { wrapper } = await mountAt('/schedules', ['schedule:read']);
       expect(wrapper.text()).toContain(text);
+    });
+
+    // An approval that found the target grown suspends without a run: the
+    // text has no number to show, so it carries none (FR and EN).
+    it.each([
+      [
+        'fr',
+        'Au moment de l’approbation, elle visait plus de postes que la demande n’en annonçait.',
+      ],
+      ['en', 'When it was approved, it targeted more computers than the request stated.'],
+    ] as const)('says the target grew, without a run, in %s', async (locale, text) => {
+      listing([{ ...suspended, suspended_code: 'target_grew', last_run: null }]);
+      setLocale(locale);
+      try {
+        const { wrapper } = await mountAt('/schedules', ['schedule:read']);
+        const note = wrapper.find('.text-negative').text();
+        expect(note).toBe(text);
+        expect(note).not.toMatch(/[{}]|\s{2}|\s[,.]/);
+      } finally {
+        setLocale('fr');
+      }
     });
   });
 });

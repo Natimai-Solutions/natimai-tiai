@@ -30,7 +30,7 @@ from app.core.config import settings as env
 from app.core.errors import AppError, ErrorCode
 from app.features.approval import crud as approval_crud
 from app.features.approval import schedule as approval_schedule
-from app.features.approval.models import ApprovalRequest
+from app.features.approval.models import ApprovalRequest, ApprovalStatus
 from app.features.audit import crud as audit
 from app.features.base import utcnow
 from app.features.command import target as target_crud
@@ -430,6 +430,39 @@ async def _require(
     return schedule
 
 
+async def _lock(
+    session: SessionDep, schedule_id: uuid.UUID, scope: Scope | None, user_id: uuid.UUID
+) -> Schedule:
+    """The schedule about to be rewritten, turned off or on, or deleted:
+    locked in the order an approval locks them — its pending request, then
+    the schedule (``approval.schedule.approve_schedule``) — and read again
+    under the lock. An approval committed meanwhile is seen, and cleared by
+    the write; never the reverse order, which deadlocks against it."""
+    await session.exec(
+        select(col(ApprovalRequest.id))
+        .where(
+            col(ApprovalRequest.schedule_id) == schedule_id,
+            col(ApprovalRequest.status) == ApprovalStatus.PENDING,
+        )
+        .with_for_update()
+    )
+    schedule = (
+        await session.exec(
+            select(Schedule)
+            .where(col(Schedule.id) == schedule_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).first()
+    if schedule is None or not await _visible(session, schedule, scope, user_id):
+        raise AppError(
+            code=ErrorCode.SCHEDULE_NOT_FOUND,
+            status_code=404,
+            message="Schedule not found",
+        )
+    return schedule
+
+
 def _require_command_rights(
     permissions: frozenset[str], command_type: CommandType, shutdown_after: bool
 ) -> None:
@@ -711,7 +744,7 @@ async def update_schedule(
 ) -> ScheduleOut:
     """Rewrite a schedule — in the writer's name from now on, active again."""
     user_id, user_email = user.id, user.email
-    schedule = await _require(session, schedule_id, scope, user_id)
+    schedule = await _lock(session, schedule_id, scope, user_id)
     previous_author = schedule.created_by
     previous_stages = len(schedule.rings or [])
     await _apply(
@@ -772,7 +805,7 @@ async def set_state(
     """Turn a schedule off, or back on — suspended ones included, in the
     name of whoever turns it on, who must hold what it needs."""
     user_id, user_email = user.id, user.email
-    schedule = await _require(session, schedule_id, scope, user_id)
+    schedule = await _lock(session, schedule_id, scope, user_id)
     now = utcnow()
     required = False
     if payload.enabled:
@@ -841,7 +874,7 @@ async def delete_schedule(
 ) -> None:
     """Delete a schedule and its run history; the commands it created stay
     in the postes' history."""
-    schedule = await _require(session, schedule_id, scope, user.id)
+    schedule = await _lock(session, schedule_id, scope, user.id)
     audit.record(
         session,
         actor=user.email,

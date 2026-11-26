@@ -126,6 +126,29 @@ describe('prepareImage', () => {
     expect(wide.name).toBe('large.jpg');
   });
 
+  it('redraws a JPEG whatever its extension says — read from its first bytes', async () => {
+    const { create } = fakeImage(800, 600);
+    const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe1, 0, 0, 0x45, 0x78, 0x69, 0x66, 0, 0]);
+    for (const [name, type] of [
+      ['panne.png', 'image/png'],
+      ['panne.pdf', 'application/pdf'],
+    ] as const) {
+      const disguised = new File([jpegBytes], name, { type });
+      const out = await prepareImage(disguised, POLICY);
+      expect(out).not.toBe(disguised);
+      expect(out.type).toBe('image/jpeg');
+    }
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it('redraws a WebP named as a PNG', async () => {
+    fakeImage(100, 100);
+    const webp = new File([new TextEncoder().encode('RIFF\0\0\0\0WEBPVP8 ')], 'x.png', {
+      type: 'image/png',
+    });
+    expect((await prepareImage(webp, POLICY)).type).toBe('image/jpeg');
+  });
+
   it('never touches a PDF', async () => {
     const decode = vi.fn();
     vi.stubGlobal('createImageBitmap', decode);

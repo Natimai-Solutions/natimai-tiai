@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -37,12 +38,23 @@ def at_risk(schedule: Schedule) -> bool:
     return schedule.command_type in RISKY_COMMAND_TYPES or schedule.shutdown_after
 
 
+_APPROVAL_FIELDS = (
+    "approved_by_id",
+    "approved_by",
+    "approved_at",
+    "approved_for_id",
+    "approved_count",
+)
+
+
 def clear_approval(schedule: Schedule) -> None:
-    schedule.approved_by_id = None
-    schedule.approved_by = None
-    schedule.approved_at = None
-    schedule.approved_for_id = None
-    schedule.approved_count = None
+    """Void the approval the schedule carries — written out at the next
+    flush even when the loaded copy already read it empty: an approval
+    committed since the read is not left in the row."""
+    for field in _APPROVAL_FIELDS:
+        setattr(schedule, field, None)
+        if field in schedule.__dict__:
+            flag_modified(schedule, field)
 
 
 async def gate(
@@ -189,6 +201,20 @@ async def approve_schedule(
         )
 
     count = await schedule_crud.estimate(session, sched, checked.scope)
+    if count > request.machine_count:
+        # Grown since the request: the approver approves the count the
+        # request showed them, never more (§1, plan §8).
+        params = {"count": count, "approved": request.machine_count}
+        raise await failed(
+            "target_grew",
+            params,
+            AppError(
+                code=ErrorCode.APPROVAL_TARGET_GREW,
+                status_code=409,
+                message="The schedule targets more postes than the request",
+                details=params,
+            ),
+        )
     sched.state = ScheduleState.ACTIVE
     sched.suspended_code = None
     sched.suspended_at = None

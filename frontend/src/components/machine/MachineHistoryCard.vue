@@ -106,7 +106,7 @@
       @deleted="emit('changed')"
     />
 
-    <q-dialog v-model="formOpen">
+    <q-dialog v-model="formOpen" :persistent="attachmentsBusy">
       <q-card style="width: 520px; max-width: 95vw">
         <q-card-section class="text-h6">
           {{ editing ? t('interventions.history.editTitle') : t('interventions.history.newTitle') }}
@@ -159,6 +159,7 @@
               :intervention-id="editing?.id ?? null"
               :policy="policy"
               editable
+              @update:busy="attachmentsBusy = $event"
               @changed="attachmentsChanged = true"
             />
             <div v-if="sendingName" class="text-caption text-muted" data-test="sending-attachments">
@@ -167,12 +168,21 @@
             </div>
           </q-card-section>
           <q-card-actions align="right" class="q-px-md q-pb-md">
-            <q-btn v-close-popup flat :label="t('interventions.actions.cancel')" />
+            <!-- Not while a picked file is still being prepared or sent: it
+                 would be lost with the dialog. -->
+            <q-btn
+              v-close-popup
+              flat
+              :label="t('interventions.actions.cancel')"
+              :disable="attachmentsBusy"
+            />
             <q-btn
               type="submit"
               color="primary"
               :label="t('interventions.actions.save')"
               :loading="saving"
+              :disable="attachmentsBusy"
+              data-test="intervention-save"
             />
           </q-card-actions>
         </q-form>
@@ -250,6 +260,8 @@ const editing = ref<Intervention | null>(null);
 const policy = ref<AttachmentPolicy | null>(null);
 const queued = ref<File[]>([]);
 const attachmentsChanged = ref(false);
+/** A picked file is still being redrawn or sent by the attachments. */
+const attachmentsBusy = ref(false);
 const sendingName = ref<string | null>(null);
 const sendingProgress = ref(0);
 
@@ -322,6 +334,7 @@ function toLocalInput(iso: string): string {
 function openCreate() {
   editing.value = null;
   queued.value = [];
+  attachmentsBusy.value = false;
   void loadPolicy();
   Object.assign(form, {
     kind: 'incident',
@@ -335,6 +348,7 @@ function openCreate() {
 function openEdit(item: Intervention) {
   editing.value = item;
   queued.value = [];
+  attachmentsBusy.value = false;
   void loadPolicy();
   shownTitle = interventionTitle(item) ?? '';
   Object.assign(form, {
@@ -347,6 +361,9 @@ function openEdit(item: Intervention) {
 }
 
 async function submit() {
+  // Enter in a field submits too: a file still being prepared would not be
+  // in `queued` yet, and would be dropped with the dialog.
+  if (attachmentsBusy.value || saving.value) return;
   saving.value = true;
   try {
     const performedAt = form.performed_at ? new Date(form.performed_at).toISOString() : null;

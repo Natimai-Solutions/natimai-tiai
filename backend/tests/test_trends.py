@@ -567,3 +567,83 @@ async def test_a_merge_leaves_the_photos_alone(engine, db_session):
         (s.location, s.counters["total"]) for s in await _snapshots(db_session)
     )
     assert after == before == [("A", 1), ("B", 1)]
+
+
+@pytest.mark.parametrize("change", ["room_building", "machine_location"])
+async def test_a_place_changed_while_the_photo_is_taken_gives_one_cell(
+    engine, db_session, change
+):
+    """The counters and their breakdowns are read from one snapshot: a room
+    moved to another building (or a heartbeat moving the poste) committed
+    right after the counters are read neither breaks the insert on
+    ``uq_trend_snapshots_cell`` nor splits the poste's alerts and failed
+    checks from its total (review C9-server, plan §8.3)."""
+    from sqlalchemy import text
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.features.alert.models import MachineAlert
+    from app.features.base import utcnow
+    from app.features.room.models import Building, Room
+    from app.features.trend import snapshot
+
+    b1 = Building(name="B1", location="S1")
+    b2 = Building(name="B2", location="S2")
+    db_session.add_all([b1, b2])
+    await db_session.flush()
+    room = Room(name="R", building_id=b1.id)
+    db_session.add(room)
+    await db_session.flush()
+    b1_id, b2_id, room_id = b1.id, b2.id, room.id
+    await db_session.commit()
+    pc = await machine(
+        db_session,
+        "PC",
+        location="L",
+        room_id=room_id,
+        compliance_total=5,
+        compliance_passed=4,
+        compliance_failed=["tpm"],
+    )
+    db_session.add(MachineAlert(machine_id=pc.id, rule="disk_low"))
+    await db_session.commit()
+
+    if change == "room_building":
+        sql = text("UPDATE rooms SET building_id = :v WHERE id = :id").bindparams(
+            v=b2_id, id=room_id
+        )
+    else:
+        sql = text("UPDATE machines SET location = :v WHERE id = :id").bindparams(
+            v="L2", id=pc.id
+        )
+
+    async with AsyncSession(engine) as session:
+        exec_ = session.exec
+        moved = False
+
+        async def exec_then_move(statement, *args, **kwargs):
+            nonlocal moved
+            result = await exec_(statement, *args, **kwargs)
+            if not moved and "FILTER (WHERE" in str(statement):
+                moved = True
+                async with AsyncSession(engine) as other:
+                    await other.exec(sql)
+                    await other.commit()
+            return result
+
+        session.exec = exec_then_move  # type: ignore[method-assign]
+        assert await snapshot.record(session, utcnow()) == 1
+        await session.commit()
+    assert moved
+
+    snaps = await _snapshots(db_session)
+    assert len(snaps) == 1
+    (cell,) = snaps
+    assert (cell.location, cell.room_id, cell.building_id, cell.site) == (
+        "L",
+        room_id,
+        b1_id,
+        "S1",
+    )
+    assert cell.counters["total"] == 1
+    assert cell.counters["alerts.disk_low"] == 1
+    assert cell.counters["compliance.tpm"] == 1

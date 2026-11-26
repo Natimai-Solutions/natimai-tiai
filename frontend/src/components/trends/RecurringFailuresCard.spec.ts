@@ -10,6 +10,7 @@ vi.mock('src/services/trends', async (importOriginal) => ({
 }));
 
 import { getRecurringFailures, type FailureRow } from 'src/services/trends';
+import LoadErrorBanner from 'src/components/LoadErrorBanner.vue';
 import RecurringFailuresCard from './RecurringFailuresCard.vue';
 
 const Stub = defineComponent({ render: () => h('div') });
@@ -83,6 +84,42 @@ describe('RecurringFailuresCard', () => {
     expect(w.text()).toContain('Autre salle (hors de votre périmètre)');
     expect(w.text()).toContain('Sans salle');
     expect(links()).toEqual([JSON.stringify({ name: 'machines', query: { room: 'r-1' } })]);
+  });
+
+  // A late answer for the rooms is not shown under « By model » chosen since.
+  it('drops a late answer to a grouping left since', async () => {
+    vi.mocked(getRecurringFailures).mockResolvedValue([row({ hw_model: 'OptiPlex 7010' })]);
+    const { w } = await mountCard();
+    let answerRooms!: (rows: FailureRow[]) => void;
+    let answerModels!: (rows: FailureRow[]) => void;
+    vi.mocked(getRecurringFailures)
+      .mockImplementationOnce(() => new Promise((ok) => (answerRooms = ok)))
+      .mockImplementationOnce(() => new Promise((ok) => (answerModels = ok)));
+    const toggle = w.findComponent(QBtnToggle);
+    toggle.vm.$emit('update:modelValue', 'room');
+    await flushPromises();
+    // The model rows are not drawn as rooms while the rooms load.
+    expect(w.text()).not.toContain('Sans salle');
+    toggle.vm.$emit('update:modelValue', 'hw_model');
+    await flushPromises();
+    answerModels([row({ hw_model: 'Latitude 5420' })]);
+    await flushPromises();
+    answerRooms([row({ room_id: 'r-1', room_name: 'A101', building_name: 'Bât. A' })]);
+    await flushPromises();
+    expect(w.text()).toContain('Latitude 5420');
+    expect(w.text()).not.toContain('A101');
+    expect(w.text()).not.toContain('Modèle inconnu');
+  });
+
+  // The error of one grouping is not left over the other while it loads.
+  it('clears a failed read when the grouping changes', async () => {
+    vi.mocked(getRecurringFailures).mockRejectedValueOnce({ response: { status: 500 } });
+    const { w } = await mountCard();
+    expect(w.findComponent(LoadErrorBanner).exists()).toBe(true);
+    vi.mocked(getRecurringFailures).mockImplementationOnce(() => new Promise(() => undefined));
+    w.findComponent(QBtnToggle).vm.$emit('update:modelValue', 'room');
+    await flushPromises();
+    expect(w.findComponent(LoadErrorBanner).exists()).toBe(false);
   });
 
   it('reloads when the period changes', async () => {

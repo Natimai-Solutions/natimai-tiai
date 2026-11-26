@@ -165,19 +165,33 @@ const columns = computed<QTableColumn<FailureRow>[]>(() => [
   },
 ]);
 
+// Each load is numbered: a late answer to an earlier grouping or period is
+// dropped rather than shown under the toggle now chosen.
+let loadSeq = 0;
+
 async function load(): Promise<void> {
+  const seq = ++loadSeq;
   loading.value = true;
   try {
-    rows.value = await getRecurringFailures({ months: props.months, by: by.value });
+    const answer = await getRecurringFailures({ months: props.months, by: by.value });
+    if (seq !== loadSeq) return;
+    rows.value = answer;
     loadError.value = null;
   } catch (e) {
+    if (seq !== loadSeq) return;
     loadError.value = e;
     rows.value = [];
   } finally {
-    loading.value = false;
+    if (seq === loadSeq) loading.value = false;
   }
 }
 
+// Rows of the other grouping, or its failure, are not shown under this one
+// while it loads.
+watch(by, () => {
+  rows.value = [];
+  loadError.value = null;
+});
 watch([by, () => props.months], () => void load());
 onMounted(load);
 

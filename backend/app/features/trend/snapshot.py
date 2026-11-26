@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import delete, func, join, true
+from sqlalchemy import Text, cast, delete, func, join, literal, true, union_all
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -90,24 +91,53 @@ def _cell_columns() -> list[Any]:
 
 async def take(session: AsyncSession, now: datetime, policies: Policies) -> list[Cell]:
     """The counters of every cell of the parc, as ``overview`` would count
-    them at ``now``: one grouped query over ``counter_source``, then one per
-    breakdown (open alerts by rule, failed compliance checks)."""
+    them at ``now``: the grouped counters of ``counter_source`` and the two
+    breakdowns (open alerts by rule, failed compliance checks), read by ONE
+    statement — three ``UNION ALL`` branches of ``(cell, key, n)`` rows.
+
+    One statement is one snapshot even at READ COMMITTED: a room moved to
+    another building, a building whose site changes or a heartbeat that
+    moves a poste while the photo is taken cannot put the same
+    ``(location, room_id)`` under two keys (the insert would fail on
+    ``uq_trend_snapshots_cell``) nor split a poste's breakdowns from its
+    total (plan §8.3).
+
+    The agent versions of the parc (``fleet_versions``) are read apart, by
+    the statement before: a fleet-wide figure, not a cell's — the reference
+    version and the list of versions behind it, turned into constants of the
+    ``agent_outdated`` predicate. It cannot put a poste in another cell nor
+    split a cell; at worst a version first reported between the two reads is
+    judged against the reference read a moment earlier; the next photo
+    judges it against the new one."""
     fleet = await fleet_versions(session)
     source, predicates = counter_source(now, policies, fleet)
     cell = _cell_columns()
-    keys = list(predicates)
-    columns: list[Any] = [*cell, *(func.count().filter(p) for p in predicates.values())]
-    rows = await session.exec(select(*columns).select_from(source).group_by(*cell))
-    cells: dict[CellKey, dict[str, int]] = {}
-    for row in rows.all():
-        key: CellKey = (row[0], row[1], row[2], row[3])
-        cells[key] = {k: int(v) for k, v in zip(keys, row[4:], strict=True) if v}
+    labelled: list[Any] = [
+        c.label(name)
+        for c, name in zip(
+            cell, ("location", "room_id", "building_id", "site"), strict=True
+        )
+    ]
+    # The wide GROUP BY turned into one row per key: two arrays of the same
+    # length, unnested side by side (zipped by Postgres).
+    keys = postgresql.array([literal(k, Text) for k in predicates])
+    counts = postgresql.array([func.count().filter(p) for p in predicates.values()])
+    columns: list[Any] = [
+        *labelled,
+        func.unnest(keys).label("key"),
+        func.unnest(counts).label("n"),
+    ]
+    main = select(*columns).select_from(source).group_by(*cell)
 
     places = join(
         Machine, Room, col(Room.id) == col(Machine.room_id), isouter=True
     ).join(Building, col(Building.id) == col(Room.building_id), isouter=True)
-    columns = [*cell, col(MachineAlert.rule), func.count()]
-    by_rule = await session.exec(
+    columns = [
+        *labelled,
+        func.concat(ALERT_PREFIX, cast(col(MachineAlert.rule), Text)).label("key"),
+        func.count().label("n"),
+    ]
+    by_rule = (
         select(*columns)
         .select_from(
             places.join(MachineAlert, col(MachineAlert.machine_id) == col(Machine.id))
@@ -119,16 +149,16 @@ async def take(session: AsyncSession, now: datetime, policies: Policies) -> list
         )
         .group_by(*cell, col(MachineAlert.rule))
     )
-    for row in by_rule.all():
-        key = (row[0], row[1], row[2], row[3])
-        if row[5]:
-            cells.setdefault(key, {})[f"{ALERT_PREFIX}{row[4]}"] = int(row[5])
 
     failed = func.jsonb_array_elements_text(
         col(Machine.compliance_failed)
     ).table_valued("value")
-    columns = [*cell, failed.c.value, func.count()]
-    by_check = await session.exec(
+    columns = [
+        *labelled,
+        func.concat(COMPLIANCE_PREFIX, failed.c.value).label("key"),
+        func.count().label("n"),
+    ]
+    by_check = (
         select(*columns)
         .select_from(places.join(failed, true()))
         .where(
@@ -138,10 +168,20 @@ async def take(session: AsyncSession, now: datetime, policies: Policies) -> list
         )
         .group_by(*cell, failed.c.value)
     )
-    for row in by_check.all():
-        key = (row[0], row[1], row[2], row[3])
-        if row[5]:
-            cells.setdefault(key, {})[f"{COMPLIANCE_PREFIX}{row[4]}"] = int(row[5])
+
+    every = union_all(main, by_rule, by_check).subquery()
+    rows = await session.exec(select(*every.c))
+    # Keyed on the unique key of a cell, ``(location, room_id)``: building
+    # and site follow from the room within the one snapshot read above.
+    places_of: dict[tuple[str | None, uuid.UUID | None], CellKey] = {}
+    cells: dict[CellKey, dict[str, int]] = {}
+    for location, room_id, building_id, site, key, n in rows.all():
+        if not n:
+            continue
+        cell_key = places_of.setdefault(
+            (location, room_id), (location, room_id, building_id, site)
+        )
+        cells.setdefault(cell_key, {})[key] = int(n)
 
     return [
         Cell(location, room_id, building_id, site, counters)

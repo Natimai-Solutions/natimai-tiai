@@ -173,6 +173,29 @@ describe('ApprovalDecisionDialog (C10)', () => {
     w.unmount();
   });
 
+  it.each([
+    ['package.retired', 409, 'Ce paquet est retiré : il ne peut plus être installé'],
+    ['package.not_ready', 409, "Ce paquet n'est pas encore déployable"],
+    ['package.not_found', 404, 'Paquet introuvable'],
+    ['package.required', 422, 'Choisissez le paquet à déployer'],
+  ])(
+    'on %s (the approval failed the request), closes and has the list read again',
+    async (code, status, message) => {
+      vi.mocked(approveApproval).mockRejectedValue(
+        Object.assign(new Error('x'), { response: { status, data: { error: { code } } } }),
+      );
+      const w = await open();
+      const before = approvalsVersion.value;
+      el('approval-approve')!.click();
+      await flushPromises();
+      expect(shown.at(-1)).toEqual({ type: 'negative', message });
+      expect(approvalsVersion.value).toBe(before + 1);
+      expect(w.emitted('done')).toHaveLength(1);
+      expect(w.emitted('update:modelValue')?.at(-1)).toEqual([false]);
+      w.unmount();
+    },
+  );
+
   it('folds a long list of postes, and counts those out of the reader’s scope', async () => {
     vi.mocked(getApproval).mockResolvedValue(detail({ hidden: 3 }));
     const w = await open();

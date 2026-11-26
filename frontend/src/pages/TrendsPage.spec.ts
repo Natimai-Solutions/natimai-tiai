@@ -176,6 +176,58 @@ describe('TrendsPage', () => {
     expect(text).toContain('Version d’agent de référence, aucun → 2.1.0');
   });
 
+  it('words the choices and the yes/no of a threshold, free text as it is', async () => {
+    vi.mocked(getTrends).mockResolvedValue(
+      trendsData({
+        policy_changes: [
+          {
+            day: '2026-11-24',
+            key: 'compliance.unencrypted_scope',
+            before: 'laptops',
+            after: 'all',
+          },
+          { day: '2026-11-24', key: 'fleet.some_flag', before: false, after: true },
+        ],
+      }),
+    );
+    const w = await mountTrends();
+    const text = w.find('[data-test="trends-policies"]').text();
+    expect(text).toContain(
+      'Périmètre du chiffrement, Portables et tablettes seulement → Tous les postes',
+    );
+    expect(text).toContain('fleet.some_flag, non → oui');
+    expect(text).not.toContain('laptops');
+  });
+
+  // A late answer for an earlier period is not drawn under the period chosen since.
+  it('drops a late answer to a period left since', async () => {
+    const w = await mountTrends();
+    let answer12!: (t: Trends) => void;
+    let answerIndicators12!: (i: Indicators) => void;
+    vi.mocked(getTrends)
+      .mockImplementationOnce(() => new Promise((ok) => (answer12 = ok)))
+      .mockResolvedValueOnce(trendsData({ since: '2024-01-01' }));
+    vi.mocked(getIndicators)
+      .mockImplementationOnce(() => new Promise((ok) => (answerIndicators12 = ok)))
+      .mockResolvedValueOnce(
+        indicatorsData({ retention: { commands_days: 90, schedule_runs_days: 180 } }),
+      );
+    const toggle = w.findComponent(QBtnToggle);
+    toggle.vm.$emit('update:modelValue', 3);
+    await flushPromises();
+    toggle.vm.$emit('update:modelValue', 24);
+    await flushPromises();
+    answer12(trendsData({ since: '2026-09-01' }));
+    answerIndicators12(indicatorsData());
+    await flushPromises();
+    const text = w.find('[data-test="trends-fleet"]').text();
+    expect(text).toContain('Suivi depuis le 01/01/2024.');
+    expect(text).not.toContain('01/09/2026');
+    expect(w.find('[data-test="indicators-retention"]').text()).toContain(
+      'Historique conservé : 90 jours',
+    );
+  });
+
   it('shows no indicator card for a section the account may not read', async () => {
     const w = await mountTrends();
     expect(w.find('[data-test="indicator-checks"]').exists()).toBe(false);

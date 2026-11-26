@@ -133,8 +133,15 @@ export const CLOSING_CODES = [
   'approval.package_gone',
   'approval.package_changed',
   'approval.nothing_left',
+  'approval.target_grew',
   'schedule.in_past',
   'schedule.forbidden_window',
+  // A deployment whose package was retired, set not ready or deleted since the
+  // request: the approval fails the request (execute.failed) with that code.
+  'package.retired',
+  'package.not_ready',
+  'package.not_found',
+  'package.required',
 ] as const;
 
 // --- Wording -------------------------------------------------------------------

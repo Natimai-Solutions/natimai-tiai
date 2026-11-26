@@ -139,7 +139,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import {
   ATTACHMENT_ACCEPT,
@@ -183,6 +183,9 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'changed'): void;
   (e: 'update:queued', files: File[]): void;
+  /** A picked file is being prepared or sent: the line must not be saved
+   * or its dialog closed meanwhile, or the file would be lost. */
+  (e: 'update:busy', busy: boolean): void;
 }>();
 
 const $q = useQuasar();
@@ -198,6 +201,10 @@ watch(
 );
 
 const busy = ref(false);
+watch(busy, (value) => emit('update:busy', value));
+onBeforeUnmount(() => {
+  if (busy.value) emit('update:busy', false);
+});
 const uploadingName = ref<string | null>(null);
 const progress = ref(0);
 const previewOpen = ref(false);

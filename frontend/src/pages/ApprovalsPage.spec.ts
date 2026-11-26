@@ -164,6 +164,29 @@ describe('ApprovalsPage (C10)', () => {
     expect(listApprovals).toHaveBeenCalled();
   });
 
+  // A late answer for « À approuver » is not shown, with its actions, under
+  // « Mes demandes » chosen since.
+  it('drops a late answer to a tab left since', async () => {
+    const w = await mountPage();
+    await w.find('[data-test="tab-mine"]').trigger('click');
+    await flushPromises();
+    let answerToDecide!: (r: ReturnType<typeof list>) => void;
+    vi.mocked(listApprovals).mockImplementation((params) =>
+      params?.view === 'mine'
+        ? Promise.resolve(list(mine))
+        : new Promise((ok) => (answerToDecide = ok)),
+    );
+    await w.find('[data-test="tab-to-decide"]').trigger('click');
+    await flushPromises();
+    await w.find('[data-test="tab-mine"]').trigger('click');
+    await flushPromises();
+    answerToDecide(list([request({ id: 'other', requested_by: 'autre@lycee.example' })]));
+    await flushPromises();
+    expect(w.text()).not.toContain('autre@lycee.example');
+    expect(w.findAll('[data-test="approval-status"]')).toHaveLength(4);
+    expect(w.find('[data-test="approve"]').exists()).toBe(false);
+  });
+
   it('says when approval is off, while the remaining requests can still be decided', async () => {
     vi.mocked(getApprovalSummary).mockResolvedValue({
       enabled: false,

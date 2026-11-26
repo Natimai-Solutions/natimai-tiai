@@ -165,6 +165,8 @@ class ErrorCode(enum.StrEnum):
     APPROVAL_PACKAGE_GONE = "approval.package_gone"
     APPROVAL_PACKAGE_CHANGED = "approval.package_changed"
     APPROVAL_NOTHING_LEFT = "approval.nothing_left"
+    # A schedule's target grew past the count the approver was shown.
+    APPROVAL_TARGET_GREW = "approval.target_grew"
     ROOM_NAME_TAKEN = "room.name.taken"
     # ROOM_SOURCE is a directory mode: postes are filed by the directory, and
     # a placement made by hand here would be undone on the next inventory.

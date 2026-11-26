@@ -121,8 +121,8 @@
                 t('trends.fleet.policyChange', {
                   date: formatDate(c.day),
                   setting: policyLabel(c.key),
-                  before: policyValue(c.before),
-                  after: policyValue(c.after),
+                  before: policyValue(c.key, c.before),
+                  after: policyValue(c.key, c.after),
                 })
               }}
             </div>
@@ -312,10 +312,24 @@ function policyLabel(key: string): string {
   return knownPolicies.has(name) ? t(`trends.policies.${name}`) : key;
 }
 
-function policyValue(value: unknown): string {
+/** The settings whose values are a choice in a list, with their wording. */
+const policyChoices: Record<string, unknown> = trendsTexts.fr.policyValues;
+
+function policyValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return t('trends.fleet.policyNone');
   if (typeof value === 'number') return frNumber(value, Number.isInteger(value) ? 0 : 1);
-  if (typeof value === 'string' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'boolean')
+    return t(value ? 'trends.policyValues.yes' : 'trends.policyValues.no');
+  if (typeof value === 'string') {
+    // A choice (the encryption scope…) in the reader's words; free text (the
+    // agent version) as it is.
+    const name = key.replace(/\./g, '_');
+    const choices = policyChoices[name];
+    if (choices && typeof choices === 'object' && Object.hasOwn(choices, value)) {
+      return t(`trends.policyValues.${name}.${value}`);
+    }
+    return value;
+  }
   return JSON.stringify(value);
 }
 
@@ -323,30 +337,43 @@ function cell(value: number | null | undefined): string {
   return value === null || value === undefined ? '—' : frNumber(value);
 }
 
+// Each load is numbered: a late answer to an earlier period or set of series
+// is dropped rather than drawn under the period now chosen.
+let trendsSeq = 0;
+let indicatorsSeq = 0;
+
 async function loadTrends(): Promise<void> {
+  const seq = ++trendsSeq;
   loadingTrends.value = true;
   try {
-    trends.value = await getTrends({
+    const answer = await getTrends({
       months: months.value,
       keys: selected.value.map((s) => s.key),
     });
+    if (seq !== trendsSeq) return;
+    trends.value = answer;
     trendsError.value = null;
   } catch (e) {
+    if (seq !== trendsSeq) return;
     trendsError.value = e;
   } finally {
-    loadingTrends.value = false;
+    if (seq === trendsSeq) loadingTrends.value = false;
   }
 }
 
 async function loadIndicators(): Promise<void> {
+  const seq = ++indicatorsSeq;
   loadingIndicators.value = true;
   try {
-    indicators.value = await getIndicators(months.value);
+    const answer = await getIndicators(months.value);
+    if (seq !== indicatorsSeq) return;
+    indicators.value = answer;
     indicatorsError.value = null;
   } catch (e) {
+    if (seq !== indicatorsSeq) return;
     indicatorsError.value = e;
   } finally {
-    loadingIndicators.value = false;
+    if (seq === indicatorsSeq) loadingIndicators.value = false;
   }
 }
 

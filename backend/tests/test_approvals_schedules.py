@@ -413,6 +413,192 @@ async def test_a_failed_approval_suspends_it_before_the_answer(client, db_sessio
     assert (await _schedule(db_session, deploy["id"])).suspended_code == "package_gone"
 
 
+async def test_a_target_grown_since_the_request_fails_the_approval(client, db_session):
+    author, other = await _setup(client, db_session)
+    created = await _create(client, author, _weekly())
+    [request] = await _requests(db_session, created["id"])
+    assert request.machine_count == 3
+    # Enrolled between the request and the approval: the approver was shown
+    # three postes, and approves three, never five.
+    for n in range(2):
+        await machine(db_session, f"PC-NEW-{n}")
+    resp = await client.post(
+        f"{API}/{created['approval']['id']}/approve", headers=other, json={}
+    )
+    assert resp.status_code == 409, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == "approval.target_grew"
+    assert error["details"] == {"count": 5, "approved": 3}
+    [request] = await _requests(db_session, created["id"])
+    assert request.status == "failed" and request.result_code == "target_grew"
+    assert request.result_params == {"count": 5, "approved": 3}
+    schedule = await _schedule(db_session, created["id"])
+    assert (schedule.state, schedule.suspended_code) == ("suspended", "target_grew")
+    assert schedule.approved_at is None and schedule.approved_count is None
+    [entry] = await _audit(db_session, "approval.fail")
+    assert entry.details["cause"] == "target_grew"
+
+    # Turned back on, it asks for the five, which are then approved.
+    resp = await client.post(
+        f"/api/v1/schedules/{created['id']}/state",
+        headers=author,
+        json={"enabled": True},
+    )
+    assert resp.json()["state"] == "to_approve"
+    request = (await _requests(db_session, created["id"]))[-1]
+    assert request.machine_count == 5
+    await _decide(client, other, str(request.id))
+    assert (await _schedule(db_session, created["id"])).approved_count == 5
+
+
+async def _approve_aside(engine, request_id, approver_email):
+    """Approve ``request_id`` from another transaction, as a second approver
+    would at the same moment; gives up on a lock held for over 300 ms."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.features.approval import crud
+    from app.features.approval import schedule as approval_schedule
+    from app.features.user import crud as user_crud
+
+    async with AsyncSession(engine) as aside:
+        approver = await user_crud.get_by_email(aside, approver_email)
+        permissions = await user_crud.user_permissions(aside, approver.id)
+        approver_id = approver.id
+        await aside.commit()
+        try:
+            await aside.execute(text("SET LOCAL lock_timeout = '300ms'"))
+            request = await crud._locked(aside, request_id)
+            await approval_schedule.approve_schedule(
+                aside,
+                request,
+                approver_id=approver_id,
+                approver_email=approver_email,
+                approver_permissions=permissions,
+                now=datetime.now(UTC),
+            )
+            await aside.commit()
+            return True
+        except DBAPIError:
+            # The writer holds the request: the approver waits for it, and
+            # then finds it closed.
+            await aside.rollback()
+            return False
+
+
+async def test_a_rewrite_racing_an_approval_does_not_keep_it(
+    client, db_session, engine, monkeypatch
+):
+    from app.api.routes import schedules as routes
+
+    author, _ = await _setup(client, db_session)
+    created = await _create(client, author, _weekly())
+    request_id = uuid.UUID(created["approval"]["id"])
+    place_visible = routes.target_crud.place_visible
+    raced: list[bool] = []
+
+    async def approved_meanwhile(*args, **kwargs):
+        # Between the rewrite reading the schedule and writing it.
+        if not raced:
+            raced.append(await _approve_aside(engine, request_id, "second@test.local"))
+        return await place_visible(*args, **kwargs)
+
+    monkeypatch.setattr(routes.target_crud, "place_visible", approved_meanwhile)
+    resp = await client.put(
+        f"/api/v1/schedules/{created['id']}",
+        headers=author,
+        json=_weekly(command_type="shutdown", time_of_day="21:00"),
+    )
+    assert resp.status_code == 200, resp.text
+    assert raced == [False]
+    assert resp.json()["state"] == "to_approve"
+    schedule = await _schedule(db_session, created["id"])
+    assert schedule.command_type == "shutdown" and schedule.state == "to_approve"
+    # The new content carries no approval: turned off then on again by its
+    # author, it is asked for, never run on the old approval.
+    assert schedule.approved_at is None and schedule.approved_for_id is None
+    assert schedule.approved_count is None
+    old, new = await _requests(db_session, created["id"])
+    assert old.status == "cancelled" and new.status == "pending"
+
+
+async def test_clearing_an_approval_committed_since_the_read(
+    client, db_session, engine
+):
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.features.approval import schedule as approval_schedule
+    from app.features.schedule.models import Schedule
+
+    author, other = await _setup(client, db_session)
+    created = await _create(client, author, _weekly())
+    async with AsyncSession(engine) as stale:
+        row = await stale.get(Schedule, uuid.UUID(created["id"]))
+        assert row.approved_at is None
+        # Approved by another transaction after this copy was read.
+        await _decide(client, other, created["approval"]["id"])
+        approval_schedule.clear_approval(row)
+        row.name = "Réécrite"
+        stale.add(row)
+        await stale.commit()
+    schedule = await _schedule(db_session, created["id"])
+    assert schedule.name == "Réécrite"
+    assert schedule.approved_at is None and schedule.approved_by is None
+    assert schedule.approved_for_id is None and schedule.approved_count is None
+
+
+async def test_an_approver_confined_to_a_room(client, db_session):
+    from app.features.user.scope import Scope
+    from tests.scope_helpers import group
+    from tests.test_approvals import RISKY
+
+    await _enable(db_session, threshold=2)
+    author = await account(
+        client, db_session, "auteur@test.local", [BuiltinGroup.ADMIN]
+    )
+    other = await account(client, db_session, "second@test.local", [BuiltinGroup.ADMIN])
+    rooms = await _two_rooms(client, author, db_session)
+    for i, room in enumerate(rooms):
+        await machine(db_session, f"{i}-X", room_id=uuid.UUID(room))
+    room_a = await group(
+        db_session,
+        "Salle A",
+        RISKY | {"schedule:read", "schedule:write"},
+        Scope(rooms=frozenset({uuid.UUID(rooms[0])})),
+    )
+    tech = await account(client, db_session, "tech@test.local", [room_a.id])
+
+    def aimed(room, name):
+        return _weekly(name=name, target={"kind": "room", "value": room})
+
+    in_a = await _create(client, author, aimed(rooms[0], "Salle A"))
+    in_b = await _create(client, author, aimed(rooms[1], "Salle B"))
+    a_id, b_id = in_a["approval"]["id"], in_b["approval"]["id"]
+
+    listed = (await client.get(API, headers=tech)).json()
+    assert [item["id"] for item in listed["items"]] == [a_id]
+    summary = (await client.get(f"{API}/summary", headers=tech)).json()
+    assert summary["to_decide"] == 1
+    # Room B is not theirs: not seen, not decided.
+    assert (await client.get(f"{API}/{b_id}", headers=tech)).status_code == 404
+    for action in ("approve", "reject"):
+        resp = await client.post(f"{API}/{b_id}/{action}", headers=tech, json={})
+        assert resp.status_code == 404, action
+        assert resp.json()["error"]["code"] == "approval.not_found"
+    [request] = await _requests(db_session, in_b["id"])
+    assert request.status == "pending"
+    # The unconfined approver sees both.
+    listed = (await client.get(API, headers=other)).json()
+    assert {item["id"] for item in listed["items"]} == {a_id, b_id}
+
+    # Room A is: listed, approved.
+    assert (await client.get(f"{API}/{a_id}", headers=tech)).status_code == 200
+    await _decide(client, tech, a_id)
+    schedule = await _schedule(db_session, in_a["id"])
+    assert schedule.state == "active" and schedule.approved_by == "tech@test.local"
+
+
 # --- The guard at the start of a run ----------------------------------------------
 
 

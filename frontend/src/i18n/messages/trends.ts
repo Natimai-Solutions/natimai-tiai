@@ -90,6 +90,15 @@ const fr = {
     compliance_patch_grace_days: 'Délai de grâce des correctifs (jours)',
     compliance_unencrypted_scope: 'Périmètre du chiffrement',
   },
+  /** The values of a non-numeric threshold, keyed like `policies`. */
+  policyValues: {
+    compliance_unencrypted_scope: {
+      laptops: 'Portables et tablettes seulement',
+      all: 'Tous les postes',
+    },
+    yes: 'oui',
+    no: 'non',
+  },
   indicators: {
     title: 'Indicateurs',
     caption:
@@ -240,6 +249,14 @@ const en: Translation<typeof fr> = {
     maintenance_due_soon_days: 'Maintenance “due soon” (days)',
     compliance_patch_grace_days: 'Patch grace period (days)',
     compliance_unencrypted_scope: 'Encryption scope',
+  },
+  policyValues: {
+    compliance_unencrypted_scope: {
+      laptops: 'Laptops and tablets only',
+      all: 'All computers',
+    },
+    yes: 'yes',
+    no: 'no',
   },
   indicators: {
     title: 'Indicators',

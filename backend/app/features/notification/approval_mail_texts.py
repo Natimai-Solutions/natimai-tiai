@@ -103,6 +103,9 @@ FR = ApprovalMailTexts(
         "nothing_left": "aucun des postes n'est encore dans votre portée.",
         "in_past": "sa date d'exécution est passée.",
         "forbidden_window": "elle tomberait dans une plage interdite.",
+        "target_grew": (
+            "elle vise {count} postes, plus que les {approved} de la demande."
+        ),
         "package.retired": "le paquet a été retiré.",
         "package.not_ready": "le paquet ne peut pas être déployé en l'état.",
         "package.not_found": "le paquet a été supprimé.",
@@ -175,6 +178,9 @@ EN = ApprovalMailTexts(
         "nothing_left": "none of the computers is in your scope any more.",
         "in_past": "its run date is past.",
         "forbidden_window": "it would run inside a forbidden window.",
+        "target_grew": (
+            "it targets {count} computers, more than the {approved} of the request."
+        ),
         "package.retired": "the package was retired.",
         "package.not_ready": "the package cannot be deployed as it stands.",
         "package.not_found": "the package was deleted.",

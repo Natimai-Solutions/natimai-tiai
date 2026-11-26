@@ -20,7 +20,11 @@
 # SHA-256, immuable, copié une fois puis seulement « touché » à chaque tour
 # (chiffré en <sha>.age comme les dumps si BACKUP_ENCRYPT_RECIPIENT est posé).
 # Une copie que le volume ne contient plus n'est plus touchée, et part après
-# BACKUP_KEEP_DAYS jours : un dump de 14 jours retrouve ses photos.
+# BACKUP_KEEP_DAYS jours : un dump de 14 jours retrouve ses photos. Volume
+# vide : rien de purgé tant que la base référence des pièces jointes (volume
+# perdu, ou base restaurée avant « Remettre les pièces jointes ») ou ne peut
+# pas le dire ; si elle n'en référence aucune (la dernière a été supprimée),
+# purge normale — une photo supprimée ne reste pas indéfiniment dans la copie.
 set -eu
 
 : "${POSTGRES_USER:?}"
@@ -113,6 +117,17 @@ dump() {
   [ "$pg_status" = 0 ] && [ "$age_status" = 0 ]
 }
 
+# Le nombre de pièces jointes que la base référence, sur la sortie : échoue
+# (code 1) si elle ne peut pas le dire — injoignable en dix secondes, table
+# absente, réponse qui n'est pas un nombre. psql est dans l'image (celle de db).
+attachment_rows() {
+  rows="$(PGCONNECT_TIMEOUT=10 psql -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -X -A -t -q -v ON_ERROR_STOP=1 \
+    -c 'SELECT count(*) FROM intervention_attachments' 2>/dev/null)" || return 1
+  case "$rows" in '' | *[!0-9]*) return 1 ;; esac
+  echo "$rows"
+}
+
 # Copie incrémentale des pièces jointes (C11). Renvoie 1 si un fichier n'a pas
 # pu être copié : la copie n'est alors pas purgée (même règle que les dumps).
 # Volume absent (compose d'avant C11) : une ligne au journal, rien d'autre.
@@ -132,11 +147,13 @@ copy_attachments() {
   failed=0
   copied=0
   kept=0
+  seen=0
   for f in "$ATTACHMENTS"/*; do
     [ -f "$f" ] || continue
     sha="$(basename "$f")"
     case "$sha" in *[!0-9a-f]*) continue ;; esac
     [ "${#sha}" -eq 64 ] || continue
+    seen=$((seen + 1))
     if [ -n "$AGE_ARGS" ]; then
       if [ -e "$COPY/$sha.age" ]; then
         touch "$COPY/$sha.age" || failed=1
@@ -180,6 +197,27 @@ copy_attachments() {
   if [ "$failed" != 0 ]; then
     echo "ECHEC de la copie des pièces jointes ($copied copiée(s)) — copie non purgée" >&2
     return 1
+  fi
+  # Volume vide : la base dit si c'est normal. Elle référence encore des
+  # pièces jointes (volume perdu, base restaurée avant « Remettre les pièces
+  # jointes ») : pas de purge, la copie est tout ce qui reste des fichiers.
+  # Elle ne peut pas répondre (table pas encore créée par les migrations,
+  # base injoignable) : pas de purge non plus, au tour suivant de trancher.
+  # Elle n'en référence aucune (la dernière a été supprimée) : purge
+  # normale, sans quoi les copies des photos supprimées — données
+  # personnelles, EXIF compris — resteraient indéfiniment. Sur un serveur
+  # reconstruit, la copie hors site se dépose donc à côté, dans un dossier
+  # que ce script ne purge jamais (DEPLOYMENT.md) : la base neuve n'en
+  # référence aucune.
+  if [ "$seen" -eq 0 ]; then
+    if ! refs="$(attachment_rows)"; then
+      echo "pièces jointes : volume vide et base muette (table absente ou injoignable) — copie non purgée"
+      return 0
+    fi
+    if [ "$refs" -gt 0 ]; then
+      echo "pièces jointes : volume vide, $refs référencée(s) en base — copie conservée, non purgée"
+      return 0
+    fi
   fi
   # Ce que le volume ne contient plus n'est plus touché : parti après
   # KEEP_DAYS jours. Les .tmp d'une copie interrompue aussi.

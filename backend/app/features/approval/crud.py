@@ -233,6 +233,18 @@ async def submit_command(
         ttl_minutes,
     )
     existing = await _find_pending_key(session, key)
+    if existing is not None and existing.expires_at <= now:
+        # Past its time, the worker has not expired it yet: expired here,
+        # and this send asks afresh (``uq_approval_requests_pending_key``
+        # would refuse the new one beside it). Read again under the row's
+        # lock: the worker may have expired it, or an approver decided it
+        # just before its time, since the read above — then it is left as
+        # it is, and this send asks afresh as any send after a decision.
+        existing = await _locked(session, existing.id, populate_existing=True)
+        if existing is not None and existing.status == ApprovalStatus.PENDING:
+            await expire(session, existing, now)
+            await session.flush()
+        existing = None
     if existing is not None:
         return existing
     approvers = await reach.command_approvers(
@@ -414,15 +426,18 @@ def not_pending() -> AppError:
 
 
 async def _locked(
-    session: AsyncSession, request_id: uuid.UUID
+    session: AsyncSession, request_id: uuid.UUID, *, populate_existing: bool = False
 ) -> ApprovalRequest | None:
-    return (
-        await session.exec(
-            select(ApprovalRequest)
-            .where(col(ApprovalRequest.id) == request_id)
-            .with_for_update()
-        )
-    ).first()
+    """The request, its row locked. ``populate_existing``: a copy the session
+    already holds is overwritten by the row as it is once locked."""
+    stmt = (
+        select(ApprovalRequest)
+        .where(col(ApprovalRequest.id) == request_id)
+        .with_for_update()
+    )
+    if populate_existing:
+        stmt = stmt.execution_options(populate_existing=True)
+    return (await session.exec(stmt)).first()
 
 
 async def lock_for_decision(

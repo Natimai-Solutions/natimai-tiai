@@ -62,6 +62,7 @@ const fr = {
     nothing_left: 'Aucun des postes n’est plus dans la portée de l’auteur.',
     in_past: 'L’heure prévue de la planification était passée.',
     forbidden_window: 'La planification tombait dans une plage interdite.',
+    target_grew: 'La planification visait {count} postes, plus que les {approved} de la demande.',
     schedule_changed: 'La planification a été modifiée depuis.',
     schedule_disabled: 'La planification a été désactivée.',
   },
@@ -166,6 +167,8 @@ const en: Translation<typeof fr> = {
     nothing_left: 'None of the computers is within the author’s scope any more.',
     in_past: 'The schedule’s planned time had passed.',
     forbidden_window: 'The schedule fell in a forbidden window.',
+    target_grew:
+      'The schedule targeted {count} computers, more than the {approved} of the request.',
     schedule_changed: 'The schedule was changed since.',
     schedule_disabled: 'The schedule was disabled.',
   },

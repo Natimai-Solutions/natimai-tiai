@@ -18,11 +18,15 @@ vi.mock('src/utils/notify', () => ({
   },
 }));
 
-vi.mock('src/services/attachments', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('src/services/attachments')>()),
-  getAttachmentPolicy: vi.fn(),
-  uploadAttachment: vi.fn(),
-}));
+vi.mock('src/services/attachments', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('src/services/attachments')>();
+  return {
+    ...actual,
+    getAttachmentPolicy: vi.fn(),
+    uploadAttachment: vi.fn(),
+    prepareForUpload: vi.fn(actual.prepareForUpload),
+  };
+});
 
 vi.mock('src/services/maintenance', async (importOriginal) => ({
   ...(await importOriginal<typeof import('src/services/maintenance')>()),
@@ -37,7 +41,7 @@ import {
   deleteIntervention,
   type Intervention,
 } from 'src/services/interventions';
-import { getAttachmentPolicy, uploadAttachment } from 'src/services/attachments';
+import { getAttachmentPolicy, prepareForUpload, uploadAttachment } from 'src/services/attachments';
 import CardLoadError from 'src/components/CardLoadError.vue';
 import InterventionAttachments from './InterventionAttachments.vue';
 import MachineHistoryCard from './MachineHistoryCard.vue';
@@ -309,6 +313,48 @@ describe('MachineHistoryCard — attachments', () => {
     expect(warning.message).toContain('« b.pdf » (Espace des pièces jointes plein');
     expect(warning.message).not.toContain('a.pdf');
     expect(wrapper.emitted('changed')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('does not save a new line while a picked photo is still being prepared', async () => {
+    vi.mocked(createIntervention).mockResolvedValue({ ...visit, id: 'new' });
+    vi.mocked(uploadAttachment).mockResolvedValue(withFiles.attachments![0]!);
+    let finish: (value: { file: File }) => void = () => undefined;
+    vi.mocked(prepareForUpload).mockImplementationOnce(
+      () => new Promise((resolve) => (finish = resolve)),
+    );
+    const wrapper = mountCard();
+    await wrapper
+      .findAllComponents(QBtn)
+      .find((b) => b.text().includes('Ajouter une intervention'))!
+      .trigger('click');
+    await flushPromises();
+    wrapper.findComponent(QFile).vm.$emit('update:modelValue', [pdf('photo.jpg')]);
+    await flushPromises();
+    // The busy state is only heard, never handed down: it does not fall
+    // through as an attribute of the list's element.
+    const list = wrapper.findComponent(InterventionAttachments);
+    expect(list.emitted('update:busy')).toEqual([[true]]);
+    expect(list.attributes()).not.toHaveProperty('busy');
+    // Still being redrawn: neither saved nor closable.
+    const save = wrapper
+      .findAllComponents(QBtn)
+      .find((b) => b.attributes('data-test') === 'intervention-save')!;
+    expect(save.props('disable')).toBe(true);
+    wrapper.findComponent(QForm).vm.$emit('submit', new Event('submit'));
+    await flushPromises();
+    expect(createIntervention).not.toHaveBeenCalled();
+    expect((wrapper.vm as unknown as { formOpen: boolean }).formOpen).toBe(true);
+
+    finish({ file: pdf('photo.jpg') });
+    await flushPromises();
+    expect(save.props('disable')).toBe(false);
+    wrapper.findComponent(QForm).vm.$emit('submit', new Event('submit'));
+    await flushPromises();
+    expect(createIntervention).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(uploadAttachment).mock.calls.map((c) => [c[0], c[1].name])).toEqual([
+      ['new', 'photo.jpg'],
+    ]);
     wrapper.unmount();
   });
 

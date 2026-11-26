@@ -674,6 +674,85 @@ async def test_creation_and_edit_answer_without_attachments(client, db_session):
 # --- Deletions -------------------------------------------------------------------
 
 
+async def test_two_deletions_at_once_one_passes_and_one_is_audited(
+    client, db_session, store, monkeypatch
+):
+    """A double click, or two tabs: both requests read the row before either
+    deletes it. One answers 204 and writes the audit entry; the other waits
+    for the row's lock, finds it gone, and answers 404 — no second entry."""
+    from app.api.routes import attachments as route
+
+    sites, line = await _setup(client, db_session)
+    body = await _attach(client, sites.admin, line, JPEG)
+    original = route.machine_visible
+    everyone = asyncio.Event()
+    arrived = 0
+
+    async def meet(session, machine_id, scope):
+        # Called just after the row is read: both requests meet here.
+        nonlocal arrived
+        arrived += 1
+        if arrived >= 2:
+            everyone.set()
+        try:
+            await asyncio.wait_for(everyone.wait(), 1.0)
+        except TimeoutError:
+            pass
+        return await original(session, machine_id, scope)
+
+    monkeypatch.setattr(route, "machine_visible", meet)
+    one, two = await asyncio.gather(
+        client.delete(f"/api/v1/attachments/{body['id']}", headers=sites.admin),
+        client.delete(f"/api/v1/attachments/{body['id']}", headers=sites.admin),
+    )
+    statuses = sorted([one.status_code, two.status_code])
+    assert statuses == [204, 404], (one.text, two.text)
+    loser = one if one.status_code == 404 else two
+    assert loser.json()["error"]["code"] == "attachment.not_found"
+    assert len(await _audit(db_session, "intervention.attachment_delete")) == 1
+    assert await _count_rows(db_session) == 0
+    assert _files(store) == []
+
+
+async def test_two_deletions_of_a_line_at_once_one_is_audited(
+    client, db_session, store, monkeypatch
+):
+    """The same race on a line (and its attachments): the second deletion
+    waits for the line's lock, finds it gone, answers 404."""
+    from app.api.routes import interventions as route
+
+    sites, line = await _setup(client, db_session)
+    await _attach(client, sites.admin, line, JPEG)
+    original = route.machine_visible
+    everyone = asyncio.Event()
+    arrived = 0
+
+    async def meet(session, machine_id, scope):
+        nonlocal arrived
+        arrived += 1
+        if arrived >= 2:
+            everyone.set()
+        try:
+            await asyncio.wait_for(everyone.wait(), 1.0)
+        except TimeoutError:
+            pass
+        return await original(session, machine_id, scope)
+
+    monkeypatch.setattr(route, "machine_visible", meet)
+    one, two = await asyncio.gather(
+        client.delete(f"/api/v1/interventions/{line}", headers=sites.admin),
+        client.delete(f"/api/v1/interventions/{line}", headers=sites.admin),
+    )
+    statuses = sorted([one.status_code, two.status_code])
+    assert statuses == [204, 404], (one.text, two.text)
+    loser = one if one.status_code == 404 else two
+    assert loser.json()["error"]["code"] == "intervention.not_found"
+    [entry] = await _audit(db_session, "intervention.delete")
+    assert entry.details["attachments"] == 1
+    assert await _count_rows(db_session) == 0
+    assert _files(store) == []
+
+
 async def test_a_deleted_attachment_leaves_the_disk_unless_shared(
     client, db_session, store
 ):

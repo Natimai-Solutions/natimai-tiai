@@ -294,7 +294,7 @@ Il n'est jamais committé.
 | `TIAI_VERSION` | `latest` | Version des images `tiai-backend` et `tiai-frontend` tirées de ghcr.io — à épingler en production (cf. § « Mettre à jour le serveur ») |
 | `TIAI_DEV_BACKEND_PORT` | `8800` | Port hôte du backend en HTTP direct (override de dev uniquement) |
 | `TIAI_DEV_BACKEND_BIND` | `127.0.0.1` | Adresse hôte sur laquelle ce port est publié (override de dev uniquement). `0.0.0.0` l'ouvre aux postes du réseau, en clair (cf. § « Mode A ») |
-| `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/`, et des copies de pièces jointes que le volume ne contient plus (cf. § « Sauvegardes et restauration ») |
+| `BACKUP_KEEP_DAYS` | `14` | Rétention des dumps quotidiens de `deploy/backups/`, et des copies de pièces jointes que le volume ne contient plus — sauf volume vide alors que la base en référence encore, ou ne peut pas le dire : rien n'est alors purgé (cf. § « Sauvegardes et restauration ») |
 | `BACKUP_ENCRYPT_RECIPIENT` | *(vide)* | Clé publique `age` (`age1…`), ou plusieurs séparées par des espaces : chaque dump quotidien est chiffré pour elles (`tiai-AAAAMMJJ-HHMMSS.dump.age`). Vide : dumps en clair. Jamais la clé privée (cf. § « [Chiffrer les sauvegardes](#chiffrer-les-sauvegardes) ») |
 
 ### Backend
@@ -661,13 +661,21 @@ demandes en attente. Une planification à risque au-delà du seuil est
 approuvée **une fois**, à l'écriture, pour son auteur et son nombre de postes :
 une modification, une réactivation par un autre compte ou une cible devenue
 plus large redemande une approbation (la planification est suspendue au
-départ d'une exécution qui dépasserait ce qui a été approuvé). Les comptes
+départ d'une exécution qui dépasserait ce qui a été approuvé). Une cible qui
+a grandi entre la demande et l'approbation fait échouer celle-ci (« La
+planification vise plus de postes que ceux de la demande ») et suspend la
+planification : l'approbateur n'approuve jamais plus de postes que ceux que la
+demande lui a montrés. Les comptes
 capables d'approuver reçoivent un e-mail (sauf préférence « rien ») ; un
 webhook peut s'abonner à `approval.requested`.
 
-L'approbation **ne s'active pas** avec moins de deux comptes capables
-d'approuver : dans un établissement à un seul administrateur, elle bloquerait
-tout. Ce nombre, affiché dans Paramètres, **ne tient pas compte des lieux** :
+Activée depuis Paramètres, l'approbation **ne s'active pas** avec moins de deux
+comptes capables d'approuver : dans un établissement à un seul administrateur,
+elle bloquerait tout. `APPROVAL_ENABLED=true` posé dans l'environnement est en
+revanche appliqué tel quel, sans ce contrôle : avec un seul compte capable
+d'approuver, toute action à risque au-delà du seuil est alors refusée
+(« aucun approbateur possible ») jusqu'à ce que l'approbation soit désactivée
+dans Paramètres. Ce nombre, affiché dans Paramètres, **ne tient pas compte des lieux** :
 un approbateur limité à des sites doit couvrir **tous** les postes d'une
 demande, et deux comptes limités à deux sites différents ne s'approuvent pas
 l'un l'autre. Une demande que personne d'autre ne pourrait approuver est
@@ -1096,7 +1104,15 @@ en `600`. Une copie que le volume ne contient plus n'est plus touchée et part
 après `BACKUP_KEEP_DAYS` jours : un dump de 14 jours retrouve ses photos. Une
 copie qui échoue est dite au journal (« ECHEC de la copie des pièces
 jointes ») et rien n'est purgé ; sans le volume (compose d'avant cette
-version), une ligne le dit et le dump continue seul.
+version), une ligne le dit et le dump continue seul. **Volume vide** : la
+base dit ce qu'il en est (`psql`, le nombre de lignes de
+`intervention_attachments`). Elle référence encore des pièces jointes (volume
+perdu, base restaurée avant « Remettre les pièces jointes ») ou ne peut pas
+répondre (table pas encore créée, base injoignable) : rien n'est purgé, et le
+journal le dit (« volume vide, N référencée(s) en base », « volume vide et
+base muette »). Elle n'en référence aucune (la dernière a été supprimée) : la
+purge a lieu comme d'habitude, et les copies des photos supprimées — des
+données personnelles, EXIF compris — partent après `BACKUP_KEEP_DAYS` jours.
 
 ### Chiffrer les sauvegardes
 
@@ -1171,14 +1187,28 @@ Pour revenir aux dumps en clair : vider `BACKUP_ENCRYPT_RECIPIENT`, puis
 
 ### Restaurer
 
-Sur une stack levée (la base peut être vide ou pleine — `--clean` remet à
-plat). Un dump chiffré (`.dump.age`) se déchiffre d'abord, voir plus bas.
+Sur une stack levée (la base peut être vide ou pleine). Un dump chiffré
+(`.dump.age`) se déchiffre d'abord, voir plus bas.
+
+La commande **vide d'abord le schéma** (`DROP SCHEMA public CASCADE`), puis
+restaure : la base revient exactement à l'état du dump. `pg_restore --clean`
+seul ne suffit pas dès que le dump est d'un schéma plus ancien que la base :
+une table créée depuis (par exemple `intervention_attachments`, migration
+0062) garde une clé étrangère vers une table du dump, qui ne peut alors être
+ni supprimée ni rechargée — les lignes du dump ne reviennent pas, et le
+backend, qui rejoue ensuite la migration, ne démarre plus (« relation already
+exists »). Tout ce qui est dans la base est donc effacé : en cas de doute,
+faire d'abord un dump manuel (plus bas).
 
 ```bash
 cd deploy
 docker compose stop backend worker      # plus personne n'écrit dans la base
 docker compose exec db-backup sh -c \
-  'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -h db -U "$POSTGRES_USER" \
+  'export PGPASSWORD="$POSTGRES_PASSWORD" &&
+   psql -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
+     -c "DROP SCHEMA public CASCADE" \
+     -c "CREATE SCHEMA public AUTHORIZATION \"$POSTGRES_APP_USER\"" &&
+   pg_restore -h db -U "$POSTGRES_USER" \
    -d "$POSTGRES_DB" --clean --if-exists --no-owner --role="$POSTGRES_APP_USER" \
    /backups/tiai-AAAAMMJJ-HHMMSS.dump'
 docker compose start backend worker
@@ -1203,8 +1233,16 @@ docker compose exec db-backup rm /backups/restauration-en-clair.dump
 ```
 
 Sur un serveur reconstruit de zéro : déposer d'abord la copie hors site du
-`.dump.age` dans `deploy/backups/`, et le `.env` d'origine (sa
-`BACKUP_ENCRYPT_RECIPIENT` comprise).
+`.dump.age` dans `deploy/backups/`, sa copie des pièces jointes dans
+**`deploy/backups/attachments-a-restaurer/`** (pas dans
+`backups/attachments/`), et le `.env` d'origine (sa
+`BACKUP_ENCRYPT_RECIPIENT` comprise). `db-backup` ne touche jamais à
+`attachments-a-restaurer/` ; dans `backups/attachments/`, les copies datées de
+plus de `BACKUP_KEEP_DAYS` jours seraient purgées dès qu'une base neuve, qui
+ne référence encore aucune pièce jointe, répond. « Remettre les pièces
+jointes » (plus bas) lit alors `attachments-a-restaurer/` ; l'effacer à la
+main une fois les photos vérifiées dans la console — les tours suivants ont
+recopié le volume dans `backups/attachments/`.
 
 > **Renommer le dump déposé avant de démarrer la stack** (clair ou chiffré) :
 > `mv backups/tiai-AAAAMMJJ-HHMMSS.dump.age backups/tiai-a-restaurer.dump.age`.
@@ -1219,7 +1257,8 @@ des lignes qui répondent « fichier absent du serveur »
 (`attachment.file_missing`), rien de plus. Pour les remettre dans le volume,
 `backend` arrêté, avec l'image `<projet>-db-backup` (elle a `sh` et `age` ;
 son point d'entrée est remplacé par `--entrypoint sh` — celui de l'image
-backend répondrait « Unknown mode: sh ») :
+backend répondrait « Unknown mode: sh »). Sur un serveur reconstruit, monter
+`backups/attachments-a-restaurer` à la place de `backups/attachments` :
 
 ```bash
 docker compose stop backend
@@ -1239,9 +1278,12 @@ démarrage, l'entrypoint rend de toute façon au compte `tiai` tout fichier du
 volume qui ne lui appartiendrait pas.
 
 Au redémarrage, le backend rejoue les migrations Alembic si le dump vient
-d'une version plus ancienne du schéma — restaurer un dump d'hier après une
-montée de version fonctionne donc sans étape supplémentaire. L'inverse (un
-dump plus récent que le code) n'est pas supporté.
+d'une version plus ancienne du schéma : restaurer un dump d'hier (ou celui
+pris juste avant une montée de version) après la montée fonctionne, **à
+condition d'avoir vidé le schéma avant `pg_restore`** comme le fait la
+commande ci-dessus — sans cela, les tables apparues depuis restent et
+bloquent la restauration. L'inverse (un dump plus récent que le code) n'est
+pas supporté.
 
 Un dump manuel avant une opération risquée :
 

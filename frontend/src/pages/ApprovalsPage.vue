@@ -224,20 +224,28 @@ async function loadSummary(): Promise<void> {
   }
 }
 
+// Each load is numbered: a late answer for the other tab (or an earlier page)
+// is dropped rather than shown, with its actions, under the tab now open.
+let loadSeq = 0;
+
 async function load(): Promise<void> {
+  const seq = ++loadSeq;
+  const asked = view.value;
   loading.value = true;
   try {
-    const res = await listApprovals({ view: view.value, page: page.value, page_size: pageSize });
+    const res = await listApprovals({ view: asked, page: page.value, page_size: pageSize });
+    if (seq !== loadSeq) return;
     items.value = res.items;
     total.value = res.total;
-    if (view.value === 'to_decide') toDecide.value = res.total;
+    if (asked === 'to_decide') toDecide.value = res.total;
     loadError.value = null;
   } catch (e) {
+    if (seq !== loadSeq) return;
     loadError.value = e;
   } finally {
-    loading.value = false;
+    if (seq === loadSeq) loading.value = false;
   }
-  void loadSummary();
+  if (seq === loadSeq) void loadSummary();
 }
 
 watch(view, () => {

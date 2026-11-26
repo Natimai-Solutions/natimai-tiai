@@ -268,12 +268,20 @@ async def delete_intervention(
     row = await _require_intervention(session, intervention_id, scope)
     # Locked before its attachments are read: an upload in progress holds
     # the line ``FOR SHARE`` until it commits, and is counted then (C11).
-    await session.exec(
+    # Gone once the lock is ours: a deletion at the same moment won — 404,
+    # not a second 204 with a second audit entry.
+    locked = await session.exec(
         select(Intervention)
         .where(col(Intervention.id) == row.id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
+    if locked.first() is None:
+        raise AppError(
+            code=ErrorCode.INTERVENTION_NOT_FOUND,
+            status_code=404,
+            message="Intervention not found",
+        )
     shas = await attachment_crud.shas_of(session, [row.id])
     audit.record(
         session,

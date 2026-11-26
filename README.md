@@ -141,8 +141,9 @@ gère naturellement les postes éteints.
   elle attend l'accord d'un second compte qui détient les mêmes droits et voit
   tous les postes visés, sur la page « Approbations » (badge dans le menu,
   e-mail, webhook `approval.requested`). Ce qui est approuvé est la liste figée
-  à la demande, revérifiée au moment d'approuver. Elle ne s'active pas avec un
-  seul compte capable d'approuver.
+  à la demande, revérifiée au moment d'approuver. Paramètres refuse de
+  l'activer avec un seul compte capable d'approuver (activée par
+  l'environnement, elle refuse alors les actions à risque au-delà du seuil).
 - **Pièces jointes et procédures** — une ligne du journal d'un poste porte
   ses photos et ses PDF (dix au plus, reconnus au contenu, toujours servis en
   téléchargement) : les photos sont réduites et perdent leurs métadonnées

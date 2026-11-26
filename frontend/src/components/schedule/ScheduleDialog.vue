@@ -409,7 +409,10 @@ async function submit(): Promise<void> {
     // C10: beyond the threshold, a schedule at risk waits for a second
     // account before it runs — said, rather than « saved » alone.
     const waiting = saved.state === 'to_approve';
-    if (waiting) notifyApprovalsChanged();
+    // Rewriting a schedule that was waiting closes its request (the server's
+    // schedule_changed) even when the new one needs none: the badge and the
+    // approvals page read again in both cases.
+    if (waiting || props.schedule?.state === 'to_approve') notifyApprovalsChanged();
     notify($q, () =>
       waiting
         ? {

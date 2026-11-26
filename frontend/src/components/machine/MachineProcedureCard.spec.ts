@@ -173,6 +173,30 @@ describe('MachineProcedureCard', () => {
     wrapper.unmount();
   });
 
+  it('an edit of a note deleted meanwhile reads again, and the next save writes it anew', async () => {
+    vi.mocked(getMachineProcedure).mockResolvedValue(answer());
+    vi.mocked(updateProcedure).mockRejectedValue({
+      response: { status: 404, data: { error: { code: 'procedure.not_found' } } },
+    });
+    vi.mocked(createProcedure).mockResolvedValue(NOTE);
+    const wrapper = await mountCard();
+    await wrapper.find('[data-test="procedure-edit"]').trigger('click');
+    await flushPromises();
+    vi.mocked(getMachineProcedure).mockResolvedValue(answer({ procedure: null }));
+    wrapper.findComponent(QForm).vm.$emit('submit', new Event('submit'));
+    await flushPromises();
+    expect(shown.at(-1)).toEqual({
+      type: 'warning',
+      message: expect.stringContaining('modifiée ou supprimée entre-temps'),
+    });
+    expect(getMachineProcedure).toHaveBeenCalledTimes(2);
+    wrapper.findComponent(QForm).vm.$emit('submit', new Event('submit'));
+    await flushPromises();
+    expect(updateProcedure).toHaveBeenCalledTimes(1);
+    expect(createProcedure).toHaveBeenCalledWith('OptiPlex 7090', NOTE.body);
+    wrapper.unmount();
+  });
+
   it('deletes the note once confirmed, naming the version it was read at', async () => {
     vi.mocked(getMachineProcedure).mockResolvedValue(answer());
     vi.mocked(deleteProcedure).mockResolvedValue();

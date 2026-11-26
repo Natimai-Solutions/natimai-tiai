@@ -248,4 +248,59 @@ describe('ScheduleDialog', () => {
     });
     wrapper.unmount();
   });
+
+  // Rewritten under the threshold, a schedule that was waiting no longer is:
+  // the server closed its request, so the badge reads again.
+  it('has the approvals read again when a waiting schedule is rewritten to need none', async () => {
+    const schedule = {
+      id: 's-2',
+      name: 'Redémarrage',
+      command_type: 'quick_scan',
+      package_id: null,
+      state: 'to_approve',
+      target: { kind: 'room', value: 'r-1', machine_ids: [], label: null, machine_count: null },
+      recurrence: 'weekly',
+      run_at_local: null,
+      weekdays: [1],
+      time_of_day: '18:00',
+      ttl_minutes: 120,
+      wake_first: false,
+      shutdown_after: false,
+      rings: null,
+    } as unknown as Schedule;
+    vi.mocked(updateSchedule).mockResolvedValue({ ...schedule, state: 'active' });
+    const before = approvalsVersion.value;
+    const { submit, wrapper } = await open({ schedule });
+    await submit();
+    expect(updateSchedule).toHaveBeenCalledWith('s-2', expect.any(Object));
+    expect(approvalsVersion.value).toBe(before + 1);
+    expect(shown.at(-1)?.type).toBe('positive');
+    wrapper.unmount();
+  });
+
+  it('leaves the approvals alone when an active schedule is rewritten', async () => {
+    const schedule = {
+      id: 's-3',
+      name: 'Scan',
+      command_type: 'quick_scan',
+      package_id: null,
+      state: 'active',
+      target: { kind: 'all', machine_ids: [], value: null, label: null, machine_count: null },
+      recurrence: 'weekly',
+      run_at_local: null,
+      weekdays: [1],
+      time_of_day: '18:00',
+      ttl_minutes: 120,
+      wake_first: false,
+      shutdown_after: false,
+      rings: null,
+    } as unknown as Schedule;
+    vi.mocked(updateSchedule).mockResolvedValue({ ...schedule });
+    const before = approvalsVersion.value;
+    const { submit, wrapper } = await open({ schedule });
+    await submit();
+    expect(updateSchedule).toHaveBeenCalledWith('s-3', expect.any(Object));
+    expect(approvalsVersion.value).toBe(before);
+    wrapper.unmount();
+  });
 });

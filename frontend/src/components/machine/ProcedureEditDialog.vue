@@ -107,9 +107,14 @@ async function submit() {
     emit('update:modelValue', false);
   } catch (e) {
     const code = apiErrorCode(e);
-    if (code === 'procedure.changed' || code === 'procedure.exists') {
+    if (
+      code === 'procedure.changed' ||
+      code === 'procedure.exists' ||
+      code === 'procedure.not_found'
+    ) {
       // What the reader typed is not lost: the dialog stays, over the
-      // version read again.
+      // version read again (deleted meanwhile, the parent hands `null` and
+      // the next save writes the note anew).
       notify($q, () => ({ type: 'warning', message: t('procedures.edit.changed') }));
       emit('stale');
     } else {

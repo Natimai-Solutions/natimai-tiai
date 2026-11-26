@@ -137,6 +137,8 @@ const fr = {
   'approval.package_changed': 'Le paquet a été modifié depuis la demande : elle est close',
   'approval.nothing_left':
     'Aucun poste de la demande n’est encore dans la portée de son auteur : elle est close',
+  'approval.target_grew':
+    'La planification vise plus de postes que ceux de la demande : elle est close et la planification suspendue',
   'room.name.taken': 'Une salle porte déjà ce nom dans ce bâtiment',
   'intervention.not_found': 'Intervention introuvable',
   'attachment.not_found': 'Pièce jointe introuvable',
@@ -306,6 +308,8 @@ const en: Record<keyof typeof fr, string> = {
   'approval.package_changed': 'The package changed since the request: it is closed',
   'approval.nothing_left':
     'None of the request’s computers is in its author’s scope any more: it is closed',
+  'approval.target_grew':
+    'The schedule targets more computers than the request did: the request is closed and the schedule suspended',
   'room.name.taken': 'A room already has this name in this building',
   'intervention.not_found': 'Intervention not found',
   'attachment.not_found': 'Attachment not found',

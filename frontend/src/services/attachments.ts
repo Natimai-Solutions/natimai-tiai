@@ -186,17 +186,36 @@ export const canvasFactory = {
   },
 };
 
+/** What the first bytes of a file say it is, whatever its extension. */
+async function sniffImage(file: File): Promise<'photo' | 'png' | null> {
+  let head: Uint8Array;
+  try {
+    head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  } catch {
+    return null;
+  }
+  const ascii = (from: number, to: number) => String.fromCharCode(...head.subarray(from, to));
+  if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'photo';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'photo';
+  if (head[0] === 0x89 && ascii(1, 4) === 'PNG') return 'png';
+  return null;
+}
+
 /**
  * A file as it is sent (plan §2.1): every JPEG and every WebP is redrawn —
  * which drops its EXIF metadata, a phone's GPS position included, even for a
  * small or cropped photo — at most 2 560 px a side, as a JPEG at 0.85; a PNG
  * stays a PNG while it fits the size limit and 2 560 px, else it is redrawn
  * as a JPEG too; a PDF, and anything else, is left as it is (the type check
- * then speaks). The server never touches a file it receives.
+ * then speaks). What a file is, is read from its first bytes as the server
+ * does, the extension (the browser's type) only failing that. The server never touches a file it receives.
  */
 export async function prepareImage(file: File, policy: AttachmentPolicy | null): Promise<File> {
-  const photo = file.type === 'image/jpeg' || file.type === 'image/webp';
-  if (!photo && file.type !== 'image/png') return file;
+  // The browser's type comes from the extension; the server's from the
+  // content: a JPEG named `.png` or `.pdf` is a photo all the same.
+  const sniffed = await sniffImage(file);
+  const photo = sniffed === 'photo' || file.type === 'image/jpeg' || file.type === 'image/webp';
+  if (!photo && sniffed !== 'png' && file.type !== 'image/png') return file;
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
   try {
     const { width, height } = bitmap;

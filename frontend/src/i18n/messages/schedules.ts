@@ -46,6 +46,8 @@ const fr = {
     approval_expired: 'Sa demande d’approbation a expiré sans décision.',
     in_past: 'Son heure était passée au moment de l’approbation.',
     forbidden_window: 'Elle tombait dans une plage interdite au moment de l’approbation.',
+    target_grew:
+      'Au moment de l’approbation, elle visait plus de postes que la demande n’en annonçait.',
     reenable: 'La réactiver la reprend à votre nom.',
   },
   target: {
@@ -230,6 +232,7 @@ const en: Translation<typeof fr> = {
     approval_expired: 'Its approval request expired without a decision.',
     in_past: 'Its time had passed when it was approved.',
     forbidden_window: 'It fell in a forbidden window when it was approved.',
+    target_grew: 'When it was approved, it targeted more computers than the request stated.',
     reenable: 'Turning it back on puts it in your name.',
   },
   target: {

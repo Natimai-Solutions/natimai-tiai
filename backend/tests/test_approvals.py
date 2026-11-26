@@ -289,6 +289,144 @@ async def test_the_same_request_twice_is_one(client, db_session, mail):
     assert len([d for d in deliveries if d.event == "approval.requested"]) == 1
 
 
+async def test_a_duplicate_of_a_request_past_its_time_asks_afresh(client, db_session):
+    from datetime import datetime as dt
+
+    await _enable(db_session, threshold=2)
+    author, _ = await _admins(client, db_session)
+    ids = [p.id for p in await _postes(db_session, 3)]
+    first = await _send(client, author, ids)
+    # Past its time, not yet expired by the job.
+    request = await _request(db_session, first["approval_id"])
+    request.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    db_session.add(request)
+    await db_session.commit()
+
+    again = await _send(client, author, ids)
+    assert again["approval_id"] != first["approval_id"]
+    assert dt.fromisoformat(again["approval_expires_at"]) > datetime.now(UTC)
+    assert (await _request(db_session, first["approval_id"])).status == "expired"
+    assert (await _request(db_session, again["approval_id"])).status == "pending"
+    assert len(await _audit(db_session, "approval.expire")) == 1
+    assert len(await _audit(db_session, "approval.request")) == 2
+
+
+async def _wait_for_a_lock_wait(db_session):
+    """Until a connection waits on a row lock (the send held behind ``holder``)."""
+    from sqlalchemy import text
+
+    for _ in range(200):
+        waiting = await db_session.scalar(
+            text(
+                "SELECT count(*) FROM pg_stat_activity"
+                " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+            )
+        )
+        await db_session.commit()
+        if waiting:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("the send never waited on the request's lock")
+
+
+async def _resend_while_held(client, db_session, engine, change):
+    """A request past its time; ``change`` closes it in another transaction
+    that holds its row while the identical send runs, then commits."""
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.features.approval.models import ApprovalRequest
+
+    await _enable(db_session, threshold=2)
+    author, _ = await _admins(client, db_session)
+    ids = [p.id for p in await _postes(db_session, 3)]
+    first = await _send(client, author, ids)
+    request = await _request(db_session, first["approval_id"])
+    request.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    db_session.add(request)
+    await db_session.commit()
+
+    async with AsyncSession(engine) as holder:
+        held = (
+            await holder.exec(
+                select(ApprovalRequest)
+                .where(col(ApprovalRequest.id) == uuid.UUID(first["approval_id"]))
+                .with_for_update()
+            )
+        ).one()
+        await change(holder, held)
+        await holder.flush()
+        send = asyncio.create_task(_send(client, author, ids))
+        await _wait_for_a_lock_wait(db_session)
+        await holder.commit()
+        again = await send
+    return first, again
+
+
+async def test_a_resend_past_its_time_leaves_an_approval_made_meanwhile(
+    client, db_session, engine
+):
+    # Approved just before its time, while the identical send reads it
+    # pending: the approval stands, and the send asks afresh.
+    from app.features.approval.models import ApprovalStatus
+
+    async def approve(holder, held):
+        held.status = ApprovalStatus.APPROVED
+        held.decided_at = datetime.now(UTC)
+        holder.add(held)
+
+    first, again = await _resend_while_held(client, db_session, engine, approve)
+    assert again["approval_id"] != first["approval_id"]
+    assert (await _request(db_session, first["approval_id"])).status == "approved"
+    assert (await _request(db_session, again["approval_id"])).status == "pending"
+    assert await _audit(db_session, "approval.expire") == []
+
+
+async def test_a_resend_past_its_time_expires_it_once_beside_the_job(
+    client, db_session, engine, mail
+):
+    # The job expires it while the identical send reads it pending: one
+    # ``approval.expire``, one mail to the author.
+    from app.features.approval import crud
+
+    async def job(holder, held):
+        await crud.expire(holder, held, datetime.now(UTC))
+
+    first, again = await _resend_while_held(client, db_session, engine, job)
+    assert again["approval_id"] != first["approval_id"]
+    assert (await _request(db_session, first["approval_id"])).status == "expired"
+    assert (await _request(db_session, again["approval_id"])).status == "pending"
+    assert len(await _audit(db_session, "approval.expire")) == 1
+    assert len(await _outbox(db_session, "auteur@test.local")) == 1
+
+
+async def test_turned_on_by_the_environment_with_one_approver(
+    client, db_session, monkeypatch
+):
+    # The two-approver check is the settings page's: the environment's
+    # value applies as it is, and a single approver means nothing at risk
+    # above the threshold goes out until the page turns it off.
+    monkeypatch.setattr(settings, "APPROVAL_ENABLED", True)
+    monkeypatch.setattr(settings, "APPROVAL_THRESHOLD", 2)
+    admin = await account(client, db_session, "admin@test.local", [BuiltinGroup.ADMIN])
+    ids = [p.id for p in await _postes(db_session, 3)]
+    body = (await client.get("/api/v1/settings", headers=admin)).json()
+    assert body["approval_enabled"] is True and body["approval_eligible"] == 1
+    resp = await client.post(
+        "/api/v1/commands",
+        headers=admin,
+        json={"type": "reboot", "machine_ids": [str(i) for i in ids]},
+    )
+    assert resp.status_code == 409 and _code(resp) == "approval.no_approver"
+    assert await _commands(db_session, type="reboot") == []
+
+    resp = await client.patch(
+        "/api/v1/settings", headers=admin, json={"approval_enabled": False}
+    )
+    assert resp.status_code == 200, resp.text
+    out = await _send(client, admin, ids, status=200)
+    assert out["count"] == 3
+
+
 async def test_simultaneous_identical_requests_make_one(client, db_session):
     from app.features.approval.models import ApprovalRequest
 

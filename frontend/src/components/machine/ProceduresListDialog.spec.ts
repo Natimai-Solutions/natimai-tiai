@@ -30,10 +30,18 @@ vi.mock('src/services/procedures', async (importOriginal) => ({
   listProcedures: vi.fn(),
   deleteProcedure: vi.fn(),
   updateProcedure: vi.fn(),
+  createProcedure: vi.fn(),
 }));
 
 import { setLocale } from 'src/i18n';
-import { deleteProcedure, listProcedures, type ProcedureListItem } from 'src/services/procedures';
+import { QForm } from 'quasar';
+import {
+  createProcedure,
+  deleteProcedure,
+  listProcedures,
+  updateProcedure,
+  type ProcedureListItem,
+} from 'src/services/procedures';
 import ProcedureEditDialog from './ProcedureEditDialog.vue';
 import ProceduresListDialog from './ProceduresListDialog.vue';
 
@@ -78,7 +86,28 @@ beforeEach(() => {
   setLocale('fr');
   vi.mocked(listProcedures).mockReset();
   vi.mocked(deleteProcedure).mockReset();
+  vi.mocked(updateProcedure).mockReset();
+  vi.mocked(createProcedure).mockReset();
 });
+
+/** Open the first row's edit dialog and submit it. */
+async function editAndSave(wrapper: ReturnType<typeof mountList>) {
+  await openRow(wrapper, 0);
+  button('procedure-row-edit')!.click();
+  await flushPromises();
+}
+
+async function save(wrapper: ReturnType<typeof mountList>) {
+  wrapper
+    .findComponent(ProcedureEditDialog)
+    .findComponent(QForm)
+    .vm.$emit('submit', new Event('submit'));
+  await flushPromises();
+}
+
+const CHANGED = {
+  response: { status: 409, data: { error: { code: 'procedure.changed' } } },
+};
 
 describe('ProceduresListDialog', () => {
   it('lists every note with its postes in service and its last edit', async () => {
@@ -145,6 +174,48 @@ describe('ProceduresListDialog', () => {
     expect(rows[0]!.props('caption')).toContain('12 computers in service');
     expect(rows[1]!.props('caption')).toContain('1 computer in service');
     expect(rows[0]!.props('caption')).toContain('edited on');
+    wrapper.unmount();
+  });
+
+  it('after a 409, the next save names the version read again', async () => {
+    vi.mocked(listProcedures).mockResolvedValue([ACTIVE]);
+    const wrapper = mountList();
+    await flushPromises();
+    await editAndSave(wrapper);
+    const newer = note({ updated_at: '2026-11-25T09:00:00Z', body: 'F12 pour le boot' });
+    vi.mocked(listProcedures).mockResolvedValue([newer]);
+    vi.mocked(updateProcedure).mockRejectedValueOnce(CHANGED).mockResolvedValueOnce(newer);
+    await save(wrapper);
+    expect(updateProcedure).toHaveBeenNthCalledWith(1, 'p1', ACTIVE.body, ACTIVE.updated_at);
+    expect(shown.at(-1)!.type).toBe('warning');
+    const edit = wrapper.findComponent(ProcedureEditDialog);
+    expect(edit.props('modelValue')).toBe(true);
+    expect(edit.props('procedure')).toEqual(newer);
+    await save(wrapper);
+    // What was typed is kept; the version named is the one read again.
+    expect(updateProcedure).toHaveBeenNthCalledWith(2, 'p1', ACTIVE.body, newer.updated_at);
+    expect(shown.at(-1)!.message).toBe('Procédure modifiée');
+    wrapper.unmount();
+  });
+
+  it('a note deleted meanwhile is written anew for its model on the next save', async () => {
+    vi.mocked(listProcedures).mockResolvedValue([ACTIVE]);
+    const wrapper = mountList();
+    await flushPromises();
+    await editAndSave(wrapper);
+    vi.mocked(listProcedures).mockResolvedValue([]);
+    vi.mocked(updateProcedure).mockRejectedValueOnce({
+      response: { status: 404, data: { error: { code: 'procedure.not_found' } } },
+    });
+    vi.mocked(createProcedure).mockResolvedValue(note({ id: 'p9' }));
+    await save(wrapper);
+    const edit = wrapper.findComponent(ProcedureEditDialog);
+    expect(edit.props('modelValue')).toBe(true);
+    expect(edit.props('procedure')).toBeNull();
+    expect(edit.props('hwModel')).toBe('OptiPlex 7090');
+    await save(wrapper);
+    expect(updateProcedure).toHaveBeenCalledTimes(1);
+    expect(createProcedure).toHaveBeenCalledWith('OptiPlex 7090', ACTIVE.body);
     wrapper.unmount();
   });
 });
